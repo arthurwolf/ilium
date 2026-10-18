@@ -10,7 +10,7 @@ use ilium_plugin_api::generated::types::errors::PluginError;
 pub struct TopicsImport;
 
 impl HostTopics for TopicsImport {
-    fn publish(&mut self, topic: String, payload_json: String) -> Result<(), PluginError> {
+    fn publish(&mut self, _topic: String, _payload_json: String) -> Result<(), PluginError> {
         unimplemented!("host::imports::topics::publish")
     }
 }

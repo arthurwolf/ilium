@@ -1,7 +1,7 @@
 //! What the user sees: the two figures of the page (a toast and the Sounds tab), pinned as golden
 //! files, and their structure. Live renders of the client side are in the features_gaps target.
 
-use crate::common::*;
+use crate::feature_only::page_text;
 
 fn golden(name: &str) -> String {
     let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))

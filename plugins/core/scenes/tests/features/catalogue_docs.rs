@@ -1,5 +1,6 @@
 //! The scene catalogue of the page (F-095..F-101, F-103) against the user documentation.
 use crate::common::*;
+use crate::feature_support::*;
 
 fn catalogue() -> Vec<Vec<String>> {
     table_after(&scenes_page(), "| Family | Scenes")

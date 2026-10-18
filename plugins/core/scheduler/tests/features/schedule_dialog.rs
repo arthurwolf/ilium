@@ -4,6 +4,7 @@ use ilium_plugin_sdk::testing::FakeSession;
 use ilium_plugin_sdk::types::{Delivery, NodeId};
 
 use crate::common::*;
+use crate::feature_support::*;
 
 fn rows(session: &mut FakeSession) -> Vec<String> {
     draw(session, SCHEDULE_VIEW, 80, 24)

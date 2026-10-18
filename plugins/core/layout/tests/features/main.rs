@@ -8,4 +8,6 @@ mod manifest;
 mod preview_render;
 mod resize;
 mod split_client;
+#[path = "../shared/split_host.rs"]
+mod split_host;
 mod split_server;

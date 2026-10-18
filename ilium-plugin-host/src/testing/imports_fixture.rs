@@ -65,59 +65,59 @@ impl std::fmt::Debug for ImportsFixtureBuilder {
 
 impl ImportsFixtureBuilder {
     /// The tier.
-    pub fn tier(self, tier: Tier) -> ImportsFixtureBuilder {
+    pub fn tier(self, _tier: Tier) -> ImportsFixtureBuilder {
         unimplemented!("host::testing::imports_fixture::ImportsFixtureBuilder::tier")
     }
 
     /// The side.
-    pub fn side(self, side: Side) -> ImportsFixtureBuilder {
+    pub fn side(self, _side: Side) -> ImportsFixtureBuilder {
         unimplemented!("host::testing::imports_fixture::ImportsFixtureBuilder::side")
     }
 
     /// The grants.
-    pub fn grants(self, grants: &[&str]) -> ImportsFixtureBuilder {
+    pub fn grants(self, _grants: &[&str]) -> ImportsFixtureBuilder {
         unimplemented!("host::testing::imports_fixture::ImportsFixtureBuilder::grants")
     }
 
     /// The manifest; installs `test.imports` unless the JSON sets another id.
-    pub fn manifest_json(self, json: &str) -> ImportsFixtureBuilder {
+    pub fn manifest_json(self, _json: &str) -> ImportsFixtureBuilder {
         unimplemented!("host::testing::imports_fixture::ImportsFixtureBuilder::manifest_json")
     }
 
     /// The project root backing the `project` fs scope.
-    pub fn project_root(self, root: &Path) -> ImportsFixtureBuilder {
+    pub fn project_root(self, _root: &Path) -> ImportsFixtureBuilder {
         unimplemented!("host::testing::imports_fixture::ImportsFixtureBuilder::project_root")
     }
 
     /// A named limit (`fs_read_all_mib`, `fs_write_mib`, `journal_entries`, `storage_bucket_mib`, `node_metadata_kib`).
-    pub fn limit(self, name: &str, value: u64) -> ImportsFixtureBuilder {
+    pub fn limit(self, _name: &str, _value: u64) -> ImportsFixtureBuilder {
         unimplemented!("host::testing::imports_fixture::ImportsFixtureBuilder::limit")
     }
 
     /// Installs a second plugin.
-    pub fn also_install(self, manifest_json: &str) -> ImportsFixtureBuilder {
+    pub fn also_install(self, _manifest_json: &str) -> ImportsFixtureBuilder {
         unimplemented!("host::testing::imports_fixture::ImportsFixtureBuilder::also_install")
     }
 
     /// The fake settings-validate export.
-    pub fn settings_validate(self, validate: SettingsValidate) -> ImportsFixtureBuilder {
+    pub fn settings_validate(self, _validate: SettingsValidate) -> ImportsFixtureBuilder {
         unimplemented!("host::testing::imports_fixture::ImportsFixtureBuilder::settings_validate")
     }
 
     /// The virtual latency of the fake settings-validate export.
-    pub fn settings_validate_latency(self, latency: Duration) -> ImportsFixtureBuilder {
+    pub fn settings_validate_latency(self, _latency: Duration) -> ImportsFixtureBuilder {
         unimplemented!(
             "host::testing::imports_fixture::ImportsFixtureBuilder::settings_validate_latency"
         )
     }
 
     /// The fake job-runner export.
-    pub fn job_runner(self, runner: JobRunner) -> ImportsFixtureBuilder {
+    pub fn job_runner(self, _runner: JobRunner) -> ImportsFixtureBuilder {
         unimplemented!("host::testing::imports_fixture::ImportsFixtureBuilder::job_runner")
     }
 
     /// Whether the websocket feature is on.
-    pub fn websocket_feature(self, on: bool) -> ImportsFixtureBuilder {
+    pub fn websocket_feature(self, _on: bool) -> ImportsFixtureBuilder {
         unimplemented!("host::testing::imports_fixture::ImportsFixtureBuilder::websocket_feature")
     }
 
@@ -253,12 +253,12 @@ impl ImportsFixture {
     }
 
     /// Starts a job instance of a kind.
-    pub fn job_instance(&mut self, kind: &str, input: &[u8]) -> JobInstance {
+    pub fn job_instance(&mut self, _kind: &str, _input: &[u8]) -> JobInstance {
         unimplemented!("host::testing::imports_fixture::ImportsFixture::job_instance")
     }
 
     /// Moves the manual clock and runs due work.
-    pub fn advance(&mut self, by: Duration) {
+    pub fn advance(&mut self, _by: Duration) {
         unimplemented!("host::testing::imports_fixture::ImportsFixture::advance")
     }
 
@@ -268,17 +268,17 @@ impl ImportsFixture {
     }
 
     /// Sets the wall clock.
-    pub fn set_wall_clock_unix_millis(&mut self, millis: u64) {
+    pub fn set_wall_clock_unix_millis(&mut self, _millis: u64) {
         unimplemented!("host::testing::imports_fixture::ImportsFixture::set_wall_clock_unix_millis")
     }
 
     /// Keeps async requests pending.
-    pub fn hold_async_completions(&mut self, on: bool) {
+    pub fn hold_async_completions(&mut self, _on: bool) {
         unimplemented!("host::testing::imports_fixture::ImportsFixture::hold_async_completions")
     }
 
     /// Waits for the outcome of a request.
-    pub fn wait_outcome(&mut self, request: RequestId, timeout: Duration) -> Option<Outcome> {
+    pub fn wait_outcome(&mut self, _request: RequestId, _timeout: Duration) -> Option<Outcome> {
         unimplemented!("host::testing::imports_fixture::ImportsFixture::wait_outcome")
     }
 
@@ -293,7 +293,7 @@ impl ImportsFixture {
     }
 
     /// Every event delivered to a plugin.
-    pub fn events_of(&self, plugin: &str) -> Vec<Event> {
+    pub fn events_of(&self, _plugin: &str) -> Vec<Event> {
         unimplemented!("host::testing::imports_fixture::ImportsFixture::events_of")
     }
 
@@ -303,22 +303,22 @@ impl ImportsFixture {
     }
 
     /// The values of a choice row.
-    pub fn choice_values(&self, key: &str) -> Vec<String> {
+    pub fn choice_values(&self, _key: &str) -> Vec<String> {
         unimplemented!("host::testing::imports_fixture::ImportsFixture::choice_values")
     }
 
     /// The item ids of a choice row.
-    pub fn choice_item_ids(&self, key: &str) -> Vec<String> {
+    pub fn choice_item_ids(&self, _key: &str) -> Vec<String> {
         unimplemented!("host::testing::imports_fixture::ImportsFixture::choice_item_ids")
     }
 
     /// Whether a choice row shows a value as unavailable.
-    pub fn choice_shows_unavailable(&self, key: &str, value: &str) -> bool {
+    pub fn choice_shows_unavailable(&self, _key: &str, _value: &str) -> bool {
         unimplemented!("host::testing::imports_fixture::ImportsFixture::choice_shows_unavailable")
     }
 
     /// The stored value of a setting.
-    pub fn settings_value(&self, key: &str) -> serde_json::Value {
+    pub fn settings_value(&self, _key: &str) -> serde_json::Value {
         unimplemented!("host::testing::imports_fixture::ImportsFixture::settings_value")
     }
 
@@ -328,32 +328,32 @@ impl ImportsFixture {
     }
 
     /// The note of a settings row.
-    pub fn row_note(&self, key: &str) -> Option<String> {
+    pub fn row_note(&self, _key: &str) -> Option<String> {
         unimplemented!("host::testing::imports_fixture::ImportsFixture::row_note")
     }
 
     /// The text of a live info row.
-    pub fn info_text(&self, key: &str) -> Option<String> {
+    pub fn info_text(&self, _key: &str) -> Option<String> {
         unimplemented!("host::testing::imports_fixture::ImportsFixture::info_text")
     }
 
     /// The spans of a rich info row.
-    pub fn info_spans(&self, key: &str) -> Vec<RichSpan> {
+    pub fn info_spans(&self, _key: &str) -> Vec<RichSpan> {
         unimplemented!("host::testing::imports_fixture::ImportsFixture::info_spans")
     }
 
     /// The state of a settings row.
-    pub fn row_state(&self, key: &str) -> RowState {
+    pub fn row_state(&self, _key: &str) -> RowState {
         unimplemented!("host::testing::imports_fixture::ImportsFixture::row_state")
     }
 
     /// The state of one item of a list row.
-    pub fn item_state(&self, key: &str, index: u32) -> Option<RowState> {
+    pub fn item_state(&self, _key: &str, _index: u32) -> Option<RowState> {
         unimplemented!("host::testing::imports_fixture::ImportsFixture::item_state")
     }
 
     /// The segments of a meter row.
-    pub fn meter_segments(&self, id: &str) -> Vec<MeterSegment> {
+    pub fn meter_segments(&self, _id: &str) -> Vec<MeterSegment> {
         unimplemented!("host::testing::imports_fixture::ImportsFixture::meter_segments")
     }
 
@@ -363,7 +363,7 @@ impl ImportsFixture {
     }
 
     /// Plugin sections drawn in a settings tab.
-    pub fn drawn_plugin_sections(&self, tab: &str) -> usize {
+    pub fn drawn_plugin_sections(&self, _tab: &str) -> usize {
         unimplemented!("host::testing::imports_fixture::ImportsFixture::drawn_plugin_sections")
     }
 
@@ -378,17 +378,17 @@ impl ImportsFixture {
     }
 
     /// Replaces the stored settings JSON.
-    pub fn restore_stored_json(&mut self, json: &str) {
+    pub fn restore_stored_json(&mut self, _json: &str) {
         unimplemented!("host::testing::imports_fixture::ImportsFixture::restore_stored_json")
     }
 
     /// The user edits a row.
-    pub fn user_edit(&mut self, key: &str, value_json: &str, input: UserInput) -> UserSave {
+    pub fn user_edit(&mut self, _key: &str, _value_json: &str, _input: UserInput) -> UserSave {
         unimplemented!("host::testing::imports_fixture::ImportsFixture::user_edit")
     }
 
     /// The user saves a patch.
-    pub fn user_save(&mut self, patch_json: &str) -> UserSave {
+    pub fn user_save(&mut self, _patch_json: &str) -> UserSave {
         unimplemented!("host::testing::imports_fixture::ImportsFixture::user_save")
     }
 
@@ -425,14 +425,14 @@ impl ImportsFixture {
     }
 
     /// Completes a background request.
-    pub fn complete_background_request(&mut self, request: RequestId) {
+    pub fn complete_background_request(&mut self, _request: RequestId) {
         unimplemented!(
             "host::testing::imports_fixture::ImportsFixture::complete_background_request"
         )
     }
 
     /// The user chooses paths in the picker.
-    pub fn picker_choose(&mut self, paths: Vec<FsPath>) {
+    pub fn picker_choose(&mut self, _paths: Vec<FsPath>) {
         unimplemented!("host::testing::imports_fixture::ImportsFixture::picker_choose")
     }
 
@@ -442,16 +442,16 @@ impl ImportsFixture {
     }
 
     /// Waits for an event of a watch.
-    pub fn wait_fs_event(&mut self, watch: WatchId, timeout: Duration) -> bool {
+    pub fn wait_fs_event(&mut self, _watch: WatchId, _timeout: Duration) -> bool {
         unimplemented!("host::testing::imports_fixture::ImportsFixture::wait_fs_event")
     }
 
     /// Waits for chunks of a stream.
     pub fn wait_stream_chunks(
         &mut self,
-        stream: StreamId,
-        count: usize,
-        timeout: Duration,
+        _stream: StreamId,
+        _count: usize,
+        _timeout: Duration,
     ) -> Vec<Vec<u8>> {
         unimplemented!("host::testing::imports_fixture::ImportsFixture::wait_stream_chunks")
     }
@@ -459,71 +459,71 @@ impl ImportsFixture {
     /// Waits for output of a child.
     pub fn wait_child_output(
         &mut self,
-        child: ChildHandle,
-        expected: &[u8],
-        timeout: Duration,
+        _child: ChildHandle,
+        _expected: &[u8],
+        _timeout: Duration,
     ) -> bool {
         unimplemented!("host::testing::imports_fixture::ImportsFixture::wait_child_output")
     }
 
     /// Waits for a child to exit.
-    pub fn wait_child_exit(&mut self, child: ChildHandle, timeout: Duration) -> bool {
+    pub fn wait_child_exit(&mut self, _child: ChildHandle, _timeout: Duration) -> bool {
         unimplemented!("host::testing::imports_fixture::ImportsFixture::wait_child_exit")
     }
 
     /// Adds a terminal pane.
-    pub fn add_terminal_pane(&mut self, title: &str, columns: u16, rows: u16) -> NodeId {
+    pub fn add_terminal_pane(&mut self, _title: &str, _columns: u16, _rows: u16) -> NodeId {
         unimplemented!("host::testing::imports_fixture::ImportsFixture::add_terminal_pane")
     }
 
     /// Adds a pane restored from a snapshot.
-    pub fn add_restored_pane(&mut self, title: &str, columns: u16, rows: u16) -> NodeId {
+    pub fn add_restored_pane(&mut self, _title: &str, _columns: u16, _rows: u16) -> NodeId {
         unimplemented!("host::testing::imports_fixture::ImportsFixture::add_restored_pane")
     }
 
     /// Adds a group.
-    pub fn add_group(&mut self, title: &str) -> NodeId {
+    pub fn add_group(&mut self, _title: &str) -> NodeId {
         unimplemented!("host::testing::imports_fixture::ImportsFixture::add_group")
     }
 
     /// Adds a group under a parent.
-    pub fn add_group_under(&mut self, parent: NodeId, title: &str) -> NodeId {
+    pub fn add_group_under(&mut self, _parent: NodeId, _title: &str) -> NodeId {
         unimplemented!("host::testing::imports_fixture::ImportsFixture::add_group_under")
     }
 
     /// Adds a terminal pane under a parent.
     pub fn add_terminal_pane_under(
         &mut self,
-        parent: NodeId,
-        title: &str,
-        columns: u16,
-        rows: u16,
+        _parent: NodeId,
+        _title: &str,
+        _columns: u16,
+        _rows: u16,
     ) -> NodeId {
         unimplemented!("host::testing::imports_fixture::ImportsFixture::add_terminal_pane_under")
     }
 
     /// Exits a pane.
-    pub fn exit_pane(&mut self, pane: NodeId) {
+    pub fn exit_pane(&mut self, _pane: NodeId) {
         unimplemented!("host::testing::imports_fixture::ImportsFixture::exit_pane")
     }
 
     /// Focuses a pane.
-    pub fn focus_pane(&mut self, pane: NodeId) {
+    pub fn focus_pane(&mut self, _pane: NodeId) {
         unimplemented!("host::testing::imports_fixture::ImportsFixture::focus_pane")
     }
 
     /// Records a host journal entry (`pane-created`, `pane-exited`, `input-sent`).
-    pub fn record_host_journal_entry(&mut self, pane: NodeId, kind: &str) {
+    pub fn record_host_journal_entry(&mut self, _pane: NodeId, _kind: &str) {
         unimplemented!("host::testing::imports_fixture::ImportsFixture::record_host_journal_entry")
     }
 
     /// Takes a storage lease as a second caller.
-    pub fn other_caller_lease(&mut self, key: &str, ttl_millis: u32) -> bool {
+    pub fn other_caller_lease(&mut self, _key: &str, _ttl_millis: u32) -> bool {
         unimplemented!("host::testing::imports_fixture::ImportsFixture::other_caller_lease")
     }
 
     /// Makes the on-disk data version of a bucket newer.
-    pub fn make_bucket_data_version_newer(&mut self, bucket: Bucket) {
+    pub fn make_bucket_data_version_newer(&mut self, _bucket: Bucket) {
         unimplemented!(
             "host::testing::imports_fixture::ImportsFixture::make_bucket_data_version_newer"
         )
@@ -535,22 +535,22 @@ impl ImportsFixture {
     }
 
     /// Sets the agent signature of a node.
-    pub fn set_agent(&mut self, node: NodeId, signature: &str) {
+    pub fn set_agent(&mut self, _node: NodeId, _signature: &str) {
         unimplemented!("host::testing::imports_fixture::ImportsFixture::set_agent")
     }
 
     /// Locks a node.
-    pub fn lock_node(&mut self, node: NodeId) {
+    pub fn lock_node(&mut self, _node: NodeId) {
         unimplemented!("host::testing::imports_fixture::ImportsFixture::lock_node")
     }
 
     /// Renames a node.
-    pub fn rename_node(&mut self, node: NodeId, title: &str) {
+    pub fn rename_node(&mut self, _node: NodeId, _title: &str) {
         unimplemented!("host::testing::imports_fixture::ImportsFixture::rename_node")
     }
 
     /// Reads node metadata as a second installed plugin.
-    pub fn other_plugin_metadata(&mut self, node: NodeId) -> Option<Vec<u8>> {
+    pub fn other_plugin_metadata(&mut self, _node: NodeId) -> Option<Vec<u8>> {
         unimplemented!("host::testing::imports_fixture::ImportsFixture::other_plugin_metadata")
     }
 }

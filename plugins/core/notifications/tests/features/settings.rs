@@ -5,6 +5,7 @@ use ilium_plugin_sdk::types::ErrorCode;
 use serde_json::{json, Value};
 
 use crate::common::*;
+use crate::feature_only::sounds;
 
 fn default_of(key: &str) -> Option<Value> {
     server_host().settings().get(key)

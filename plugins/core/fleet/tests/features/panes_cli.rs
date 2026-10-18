@@ -6,6 +6,7 @@
 use serde_json::{json, Value};
 
 use crate::common::*;
+use crate::feature_only::*;
 
 fn two_sessions(host: &mut ilium_plugin_sdk::testing::FakeHost) {
     add_session(

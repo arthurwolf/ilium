@@ -1,7 +1,5 @@
 //! Twins of the original tests of ilium-client/src/background_animation/mod.rs (ported through FakeScene / FakeSession).
 use crate::common::*;
-#[allow(unused_imports)]
-use serde_json::json;
 
 /// REQ: PORT:ilium-client/src/background_animation/mod.rs::same_cached_render_can_acknowledge_two_distinct_terminal_draws
 #[test]

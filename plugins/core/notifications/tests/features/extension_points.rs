@@ -7,7 +7,9 @@ use ilium_plugin_sdk::exports::ServiceReply;
 use ilium_plugin_sdk::testing::FakeSession;
 use ilium_plugin_sdk::types::Urgency;
 
-use crate::common::*;
+use crate::feature_only::{
+    json_block_after, manual_page, notices, page_text, table_rows, PLUGIN_ID,
+};
 
 fn point_rows() -> Vec<Vec<String>> {
     table_rows(&page_text(), "| Point | Kind |")

@@ -76,9 +76,9 @@ pub fn runtime_config() -> RuntimeSettings {
 
 /// Picks the allocator from measured `(p99 instantiate µs, rss MiB)` pairs (reference-host-runtime.md HST-066).
 pub fn select_allocator(
-    on_demand: (f64, f64),
-    pooling: (f64, f64),
-    added_rss_mib: f64,
+    _on_demand: (f64, f64),
+    _pooling: (f64, f64),
+    _added_rss_mib: f64,
 ) -> AllocatorKind {
     unimplemented!("host::engine::select_allocator")
 }
@@ -89,17 +89,17 @@ pub fn config_fingerprint() -> String {
 }
 
 /// The compiled-code cache directory under `base`: `<version>-<fingerprint>` (HST-070).
-pub fn compile_cache_dir(base: &Path) -> PathBuf {
+pub fn compile_cache_dir(_base: &Path) -> PathBuf {
     unimplemented!("host::engine::compile_cache_dir")
 }
 
 /// Removes cache directories of other versions or fingerprints; returns what it removed (HST-071).
-pub fn prune_stale_cache_dirs(base: &Path) -> std::io::Result<Vec<PathBuf>> {
+pub fn prune_stale_cache_dirs(_base: &Path) -> std::io::Result<Vec<PathBuf>> {
     unimplemented!("host::engine::prune_stale_cache_dirs")
 }
 
 /// Whether the monotonic clock jumped more than the tolerated amount (reference-host-runtime.md HST-085).
-pub fn clock_jump_detected(previous_ms: u64, now_ms: u64) -> bool {
+pub fn clock_jump_detected(_previous_ms: u64, _now_ms: u64) -> bool {
     unimplemented!("host::engine::clock_jump_detected")
 }
 
@@ -151,7 +151,7 @@ impl ValidationContext {
 }
 
 /// Validates component bytes before compilation (reference-host-runtime.md HST-055, HST-080..083).
-pub fn validate_component(bytes: &[u8], context: &ValidationContext) -> Result<(), Diagnostic> {
+pub fn validate_component(_bytes: &[u8], _context: &ValidationContext) -> Result<(), Diagnostic> {
     unimplemented!("host::engine::validate_component")
 }
 
@@ -173,7 +173,7 @@ pub struct StoreSettings {
 }
 
 /// The store settings for resolved limits (reference-host-runtime.md HST-067).
-pub fn store_settings(limits: &ResolvedLimits) -> StoreSettings {
+pub fn store_settings(_limits: &ResolvedLimits) -> StoreSettings {
     unimplemented!("host::engine::store_settings")
 }
 
@@ -232,7 +232,7 @@ pub struct PluginEngine {
 
 impl PluginEngine {
     /// Builds the engine with epoch interruption and fuel off (reference-host-runtime.md).
-    pub fn new(config: EngineConfig) -> Result<PluginEngine, HostError> {
+    pub fn new(_config: EngineConfig) -> Result<PluginEngine, HostError> {
         unimplemented!("host::engine::PluginEngine::new")
     }
 
@@ -242,20 +242,20 @@ impl PluginEngine {
     }
 
     /// Compiles component bytes (reference-host-runtime.md).
-    pub fn compile(&self, bytes: &[u8]) -> Result<CompiledComponent, HostError> {
+    pub fn compile(&self, _bytes: &[u8]) -> Result<CompiledComponent, HostError> {
         unimplemented!("host::engine::PluginEngine::compile")
     }
 
     /// Looks a precompiled component up in the cache (reference-host-runtime.md).
     pub fn deserialize_cached(
         &self,
-        key: &CacheKey,
+        _key: &CacheKey,
     ) -> Result<Option<CompiledComponent>, HostError> {
         unimplemented!("host::engine::PluginEngine::deserialize_cached")
     }
 
     /// Loads an embedded artifact, compiling when its `.cwasm` is stale (reference-host-runtime.md HST-058).
-    pub fn load_embedded(&self, artifact: &EmbeddedArtifact) -> Result<LoadPath, HostError> {
+    pub fn load_embedded(&self, _artifact: &EmbeddedArtifact) -> Result<LoadPath, HostError> {
         unimplemented!("host::engine::PluginEngine::load_embedded")
     }
 
@@ -275,7 +275,7 @@ impl PluginEngine {
     }
 
     /// Epoch ticks a deadline of `deadline_ms` spans, rounded up plus one (reference-host-runtime.md HST-060).
-    pub fn deadline_ticks(&self, deadline_ms: u64) -> u64 {
+    pub fn deadline_ticks(&self, _deadline_ms: u64) -> u64 {
         unimplemented!("host::engine::PluginEngine::deadline_ticks")
     }
 
@@ -288,6 +288,6 @@ impl PluginEngine {
 /// The compile-cache key of a component: its SHA-256 plus the engine identity (wasmtime version,
 /// CPU features and config), so a changed engine never serves a stale artifact
 /// (reference-install-and-update.md PKG-268).
-pub fn compile_cache_key(component_sha256: &str, engine_id: &str) -> String {
+pub fn compile_cache_key(_component_sha256: &str, _engine_id: &str) -> String {
     unimplemented!("host::engine::compile_cache_key")
 }

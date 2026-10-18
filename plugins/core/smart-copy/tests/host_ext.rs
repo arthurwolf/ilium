@@ -2,8 +2,6 @@
 //!
 //! Plugin-specific scaffolding kept out of the shared harness type. Skeleton bodies.
 
-#![allow(dead_code)]
-
 use ilium_plugin_sdk::testing::FakeHost;
 
 /// Handle on the project files the picker checks for existence.
@@ -11,8 +9,8 @@ pub struct Files<'a>(pub &'a mut FakeHost);
 
 impl Files<'_> {
     /// Marks `path` as an existing file.
-    pub fn add_existing(&mut self, _path: &str) {
-        unimplemented!("smart-copy.files-add-existing")
+    pub fn add_existing(&mut self, path: &str) {
+        self.0.fs().seed(path, &[]);
     }
 }
 

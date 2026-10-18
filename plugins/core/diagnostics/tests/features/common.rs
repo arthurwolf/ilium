@@ -1,37 +1,20 @@
-//! Shared helpers: hosts for both sides, sessions, page and manifest readers, service callers.
+//! Helpers of the `features` target: the manual page and manifest readers, the log and report
+//! fixtures, and the section and sink registrations. The session and service-call helpers are
+//! shared with the `port` target and come from `session_support`.
 
-// This module is compiled into both the `features` and `port` test targets (the port twins mount it
-// with #[path]); each target uses a different subset of the helpers, so the rest look dead per target.
-#![allow(dead_code)]
-
-use std::path::PathBuf;
-
-use ilium_plugin_core_diagnostics::{DiagnosticsClient, DiagnosticsServer};
-use ilium_plugin_sdk::exports::ServiceReply;
-use ilium_plugin_sdk::testing::{FakeHost, FakeSession};
+use ilium_plugin_sdk::testing::FakeSession;
 use ilium_plugin_sdk::types::{FsPath, Intent, PluginError, Submission};
 use serde_json::{json, Value};
+
+use crate::session_support::workspace_root;
+pub use crate::session_support::{agent_debug, call, manifest_path, session};
 
 /// The plugin id.
 pub const PLUGIN_ID: &str = "ilium.core.diagnostics";
 /// The report service of the manifest.
 pub const REPORT_SERVICE: &str = "ilium.core.diagnostics/report";
-/// The agent debug history service assumed for F-032 (API_GAPS.md item 1).
-pub const AGENT_DEBUG_SERVICE: &str = "ilium.core.diagnostics/agent-debug";
 /// The log folder grant of the page for user id 1000.
 pub const LOG_SCOPE: &str = "path:/tmp/.ilium-1000/logs";
-/// The caller of service calls in tests.
-pub const CALLER: &str = "ilium.core.kanban";
-
-/// Path of the plugin manifest (the skeleton file, exact per the manual).
-pub fn manifest_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("manifest.json")
-}
-
-/// Root of the worktree, found from the crate directory (plugins/core/diagnostics).
-pub fn workspace_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..")
-}
 
 /// Text of one manual page.
 pub fn page(name: &str) -> String {
@@ -79,50 +62,6 @@ pub fn table_row(text: &str, prefix: &str) -> Vec<String> {
         .collect()
 }
 
-/// A server-side host with the manifest grants and the plugin activated.
-pub fn server_host() -> FakeHost {
-    let mut host = FakeHost::for_manifest(manifest_path())
-        .expect("manifest loads")
-        .side("server")
-        .build();
-    host.activate::<DiagnosticsServer>();
-    host
-}
-
-/// A client-side host with the manifest grants and the plugin activated.
-pub fn client_host() -> FakeHost {
-    let mut host = FakeHost::for_manifest(manifest_path())
-        .expect("manifest loads")
-        .side("client")
-        .build();
-    host.activate::<DiagnosticsClient>();
-    host
-}
-
-/// A session with the plugin installed and started, plus the settings stub and a caller stub.
-pub fn session() -> FakeSession {
-    let mut session = FakeSession::new();
-    session.install_core("settings");
-    session.install_core("kanban");
-    session
-        .install(workspace_root().join("plugins/core/diagnostics"))
-        .start();
-    session
-}
-
-/// Calls a service of the plugin with a JSON request and parses the JSON reply.
-pub fn call(
-    session: &mut FakeSession,
-    service: &str,
-    request: Value,
-) -> Result<Value, PluginError> {
-    let reply = session.call_service(CALLER, service, "^0.1", &request.to_string())?;
-    match reply {
-        ServiceReply::Done(text) => Ok(serde_json::from_str(&text).expect("the reply is JSON")),
-        ServiceReply::Deferred => panic!("the reply is still deferred after the session settled"),
-    }
-}
-
 /// Builds the report with `include_log_tail`.
 pub fn build_report(
     session: &mut FakeSession,
@@ -137,16 +76,6 @@ pub fn build_report(
         .as_str()
         .expect("text is a string")
         .to_string())
-}
-
-/// Calls one method of the assumed agent-debug service.
-pub fn agent_debug(
-    session: &mut FakeSession,
-    method: &str,
-    mut fields: Value,
-) -> Result<Value, PluginError> {
-    fields["method"] = json!(method);
-    call(session, AGENT_DEBUG_SERVICE, fields)
 }
 
 /// The intents of a submission list, in order.

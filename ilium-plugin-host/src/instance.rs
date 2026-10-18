@@ -109,27 +109,27 @@ pub struct PluginInstance {
 
 impl PluginInstance {
     /// Calls `activate` (reference-runtime-model.md).
-    pub fn activate(&mut self, activation: Activation) -> Result<(), PluginError> {
+    pub fn activate(&mut self, _activation: Activation) -> Result<(), PluginError> {
         unimplemented!("host::instance::PluginInstance::activate")
     }
 
     /// Calls `deactivate`; the returned bytes are the saved state (reference-runtime-model.md).
-    pub fn deactivate(&mut self, reason: DeactivationReason) -> Option<Vec<u8>> {
+    pub fn deactivate(&mut self, _reason: DeactivationReason) -> Option<Vec<u8>> {
         unimplemented!("host::instance::PluginInstance::deactivate")
     }
 
     /// Delivers one batch of events (at most 256) and returns the submissions (ABI-008).
-    pub fn on_events(&mut self, batch: Vec<Event>) -> Result<Vec<Submission>, Trap> {
+    pub fn on_events(&mut self, _batch: Vec<Event>) -> Result<Vec<Submission>, Trap> {
         unimplemented!("host::instance::PluginInstance::on_events")
     }
 
     /// Renders a view (reference-wit.md section 8.3).
-    pub fn render(&mut self, view: ViewTarget, area: Area) -> Result<UiTree, Trap> {
+    pub fn render(&mut self, _view: ViewTarget, _area: Area) -> Result<UiTree, Trap> {
         unimplemented!("host::instance::PluginInstance::render")
     }
 
     /// Calls any other export (reference-wit.md section 8).
-    pub fn call_export(&mut self, call: ExportCall) -> Result<ExportReply, Trap> {
+    pub fn call_export(&mut self, _call: ExportCall) -> Result<ExportReply, Trap> {
         unimplemented!("host::instance::PluginInstance::call_export")
     }
 

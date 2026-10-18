@@ -6,6 +6,7 @@
 mod common;
 mod doc_page;
 mod extension_points;
+mod feature_support;
 mod manifest;
 mod queue_delivery;
 mod queue_dialog;

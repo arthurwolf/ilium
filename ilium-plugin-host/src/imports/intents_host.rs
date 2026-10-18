@@ -12,7 +12,7 @@ use ilium_plugin_api::generated::types::intents::Submission;
 pub struct IntentsHostImport;
 
 impl HostIntentsHost for IntentsHostImport {
-    fn submit(&mut self, submission: Submission) -> Result<RequestId, PluginError> {
+    fn submit(&mut self, _submission: Submission) -> Result<RequestId, PluginError> {
         unimplemented!("host::imports::intents_host::submit")
     }
 }

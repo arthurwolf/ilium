@@ -1,7 +1,7 @@
 //! Doc tests (`doc_` rows): rules that the manual page, the traceability table and the user guide
 //! state and that only a reading of those pages can check.
 
-use crate::common::*;
+use crate::feature_only::{manual_page, page_text, table_rows, user_doc};
 
 fn traceability_row(id: &str) -> String {
     manual_page("reference-feature-traceability.md")

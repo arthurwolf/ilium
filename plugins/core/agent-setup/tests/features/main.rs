@@ -11,6 +11,7 @@ mod doc_page;
 mod extension_points;
 #[path = "../host_ext.rs"]
 mod host_ext;
+mod host_ext_features;
 mod manifest;
 mod markers;
 mod safety;

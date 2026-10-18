@@ -1,7 +1,5 @@
 //! Twins of the original tests of ilium-client/src/background_animation/worker.rs (ported through FakeScene / FakeSession).
 use crate::common::*;
-#[allow(unused_imports)]
-use serde_json::json;
 
 /// REQ: PORT:ilium-client/src/background_animation/worker.rs::admission_returns_oversized_request_and_drop_does_not_wait_for_render
 #[test]

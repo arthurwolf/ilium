@@ -5,8 +5,6 @@
 //! (which does nothing unless `ILIUM_PROBE` is set), applies the policy, performs the probe and
 //! prints `key|value` lines on stdout. The parent parses the lines and asserts on them.
 
-#![allow(dead_code)]
-
 use ilium_plugin_helper::sandbox::{apply, SandboxPolicy};
 use std::collections::BTreeMap;
 use std::process::{Command, Stdio};
@@ -16,7 +14,6 @@ pub const ENTRY: &str = "probe_child::sec_025_probe_child_entry";
 /// Result of one probe run: the printed `key|value` lines in order.
 pub struct Probe {
     pub lines: Vec<(String, String)>,
-    pub exit_ok: bool,
 }
 
 impl Probe {
@@ -73,10 +70,7 @@ pub fn run_probe(name: &str, extra_env: &[(&str, String)]) -> Probe {
         .filter_map(|l| l.split_once('|'))
         .map(|(k, v)| (k.to_string(), v.to_string()))
         .collect();
-    Probe {
-        lines,
-        exit_ok: output.status.success(),
-    }
+    Probe { lines }
 }
 
 pub fn parent_ns(kind: &str) -> String {

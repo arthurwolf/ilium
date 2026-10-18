@@ -17,7 +17,7 @@ pub struct PackageStore {
 
 impl PackageStore {
     /// The directory of one installed version.
-    pub fn version_dir(&self, plugin: &PluginId, version: &str) -> PathBuf {
+    pub fn version_dir(&self, _plugin: &PluginId, _version: &str) -> PathBuf {
         unimplemented!("host::registry::PackageStore::version_dir")
     }
 }
@@ -39,13 +39,11 @@ pub struct InstalledRecord {
 
 /// The registry of installed plugins, `installed.json` (reference-packaging.md).
 #[derive(Debug)]
-pub struct InstalledRegistry {
-    path: PathBuf,
-}
+pub struct InstalledRegistry;
 
 impl InstalledRegistry {
     /// Opens or creates the registry file.
-    pub fn open(path: &Path) -> Result<InstalledRegistry, HostError> {
+    pub fn open(_path: &Path) -> Result<InstalledRegistry, HostError> {
         unimplemented!("host::registry::InstalledRegistry::open")
     }
 
@@ -55,12 +53,12 @@ impl InstalledRegistry {
     }
 
     /// Inserts or replaces one record, atomically.
-    pub fn put(&mut self, record: InstalledRecord) -> Result<(), HostError> {
+    pub fn put(&mut self, _record: InstalledRecord) -> Result<(), HostError> {
         unimplemented!("host::registry::InstalledRegistry::put")
     }
 
     /// Removes a record.
-    pub fn remove(&mut self, plugin: &PluginId) -> Result<(), HostError> {
+    pub fn remove(&mut self, _plugin: &PluginId) -> Result<(), HostError> {
         unimplemented!("host::registry::InstalledRegistry::remove")
     }
 }
@@ -68,56 +66,52 @@ impl InstalledRegistry {
 /// The grant store, `$XDG_STATE_HOME/ilium/grants.json`: mode 0600, single writer, atomic replace
 /// (reference-security.md).
 #[derive(Debug)]
-pub struct GrantStore {
-    path: PathBuf,
-}
+pub struct GrantStore;
 
 impl GrantStore {
     /// Opens the store, taking the single-writer lock.
-    pub fn open(path: &Path) -> Result<GrantStore, HostError> {
+    pub fn open(_path: &Path) -> Result<GrantStore, HostError> {
         unimplemented!("host::registry::GrantStore::open")
     }
 
     /// The grants a user approved for a plugin.
-    pub fn granted(&self, plugin: &PluginId) -> Result<Vec<Grant>, HostError> {
+    pub fn granted(&self, _plugin: &PluginId) -> Result<Vec<Grant>, HostError> {
         unimplemented!("host::registry::GrantStore::granted")
     }
 
     /// Replaces the approved grants of a plugin, atomically.
-    pub fn set_granted(&mut self, plugin: &PluginId, grants: &[Grant]) -> Result<(), HostError> {
+    pub fn set_granted(&mut self, _plugin: &PluginId, _grants: &[Grant]) -> Result<(), HostError> {
         unimplemented!("host::registry::GrantStore::set_granted")
     }
 }
 
 /// Enable flags, `config.toml [plugins.<id>]` (reference-packaging.md).
 #[derive(Debug)]
-pub struct EnableFlags {
-    path: PathBuf,
-}
+pub struct EnableFlags;
 
 impl EnableFlags {
     /// Opens the flags of a config file.
-    pub fn open(path: &Path) -> Result<EnableFlags, HostError> {
+    pub fn open(_path: &Path) -> Result<EnableFlags, HostError> {
         unimplemented!("host::registry::EnableFlags::open")
     }
 
     /// Whether the user enabled the plugin; a plugin without a flag is enabled.
-    pub fn is_enabled(&self, plugin: &PluginId) -> bool {
+    pub fn is_enabled(&self, _plugin: &PluginId) -> bool {
         unimplemented!("host::registry::EnableFlags::is_enabled")
     }
 
     /// Sets the flag.
-    pub fn set_enabled(&mut self, plugin: &PluginId, enabled: bool) -> Result<(), HostError> {
+    pub fn set_enabled(&mut self, _plugin: &PluginId, _enabled: bool) -> Result<(), HostError> {
         unimplemented!("host::registry::EnableFlags::set_enabled")
     }
 }
 
 /// The package download folder under the cache directory (reference-install-and-update.md PKG-267).
-pub fn downloads_dir(cache: &Path) -> PathBuf {
+pub fn downloads_dir(_cache: &Path) -> PathBuf {
     unimplemented!("host::registry::downloads_dir")
 }
 
 /// The offline cache folder of one registry URL under the cache directory (PKG-267).
-pub fn registry_cache_dir(cache: &Path, url: &str) -> PathBuf {
+pub fn registry_cache_dir(_cache: &Path, _url: &str) -> PathBuf {
     unimplemented!("host::registry::registry_cache_dir")
 }

@@ -1,6 +1,7 @@
 //! The manifest of ilium.core.editor against the manual page (the page says the manifest is exact).
 
-use crate::support::{manifest_json, manual_page, page_text};
+use crate::fixtures::{manifest_json, page_text};
+use crate::support::manual_page;
 use ilium_plugin_core_editor::EditorClient;
 use ilium_plugin_sdk::NativeEntry;
 use serde_json::Value;

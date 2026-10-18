@@ -2,7 +2,6 @@
 //! IPC rules of reference-host-ipc.md (HST-100..125). The grant `panes.create` gates the intent
 //! `create-pane` (outcome `ok-node`).
 
-use std::collections::BTreeMap;
 use std::time::Duration;
 
 /// A connection handle of the harness.
@@ -116,21 +115,9 @@ pub struct ClientHalf {
     pub disabled_code: Option<String>,
 }
 
-/// One connection's bookkeeping.
-#[derive(Debug, Default)]
-struct Connection {
-    client_id: String,
-    wire: Vec<WireItem>,
-    deliveries: Vec<ClientDelivery>,
-}
-
 /// The in-process IPC harness (HST-100..125).
 #[derive(Debug, Default)]
-pub struct IpcHarness {
-    now: Duration,
-    connections: BTreeMap<u32, Connection>,
-    next_conn: u32,
-}
+pub struct IpcHarness;
 
 impl IpcHarness {
     /// An empty server with no plugins and no connections.
@@ -139,17 +126,17 @@ impl IpcHarness {
     }
 
     /// Installs a plugin on the server.
-    pub fn install_server_plugin(&mut self, id: &str, version: &str, content_hash: [u8; 32]) {
+    pub fn install_server_plugin(&mut self, _id: &str, _version: &str, _content_hash: [u8; 32]) {
         unimplemented!("host::testing::ipc_harness::IpcHarness::install_server_plugin")
     }
 
     /// Grants a plugin a grant.
-    pub fn grant(&mut self, plugin: &str, grant: &str) {
+    pub fn grant(&mut self, _plugin: &str, _grant: &str) {
         unimplemented!("host::testing::ipc_harness::IpcHarness::grant")
     }
 
     /// Revokes a grant of a plugin.
-    pub fn revoke(&mut self, plugin: &str, grant: &str) {
+    pub fn revoke(&mut self, _plugin: &str, _grant: &str) {
         unimplemented!("host::testing::ipc_harness::IpcHarness::revoke")
     }
 
@@ -160,62 +147,62 @@ impl IpcHarness {
     }
 
     /// Connects a client.
-    pub fn connect(&mut self, client_id: &str, interactive: bool, hello: HelloSpec) -> ConnId {
+    pub fn connect(&mut self, _client_id: &str, _interactive: bool, _hello: HelloSpec) -> ConnId {
         unimplemented!("host::testing::ipc_harness::IpcHarness::connect")
     }
 
     /// Reattaches a client that last saw outcome `last_seen_seq` (HST-116).
-    pub fn reattach(&mut self, client_id: &str, last_seen_seq: u64, hello: HelloSpec) -> ConnId {
+    pub fn reattach(&mut self, _client_id: &str, _last_seen_seq: u64, _hello: HelloSpec) -> ConnId {
         unimplemented!("host::testing::ipc_harness::IpcHarness::reattach")
     }
 
     /// Drops a connection.
-    pub fn disconnect(&mut self, conn: ConnId) {
+    pub fn disconnect(&mut self, _conn: ConnId) {
         unimplemented!("host::testing::ipc_harness::IpcHarness::disconnect")
     }
 
     /// Moves the clock.
-    pub fn advance(&mut self, by: Duration) {
+    pub fn advance(&mut self, _by: Duration) {
         unimplemented!("host::testing::ipc_harness::IpcHarness::advance")
     }
 
     /// Runs server and client halves until idle or `max_rounds`.
-    pub fn pump(&mut self, max_rounds: u32) {
+    pub fn pump(&mut self, _max_rounds: u32) {
         unimplemented!("host::testing::ipc_harness::IpcHarness::pump")
     }
 
     /// Everything the server sent to the connection, in order.
-    pub fn wire(&self, conn: ConnId) -> Vec<WireItem> {
+    pub fn wire(&self, _conn: ConnId) -> Vec<WireItem> {
         unimplemented!("host::testing::ipc_harness::IpcHarness::wire")
     }
 
     /// What the client half did, in order.
-    pub fn deliveries(&self, conn: ConnId) -> Vec<ClientDelivery> {
+    pub fn deliveries(&self, _conn: ConnId) -> Vec<ClientDelivery> {
         unimplemented!("host::testing::ipc_harness::IpcHarness::deliveries")
     }
 
     /// Whether the connection is open.
-    pub fn is_open(&self, conn: ConnId) -> bool {
+    pub fn is_open(&self, _conn: ConnId) -> bool {
         unimplemented!("host::testing::ipc_harness::IpcHarness::is_open")
     }
 
     /// The error id the connection was closed with.
-    pub fn close_code(&self, conn: ConnId) -> Option<String> {
+    pub fn close_code(&self, _conn: ConnId) -> Option<String> {
         unimplemented!("host::testing::ipc_harness::IpcHarness::close_code")
     }
 
     /// How the client process exited, when it did (HST-104).
-    pub fn client_exit(&self, conn: ConnId) -> Option<ClientExit> {
+    pub fn client_exit(&self, _conn: ConnId) -> Option<ClientExit> {
         unimplemented!("host::testing::ipc_harness::IpcHarness::client_exit")
     }
 
     /// The client half of a plugin on a connection (HST-105).
-    pub fn client_half(&self, conn: ConnId, plugin: &str) -> ClientHalf {
+    pub fn client_half(&self, _conn: ConnId, _plugin: &str) -> ClientHalf {
         unimplemented!("host::testing::ipc_harness::IpcHarness::client_half")
     }
 
     /// Whether the server half of a plugin runs.
-    pub fn server_half_running(&self, plugin: &str) -> bool {
+    pub fn server_half_running(&self, _plugin: &str) -> bool {
         unimplemented!("host::testing::ipc_harness::IpcHarness::server_half_running")
     }
 
@@ -230,22 +217,22 @@ impl IpcHarness {
     }
 
     /// Local effects the client applied before the server confirmed (HST-112).
-    pub fn client_local_effects(&self, conn: ConnId) -> usize {
+    pub fn client_local_effects(&self, _conn: ConnId) -> usize {
         unimplemented!("host::testing::ipc_harness::IpcHarness::client_local_effects")
     }
 
     /// Submits the client sent.
-    pub fn submits_sent(&self, conn: ConnId) -> usize {
+    pub fn submits_sent(&self, _conn: ConnId) -> usize {
         unimplemented!("host::testing::ipc_harness::IpcHarness::submits_sent")
     }
 
     /// Resync requests the client sent (HST-108).
-    pub fn resync_requests(&self, conn: ConnId) -> usize {
+    pub fn resync_requests(&self, _conn: ConnId) -> usize {
         unimplemented!("host::testing::ipc_harness::IpcHarness::resync_requests")
     }
 
     /// The contribution ids in the client's mirror.
-    pub fn client_mirror(&self, conn: ConnId) -> Vec<String> {
+    pub fn client_mirror(&self, _conn: ConnId) -> Vec<String> {
         unimplemented!("host::testing::ipc_harness::IpcHarness::client_mirror")
     }
 
@@ -255,52 +242,57 @@ impl IpcHarness {
     }
 
     /// The final outcome of a submission, when it completed.
-    pub fn final_outcome(&self, client_id: &str, plugin: &str, dedup_key: &str) -> Option<String> {
+    pub fn final_outcome(
+        &self,
+        _client_id: &str,
+        _plugin: &str,
+        _dedup_key: &str,
+    ) -> Option<String> {
         unimplemented!("host::testing::ipc_harness::IpcHarness::final_outcome")
     }
 
     /// PTY frames written to the connection.
-    pub fn pty_frames_written(&self, conn: ConnId) -> usize {
+    pub fn pty_frames_written(&self, _conn: ConnId) -> usize {
         unimplemented!("host::testing::ipc_harness::IpcHarness::pty_frames_written")
     }
 
     /// PTY frames dropped on the connection.
-    pub fn pty_frames_dropped(&self, conn: ConnId) -> usize {
+    pub fn pty_frames_dropped(&self, _conn: ConnId) -> usize {
         unimplemented!("host::testing::ipc_harness::IpcHarness::pty_frames_dropped")
     }
 
     /// The client submits an intent of a plugin.
-    pub fn submit(&mut self, conn: ConnId, plugin: &str, dedup_key: &str, intent: &str) {
+    pub fn submit(&mut self, _conn: ConnId, _plugin: &str, _dedup_key: &str, _intent: &str) {
         unimplemented!("host::testing::ipc_harness::IpcHarness::submit")
     }
 
     /// Pauses or resumes the server's apply step.
-    pub fn pause_apply(&mut self, paused: bool) {
+    pub fn pause_apply(&mut self, _paused: bool) {
         unimplemented!("host::testing::ipc_harness::IpcHarness::pause_apply")
     }
 
     /// The server-side plugin puts a contribution of the given encoded size.
-    pub fn put_contribution(&mut self, plugin: &str, id: &str, entry_bytes: usize) {
+    pub fn put_contribution(&mut self, _plugin: &str, _id: &str, _entry_bytes: usize) {
         unimplemented!("host::testing::ipc_harness::IpcHarness::put_contribution")
     }
 
     /// Loses the next increment sent to the connection (HST-108).
-    pub fn drop_next_increment(&mut self, conn: ConnId) {
+    pub fn drop_next_increment(&mut self, _conn: ConnId) {
         unimplemented!("host::testing::ipc_harness::IpcHarness::drop_next_increment")
     }
 
     /// The client sends an envelope with an explicit sequence number (HST-102).
-    pub fn send_client_envelope(&mut self, conn: ConnId, seq: u64) {
+    pub fn send_client_envelope(&mut self, _conn: ConnId, _seq: u64) {
         unimplemented!("host::testing::ipc_harness::IpcHarness::send_client_envelope")
     }
 
     /// Floods plugin data toward a connection whose client reader is stalled (HST-121..123).
-    pub fn flood_plugin_data(&mut self, conn: ConnId, record_bytes: usize, records: usize) {
+    pub fn flood_plugin_data(&mut self, _conn: ConnId, _record_bytes: usize, _records: usize) {
         unimplemented!("host::testing::ipc_harness::IpcHarness::flood_plugin_data")
     }
 
     /// Queues PTY frames toward a connection (HST-120).
-    pub fn push_pty_frames(&mut self, conn: ConnId, count: usize) {
+    pub fn push_pty_frames(&mut self, _conn: ConnId, _count: usize) {
         unimplemented!("host::testing::ipc_harness::IpcHarness::push_pty_frames")
     }
 }

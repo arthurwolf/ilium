@@ -1,8 +1,6 @@
 //! Shared helpers of the devtools tests (lane dev-pipeline): environment builder, project builder,
 //! component builder, record selectors, SHA-256.
 
-#![allow(dead_code)]
-
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
@@ -72,21 +70,6 @@ pub fn records_of<'a>(output: &'a CliOutput, record_type: &str) -> Vec<&'a Value
         .stdout_jsonl
         .iter()
         .filter(|record| record.get("type").and_then(Value::as_str) == Some(record_type))
-        .collect()
-}
-
-/// The `type` of every record in order.
-pub fn record_types(output: &CliOutput) -> Vec<String> {
-    output
-        .stdout_jsonl
-        .iter()
-        .map(|record| {
-            record
-                .get("type")
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .to_owned()
-        })
         .collect()
 }
 
@@ -216,12 +199,6 @@ pub fn write_docs(dir: &Path) {
     write_text(dir, "CHANGELOG.md", &good_changelog());
     write_text(dir, "LICENSE", "MIT License\n");
     write_text(dir, "help/overview.md", "# Agent tools\n\nOne sentence that says what the plugin adds.\n\nThe plugin adds the work badge.\n");
-}
-
-/// A project that should raise no lint finding except skipped-rule hints: base manifest plus docs.
-pub fn fresh_project(dir: &Path) {
-    write_manifest(dir, &base_manifest());
-    write_docs(dir);
 }
 
 /// Mutates the base manifest with `edit`, writes it with the docs and returns the value.

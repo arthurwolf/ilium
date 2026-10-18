@@ -1,7 +1,5 @@
 //! Twins of the original tests of ilium-client/src/background_animation/r05_cloudlet_tests.rs (ported through FakeScene / FakeSession).
 use crate::common::*;
-#[allow(unused_imports)]
-use serde_json::json;
 
 /// REQ: PORT:ilium-client/src/background_animation/r05_cloudlet_tests.rs::r05_full_resolution_oracle_all_source_counts_and_nonmonotone_times
 #[test]

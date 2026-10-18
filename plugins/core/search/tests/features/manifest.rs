@@ -3,6 +3,7 @@
 use serde_json::{json, Value};
 
 use crate::common::*;
+use crate::support::*;
 
 fn page_manifest() -> Value {
     let blocks = json_blocks(&page_text());

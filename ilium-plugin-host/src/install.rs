@@ -139,51 +139,39 @@ pub struct LimitsInstallReport {
 }
 
 /// Installs a package directory, clamping its requested limits to the tier (HST-404).
-pub fn install_with_limits(dir: &Path, tier: Tier, requested: &Limits) -> LimitsInstallReport {
+pub fn install_with_limits(_dir: &Path, _tier: Tier, _requested: &Limits) -> LimitsInstallReport {
     unimplemented!("host::install::install_with_limits")
 }
 
 /// The installer (reference-packaging.md).
 #[derive(Debug)]
-pub struct Installer {
-    store: PackageStore,
-    state_dir: Option<PathBuf>,
-    options: InstallOptions,
-}
+pub struct Installer;
 
 impl Installer {
     /// An installer over a package store.
-    pub fn new(store: PackageStore) -> Installer {
-        Installer {
-            store,
-            state_dir: None,
-            options: InstallOptions::default(),
-        }
+    pub fn new(_store: PackageStore) -> Installer {
+        Installer
     }
 
     /// An installer over a package store with a state directory and options (PKG-262).
     pub fn with_options(
-        store: PackageStore,
-        state_dir: PathBuf,
-        options: InstallOptions,
+        _store: PackageStore,
+        _state_dir: PathBuf,
+        _options: InstallOptions,
     ) -> Installer {
-        Installer {
-            store,
-            state_dir: Some(state_dir),
-            options,
-        }
+        Installer
     }
 
     /// Runs the stages without changing disk (reference-check-and-lint-rules.md).
-    pub fn check(&self, package: &[u8], mode: CheckMode) -> CheckReport {
+    pub fn check(&self, _package: &[u8], _mode: CheckMode) -> CheckReport {
         unimplemented!("host::install::Installer::check")
     }
 
     /// Installs a package after consent.
     pub fn install(
         &self,
-        package: &[u8],
-        consent: &dyn Consent,
+        _package: &[u8],
+        _consent: &dyn Consent,
     ) -> Result<InstallReport, Diagnostic> {
         unimplemented!("host::install::Installer::install")
     }
@@ -191,9 +179,9 @@ impl Installer {
     /// Installs, then stops as if the process died right after `step` (testing hook, PKG-270..272).
     pub fn install_crashing_after(
         &self,
-        package: &[u8],
-        consent: &dyn Consent,
-        step: InstallStep,
+        _package: &[u8],
+        _consent: &dyn Consent,
+        _step: InstallStep,
     ) -> Result<(), Diagnostic> {
         unimplemented!("host::install::Installer::install_crashing_after")
     }
@@ -211,8 +199,8 @@ impl Installer {
     /// Stages an update; the swap happens at the next safe point.
     pub fn update(
         &self,
-        package: &[u8],
-        consent: &dyn Consent,
+        _package: &[u8],
+        _consent: &dyn Consent,
     ) -> Result<InstallReport, Diagnostic> {
         unimplemented!("host::install::Installer::update")
     }
@@ -220,19 +208,19 @@ impl Installer {
     /// Commits or rolls back a staged update after its first activation (PKG-280, LIF-075).
     pub fn finish_update(
         &self,
-        plugin: &PluginId,
-        first: FirstActivate,
+        _plugin: &PluginId,
+        _first: FirstActivate,
     ) -> Result<UpdateOutcome, Diagnostic> {
         unimplemented!("host::install::Installer::finish_update")
     }
 
     /// Returns to the previous version.
-    pub fn rollback(&self, plugin: &PluginId) -> Result<InstallReport, Diagnostic> {
+    pub fn rollback(&self, _plugin: &PluginId) -> Result<InstallReport, Diagnostic> {
         unimplemented!("host::install::Installer::rollback")
     }
 
     /// Removes a plugin; `purge` also deletes its data, storage, settings and backups (PKG-294).
-    pub fn uninstall(&self, plugin: &PluginId, purge: bool) -> Result<(), Diagnostic> {
+    pub fn uninstall(&self, _plugin: &PluginId, _purge: bool) -> Result<(), Diagnostic> {
         unimplemented!("host::install::Installer::uninstall")
     }
 }

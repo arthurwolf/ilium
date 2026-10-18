@@ -1,7 +1,5 @@
 //! Twins of the original tests of ilium-client/src/background_animation/surface.rs (ported through FakeScene / FakeSession).
 use crate::common::*;
-#[allow(unused_imports)]
-use serde_json::json;
 
 /// REQ: PORT:ilium-client/src/background_animation/surface.rs::blocked_render_returns_to_ui_and_completion_wakes_one_fps_surface
 #[test]

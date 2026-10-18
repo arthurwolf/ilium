@@ -19,120 +19,125 @@ impl HostFs for FsImport {
         unimplemented!("host::imports::fs::roots")
     }
 
-    fn metadata(&mut self, path: FsPath) -> Result<FsMetadata, PluginError> {
+    fn metadata(&mut self, _path: FsPath) -> Result<FsMetadata, PluginError> {
         unimplemented!("host::imports::fs::metadata")
     }
 
-    fn list_dir(&mut self, path: FsPath, max_entries: u32) -> Result<Vec<DirEntry>, PluginError> {
+    fn list_dir(&mut self, _path: FsPath, _max_entries: u32) -> Result<Vec<DirEntry>, PluginError> {
         unimplemented!("host::imports::fs::list_dir")
     }
 
-    fn read(&mut self, path: FsPath, offset: u64, max_bytes: u32) -> Result<Vec<u8>, PluginError> {
+    fn read(
+        &mut self,
+        _path: FsPath,
+        _offset: u64,
+        _max_bytes: u32,
+    ) -> Result<Vec<u8>, PluginError> {
         unimplemented!("host::imports::fs::read")
     }
 
-    fn read_all(&mut self, path: FsPath) -> Result<RequestId, PluginError> {
+    fn read_all(&mut self, _path: FsPath) -> Result<RequestId, PluginError> {
         unimplemented!("host::imports::fs::read_all")
     }
 
     fn scan(
         &mut self,
-        path: FsPath,
-        glob: String,
-        max_entries: u32,
+        _path: FsPath,
+        _glob: String,
+        _max_entries: u32,
     ) -> Result<RequestId, PluginError> {
         unimplemented!("host::imports::fs::scan")
     }
 
     fn write(
         &mut self,
-        path: FsPath,
-        data: Vec<u8>,
-        mode: WriteMode,
+        _path: FsPath,
+        _data: Vec<u8>,
+        _mode: WriteMode,
     ) -> Result<RequestId, PluginError> {
         unimplemented!("host::imports::fs::write")
     }
 
-    fn create_dir(&mut self, path: FsPath) -> Result<(), PluginError> {
+    fn create_dir(&mut self, _path: FsPath) -> Result<(), PluginError> {
         unimplemented!("host::imports::fs::create_dir")
     }
 
-    fn remove(&mut self, path: FsPath) -> Result<RequestId, PluginError> {
+    fn remove(&mut self, _path: FsPath) -> Result<RequestId, PluginError> {
         unimplemented!("host::imports::fs::remove")
     }
 
-    fn rename(&mut self, source: FsPath, target: FsPath) -> Result<RequestId, PluginError> {
+    fn rename(&mut self, _source: FsPath, _target: FsPath) -> Result<RequestId, PluginError> {
         unimplemented!("host::imports::fs::rename")
     }
 
-    fn watch(&mut self, path: FsPath, recursive: bool) -> Result<WatchId, PluginError> {
+    fn watch(&mut self, _path: FsPath, _recursive: bool) -> Result<WatchId, PluginError> {
         unimplemented!("host::imports::fs::watch")
     }
 
-    fn unwatch(&mut self, watch: WatchId) {
+    fn unwatch(&mut self, _watch: WatchId) {
         unimplemented!("host::imports::fs::unwatch")
     }
 
     fn lock(
         &mut self,
-        path: FsPath,
-        exclusive: bool,
-        timeout_millis: u32,
+        _path: FsPath,
+        _exclusive: bool,
+        _timeout_millis: u32,
     ) -> Result<RequestId, PluginError> {
         unimplemented!("host::imports::fs::lock")
     }
 
-    fn unlock(&mut self, lock: LockId) {
+    fn unlock(&mut self, _lock: LockId) {
         unimplemented!("host::imports::fs::unlock")
     }
 
-    fn pick(&mut self, spec: PickSpec) -> Result<RequestId, PluginError> {
+    fn pick(&mut self, _spec: PickSpec) -> Result<RequestId, PluginError> {
         unimplemented!("host::imports::fs::pick")
     }
 
-    fn read_with_revision(&mut self, path: FsPath) -> Result<RequestId, PluginError> {
+    fn read_with_revision(&mut self, _path: FsPath) -> Result<RequestId, PluginError> {
         unimplemented!("host::imports::fs::read_with_revision")
     }
 
     fn write_atomic(
         &mut self,
-        path: FsPath,
-        data: Vec<u8>,
-        expected: Option<RevisionToken>,
+        _path: FsPath,
+        _data: Vec<u8>,
+        _expected: Option<RevisionToken>,
     ) -> Result<RequestId, PluginError> {
         unimplemented!("host::imports::fs::write_atomic")
     }
 
     fn tail(
         &mut self,
-        path: FsPath,
-        cursor: u64,
-        max_bytes: u32,
+        _path: FsPath,
+        _cursor: u64,
+        _max_bytes: u32,
     ) -> Result<TailChunk, PluginError> {
         unimplemented!("host::imports::fs::tail")
     }
 
-    fn take_bytes(&mut self, request: RequestId) -> Option<Vec<u8>> {
+    fn take_bytes(&mut self, _request: RequestId) -> Option<Vec<u8>> {
         unimplemented!("host::imports::fs::take_bytes")
     }
 
-    fn take_entries(&mut self, request: RequestId) -> Option<Vec<ScannedEntry>> {
+    fn take_entries(&mut self, _request: RequestId) -> Option<Vec<ScannedEntry>> {
         unimplemented!("host::imports::fs::take_entries")
     }
 
-    fn take_lock(&mut self, request: RequestId) -> Option<LockId> {
+    fn take_lock(&mut self, _request: RequestId) -> Option<LockId> {
         unimplemented!("host::imports::fs::take_lock")
     }
 
-    fn take_picked(&mut self, request: RequestId) -> Option<FsPath> {
+    fn take_picked(&mut self, _request: RequestId) -> Option<FsPath> {
         unimplemented!("host::imports::fs::take_picked")
     }
 
-    fn take_revisioned(&mut self, request: RequestId) -> Option<Revisioned> {
+    fn take_revisioned(&mut self, _request: RequestId) -> Option<Revisioned> {
         unimplemented!("host::imports::fs::take_revisioned")
     }
 
-    fn take_written(&mut self, request: RequestId) -> Option<RevisionToken> {
+    fn take_written(&mut self, _request: RequestId) -> Option<RevisionToken> {
         unimplemented!("host::imports::fs::take_written")
     }
 }

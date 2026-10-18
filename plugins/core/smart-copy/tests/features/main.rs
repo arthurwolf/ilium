@@ -7,8 +7,6 @@ mod command_freeze;
 mod common;
 mod doc_page;
 mod hooks_topic;
-#[path = "../host_ext.rs"]
-mod host_ext;
 mod light_candidates;
 mod light_claims;
 mod manifest;

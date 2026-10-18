@@ -3,6 +3,7 @@
 use serde_json::json;
 
 use crate::common::*;
+use crate::feature_support::*;
 
 const PROBE: &str = "/opt/probe.sh";
 

@@ -5,6 +5,7 @@ use ilium_plugin_sdk::types::{AgentActivity, Urgency};
 use serde_json::json;
 
 use crate::common::*;
+use crate::feature_only::{is_valid_dedup_key, notices, sounds, task_outcome};
 
 /// REQ: F-048
 #[test]

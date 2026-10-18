@@ -33,33 +33,31 @@ pub const EXECUTOR_THREAD_PREFIX: &str = "ilium-exec-";
 pub const JOB_THREAD_PREFIX: &str = "ilium-job-";
 
 /// Executor threads of a process for a core count (reference-host-architecture.md HST-183).
-pub fn executor_threads(process: ProcessKind, cores: usize) -> usize {
+pub fn executor_threads(_process: ProcessKind, _cores: usize) -> usize {
     unimplemented!("host::scheduler::executor_threads")
 }
 
 /// Job bank threads for a core count (reference-host-architecture.md HST-184).
-pub fn job_bank_threads(cores: usize) -> usize {
+pub fn job_bank_threads(_cores: usize) -> usize {
     unimplemented!("host::scheduler::job_bank_threads")
 }
 
 /// Bounded channel from worker threads to the UI thread (reference-host-architecture.md HST-182).
 #[derive(Debug)]
 pub struct UiWorkChannel<T> {
-    capacity: usize,
     _items: PhantomData<T>,
 }
 
 impl<T> UiWorkChannel<T> {
     /// A channel that holds at most `capacity` items.
-    pub fn new(capacity: usize) -> UiWorkChannel<T> {
+    pub fn new(_capacity: usize) -> UiWorkChannel<T> {
         UiWorkChannel {
-            capacity,
             _items: PhantomData,
         }
     }
 
     /// Queues an item; a full channel hands it back (reference-host-architecture.md HST-182).
-    pub fn try_send(&self, item: T) -> Result<(), T> {
+    pub fn try_send(&self, _item: T) -> Result<(), T> {
         unimplemented!("host::scheduler::UiWorkChannel::try_send")
     }
 
@@ -203,38 +201,36 @@ pub struct QueueStats {
 
 /// The scheduler of all plugin queues (reference-host-architecture.md).
 #[derive(Debug)]
-pub struct Scheduler {
-    epoch_tick_ms: u64,
-}
+pub struct Scheduler;
 
 impl Scheduler {
     /// A scheduler with the given epoch tick (reference-host-runtime.md).
-    pub fn new(epoch_tick_ms: u64) -> Scheduler {
-        Scheduler { epoch_tick_ms }
+    pub fn new(_epoch_tick_ms: u64) -> Scheduler {
+        Scheduler
     }
 
     /// Statistics of a plugin's queue, if it has one.
-    pub fn stats(&self, plugin: &PluginId) -> Option<QueueStats> {
+    pub fn stats(&self, _plugin: &PluginId) -> Option<QueueStats> {
         unimplemented!("host::scheduler::Scheduler::stats")
     }
 
     /// Advances time: runs due calls, applies deadlines, rotates fairly between plugins.
-    pub fn tick(&self, now: Instant) {
+    pub fn tick(&self, _now: Instant) {
         unimplemented!("host::scheduler::Scheduler::tick")
     }
 
     /// Registers a plugin side with its event queue capacity (reference-host-architecture.md HST-201).
-    pub fn register_side(&self, plugin: &PluginId, event_queue: usize) {
+    pub fn register_side(&self, _plugin: &PluginId, _event_queue: usize) {
         unimplemented!("host::scheduler::Scheduler::register_side")
     }
 
     /// Queues a call and returns its ticket (reference-host-architecture.md HST-185).
     pub fn enqueue(
         &self,
-        plugin: &PluginId,
-        kind: CallKind,
-        now: Instant,
-        work: Box<dyn FnOnce() + Send>,
+        _plugin: &PluginId,
+        _kind: CallKind,
+        _now: Instant,
+        _work: Box<dyn FnOnce() + Send>,
     ) -> u64 {
         unimplemented!("host::scheduler::Scheduler::enqueue")
     }
@@ -250,27 +246,27 @@ impl Scheduler {
     }
 
     /// Deadline breaches of a plugin per call class (reference-host-architecture.md HST-188).
-    pub fn breach_count(&self, plugin: &PluginId, class: CallClass) -> u64 {
+    pub fn breach_count(&self, _plugin: &PluginId, _class: CallClass) -> u64 {
         unimplemented!("host::scheduler::Scheduler::breach_count")
     }
 
     /// Peak number of calls running in one plugin's store at once (reference-host-architecture.md HST-189).
-    pub fn max_concurrent_calls_in_store(&self, plugin: &PluginId) -> usize {
+    pub fn max_concurrent_calls_in_store(&self, _plugin: &PluginId) -> usize {
         unimplemented!("host::scheduler::Scheduler::max_concurrent_calls_in_store")
     }
 
     /// Marks a plugin's store busy or free (testing hook of the `sched` lane, HST-189).
-    pub fn set_store_busy(&self, plugin: &PluginId, busy: bool) {
+    pub fn set_store_busy(&self, _plugin: &PluginId, _busy: bool) {
         unimplemented!("host::scheduler::Scheduler::set_store_busy")
     }
 
     /// Records the start of a plugin's activation (reference-host-architecture.md HST-190).
-    pub fn begin_activation(&self, plugin: &PluginId) {
+    pub fn begin_activation(&self, _plugin: &PluginId) {
         unimplemented!("host::scheduler::Scheduler::begin_activation")
     }
 
     /// Records the end of a plugin's activation (reference-host-architecture.md HST-190).
-    pub fn finish_activation(&self, plugin: &PluginId, succeeded: bool) {
+    pub fn finish_activation(&self, _plugin: &PluginId, _succeeded: bool) {
         unimplemented!("host::scheduler::Scheduler::finish_activation")
     }
 
@@ -280,12 +276,12 @@ impl Scheduler {
     }
 
     /// Pushes an event to a side's queue (reference-host-architecture.md HST-202).
-    pub fn push_event(&self, plugin: &PluginId, event: Event) -> EventPush {
+    pub fn push_event(&self, _plugin: &PluginId, _event: Event) -> EventPush {
         unimplemented!("host::scheduler::Scheduler::push_event")
     }
 
     /// Sets the per-second rate a source may push at (reference-host-architecture.md HST-203).
-    pub fn set_source_rate(&self, plugin: &PluginId, per_second: u32) {
+    pub fn set_source_rate(&self, _plugin: &PluginId, _per_second: u32) {
         unimplemented!("host::scheduler::Scheduler::set_source_rate")
     }
 
@@ -293,19 +289,19 @@ impl Scheduler {
     /// (reference-host-architecture.md HST-203).
     pub fn push_event_from_source(
         &self,
-        plugin: &PluginId,
-        event: Event,
+        _plugin: &PluginId,
+        _event: Event,
     ) -> Result<EventPush, PluginError> {
         unimplemented!("host::scheduler::Scheduler::push_event_from_source")
     }
 
     /// Events waiting in a side's queue (reference-host-architecture.md HST-202).
-    pub fn queue_len(&self, plugin: &PluginId) -> usize {
+    pub fn queue_len(&self, _plugin: &PluginId) -> usize {
         unimplemented!("host::scheduler::Scheduler::queue_len")
     }
 
     /// Sets a plugin's execution bucket balance (testing hook of the `sched` lane, HST-206).
-    pub fn set_bucket_balance_ms(&self, plugin: &PluginId, balance_ms: i64) {
+    pub fn set_bucket_balance_ms(&self, _plugin: &PluginId, _balance_ms: i64) {
         unimplemented!("host::scheduler::Scheduler::set_bucket_balance_ms")
     }
 }
@@ -333,52 +329,48 @@ pub enum QueuePolicy {
 }
 
 /// The queue policy of an event kind (reference-host-architecture.md HST-202).
-pub fn event_queue_policy(event: &Event) -> QueuePolicy {
+pub fn event_queue_policy(_event: &Event) -> QueuePolicy {
     unimplemented!("host::scheduler::event_queue_policy")
 }
 
 /// Collects events into `on-events` batches (reference-host-architecture.md HST-204).
 #[derive(Debug, Default)]
-pub struct BatchBuilder {
-    pending: Vec<Event>,
-}
+pub struct BatchBuilder;
 
 impl BatchBuilder {
     /// An empty builder.
     pub fn new() -> BatchBuilder {
-        BatchBuilder::default()
+        BatchBuilder
     }
 
     /// Adds an event that arrived at `at_ms`; user actions flush at once (HST-204).
-    pub fn push(&mut self, event: Event, at_ms: u64, from_user_action: bool) {
+    pub fn push(&mut self, _event: Event, _at_ms: u64, _from_user_action: bool) {
         unimplemented!("host::scheduler::BatchBuilder::push")
     }
 
     /// The batch to deliver now, if one is due (HST-204).
-    pub fn take_ready(&mut self, now_ms: u64) -> Option<Vec<Event>> {
+    pub fn take_ready(&mut self, _now_ms: u64) -> Option<Vec<Event>> {
         unimplemented!("host::scheduler::BatchBuilder::take_ready")
     }
 }
 
 /// Flow control of one stream to a plugin (reference-host-architecture.md HST-205).
 #[derive(Debug, Default)]
-pub struct StreamCredit {
-    in_flight: usize,
-}
+pub struct StreamCredit;
 
 impl StreamCredit {
     /// Credit with nothing in flight.
     pub fn new() -> StreamCredit {
-        StreamCredit::default()
+        StreamCredit
     }
 
     /// Bytes queued for the plugin.
-    pub fn enqueued(&mut self, bytes: usize) {
+    pub fn enqueued(&mut self, _bytes: usize) {
         unimplemented!("host::scheduler::StreamCredit::enqueued")
     }
 
     /// Bytes the plugin consumed.
-    pub fn consumed(&mut self, bytes: usize) {
+    pub fn consumed(&mut self, _bytes: usize) {
         unimplemented!("host::scheduler::StreamCredit::consumed")
     }
 
@@ -393,7 +385,7 @@ impl StreamCredit {
     }
 
     /// Chunk sizes for `len` bytes, each at most `MAX_CHUNK_BYTES` (HST-205).
-    pub fn split_chunks(len: usize) -> Vec<usize> {
+    pub fn split_chunks(_len: usize) -> Vec<usize> {
         unimplemented!("host::scheduler::StreamCredit::split_chunks")
     }
 }
@@ -402,28 +394,26 @@ impl StreamCredit {
 
 /// A plugin's execution-time bucket (reference-host-architecture.md HST-206).
 #[derive(Debug, Default)]
-pub struct ExecutionBucket {
-    balance_ms: i64,
-}
+pub struct ExecutionBucket;
 
 impl ExecutionBucket {
     /// A bucket at its starting balance.
     pub fn new() -> ExecutionBucket {
-        ExecutionBucket::default()
+        ExecutionBucket
     }
 
     /// Charges CPU time.
-    pub fn charge_cpu_ms(&mut self, cpu_ms: u64) {
+    pub fn charge_cpu_ms(&mut self, _cpu_ms: u64) {
         unimplemented!("host::scheduler::ExecutionBucket::charge_cpu_ms")
     }
 
     /// Charges payload bytes at the documented rate (HST-206).
-    pub fn charge_payload_bytes(&mut self, bytes: u64) {
+    pub fn charge_payload_bytes(&mut self, _bytes: u64) {
         unimplemented!("host::scheduler::ExecutionBucket::charge_payload_bytes")
     }
 
     /// Refills for elapsed wall time, capped at the bucket size (HST-206).
-    pub fn refill(&mut self, elapsed: Duration) {
+    pub fn refill(&mut self, _elapsed: Duration) {
         unimplemented!("host::scheduler::ExecutionBucket::refill")
     }
 
@@ -439,7 +429,7 @@ impl ExecutionBucket {
 }
 
 /// Milliseconds to wait until a debt is repaid at the refill rate (HST-207).
-pub fn retry_after_ms(balance_ms: i64) -> u32 {
+pub fn retry_after_ms(_balance_ms: i64) -> u32 {
     unimplemented!("host::scheduler::retry_after_ms")
 }
 
@@ -472,44 +462,42 @@ pub enum CancelCause {
 }
 
 /// The outcome a cancelled request reports (HST-208).
-pub fn cancellation_outcome(cause: CancelCause) -> Outcome {
+pub fn cancellation_outcome(_cause: CancelCause) -> Outcome {
     unimplemented!("host::scheduler::cancellation_outcome")
 }
 
 /// Open requests and their final outcomes (reference-host-architecture.md HST-209).
 #[derive(Debug, Default)]
-pub struct RequestLedger {
-    open: Vec<RequestRef>,
-}
+pub struct RequestLedger;
 
 impl RequestLedger {
     /// An empty ledger.
     pub fn new() -> RequestLedger {
-        RequestLedger::default()
+        RequestLedger
     }
 
     /// Records an open request.
-    pub fn open(&mut self, request: RequestRef) {
+    pub fn open(&mut self, _request: RequestRef) {
         unimplemented!("host::scheduler::RequestLedger::open")
     }
 
     /// Completes a request; a second completion is ignored (HST-209).
-    pub fn complete(&mut self, request: RequestRef, outcome: Outcome) {
+    pub fn complete(&mut self, _request: RequestRef, _outcome: Outcome) {
         unimplemented!("host::scheduler::RequestLedger::complete")
     }
 
     /// Cancels a request (HST-209).
-    pub fn cancel(&mut self, request: RequestRef) {
+    pub fn cancel(&mut self, _request: RequestRef) {
         unimplemented!("host::scheduler::RequestLedger::cancel")
     }
 
     /// The final outcome of a request, if it ended.
-    pub fn outcome_of(&self, request: RequestRef) -> Option<Outcome> {
+    pub fn outcome_of(&self, _request: RequestRef) -> Option<Outcome> {
         unimplemented!("host::scheduler::RequestLedger::outcome_of")
     }
 
     /// How many times a request was completed (at most one, HST-209).
-    pub fn completion_count(&self, request: RequestRef) -> usize {
+    pub fn completion_count(&self, _request: RequestRef) -> usize {
         unimplemented!("host::scheduler::RequestLedger::completion_count")
     }
 }
@@ -528,7 +516,7 @@ pub enum CancelledWork {
 }
 
 /// Longest teardown of cancelled work (HST-212..214).
-pub fn teardown_bound(work: CancelledWork) -> Duration {
+pub fn teardown_bound(_work: CancelledWork) -> Duration {
     unimplemented!("host::scheduler::teardown_bound")
 }
 
@@ -556,7 +544,7 @@ pub enum JobCancelVerdict {
 }
 
 /// The verdict for a job whose cancel flag was set at `flag_set_at_ms` (HST-214).
-pub fn job_cancel_verdict(flag_set_at_ms: u64, now_ms: u64, returned: bool) -> JobCancelVerdict {
+pub fn job_cancel_verdict(_flag_set_at_ms: u64, _now_ms: u64, _returned: bool) -> JobCancelVerdict {
     unimplemented!("host::scheduler::job_cancel_verdict")
 }
 
@@ -608,6 +596,10 @@ pub struct HookRun {
 }
 
 /// Runs a hook chain started at `start_ms` by a side of `owner_process` (HST-215, HST-216).
-pub fn run_hook(owner_process: ProcessKind, handlers: Vec<HandlerSpec>, start_ms: u64) -> HookRun {
+pub fn run_hook(
+    _owner_process: ProcessKind,
+    _handlers: Vec<HandlerSpec>,
+    _start_ms: u64,
+) -> HookRun {
     unimplemented!("host::scheduler::run_hook")
 }

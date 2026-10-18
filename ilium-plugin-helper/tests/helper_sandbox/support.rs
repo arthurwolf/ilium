@@ -4,8 +4,6 @@
 //! Assumptions that the manual leaves open are listed in API_GAPS.md (frame length is a
 //! little-endian u32, enum tags follow the message table order, integers are fixed width).
 
-#![allow(dead_code)]
-
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
@@ -34,7 +32,6 @@ pub mod tag {
     pub const CANCEL: u32 = 8;
     pub const SHUTDOWN: u32 = 9;
     pub const HEARTBEAT: u32 = 10;
-    pub const LOG: u32 = 11;
     /// A tag that no message kind uses.
     pub const UNKNOWN: u32 = 0xFFFF_FFF0;
 }
@@ -150,7 +147,6 @@ pub fn frame_tag(frame: &[u8]) -> Option<u32> {
 pub struct Hello {
     pub protocol_version: u32,
     pub fingerprint: String,
-    pub build: String,
 }
 
 pub fn parse_hello(frame: &[u8]) -> Option<Hello> {
@@ -161,7 +157,6 @@ pub fn parse_hello(frame: &[u8]) -> Option<Hello> {
     Some(Hello {
         protocol_version: dec.u32()?,
         fingerprint: dec.string()?,
-        build: dec.string()?,
     })
 }
 

@@ -6,6 +6,7 @@ use proptest::prelude::*;
 use serde_json::json;
 
 use crate::common::*;
+use crate::feature_only::is_valid_dedup_key;
 
 fn approval_sound_key(revision: u64) -> Option<String> {
     let mut host = server_host();

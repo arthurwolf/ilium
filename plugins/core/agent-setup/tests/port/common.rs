@@ -1,6 +1,7 @@
 //! Shared helpers of the port twins: hosts, file access on the fake file system, service calls.
 
 pub use crate::host_ext::*;
+pub use crate::host_ext_port::*;
 use std::path::PathBuf;
 
 use ilium_plugin_core_agent_setup::AgentSetupServer;

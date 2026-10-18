@@ -1,5 +1,6 @@
 //! The exact manifest of the Scenes plugin (page section "Manifest", COR-010, COR-011, COR-050).
 use crate::common::*;
+use crate::feature_support::*;
 use serde_json::json;
 
 /// REQ: COR-010

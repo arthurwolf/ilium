@@ -9,7 +9,7 @@ pub struct DedupKey(String);
 
 impl DedupKey {
     /// ABI-010: `[A-Za-z0-9._:/-]`, 1..=128 characters; anything else is `invalid-argument`.
-    pub fn parse(text: &str) -> Result<DedupKey, PluginError> {
+    pub fn parse(_text: &str) -> Result<DedupKey, PluginError> {
         unimplemented!("api::dedup::DedupKey::parse")
     }
 
@@ -30,6 +30,6 @@ pub const DEDUP_WINDOW_MS: u64 = 600_000;
 
 /// ABI-034: a key accepted at `accepted_wall_ms` is still reserved at `now_wall_ms` while
 /// `now_wall_ms - accepted_wall_ms < 600,000`. A clock that went backwards keeps it reserved.
-pub fn is_reserved(accepted_wall_ms: u64, now_wall_ms: u64) -> bool {
+pub fn is_reserved(_accepted_wall_ms: u64, _now_wall_ms: u64) -> bool {
     unimplemented!("api::dedup::is_reserved")
 }

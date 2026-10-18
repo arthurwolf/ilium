@@ -6,9 +6,6 @@
 //!
 //! Skeleton state: data types are complete, behaviour is `unimplemented!("helper::<path>")`.
 
-// Skeleton functions name parameters for the implementation that replaces the stubs.
-#![allow(unused_variables, dead_code)]
-
 use std::io::{Read, Write};
 
 pub mod forward;
@@ -40,9 +37,9 @@ pub struct HelperConfig {
 
 /// Serves requests from `input` and answers on `output` until the host closes the channel.
 pub fn serve(
-    input: impl Read,
-    output: impl Write,
-    config: HelperConfig,
+    _input: impl Read,
+    _output: impl Write,
+    _config: HelperConfig,
 ) -> Result<(), HelperError> {
     unimplemented!("helper::serve")
 }

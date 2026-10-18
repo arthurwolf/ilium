@@ -6,7 +6,7 @@ use ilium_plugin_api::PluginError;
 use crate::calls::CallClass;
 
 /// The `retry-after-ms` hint for a limit that frees in `remaining_ms` (reference-errors-and-limits.md).
-pub fn retry_after_ms(remaining_ms: i64) -> i64 {
+pub fn retry_after_ms(_remaining_ms: i64) -> i64 {
     unimplemented!("host::limits_rules::retry_after_ms")
 }
 
@@ -67,12 +67,12 @@ pub enum ReplyKind {
 }
 
 /// The deadline of a reply kind in milliseconds (reference-errors-and-limits.md).
-pub fn reply_deadline_ms(kind: ReplyKind) -> u64 {
+pub fn reply_deadline_ms(_kind: ReplyKind) -> u64 {
     unimplemented!("host::limits_rules::reply_deadline_ms")
 }
 
 /// Clamps a requested client-request timeout to the allowed range (reference-errors-and-limits.md).
-pub fn client_request_timeout_ms(requested_ms: u32) -> u32 {
+pub fn client_request_timeout_ms(_requested_ms: u32) -> u32 {
     unimplemented!("host::limits_rules::client_request_timeout_ms")
 }
 
@@ -85,12 +85,12 @@ pub struct ReplyWaiter {
 
 impl ReplyWaiter {
     /// A waiter for one reply kind.
-    pub fn new(kind: ReplyKind) -> ReplyWaiter {
+    pub fn new(_kind: ReplyKind) -> ReplyWaiter {
         unimplemented!("host::limits_rules::ReplyWaiter::new")
     }
 
     /// Time passed.
-    pub fn advance_ms(&mut self, ms: u64) {
+    pub fn advance_ms(&mut self, _ms: u64) {
         unimplemented!("host::limits_rules::ReplyWaiter::advance_ms")
     }
 
@@ -113,11 +113,11 @@ pub enum SoftVerdict {
 
 /// The verdict for the `breaches`-th soft breach of `class` that ran `elapsed_ms`
 /// (reference-errors-and-limits.md).
-pub fn soft_breach_verdict(class: CallClass, breaches: u32, elapsed_ms: u64) -> SoftVerdict {
+pub fn soft_breach_verdict(_class: CallClass, _breaches: u32, _elapsed_ms: u64) -> SoftVerdict {
     unimplemented!("host::limits_rules::soft_breach_verdict")
 }
 
 /// The verdict for the `breaches`-th breach of an extension hook handler (reference-errors-and-limits.md).
-pub fn hook_handler_breach_verdict(breaches: u32) -> SoftVerdict {
+pub fn hook_handler_breach_verdict(_breaches: u32) -> SoftVerdict {
     unimplemented!("host::limits_rules::hook_handler_breach_verdict")
 }

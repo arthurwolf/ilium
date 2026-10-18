@@ -1,9 +1,7 @@
 //! Twins of the tests of ilium-client/src/animation_hover.rs.
 
 use crate::common::*;
-#[allow(unused_imports)]
-use ilium_plugin_sdk::types::{ErrorCode, ViewTarget};
-#[allow(unused_imports)]
+use ilium_plugin_sdk::types::ViewTarget;
 use serde_json::json;
 
 /// REQ: PORT:ilium-client/src/animation_hover.rs::a_ready_gpu_can_be_selected_from_the_keyboard

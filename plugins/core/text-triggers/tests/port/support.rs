@@ -9,7 +9,6 @@ use serde_json::{json, Value};
 
 use crate::common::*;
 
-pub const REPLY: &str = "reply";
 /// The host dedup window of the manual (10 minutes) in milliseconds.
 pub const DEDUP_WINDOW_MS: u64 = 600_000;
 /// The default delay between detection and send, in seconds (the original DEFAULT_TEXT_TRIGGER_DELAY_SECONDS).

@@ -14,9 +14,9 @@ use crate::cli::CliOutput;
 
 /// The compiled-code cache key of one component: hash, wasmtime version and CPU features (LIF-176).
 pub fn compile_cache_key(
-    component_hash: &str,
-    wasmtime_version: &str,
-    cpu_features: &str,
+    _component_hash: &str,
+    _wasmtime_version: &str,
+    _cpu_features: &str,
 ) -> String {
     unimplemented!("host::testing::ops::compile_cache_key")
 }
@@ -144,37 +144,37 @@ pub struct PackageSpec {
 
 impl PackageSpec {
     /// A package with the given id and version.
-    pub fn new(id: &str, version: &str) -> PackageSpec {
+    pub fn new(_id: &str, _version: &str) -> PackageSpec {
         unimplemented!("host::testing::ops::PackageSpec::new")
     }
 
     /// Adds a requested grant.
-    pub fn grant(self, grant: &str) -> PackageSpec {
+    pub fn grant(self, _grant: &str) -> PackageSpec {
         unimplemented!("host::testing::ops::PackageSpec::grant")
     }
 
     /// Adds a high-risk grant.
-    pub fn high_risk_grant(self, grant: &str) -> PackageSpec {
+    pub fn high_risk_grant(self, _grant: &str) -> PackageSpec {
         unimplemented!("host::testing::ops::PackageSpec::high_risk_grant")
     }
 
     /// Adds a first-use-prompted grant.
-    pub fn first_use_prompt(self, grant: &str) -> PackageSpec {
+    pub fn first_use_prompt(self, _grant: &str) -> PackageSpec {
         unimplemented!("host::testing::ops::PackageSpec::first_use_prompt")
     }
 
     /// Signs the package with the named key.
-    pub fn signed(self, key: &str) -> PackageSpec {
+    pub fn signed(self, _key: &str) -> PackageSpec {
         unimplemented!("host::testing::ops::PackageSpec::signed")
     }
 
     /// Re-signs the package with a note.
-    pub fn resigned(self, note: &str) -> PackageSpec {
+    pub fn resigned(self, _note: &str) -> PackageSpec {
         unimplemented!("host::testing::ops::PackageSpec::resigned")
     }
 
     /// Signs with the same publisher key as another package.
-    pub fn same_publisher_as(self, key: &str) -> PackageSpec {
+    pub fn same_publisher_as(self, _key: &str) -> PackageSpec {
         unimplemented!("host::testing::ops::PackageSpec::same_publisher_as")
     }
 
@@ -189,12 +189,12 @@ impl PackageSpec {
     }
 
     /// Embeds a marker in the component so two versions differ in content.
-    pub fn content_marker(self, marker: &str) -> PackageSpec {
+    pub fn content_marker(self, _marker: &str) -> PackageSpec {
         unimplemented!("host::testing::ops::PackageSpec::content_marker")
     }
 
     /// Pads the package to the given size in bytes.
-    pub fn padding(self, bytes: u64) -> PackageSpec {
+    pub fn padding(self, _bytes: u64) -> PackageSpec {
         unimplemented!("host::testing::ops::PackageSpec::padding")
     }
 
@@ -219,22 +219,22 @@ impl PackageSpec {
     }
 
     /// `activate` writes the given file.
-    pub fn start_writes_file(self, path: &Path) -> PackageSpec {
+    pub fn start_writes_file(self, _path: &Path) -> PackageSpec {
         unimplemented!("host::testing::ops::PackageSpec::start_writes_file")
     }
 
     /// `deactivate` returns a restore blob of the given length.
-    pub fn restore_bytes(self, len: usize) -> PackageSpec {
+    pub fn restore_bytes(self, _len: usize) -> PackageSpec {
         unimplemented!("host::testing::ops::PackageSpec::restore_bytes")
     }
 
     /// The manifest `data_version`.
-    pub fn data_version(self, version: u32) -> PackageSpec {
+    pub fn data_version(self, _version: u32) -> PackageSpec {
         unimplemented!("host::testing::ops::PackageSpec::data_version")
     }
 
     /// The manifest `data_version` as raw JSON text.
-    pub fn raw_data_version(self, json: &str) -> PackageSpec {
+    pub fn raw_data_version(self, _json: &str) -> PackageSpec {
         unimplemented!("host::testing::ops::PackageSpec::raw_data_version")
     }
 
@@ -254,32 +254,32 @@ impl PackageSpec {
     }
 
     /// Provides a service.
-    pub fn provides_service(self, service: &str) -> PackageSpec {
+    pub fn provides_service(self, _service: &str) -> PackageSpec {
         unimplemented!("host::testing::ops::PackageSpec::provides_service")
     }
 
     /// Requires a service.
-    pub fn requires_service(self, service: &str) -> PackageSpec {
+    pub fn requires_service(self, _service: &str) -> PackageSpec {
         unimplemented!("host::testing::ops::PackageSpec::requires_service")
     }
 
     /// `activate` waits for the given virtual time.
-    pub fn wait_ms(self, ms: u32) -> PackageSpec {
+    pub fn wait_ms(self, _ms: u32) -> PackageSpec {
         unimplemented!("host::testing::ops::PackageSpec::wait_ms")
     }
 
     /// Owns an extension point.
-    pub fn extension_point(self, point: &str) -> PackageSpec {
+    pub fn extension_point(self, _point: &str) -> PackageSpec {
         unimplemented!("host::testing::ops::PackageSpec::extension_point")
     }
 
     /// Contributes to an extension point.
-    pub fn extension_contribution(self, point: &str) -> PackageSpec {
+    pub fn extension_contribution(self, _point: &str) -> PackageSpec {
         unimplemented!("host::testing::ops::PackageSpec::extension_contribution")
     }
 
     /// Declares an activation trigger.
-    pub fn activation_trigger(self, trigger: &str) -> PackageSpec {
+    pub fn activation_trigger(self, _trigger: &str) -> PackageSpec {
         unimplemented!("host::testing::ops::PackageSpec::activation_trigger")
     }
 }
@@ -325,7 +325,7 @@ pub struct PluginsScreen {
 
 impl PluginsScreen {
     /// The row of a plugin.
-    pub fn row_for(&self, id: &str) -> Option<&PluginRow> {
+    pub fn row_for(&self, _id: &str) -> Option<&PluginRow> {
         unimplemented!("host::testing::ops::PluginsScreen::row_for")
     }
 
@@ -374,17 +374,17 @@ pub struct ClientHandle {
 
 impl ClientHandle {
     /// Detaches, letting the plugin's client side hand back a restore blob.
-    pub fn detach_with_restore(&self, id: &str, bytes: &[u8]) {
+    pub fn detach_with_restore(&self, _id: &str, _bytes: &[u8]) {
         unimplemented!("host::testing::ops::ClientHandle::detach_with_restore")
     }
 
     /// The bytes the plugin's client side was restored with.
-    pub fn restored_bytes(&self, id: &str) -> Option<Vec<u8>> {
+    pub fn restored_bytes(&self, _id: &str) -> Option<Vec<u8>> {
         unimplemented!("host::testing::ops::ClientHandle::restored_bytes")
     }
 
     /// The deactivation reasons seen by the plugin's client side.
-    pub fn deactivations(&self, id: &str) -> Vec<DeactivationReason> {
+    pub fn deactivations(&self, _id: &str) -> Vec<DeactivationReason> {
         unimplemented!("host::testing::ops::ClientHandle::deactivations")
     }
 }
@@ -442,7 +442,7 @@ impl DevSession {
     }
 
     /// Reloads with a new package.
-    pub fn reload(&self, spec: &PackageSpec) {
+    pub fn reload(&self, _spec: &PackageSpec) {
         unimplemented!("host::testing::ops::DevSession::reload")
     }
 
@@ -467,7 +467,7 @@ impl DevSession {
     }
 
     /// Answers every pending prompt.
-    pub fn answer_prompts(&self, answer: &str) {
+    pub fn answer_prompts(&self, _answer: &str) {
         unimplemented!("host::testing::ops::DevSession::answer_prompts")
     }
 }
@@ -485,7 +485,7 @@ impl ServerHandle {
     }
 
     /// Pauses the next update at a stage.
-    pub fn pause_at(&self, stage: UpdateStage) {
+    pub fn pause_at(&self, _stage: UpdateStage) {
         unimplemented!("host::testing::ops::ServerHandle::pause_at")
     }
 
@@ -540,229 +540,229 @@ impl ServerHandle {
     }
 
     /// The active version of a plugin.
-    pub fn active_version(&self, id: &str) -> Option<String> {
+    pub fn active_version(&self, _id: &str) -> Option<String> {
         unimplemented!("host::testing::ops::ServerHandle::active_version")
     }
 
     /// The activations of a plugin, as `<side>:<scope>` texts.
-    pub fn activations(&self, id: &str) -> Vec<String> {
+    pub fn activations(&self, _id: &str) -> Vec<String> {
         unimplemented!("host::testing::ops::ServerHandle::activations")
     }
 
     /// The deactivation reasons of a plugin.
-    pub fn deactivations(&self, id: &str) -> Vec<DeactivationReason> {
+    pub fn deactivations(&self, _id: &str) -> Vec<DeactivationReason> {
         unimplemented!("host::testing::ops::ServerHandle::deactivations")
     }
 
     /// The instance state of one side of a plugin.
-    pub fn state_of(&self, id: &str, side: Side) -> InstanceState {
+    pub fn state_of(&self, _id: &str, _side: Side) -> InstanceState {
         unimplemented!("host::testing::ops::ServerHandle::state_of")
     }
 
     /// Why a plugin is inactive.
-    pub fn inactive_reason(&self, id: &str) -> Option<String> {
+    pub fn inactive_reason(&self, _id: &str) -> Option<String> {
         unimplemented!("host::testing::ops::ServerHandle::inactive_reason")
     }
 
     /// The refusal code of a plugin.
-    pub fn refusal(&self, id: &str) -> Option<String> {
+    pub fn refusal(&self, _id: &str) -> Option<String> {
         unimplemented!("host::testing::ops::ServerHandle::refusal")
     }
 
     /// Failures in the window of one side.
-    pub fn failure_count(&self, id: &str, side: Side) -> u32 {
+    pub fn failure_count(&self, _id: &str, _side: Side) -> u32 {
         unimplemented!("host::testing::ops::ServerHandle::failure_count")
     }
 
     /// The scheduled restart delay of one side.
-    pub fn restart_delay_ms(&self, id: &str, side: Side) -> Option<u64> {
+    pub fn restart_delay_ms(&self, _id: &str, _side: Side) -> Option<u64> {
         unimplemented!("host::testing::ops::ServerHandle::restart_delay_ms")
     }
 
     /// Makes one side fail.
-    pub fn fail(&self, id: &str, side: Side) {
+    pub fn fail(&self, _id: &str, _side: Side) {
         unimplemented!("host::testing::ops::ServerHandle::fail")
     }
 
     /// Makes the activation of a version fail.
-    pub fn fail_activation_of_version(&self, version: &str) {
+    pub fn fail_activation_of_version(&self, _version: &str) {
         unimplemented!("host::testing::ops::ServerHandle::fail_activation_of_version")
     }
 
     /// Whether the failure window disabled the plugin.
-    pub fn is_disabled_by_failure(&self, id: &str) -> bool {
+    pub fn is_disabled_by_failure(&self, _id: &str) -> bool {
         unimplemented!("host::testing::ops::ServerHandle::is_disabled_by_failure")
     }
 
     /// Whether the plugin is enabled.
-    pub fn is_enabled(&self, id: &str) -> bool {
+    pub fn is_enabled(&self, _id: &str) -> bool {
         unimplemented!("host::testing::ops::ServerHandle::is_enabled")
     }
 
     /// Disables the plugin.
-    pub fn disable(&self, id: &str) {
+    pub fn disable(&self, _id: &str) {
         unimplemented!("host::testing::ops::ServerHandle::disable")
     }
 
     /// Enables the plugin.
-    pub fn enable(&self, id: &str) {
+    pub fn enable(&self, _id: &str) {
         unimplemented!("host::testing::ops::ServerHandle::enable")
     }
 
     /// The virtual times at which a dependency was retried.
-    pub fn dependency_retry_times(&self, id: &str) -> Vec<Duration> {
+    pub fn dependency_retry_times(&self, _id: &str) -> Vec<Duration> {
         unimplemented!("host::testing::ops::ServerHandle::dependency_retry_times")
     }
 
     /// Calls an export of a plugin.
-    pub fn call_plugin(&self, id: &str, export: &str) -> Result<(), PluginError> {
+    pub fn call_plugin(&self, _id: &str, _export: &str) -> Result<(), PluginError> {
         unimplemented!("host::testing::ops::ServerHandle::call_plugin")
     }
 
     /// Calls a service method as a plugin.
     pub fn call_service(
         &self,
-        caller: &str,
-        service: &str,
-        method: &str,
+        _caller: &str,
+        _service: &str,
+        _method: &str,
     ) -> Result<(), PluginError> {
         unimplemented!("host::testing::ops::ServerHandle::call_service")
     }
 
     /// The grants of a plugin.
-    pub fn granted(&self, id: &str) -> Vec<String> {
+    pub fn granted(&self, _id: &str) -> Vec<String> {
         unimplemented!("host::testing::ops::ServerHandle::granted")
     }
 
     /// The length of the last restore blob delivered.
-    pub fn last_restored_len(&self, id: &str) -> Option<usize> {
+    pub fn last_restored_len(&self, _id: &str) -> Option<usize> {
         unimplemented!("host::testing::ops::ServerHandle::last_restored_len")
     }
 
     /// The stored client restore blob.
-    pub fn stored_client_restore(&self, id: &str) -> Option<Vec<u8>> {
+    pub fn stored_client_restore(&self, _id: &str) -> Option<Vec<u8>> {
         unimplemented!("host::testing::ops::ServerHandle::stored_client_restore")
     }
 
     /// Attaches a client.
-    pub fn attach_client(&self, name: &str) -> ClientHandle {
+    pub fn attach_client(&self, _name: &str) -> ClientHandle {
         unimplemented!("host::testing::ops::ServerHandle::attach_client")
     }
 
     /// Sets node metadata as a plugin.
-    pub fn set_node_metadata(&self, node: u64, owner: &str, key: &str, bytes: &[u8]) {
+    pub fn set_node_metadata(&self, _node: u64, _owner: &str, _key: &str, _bytes: &[u8]) {
         unimplemented!("host::testing::ops::ServerHandle::set_node_metadata")
     }
 
     /// Reads node metadata as another plugin.
     pub fn node_metadata_as(
         &self,
-        reader: &str,
-        node: u64,
-        owner: &str,
-        key: &str,
+        _reader: &str,
+        _node: u64,
+        _owner: &str,
+        _key: &str,
     ) -> Option<Vec<u8>> {
         unimplemented!("host::testing::ops::ServerHandle::node_metadata_as")
     }
 
     /// Removes a node.
-    pub fn remove_node(&self, node: u64) {
+    pub fn remove_node(&self, _node: u64) {
         unimplemented!("host::testing::ops::ServerHandle::remove_node")
     }
 
     /// Adds a decoration of a plugin to a node.
-    pub fn add_decoration(&self, id: &str, node: u64) {
+    pub fn add_decoration(&self, _id: &str, _node: u64) {
         unimplemented!("host::testing::ops::ServerHandle::add_decoration")
     }
 
     /// Decorations of a plugin.
-    pub fn decorations(&self, id: &str) -> usize {
+    pub fn decorations(&self, _id: &str) -> usize {
         unimplemented!("host::testing::ops::ServerHandle::decorations")
     }
 
     /// Writes a storage value.
-    pub fn write_storage(&self, id: &str, bucket: &str, key: &str, bytes: &[u8]) {
+    pub fn write_storage(&self, _id: &str, _bucket: &str, _key: &str, _bytes: &[u8]) {
         unimplemented!("host::testing::ops::ServerHandle::write_storage")
     }
 
     /// Writes a storage value, returning the refusal code.
     pub fn write_storage_checked(
         &self,
-        id: &str,
-        bucket: &str,
-        key: &str,
-        bytes: &[u8],
+        _id: &str,
+        _bucket: &str,
+        _key: &str,
+        _bytes: &[u8],
     ) -> Result<(), String> {
         unimplemented!("host::testing::ops::ServerHandle::write_storage_checked")
     }
 
     /// Reads a storage value.
-    pub fn read_storage(&self, id: &str, bucket: &str, key: &str) -> Option<Vec<u8>> {
+    pub fn read_storage(&self, _id: &str, _bucket: &str, _key: &str) -> Option<Vec<u8>> {
         unimplemented!("host::testing::ops::ServerHandle::read_storage")
     }
 
     /// Writes a setting.
-    pub fn write_setting(&self, id: &str, key: &str, value: &str) {
+    pub fn write_setting(&self, _id: &str, _key: &str, _value: &str) {
         unimplemented!("host::testing::ops::ServerHandle::write_setting")
     }
 
     /// Writes a data file.
-    pub fn write_data_file(&self, id: &str, name: &str, bytes: &[u8]) {
+    pub fn write_data_file(&self, _id: &str, _name: &str, _bytes: &[u8]) {
         unimplemented!("host::testing::ops::ServerHandle::write_data_file")
     }
 
     /// Writes a data file, returning the refusal code.
     pub fn write_data_file_checked(
         &self,
-        id: &str,
-        name: &str,
-        bytes: &[u8],
+        _id: &str,
+        _name: &str,
+        _bytes: &[u8],
     ) -> Result<(), String> {
         unimplemented!("host::testing::ops::ServerHandle::write_data_file_checked")
     }
 
     /// Reads a data file.
-    pub fn read_data_file(&self, id: &str, name: &str) -> Option<Vec<u8>> {
+    pub fn read_data_file(&self, _id: &str, _name: &str) -> Option<Vec<u8>> {
         unimplemented!("host::testing::ops::ServerHandle::read_data_file")
     }
 
     /// Sends a request from a plugin that stays pending.
-    pub fn send_pending_request(&self, id: &str) -> PendingRequest {
+    pub fn send_pending_request(&self, _id: &str) -> PendingRequest {
         unimplemented!("host::testing::ops::ServerHandle::send_pending_request")
     }
 
     /// How often a request was delivered.
-    pub fn deliveries_of(&self, request: u64) -> usize {
+    pub fn deliveries_of(&self, _request: u64) -> usize {
         unimplemented!("host::testing::ops::ServerHandle::deliveries_of")
     }
 
     /// Races a disable against an update; the named steps in order.
-    pub fn race_disable_and_update(&self, id: &str, spec: &PackageSpec) -> Vec<String> {
+    pub fn race_disable_and_update(&self, _id: &str, _spec: &PackageSpec) -> Vec<String> {
         unimplemented!("host::testing::ops::ServerHandle::race_disable_and_update")
     }
 
     /// Races the disable of two plugins; the named steps in order.
-    pub fn race_disable_of_two(&self, first: &str, second: &str) -> Vec<String> {
+    pub fn race_disable_of_two(&self, _first: &str, _second: &str) -> Vec<String> {
         unimplemented!("host::testing::ops::ServerHandle::race_disable_of_two")
     }
 
     /// Answers a first-use prompt.
-    pub fn answer_first_use(&self, id: &str, grant: &str, answer: &str) {
+    pub fn answer_first_use(&self, _id: &str, _grant: &str, _answer: &str) {
         unimplemented!("host::testing::ops::ServerHandle::answer_first_use")
     }
 
     /// Triggers the first use of a grant.
-    pub fn trigger_first_use(&self, id: &str, grant: &str) {
+    pub fn trigger_first_use(&self, _id: &str, _grant: &str) {
         unimplemented!("host::testing::ops::ServerHandle::trigger_first_use")
     }
 
     /// How often "not now" was answered.
-    pub fn not_now_count(&self, id: &str, grant: &str) -> u32 {
+    pub fn not_now_count(&self, _id: &str, _grant: &str) -> u32 {
         unimplemented!("host::testing::ops::ServerHandle::not_now_count")
     }
 
     /// How often a grant was prompted.
-    pub fn prompts_for(&self, id: &str, grant: &str) -> u32 {
+    pub fn prompts_for(&self, _id: &str, _grant: &str) -> u32 {
         unimplemented!("host::testing::ops::ServerHandle::prompts_for")
     }
 
@@ -777,41 +777,41 @@ impl ServerHandle {
     }
 
     /// Renders the detail screen of a plugin.
-    pub fn render_plugin_detail(&self, id: &str) -> PluginDetail {
+    pub fn render_plugin_detail(&self, _id: &str) -> PluginDetail {
         unimplemented!("host::testing::ops::ServerHandle::render_plugin_detail")
     }
 
     /// Presses space on the row of a plugin.
-    pub fn press_space_on(&self, id: &str) {
+    pub fn press_space_on(&self, _id: &str) {
         unimplemented!("host::testing::ops::ServerHandle::press_space_on")
     }
 
     /// Presses Enable on the recovery page.
-    pub fn press_recovery_enable(&self, id: &str) {
+    pub fn press_recovery_enable(&self, _id: &str) {
         unimplemented!("host::testing::ops::ServerHandle::press_recovery_enable")
     }
 
     /// Presses Reset failures.
-    pub fn press_reset_failures(&self, id: &str) {
+    pub fn press_reset_failures(&self, _id: &str) {
         unimplemented!("host::testing::ops::ServerHandle::press_reset_failures")
     }
 
     /// Makes an extension handler breach its budget.
-    pub fn breach_extension(&self, id: &str, point: &str, extension: &str) {
+    pub fn breach_extension(&self, _id: &str, _point: &str, _extension: &str) {
         unimplemented!("host::testing::ops::ServerHandle::breach_extension")
     }
 
     /// Whether an extension was stopped.
-    pub fn extension_stopped(&self, id: &str, point: &str, extension: &str) -> bool {
+    pub fn extension_stopped(&self, _id: &str, _point: &str, _extension: &str) -> bool {
         unimplemented!("host::testing::ops::ServerHandle::extension_stopped")
     }
 
     /// Calls an extension.
     pub fn call_extension(
         &self,
-        id: &str,
-        point: &str,
-        extension: &str,
+        _id: &str,
+        _point: &str,
+        _extension: &str,
     ) -> Result<(), PluginError> {
         unimplemented!("host::testing::ops::ServerHandle::call_extension")
     }
@@ -822,37 +822,37 @@ impl ServerHandle {
     }
 
     /// The contributions of a plugin.
-    pub fn contributions(&self, id: &str) -> Vec<String> {
+    pub fn contributions(&self, _id: &str) -> Vec<String> {
         unimplemented!("host::testing::ops::ServerHandle::contributions")
     }
 
     /// The activation triggers of a plugin.
-    pub fn triggers(&self, id: &str) -> Vec<String> {
+    pub fn triggers(&self, _id: &str) -> Vec<String> {
         unimplemented!("host::testing::ops::ServerHandle::triggers")
     }
 
     /// Whether a plugin replaces a core plugin.
-    pub fn replaces(&self, id: &str, core: &str) -> bool {
+    pub fn replaces(&self, _id: &str, _core: &str) -> bool {
         unimplemented!("host::testing::ops::ServerHandle::replaces")
     }
 
     /// Makes a plugin hold every effect.
-    pub fn hold_effects(&self, id: &str) -> Effects {
+    pub fn hold_effects(&self, _id: &str) -> Effects {
         unimplemented!("host::testing::ops::ServerHandle::hold_effects")
     }
 
     /// The effects held by a plugin.
-    pub fn effects_of(&self, id: &str) -> Effects {
+    pub fn effects_of(&self, _id: &str) -> Effects {
         unimplemented!("host::testing::ops::ServerHandle::effects_of")
     }
 
     /// The effects held by an instance.
-    pub fn effects_of_instance(&self, instance: u64) -> Effects {
+    pub fn effects_of_instance(&self, _instance: u64) -> Effects {
         unimplemented!("host::testing::ops::ServerHandle::effects_of_instance")
     }
 
     /// Whether a dev package of a plugin is loaded.
-    pub fn has_dev_package(&self, id: &str) -> bool {
+    pub fn has_dev_package(&self, _id: &str) -> bool {
         unimplemented!("host::testing::ops::ServerHandle::has_dev_package")
     }
 }
@@ -870,22 +870,22 @@ impl OpsRig {
     }
 
     /// Runs the CLI with stdin closed and no TTY.
-    pub fn cli(&self, args: &[&str]) -> CliOutput {
+    pub fn cli(&self, _args: &[&str]) -> CliOutput {
         unimplemented!("host::testing::ops::OpsRig::cli")
     }
 
     /// Runs the CLI on a TTY with scripted prompt answers.
-    pub fn cli_tty(&self, args: &[&str], answers: &[&str]) -> CliOutput {
+    pub fn cli_tty(&self, _args: &[&str], _answers: &[&str]) -> CliOutput {
         unimplemented!("host::testing::ops::OpsRig::cli_tty")
     }
 
     /// Runs the `plugin dev` entry and returns when it exits.
-    pub fn dev_cli(&self, args: &[&str]) -> CliOutput {
+    pub fn dev_cli(&self, _args: &[&str]) -> CliOutput {
         unimplemented!("host::testing::ops::OpsRig::dev_cli")
     }
 
     /// Writes a package file.
-    pub fn write_package(&self, spec: &PackageSpec) -> PathBuf {
+    pub fn write_package(&self, _spec: &PackageSpec) -> PathBuf {
         unimplemented!("host::testing::ops::OpsRig::write_package")
     }
 
@@ -910,7 +910,7 @@ impl OpsRig {
     }
 
     /// The data directory of a plugin.
-    pub fn data_dir(&self, id: &str) -> PathBuf {
+    pub fn data_dir(&self, _id: &str) -> PathBuf {
         unimplemented!("host::testing::ops::OpsRig::data_dir")
     }
 
@@ -930,7 +930,7 @@ impl OpsRig {
     }
 
     /// Overwrites `installed.json`.
-    pub fn set_registry_bytes(&self, bytes: &[u8]) {
+    pub fn set_registry_bytes(&self, _bytes: &[u8]) {
         unimplemented!("host::testing::ops::OpsRig::set_registry_bytes")
     }
 
@@ -940,7 +940,7 @@ impl OpsRig {
     }
 
     /// Injects a fault.
-    pub fn inject(&self, fault: Fault) {
+    pub fn inject(&self, _fault: Fault) {
         unimplemented!("host::testing::ops::OpsRig::inject")
     }
 
@@ -955,7 +955,7 @@ impl OpsRig {
     }
 
     /// Holds the lock for a virtual duration.
-    pub fn hold_lock_for(&self, duration: Duration) -> LockHold {
+    pub fn hold_lock_for(&self, _duration: Duration) -> LockHold {
         unimplemented!("host::testing::ops::OpsRig::hold_lock_for")
     }
 
@@ -970,32 +970,32 @@ impl OpsRig {
     }
 
     /// Moves the clock and runs due work.
-    pub fn advance(&self, by: Duration) {
+    pub fn advance(&self, _by: Duration) {
         unimplemented!("host::testing::ops::OpsRig::advance")
     }
 
     /// Starts a server that applies pending work at once.
-    pub fn start_server(&self, session: &str) -> ServerHandle {
+    pub fn start_server(&self, _session: &str) -> ServerHandle {
         unimplemented!("host::testing::ops::OpsRig::start_server")
     }
 
     /// Starts a server that applies pending work on `apply_pending`.
-    pub fn start_server_manual(&self, session: &str) -> ServerHandle {
+    pub fn start_server_manual(&self, _session: &str) -> ServerHandle {
         unimplemented!("host::testing::ops::OpsRig::start_server_manual")
     }
 
     /// Starts a server without a file watcher.
-    pub fn start_server_polling(&self, session: &str) -> ServerHandle {
+    pub fn start_server_polling(&self, _session: &str) -> ServerHandle {
         unimplemented!("host::testing::ops::OpsRig::start_server_polling")
     }
 
     /// Starts the same session again, or returns the running server.
-    pub fn start_server_or_same(&self, server: &ServerHandle) -> ServerHandle {
+    pub fn start_server_or_same(&self, _server: &ServerHandle) -> ServerHandle {
         unimplemented!("host::testing::ops::OpsRig::start_server_or_same")
     }
 
     /// Whether a session server runs.
-    pub fn server_running(&self, session: &str) -> bool {
+    pub fn server_running(&self, _session: &str) -> bool {
         unimplemented!("host::testing::ops::OpsRig::server_running")
     }
 
@@ -1020,12 +1020,12 @@ impl OpsRig {
     }
 
     /// Sets the free disk space.
-    pub fn set_free_bytes(&self, bytes: u64) {
+    pub fn set_free_bytes(&self, _bytes: u64) {
         unimplemented!("host::testing::ops::OpsRig::set_free_bytes")
     }
 
     /// The free space an install of the spec needs.
-    pub fn required_free_bytes(&self, spec: &PackageSpec) -> u64 {
+    pub fn required_free_bytes(&self, _spec: &PackageSpec) -> u64 {
         unimplemented!("host::testing::ops::OpsRig::required_free_bytes")
     }
 
@@ -1040,17 +1040,17 @@ impl OpsRig {
     }
 
     /// Makes the data directory of a plugin read-only.
-    pub fn make_data_read_only(&self, id: &str) {
+    pub fn make_data_read_only(&self, _id: &str) {
         unimplemented!("host::testing::ops::OpsRig::make_data_read_only")
     }
 
     /// Overwrites a file with the given bytes.
-    pub fn corrupt_file(&self, path: &Path, bytes: &[u8]) {
+    pub fn corrupt_file(&self, _path: &Path, _bytes: &[u8]) {
         unimplemented!("host::testing::ops::OpsRig::corrupt_file")
     }
 
     /// The storage database path of a plugin.
-    pub fn storage_db_path(&self, id: &str) -> PathBuf {
+    pub fn storage_db_path(&self, _id: &str) -> PathBuf {
         unimplemented!("host::testing::ops::OpsRig::storage_db_path")
     }
 
@@ -1065,196 +1065,196 @@ impl OpsRig {
     }
 
     /// Plants a data directory with a stamp.
-    pub fn plant_data(&self, id: &str, stamp: u32) -> PathBuf {
+    pub fn plant_data(&self, _id: &str, _stamp: u32) -> PathBuf {
         unimplemented!("host::testing::ops::OpsRig::plant_data")
     }
 
     /// Plants a setting.
-    pub fn plant_settings(&self, id: &str, key: &str, value: &str) {
+    pub fn plant_settings(&self, _id: &str, _key: &str, _value: &str) {
         unimplemented!("host::testing::ops::OpsRig::plant_settings")
     }
 
     /// Plants a backup.
-    pub fn plant_backup(&self, id: &str, name: &str) {
+    pub fn plant_backup(&self, _id: &str, _name: &str) {
         unimplemented!("host::testing::ops::OpsRig::plant_backup")
     }
 
     /// Plants a cache folder.
-    pub fn plant_cache(&self, id: &str) {
+    pub fn plant_cache(&self, _id: &str) {
         unimplemented!("host::testing::ops::OpsRig::plant_cache")
     }
 
     /// Plants a shared bucket.
-    pub fn plant_shared_bucket(&self, id: &str) {
+    pub fn plant_shared_bucket(&self, _id: &str) {
         unimplemented!("host::testing::ops::OpsRig::plant_shared_bucket")
     }
 
     /// Plants a first-use answer.
-    pub fn plant_first_use_answer(&self, id: &str, grant: &str) {
+    pub fn plant_first_use_answer(&self, _id: &str, _grant: &str) {
         unimplemented!("host::testing::ops::OpsRig::plant_first_use_answer")
     }
 
     /// Plants a durable timer.
-    pub fn plant_durable_timer(&self, id: &str, due_unix_ms: u64) {
+    pub fn plant_durable_timer(&self, _id: &str, _due_unix_ms: u64) {
         unimplemented!("host::testing::ops::OpsRig::plant_durable_timer")
     }
 
     /// Plants node metadata in a session snapshot.
     pub fn plant_snapshot_metadata(
         &self,
-        session: &str,
-        node: u64,
-        id: &str,
-        key: &str,
-        bytes: &[u8],
+        _session: &str,
+        _node: u64,
+        _id: &str,
+        _key: &str,
+        _bytes: &[u8],
     ) {
         unimplemented!("host::testing::ops::OpsRig::plant_snapshot_metadata")
     }
 
     /// Makes a staging directory of the given owner pid and age.
-    pub fn make_staging(&self, name: &str, pid: u32, age: Duration) -> PathBuf {
+    pub fn make_staging(&self, _name: &str, _pid: u32, _age: Duration) -> PathBuf {
         unimplemented!("host::testing::ops::OpsRig::make_staging")
     }
 
     /// Makes an orphan store entry of the given age.
-    pub fn make_store_orphan(&self, id: &str, version: &str, age: Duration) -> PathBuf {
+    pub fn make_store_orphan(&self, _id: &str, _version: &str, _age: Duration) -> PathBuf {
         unimplemented!("host::testing::ops::OpsRig::make_store_orphan")
     }
 
     /// Ages the store entries of a plugin.
-    pub fn age_store_entries(&self, id: &str, age: Duration) {
+    pub fn age_store_entries(&self, _id: &str, _age: Duration) {
         unimplemented!("host::testing::ops::OpsRig::age_store_entries")
     }
 
     /// Truncates the first file of a store entry.
-    pub fn truncate_first_store_file(&self, id: &str, version: &str) {
+    pub fn truncate_first_store_file(&self, _id: &str, _version: &str) {
         unimplemented!("host::testing::ops::OpsRig::truncate_first_store_file")
     }
 
     /// Deletes a cached package.
-    pub fn delete_cached_package(&self, id: &str, version: &str) {
+    pub fn delete_cached_package(&self, _id: &str, _version: &str) {
         unimplemented!("host::testing::ops::OpsRig::delete_cached_package")
     }
 
     /// Deletes the backups of a plugin.
-    pub fn delete_backups(&self, id: &str) {
+    pub fn delete_backups(&self, _id: &str) {
         unimplemented!("host::testing::ops::OpsRig::delete_backups")
     }
 
     /// The data-version stamp of a plugin's bucket.
-    pub fn bucket_stamp(&self, id: &str) -> Option<u32> {
+    pub fn bucket_stamp(&self, _id: &str) -> Option<u32> {
         unimplemented!("host::testing::ops::OpsRig::bucket_stamp")
     }
 
     /// A stored setting.
-    pub fn setting(&self, id: &str, key: &str) -> Option<String> {
+    pub fn setting(&self, _id: &str, _key: &str) -> Option<String> {
         unimplemented!("host::testing::ops::OpsRig::setting")
     }
 
     /// Whether the shared bucket of a plugin exists.
-    pub fn shared_bucket_exists(&self, id: &str) -> bool {
+    pub fn shared_bucket_exists(&self, _id: &str) -> bool {
         unimplemented!("host::testing::ops::OpsRig::shared_bucket_exists")
     }
 
     /// The first-use answers of a plugin.
-    pub fn first_use_answers(&self, id: &str) -> Vec<String> {
+    pub fn first_use_answers(&self, _id: &str) -> Vec<String> {
         unimplemented!("host::testing::ops::OpsRig::first_use_answers")
     }
 
     /// The durable timers of a plugin.
-    pub fn durable_timers(&self, id: &str) -> Vec<String> {
+    pub fn durable_timers(&self, _id: &str) -> Vec<String> {
         unimplemented!("host::testing::ops::OpsRig::durable_timers")
     }
 
     /// The node metadata keys of a plugin in a session snapshot.
-    pub fn snapshot_metadata_keys(&self, session: &str, id: &str) -> Vec<String> {
+    pub fn snapshot_metadata_keys(&self, _session: &str, _id: &str) -> Vec<String> {
         unimplemented!("host::testing::ops::OpsRig::snapshot_metadata_keys")
     }
 
     /// The bytes of a session snapshot.
-    pub fn snapshot_bytes(&self, session: &str) -> Vec<u8> {
+    pub fn snapshot_bytes(&self, _session: &str) -> Vec<u8> {
         unimplemented!("host::testing::ops::OpsRig::snapshot_bytes")
     }
 
     /// Makes the snapshot directory of a session read-only.
-    pub fn make_snapshot_dir_read_only(&self, session: &str) {
+    pub fn make_snapshot_dir_read_only(&self, _session: &str) {
         unimplemented!("host::testing::ops::OpsRig::make_snapshot_dir_read_only")
     }
 
     /// Makes the snapshot directory of a session writable.
-    pub fn make_snapshot_dir_writable(&self, session: &str) {
+    pub fn make_snapshot_dir_writable(&self, _session: &str) {
         unimplemented!("host::testing::ops::OpsRig::make_snapshot_dir_writable")
     }
 
     /// Trusts a publisher key.
-    pub fn trust_publisher(&self, key_id: &str) {
+    pub fn trust_publisher(&self, _key_id: &str) {
         unimplemented!("host::testing::ops::OpsRig::trust_publisher")
     }
 
     /// Revokes a key.
-    pub fn revoke_key(&self, key_id: &str, reason: &str) {
+    pub fn revoke_key(&self, _key_id: &str, _reason: &str) {
         unimplemented!("host::testing::ops::OpsRig::revoke_key")
     }
 
     /// Takes a version down from the registry.
-    pub fn registry_takedown(&self, id: &str, version: &str) {
+    pub fn registry_takedown(&self, _id: &str, _version: &str) {
         unimplemented!("host::testing::ops::OpsRig::registry_takedown")
     }
 
     /// Writes the policy file.
-    pub fn write_policy(&self, toml: &str) {
+    pub fn write_policy(&self, _toml: &str) {
         unimplemented!("host::testing::ops::OpsRig::write_policy")
     }
 
     /// Writes the project `plugins.toml`.
-    pub fn write_project_plugins_toml(&self, text: &str) {
+    pub fn write_project_plugins_toml(&self, _text: &str) {
         unimplemented!("host::testing::ops::OpsRig::write_project_plugins_toml")
     }
 
     /// Sets the user, project and session enable levels of a plugin.
     pub fn set_enabled_levels(
         &self,
-        id: &str,
-        session: &str,
-        user: Option<bool>,
-        project: Option<bool>,
-        session_level: Option<bool>,
+        _id: &str,
+        _session: &str,
+        _user: Option<bool>,
+        _project: Option<bool>,
+        _session_level: Option<bool>,
     ) {
         unimplemented!("host::testing::ops::OpsRig::set_enabled_levels")
     }
 
     /// Sets every keep-and-lose marker of a plugin.
-    pub fn set_all_markers(&self, id: &str, server: &ServerHandle) {
+    pub fn set_all_markers(&self, _id: &str, _server: &ServerHandle) {
         unimplemented!("host::testing::ops::OpsRig::set_all_markers")
     }
 
     /// Whether a marker is still present.
-    pub fn marker_present(&self, id: &str, marker: Marker) -> bool {
+    pub fn marker_present(&self, _id: &str, _marker: Marker) -> bool {
         unimplemented!("host::testing::ops::OpsRig::marker_present")
     }
 
     /// Applies a lifecycle event.
-    pub fn apply_event(&self, server: &ServerHandle, id: &str, event: LifeEvent) {
+    pub fn apply_event(&self, _server: &ServerHandle, _id: &str, _event: LifeEvent) {
         unimplemented!("host::testing::ops::OpsRig::apply_event")
     }
 
     /// Installs a replacement of a core plugin.
-    pub fn install_replacement_of_core(&self, spec: &PackageSpec, core_id: &str) {
+    pub fn install_replacement_of_core(&self, _spec: &PackageSpec, _core_id: &str) {
         unimplemented!("host::testing::ops::OpsRig::install_replacement_of_core")
     }
 
     /// Installs a bundled plugin.
-    pub fn install_bundled(&self, spec: &PackageSpec) {
+    pub fn install_bundled(&self, _spec: &PackageSpec) {
         unimplemented!("host::testing::ops::OpsRig::install_bundled")
     }
 
     /// Updates a bundled plugin.
-    pub fn update_bundled(&self, spec: &PackageSpec) {
+    pub fn update_bundled(&self, _spec: &PackageSpec) {
         unimplemented!("host::testing::ops::OpsRig::update_bundled")
     }
 
     /// Starts a `plugin dev` session.
-    pub fn dev_start(&self, spec: &PackageSpec, args: &[&str]) -> DevSession {
+    pub fn dev_start(&self, _spec: &PackageSpec, _args: &[&str]) -> DevSession {
         unimplemented!("host::testing::ops::OpsRig::dev_start")
     }
 }

@@ -11,7 +11,7 @@ use ilium_plugin_api::generated::types::tree::PaneInfo;
 pub struct PanesImport;
 
 impl HostPanes for PanesImport {
-    fn info(&mut self, pane: NodeId) -> Option<PaneInfo> {
+    fn info(&mut self, _pane: NodeId) -> Option<PaneInfo> {
         unimplemented!("host::imports::panes::info")
     }
 

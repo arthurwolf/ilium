@@ -2,7 +2,6 @@
 //!
 //! Every use of a testkit or skeleton item that does not exist yet lives in the "gap helpers"
 //! section at the end of this file (see ../API_GAPS.md), so a missing item breaks this file only.
-#![allow(dead_code)]
 
 use std::path::PathBuf;
 
@@ -11,15 +10,10 @@ use ilium_plugin_sdk::anim::FrameInput;
 use ilium_plugin_sdk::testing::{FakeScene, FakeSession, Screen};
 use serde_json::{json, Value};
 
-pub const PLUGIN_ID: &str = "ilium.core.scenes";
 pub const CATALOG_SERVICE: &str = "ilium.core.scenes/catalog";
-pub const POINT_PACKS: &str = "ilium.core.scenes/scene-packs";
-pub const POINT_SOURCES: &str = "ilium.core.scenes/scene-data-sources";
 
 /// 2000-01-01 12:00:00 UTC (J2000.0) in Unix milliseconds: the sidereal formula of the page sample gives day 0.
 pub const J2000_UNIX_MILLIS: u64 = 946_728_000_000;
-/// One sidereal day in milliseconds (86,164.0905 s rounded to the millisecond).
-pub const SIDEREAL_DAY_MILLIS: u64 = 86_164_091;
 
 pub fn crate_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -52,43 +46,6 @@ pub fn scenes_page() -> String {
     page("core-plugin-scenes")
 }
 
-/// A user documentation page of the repository (src/docs/<stem>.md).
-pub fn user_doc(stem: &str) -> String {
-    let path = workspace_root().join("src/docs").join(format!("{stem}.md"));
-    std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("user doc {path:?}: {error}"))
-}
-
-/// Cells of the markdown table whose header line starts with `header_start`, without header and separator.
-pub fn table_after(text: &str, header_start: &str) -> Vec<Vec<String>> {
-    let start = text
-        .find(header_start)
-        .unwrap_or_else(|| panic!("table starting with {header_start:?}"));
-    text[start..]
-        .lines()
-        .skip(2)
-        .take_while(|line| line.starts_with('|'))
-        .map(|line| {
-            line.trim()
-                .trim_start_matches('|')
-                .trim_end_matches('|')
-                .split('|')
-                .map(|cell| cell.trim().to_string())
-                .collect()
-        })
-        .collect()
-}
-
-/// The first fenced json block that follows the heading `heading` on a page, parsed.
-pub fn json_block_after(text: &str, heading: &str) -> Value {
-    let start = text
-        .find(heading)
-        .unwrap_or_else(|| panic!("heading {heading:?}"));
-    let rest = &text[start..];
-    let open = rest.find("```json\n").expect("json block") + "```json\n".len();
-    let close = rest[open..].find("```").expect("closing fence");
-    serde_json::from_str(&rest[open..open + close]).expect("block is JSON")
-}
-
 /// The contributed scene entries of the manifest.
 pub fn scene_entries() -> Vec<Value> {
     manifest_value()["contributes"]["scenes"]
@@ -107,11 +64,6 @@ pub fn scene_entry(id: &str) -> Value {
 
 /// The three scene ids of the manifest, in page order.
 pub const MANIFEST_SCENES: [&str; 3] = ["waves", "clock", "stars-overhead"];
-
-/// The scene spec JSON the host passes to the constructor (api-scenes.md "Lifecycle of a renderer").
-pub fn spec(scene: &str, settings: Value, palette: &[u32], mode: &str) -> String {
-    json!({ "scene": scene, "settings": settings, "palette": palette, "mode": mode }).to_string()
-}
 
 /// A frame input of the given pixel size at `time_millis` since the scene started, at J2000 plus that time.
 pub fn frame(width: u32, height: u32, time_millis: u64) -> FrameInput {
@@ -218,34 +170,4 @@ pub fn fake_scene_at(
     longitude: f64,
 ) -> FakeScene {
     fake_scene(scene_id, columns, rows).with_location(latitude, longitude)
-}
-
-/// The same with the scene settings of the spec (needs `FakeScene::with_settings`).
-pub fn fake_scene_with(scene_id: &str, columns: u16, rows: u16, settings: &Value) -> FakeScene {
-    fake_scene(scene_id, columns, rows).with_settings(&settings.to_string())
-}
-
-/// The same with both observer and settings.
-pub fn fake_scene_at_with(
-    scene_id: &str,
-    columns: u16,
-    rows: u16,
-    latitude: f64,
-    longitude: f64,
-    settings: &Value,
-) -> FakeScene {
-    fake_scene_with(scene_id, columns, rows, settings).with_location(latitude, longitude)
-}
-
-/// The status text of the renderer after the frames drawn so far (needs `FakeScene::status`).
-pub fn status_of(scene: &FakeScene) -> Option<String> {
-    scene.status()
-}
-
-/// Adds a contribution of another plugin to a point of the plugin (needs `FakeHost::extensions`).
-pub fn contribute(session: &mut FakeSession, point: &str, id: &str, priority: u8, entry: &Value) {
-    session
-        .plugin(PLUGIN_ID)
-        .extensions()
-        .contribute(point, id, priority, entry.to_string());
 }

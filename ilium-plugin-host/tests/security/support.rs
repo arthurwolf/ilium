@@ -2,8 +2,6 @@
 //! network, import-call shortcuts, JSONL readers and manual-page readers. Items outside the
 //! skeleton are named in API_GAPS.md.
 
-#![allow(dead_code)]
-
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -483,11 +481,6 @@ pub fn assert_page_has(page: &str, needles: &[&str]) {
 /// A scratch directory.
 pub fn scratch() -> tempfile::TempDir {
     tempfile::tempdir().expect("scratch directory")
-}
-
-/// Number of occurrences of `needle` in `haystack`.
-pub fn count_of(haystack: &str, needle: &str) -> usize {
-    haystack.matches(needle).count()
 }
 
 /// A valid server-side source manifest with extra top-level keys merged in.

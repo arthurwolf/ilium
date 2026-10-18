@@ -12,33 +12,33 @@ use ilium_plugin_api::generated::types::ids::RequestId;
 pub struct ExtensionsImport;
 
 impl HostExtensions for ExtensionsImport {
-    fn list(&mut self, point: String) -> Result<Vec<ExtensionEntry>, ExtensionError> {
+    fn list(&mut self, _point: String) -> Result<Vec<ExtensionEntry>, ExtensionError> {
         unimplemented!("host::imports::extensions::list")
     }
 
     fn run_hook(
         &mut self,
-        point: String,
-        payload_json: String,
+        _point: String,
+        _payload_json: String,
     ) -> Result<RequestId, ExtensionError> {
         unimplemented!("host::imports::extensions::run_hook")
     }
 
-    fn take_reply(&mut self, request: RequestId) -> Option<String> {
+    fn take_reply(&mut self, _request: RequestId) -> Option<String> {
         unimplemented!("host::imports::extensions::take_reply")
     }
 
     fn register(
         &mut self,
-        point: String,
-        extension: String,
-        priority: u8,
-        entry_json: String,
+        _point: String,
+        _extension: String,
+        _priority: u8,
+        _entry_json: String,
     ) -> Result<(), ExtensionError> {
         unimplemented!("host::imports::extensions::register")
     }
 
-    fn unregister(&mut self, point: String, extension: String) -> Result<(), ExtensionError> {
+    fn unregister(&mut self, _point: String, _extension: String) -> Result<(), ExtensionError> {
         unimplemented!("host::imports::extensions::unregister")
     }
 }

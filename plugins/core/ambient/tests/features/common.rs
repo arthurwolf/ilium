@@ -2,15 +2,13 @@
 //!
 //! Every use of a testkit item that the skeleton lacks lives in the "gap helpers" section at the
 //! end of this file (see ../API_GAPS.md), so a missing item breaks this file only.
-#![allow(dead_code)]
 
 use std::path::PathBuf;
 
 use ilium_plugin_core_ambient::AmbientClient;
 use ilium_plugin_sdk::testing::FakeHost;
 use ilium_plugin_sdk::types::{
-    Area, Event, PluginSide, SettingsChange, SettingsOrigin, Submission, UiNode, UiTree,
-    ViewTarget, Widget,
+    Area, Event, PluginSide, SettingsChange, SettingsOrigin, UiNode, UiTree, ViewTarget, Widget,
 };
 use ilium_plugin_sdk::Views;
 use serde_json::Value;
@@ -199,11 +197,6 @@ pub fn node_by_key(tree: &UiTree, key: &str) -> Option<UiNode> {
         .cloned()
 }
 
-/// Every `set-kernel-setting`-like submission is a `Submission`; this only counts them.
-pub fn submission_count(submissions: &[Submission]) -> usize {
-    submissions.len()
-}
-
 // ---------------------------------------------------------------------------------------------
 // Gap helpers: every item below is missing from the skeleton testkit (see ../API_GAPS.md).
 // ---------------------------------------------------------------------------------------------
@@ -222,11 +215,6 @@ pub fn set_kernel_tab(host: &mut FakeHost, tab: &str, values: Value) {
 /// Every `kernel-settings.write` the plugin made: (tab, key, JSON value text), in order.
 pub fn kernel_writes(host: &mut FakeHost) -> Vec<(String, String, String)> {
     host.kernel_settings().written()
-}
-
-/// Every topic the plugin published: (topic, payload JSON text), in order.
-pub fn published_topics(host: &FakeHost) -> Vec<(String, String)> {
-    host.published_topics()
 }
 
 /// The tree the plugin returned for the last render of `target` (gap: `FakeHost::last_tree`).

@@ -29,32 +29,32 @@ impl MenuHarness {
     }
 
     /// A running provider that answers after a delay.
-    pub fn add_provider(&mut self, plugin: &str, answer_after_ms: u32, entries: Vec<MenuEntry>) {
+    pub fn add_provider(&mut self, _plugin: &str, _answer_after_ms: u32, _entries: Vec<MenuEntry>) {
         unimplemented!("host::testing::menu::MenuHarness::add_provider")
     }
 
     /// A stopped provider that needs activation first.
     pub fn add_stopped_provider(
         &mut self,
-        plugin: &str,
-        activation_ms: u32,
-        entries: Vec<MenuEntry>,
+        _plugin: &str,
+        _activation_ms: u32,
+        _entries: Vec<MenuEntry>,
     ) {
         unimplemented!("host::testing::menu::MenuHarness::add_stopped_provider")
     }
 
     /// The static entries of the menu.
-    pub fn static_entries(&mut self, entries: Vec<MenuEntry>) {
+    pub fn static_entries(&mut self, _entries: Vec<MenuEntry>) {
         unimplemented!("host::testing::menu::MenuHarness::static_entries")
     }
 
     /// Opens the menu.
-    pub fn open(&mut self, context: MenuContext) -> MenuOpening {
+    pub fn open(&mut self, _context: MenuContext) -> MenuOpening {
         unimplemented!("host::testing::menu::MenuHarness::open")
     }
 
     /// Moves the manual clock.
-    pub fn advance_ms(&mut self, ms: u64) {
+    pub fn advance_ms(&mut self, _ms: u64) {
         unimplemented!("host::testing::menu::MenuHarness::advance_ms")
     }
 }

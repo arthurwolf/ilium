@@ -35,15 +35,15 @@ pub struct PluginLinker {
 }
 
 /// Builds the linker for a world and the granted capabilities (reference-host-runtime.md).
-pub fn build_linker(world: World, grants: &[Grant]) -> Result<PluginLinker, HostError> {
+pub fn build_linker(_world: World, _grants: &[Grant]) -> Result<PluginLinker, HostError> {
     unimplemented!("host::linker::build_linker")
 }
 
 /// The cache key of a linker: side, tier and the sorted grants (reference-host-runtime.md HST-06x).
 pub fn linker_cache_key(
-    side: ilium_plugin_api::Side,
-    tier: ilium_plugin_api::Tier,
-    grants: &[Grant],
+    _side: ilium_plugin_api::Side,
+    _tier: ilium_plugin_api::Tier,
+    _grants: &[Grant],
 ) -> String {
     unimplemented!("host::linker::linker_cache_key")
 }

@@ -4,14 +4,12 @@
 //! scales, chart, transcript statistics, reset parsing, settings model). The twins assume the convention of
 //! the other core-plugin port suites: a `message` event on channel `port.<op>` carrying a JSON request is
 //! answered by one `message` intent whose payload is the JSON reply (see ../API_GAPS_ports.md).
-#![allow(dead_code)]
-
 use std::path::PathBuf;
 
 use ilium_plugin_core_cost::{CostClient, CostServer};
 use ilium_plugin_sdk::testing::FakeHost;
 use ilium_plugin_sdk::types::{Event, Intent, MessageEvent, PluginId, PluginSide};
-use serde_json::{json, Value};
+use serde_json::Value;
 
 pub const PLUGIN_ID: &str = "ilium.core.cost";
 
@@ -72,9 +70,4 @@ pub fn near(value: &Value, expected: f64) -> bool {
     value
         .as_f64()
         .is_some_and(|number| (number - expected).abs() < 1e-6)
-}
-
-/// JSON array of strings from string slices.
-pub fn lines(items: &[&str]) -> Value {
-    json!(items)
 }

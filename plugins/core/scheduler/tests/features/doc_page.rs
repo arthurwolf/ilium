@@ -1,7 +1,7 @@
 //! The behaviour contract table of the page and the user documentation it quotes (src/docs/automation.md).
 //! These tests read the documents: the exact values are the spec the plugin must reproduce.
 
-use crate::common::{behaviour_rows, behaviour_value, manual_page, page_text, user_doc};
+use crate::feature_support::{behaviour_rows, behaviour_value, manual_page, page_text, user_doc};
 
 fn automation() -> String {
     user_doc("automation.md")

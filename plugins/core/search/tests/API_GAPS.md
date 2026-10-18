@@ -1,7 +1,7 @@
 # API gaps of the Workspace search feature tests
 
 Items missing from the skeleton, and wire formats no manual page names. Every one is used in the
-tests as written below; the gap helpers in `tests/features/common.rs` hold the wire-format ones.
+tests as written below; the gap helpers in `tests/features/support.rs` hold the wire-format ones.
 
 - `ilium-plugin-testkit`: `FakeTree::set_screen(&mut self, id: u64, text: &str)`; the text `terminal.read-screen` returns for pane `id` (F-009, used by `add_terminal`).
 - `ilium-plugin-testkit`: `FakeHost::vector(&mut self) -> &mut FakeVector` with `embed_batch_sizes(&self) -> Vec<usize>`, `top_k_requests(&self) -> Vec<u32>` and `set_top_k(&mut self, Vec<(String, f32)>)`; fake of the vector API and `inference.embed` (F-009, search by meaning, 256-text batches, top 20).

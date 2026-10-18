@@ -4,7 +4,8 @@
 use ilium_plugin_sdk::testing::FakeHost;
 use serde_json::{json, Value};
 
-use crate::common::{json_block_after, manifest, manifest_path, page_text};
+use crate::common::manifest_path;
+use crate::doc_support::{json_block_after, manifest, page_text, workspace_root};
 
 fn client_grants() -> Vec<String> {
     manifest()["capabilities"]["client"]
@@ -219,8 +220,7 @@ fn manifest_022_the_disabled_notice_is_the_documented_sentence() {
 /// REQ: COR-022
 #[test]
 fn manifest_022_disabled_kanban_shows_a_placeholder_and_keeps_board_files() {
-    let path = crate::common::workspace_root()
-        .join("docs/plugins-manual/pages/reference-kernel-and-boot.md");
+    let path = workspace_root().join("docs/plugins-manual/pages/reference-kernel-and-boot.md");
     let boot = std::fs::read_to_string(path).expect("kernel and boot page");
     let row = boot
         .lines()
@@ -233,8 +233,7 @@ fn manifest_022_disabled_kanban_shows_a_placeholder_and_keeps_board_files() {
 /// REQ: COR-050
 #[test]
 fn manifest_050_the_boot_table_activates_kanban_on_the_pane_kind() {
-    let path = crate::common::workspace_root()
-        .join("docs/plugins-manual/pages/reference-kernel-and-boot.md");
+    let path = workspace_root().join("docs/plugins-manual/pages/reference-kernel-and-boot.md");
     let boot = std::fs::read_to_string(path).expect("kernel and boot page");
     let row = boot
         .lines()

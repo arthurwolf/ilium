@@ -6,6 +6,7 @@ use serde_json::{json, Value};
 use ilium_plugin_sdk::testing::FakeHost;
 
 use crate::common::*;
+use crate::feature_support::*;
 
 fn words(count: usize) -> String {
     vec!["word"; count].join(" ")

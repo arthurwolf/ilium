@@ -1,5 +1,4 @@
 //! Shared helpers of the cli_compat tests: an isolated sandbox, a bounded binary run and page readers.
-#![allow(dead_code)]
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -109,14 +108,6 @@ pub fn workspace_root() -> PathBuf {
         .parent()
         .expect("workspace root")
         .to_path_buf()
-}
-
-pub fn manual_page(name: &str) -> String {
-    let path = workspace_root()
-        .join("docs/plugins-manual/pages")
-        .join(format!("{name}.md"));
-    std::fs::read_to_string(&path)
-        .unwrap_or_else(|error| panic!("read {}: {error}", path.display()))
 }
 
 pub fn user_doc(name: &str) -> String {

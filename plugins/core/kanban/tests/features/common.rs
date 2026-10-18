@@ -1,15 +1,10 @@
 //! Shared helpers: the host, a board pane bound to the sample file, and readers.
 
-// This module is compiled into both the `features` and `port` test targets (the port twins mount it
-// with #[path]); each target uses a different subset of the helpers, so the rest look dead per target.
-#![allow(dead_code)]
-
 use std::path::PathBuf;
 
 use ilium_plugin_core_kanban::KanbanClient;
 use ilium_plugin_sdk::testing::{FakeHost, Screen, TreeNode};
 use ilium_plugin_sdk::types::{Event, NodeClass, NodeId, PaneInfo, PrimitiveKind, ViewTarget};
-use serde_json::Value;
 
 /// The global pane kind id: `<plugin-id>.<local id>` (capability-panes-provide-kind.md).
 pub const BOARD_KIND: &str = "ilium.core.kanban.board";
@@ -24,40 +19,6 @@ pub const SAMPLE_BOARD: &str =
 /// Path of the plugin manifest (the skeleton file, exact per the manual).
 pub fn manifest_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("manifest.json")
-}
-
-/// Root of the worktree, found from the crate directory (plugins/core/kanban).
-pub fn workspace_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..")
-}
-
-/// The manual page of this plugin.
-pub fn page_text() -> String {
-    let path = workspace_root().join("docs/plugins-manual/pages/core-plugin-kanban.md");
-    std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("page {path:?}: {error}"))
-}
-
-/// A user documentation page under src/docs.
-pub fn user_doc(name: &str) -> String {
-    let path = workspace_root().join("src/docs").join(name);
-    std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("{path:?}: {error}"))
-}
-
-/// The manifest as JSON.
-pub fn manifest() -> Value {
-    let text = std::fs::read_to_string(manifest_path()).expect("manifest.json readable");
-    serde_json::from_str(&text).expect("manifest.json is JSON")
-}
-
-/// The first json code block after the heading text `heading`.
-pub fn json_block_after(page: &str, heading: &str) -> Value {
-    let start = page
-        .find(heading)
-        .unwrap_or_else(|| panic!("heading {heading} missing"));
-    let rest = &page[start..];
-    let open = rest.find("```json\n").expect("json block") + "```json\n".len();
-    let close = rest[open..].find("```").expect("block end");
-    serde_json::from_str(&rest[open..open + close]).expect("page block is JSON")
 }
 
 /// A client-side host with the manifest grants; the file system holds `board_text` at `BOARD_PATH`

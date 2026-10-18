@@ -9,7 +9,7 @@ use ilium_plugin_sdk::types::ErrorCode;
 use ilium_plugin_sdk::JobRunner;
 use serde_json::Value;
 
-use crate::common::*;
+use crate::support::*;
 
 fn write_project_file(host: &mut FakeHost, path: &str, bytes: &[u8]) {
     host.fs().write(format!("project:{path}"), bytes);

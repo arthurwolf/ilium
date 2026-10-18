@@ -12,9 +12,9 @@ pub struct ResolutionPlan {
 
 /// Resolves requirements; a cycle is `manifest.requires-cycle` (PKG-654).
 pub fn resolve(
-    packages: &[Manifest],
-    installed: &[InstalledSummary],
-    host: ApiVersion,
+    _packages: &[Manifest],
+    _installed: &[InstalledSummary],
+    _host: ApiVersion,
 ) -> Result<ResolutionPlan, Vec<Diagnostic>> {
     unimplemented!("host::resolve::resolve")
 }
@@ -35,7 +35,7 @@ pub struct PluginVersion {
 
 impl PluginVersion {
     /// Parses a version; a bad one is `manifest.version-invalid` (PKG-310).
-    pub fn parse(text: &str) -> Result<PluginVersion, Diagnostic> {
+    pub fn parse(_text: &str) -> Result<PluginVersion, Diagnostic> {
         unimplemented!("host::resolve::PluginVersion::parse")
     }
 }
@@ -48,12 +48,12 @@ pub struct VersionRange {
 
 impl VersionRange {
     /// Parses a range; a bad one is `manifest.requires-invalid` (PKG-313).
-    pub fn parse(text: &str) -> Result<VersionRange, Diagnostic> {
+    pub fn parse(_text: &str) -> Result<VersionRange, Diagnostic> {
         unimplemented!("host::resolve::VersionRange::parse")
     }
 
     /// Whether a version satisfies the range; pre-releases match only when allowed (PKG-315).
-    pub fn matches(&self, version: &PluginVersion, allow_prerelease: bool) -> bool {
+    pub fn matches(&self, _version: &PluginVersion, _allow_prerelease: bool) -> bool {
         unimplemented!("host::resolve::VersionRange::matches")
     }
 }
@@ -68,7 +68,7 @@ pub struct ServiceRequirement {
 }
 
 /// Parses `<interface>@<range>` (PKG-320).
-pub fn parse_service_requirement(text: &str) -> Result<ServiceRequirement, Diagnostic> {
+pub fn parse_service_requirement(_text: &str) -> Result<ServiceRequirement, Diagnostic> {
     unimplemented!("host::resolve::parse_service_requirement")
 }
 
@@ -84,7 +84,7 @@ pub struct PointReference {
 }
 
 /// Parses `<plugin>/<point>@<range>` (PKG-321).
-pub fn parse_point_reference(text: &str) -> Result<PointReference, Diagnostic> {
+pub fn parse_point_reference(_text: &str) -> Result<PointReference, Diagnostic> {
     unimplemented!("host::resolve::parse_point_reference")
 }
 
@@ -168,12 +168,12 @@ pub struct ResolvedPlan {
 
 impl ResolvedPlan {
     /// The digest of the source chosen for a plugin (PKG-340).
-    pub fn chosen_source_sha(&self, id: &str) -> Option<String> {
+    pub fn chosen_source_sha(&self, _id: &str) -> Option<String> {
         unimplemented!("host::resolve::ResolvedPlan::chosen_source_sha")
     }
 }
 
 /// Resolves a request into a plan; conflicts are diagnostics (PKG-330..348).
-pub fn resolve_plan(input: &ResolveInput) -> Result<ResolvedPlan, Vec<Diagnostic>> {
+pub fn resolve_plan(_input: &ResolveInput) -> Result<ResolvedPlan, Vec<Diagnostic>> {
     unimplemented!("host::resolve::resolve_plan")
 }

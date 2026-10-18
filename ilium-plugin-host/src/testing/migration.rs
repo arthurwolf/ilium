@@ -92,32 +92,32 @@ pub struct PluginSpec {
 
 impl PluginSpec {
     /// A plugin with the given id and version.
-    pub fn new(id: &str, version: &str) -> PluginSpec {
+    pub fn new(_id: &str, _version: &str) -> PluginSpec {
         unimplemented!("host::testing::migration::PluginSpec::new")
     }
 
     /// The manifest `data_version`.
-    pub fn data_version(self, version: u32) -> PluginSpec {
+    pub fn data_version(self, _version: u32) -> PluginSpec {
         unimplemented!("host::testing::migration::PluginSpec::data_version")
     }
 
     /// The manifest `data_version` as raw JSON.
-    pub fn data_version_json(self, json: &str) -> PluginSpec {
+    pub fn data_version_json(self, _json: &str) -> PluginSpec {
         unimplemented!("host::testing::migration::PluginSpec::data_version_json")
     }
 
     /// The scripted `migrate` export.
-    pub fn migrator(self, steps: Vec<Step>) -> PluginSpec {
+    pub fn migrator(self, _steps: Vec<Step>) -> PluginSpec {
         unimplemented!("host::testing::migration::PluginSpec::migrator")
     }
 
     /// The manifest migrate deadline.
-    pub fn migrate_deadline_ms(self, ms: u64) -> PluginSpec {
+    pub fn migrate_deadline_ms(self, _ms: u64) -> PluginSpec {
         unimplemented!("host::testing::migration::PluginSpec::migrate_deadline_ms")
     }
 
     /// The restore blob `deactivate` returns.
-    pub fn restore_bytes(self, bytes: Vec<u8>) -> PluginSpec {
+    pub fn restore_bytes(self, _bytes: Vec<u8>) -> PluginSpec {
         unimplemented!("host::testing::migration::PluginSpec::restore_bytes")
     }
 }
@@ -130,30 +130,30 @@ pub struct StorageHandle {
 
 impl StorageHandle {
     /// `storage.put`.
-    pub fn put(&self, bucket: Bucket, key: &str, value: &[u8]) -> Result<(), PluginError> {
+    pub fn put(&self, _bucket: Bucket, _key: &str, _value: &[u8]) -> Result<(), PluginError> {
         unimplemented!("host::testing::migration::StorageHandle::put")
     }
 
     /// `storage.get`.
-    pub fn get(&self, bucket: Bucket, key: &str) -> Option<Vec<u8>> {
+    pub fn get(&self, _bucket: Bucket, _key: &str) -> Option<Vec<u8>> {
         unimplemented!("host::testing::migration::StorageHandle::get")
     }
 
     /// `storage.remove`.
-    pub fn remove(&self, bucket: Bucket, key: &str) -> Result<(), PluginError> {
+    pub fn remove(&self, _bucket: Bucket, _key: &str) -> Result<(), PluginError> {
         unimplemented!("host::testing::migration::StorageHandle::remove")
     }
 
     /// `storage.keys` with a prefix.
-    pub fn keys(&self, bucket: Bucket, prefix: &str) -> Vec<String> {
+    pub fn keys(&self, _bucket: Bucket, _prefix: &str) -> Vec<String> {
         unimplemented!("host::testing::migration::StorageHandle::keys")
     }
 
     /// `storage.write-batch`; `None` removes a key.
     pub fn write_batch(
         &self,
-        bucket: Bucket,
-        entries: &[(String, Option<Vec<u8>>)],
+        _bucket: Bucket,
+        _entries: &[(String, Option<Vec<u8>>)],
     ) -> Result<(), PluginError> {
         unimplemented!("host::testing::migration::StorageHandle::write_batch")
     }
@@ -164,7 +164,7 @@ impl StorageHandle {
     }
 
     /// Every key of a bucket with its value.
-    pub fn dump(&self, bucket: Bucket) -> BTreeMap<String, Vec<u8>> {
+    pub fn dump(&self, _bucket: Bucket) -> BTreeMap<String, Vec<u8>> {
         unimplemented!("host::testing::migration::StorageHandle::dump")
     }
 }
@@ -177,27 +177,27 @@ pub struct MigServer {
 
 impl MigServer {
     /// Activates a plugin.
-    pub fn activate(&self, id: &str) -> ActivateReport {
+    pub fn activate(&self, _id: &str) -> ActivateReport {
         unimplemented!("host::testing::migration::MigServer::activate")
     }
 
     /// Applies the pending update of a plugin.
-    pub fn upgrade(&self, id: &str) -> ActivateReport {
+    pub fn upgrade(&self, _id: &str) -> ActivateReport {
         unimplemented!("host::testing::migration::MigServer::upgrade")
     }
 
     /// The storage of a plugin.
-    pub fn storage(&self, id: &str) -> StorageHandle {
+    pub fn storage(&self, _id: &str) -> StorageHandle {
         unimplemented!("host::testing::migration::MigServer::storage")
     }
 
     /// The data-version stamp of a bucket.
-    pub fn stamp(&self, id: &str, bucket: Bucket) -> Option<u32> {
+    pub fn stamp(&self, _id: &str, _bucket: Bucket) -> Option<u32> {
         unimplemented!("host::testing::migration::MigServer::stamp")
     }
 
     /// Calls `migrate` directly.
-    pub fn call_migrate(&self, id: &str, from: u32, to: u32) -> Result<(), PluginError> {
+    pub fn call_migrate(&self, _id: &str, _from: u32, _to: u32) -> Result<(), PluginError> {
         unimplemented!("host::testing::migration::MigServer::call_migrate")
     }
 
@@ -220,37 +220,37 @@ impl MigrationRig {
     }
 
     /// Starts a server for a project session.
-    pub fn server(&self, name: &str, project: &str, session: &str) -> MigServer {
+    pub fn server(&self, _name: &str, _project: &str, _session: &str) -> MigServer {
         unimplemented!("host::testing::migration::MigrationRig::server")
     }
 
     /// Restarts a server.
-    pub fn restart_server(&self, server: &MigServer) -> MigServer {
+    pub fn restart_server(&self, _server: &MigServer) -> MigServer {
         unimplemented!("host::testing::migration::MigrationRig::restart_server")
     }
 
     /// Installs a plugin.
-    pub fn install(&self, spec: &PluginSpec) -> CliOutput {
+    pub fn install(&self, _spec: &PluginSpec) -> CliOutput {
         unimplemented!("host::testing::migration::MigrationRig::install")
     }
 
     /// Updates a plugin.
-    pub fn update(&self, spec: &PluginSpec, flags: &[&str]) -> CliOutput {
+    pub fn update(&self, _spec: &PluginSpec, _flags: &[&str]) -> CliOutput {
         unimplemented!("host::testing::migration::MigrationRig::update")
     }
 
     /// Rolls a plugin back.
-    pub fn rollback(&self, id: &str, flags: &[&str]) -> CliOutput {
+    pub fn rollback(&self, _id: &str, _flags: &[&str]) -> CliOutput {
         unimplemented!("host::testing::migration::MigrationRig::rollback")
     }
 
     /// Runs a CLI command.
-    pub fn cli(&self, args: &[&str]) -> CliOutput {
+    pub fn cli(&self, _args: &[&str]) -> CliOutput {
         unimplemented!("host::testing::migration::MigrationRig::cli")
     }
 
     /// Installs a package file with flags.
-    pub fn cli_install_file(&self, spec: &PluginSpec, flags: &[&str]) -> CliOutput {
+    pub fn cli_install_file(&self, _spec: &PluginSpec, _flags: &[&str]) -> CliOutput {
         unimplemented!("host::testing::migration::MigrationRig::cli_install_file")
     }
 
@@ -260,52 +260,57 @@ impl MigrationRig {
     }
 
     /// The data-version stamp of a bucket.
-    pub fn stamp(&self, id: &str, bucket: Bucket) -> Option<u32> {
+    pub fn stamp(&self, _id: &str, _bucket: Bucket) -> Option<u32> {
         unimplemented!("host::testing::migration::MigrationRig::stamp")
     }
 
     /// The data-version stamp of the data directory.
-    pub fn data_dir_stamp(&self, id: &str) -> Option<u32> {
+    pub fn data_dir_stamp(&self, _id: &str) -> Option<u32> {
         unimplemented!("host::testing::migration::MigrationRig::data_dir_stamp")
     }
 
     /// Where the stamp is stored.
-    pub fn stamp_location(&self, id: &str) -> PathBuf {
+    pub fn stamp_location(&self, _id: &str) -> PathBuf {
         unimplemented!("host::testing::migration::MigrationRig::stamp_location")
     }
 
     /// The data directory of a plugin.
-    pub fn plugin_data_dir(&self, id: &str) -> PathBuf {
+    pub fn plugin_data_dir(&self, _id: &str) -> PathBuf {
         unimplemented!("host::testing::migration::MigrationRig::plugin_data_dir")
     }
 
     /// The files of the data directory, by relative path.
-    pub fn data_dir_files(&self, id: &str) -> BTreeMap<String, Vec<u8>> {
+    pub fn data_dir_files(&self, _id: &str) -> BTreeMap<String, Vec<u8>> {
         unimplemented!("host::testing::migration::MigrationRig::data_dir_files")
     }
 
     /// Writes a data file.
-    pub fn write_data_file(&self, id: &str, name: &str, bytes: &[u8]) {
+    pub fn write_data_file(&self, _id: &str, _name: &str, _bytes: &[u8]) {
         unimplemented!("host::testing::migration::MigrationRig::write_data_file")
     }
 
     /// The backup names of a plugin.
-    pub fn backups(&self, id: &str) -> Vec<String> {
+    pub fn backups(&self, _id: &str) -> Vec<String> {
         unimplemented!("host::testing::migration::MigrationRig::backups")
     }
 
     /// A bucket of a backup.
-    pub fn backup_dump(&self, id: &str, backup: &str, bucket: Bucket) -> BTreeMap<String, Vec<u8>> {
+    pub fn backup_dump(
+        &self,
+        _id: &str,
+        _backup: &str,
+        _bucket: Bucket,
+    ) -> BTreeMap<String, Vec<u8>> {
         unimplemented!("host::testing::migration::MigrationRig::backup_dump")
     }
 
     /// The data files of a backup.
-    pub fn backup_data_files(&self, id: &str, backup: &str) -> BTreeMap<String, Vec<u8>> {
+    pub fn backup_data_files(&self, _id: &str, _backup: &str) -> BTreeMap<String, Vec<u8>> {
         unimplemented!("host::testing::migration::MigrationRig::backup_data_files")
     }
 
     /// The `migrate` calls of a plugin.
-    pub fn migrate_calls(&self, id: &str) -> Vec<MigrateCall> {
+    pub fn migrate_calls(&self, _id: &str) -> Vec<MigrateCall> {
         unimplemented!("host::testing::migration::MigrationRig::migrate_calls")
     }
 
@@ -315,42 +320,42 @@ impl MigrationRig {
     }
 
     /// The last log line with a code, as its JSON record (`level`, `code`, `message`).
-    pub fn log_line(&self, code: &str) -> Option<serde_json::Value> {
+    pub fn log_line(&self, _code: &str) -> Option<serde_json::Value> {
         unimplemented!("host::testing::migration::MigrationRig::log_line")
     }
 
     /// Failures in the window of a plugin.
-    pub fn failures_in_window(&self, id: &str) -> u32 {
+    pub fn failures_in_window(&self, _id: &str) -> u32 {
         unimplemented!("host::testing::migration::MigrationRig::failures_in_window")
     }
 
     /// `plugin info` as JSON.
-    pub fn info_json(&self, id: &str) -> serde_json::Value {
+    pub fn info_json(&self, _id: &str) -> serde_json::Value {
         unimplemented!("host::testing::migration::MigrationRig::info_json")
     }
 
     /// The migrate lock path.
-    pub fn lock_path(&self, id: &str) -> PathBuf {
+    pub fn lock_path(&self, _id: &str) -> PathBuf {
         unimplemented!("host::testing::migration::MigrationRig::lock_path")
     }
 
     /// Writes the config file.
-    pub fn config(&self, toml: &str) {
+    pub fn config(&self, _toml: &str) {
         unimplemented!("host::testing::migration::MigrationRig::config")
     }
 
     /// Sets the wall clock.
-    pub fn set_clock_utc(&self, rfc3339: &str) {
+    pub fn set_clock_utc(&self, _rfc3339: &str) {
         unimplemented!("host::testing::migration::MigrationRig::set_clock_utc")
     }
 
     /// Moves the clock.
-    pub fn advance_clock(&self, ms: u64) {
+    pub fn advance_clock(&self, _ms: u64) {
         unimplemented!("host::testing::migration::MigrationRig::advance_clock")
     }
 
     /// Sets the free disk space.
-    pub fn set_free_bytes(&self, bytes: u64) {
+    pub fn set_free_bytes(&self, _bytes: u64) {
         unimplemented!("host::testing::migration::MigrationRig::set_free_bytes")
     }
 
@@ -365,7 +370,7 @@ impl MigrationRig {
     }
 
     /// Sets the quota of a bucket.
-    pub fn set_plugin_quota(&self, id: &str, bucket: Bucket, bytes: u64) {
+    pub fn set_plugin_quota(&self, _id: &str, _bucket: Bucket, _bytes: u64) {
         unimplemented!("host::testing::migration::MigrationRig::set_plugin_quota")
     }
 
@@ -375,12 +380,12 @@ impl MigrationRig {
     }
 
     /// Reads a value after a power loss.
-    pub fn read_after_power_loss(&self, id: &str, bucket: Bucket, key: &str) -> Option<Vec<u8>> {
+    pub fn read_after_power_loss(&self, _id: &str, _bucket: Bucket, _key: &str) -> Option<Vec<u8>> {
         unimplemented!("host::testing::migration::MigrationRig::read_after_power_loss")
     }
 
     /// Bytes not yet flushed.
-    pub fn unflushed_bytes(&self, id: &str) -> u64 {
+    pub fn unflushed_bytes(&self, _id: &str) -> u64 {
         unimplemented!("host::testing::migration::MigrationRig::unflushed_bytes")
     }
 

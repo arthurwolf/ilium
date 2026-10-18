@@ -17,9 +17,9 @@ impl HostPlugins for PluginsImport {
 
     fn set_enabled(
         &mut self,
-        plugin: PluginId,
-        enabled: bool,
-        scope: String,
+        _plugin: PluginId,
+        _enabled: bool,
+        _scope: String,
     ) -> Result<(), PluginError> {
         unimplemented!("host::imports::plugins::set_enabled")
     }

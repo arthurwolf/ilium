@@ -1,8 +1,6 @@
 //! Shared helpers of the lifecycle-ops lane: the rig shortcuts, JSONL readers and file-tree
 //! snapshots. Everything uses the skeleton or the items named in API_GAPS.md.
 
-#![allow(dead_code)]
-
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -184,11 +182,6 @@ pub fn ms(value: u64) -> Duration {
 /// Seconds as a duration.
 pub fn secs(value: u64) -> Duration {
     Duration::from_secs(value)
-}
-
-/// The set of strings in a slice.
-pub fn set_of(values: &[String]) -> BTreeSet<String> {
-    values.iter().cloned().collect()
 }
 
 /// Position of the first element equal to `needle`; fails the test when absent.

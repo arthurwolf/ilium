@@ -1,7 +1,5 @@
 //! Twins of the original tests of ilium-client/src/background_animation/pack_simd.rs (ported through FakeScene / FakeSession).
 use crate::common::*;
-#[allow(unused_imports)]
-use serde_json::json;
 
 /// REQ: PORT:ilium-client/src/background_animation/pack_simd.rs::runtime_threshold_packing_matches_scalar_for_cell_tails_and_non_finite_samples
 #[test]

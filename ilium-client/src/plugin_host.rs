@@ -2,9 +2,6 @@
 //! (test plan section 1.2). Client-side instances render views and handle input.
 //! Skeleton: nothing calls it yet, so no existing code path changes behaviour.
 
-// Not wired into the client yet; the implementation phase calls it from the app.
-#![allow(dead_code, unused_variables)]
-
 pub mod screens_rig;
 pub mod widget_rig;
 
@@ -24,6 +21,7 @@ impl ClientPluginHost {
 
     /// Starts the client-side instances of enabled plugins.
     pub fn start(&self) -> StartReport {
+        let _requested_start_mode = self.start_mode;
         unimplemented!("client::plugin_host::ClientPluginHost::start")
     }
 

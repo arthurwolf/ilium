@@ -11,31 +11,31 @@ use ilium_plugin_api::generated::types::ids::{RequestId, StreamId};
 pub struct HttpImport;
 
 impl HostHttp for HttpImport {
-    fn fetch(&mut self, request: HttpRequest) -> Result<RequestId, PluginError> {
+    fn fetch(&mut self, _request: HttpRequest) -> Result<RequestId, PluginError> {
         unimplemented!("host::imports::http::fetch")
     }
 
-    fn take_response(&mut self, request: RequestId) -> Option<HttpResponse> {
+    fn take_response(&mut self, _request: RequestId) -> Option<HttpResponse> {
         unimplemented!("host::imports::http::take_response")
     }
 
-    fn open_stream(&mut self, request: StreamRequest) -> Result<StreamId, PluginError> {
+    fn open_stream(&mut self, _request: StreamRequest) -> Result<StreamId, PluginError> {
         unimplemented!("host::imports::http::open_stream")
     }
 
-    fn close_stream(&mut self, stream: StreamId) {
+    fn close_stream(&mut self, _stream: StreamId) {
         unimplemented!("host::imports::http::close_stream")
     }
 
     fn open_websocket(
         &mut self,
-        url: String,
-        protocols: Vec<String>,
+        _url: String,
+        _protocols: Vec<String>,
     ) -> Result<StreamId, PluginError> {
         unimplemented!("host::imports::http::open_websocket")
     }
 
-    fn send_websocket(&mut self, stream: StreamId, text: String) -> Result<(), PluginError> {
+    fn send_websocket(&mut self, _stream: StreamId, _text: String) -> Result<(), PluginError> {
         unimplemented!("host::imports::http::send_websocket")
     }
 }

@@ -19,3 +19,6 @@ mod log_tail;
 mod manifest;
 mod renders;
 mod report;
+
+#[path = "../support/session.rs"]
+mod session_support;

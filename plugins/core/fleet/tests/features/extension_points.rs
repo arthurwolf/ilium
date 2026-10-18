@@ -6,6 +6,7 @@ use ilium_plugin_sdk::types::AgentActivity;
 use serde_json::Value;
 
 use crate::common::*;
+use crate::feature_only::*;
 
 /// REQ: COR-011
 #[test]

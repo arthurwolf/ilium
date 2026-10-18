@@ -15,6 +15,6 @@ pub struct SandboxPolicy {
 }
 
 /// Applies the policy to the current process; it cannot be undone.
-pub fn apply(policy: &SandboxPolicy) -> Result<(), HelperError> {
+pub fn apply(_policy: &SandboxPolicy) -> Result<(), HelperError> {
     unimplemented!("helper::sandbox::apply")
 }

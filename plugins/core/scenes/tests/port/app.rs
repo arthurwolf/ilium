@@ -1,7 +1,5 @@
 //! Twins of the original tests of ilium-client/src/app.rs (ported through FakeScene / FakeSession).
 use crate::common::*;
-#[allow(unused_imports)]
-use serde_json::json;
 
 /// REQ: PORT:ilium-client/src/app.rs::agent_animations_wake_at_their_exact_visible_phase_boundaries
 #[test]

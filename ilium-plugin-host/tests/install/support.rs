@@ -2,12 +2,10 @@
 //! readers and manual-page readers. Uses only the skeleton surface plus the items listed in
 //! API_GAPS.md. Later parts of the lane extend this file.
 
-#![allow(dead_code)]
-
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, UNIX_EPOCH};
 
 use ilium_plugin_api::Platform;
 use ilium_plugin_host::cli::{run, CliEnv, CliOutput};
@@ -324,7 +322,6 @@ pub enum Served {
     Redirect {
         location: String,
     },
-    Status(u16),
 }
 
 /// Serves URLs from memory and records every request (reference-registry.md transport, PKG-260).
@@ -373,12 +370,6 @@ impl FakeFetcher {
         }
     }
 
-    pub fn status(&self, url: &str, code: u16) {
-        if let Ok(mut routes) = self.routes.lock() {
-            routes.insert(url.to_owned(), Served::Status(code));
-        }
-    }
-
     pub fn calls(&self) -> Vec<String> {
         self.calls
             .lock()
@@ -401,7 +392,6 @@ impl Fetcher for FakeFetcher {
     fn get(&self, url: &str) -> Result<Vec<u8>, FetchError> {
         match self.lookup(url) {
             Some(Served::Body { bytes, .. }) => Ok(bytes),
-            Some(Served::Status(code)) => Err(FetchError::Status(code)),
             Some(Served::Redirect { .. }) | None => Err(FetchError::Unreachable),
         }
     }
@@ -432,7 +422,6 @@ impl Fetcher for FakeFetcher {
                     body: Vec::new(),
                 })
             }
-            Some(Served::Status(code)) => Err(FetchError::Status(code)),
             None => Err(FetchError::Unreachable),
         }
     }
@@ -719,9 +708,4 @@ pub fn manual_page(name: &str) -> String {
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../docs/plugins-manual/pages")
         });
     std::fs::read_to_string(base.join(name)).unwrap_or_default()
-}
-
-/// The system time of the fixture clock plus an offset.
-pub fn clock_plus(seconds: u64) -> SystemTime {
-    UNIX_EPOCH + Duration::from_secs(NOW_SECS + seconds)
 }

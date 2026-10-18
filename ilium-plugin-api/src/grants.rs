@@ -77,7 +77,7 @@ pub struct GrantInfo {
 
 impl Grant {
     /// Parses a grant string; an unknown family is `manifest.grant-unknown` (ABI-023).
-    pub fn parse(text: &str) -> Result<Grant, Diagnostic> {
+    pub fn parse(_text: &str) -> Result<Grant, Diagnostic> {
         unimplemented!("api::grants::Grant::parse")
     }
 
@@ -98,7 +98,7 @@ impl Grant {
 
     /// Whether this grant allows what `requested` asks for, for example `*.example.com`
     /// covering `api.example.com` (reference-capabilities.md).
-    pub fn covers(&self, requested: &Grant) -> bool {
+    pub fn covers(&self, _requested: &Grant) -> bool {
         unimplemented!("api::grants::Grant::covers")
     }
 }
@@ -109,22 +109,22 @@ pub fn table() -> &'static [GrantInfo] {
 }
 
 /// The table row of a grant family (reference-capabilities.md).
-pub fn info(family: &str) -> Option<&'static GrantInfo> {
+pub fn info(_family: &str) -> Option<&'static GrantInfo> {
     unimplemented!("api::grants::info")
 }
 
 /// Returns the diagnostic code when the grant is not allowed for this tier and side
 /// (reference-manifest-schema.md `manifest.grant-tier`, `manifest.grant-side`).
-pub fn check_grant(grant: &Grant, tier: Tier, side: Side) -> Result<(), Diagnostic> {
+pub fn check_grant(_grant: &Grant, _tier: Tier, _side: Side) -> Result<(), Diagnostic> {
     unimplemented!("api::grants::check_grant")
 }
 
 /// The highest risk of a grant list (reference-capabilities.md).
-pub fn risk_of(grants: &[Grant]) -> Risk {
+pub fn risk_of(_grants: &[Grant]) -> Risk {
     unimplemented!("api::grants::risk_of")
 }
 
 /// Whether a grant name is high risk (reference-capabilities.md, api-panes.md PAN-032).
-pub fn is_high_risk(grant: &str) -> bool {
+pub fn is_high_risk(_grant: &str) -> bool {
     unimplemented!("api::grants::is_high_risk")
 }

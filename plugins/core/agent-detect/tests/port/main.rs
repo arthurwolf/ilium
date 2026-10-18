@@ -10,8 +10,6 @@ mod detect_chronology_more;
 mod detect_goal;
 mod detect_identity;
 mod detect_interstitial;
-#[path = "../host_ext.rs"]
-mod host_ext;
 mod kernel_ports;
 mod live_agent;
 mod status_chronology;

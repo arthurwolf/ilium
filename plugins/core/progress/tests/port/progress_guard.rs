@@ -13,7 +13,6 @@ fn guard(host: &mut FakeHost, pane: Option<u64>, input: &Value) -> Run {
         .invoke(&["progress", "guard"], input.to_string().as_bytes());
     Run {
         stdout: invocation.stdout(),
-        stderr: invocation.stderr(),
         exit: invocation.exit_code(),
     }
 }

@@ -1,18 +1,13 @@
-//! Compaction-lane testing hooks on `FakeHost`, kept out of the shared harness type.
+//! Compaction-lane testing hooks used only by the port test target.
 //!
-//! Every method is plugin-specific scaffolding (report engine, scan engine, settings page,
-//! remote dialog, worker and flow state) that only this lane needs. Bodies are skeletons:
-//! `unimplemented!()` until the plugin exists. Shared harness behaviour stays in
-//! `ilium_plugin_sdk::testing::FakeHost`.
-
-#![allow(dead_code)]
-
-use std::fmt;
-use std::time::Duration;
+//! Every method is plugin-specific scaffolding. Bodies are skeletons: `unimplemented!()` until the
+//! plugin exists. Shared harness behaviour stays in `ilium_plugin_sdk::testing::FakeHost`.
 
 use ilium_plugin_sdk::testing::{FakeHost, Screen, ScreenCell};
-use ilium_plugin_sdk::types::{Color, PluginError, Submission, ViewTarget};
+use ilium_plugin_sdk::types::{Color, ViewTarget};
 use serde_json::Value;
+use std::fmt;
+use std::time::Duration;
 
 /// Error of an agent-home scan (compaction scan engine).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -99,24 +94,7 @@ pub struct PauseOutcome {
     pub interrupts: u32,
 }
 
-/// Agent config files seen by the plugin, through the host.
-pub struct AgentFiles<'a>(pub &'a mut FakeHost);
-
-impl AgentFiles<'_> {
-    /// Writes a file.
-    pub fn write(&mut self, _path: &str, _bytes: &[u8]) {
-        unimplemented!("compaction.agent-files-write")
-    }
-
-    /// Reads a file.
-    pub fn read(&self, _path: &str) -> Option<Vec<u8>> {
-        unimplemented!("compaction.agent-files-read")
-    }
-}
-
-/// Compaction-lane hooks. Implemented for `FakeHost` with skeleton bodies.
-pub trait CompactionHostExt {
-    // ---- report engine ----
+pub trait CompactionPortHostExt {
     fn build_report(&mut self, _input: Value) -> Result<Value, String> {
         unimplemented!("compaction.build-report")
     }
@@ -135,8 +113,6 @@ pub trait CompactionHostExt {
     fn widening_triggers(&self, _agent: &str, _grid: &[u64], _current: u64) -> Vec<u64> {
         unimplemented!("compaction.widening-triggers")
     }
-
-    // ---- scan engine ----
     fn scan_agent_homes(
         &mut self,
         _agent: &str,
@@ -220,9 +196,6 @@ pub trait CompactionHostExt {
     fn is_scanning(&self, _agent: &str) -> bool {
         unimplemented!("compaction.is-scanning")
     }
-    fn scans_started(&self) -> Vec<Value> {
-        unimplemented!("compaction.scans-started")
-    }
     fn scan_request(&self, _index: usize) -> Value {
         unimplemented!("compaction.scan-request")
     }
@@ -235,26 +208,8 @@ pub trait CompactionHostExt {
     fn set_scan_failure(&mut self, _message: &str) {
         unimplemented!("compaction.set-scan-failure")
     }
-    fn set_scan_result(&mut self, _sessions: u64, _turns: u64) {
-        unimplemented!("compaction.set-scan-result")
-    }
-    fn set_recommendation(&mut self, _tokens: u64, _alternative: u64) {
-        unimplemented!("compaction.set-recommendation")
-    }
-    fn recommended_tokens(&self) -> u64 {
-        unimplemented!("compaction.recommended-tokens")
-    }
     fn extrapolated_alternative_tokens(&self) -> Option<u64> {
         unimplemented!("compaction.extrapolated-alternative-tokens")
-    }
-    fn select_agent_target(&mut self, _target: &str) {
-        unimplemented!("compaction.select-agent-target")
-    }
-    fn agent_file_writes(&self) -> Vec<String> {
-        unimplemented!("compaction.agent-file-writes")
-    }
-    fn agent_files(&mut self) -> AgentFiles<'_> {
-        unimplemented!("compaction.agent-files")
     }
     fn set_note(&mut self, _agent: &str, _note: &str) {
         unimplemented!("compaction.set-note")
@@ -283,28 +238,6 @@ pub trait CompactionHostExt {
     fn technique_fidelity(&self, _id: &str) -> String {
         unimplemented!("compaction.technique-fidelity")
     }
-    fn convert_session(&mut self, _from: &str, _to: &str, _path: &str) -> Vec<Submission> {
-        unimplemented!("compaction.convert-session")
-    }
-    fn convert_session_failing(&mut self, _from: &str, _to: &str) -> Vec<Submission> {
-        unimplemented!("compaction.convert-session-failing")
-    }
-    fn cancel_job_after_chunks(&mut self, _chunks: usize) {
-        unimplemented!("compaction.cancel-job-after-chunks")
-    }
-    fn job_progress_reports(&self) -> Vec<f64> {
-        unimplemented!("compaction.job-progress-reports")
-    }
-    fn run_job_for_pane(
-        &mut self,
-        _pane: u64,
-        _kind: &str,
-        _input: Vec<u8>,
-    ) -> Result<Vec<u8>, PluginError> {
-        unimplemented!("compaction.run-job-for-pane")
-    }
-
-    // ---- ui pages ----
     fn bar_parts(&self, _fraction: f64, _width: usize) -> (String, String) {
         unimplemented!("compaction.bar-parts")
     }
@@ -326,14 +259,8 @@ pub trait CompactionHostExt {
     fn click_help_anchor(&mut self, _target: ViewTarget, _topic: &str) {
         unimplemented!("compaction.click-help-anchor")
     }
-    fn open_view(&mut self, _target: ViewTarget) {
-        unimplemented!("compaction.open-view")
-    }
     fn close_view(&mut self, _target: ViewTarget) {
         unimplemented!("compaction.close-view")
-    }
-    fn view_closed(&self, _target: ViewTarget) -> bool {
-        unimplemented!("compaction.view-closed")
     }
     fn confirmation_layout(
         &mut self,
@@ -438,8 +365,6 @@ pub trait CompactionHostExt {
     fn set_screen_size(&mut self, _columns: u16, _rows: u16) {
         unimplemented!("compaction.set-screen-size")
     }
-
-    // ---- settings page ----
     fn settings_row_geometry(&self, _row: &str) -> RowGeometry {
         unimplemented!("compaction.settings-row-geometry")
     }
@@ -553,8 +478,6 @@ pub trait CompactionHostExt {
     fn settings_serialized_bound_ok(&self, _settings: &Value) -> bool {
         unimplemented!("compaction.settings-serialized-bound-ok")
     }
-
-    // ---- remote settings ----
     fn remote_settings_adjust(&mut self, _row: &str, _delta: i32) -> bool {
         unimplemented!("compaction.remote-settings-adjust")
     }
@@ -588,8 +511,6 @@ pub trait CompactionHostExt {
     fn default_summarizer_max_output_tokens(&self) -> u64 {
         unimplemented!("compaction.default-summarizer-max-output-tokens")
     }
-
-    // ---- flow and monitor ----
     fn flow_start(&mut self, _agent: &str, _technique: &str) {
         unimplemented!("compaction.flow-start")
     }
@@ -654,8 +575,6 @@ pub trait CompactionHostExt {
     fn native_trigger_detect(&mut self, _agent: &str) -> Value {
         unimplemented!("compaction.native-trigger-detect")
     }
-
-    // ---- remote dialog ----
     fn dialog_banner_close_width(&self) -> u16 {
         unimplemented!("compaction.dialog-banner-close-width")
     }
@@ -683,8 +602,6 @@ pub trait CompactionHostExt {
     fn dialog_token_bar_lines(&self, _state: Value, _width: usize) -> Vec<String> {
         unimplemented!("compaction.dialog-token-bar-lines")
     }
-
-    // ---- remote worker ----
     fn worker_annotate_progress_overflow(
         &self,
         _result: Result<Value, String>,
@@ -728,4 +645,4 @@ pub trait CompactionHostExt {
     }
 }
 
-impl CompactionHostExt for FakeHost {}
+impl CompactionPortHostExt for FakeHost {}

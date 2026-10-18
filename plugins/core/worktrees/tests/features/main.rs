@@ -9,4 +9,6 @@ mod include;
 mod manifest;
 mod ports;
 mod settings;
+#[path = "../shared/common.rs"]
+mod shared_common;
 mod status;

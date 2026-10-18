@@ -18,45 +18,45 @@ impl HostAgent for AgentImport {
         unimplemented!("host::imports::agent::agents")
     }
 
-    fn view(&mut self, pane: NodeId) -> Option<AgentView> {
+    fn view(&mut self, _pane: NodeId) -> Option<AgentView> {
         unimplemented!("host::imports::agent::view")
     }
 
-    fn session(&mut self, pane: NodeId) -> Option<SessionRef> {
+    fn session(&mut self, _pane: NodeId) -> Option<SessionRef> {
         unimplemented!("host::imports::agent::session")
     }
 
-    fn last_prompt(&mut self, pane: NodeId) -> Option<String> {
+    fn last_prompt(&mut self, _pane: NodeId) -> Option<String> {
         unimplemented!("host::imports::agent::last_prompt")
     }
 
-    fn register_signature(&mut self, spec: SignatureSpec) -> Result<(), PluginError> {
+    fn register_signature(&mut self, _spec: SignatureSpec) -> Result<(), PluginError> {
         unimplemented!("host::imports::agent::register_signature")
     }
 
     fn set_toolbar_state(
         &mut self,
-        button: String,
-        pane: Option<NodeId>,
-        enabled: bool,
-        label: Option<String>,
+        _button: String,
+        _pane: Option<NodeId>,
+        _enabled: bool,
+        _label: Option<String>,
     ) -> Result<(), PluginError> {
         unimplemented!("host::imports::agent::set_toolbar_state")
     }
 
-    fn model(&mut self, pane: NodeId) -> Option<AgentModel> {
+    fn model(&mut self, _pane: NodeId) -> Option<AgentModel> {
         unimplemented!("host::imports::agent::model")
     }
 
-    fn prompt_epoch(&mut self, pane: NodeId) -> Option<u64> {
+    fn prompt_epoch(&mut self, _pane: NodeId) -> Option<u64> {
         unimplemented!("host::imports::agent::prompt_epoch")
     }
 
-    fn transcript(&mut self, query: TranscriptQuery) -> Result<RequestId, PluginError> {
+    fn transcript(&mut self, _query: TranscriptQuery) -> Result<RequestId, PluginError> {
         unimplemented!("host::imports::agent::transcript")
     }
 
-    fn take_transcript(&mut self, request: RequestId) -> Option<Vec<TranscriptTurn>> {
+    fn take_transcript(&mut self, _request: RequestId) -> Option<Vec<TranscriptTurn>> {
         unimplemented!("host::imports::agent::take_transcript")
     }
 }

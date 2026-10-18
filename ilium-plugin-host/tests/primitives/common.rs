@@ -2,14 +2,12 @@
 //! with panes, outcome readers and manual-page readers. Everything outside the skeleton is
 //! named in API_GAPS.md.
 
-#![allow(dead_code)]
-
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use ilium_plugin_api::generated::primitives::terminal::{Cell, CellRows};
+use ilium_plugin_api::generated::primitives::terminal::CellRows;
 use ilium_plugin_api::generated::types::events::Event;
 use ilium_plugin_api::generated::types::ids::NodeId;
 use ilium_plugin_api::generated::types::intents::{Intent, Submission};
@@ -231,14 +229,6 @@ pub fn refusal_of(outcome: &Outcome) -> Option<ErrorCode> {
     }
 }
 
-/// The failure code of a completion, if it failed.
-pub fn failure_of(outcome: &Outcome) -> Option<ErrorCode> {
-    match outcome {
-        Outcome::Failed(error) => Some(error.code),
-        _ => None,
-    }
-}
-
 /// The error code of a sync result.
 pub fn error_of<T: std::fmt::Debug>(result: Result<T, PluginError>) -> Option<ErrorCode> {
     result.err().map(|error| error.code)
@@ -247,14 +237,6 @@ pub fn error_of<T: std::fmt::Debug>(result: Result<T, PluginError>) -> Option<Er
 /// Rows of `columns` empty cells, `count` rows.
 pub fn cell_rows_len(rows: &Option<CellRows>) -> Option<usize> {
     rows.as_ref().map(|rows| rows.rows.len())
-}
-
-/// A plain cell.
-pub fn cell(text: &str) -> Cell {
-    Cell {
-        text: text.to_owned(),
-        ..Cell::default()
-    }
 }
 
 /// All captured log text joined with newlines.

@@ -1,6 +1,6 @@
 //! Extension points, topics and the replaceable flag (core-plugin-editor.md "Extension points").
 
-use crate::support::{manifest_json, page_text};
+use crate::fixtures::{manifest_json, page_text};
 use ilium_plugin_sdk::testing::core_stubs;
 
 const POINTS: [&str; 3] = [

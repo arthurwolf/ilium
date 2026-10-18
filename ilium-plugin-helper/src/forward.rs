@@ -4,9 +4,9 @@ use crate::HelperError;
 
 /// Sends one import call to the host and waits for its answer.
 pub fn forward_import(
-    interface: &str,
-    function: &str,
-    payload: &[u8],
+    _interface: &str,
+    _function: &str,
+    _payload: &[u8],
 ) -> Result<Vec<u8>, HelperError> {
     unimplemented!("helper::forward::forward_import")
 }

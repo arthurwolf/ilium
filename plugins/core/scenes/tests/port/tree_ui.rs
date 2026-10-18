@@ -1,7 +1,5 @@
 //! Twins of the original tests of ilium-client/src/tree_ui.rs (ported through FakeScene / FakeSession).
 use crate::common::*;
-#[allow(unused_imports)]
-use serde_json::json;
 
 /// REQ: PORT:ilium-client/src/tree_ui.rs::pane_label_cycles_through_every_half_hour_clock_for_waiting_background
 #[test]

@@ -6,6 +6,7 @@ use ilium_plugin_sdk::types::{ErrorCode, PluginError};
 use serde_json::{json, Value};
 
 use crate::common::*;
+use crate::feature_support::*;
 
 const PROBE: &str = "/opt/probe.sh";
 
@@ -234,14 +235,12 @@ fn progress_b15_an_error_text_on_a_non_error_status_is_rejected_invalid_probe_re
 #[test]
 fn f_059_an_empty_error_string_counts_as_absent_on_a_running_report() {
     let (mut host, pane) = host_with_pane();
-    let run = check(
-        &mut host,
-        pane,
-        &report("job", "running", 5.0, "m", "", json!("")),
-    );
+    let output = report("job", "running", 5.0, "m", "", json!(""));
+    expect_probe(&mut host, PROBE, &output);
+    let (run, stderr) = progress_with_stderr(&mut host, pane, &["check", "--command", PROBE]);
     assert_eq!(run.exit, Some(0));
     assert_eq!(code(&run), "", "no progress_rejected record expected");
-    assert!(run.stderr.is_empty(), "{}", run.stderr);
+    assert!(stderr.is_empty(), "{stderr}");
 }
 
 /// REQ: F-059

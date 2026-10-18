@@ -2,15 +2,9 @@
 //! constants and small byte builders. Everything uses only the public surface named in
 //! API_GAPS.md or the skeleton. Part 2 of the lane extends this file.
 
-#![allow(dead_code)]
-
 use std::path::Path;
 use std::time::Duration;
 
-use ilium_plugin_api::generated::host::{
-    HostClock, HostCodec, HostFs, HostHttp, HostJobs, HostJournal, HostLog, HostPanes, HostProcess,
-    HostSettings,
-};
 use ilium_plugin_api::generated::types::{ErrorCode, FsPath, Outcome, PluginError, RequestId};
 use ilium_plugin_api::manifest::{CheckMode, Diagnostic, ValidationContext};
 use ilium_plugin_api::{Platform, Tier};
@@ -359,15 +353,3 @@ pub fn http_response(status: &str, headers: &[(&str, &str)], body: &[u8]) -> Vec
     out.extend_from_slice(body);
     out
 }
-
-/// The `Host*` trait objects are used through the fixture; these aliases keep test signatures short.
-pub type Settings<'a> = &'a mut dyn HostSettings;
-pub type Fs<'a> = &'a mut dyn HostFs;
-pub type Http<'a> = &'a mut dyn HostHttp;
-pub type Jobs<'a> = &'a mut dyn HostJobs;
-pub type Process<'a> = &'a mut dyn HostProcess;
-pub type Panes<'a> = &'a mut dyn HostPanes;
-pub type Journal<'a> = &'a mut dyn HostJournal;
-pub type Log<'a> = &'a mut dyn HostLog;
-pub type Clock<'a> = &'a mut dyn HostClock;
-pub type Codec<'a> = &'a mut dyn HostCodec;

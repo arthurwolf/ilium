@@ -1,7 +1,5 @@
 //! WIT exports and the submit import (wit/exports/handler.wit, lifecycle.wit, host/intents-host.wit).
 
-use std::time::Duration;
-
 use ilium_plugin_api::generated::types::{DeactivationReason, ErrorCode};
 
 use crate::common::*;
@@ -127,6 +125,3 @@ fn wit_intents_host_submit_signature_matches_the_wit_file() {
         "{text}"
     );
 }
-
-#[allow(dead_code)]
-fn unused(_: Duration) {}

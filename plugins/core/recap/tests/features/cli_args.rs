@@ -2,6 +2,7 @@
 //! The consent gate is closed (no kernel setting) in these tests, so no model is involved.
 
 use crate::common::*;
+use crate::feature_support::*;
 
 fn run(args: &[&str]) -> (String, String, Option<u8>) {
     let mut host = activated_server();

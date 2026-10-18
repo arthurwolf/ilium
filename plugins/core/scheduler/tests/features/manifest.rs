@@ -3,7 +3,7 @@
 use ilium_plugin_sdk::testing::FakeHost;
 use serde_json::{json, Value};
 
-use crate::common::{json_block_after, manifest, manifest_path, manual_page, page_text};
+use crate::feature_support::{json_block_after, manifest, manifest_path, manual_page, page_text};
 
 fn grants(side: &str) -> Vec<String> {
     manifest()["capabilities"][side]

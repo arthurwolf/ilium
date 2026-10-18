@@ -1,9 +1,9 @@
 //! Markdown source and rendered views (F-021, src/docs/editors-and-boards.md "Markdown: Source and
 //! Rendered views", core-plugin-editor.md "Markdown rendered view").
 
+use crate::fixtures::{nodes_where, NOTES_MD};
 use crate::support::{
-    active_host, buffer_ref, direct, direct_open, nodes_where, open_file, project_path,
-    render_pane, seed_text, NOTES_MD,
+    active_host, buffer_ref, direct, direct_open, open_file, project_path, render_pane, seed_text,
 };
 use ilium_plugin_sdk::generated::types::{
     BufferId, Direction, EditorPointerEvent, Event, Intent, NodeId, PointerButton, PointerKind,

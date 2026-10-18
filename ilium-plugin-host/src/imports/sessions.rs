@@ -15,11 +15,11 @@ impl HostSessions for SessionsImport {
         unimplemented!("host::imports::sessions::list_live")
     }
 
-    fn send(&mut self, request: CrossRequest) -> Result<RequestId, PluginError> {
+    fn send(&mut self, _request: CrossRequest) -> Result<RequestId, PluginError> {
         unimplemented!("host::imports::sessions::send")
     }
 
-    fn take_reply(&mut self, request: RequestId) -> Option<String> {
+    fn take_reply(&mut self, _request: RequestId) -> Option<String> {
         unimplemented!("host::imports::sessions::take_reply")
     }
 }

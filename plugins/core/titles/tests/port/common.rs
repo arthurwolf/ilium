@@ -1,5 +1,4 @@
 //! Shared helpers of the titles port twins (self-contained copy of the feature helpers).
-#![allow(dead_code)]
 
 use std::path::PathBuf;
 
@@ -10,7 +9,7 @@ use ilium_plugin_sdk::types::{
     AgentActivity, AgentActivityEvent, CommandContext, CommandInvokedEvent, CommandOrigin,
     ErrorCode, Event, InputSource, InputSubmittedEvent, Intent, NodeClass, NodeId, Outcome,
     PluginError, RenameNodeSpec, RequestId, RequestRef, RequestResult, RestructureOp,
-    RestructureSpec, SetInferredIconSpec, Submission,
+    RestructureSpec, Submission,
 };
 use serde_json::json;
 
@@ -99,16 +98,6 @@ pub fn renames(submissions: &[Submission]) -> Vec<RenameNodeSpec> {
         .iter()
         .filter_map(|submission| match &submission.intent {
             Intent::RenameNode(spec) => Some(spec.clone()),
-            _ => None,
-        })
-        .collect()
-}
-
-pub fn icons(submissions: &[Submission]) -> Vec<SetInferredIconSpec> {
-    submissions
-        .iter()
-        .filter_map(|submission| match &submission.intent {
-            Intent::SetInferredIcon(spec) => Some(spec.clone()),
             _ => None,
         })
         .collect()

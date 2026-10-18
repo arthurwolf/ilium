@@ -6,6 +6,7 @@ mod cli_gate;
 mod common;
 mod doc_page;
 mod extension_points;
+mod feature_support;
 #[path = "../host_ext.rs"]
 mod host_ext;
 mod jobs_and_service;

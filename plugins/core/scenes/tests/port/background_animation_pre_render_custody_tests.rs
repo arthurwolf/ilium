@@ -1,7 +1,5 @@
 //! Twins of the original tests of ilium-client/src/background_animation/pre_render_custody_tests.rs (ported through FakeScene / FakeSession).
 use crate::common::*;
-#[allow(unused_imports)]
-use serde_json::json;
 
 /// REQ: PORT:ilium-client/src/background_animation/pre_render_custody_tests.rs::actual_live_native_text_publication_keeps_wide_glyph_and_continuation
 #[test]

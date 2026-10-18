@@ -2,7 +2,7 @@
 //! envelope sequencing, payload caps, forwarded-request dedup, outcome replay, the detached queue
 //! and the writer queues. No I/O; `ilium-server` drives these from its connection tasks.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::VecDeque;
 
 /// A forwarded request's dedup key is remembered this long, milliseconds (HST-113).
 pub const DEDUP_WINDOW_MS: u64 = 600_000;
@@ -81,16 +81,16 @@ pub enum PayloadKind {
 }
 
 /// Refuses a payload longer than its kind's cap (HST-124).
-pub fn check_payload(kind: PayloadKind, len: usize) -> Result<(), IpcFault> {
+pub fn check_payload(_kind: PayloadKind, _len: usize) -> Result<(), IpcFault> {
     unimplemented!("host::ipc::check_payload")
 }
 
 /// Encodes a payload only when its declared length is within the cap; `encode` is never called
 /// for an oversize payload (HST-124).
 pub fn encode_checked<F: FnOnce() -> Vec<u8>>(
-    kind: PayloadKind,
-    declared_len: usize,
-    encode: F,
+    _kind: PayloadKind,
+    _declared_len: usize,
+    _encode: F,
 ) -> Result<Vec<u8>, IpcFault> {
     unimplemented!("host::ipc::encode_checked")
 }
@@ -98,22 +98,16 @@ pub fn encode_checked<F: FnOnce() -> Vec<u8>>(
 /// The receiving side of one connection: envelope sequence numbers start at 1 and increase by
 /// one; a gap or an oversize envelope closes the connection (HST-102, HST-125).
 #[derive(Debug, Default)]
-pub struct ReceiverConnection {
-    next_seq: u64,
-    closed_with: Option<String>,
-}
+pub struct ReceiverConnection;
 
 impl ReceiverConnection {
     /// An open connection expecting sequence 1.
     pub fn new() -> ReceiverConnection {
-        ReceiverConnection {
-            next_seq: 1,
-            closed_with: None,
-        }
+        ReceiverConnection
     }
 
     /// Accepts one envelope; the fault closes the connection.
-    pub fn on_envelope(&mut self, seq: u64, encoded_len: usize) -> Result<(), IpcFault> {
+    pub fn on_envelope(&mut self, _seq: u64, _encoded_len: usize) -> Result<(), IpcFault> {
         unimplemented!("host::ipc::ReceiverConnection::on_envelope")
     }
 
@@ -139,24 +133,22 @@ pub enum DedupVerdict {
 
 /// Remembers forwarded requests per plugin and client for `DEDUP_WINDOW_MS` (HST-113).
 #[derive(Debug, Default)]
-pub struct ForwardedDedup {
-    accepted_ms: BTreeMap<(String, String, String), u64>,
-}
+pub struct ForwardedDedup;
 
 impl ForwardedDedup {
     /// An empty window.
     pub fn new() -> ForwardedDedup {
-        ForwardedDedup::default()
+        ForwardedDedup
     }
 
     /// Admits a request once per window; a key is free again at exactly `DEDUP_WINDOW_MS` after
     /// it was accepted.
     pub fn admit(
         &mut self,
-        plugin: &str,
-        client_id: &str,
-        dedup_key: &str,
-        now_ms: u64,
+        _plugin: &str,
+        _client_id: &str,
+        _dedup_key: &str,
+        _now_ms: u64,
     ) -> DedupVerdict {
         unimplemented!("host::ipc::ForwardedDedup::admit")
     }
@@ -173,24 +165,21 @@ pub struct StoredOutcome {
 
 /// Outcomes kept per client id for replay after a reattach (HST-116, HST-117).
 #[derive(Debug, Default)]
-pub struct OutcomeStore {
-    records: BTreeMap<String, VecDeque<StoredOutcome>>,
-    disconnected_at_ms: BTreeMap<String, u64>,
-}
+pub struct OutcomeStore;
 
 impl OutcomeStore {
     /// An empty store.
     pub fn new() -> OutcomeStore {
-        OutcomeStore::default()
+        OutcomeStore
     }
 
     /// Records an outcome; the oldest beyond `OUTCOME_RECORD_LIMIT` per client is dropped.
-    pub fn record(&mut self, client_id: &str, seq: u64, outcome: &str, now_ms: u64) {
+    pub fn record(&mut self, _client_id: &str, _seq: u64, _outcome: &str, _now_ms: u64) {
         unimplemented!("host::ipc::OutcomeStore::record")
     }
 
     /// Starts the grace period of a disconnected client.
-    pub fn on_disconnect(&mut self, client_id: &str, now_ms: u64) {
+    pub fn on_disconnect(&mut self, _client_id: &str, _now_ms: u64) {
         unimplemented!("host::ipc::OutcomeStore::on_disconnect")
     }
 
@@ -198,15 +187,15 @@ impl OutcomeStore {
     /// grace period has elapsed.
     pub fn replay(
         &mut self,
-        client_id: &str,
-        last_seen_seq: u64,
-        now_ms: u64,
+        _client_id: &str,
+        _last_seen_seq: u64,
+        _now_ms: u64,
     ) -> Vec<StoredOutcome> {
         unimplemented!("host::ipc::OutcomeStore::replay")
     }
 
     /// The records currently kept for a client.
-    pub fn record_count(&mut self, client_id: &str, now_ms: u64) -> usize {
+    pub fn record_count(&mut self, _client_id: &str, _now_ms: u64) -> usize {
         unimplemented!("host::ipc::OutcomeStore::record_count")
     }
 }
@@ -233,7 +222,7 @@ impl DetachedQueue {
     }
 
     /// Queues one submission by dedup key.
-    pub fn push(&mut self, dedup_key: &str) -> QueueVerdict {
+    pub fn push(&mut self, _dedup_key: &str) -> QueueVerdict {
         unimplemented!("host::ipc::DetachedQueue::push")
     }
 
@@ -290,9 +279,7 @@ pub enum PushOutcome {
 /// back-pressure rules of HST-120..123.
 #[derive(Debug, Default)]
 pub struct WriterQueues {
-    pty: VecDeque<u32>,
     plugin: VecDeque<PluginRecord>,
-    pty_since_plugin: u32,
     resync_flagged: bool,
 }
 
@@ -303,12 +290,12 @@ impl WriterQueues {
     }
 
     /// Queues a PTY frame.
-    pub fn push_pty_frame(&mut self, id: u32) {
+    pub fn push_pty_frame(&mut self, _id: u32) {
         unimplemented!("host::ipc::WriterQueues::push_pty_frame")
     }
 
     /// Queues a plugin record.
-    pub fn push_plugin(&mut self, record: PluginRecord) -> PushOutcome {
+    pub fn push_plugin(&mut self, _record: PluginRecord) -> PushOutcome {
         unimplemented!("host::ipc::WriterQueues::push_plugin")
     }
 

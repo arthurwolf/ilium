@@ -5,7 +5,8 @@ use ilium_plugin_sdk::exports::{HookCall, HookReply};
 use ilium_plugin_sdk::testing::FakeSession;
 use serde_json::json;
 
-use crate::common::{enabled_client, hear, manual_page, page_text, table_after};
+use crate::common::{enabled_client, hear};
+use crate::manual::{manual_page, page_text, table_after};
 
 fn point_rows() -> Vec<Vec<String>> {
     table_after(&page_text(), "| Point | Kind |")

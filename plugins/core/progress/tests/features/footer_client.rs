@@ -7,6 +7,7 @@ use ilium_plugin_sdk::types::{Intent, ViewTarget};
 use serde_json::{json, Value};
 
 use crate::common::*;
+use crate::feature_support::*;
 
 fn monitor(id: u64, status: &str, percent: f64, message: &str) -> Value {
     json!({"monitor_id": id, "report": {"job_id": format!("job-{id}"), "status": status, "percent": percent,

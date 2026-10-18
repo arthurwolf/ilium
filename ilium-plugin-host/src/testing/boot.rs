@@ -33,7 +33,7 @@ pub struct PluginSpec {
 
 impl PluginSpec {
     /// A plugin of `id` at `tier`.
-    pub fn new(id: &str, tier: Tier) -> PluginSpec {
+    pub fn new(_id: &str, _tier: Tier) -> PluginSpec {
         unimplemented!("host::testing::boot::PluginSpec::new")
     }
 
@@ -43,52 +43,52 @@ impl PluginSpec {
     }
 
     /// The sides the plugin provides.
-    pub fn sides(self, sides: &[Side]) -> PluginSpec {
+    pub fn sides(self, _sides: &[Side]) -> PluginSpec {
         unimplemented!("host::testing::boot::PluginSpec::sides")
     }
 
     /// The server-side activation events.
-    pub fn activation(self, events: &[&str]) -> PluginSpec {
+    pub fn activation(self, _events: &[&str]) -> PluginSpec {
         unimplemented!("host::testing::boot::PluginSpec::activation")
     }
 
     /// The client-side activation events.
-    pub fn client_activation(self, events: &[&str]) -> PluginSpec {
+    pub fn client_activation(self, _events: &[&str]) -> PluginSpec {
         unimplemented!("host::testing::boot::PluginSpec::client_activation")
     }
 
     /// The plugins this one requires.
-    pub fn requires(self, ids: &[&str]) -> PluginSpec {
+    pub fn requires(self, _ids: &[&str]) -> PluginSpec {
         unimplemented!("host::testing::boot::PluginSpec::requires")
     }
 
     /// A manifest limit.
-    pub fn limit(self, key: &str, value: u64) -> PluginSpec {
+    pub fn limit(self, _key: &str, _value: u64) -> PluginSpec {
         unimplemented!("host::testing::boot::PluginSpec::limit")
     }
 
     /// The grants the manifest declares.
-    pub fn default_grants(self, grants: &[&str]) -> PluginSpec {
+    pub fn default_grants(self, _grants: &[&str]) -> PluginSpec {
         unimplemented!("host::testing::boot::PluginSpec::default_grants")
     }
 
     /// The grants already in the grant store at boot.
-    pub fn stored_grants(self, grants: &[&str]) -> PluginSpec {
+    pub fn stored_grants(self, _grants: &[&str]) -> PluginSpec {
         unimplemented!("host::testing::boot::PluginSpec::stored_grants")
     }
 
     /// A contribution to an extension point.
-    pub fn contributes(self, point: &str) -> PluginSpec {
+    pub fn contributes(self, _point: &str) -> PluginSpec {
         unimplemented!("host::testing::boot::PluginSpec::contributes")
     }
 
     /// An event subscription.
-    pub fn subscribes(self, event: &str) -> PluginSpec {
+    pub fn subscribes(self, _event: &str) -> PluginSpec {
         unimplemented!("host::testing::boot::PluginSpec::subscribes")
     }
 
     /// How long the plugin's deactivate export takes.
-    pub fn deactivate_takes_ms(self, ms: u64) -> PluginSpec {
+    pub fn deactivate_takes_ms(self, _ms: u64) -> PluginSpec {
         unimplemented!("host::testing::boot::PluginSpec::deactivate_takes_ms")
     }
 
@@ -100,35 +100,26 @@ impl PluginSpec {
 
 /// Builds a [`BootRun`] for one kernel process kind.
 #[derive(Debug)]
-pub struct BootHarness {
-    kind: ProcessKind,
-    mode: StartMode,
-    plugins: Vec<PluginSpec>,
-    restored_tree: usize,
-    fail_engine_creation: bool,
-    corrupt_grant_store: bool,
-    tampered_packages: Vec<String>,
-    stored_data: Vec<(String, String, String)>,
-}
+pub struct BootHarness;
 
 impl BootHarness {
     /// A harness for a kernel of `kind`.
-    pub fn new(kind: ProcessKind) -> BootHarness {
+    pub fn new(_kind: ProcessKind) -> BootHarness {
         unimplemented!("host::testing::boot::BootHarness::new")
     }
 
     /// The start mode.
-    pub fn mode(self, mode: StartMode) -> BootHarness {
+    pub fn mode(self, _mode: StartMode) -> BootHarness {
         unimplemented!("host::testing::boot::BootHarness::mode")
     }
 
     /// Installs a plugin.
-    pub fn plugin(self, plugin: PluginSpec) -> BootHarness {
+    pub fn plugin(self, _plugin: PluginSpec) -> BootHarness {
         unimplemented!("host::testing::boot::BootHarness::plugin")
     }
 
     /// A restored tree of `panes` panes present before activation.
-    pub fn restored_tree(self, panes: usize) -> BootHarness {
+    pub fn restored_tree(self, _panes: usize) -> BootHarness {
         unimplemented!("host::testing::boot::BootHarness::restored_tree")
     }
 
@@ -143,7 +134,7 @@ impl BootHarness {
     }
 
     /// Tampers with an installed package's files (HST-045).
-    pub fn tamper_package(self, id: &str) -> BootHarness {
+    pub fn tamper_package(self, _id: &str) -> BootHarness {
         unimplemented!("host::testing::boot::BootHarness::tamper_package")
     }
 
@@ -153,12 +144,12 @@ impl BootHarness {
     }
 
     /// Installs one core plugin of the activation table.
-    pub fn plugin_from_table(self, id: &str) -> BootHarness {
+    pub fn plugin_from_table(self, _id: &str) -> BootHarness {
         unimplemented!("host::testing::boot::BootHarness::plugin_from_table")
     }
 
     /// Pre-fills a plugin's store with one key.
-    pub fn store_data(self, id: &str, key: &str, value: &str) -> BootHarness {
+    pub fn store_data(self, _id: &str, _key: &str, _value: &str) -> BootHarness {
         unimplemented!("host::testing::boot::BootHarness::store_data")
     }
 
@@ -230,10 +221,7 @@ pub struct ComposedFrame {
 
 /// A booted kernel process with its plugins.
 #[derive(Debug)]
-pub struct BootRun {
-    kind: ProcessKind,
-    trace: Vec<String>,
-}
+pub struct BootRun;
 
 impl BootRun {
     // ---- Lifecycle ------------------------------------------------------------------------
@@ -269,17 +257,17 @@ impl BootRun {
     }
 
     /// Restarts one plugin.
-    pub fn restart_plugin(&mut self, id: &str) {
+    pub fn restart_plugin(&mut self, _id: &str) {
         unimplemented!("host::testing::boot::BootRun::restart_plugin")
     }
 
     /// Advances the harness clock.
-    pub fn advance(&mut self, by: Duration) {
+    pub fn advance(&mut self, _by: Duration) {
         unimplemented!("host::testing::boot::BootRun::advance")
     }
 
     /// Pumps the host for up to `budget` and returns the time it took.
-    pub fn timed_pump(&mut self, budget: Duration) -> Duration {
+    pub fn timed_pump(&mut self, _budget: Duration) -> Duration {
         unimplemented!("host::testing::boot::BootRun::timed_pump")
     }
 
@@ -304,7 +292,7 @@ impl BootRun {
     }
 
     /// How often `deactivate` was called on a plugin.
-    pub fn deactivate_calls(&self, id: &str) -> usize {
+    pub fn deactivate_calls(&self, _id: &str) -> usize {
         unimplemented!("host::testing::boot::BootRun::deactivate_calls")
     }
 
@@ -346,42 +334,42 @@ impl BootRun {
     // ---- Plugin state ---------------------------------------------------------------------
 
     /// The state of one side of a plugin.
-    pub fn side_state(&self, id: &str, side: Side) -> SideState {
+    pub fn side_state(&self, _id: &str, _side: Side) -> SideState {
         unimplemented!("host::testing::boot::BootRun::side_state")
     }
 
     /// The state of a plugin's client side in one client.
-    pub fn client_side_state(&self, client: ClientId, id: &str) -> SideState {
+    pub fn client_side_state(&self, _client: ClientId, _id: &str) -> SideState {
         unimplemented!("host::testing::boot::BootRun::client_side_state")
     }
 
     /// How often a plugin was instantiated.
-    pub fn instantiations(&self, id: &str) -> u32 {
+    pub fn instantiations(&self, _id: &str) -> u32 {
         unimplemented!("host::testing::boot::BootRun::instantiations")
     }
 
     /// How often a plugin was instantiated in the parent process.
-    pub fn parent_instantiations(&self, id: &str) -> u32 {
+    pub fn parent_instantiations(&self, _id: &str) -> u32 {
         unimplemented!("host::testing::boot::BootRun::parent_instantiations")
     }
 
     /// How often a plugin was instantiated in the helper process.
-    pub fn helper_instantiations(&self, id: &str) -> u32 {
+    pub fn helper_instantiations(&self, _id: &str) -> u32 {
         unimplemented!("host::testing::boot::BootRun::helper_instantiations")
     }
 
     /// Why a plugin is disabled, if it is.
-    pub fn disabled_reason(&self, id: &str) -> Option<String> {
+    pub fn disabled_reason(&self, _id: &str) -> Option<String> {
         unimplemented!("host::testing::boot::BootRun::disabled_reason")
     }
 
     /// Disables a plugin.
-    pub fn disable(&mut self, id: &str) {
+    pub fn disable(&mut self, _id: &str) {
         unimplemented!("host::testing::boot::BootRun::disable")
     }
 
     /// Enables a plugin.
-    pub fn enable(&mut self, id: &str) {
+    pub fn enable(&mut self, _id: &str) {
         unimplemented!("host::testing::boot::BootRun::enable")
     }
 
@@ -391,121 +379,121 @@ impl BootRun {
     }
 
     /// Whether the off-effect row of a disabled core plugin holds.
-    pub fn off_effect_holds(&self, name: &str) -> bool {
+    pub fn off_effect_holds(&self, _name: &str) -> bool {
         unimplemented!("host::testing::boot::BootRun::off_effect_holds")
     }
 
     /// The grants a plugin holds.
-    pub fn granted(&self, id: &str) -> Vec<String> {
+    pub fn granted(&self, _id: &str) -> Vec<String> {
         unimplemented!("host::testing::boot::BootRun::granted")
     }
 
     /// Revokes one grant of a plugin.
-    pub fn revoke_grant(&mut self, id: &str, grant: &str) {
+    pub fn revoke_grant(&mut self, _id: &str, _grant: &str) {
         unimplemented!("host::testing::boot::BootRun::revoke_grant")
     }
 
     /// The effective value of a plugin's limit.
-    pub fn effective_limit(&self, id: &str, key: &str) -> u64 {
+    pub fn effective_limit(&self, _id: &str, _key: &str) -> u64 {
         unimplemented!("host::testing::boot::BootRun::effective_limit")
     }
 
     /// Changes a plugin's limit at runtime.
-    pub fn change_limit(&mut self, key: &str, value: u64) {
+    pub fn change_limit(&mut self, _key: &str, _value: u64) {
         unimplemented!("host::testing::boot::BootRun::change_limit")
     }
 
     /// The events a plugin received.
-    pub fn plugin_events(&self, id: &str) -> Vec<String> {
+    pub fn plugin_events(&self, _id: &str) -> Vec<String> {
         unimplemented!("host::testing::boot::BootRun::plugin_events")
     }
 
     /// The outcomes a plugin has not yet received.
-    pub fn pending_outcomes(&self, id: &str) -> Vec<String> {
+    pub fn pending_outcomes(&self, _id: &str) -> Vec<String> {
         unimplemented!("host::testing::boot::BootRun::pending_outcomes")
     }
 
     /// Leaves `count` requests of a plugin pending.
-    pub fn leave_requests_pending(&mut self, id: &str, count: usize) {
+    pub fn leave_requests_pending(&mut self, _id: &str, _count: usize) {
         unimplemented!("host::testing::boot::BootRun::leave_requests_pending")
     }
 
     /// Submits an intent from a plugin and returns the outcome word.
-    pub fn submit_from(&mut self, id: &str) -> String {
+    pub fn submit_from(&mut self, _id: &str) -> String {
         unimplemented!("host::testing::boot::BootRun::submit_from")
     }
 
     /// Makes one side of a plugin trap.
-    pub fn trap_in(&mut self, id: &str, side: Side) {
+    pub fn trap_in(&mut self, _id: &str, _side: Side) {
         unimplemented!("host::testing::boot::BootRun::trap_in")
     }
 
     /// Makes a plugin's client side trap in one client.
-    pub fn trap_in_client(&mut self, client: ClientId, id: &str) {
+    pub fn trap_in_client(&mut self, _client: ClientId, _id: &str) {
         unimplemented!("host::testing::boot::BootRun::trap_in_client")
     }
 
     /// Makes one side of a plugin fail until the host disables it.
-    pub fn fail_until_disabled(&mut self, id: &str, side: Side) {
+    pub fn fail_until_disabled(&mut self, _id: &str, _side: Side) {
         unimplemented!("host::testing::boot::BootRun::fail_until_disabled")
     }
 
     /// Makes a plugin's client side fail in one client until disabled there.
-    pub fn fail_until_disabled_in_client(&mut self, client: ClientId, id: &str) {
+    pub fn fail_until_disabled_in_client(&mut self, _client: ClientId, _id: &str) {
         unimplemented!("host::testing::boot::BootRun::fail_until_disabled_in_client")
     }
 
     /// Fires an activation trigger.
-    pub fn fire_trigger(&mut self, trigger: &str) {
+    pub fn fire_trigger(&mut self, _trigger: &str) {
         unimplemented!("host::testing::boot::BootRun::fire_trigger")
     }
 
     /// Whether a kernel command still works.
-    pub fn command_works(&mut self, command: &str) -> bool {
+    pub fn command_works(&mut self, _command: &str) -> bool {
         unimplemented!("host::testing::boot::BootRun::command_works")
     }
 
     /// A plugin tries to unregister a kernel command.
     pub fn plugin_tries_to_unregister_command(
         &mut self,
-        id: &str,
-        command: &str,
+        _id: &str,
+        _command: &str,
     ) -> Result<(), PluginError> {
         unimplemented!("host::testing::boot::BootRun::plugin_tries_to_unregister_command")
     }
 
     /// The queue depth of one side of a plugin.
-    pub fn queue_depth(&self, id: &str, side: Side) -> usize {
+    pub fn queue_depth(&self, _id: &str, _side: Side) -> usize {
         unimplemented!("host::testing::boot::BootRun::queue_depth")
     }
 
     /// The quota bucket level of one side of a plugin.
-    pub fn quota_bucket(&self, id: &str, side: Side) -> i64 {
+    pub fn quota_bucket(&self, _id: &str, _side: Side) -> i64 {
         unimplemented!("host::testing::boot::BootRun::quota_bucket")
     }
 
     /// The tree size a plugin saw on activate.
-    pub fn tree_seen_on_activate(&self, id: &str) -> usize {
+    pub fn tree_seen_on_activate(&self, _id: &str) -> usize {
         unimplemented!("host::testing::boot::BootRun::tree_seen_on_activate")
     }
 
     /// The tree-changed batches a plugin received.
-    pub fn tree_changed_batches(&self, id: &str) -> usize {
+    pub fn tree_changed_batches(&self, _id: &str) -> usize {
         unimplemented!("host::testing::boot::BootRun::tree_changed_batches")
     }
 
     /// The nodes across the tree-changed batches a plugin received.
-    pub fn tree_changed_nodes(&self, id: &str) -> usize {
+    pub fn tree_changed_nodes(&self, _id: &str) -> usize {
         unimplemented!("host::testing::boot::BootRun::tree_changed_nodes")
     }
 
     /// The restore-step events a plugin received.
-    pub fn restore_step_events(&self, id: &str) -> usize {
+    pub fn restore_step_events(&self, _id: &str) -> usize {
         unimplemented!("host::testing::boot::BootRun::restore_step_events")
     }
 
     /// Delivers `nodes` nodes of tree traffic to a plugin.
-    pub fn deliver_tree_traffic(&mut self, id: &str, nodes: usize) {
+    pub fn deliver_tree_traffic(&mut self, _id: &str, _nodes: usize) {
         unimplemented!("host::testing::boot::BootRun::deliver_tree_traffic")
     }
 
@@ -515,24 +503,24 @@ impl BootRun {
     }
 
     /// The install-time file-hash check codes of a plugin (HST-045).
-    pub fn verify_install_hashes(&mut self, id: &str) -> Vec<String> {
+    pub fn verify_install_hashes(&mut self, _id: &str) -> Vec<String> {
         unimplemented!("host::testing::boot::BootRun::verify_install_hashes")
     }
 
     // ---- Processes, hosts and engines -----------------------------------------------------
 
     /// The process hosting one side of a plugin.
-    pub fn host_process(&self, id: &str, side: Side) -> ProcessKind {
+    pub fn host_process(&self, _id: &str, _side: Side) -> ProcessKind {
         unimplemented!("host::testing::boot::BootRun::host_process")
     }
 
     /// The process hosting one side of a plugin for one client.
-    pub fn host_process_of_client(&self, id: &str, side: Side, client: ClientId) -> ProcessKind {
+    pub fn host_process_of_client(&self, _id: &str, _side: Side, _client: ClientId) -> ProcessKind {
         unimplemented!("host::testing::boot::BootRun::host_process_of_client")
     }
 
     /// How many hosts run one side of a plugin.
-    pub fn hosts_of(&self, id: &str, side: Side) -> usize {
+    pub fn hosts_of(&self, _id: &str, _side: Side) -> usize {
         unimplemented!("host::testing::boot::BootRun::hosts_of")
     }
 
@@ -567,62 +555,62 @@ impl BootRun {
     }
 
     /// The engine a store belongs to.
-    pub fn engine_of_store(&self, store: u64) -> u64 {
+    pub fn engine_of_store(&self, _store: u64) -> u64 {
         unimplemented!("host::testing::boot::BootRun::engine_of_store")
     }
 
     /// The store ids of one side of a plugin.
-    pub fn store_ids(&self, id: &str, side: Side) -> Vec<u64> {
+    pub fn store_ids(&self, _id: &str, _side: Side) -> Vec<u64> {
         unimplemented!("host::testing::boot::BootRun::store_ids")
     }
 
     /// The store ids of a plugin's job instances.
-    pub fn job_store_ids(&self, id: &str) -> Vec<u64> {
+    pub fn job_store_ids(&self, _id: &str) -> Vec<u64> {
         unimplemented!("host::testing::boot::BootRun::job_store_ids")
     }
 
     /// Starts `count` jobs of a plugin.
-    pub fn start_jobs(&mut self, id: &str, count: usize) {
+    pub fn start_jobs(&mut self, _id: &str, _count: usize) {
         unimplemented!("host::testing::boot::BootRun::start_jobs")
     }
 
     /// Completes one job of a plugin.
-    pub fn complete_one_job(&mut self, id: &str) {
+    pub fn complete_one_job(&mut self, _id: &str) {
         unimplemented!("host::testing::boot::BootRun::complete_one_job")
     }
 
     /// Live, queued and peak job counts of a plugin.
-    pub fn job_stats(&self, id: &str) -> JobStats {
+    pub fn job_stats(&self, _id: &str) -> JobStats {
         unimplemented!("host::testing::boot::BootRun::job_stats")
     }
 
     /// The memory base of job `index` of a plugin.
-    pub fn job_memory_base(&self, id: &str, index: usize) -> u64 {
+    pub fn job_memory_base(&self, _id: &str, _index: usize) -> u64 {
         unimplemented!("host::testing::boot::BootRun::job_memory_base")
     }
 
     /// The memory base of a plugin's main instance.
-    pub fn main_memory_base(&self, id: &str) -> u64 {
+    pub fn main_memory_base(&self, _id: &str) -> u64 {
         unimplemented!("host::testing::boot::BootRun::main_memory_base")
     }
 
     /// The worker bank job `index` of a plugin runs on.
-    pub fn job_worker_bank(&self, id: &str, index: usize) -> String {
+    pub fn job_worker_bank(&self, _id: &str, _index: usize) -> String {
         unimplemented!("host::testing::boot::BootRun::job_worker_bank")
     }
 
     /// The thread a plugin's scene frames render on.
-    pub fn scene_frame_thread(&self, id: &str) -> u64 {
+    pub fn scene_frame_thread(&self, _id: &str) -> u64 {
         unimplemented!("host::testing::boot::BootRun::scene_frame_thread")
     }
 
     /// Starts a plugin's scene instance.
-    pub fn start_scene_instance(&mut self, id: &str) {
+    pub fn start_scene_instance(&mut self, _id: &str) {
         unimplemented!("host::testing::boot::BootRun::start_scene_instance")
     }
 
     /// Delays every scene frame by `delay`.
-    pub fn set_scene_frame_delay(&mut self, delay: Duration) {
+    pub fn set_scene_frame_delay(&mut self, _delay: Duration) {
         unimplemented!("host::testing::boot::BootRun::set_scene_frame_delay")
     }
 
@@ -637,12 +625,12 @@ impl BootRun {
     }
 
     /// Composes one client frame.
-    pub fn compose_client_frame(&mut self, client: ClientId) -> ComposedFrame {
+    pub fn compose_client_frame(&mut self, _client: ClientId) -> ComposedFrame {
         unimplemented!("host::testing::boot::BootRun::compose_client_frame")
     }
 
     /// Runs a CLI command of a plugin.
-    pub fn run_cli(&mut self, id: &str, command: &str) -> CliRun {
+    pub fn run_cli(&mut self, _id: &str, _command: &str) -> CliRun {
         unimplemented!("host::testing::boot::BootRun::run_cli")
     }
 
@@ -652,7 +640,7 @@ impl BootRun {
     }
 
     /// A CLI process calls `tree.import` on a plugin.
-    pub fn cli_call_tree_import(&mut self, id: &str) -> Result<(), PluginError> {
+    pub fn cli_call_tree_import(&mut self, _id: &str) -> Result<(), PluginError> {
         unimplemented!("host::testing::boot::BootRun::cli_call_tree_import")
     }
 
@@ -666,39 +654,39 @@ impl BootRun {
     /// Connects a client, retrying for `budget` with `interval` between tries.
     pub fn client_connect_with_retry(
         &mut self,
-        budget: Duration,
-        interval: Duration,
+        _budget: Duration,
+        _interval: Duration,
     ) -> Result<ClientId, Code> {
         unimplemented!("host::testing::boot::BootRun::client_connect_with_retry")
     }
 
     /// A client exits.
-    pub fn client_exit(&mut self, client: ClientId) {
+    pub fn client_exit(&mut self, _client: ClientId) {
         unimplemented!("host::testing::boot::BootRun::client_exit")
     }
 
     /// Shuts a client down and returns how long it took.
-    pub fn client_shutdown(&mut self, client: ClientId) -> Duration {
+    pub fn client_shutdown(&mut self, _client: ClientId) -> Duration {
         unimplemented!("host::testing::boot::BootRun::client_shutdown")
     }
 
     /// The events the client-side plugins of a client saw.
-    pub fn events_seen_by_client_plugins(&self, client: ClientId) -> Vec<String> {
+    pub fn events_seen_by_client_plugins(&self, _client: ClientId) -> Vec<String> {
         unimplemented!("host::testing::boot::BootRun::events_seen_by_client_plugins")
     }
 
     /// The notices shown to a client.
-    pub fn notices_for_client(&self, client: ClientId) -> Vec<String> {
+    pub fn notices_for_client(&self, _client: ClientId) -> Vec<String> {
         unimplemented!("host::testing::boot::BootRun::notices_for_client")
     }
 
     /// Delivers a pending outcome to a client; true when one was delivered.
-    pub fn deliver_outcome_to_client(&mut self, client: ClientId) -> bool {
+    pub fn deliver_outcome_to_client(&mut self, _client: ClientId) -> bool {
         unimplemented!("host::testing::boot::BootRun::deliver_outcome_to_client")
     }
 
     /// How often the recovery page opened in a client.
-    pub fn recovery_page_opens(&self, client: ClientId) -> u32 {
+    pub fn recovery_page_opens(&self, _client: ClientId) -> u32 {
         unimplemented!("host::testing::boot::BootRun::recovery_page_opens")
     }
 
@@ -708,12 +696,12 @@ impl BootRun {
     }
 
     /// The contributions a client's replica holds.
-    pub fn replica_contributions(&self, client: ClientId) -> Vec<Contribution> {
+    pub fn replica_contributions(&self, _client: ClientId) -> Vec<Contribution> {
         unimplemented!("host::testing::boot::BootRun::replica_contributions")
     }
 
     /// The IPC message kind a client's replica was built from.
-    pub fn replica_source(&self, client: ClientId) -> String {
+    pub fn replica_source(&self, _client: ClientId) -> String {
         unimplemented!("host::testing::boot::BootRun::replica_source")
     }
 
@@ -730,27 +718,27 @@ impl BootRun {
     }
 
     /// A client-side plugin registers an extension point.
-    pub fn client_registers_point(&mut self, point: &str) {
+    pub fn client_registers_point(&mut self, _point: &str) {
         unimplemented!("host::testing::boot::BootRun::client_registers_point")
     }
 
     /// A client-side plugin registers a service.
-    pub fn client_registers_service(&mut self, service: &str) {
+    pub fn client_registers_service(&mut self, _service: &str) {
         unimplemented!("host::testing::boot::BootRun::client_registers_service")
     }
 
     /// A server-side plugin registers an extension point.
-    pub fn server_registers_point(&mut self, point: &str) {
+    pub fn server_registers_point(&mut self, _point: &str) {
         unimplemented!("host::testing::boot::BootRun::server_registers_point")
     }
 
     /// Whether the server registry holds a point.
-    pub fn server_sees_point(&self, point: &str) -> bool {
+    pub fn server_sees_point(&self, _point: &str) -> bool {
         unimplemented!("host::testing::boot::BootRun::server_sees_point")
     }
 
     /// Whether the server registry holds a service.
-    pub fn server_sees_service(&self, service: &str) -> bool {
+    pub fn server_sees_service(&self, _service: &str) -> bool {
         unimplemented!("host::testing::boot::BootRun::server_sees_service")
     }
 
@@ -762,12 +750,12 @@ impl BootRun {
     }
 
     /// Types into a kernel pane.
-    pub fn kernel_type(&mut self, pane: u64, text: &str) {
+    pub fn kernel_type(&mut self, _pane: u64, _text: &str) {
         unimplemented!("host::testing::boot::BootRun::kernel_type")
     }
 
     /// The screen of a kernel pane.
-    pub fn kernel_screen(&self, pane: u64) -> String {
+    pub fn kernel_screen(&self, _pane: u64) -> String {
         unimplemented!("host::testing::boot::BootRun::kernel_screen")
     }
 
@@ -787,22 +775,22 @@ impl BootRun {
     }
 
     /// Changes a kernel setting.
-    pub fn change_kernel_setting(&mut self, key: &str, value: &str) {
+    pub fn change_kernel_setting(&mut self, _key: &str, _value: &str) {
         unimplemented!("host::testing::boot::BootRun::change_kernel_setting")
     }
 
     /// Changes a plugin setting.
-    pub fn change_plugin_setting(&mut self, id: &str, key: &str, value: &str) {
+    pub fn change_plugin_setting(&mut self, _id: &str, _key: &str, _value: &str) {
         unimplemented!("host::testing::boot::BootRun::change_plugin_setting")
     }
 
     /// Changes a key binding.
-    pub fn change_key_binding(&mut self, key: &str, action: &str) {
+    pub fn change_key_binding(&mut self, _key: &str, _action: &str) {
         unimplemented!("host::testing::boot::BootRun::change_key_binding")
     }
 
     /// Changes the HTTP API port.
-    pub fn change_http_port(&mut self, port: u16) {
+    pub fn change_http_port(&mut self, _port: u16) {
         unimplemented!("host::testing::boot::BootRun::change_http_port")
     }
 
@@ -817,12 +805,12 @@ impl BootRun {
     }
 
     /// The status of an HTTP API request.
-    pub fn http_status(&mut self, method: &str, path: &str) -> u16 {
+    pub fn http_status(&mut self, _method: &str, _path: &str) -> u16 {
         unimplemented!("host::testing::boot::BootRun::http_status")
     }
 
     /// A value in a plugin's store.
-    pub fn stored_data(&self, id: &str, key: &str) -> Option<String> {
+    pub fn stored_data(&self, _id: &str, _key: &str) -> Option<String> {
         unimplemented!("host::testing::boot::BootRun::stored_data")
     }
 }

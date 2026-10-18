@@ -8,6 +8,7 @@ use proptest::prelude::*;
 use serde_json::Value;
 
 use crate::common::*;
+use crate::feature_only::*;
 
 /// A host whose own session `default` holds two agents (working, idle) and one shell.
 /// Returns (host, working agent, idle agent, shell).

@@ -1,6 +1,5 @@
 //! Shared helpers of the parity lane: a booted `ServerKernel` world (gap constructors, see
 //! API_GAPS.md), intent builders and the run-in-both-modes comparison.
-#![allow(dead_code)]
 
 use std::fmt::Debug;
 use std::path::{Path, PathBuf};
@@ -112,26 +111,6 @@ pub fn terminal(
             content_kind: "ilium.terminal".to_owned(),
             cwd: None,
             command: Some(command.iter().map(|part| (*part).to_owned()).collect()),
-            initial_input: None,
-        }),
-    ))
-}
-
-/// A pane of an arbitrary content kind ("ilium.editor", "ilium.board").
-pub fn pane_of_kind(
-    kernel: &ServerKernel,
-    parent: Option<NodeId>,
-    title: &str,
-    kind: &str,
-) -> NodeId {
-    created(apply(
-        kernel,
-        Intent::CreatePane(CreatePaneSpec {
-            parent,
-            title: title.to_owned(),
-            content_kind: kind.to_owned(),
-            cwd: None,
-            command: None,
             initial_input: None,
         }),
     ))

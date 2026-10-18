@@ -2,7 +2,8 @@
 
 use ilium_plugin_sdk::testing::assert_golden;
 
-use crate::common::{board_host, draw, rows_of, workspace_root, SAMPLE_BOARD};
+use crate::common::{board_host, draw, rows_of, SAMPLE_BOARD};
+use crate::doc_support::{page_text, workspace_root};
 
 fn golden_path(name: &str) -> String {
     workspace_root()
@@ -14,7 +15,7 @@ fn golden_path(name: &str) -> String {
 
 /// The first `pre.term` block of the page (the board figure), HTML-unescaped.
 fn page_board_figure() -> String {
-    let page = crate::common::page_text();
+    let page = page_text();
     let start = page.find("<pre class=\"term\">").expect("figure") + "<pre class=\"term\">".len();
     let end = page[start..].find("</pre>").expect("figure end");
     page[start..start + end].to_string()

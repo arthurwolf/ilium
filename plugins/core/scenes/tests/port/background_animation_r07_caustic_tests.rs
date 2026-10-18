@@ -1,7 +1,5 @@
 //! Twins of the original tests of ilium-client/src/background_animation/r07_caustic_tests.rs (ported through FakeScene / FakeSession).
 use crate::common::*;
-#[allow(unused_imports)]
-use serde_json::json;
 
 /// REQ: PORT:ilium-client/src/background_animation/r07_caustic_tests.rs::r07_full_frame_oracle_and_all_preparation_keys
 #[test]

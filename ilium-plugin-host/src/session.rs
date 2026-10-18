@@ -30,7 +30,7 @@ impl Default for SessionLimits {
 
 impl SessionLimits {
     /// The defaults overridden by the user's `(key, value)` settings; higher values are clamped.
-    pub fn from_user(settings: &[(&str, u64)]) -> SessionLimits {
+    pub fn from_user(_settings: &[(&str, u64)]) -> SessionLimits {
         unimplemented!("host::session::SessionLimits::from_user")
     }
 }

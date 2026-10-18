@@ -58,7 +58,7 @@ pub struct Trap {
 }
 
 /// The deadline of a call class under the resolved limits (reference-runtime-model.md).
-pub fn deadline_for(class: CallClass, limits: &ResolvedLimits) -> Duration {
+pub fn deadline_for(_class: CallClass, _limits: &ResolvedLimits) -> Duration {
     unimplemented!("host::calls::deadline_for")
 }
 
@@ -80,20 +80,20 @@ pub enum BreachVerdict {
 
 /// Classifies an elapsed time against the class deadline (reference-host-scheduling.md HST-189).
 pub fn evaluate_breach(
-    class: CallClass,
-    elapsed: Duration,
-    limits: &ResolvedLimits,
+    _class: CallClass,
+    _elapsed: Duration,
+    _limits: &ResolvedLimits,
 ) -> BreachVerdict {
     unimplemented!("host::calls::evaluate_breach")
 }
 
 /// The call class of an event batch: `Command` when a command invocation is present (HST-192).
-pub fn batch_call_class(batch: &[ilium_plugin_api::generated::types::events::Event]) -> CallClass {
+pub fn batch_call_class(_batch: &[ilium_plugin_api::generated::types::events::Event]) -> CallClass {
     unimplemented!("host::calls::batch_call_class")
 }
 
 /// How many late calls in a row trap the instance, if the class has a streak limit (HST-190).
-pub fn streak_limit(class: CallClass) -> Option<u32> {
+pub fn streak_limit(_class: CallClass) -> Option<u32> {
     unimplemented!("host::calls::streak_limit")
 }
 
@@ -106,12 +106,12 @@ pub struct StreakCounter {
 
 impl StreakCounter {
     /// A counter for one class.
-    pub fn new(class: CallClass) -> StreakCounter {
+    pub fn new(_class: CallClass) -> StreakCounter {
         unimplemented!("host::calls::StreakCounter::new")
     }
 
     /// Records one call; returns true when the streak limit is reached (trap the instance).
-    pub fn record(&mut self, timely: bool) -> bool {
+    pub fn record(&mut self, _timely: bool) -> bool {
         unimplemented!("host::calls::StreakCounter::record")
     }
 }
@@ -128,17 +128,17 @@ pub struct CallBudget {
 
 impl CallBudget {
     /// A budget for one call of `class` under `limits`.
-    pub fn new(class: CallClass, limits: &ResolvedLimits) -> CallBudget {
+    pub fn new(_class: CallClass, _limits: &ResolvedLimits) -> CallBudget {
         unimplemented!("host::calls::CallBudget::new")
     }
 
     /// Guest code ran for `ms`.
-    pub fn guest_ms(&mut self, ms: u64) {
+    pub fn guest_ms(&mut self, _ms: u64) {
         unimplemented!("host::calls::CallBudget::guest_ms")
     }
 
     /// A host import ran for `ms` (not charged).
-    pub fn import_ms(&mut self, ms: u64) {
+    pub fn import_ms(&mut self, _ms: u64) {
         unimplemented!("host::calls::CallBudget::import_ms")
     }
 
@@ -148,7 +148,7 @@ impl CallBudget {
     }
 
     /// Time passed after the return (not charged).
-    pub fn post_return_ms(&mut self, ms: u64) {
+    pub fn post_return_ms(&mut self, _ms: u64) {
         unimplemented!("host::calls::CallBudget::post_return_ms")
     }
 
@@ -163,12 +163,12 @@ impl CallBudget {
     }
 
     /// A gap between scheduler ticks of `ms` (a suspended machine is not charged, HST-196).
-    pub fn tick_gap(&mut self, ms: u64) {
+    pub fn tick_gap(&mut self, _ms: u64) {
         unimplemented!("host::calls::CallBudget::tick_gap")
     }
 }
 
 /// The number of engine epoch ticks a deadline of `ms` milliseconds spans (reference-host-runtime.md).
-pub fn deadline_ticks(ms: u64) -> u64 {
+pub fn deadline_ticks(_ms: u64) -> u64 {
     unimplemented!("host::calls::deadline_ticks")
 }

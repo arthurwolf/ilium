@@ -40,38 +40,36 @@ pub struct ShutdownReport {
 
 /// Owns the instances of all plugins (reference-runtime-model.md).
 #[derive(Debug)]
-pub struct LifecycleManager {
-    mode: StartMode,
-}
+pub struct LifecycleManager;
 
 impl LifecycleManager {
     /// Starts plugins in dependency order, core first (reference-host-architecture.md).
-    pub fn start(&self, mode: StartMode) -> StartReport {
+    pub fn start(&self, _mode: StartMode) -> StartReport {
         unimplemented!("host::lifecycle::LifecycleManager::start")
     }
 
     /// Deactivates everything within the budget, reverse of start order.
-    pub fn shutdown(&self, budget: Duration) -> ShutdownReport {
+    pub fn shutdown(&self, _budget: Duration) -> ShutdownReport {
         unimplemented!("host::lifecycle::LifecycleManager::shutdown")
     }
 
     /// Enables a plugin and starts it.
-    pub fn enable(&self, plugin: &PluginId) -> Result<(), HostError> {
+    pub fn enable(&self, _plugin: &PluginId) -> Result<(), HostError> {
         unimplemented!("host::lifecycle::LifecycleManager::enable")
     }
 
     /// Disables a plugin and stops it.
-    pub fn disable(&self, plugin: &PluginId) -> Result<(), HostError> {
+    pub fn disable(&self, _plugin: &PluginId) -> Result<(), HostError> {
         unimplemented!("host::lifecycle::LifecycleManager::disable")
     }
 
     /// The state of one side of a plugin.
-    pub fn state_of(&self, plugin: &PluginId, side: Side) -> SideState {
+    pub fn state_of(&self, _plugin: &PluginId, _side: Side) -> SideState {
         unimplemented!("host::lifecycle::LifecycleManager::state_of")
     }
 
     /// The `plugin-info` record of a plugin.
-    pub fn plugin_info(&self, plugin: &PluginId) -> Option<PluginInfo> {
+    pub fn plugin_info(&self, _plugin: &PluginId) -> Option<PluginInfo> {
         unimplemented!("host::lifecycle::LifecycleManager::plugin_info")
     }
 }
@@ -100,7 +98,10 @@ pub struct UsageError {
 
 /// Resolves `--no-plugins`, `--safe-mode=<value>` and the environment into a safe mode
 /// (reference-security-response.md).
-pub fn resolve_safe_mode(args: &[String], env_value: Option<&str>) -> Result<SafeMode, UsageError> {
+pub fn resolve_safe_mode(
+    _args: &[String],
+    _env_value: Option<&str>,
+) -> Result<SafeMode, UsageError> {
     unimplemented!("host::lifecycle::resolve_safe_mode")
 }
 
@@ -122,13 +123,13 @@ pub struct StartNode {
 
 /// The activation order: requirements first, ties by (tier, id byte order); a cycle is a
 /// diagnostic (PKG-350).
-pub fn start_order(nodes: &[StartNode]) -> Result<Vec<String>, Vec<ilium_plugin_api::Diagnostic>> {
+pub fn start_order(_nodes: &[StartNode]) -> Result<Vec<String>, Vec<ilium_plugin_api::Diagnostic>> {
     unimplemented!("host::lifecycle::start_order")
 }
 
 /// The shutdown order: the exact reverse of [`start_order`] (PKG-351).
 pub fn shutdown_order(
-    nodes: &[StartNode],
+    _nodes: &[StartNode],
 ) -> Result<Vec<String>, Vec<ilium_plugin_api::Diagnostic>> {
     unimplemented!("host::lifecycle::shutdown_order")
 }

@@ -25,10 +25,10 @@ pub struct ComponentSummary {
 /// (ABI-004), imports against grants (ABI-023), forbidden WASI (`component.wasi-forbidden`)
 /// and unstable imports (ABI-022). Returns every finding in refusal order.
 pub fn check_component(
-    manifest: &Manifest,
-    side: Side,
-    component: &ComponentSummary,
-    context: &ValidationContext,
+    _manifest: &Manifest,
+    _side: Side,
+    _component: &ComponentSummary,
+    _context: &ValidationContext,
 ) -> Vec<Diagnostic> {
     unimplemented!("api::manifest::check_component")
 }

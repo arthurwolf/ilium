@@ -3,7 +3,8 @@
 
 use serde_json::Value;
 
-use crate::common::{golden_path, page, page_text};
+use crate::feature_only::{golden_path, page_text};
+use crate::manual_pages::page;
 
 /// The figure blocks (`<pre class="term">`) of the page with the markup removed.
 fn figures(page: &str) -> Vec<String> {
@@ -243,9 +244,10 @@ fn doc_036_the_notifications_handoff_sample_uses_the_agent_question_channel() {
 /// REQ: F-058
 #[test]
 fn doc_058_the_automation_doc_lists_the_four_request_fields() {
-    let automation =
-        std::fs::read_to_string(crate::common::workspace_root().join("src/docs/automation.md"))
-            .expect("doc");
+    let automation = std::fs::read_to_string(
+        crate::manual_pages::workspace_root().join("src/docs/automation.md"),
+    )
+    .expect("doc");
     for field in ["`agent_type`", "`project`", "`prompt`", "`workspace`"] {
         assert!(automation.contains(field), "{field}");
     }

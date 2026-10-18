@@ -4,7 +4,7 @@
 use ilium_plugin_api::grants::Grant;
 
 /// The display name of a grant string, as the review dialog shows it.
-pub fn display_name(grant: &str) -> String {
+pub fn display_name(_grant: &str) -> String {
     unimplemented!("host::review::display_name")
 }
 
@@ -26,7 +26,7 @@ pub struct Row {
 }
 
 /// The review rows of a grant list, ordered as the dialog shows them.
-pub fn review_rows(grants: &[Grant]) -> Vec<Row> {
+pub fn review_rows(_grants: &[Grant]) -> Vec<Row> {
     unimplemented!("host::review::review_rows")
 }
 
@@ -71,29 +71,27 @@ pub struct UpdateReview {
 }
 
 /// The update review from the grants held before to the grants the new version lists.
-pub fn update_review(before: &[Grant], after: &[Grant]) -> UpdateReview {
+pub fn update_review(_before: &[Grant], _after: &[Grant]) -> UpdateReview {
     unimplemented!("host::review::update_review")
 }
 
 /// The scroll indicator of a long review (`3 of 12`).
-pub fn scroll_indicator(position: usize, total: usize) -> String {
+pub fn scroll_indicator(_position: usize, _total: usize) -> String {
     unimplemented!("host::review::scroll_indicator")
 }
 
 /// Counts declines per plugin and grant and silences repeated consent prompts (SEC-110).
 #[derive(Debug, Clone, Default)]
-pub struct DeclineCounter {
-    declines: std::collections::BTreeMap<(String, String), u32>,
-}
+pub struct DeclineCounter;
 
 impl DeclineCounter {
     /// Records one decline of `grant` by `plugin`'s prompt.
-    pub fn record_decline(&mut self, plugin: &str, grant: &str) {
+    pub fn record_decline(&mut self, _plugin: &str, _grant: &str) {
         unimplemented!("host::review::DeclineCounter::record_decline")
     }
 
     /// Whether further prompts of `plugin` for `grant` are silenced.
-    pub fn is_silenced(&self, plugin: &str, grant: &str) -> bool {
+    pub fn is_silenced(&self, _plugin: &str, _grant: &str) -> bool {
         unimplemented!("host::review::DeclineCounter::is_silenced")
     }
 }
@@ -108,6 +106,6 @@ pub enum GrantGroup {
 }
 
 /// The review group of a grant string, if it belongs to one.
-pub fn grant_group(grant: &str) -> Option<GrantGroup> {
+pub fn grant_group(_grant: &str) -> Option<GrantGroup> {
     unimplemented!("host::review::grant_group")
 }

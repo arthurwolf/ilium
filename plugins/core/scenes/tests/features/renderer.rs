@@ -1,5 +1,6 @@
 //! Renderer lifecycle shared by all scenes (api-scenes.md, COR-011).
 use crate::common::*;
+use crate::feature_support::*;
 use serde_json::json;
 
 /// REQ: COR-011, F-096

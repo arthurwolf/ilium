@@ -19,78 +19,78 @@ impl HostEditor for EditorImport {
         unimplemented!("host::imports::editor::buffers")
     }
 
-    fn buffer_for_pane(&mut self, pane: NodeId) -> Option<BufferRef> {
+    fn buffer_for_pane(&mut self, _pane: NodeId) -> Option<BufferRef> {
         unimplemented!("host::imports::editor::buffer_for_pane")
     }
 
     fn read_lines(
         &mut self,
-        buffer: BufferId,
-        first_line: u32,
-        count: u32,
+        _buffer: BufferId,
+        _first_line: u32,
+        _count: u32,
     ) -> Result<Vec<String>, PluginError> {
         unimplemented!("host::imports::editor::read_lines")
     }
 
-    fn selections(&mut self, buffer: BufferId) -> Vec<TextRange> {
+    fn selections(&mut self, _buffer: BufferId) -> Vec<TextRange> {
         unimplemented!("host::imports::editor::selections")
     }
 
     fn set_decorations(
         &mut self,
-        buffer: BufferId,
-        layer: String,
-        items: Vec<RangeDecoration>,
+        _buffer: BufferId,
+        _layer: String,
+        _items: Vec<RangeDecoration>,
     ) -> Result<(), PluginError> {
         unimplemented!("host::imports::editor::set_decorations")
     }
 
     fn set_gutter(
         &mut self,
-        buffer: BufferId,
-        layer: String,
-        marks: Vec<GutterMark>,
+        _buffer: BufferId,
+        _layer: String,
+        _marks: Vec<GutterMark>,
     ) -> Result<(), PluginError> {
         unimplemented!("host::imports::editor::set_gutter")
     }
 
     fn create_buffer(
         &mut self,
-        initial: String,
-        language: Option<String>,
+        _initial: String,
+        _language: Option<String>,
     ) -> Result<BufferId, PluginError> {
         unimplemented!("host::imports::editor::create_buffer")
     }
 
-    fn load_file(&mut self, path: FsPath) -> Result<RequestId, PluginError> {
+    fn load_file(&mut self, _path: FsPath) -> Result<RequestId, PluginError> {
         unimplemented!("host::imports::editor::load_file")
     }
 
-    fn take_buffer(&mut self, request: RequestId) -> Option<BufferId> {
+    fn take_buffer(&mut self, _request: RequestId) -> Option<BufferId> {
         unimplemented!("host::imports::editor::take_buffer")
     }
 
     fn save_buffer(
         &mut self,
-        buffer: BufferId,
-        path: Option<FsPath>,
+        _buffer: BufferId,
+        _path: Option<FsPath>,
     ) -> Result<RequestId, PluginError> {
         unimplemented!("host::imports::editor::save_buffer")
     }
 
-    fn close_buffer(&mut self, buffer: BufferId) {
+    fn close_buffer(&mut self, _buffer: BufferId) {
         unimplemented!("host::imports::editor::close_buffer")
     }
 
-    fn viewport(&mut self, pane: NodeId) -> Option<EditorViewport> {
+    fn viewport(&mut self, _pane: NodeId) -> Option<EditorViewport> {
         unimplemented!("host::imports::editor::viewport")
     }
 
     fn set_minimap_marks(
         &mut self,
-        buffer: BufferId,
-        layer: String,
-        marks: Vec<MinimapMark>,
+        _buffer: BufferId,
+        _layer: String,
+        _marks: Vec<MinimapMark>,
     ) -> Result<(), PluginError> {
         unimplemented!("host::imports::editor::set_minimap_marks")
     }

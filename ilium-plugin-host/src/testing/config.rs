@@ -14,17 +14,22 @@ pub struct PluginSpec {
 
 impl PluginSpec {
     /// A plugin of `id` at `tier` (`"T1"`, `"T2"`, ...).
-    pub fn new(id: &str, tier: &str) -> PluginSpec {
+    pub fn new(_id: &str, _tier: &str) -> PluginSpec {
         unimplemented!("host::testing::config::PluginSpec::new")
     }
 
     /// The grants the manifest declares.
-    pub fn grants(self, grants: &[&str]) -> PluginSpec {
+    pub fn grants(self, _grants: &[&str]) -> PluginSpec {
         unimplemented!("host::testing::config::PluginSpec::grants")
     }
 
     /// A snapshot section the manifest declares (COR-032).
-    pub fn snapshot_section(self, name: &str, schema_version: u32, max_bytes: usize) -> PluginSpec {
+    pub fn snapshot_section(
+        self,
+        _name: &str,
+        _schema_version: u32,
+        _max_bytes: usize,
+    ) -> PluginSpec {
         unimplemented!("host::testing::config::PluginSpec::snapshot_section")
     }
 }
@@ -61,12 +66,12 @@ pub struct SnapshotFile {
 
 impl SnapshotFile {
     /// The bytes of a section, if present.
-    pub fn section(&self, name: &str) -> Option<Vec<u8>> {
+    pub fn section(&self, _name: &str) -> Option<Vec<u8>> {
         unimplemented!("host::testing::config::SnapshotFile::section")
     }
 
     /// The schema version recorded for a section.
-    pub fn schema_version(&self, name: &str) -> Option<u32> {
+    pub fn schema_version(&self, _name: &str) -> Option<u32> {
         unimplemented!("host::testing::config::SnapshotFile::schema_version")
     }
 
@@ -78,12 +83,7 @@ impl SnapshotFile {
 
 /// The config-migration rig: an isolated config, project config and snapshot file.
 #[derive(Debug, Default)]
-pub struct ConfigRig {
-    installed: Vec<PluginSpec>,
-    config: String,
-    project_config: String,
-    log_codes: Vec<String>,
-}
+pub struct ConfigRig;
 
 impl ConfigRig {
     /// A rig with no plugins.
@@ -97,17 +97,17 @@ impl ConfigRig {
     }
 
     /// Installs a plugin.
-    pub fn install(&mut self, plugin: &PluginSpec) -> InstallResult {
+    pub fn install(&mut self, _plugin: &PluginSpec) -> InstallResult {
         unimplemented!("host::testing::config::ConfigRig::install")
     }
 
     /// Uninstalls a plugin; true when it was installed.
-    pub fn uninstall(&mut self, id: &str) -> bool {
+    pub fn uninstall(&mut self, _id: &str) -> bool {
         unimplemented!("host::testing::config::ConfigRig::uninstall")
     }
 
     /// Whether a plugin is installed.
-    pub fn is_installed(&self, id: &str) -> bool {
+    pub fn is_installed(&self, _id: &str) -> bool {
         unimplemented!("host::testing::config::ConfigRig::is_installed")
     }
 
@@ -117,22 +117,22 @@ impl ConfigRig {
     }
 
     /// Who may write a settings tab.
-    pub fn write_owners(&self, tab: &str) -> Vec<String> {
+    pub fn write_owners(&self, _tab: &str) -> Vec<String> {
         unimplemented!("host::testing::config::ConfigRig::write_owners")
     }
 
     /// The risk level of a grant as the settings screen shows it.
-    pub fn risk_of(&self, grant: &str) -> Option<String> {
+    pub fn risk_of(&self, _grant: &str) -> Option<String> {
         unimplemented!("host::testing::config::ConfigRig::risk_of")
     }
 
     /// A handle on a snapshot section of a plugin (COR-032).
     pub fn section(
         &mut self,
-        plugin: &str,
-        name: &str,
-        schema_version: u32,
-        max_bytes: usize,
+        _plugin: &str,
+        _name: &str,
+        _schema_version: u32,
+        _max_bytes: usize,
     ) -> SectionHandle {
         unimplemented!("host::testing::config::ConfigRig::section")
     }
@@ -140,8 +140,8 @@ impl ConfigRig {
     /// Writes a snapshot section.
     pub fn write_section(
         &mut self,
-        section: &SectionHandle,
-        bytes: &[u8],
+        _section: &SectionHandle,
+        _bytes: &[u8],
     ) -> Result<(), PluginError> {
         unimplemented!("host::testing::config::ConfigRig::write_section")
     }
@@ -157,12 +157,12 @@ impl ConfigRig {
     }
 
     /// Crashes a plugin instance.
-    pub fn crash_plugin(&mut self, id: &str) {
+    pub fn crash_plugin(&mut self, _id: &str) {
         unimplemented!("host::testing::config::ConfigRig::crash_plugin")
     }
 
     /// Makes a plugin store a key in plugin storage (never the snapshot).
-    pub fn plugin_stores_in_storage(&mut self, id: &str, key: &str, value: &[u8]) {
+    pub fn plugin_stores_in_storage(&mut self, _id: &str, _key: &str, _value: &[u8]) {
         unimplemented!("host::testing::config::ConfigRig::plugin_stores_in_storage")
     }
 
@@ -172,7 +172,7 @@ impl ConfigRig {
     }
 
     /// Replaces the user config file (COR-033).
-    pub fn write_config(&mut self, contents: &str) {
+    pub fn write_config(&mut self, _contents: &str) {
         unimplemented!("host::testing::config::ConfigRig::write_config")
     }
 
@@ -182,12 +182,12 @@ impl ConfigRig {
     }
 
     /// Sets one setting through the settings screen.
-    pub fn set_setting(&mut self, key: &str, value: &str) {
+    pub fn set_setting(&mut self, _key: &str, _value: &str) {
         unimplemented!("host::testing::config::ConfigRig::set_setting")
     }
 
     /// Replaces the project config file.
-    pub fn write_project_config(&mut self, contents: &str) {
+    pub fn write_project_config(&mut self, _contents: &str) {
         unimplemented!("host::testing::config::ConfigRig::write_project_config")
     }
 
@@ -197,7 +197,7 @@ impl ConfigRig {
     }
 
     /// Sets one project setting through the settings screen.
-    pub fn set_project_setting(&mut self, key: &str, value: &str) {
+    pub fn set_project_setting(&mut self, _key: &str, _value: &str) {
         unimplemented!("host::testing::config::ConfigRig::set_project_setting")
     }
 

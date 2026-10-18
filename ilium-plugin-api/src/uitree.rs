@@ -18,6 +18,6 @@ pub struct UiCaps {
 
 /// Checks a tree against the caps and the tree rules; a breach is `trap.invalid-ui-tree`
 /// (reference-errors-and-limits.md "Trap codes").
-pub fn check_ui_tree(tree: &UiTree, caps: UiCaps) -> Result<(), Code> {
+pub fn check_ui_tree(_tree: &UiTree, _caps: UiCaps) -> Result<(), Code> {
     unimplemented!("api::uitree::check_ui_tree")
 }

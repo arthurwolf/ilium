@@ -1,9 +1,7 @@
 //! Twins of the tests of ilium-client/src/value_scene.rs.
 
 use crate::common::*;
-#[allow(unused_imports)]
-use ilium_plugin_sdk::types::{ErrorCode, ViewTarget};
-#[allow(unused_imports)]
+use ilium_plugin_sdk::types::ErrorCode;
 use serde_json::json;
 
 /// REQ: PORT:ilium-client/src/value_scene.rs::changed_option_identity_is_rejected_instead_of_using_stale_index

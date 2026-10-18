@@ -10,9 +10,8 @@ mod confirmations;
 mod devices;
 mod doc_page;
 mod extension_points;
-#[path = "../host_ext.rs"]
-mod host_ext;
 mod manifest;
+mod manual;
 mod onboarding;
 mod render;
 mod session_keys;

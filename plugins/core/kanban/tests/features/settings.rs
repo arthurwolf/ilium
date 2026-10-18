@@ -4,7 +4,8 @@
 use ilium_plugin_sdk::types::ErrorCode;
 use serde_json::{json, Value};
 
-use crate::common::{client_host_with, manifest, page_text, user_doc};
+use crate::common::client_host_with;
+use crate::doc_support::{manifest, page_text, user_doc, workspace_root};
 
 fn tab() -> Value {
     manifest()["contributes"]["settings"][0].clone()
@@ -226,8 +227,8 @@ fn settings_033_the_values_stay_in_the_kernel_config_table_so_no_user_setting_mo
 /// REQ: F-024
 #[test]
 fn settings_024_the_migration_page_keeps_both_kernel_keys_in_kanban_board() {
-    let path = crate::common::workspace_root()
-        .join("docs/plugins-manual/pages/reference-config-and-data-migration.md");
+    let path =
+        workspace_root().join("docs/plugins-manual/pages/reference-config-and-data-migration.md");
     let page = std::fs::read_to_string(path).expect("migration page");
     assert!(page.contains(
         "| `[kanban_board]` | `card_preview_lines`, `minimum_column_width` | Kanban | yes |"

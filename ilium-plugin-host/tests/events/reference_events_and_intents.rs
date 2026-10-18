@@ -8,7 +8,7 @@ use ilium_plugin_api::generated::types::{
     SettingsChange, SettingsOrigin, TitleOrigin, TopicPublishedEvent, UiAction, UserLineEvent,
     ViewTarget,
 };
-use ilium_plugin_api::{Side, Tier};
+use ilium_plugin_api::Tier;
 use proptest::prelude::*;
 
 use crate::common::*;
@@ -1825,9 +1825,4 @@ fn evt_050_20_valid_after_25_refused_in_the_same_second_are_all_accepted() {
     for n in 101..=120 {
         assert!(is_ok(&env.outcome(n)), "send {n}: {:?}", env.outcome(n));
     }
-}
-
-#[allow(dead_code)]
-fn unused_side_marker() -> Side {
-    Side::Server
 }

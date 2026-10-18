@@ -1,8 +1,6 @@
 //! Shared helpers of the imports-ui tests: a rig that wires a harness to a fake kernel, error
 //! readers and size constants. Everything outside the skeleton is named in API_GAPS.md.
 
-#![allow(dead_code)]
-
 use std::collections::VecDeque;
 use std::fmt::Debug;
 use std::sync::{Arc, Mutex};
@@ -38,7 +36,6 @@ impl NativeGuest for IdleGuest {
 pub struct Rig {
     pub kernel: Arc<FakeKernel>,
     pub host: HarnessHandle,
-    pub seen: Arc<Mutex<Vec<Event>>>,
 }
 
 fn build(side: Side, grants: &[&str], declined: &[&str]) -> Rig {
@@ -58,7 +55,7 @@ fn build(side: Side, grants: &[&str], declined: &[&str]) -> Rig {
         .with_native_guest(Box::new(IdleGuest { seen: seen.clone() }))
         .build()
         .expect("the harness builds a host for a native guest");
-    Rig { kernel, host, seen }
+    Rig { kernel, host }
 }
 
 /// A rig for a T3 plugin on `side` with the given grants.
@@ -89,20 +86,7 @@ pub fn code_of<T: Debug>(result: Result<T, PluginError>) -> ErrorCode {
     }
 }
 
-/// The retry hint of a failed call.
-pub fn retry_after_of<T: Debug>(result: Result<T, PluginError>) -> Option<u32> {
-    match result {
-        Err(error) => error.retry_after_ms,
-        Ok(value) => panic!("expected an error, got Ok({value:?})"),
-    }
-}
-
 /// A string of `length` ASCII characters.
 pub fn text_of(length: usize) -> String {
     "a".repeat(length)
-}
-
-/// A node id helper.
-pub fn node(id: u64) -> NodeId {
-    NodeId(id)
 }

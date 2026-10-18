@@ -7,6 +7,7 @@ use ilium_plugin_sdk::testing::FakeSession;
 use ilium_plugin_sdk::types::ErrorCode;
 
 use crate::common::*;
+use crate::feature_support::*;
 
 const SERVICE: &str = "ilium.core.recap/recap";
 

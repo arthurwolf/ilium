@@ -1,7 +1,7 @@
 //! Rules the page and the reference pages state in tables and prose: the kernel tab, the config table, the boot
 //! trigger, the traceability row, the security marks of the extension points (SEC-293) and the samples.
 
-use crate::common::{manual_page, page_text, table_after};
+use crate::manual::{manual_page, page_text, table_after};
 
 /// REQ: COR-030, COR-033
 #[test]

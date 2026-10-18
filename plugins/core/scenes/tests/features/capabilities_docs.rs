@@ -1,5 +1,6 @@
 //! Grants of the catalogue, the manifest capabilities and the page samples 3 and 5 (F-099, F-100, F-101, COR-010, COR-011).
 use crate::common::*;
+use crate::feature_support::*;
 use serde_json::json;
 
 fn row(family: &str) -> Vec<String> {

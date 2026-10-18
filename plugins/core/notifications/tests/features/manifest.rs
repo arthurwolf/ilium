@@ -5,6 +5,9 @@ use ilium_plugin_sdk::testing::FakeHost;
 use serde_json::json;
 
 use crate::common::*;
+use crate::feature_only::{
+    json_block_after, manifest, manual_page, page_text, server_grants, PLUGIN_ID,
+};
 
 /// REQ: COR-050
 #[test]

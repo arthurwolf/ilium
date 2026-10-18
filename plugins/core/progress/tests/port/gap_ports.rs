@@ -4,6 +4,7 @@ use ilium_plugin_sdk::testing::FakeHost;
 use serde_json::{json, Value};
 
 use crate::common::*;
+use crate::host_ext::*;
 use crate::support::*;
 
 const HOOK_COMMAND: &str = "ilium progress guard || true";

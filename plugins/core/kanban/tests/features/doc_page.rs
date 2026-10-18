@@ -1,6 +1,6 @@
 //! The page, the samples it prints and the user documentation the plugin must keep true (F-024, F-025).
 
-use crate::common::{page_text, user_doc};
+use crate::doc_support::{page_text, user_doc, workspace_root};
 
 /// REQ: F-024
 #[test]
@@ -152,8 +152,7 @@ fn doc_024_the_page_figure_shows_the_board_title_and_three_headers() {
 /// REQ: F-024
 #[test]
 fn doc_024_the_traceability_rows_name_this_plugin_as_the_owner() {
-    let path = crate::common::workspace_root()
-        .join("docs/plugins-manual/pages/reference-feature-traceability.md");
+    let path = workspace_root().join("docs/plugins-manual/pages/reference-feature-traceability.md");
     let table = std::fs::read_to_string(path).expect("traceability page");
     let f024 = table
         .lines()

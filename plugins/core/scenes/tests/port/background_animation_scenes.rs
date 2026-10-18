@@ -1,7 +1,5 @@
 //! Twins of the original tests of ilium-client/src/background_animation/scenes.rs (ported through FakeScene / FakeSession).
 use crate::common::*;
-#[allow(unused_imports)]
-use serde_json::json;
 
 /// REQ: PORT:ilium-client/src/background_animation/scenes.rs::fixed_cloudlet_sources_preserve_every_dot_at_all_legal_counts
 #[test]

@@ -1,9 +1,8 @@
 //! Editor pane renders: line numbers, minimap column, long lines, highlighting, cursor line
 //! (core-plugin-editor.md "What the user sees", src/docs/editors-and-boards.md).
 
-use crate::support::{
-    active_host, count_char, nodes_where, open_file, pane_tree, render_pane, MAIN_RS,
-};
+use crate::fixtures::{count_char, nodes_where, pane_tree, MAIN_RS};
+use crate::support::{active_host, open_file, render_pane};
 use ilium_plugin_sdk::generated::types::Widget;
 use ilium_plugin_sdk::testing::golden::assert_golden;
 use ilium_plugin_sdk::testing::host::Screen;

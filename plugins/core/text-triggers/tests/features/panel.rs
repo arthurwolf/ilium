@@ -7,6 +7,7 @@ use ilium_plugin_sdk::types::{ActionKind, ActionValue, ViewTarget};
 use serde_json::json;
 
 use crate::common::*;
+use crate::manual::workspace_root;
 
 fn tab() -> ViewTarget {
     ViewTarget::SettingsPage("text-triggers".to_string())

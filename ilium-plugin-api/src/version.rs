@@ -41,13 +41,13 @@ pub struct ApiVersion {
 
 impl ApiVersion {
     /// Parses `ilium:plugin@X.Y.Z`; anything else is `manifest.schema` (reference-manifest.md PKG-013).
-    pub fn parse(contract: &str) -> Result<ApiVersion, Diagnostic> {
+    pub fn parse(_contract: &str) -> Result<ApiVersion, Diagnostic> {
         unimplemented!("api::version::parse")
     }
 
     /// Decodes the 6-byte payload of `ilium:api-version` (ABI-004); a wrong size is
     /// `package.api-section-invalid` (reference-manifest-schema.md).
-    pub fn from_custom_section(bytes: &[u8]) -> Result<ApiVersion, Diagnostic> {
+    pub fn from_custom_section(_bytes: &[u8]) -> Result<ApiVersion, Diagnostic> {
         unimplemented!("api::version::from_custom_section")
     }
 

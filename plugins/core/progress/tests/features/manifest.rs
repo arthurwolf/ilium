@@ -4,6 +4,7 @@
 use serde_json::json;
 
 use crate::common::*;
+use crate::feature_support::*;
 
 /// REQ: COR-050, F-059
 #[test]

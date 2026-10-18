@@ -1,9 +1,6 @@
 //! Twins of the tests of ilium-client/src/app_semantic_animation_tests.rs.
 
 use crate::common::*;
-#[allow(unused_imports)]
-use ilium_plugin_sdk::types::{ErrorCode, ViewTarget};
-#[allow(unused_imports)]
 use serde_json::json;
 
 /// REQ: PORT:ilium-client/src/app_semantic_animation_tests.rs::animation_settings_are_global_and_selecting_projects_never_rebinds_them

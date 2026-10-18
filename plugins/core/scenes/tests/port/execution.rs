@@ -1,7 +1,5 @@
 //! Twins of the original tests of ilium-client/src/execution.rs (ported through FakeScene / FakeSession).
 use crate::common::*;
-#[allow(unused_imports)]
-use serde_json::json;
 
 /// REQ: PORT:ilium-client/src/execution.rs::ambient_storage_admits_wikipedia_replacement_overlap
 #[test]

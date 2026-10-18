@@ -5,6 +5,7 @@ use ilium_plugin_sdk::types::{DeactivationReason, ViewTarget};
 use serde_json::json;
 
 use crate::common::*;
+use crate::manual::{manual_page, page_text};
 
 const NOTICE: &str = "Text triggers is disabled. Values are kept.";
 

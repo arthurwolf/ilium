@@ -42,7 +42,7 @@ pub const PURE_EXPORTS: [&str; 3] = ["views.render", "annotate", "settings-valid
 pub const BATCH_REFUSED_PREFIX: &str = "batch refused: submission ";
 
 /// ABI-008: `Ok` for at most 256 submissions, else the trap code `trap.submission-batch`.
-pub fn check_submission_count(count: usize) -> Result<(), Code> {
+pub fn check_submission_count(_count: usize) -> Result<(), Code> {
     unimplemented!("api::abi::check_submission_count")
 }
 
@@ -67,33 +67,33 @@ pub enum BatchVerdict {
 }
 
 /// ABI-031: shape over the whole list first, then grant; one verdict per submission, in order.
-pub fn batch_verdicts(checks: &[BatchCheck]) -> Vec<BatchVerdict> {
+pub fn batch_verdicts(_checks: &[BatchCheck]) -> Vec<BatchVerdict> {
     unimplemented!("api::abi::batch_verdicts")
 }
 
 /// ABI-011: whether a correlation number belongs to the SDK.
-pub fn is_sdk_correlation(correlation: u64) -> bool {
+pub fn is_sdk_correlation(_correlation: u64) -> bool {
     unimplemented!("api::abi::is_sdk_correlation")
 }
 
 /// ABI-042: the instance deadline in ticks for a call deadline of `deadline_ms`:
 /// `ceil(deadline_ms / 10) + 1`.
-pub fn deadline_ticks(deadline_ms: u64) -> u64 {
+pub fn deadline_ticks(_deadline_ms: u64) -> u64 {
     unimplemented!("api::abi::deadline_ticks")
 }
 
 /// ABI-045: the batch sizes that deliver `queued` events, at most 256 each, in order.
-pub fn batch_sizes(queued: usize) -> Vec<usize> {
+pub fn batch_sizes(_queued: usize) -> Vec<usize> {
     unimplemented!("api::abi::batch_sizes")
 }
 
 /// ABI-044: whether `deactivate` bytes of this length are kept for the next activation.
-pub fn restore_bytes_accepted(length: usize) -> bool {
+pub fn restore_bytes_accepted(_length: usize) -> bool {
     unimplemented!("api::abi::restore_bytes_accepted")
 }
 
 /// ABI-048: whether an export (as named in [`PURE_EXPORTS`]) is a pure call.
-pub fn is_pure_export(export: &str) -> bool {
+pub fn is_pure_export(_export: &str) -> bool {
     unimplemented!("api::abi::is_pure_export")
 }
 
@@ -114,12 +114,12 @@ pub enum DeliveryPolicy {
 }
 
 /// ABI-015: the policy of an event case name such as `output-matched`; `None` for an unknown name.
-pub fn delivery_policy(event_case: &str) -> Option<DeliveryPolicy> {
+pub fn delivery_policy(_event_case: &str) -> Option<DeliveryPolicy> {
     unimplemented!("api::abi::delivery_policy")
 }
 
 /// ABI-015, ABI-039: whether losing or merging this event case is reported in `events-dropped`.
-pub fn counted_in_events_dropped(event_case: &str) -> bool {
+pub fn counted_in_events_dropped(_event_case: &str) -> bool {
     unimplemented!("api::abi::counted_in_events_dropped")
 }
 
@@ -127,8 +127,6 @@ pub fn counted_in_events_dropped(event_case: &str) -> bool {
 /// ABI-039, ABI-045). The host queue must behave like it.
 #[derive(Debug, Clone)]
 pub struct QueueModel {
-    // Read by the implementation that replaces the stubs.
-    #[allow(dead_code)]
     capacity: usize,
 }
 
@@ -138,8 +136,13 @@ impl QueueModel {
         QueueModel { capacity }
     }
 
+    /// The most events this queue holds before it starts dropping (ABI-045).
+    pub fn capacity(&self) -> usize {
+        self.capacity
+    }
+
     /// Enqueues one event of `event_case` with coalescing `key` (ABI-033, ABI-039).
-    pub fn push(&mut self, event_case: &str, key: u64) {
+    pub fn push(&mut self, _event_case: &str, _key: u64) {
         unimplemented!("api::abi::QueueModel::push")
     }
 

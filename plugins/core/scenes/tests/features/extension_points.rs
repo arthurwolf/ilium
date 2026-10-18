@@ -1,5 +1,6 @@
 //! Extension points and the catalog service (page "Extension points").
 use crate::common::*;
+use crate::feature_support::*;
 use serde_json::json;
 
 /// REQ: COR-010

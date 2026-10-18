@@ -268,7 +268,7 @@ fn sec_109_a_changed_tier_resets_stored_decisions() {
 /// REQ: SEC-110
 #[test]
 fn sec_110_third_decline_stops_the_prompt() {
-    let mut counter = DeclineCounter::default();
+    let mut counter = DeclineCounter;
     for _ in 0..3 {
         counter.record_decline("test.plugin", "net.http:example.com");
     }
@@ -278,7 +278,7 @@ fn sec_110_third_decline_stops_the_prompt() {
 /// REQ: SEC-110
 #[test]
 fn sec_110_two_declines_do_not_silence() {
-    let mut counter = DeclineCounter::default();
+    let mut counter = DeclineCounter;
     for _ in 0..2 {
         counter.record_decline("test.plugin", "net.http:example.com");
     }
@@ -353,7 +353,6 @@ fn sec_114_external_edit_of_the_store_is_recorded_in_the_audit_log() {
         .set("test.plugin", "key-a", "T2", &[grant("tree.read")])
         .expect("set");
     let path = store.path().to_owned();
-    drop(store);
     std::fs::write(&path, br#"{"version":1,"plugins":{"test.plugin":{"key":"key-a","tier":"T2","grants":["fs.read:home"]}}}"#)
         .expect("external edit");
     let _ = GrantStore::open(dir.path()).expect("reopens");

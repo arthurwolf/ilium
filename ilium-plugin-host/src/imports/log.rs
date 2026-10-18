@@ -9,7 +9,7 @@ use ilium_plugin_api::generated::host::log::{HostLog, Level};
 pub struct LogImport;
 
 impl HostLog for LogImport {
-    fn log(&mut self, level: Level, message: String) {
+    fn log(&mut self, _level: Level, _message: String) {
         unimplemented!("host::imports::log::log")
     }
 }

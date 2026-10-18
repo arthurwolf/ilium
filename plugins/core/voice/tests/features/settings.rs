@@ -397,7 +397,7 @@ fn settings_050_the_custom_prompt_round_trips_a_trailing_newline() {
 /// REQ: F-050
 #[test]
 fn settings_050_the_custom_prompt_is_not_written_by_the_voice_control_tab_key_rules() {
-    let page = crate::common::manual_page("reference-config-and-data-migration.md");
+    let page = crate::manual::manual_page("reference-config-and-data-migration.md");
     assert!(page
         .contains("`llm-instructions` | LLM Instructions | `[inference.instructions]`, `[voice]`"));
 }

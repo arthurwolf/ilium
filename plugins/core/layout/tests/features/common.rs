@@ -1,26 +1,15 @@
 //! Shared helpers of the layout feature tests.
-#![allow(dead_code)]
 
-use std::path::PathBuf;
+pub use crate::split_host::*;
 
-use ilium_plugin_core_layout::{LayoutClient, LayoutServer};
+use ilium_plugin_core_layout::LayoutClient;
 use ilium_plugin_sdk::testing::{manual, FakeHost};
 use ilium_plugin_sdk::types::{
-    ClientId, CommandContext, CommandInvokedEvent, CommandOrigin, CreatePaneSpec, CreateSplitSpec,
-    Event, Intent, MessageEvent, MessageSpec, NodeClass, NodeId, PluginId, PluginSide,
-    ResizePaneSpec, Submission,
+    CommandContext, CommandInvokedEvent, CommandOrigin, CreatePaneSpec, Event, Intent, MessageSpec,
+    NodeClass, NodeId, ResizePaneSpec, Submission,
 };
 
-pub const PLUGIN_ID: &str = "ilium.core.layout";
 pub const PANEL: &str = "layout.presets";
-
-pub fn crate_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-}
-
-pub fn manifest_path() -> PathBuf {
-    crate_dir().join("manifest.json")
-}
 
 pub fn manifest_value() -> serde_json::Value {
     let text = std::fs::read_to_string(manifest_path()).expect("manifest.json is readable");
@@ -81,22 +70,10 @@ pub fn term_blocks(page: &str) -> Vec<String> {
     blocks
 }
 
-pub fn server_host() -> FakeHost {
-    FakeHost::for_manifest(manifest_path())
-        .expect("manifest loads")
-        .side("server")
-}
-
 pub fn client_host() -> FakeHost {
     FakeHost::for_manifest(manifest_path())
         .expect("manifest loads")
         .side("client")
-}
-
-pub fn activated_server() -> FakeHost {
-    let mut host = server_host();
-    host.activate::<LayoutServer>();
-    host
 }
 
 pub fn activated_client() -> FakeHost {
@@ -115,20 +92,6 @@ pub fn command_event(name: &str, pane: Option<u64>) -> Event {
             ..CommandContext::default()
         },
     })
-}
-
-pub fn message_from_client(channel: &str, payload: Vec<u8>) -> Event {
-    Event::Message(MessageEvent {
-        from: PluginId(PLUGIN_ID.to_string()),
-        from_side: PluginSide::Client,
-        from_client: Some(ClientId(1)),
-        channel: channel.to_string(),
-        payload,
-    })
-}
-
-pub fn id_bytes(node: u64) -> Vec<u8> {
-    node.to_le_bytes().to_vec()
 }
 
 pub fn resize_payload(node: u64, columns: u16) -> Vec<u8> {
@@ -152,16 +115,6 @@ pub fn create_panes(submissions: &[Submission]) -> Vec<CreatePaneSpec> {
         .iter()
         .filter_map(|submission| match &submission.intent {
             Intent::CreatePane(spec) => Some(spec.clone()),
-            _ => None,
-        })
-        .collect()
-}
-
-pub fn create_splits(submissions: &[Submission]) -> Vec<CreateSplitSpec> {
-    submissions
-        .iter()
-        .filter_map(|submission| match &submission.intent {
-            Intent::CreateSplit(spec) => Some(spec.clone()),
             _ => None,
         })
         .collect()

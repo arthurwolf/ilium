@@ -4,7 +4,9 @@
 use ilium_plugin_sdk::testing::FakeHost;
 use serde_json::{json, Value};
 
-use crate::common::{manifest_path, page, page_text};
+use crate::common::manifest_path;
+use crate::feature_only::page_text;
+use crate::manual_pages::page;
 
 fn manifest() -> Value {
     let text = std::fs::read_to_string(manifest_path()).expect("manifest.json readable");

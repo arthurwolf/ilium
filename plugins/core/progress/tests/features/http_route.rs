@@ -4,6 +4,7 @@ use ilium_plugin_sdk::types::{Event, Header, HttpCalledEvent};
 use serde_json::Value;
 
 use crate::common::*;
+use crate::feature_support::*;
 
 fn call(host: &mut ilium_plugin_sdk::testing::FakeHost, id: u64, method: &str, path: &str) {
     host.deliver_one(Event::HttpCalled(HttpCalledEvent {

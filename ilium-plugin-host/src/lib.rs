@@ -15,7 +15,6 @@
 // The skeleton functions name their parameters for the implementation that replaces the
 // `unimplemented!` bodies, and private fields wait for the code that reads them; until then both
 // are unused by design (test plan 1.3).
-#![allow(unused_variables, dead_code)]
 
 pub mod approval;
 pub mod audit;

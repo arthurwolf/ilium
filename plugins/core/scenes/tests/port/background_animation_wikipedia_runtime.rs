@@ -1,7 +1,5 @@
 //! Twins of the original tests of ilium-client/src/background_animation/wikipedia/runtime.rs (ported through FakeScene / FakeSession).
 use crate::common::*;
-#[allow(unused_imports)]
-use serde_json::json;
 
 /// REQ: PORT:ilium-client/src/background_animation/wikipedia/runtime.rs::an_article_loaded_while_motion_is_off_starts_at_the_top_on_resume
 #[test]

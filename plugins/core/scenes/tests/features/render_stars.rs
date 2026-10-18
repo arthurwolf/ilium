@@ -1,5 +1,6 @@
 //! Stars overhead (page sample 4, F-100). Formula of the page at J2000.
 use crate::common::*;
+use crate::feature_support::*;
 
 fn stars_at(
     columns: u16,

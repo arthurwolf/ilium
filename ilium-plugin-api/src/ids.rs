@@ -15,6 +15,6 @@ pub const PLUGIN_ID_MAX_CHARS: usize = 128;
 pub const PLUGIN_ID_SEGMENTS: std::ops::RangeInclusive<usize> = 2..=8;
 
 /// Parses and checks a plugin id; a bad id is `manifest.id-invalid` (reference-manifest.md PKG-014).
-pub fn parse_plugin_id(text: &str) -> Result<PluginId, Diagnostic> {
+pub fn parse_plugin_id(_text: &str) -> Result<PluginId, Diagnostic> {
     unimplemented!("api::ids::parse_plugin_id")
 }

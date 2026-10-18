@@ -5,6 +5,7 @@ use ilium_plugin_sdk::testing::FakeHost;
 use serde_json::Value;
 
 use crate::common::*;
+use crate::feature_support::*;
 
 const PROBE: &str = "/opt/probe.sh";
 const JOB: &str = "export-412";

@@ -25,18 +25,18 @@ pub struct BuildPlan {
 
 /// The files a template creates.
 pub fn template_files(
-    template: &str,
-    plugin_id: &str,
+    _template: &str,
+    _plugin_id: &str,
 ) -> Result<Vec<(String, String)>, Diagnostic> {
     unimplemented!("host::devtools::template_files")
 }
 
 /// The plan of `ilium plugin build` for a project directory.
-pub fn build_plan(project_dir: &Path) -> Result<BuildPlan, Diagnostic> {
+pub fn build_plan(_project_dir: &Path) -> Result<BuildPlan, Diagnostic> {
     unimplemented!("host::devtools::build_plan")
 }
 
 /// Lints a project directory.
-pub fn lint(project_dir: &Path) -> Vec<LintFinding> {
+pub fn lint(_project_dir: &Path) -> Vec<LintFinding> {
     unimplemented!("host::devtools::lint")
 }

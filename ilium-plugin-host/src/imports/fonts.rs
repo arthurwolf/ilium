@@ -10,15 +10,15 @@ use ilium_plugin_api::generated::types::errors::PluginError;
 pub struct FontsImport;
 
 impl HostFonts for FontsImport {
-    fn font_new(&mut self, asset: String) -> FontHandle {
+    fn font_new(&mut self, _asset: String) -> FontHandle {
         unimplemented!("host::imports::fonts::font_new")
     }
 
     fn font_rasterize(
         &mut self,
-        handle: FontHandle,
-        text: String,
-        size_px: u16,
+        _handle: FontHandle,
+        _text: String,
+        _size_px: u16,
     ) -> Result<(u32, u32, Vec<u8>), PluginError> {
         unimplemented!("host::imports::fonts::font_rasterize")
     }

@@ -157,7 +157,7 @@ pub struct KeyPair {
 
 impl KeyPair {
     /// Generates a key pair for `publisher`.
-    pub fn generate(publisher: &str) -> KeyPair {
+    pub fn generate(_publisher: &str) -> KeyPair {
         unimplemented!("host::testing::user_rig::KeyPair::generate")
     }
 
@@ -184,35 +184,31 @@ impl KeyPair {
 
 /// A plugin package to install, built in memory.
 #[derive(Debug, Clone)]
-pub struct PackageSpec {
-    id: String,
-    version: String,
-    options: Vec<String>,
-}
+pub struct PackageSpec;
 
 impl PackageSpec {
     /// A package of `id` at `version`.
-    pub fn new(id: &str, version: &str) -> PackageSpec {
+    pub fn new(_id: &str, _version: &str) -> PackageSpec {
         unimplemented!("host::testing::user_rig::PackageSpec::new")
     }
 
     /// Grants the manifest declares for one side.
-    pub fn grants(self, side: &str, grants: &[&str]) -> PackageSpec {
+    pub fn grants(self, _side: &str, _grants: &[&str]) -> PackageSpec {
         unimplemented!("host::testing::user_rig::PackageSpec::grants")
     }
 
     /// The display name.
-    pub fn display_name(self, name: &str) -> PackageSpec {
+    pub fn display_name(self, _name: &str) -> PackageSpec {
         unimplemented!("host::testing::user_rig::PackageSpec::display_name")
     }
 
     /// Signs the package.
-    pub fn signed_with(self, key: &KeyPair) -> PackageSpec {
+    pub fn signed_with(self, _key: &KeyPair) -> PackageSpec {
         unimplemented!("host::testing::user_rig::PackageSpec::signed_with")
     }
 
     /// The plugin writes a data file on start.
-    pub fn start_writes_file(self, name: &str) -> PackageSpec {
+    pub fn start_writes_file(self, _name: &str) -> PackageSpec {
         unimplemented!("host::testing::user_rig::PackageSpec::start_writes_file")
     }
 
@@ -222,12 +218,12 @@ impl PackageSpec {
     }
 
     /// The plugin traps when rendering a view.
-    pub fn render_traps(self, view: &str) -> PackageSpec {
+    pub fn render_traps(self, _view: &str) -> PackageSpec {
         unimplemented!("host::testing::user_rig::PackageSpec::render_traps")
     }
 
     /// The plugin traps in an export.
-    pub fn export_traps(self, export: &str) -> PackageSpec {
+    pub fn export_traps(self, _export: &str) -> PackageSpec {
         unimplemented!("host::testing::user_rig::PackageSpec::export_traps")
     }
 
@@ -247,57 +243,62 @@ impl PackageSpec {
     }
 
     /// The API version the manifest declares.
-    pub fn api_version(self, version: &str) -> PackageSpec {
+    pub fn api_version(self, _version: &str) -> PackageSpec {
         unimplemented!("host::testing::user_rig::PackageSpec::api_version")
     }
 
     /// The plugins this package replaces.
-    pub fn replaces(self, ids: &[&str]) -> PackageSpec {
+    pub fn replaces(self, _ids: &[&str]) -> PackageSpec {
         unimplemented!("host::testing::user_rig::PackageSpec::replaces")
     }
 
     /// A pane kind the plugin provides.
-    pub fn provides_pane(self, kind: &str) -> PackageSpec {
+    pub fn provides_pane(self, _kind: &str) -> PackageSpec {
         unimplemented!("host::testing::user_rig::PackageSpec::provides_pane")
     }
 
     /// A service the plugin provides.
-    pub fn provides_service(self, service: &str) -> PackageSpec {
+    pub fn provides_service(self, _service: &str) -> PackageSpec {
         unimplemented!("host::testing::user_rig::PackageSpec::provides_service")
     }
 
     /// A service of another plugin this one consumes.
-    pub fn consumes_service(self, provider: &str, service: &str) -> PackageSpec {
+    pub fn consumes_service(self, _provider: &str, _service: &str) -> PackageSpec {
         unimplemented!("host::testing::user_rig::PackageSpec::consumes_service")
     }
 
     /// An extension point the plugin defines.
-    pub fn defines_point(self, point: &str) -> PackageSpec {
+    pub fn defines_point(self, _point: &str) -> PackageSpec {
         unimplemented!("host::testing::user_rig::PackageSpec::defines_point")
     }
 
     /// A filter point the plugin defines.
-    pub fn defines_filter_point(self, point: &str) -> PackageSpec {
+    pub fn defines_filter_point(self, _point: &str) -> PackageSpec {
         unimplemented!("host::testing::user_rig::PackageSpec::defines_filter_point")
     }
 
     /// A veto point the plugin defines.
-    pub fn defines_veto_point(self, point: &str) -> PackageSpec {
+    pub fn defines_veto_point(self, _point: &str) -> PackageSpec {
         unimplemented!("host::testing::user_rig::PackageSpec::defines_veto_point")
     }
 
     /// A contribution to another plugin's point.
-    pub fn contributes_to(self, owner: &str, point: &str) -> PackageSpec {
+    pub fn contributes_to(self, _owner: &str, _point: &str) -> PackageSpec {
         unimplemented!("host::testing::user_rig::PackageSpec::contributes_to")
     }
 
     /// A contribution with an explicit priority.
-    pub fn contributes_with_priority(self, owner: &str, point: &str, priority: u32) -> PackageSpec {
+    pub fn contributes_with_priority(
+        self,
+        _owner: &str,
+        _point: &str,
+        _priority: u32,
+    ) -> PackageSpec {
         unimplemented!("host::testing::user_rig::PackageSpec::contributes_with_priority")
     }
 
     /// A hook handler on another plugin's point.
-    pub fn hook(self, owner: &str, point: &str, behaviour: HookBehaviour) -> PackageSpec {
+    pub fn hook(self, _owner: &str, _point: &str, _behaviour: HookBehaviour) -> PackageSpec {
         unimplemented!("host::testing::user_rig::PackageSpec::hook")
     }
 
@@ -343,23 +344,15 @@ pub struct VetoOutcome {
 
 /// An install started without waiting for its review.
 #[derive(Debug)]
-pub struct PendingInstall {
-    id: String,
-}
+pub struct PendingInstall;
 
 /// A long call started with [`UserRig::start_long_call`].
 #[derive(Debug)]
-pub struct CallHandle {
-    id: u64,
-}
+pub struct CallHandle;
 
 /// The user rig.
 #[derive(Debug)]
-pub struct UserRig {
-    platform: Platform,
-    root: PathBuf,
-    now_ms: u64,
-}
+pub struct UserRig;
 
 impl UserRig {
     /// Replacements the install recorded, as `(replaced id, replacing id)` (USR-043).
@@ -373,7 +366,7 @@ impl UserRig {
     }
 
     /// A rig on `platform`.
-    pub fn new_on(platform: Platform) -> UserRig {
+    pub fn new_on(_platform: Platform) -> UserRig {
         unimplemented!("host::testing::user_rig::UserRig::new_on")
     }
 
@@ -385,26 +378,26 @@ impl UserRig {
     // ---- CLI and install ------------------------------------------------------------------
 
     /// Runs `ilium plugin <args>`.
-    pub fn cli(&mut self, args: &[&str]) -> CliOutput {
+    pub fn cli(&mut self, _args: &[&str]) -> CliOutput {
         unimplemented!("host::testing::user_rig::UserRig::cli")
     }
 
     /// Installs a package file with extra arguments.
-    pub fn install_file(&mut self, package: &PackageSpec, args: &[&str]) -> CliOutput {
+    pub fn install_file(&mut self, _package: &PackageSpec, _args: &[&str]) -> CliOutput {
         unimplemented!("host::testing::user_rig::UserRig::install_file")
     }
 
     /// Starts an install without waiting for its review.
     pub fn install_file_nonblocking(
         &mut self,
-        package: &PackageSpec,
-        args: &[&str],
+        _package: &PackageSpec,
+        _args: &[&str],
     ) -> PendingInstall {
         unimplemented!("host::testing::user_rig::UserRig::install_file_nonblocking")
     }
 
     /// Installs a package through the Plugins settings screen.
-    pub fn install_from_plugins_screen(&mut self, package: &PackageSpec) -> CliOutput {
+    pub fn install_from_plugins_screen(&mut self, _package: &PackageSpec) -> CliOutput {
         unimplemented!("host::testing::user_rig::UserRig::install_from_plugins_screen")
     }
 
@@ -414,17 +407,17 @@ impl UserRig {
     }
 
     /// Sets the CI environment flag.
-    pub fn set_ci(&mut self, is_ci: bool) {
+    pub fn set_ci(&mut self, _is_ci: bool) {
         unimplemented!("host::testing::user_rig::UserRig::set_ci")
     }
 
     /// Points the rig at a registry URL.
-    pub fn configure_registry(&mut self, url: &str) {
+    pub fn configure_registry(&mut self, _url: &str) {
         unimplemented!("host::testing::user_rig::UserRig::configure_registry")
     }
 
     /// How often the install instructions of a package ran.
-    pub fn package_instructions_run(&self, id: &str) -> u32 {
+    pub fn package_instructions_run(&self, _id: &str) -> u32 {
         unimplemented!("host::testing::user_rig::UserRig::package_instructions_run")
     }
 
@@ -481,27 +474,27 @@ impl UserRig {
     }
 
     /// Sets the umask of the host process.
-    pub fn set_umask(&mut self, mask: u32) {
+    pub fn set_umask(&mut self, _mask: u32) {
         unimplemented!("host::testing::user_rig::UserRig::set_umask")
     }
 
     /// Sets the mode of a file.
-    pub fn set_file_mode(&mut self, path: &Path, mode: u32) {
+    pub fn set_file_mode(&mut self, _path: &Path, _mode: u32) {
         unimplemented!("host::testing::user_rig::UserRig::set_file_mode")
     }
 
     /// Ages a file by `days`.
-    pub fn age_file(&mut self, path: &Path, days: u32) {
+    pub fn age_file(&mut self, _path: &Path, _days: u32) {
         unimplemented!("host::testing::user_rig::UserRig::age_file")
     }
 
     /// Opens (creates) a project and returns its path.
-    pub fn open_project(&mut self, name: &str) -> PathBuf {
+    pub fn open_project(&mut self, _name: &str) -> PathBuf {
         unimplemented!("host::testing::user_rig::UserRig::open_project")
     }
 
     /// Switches the server to another project.
-    pub fn switch_project(&mut self, path: &Path) {
+    pub fn switch_project(&mut self, _path: &Path) {
         unimplemented!("host::testing::user_rig::UserRig::switch_project")
     }
 
@@ -513,7 +506,7 @@ impl UserRig {
     }
 
     /// Starts the server in a mode.
-    pub fn start_server_mode(&mut self, mode: StartMode) {
+    pub fn start_server_mode(&mut self, _mode: StartMode) {
         unimplemented!("host::testing::user_rig::UserRig::start_server_mode")
     }
 
@@ -528,12 +521,12 @@ impl UserRig {
     }
 
     /// Advances the clock.
-    pub fn advance_ms(&mut self, ms: u64) {
+    pub fn advance_ms(&mut self, _ms: u64) {
         unimplemented!("host::testing::user_rig::UserRig::advance_ms")
     }
 
     /// Kills the host at a point of the next install or uninstall.
-    pub fn kill_host_at(&mut self, point: KillPoint) {
+    pub fn kill_host_at(&mut self, _point: KillPoint) {
         unimplemented!("host::testing::user_rig::UserRig::kill_host_at")
     }
 
@@ -543,12 +536,12 @@ impl UserRig {
     }
 
     /// The uninstall trace of a plugin.
-    pub fn uninstall_trace(&self, id: &str) -> Vec<String> {
+    pub fn uninstall_trace(&self, _id: &str) -> Vec<String> {
         unimplemented!("host::testing::user_rig::UserRig::uninstall_trace")
     }
 
     /// Uninstalls a plugin and reports which host steps observers saw.
-    pub fn uninstall_observing_steps(&mut self, id: &str) -> UninstallSteps {
+    pub fn uninstall_observing_steps(&mut self, _id: &str) -> UninstallSteps {
         unimplemented!("host::testing::user_rig::UserRig::uninstall_observing_steps")
     }
 
@@ -565,7 +558,7 @@ impl UserRig {
     // ---- Dialogs and prompts --------------------------------------------------------------
 
     /// Attaches a client that answers dialogs in order.
-    pub fn attach_client(&mut self, answers: Vec<DialogAnswer>) {
+    pub fn attach_client(&mut self, _answers: Vec<DialogAnswer>) {
         unimplemented!("host::testing::user_rig::UserRig::attach_client")
     }
 
@@ -597,12 +590,12 @@ impl UserRig {
     // ---- Grants, trust and state ----------------------------------------------------------
 
     /// The grant entries of a plugin.
-    pub fn grant_entries(&self, id: &str) -> Vec<GrantEntry> {
+    pub fn grant_entries(&self, _id: &str) -> Vec<GrantEntry> {
         unimplemented!("host::testing::user_rig::UserRig::grant_entries")
     }
 
     /// Trusts a publisher key.
-    pub fn trust(&mut self, key: &KeyPair) {
+    pub fn trust(&mut self, _key: &KeyPair) {
         unimplemented!("host::testing::user_rig::UserRig::trust")
     }
 
@@ -612,84 +605,84 @@ impl UserRig {
     }
 
     /// The grant-store bytes expected after a grant is given.
-    pub fn expected_grants_after(&self, id: &str, grant: &str) -> Vec<u8> {
+    pub fn expected_grants_after(&self, _id: &str, _grant: &str) -> Vec<u8> {
         unimplemented!("host::testing::user_rig::UserRig::expected_grants_after")
     }
 
     /// Sets a plugin setting.
-    pub fn set_plugin_setting(&mut self, id: &str, key: &str, value: &str) {
+    pub fn set_plugin_setting(&mut self, _id: &str, _key: &str, _value: &str) {
         unimplemented!("host::testing::user_rig::UserRig::set_plugin_setting")
     }
 
     /// A plugin setting.
-    pub fn plugin_setting(&self, id: &str, key: &str) -> Option<String> {
+    pub fn plugin_setting(&self, _id: &str, _key: &str) -> Option<String> {
         unimplemented!("host::testing::user_rig::UserRig::plugin_setting")
     }
 
     /// Writes a file into a plugin's cache directory.
-    pub fn write_cache_file(&mut self, id: &str, name: &str) {
+    pub fn write_cache_file(&mut self, _id: &str, _name: &str) {
         unimplemented!("host::testing::user_rig::UserRig::write_cache_file")
     }
 
     /// Writes a storage bucket of a plugin.
-    pub fn write_storage_bucket(&mut self, id: &str) {
+    pub fn write_storage_bucket(&mut self, _id: &str) {
         unimplemented!("host::testing::user_rig::UserRig::write_storage_bucket")
     }
 
     /// Whether a file exists in a plugin's data directory.
-    pub fn data_file_exists(&self, id: &str, name: &str) -> bool {
+    pub fn data_file_exists(&self, _id: &str, _name: &str) -> bool {
         unimplemented!("host::testing::user_rig::UserRig::data_file_exists")
     }
 
     /// Reads a file of a plugin's data directory.
-    pub fn read_data_file(&self, id: &str, name: &str) -> Option<String> {
+    pub fn read_data_file(&self, _id: &str, _name: &str) -> Option<String> {
         unimplemented!("host::testing::user_rig::UserRig::read_data_file")
     }
 
     // ---- Calls ----------------------------------------------------------------------------
 
     /// A plugin side makes a call needing `grant`.
-    pub fn call_needing(&mut self, id: &str, side: &str, grant: &str) -> CallOutcome {
+    pub fn call_needing(&mut self, _id: &str, _side: &str, _grant: &str) -> CallOutcome {
         unimplemented!("host::testing::user_rig::UserRig::call_needing")
     }
 
     /// A plugin side makes a call needing a grant its manifest never listed.
-    pub fn call_needing_unlisted(&mut self, id: &str, side: &str, grant: &str) -> CallOutcome {
+    pub fn call_needing_unlisted(&mut self, _id: &str, _side: &str, _grant: &str) -> CallOutcome {
         unimplemented!("host::testing::user_rig::UserRig::call_needing_unlisted")
     }
 
     /// Starts a long call needing `grant`.
-    pub fn start_long_call(&mut self, id: &str, side: &str, grant: &str) -> CallHandle {
+    pub fn start_long_call(&mut self, _id: &str, _side: &str, _grant: &str) -> CallHandle {
         unimplemented!("host::testing::user_rig::UserRig::start_long_call")
     }
 
     /// Finishes a long call.
-    pub fn finish_call(&mut self, call: CallHandle) -> CallOutcome {
+    pub fn finish_call(&mut self, _call: CallHandle) -> CallOutcome {
         unimplemented!("host::testing::user_rig::UserRig::finish_call")
     }
 
     /// The granted list a plugin side's instance saw.
-    pub fn granted_list_seen_by_instance(&self, id: &str, side: &str) -> Vec<String> {
+    pub fn granted_list_seen_by_instance(&self, _id: &str, _side: &str) -> Vec<String> {
         unimplemented!("host::testing::user_rig::UserRig::granted_list_seen_by_instance")
     }
 
     /// A plugin makes an HTTP request.
-    pub fn plugin_http(&mut self, id: &str, url: &str) -> CallOutcome {
+    pub fn plugin_http(&mut self, _id: &str, _url: &str) -> CallOutcome {
         unimplemented!("host::testing::user_rig::UserRig::plugin_http")
     }
 
     /// A plugin opens a raw socket.
-    pub fn plugin_raw_socket(&mut self, id: &str, address: &str) -> CallOutcome {
+    pub fn plugin_raw_socket(&mut self, _id: &str, _address: &str) -> CallOutcome {
         unimplemented!("host::testing::user_rig::UserRig::plugin_raw_socket")
     }
 
     /// Makes the fake network redirect one URL to another.
-    pub fn script_redirect(&mut self, from: &str, to: &str) {
+    pub fn script_redirect(&mut self, _from: &str, _to: &str) {
         unimplemented!("host::testing::user_rig::UserRig::script_redirect")
     }
 
     /// A plugin asks to open a link.
-    pub fn plugin_opens_link(&mut self, id: &str, url: &str) {
+    pub fn plugin_opens_link(&mut self, _id: &str, _url: &str) {
         unimplemented!("host::testing::user_rig::UserRig::plugin_opens_link")
     }
 
@@ -699,7 +692,7 @@ impl UserRig {
     }
 
     /// A plugin requests a URL.
-    pub fn plugin_requests(&mut self, id: &str, url: &str) {
+    pub fn plugin_requests(&mut self, _id: &str, _url: &str) {
         unimplemented!("host::testing::user_rig::UserRig::plugin_requests")
     }
 
@@ -709,7 +702,7 @@ impl UserRig {
     }
 
     /// A plugin shows a toast.
-    pub fn plugin_toast(&mut self, id: &str, text: &str) {
+    pub fn plugin_toast(&mut self, _id: &str, _text: &str) {
         unimplemented!("host::testing::user_rig::UserRig::plugin_toast")
     }
 
@@ -724,7 +717,7 @@ impl UserRig {
     }
 
     /// A plugin locks user input.
-    pub fn plugin_locks_input(&mut self, id: &str) {
+    pub fn plugin_locks_input(&mut self, _id: &str) {
         unimplemented!("host::testing::user_rig::UserRig::plugin_locks_input")
     }
 
@@ -739,37 +732,37 @@ impl UserRig {
     }
 
     /// A plugin logs one line at a level.
-    pub fn plugin_logs(&mut self, id: &str, level: &str, line: &str) {
+    pub fn plugin_logs(&mut self, _id: &str, _level: &str, _line: &str) {
         unimplemented!("host::testing::user_rig::UserRig::plugin_logs")
     }
 
     /// A plugin logs `bytes` bytes.
-    pub fn plugin_logs_bytes(&mut self, id: &str, bytes: usize) {
+    pub fn plugin_logs_bytes(&mut self, _id: &str, _bytes: usize) {
         unimplemented!("host::testing::user_rig::UserRig::plugin_logs_bytes")
     }
 
     /// The journal lines of a plugin.
-    pub fn log_lines(&self, id: &str) -> Vec<String> {
+    pub fn log_lines(&self, _id: &str) -> Vec<String> {
         unimplemented!("host::testing::user_rig::UserRig::log_lines")
     }
 
     /// Makes a plugin trap on its next call.
-    pub fn inject_trap(&mut self, id: &str) {
+    pub fn inject_trap(&mut self, _id: &str) {
         unimplemented!("host::testing::user_rig::UserRig::inject_trap")
     }
 
     /// How often a plugin's instance started.
-    pub fn instance_starts(&self, id: &str) -> u32 {
+    pub fn instance_starts(&self, _id: &str) -> u32 {
         unimplemented!("host::testing::user_rig::UserRig::instance_starts")
     }
 
     /// The failure count of a plugin.
-    pub fn failure_count(&self, id: &str) -> u32 {
+    pub fn failure_count(&self, _id: &str) -> u32 {
         unimplemented!("host::testing::user_rig::UserRig::failure_count")
     }
 
     /// The N14 notice text for a plugin, if shown.
-    pub fn n14_text(&self, id: &str) -> Option<String> {
+    pub fn n14_text(&self, _id: &str) -> Option<String> {
         unimplemented!("host::testing::user_rig::UserRig::n14_text")
     }
 
@@ -796,7 +789,7 @@ impl UserRig {
     }
 
     /// Turns request logging on or off.
-    pub fn set_request_logging(&mut self, on: bool) {
+    pub fn set_request_logging(&mut self, _on: bool) {
         unimplemented!("host::testing::user_rig::UserRig::set_request_logging")
     }
 
@@ -808,99 +801,99 @@ impl UserRig {
     // ---- Extensions and panes -------------------------------------------------------------
 
     /// The order in which a point's contributors were called.
-    pub fn call_point_order(&mut self, owner: &str, point: &str) -> Vec<String> {
+    pub fn call_point_order(&mut self, _owner: &str, _point: &str) -> Vec<String> {
         unimplemented!("host::testing::user_rig::UserRig::call_point_order")
     }
 
     /// Moves a contributor up in the Extensions screen.
-    pub fn extensions_move_up(&mut self, owner: &str, point: &str, plugin: &str) {
+    pub fn extensions_move_up(&mut self, _owner: &str, _point: &str, _plugin: &str) {
         unimplemented!("host::testing::user_rig::UserRig::extensions_move_up")
     }
 
     /// Moves a contributor down in the Extensions screen.
-    pub fn extensions_move_down(&mut self, owner: &str, point: &str, plugin: &str) {
+    pub fn extensions_move_down(&mut self, _owner: &str, _point: &str, _plugin: &str) {
         unimplemented!("host::testing::user_rig::UserRig::extensions_move_down")
     }
 
     /// Toggles a contributor in the Extensions screen.
-    pub fn extensions_toggle(&mut self, owner: &str, point: &str, plugin: &str, on: bool) {
+    pub fn extensions_toggle(&mut self, _owner: &str, _point: &str, _plugin: &str, _on: bool) {
         unimplemented!("host::testing::user_rig::UserRig::extensions_toggle")
     }
 
     /// Records the current extension order of a plugin.
-    pub fn extensions_remember_order(&mut self, plugin: &str) {
+    pub fn extensions_remember_order(&mut self, _plugin: &str) {
         unimplemented!("host::testing::user_rig::UserRig::extensions_remember_order")
     }
 
     /// The extension order entries kept for a plugin.
-    pub fn extension_order_entries(&self, plugin: &str) -> Vec<String> {
+    pub fn extension_order_entries(&self, _plugin: &str) -> Vec<String> {
         unimplemented!("host::testing::user_rig::UserRig::extension_order_entries")
     }
 
     /// Whether a contributor is active on a point.
-    pub fn extension_active(&self, owner: &str, point: &str, plugin: &str) -> bool {
+    pub fn extension_active(&self, _owner: &str, _point: &str, _plugin: &str) -> bool {
         unimplemented!("host::testing::user_rig::UserRig::extension_active")
     }
 
     /// The label the Extensions screen shows for a contributor.
-    pub fn extension_label(&self, owner: &str, point: &str, plugin: &str) -> String {
+    pub fn extension_label(&self, _owner: &str, _point: &str, _plugin: &str) -> String {
         unimplemented!("host::testing::user_rig::UserRig::extension_label")
     }
 
     /// Resets a contributor after breaches.
-    pub fn extension_reset(&mut self, owner: &str, point: &str, plugin: &str) {
+    pub fn extension_reset(&mut self, _owner: &str, _point: &str, _plugin: &str) {
         unimplemented!("host::testing::user_rig::UserRig::extension_reset")
     }
 
     /// Whether a reset is offered for a contributor.
-    pub fn extension_reset_offered(&self, owner: &str, point: &str, plugin: &str) -> bool {
+    pub fn extension_reset_offered(&self, _owner: &str, _point: &str, _plugin: &str) -> bool {
         unimplemented!("host::testing::user_rig::UserRig::extension_reset_offered")
     }
 
     /// Runs a filter point and returns the filtered value.
-    pub fn run_filter_point(&mut self, owner: &str, point: &str, input: &str) -> String {
+    pub fn run_filter_point(&mut self, _owner: &str, _point: &str, _input: &str) -> String {
         unimplemented!("host::testing::user_rig::UserRig::run_filter_point")
     }
 
     /// Runs a veto point.
-    pub fn run_veto_point(&mut self, owner: &str, point: &str) -> VetoOutcome {
+    pub fn run_veto_point(&mut self, _owner: &str, _point: &str) -> VetoOutcome {
         unimplemented!("host::testing::user_rig::UserRig::run_veto_point")
     }
 
     /// Calls a service of a provider from a consumer; returns the result word.
-    pub fn call_service(&mut self, consumer: &str, provider: &str, service: &str) -> String {
+    pub fn call_service(&mut self, _consumer: &str, _provider: &str, _service: &str) -> String {
         unimplemented!("host::testing::user_rig::UserRig::call_service")
     }
 
     /// The decorations a plugin currently draws.
-    pub fn decoration_count(&self, id: &str) -> usize {
+    pub fn decoration_count(&self, _id: &str) -> usize {
         unimplemented!("host::testing::user_rig::UserRig::decoration_count")
     }
 
     /// Opens a plugin pane.
-    pub fn open_plugin_pane(&mut self, id: &str, kind: &str) -> PaneId {
+    pub fn open_plugin_pane(&mut self, _id: &str, _kind: &str) -> PaneId {
         unimplemented!("host::testing::user_rig::UserRig::open_plugin_pane")
     }
 
     /// Whether a pane is in the tree.
-    pub fn pane_exists(&self, pane: PaneId) -> bool {
+    pub fn pane_exists(&self, _pane: PaneId) -> bool {
         unimplemented!("host::testing::user_rig::UserRig::pane_exists")
     }
 
     /// The content kind of a pane (`placeholder` once its plugin is gone).
-    pub fn pane_content_kind(&self, pane: PaneId) -> String {
+    pub fn pane_content_kind(&self, _pane: PaneId) -> String {
         unimplemented!("host::testing::user_rig::UserRig::pane_content_kind")
     }
 
     // ---- Policy and audit -----------------------------------------------------------------
 
     /// Writes the system policy file.
-    pub fn write_system_policy(&mut self, toml: &str) {
+    pub fn write_system_policy(&mut self, _toml: &str) {
         unimplemented!("host::testing::user_rig::UserRig::write_system_policy")
     }
 
     /// Sets the mode of the system policy file.
-    pub fn set_system_policy_mode(&mut self, mode: u32) {
+    pub fn set_system_policy_mode(&mut self, _mode: u32) {
         unimplemented!("host::testing::user_rig::UserRig::set_system_policy_mode")
     }
 
@@ -910,7 +903,7 @@ impl UserRig {
     }
 
     /// The audit records of one event kind.
-    pub fn audit_records_of(&self, event: &str) -> Vec<serde_json::Value> {
+    pub fn audit_records_of(&self, _event: &str) -> Vec<serde_json::Value> {
         unimplemented!("host::testing::user_rig::UserRig::audit_records_of")
     }
 }

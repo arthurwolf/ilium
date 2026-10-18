@@ -1,9 +1,6 @@
 //! Twins of the tests of ilium-client/src/semantic_animation_tests.rs.
 
 use crate::common::*;
-#[allow(unused_imports)]
-use ilium_plugin_sdk::types::ErrorCode;
-#[allow(unused_imports)]
 use serde_json::json;
 
 /// REQ: PORT:ilium-client/src/semantic_animation_tests.rs::all_concrete_ids_and_descriptions_are_present_once_without_aliases

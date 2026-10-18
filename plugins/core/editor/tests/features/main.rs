@@ -3,6 +3,7 @@
 //! FakeHost (events, intents, rendered screens) or, for exports FakeHost has no entry for
 //! (token provider, service provider, widget trees), directly. See ../API_GAPS.md.
 
+mod fixtures;
 mod support;
 
 mod events;

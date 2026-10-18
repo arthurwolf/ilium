@@ -6,7 +6,6 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration;
 
-use ilium_plugin_api::generated::types::NodeId;
 use ilium_plugin_api::kernel::KernelFacade;
 use ilium_plugin_api::{ProcessKind, Side, Tier};
 use ilium_plugin_host::lifecycle::StartMode;
@@ -646,11 +645,10 @@ fn some_grants(count: usize) -> Vec<ilium_plugin_api::grants::Grant> {
 #[test]
 fn hst_023_a_second_writer_cannot_open_the_store_while_the_first_holds_it() {
     let (_dir, path) = temp_grant_path();
-    let first = GrantStore::open(&path).expect("first writer opens");
+    let _first = GrantStore::open(&path).expect("first writer opens");
     let second = GrantStore::open(&path);
     // manual does not pin the lock-refusal error code, so only the refusal is asserted.
     assert!(second.is_err(), "a second writer must be refused");
-    drop(first);
     assert!(
         GrantStore::open(&path).is_ok(),
         "the lock is released on drop"
@@ -715,10 +713,9 @@ fn hst_023_concurrent_openers_never_hold_the_writer_lock_together() {
         let max_seen = Arc::clone(&max_seen);
         threads.push(std::thread::spawn(move || {
             for _ in 0..30 {
-                if let Ok(store) = GrantStore::open(&path) {
+                if let Ok(_store) = GrantStore::open(&path) {
                     let now = holders.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
                     max_seen.fetch_max(now, std::sync::atomic::Ordering::SeqCst);
-                    drop(store);
                     holders.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
                 }
             }
@@ -1117,10 +1114,4 @@ fn hst_045_the_install_time_hash_check_uses_manifest_file_hash() {
         .build();
     let diagnostics = run.verify_install_hashes("acme.hashed");
     assert!(diagnostics.iter().any(|code| code == "manifest.file-hash"));
-}
-
-// A node-id helper keeps the import used by tree-traffic tests in other modules.
-#[allow(dead_code)]
-fn node(id: u64) -> NodeId {
-    NodeId(id)
 }

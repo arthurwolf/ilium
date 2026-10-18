@@ -2,6 +2,7 @@
 //! `before-send-scheduled` (hook, veto), service `ilium.core.scheduler/queue`, topic `ilium.core.scheduler/fired`.
 
 use crate::common::*;
+use crate::feature_support::*;
 use ilium_plugin_sdk::exports::{HookCall, HookReply};
 use ilium_plugin_sdk::testing::FakeSession;
 

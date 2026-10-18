@@ -10,5 +10,6 @@ mod config_text;
 mod feature_setup;
 #[path = "../host_ext.rs"]
 mod host_ext;
+mod host_ext_port;
 mod path_paste;
 mod setup_prompt;

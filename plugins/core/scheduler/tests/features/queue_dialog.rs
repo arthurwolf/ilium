@@ -4,6 +4,7 @@ use ilium_plugin_sdk::testing::FakeSession;
 use ilium_plugin_sdk::types::{ActionKind, ActionValue, AgentActivity, NodeId};
 
 use crate::common::*;
+use crate::feature_support::*;
 
 const WARNING: &str =
     "DANGER: this will re-send forever whenever the agent finishes. Do not run it unmonitored.";

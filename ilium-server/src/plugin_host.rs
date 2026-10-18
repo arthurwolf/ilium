@@ -7,7 +7,6 @@
 //! kernel over a temporary project in a start mode and let a test drive it like a running server.
 
 // Not wired into the server yet; the implementation phase calls it from `run()`.
-#![allow(dead_code, unused_variables)]
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -21,22 +20,20 @@ use ilium_plugin_host::lifecycle::{ShutdownReport, StartMode, StartReport};
 
 /// Read and write access to the real tree and panes for plugins.
 #[derive(Debug)]
-pub struct ServerKernel {
-    start_mode: StartMode,
-}
+pub struct ServerKernel;
 
 impl ServerKernel {
     /// A kernel over a fresh temporary project started in `mode` with this `config.toml`
     /// (parity-and-coverage.md COR-010).
-    pub fn for_parity_world(mode: StartMode, config_toml: &str) -> ServerKernel {
+    pub fn for_parity_world(_mode: StartMode, _config_toml: &str) -> ServerKernel {
         unimplemented!("server::plugin_host::ServerKernel::for_parity_world")
     }
 
     /// Like `for_parity_world`, owning the named session (parity-and-coverage.md COR-010).
     pub fn for_parity_world_named(
-        mode: StartMode,
-        config_toml: &str,
-        session: &str,
+        _mode: StartMode,
+        _config_toml: &str,
+        _session: &str,
     ) -> ServerKernel {
         unimplemented!("server::plugin_host::ServerKernel::for_parity_world_named")
     }
@@ -49,22 +46,22 @@ impl ServerKernel {
     }
 
     /// Advances the server's clock.
-    pub fn advance_clock_ms(&self, ms: u64) {
+    pub fn advance_clock_ms(&self, _ms: u64) {
         unimplemented!("server::plugin_host::ServerKernel::advance_clock_ms")
     }
 
     /// Feeds bytes to a pane as if its process wrote them.
-    pub fn feed_output(&self, pane: NodeId, bytes: &[u8]) {
+    pub fn feed_output(&self, _pane: NodeId, _bytes: &[u8]) {
         unimplemented!("server::plugin_host::ServerKernel::feed_output")
     }
 
     /// Clicks in a pane (`button` 0 left, 1 middle, 2 right).
-    pub fn mouse_click(&self, pane: NodeId, column: u16, row: u16, button: u8) {
+    pub fn mouse_click(&self, _pane: NodeId, _column: u16, _row: u16, _button: u8) {
         unimplemented!("server::plugin_host::ServerKernel::mouse_click")
     }
 
     /// Scrolls the wheel in a pane.
-    pub fn mouse_wheel(&self, pane: NodeId, column: u16, row: u16, up: bool) {
+    pub fn mouse_wheel(&self, _pane: NodeId, _column: u16, _row: u16, _up: bool) {
         unimplemented!("server::plugin_host::ServerKernel::mouse_wheel")
     }
 
@@ -84,18 +81,18 @@ impl ServerKernel {
     }
 
     /// Replaces `config.toml`.
-    pub fn write_config_file(&self, text: &str) {
+    pub fn write_config_file(&self, _text: &str) {
         unimplemented!("server::plugin_host::ServerKernel::write_config_file")
     }
 
     /// Writes a file under the project root.
-    pub fn write_project_file(&self, path: &str, text: &str) {
+    pub fn write_project_file(&self, _path: &str, _text: &str) {
         unimplemented!("server::plugin_host::ServerKernel::write_project_file")
     }
 
     /// Sets (`Some`) or unsets (`None`) an environment variable the server sees
     /// (parity-and-coverage.md, api-panes.md PAN-00x shell resolution).
-    pub fn set_environment(&self, name: &str, value: Option<&str>) {
+    pub fn set_environment(&self, _name: &str, _value: Option<&str>) {
         unimplemented!("server::plugin_host::ServerKernel::set_environment")
     }
 
@@ -105,27 +102,27 @@ impl ServerKernel {
     }
 
     /// Completes onboarding, with AI features on or off.
-    pub fn finish_onboarding(&self, enable_ai: bool) {
+    pub fn finish_onboarding(&self, _enable_ai: bool) {
         unimplemented!("server::plugin_host::ServerKernel::finish_onboarding")
     }
 
     /// Types text into an editor pane.
-    pub fn editor_type(&self, pane: NodeId, text: &str) {
+    pub fn editor_type(&self, _pane: NodeId, _text: &str) {
         unimplemented!("server::plugin_host::ServerKernel::editor_type")
     }
 
     /// Saves an editor pane.
-    pub fn editor_save(&self, pane: NodeId) {
+    pub fn editor_save(&self, _pane: NodeId) {
         unimplemented!("server::plugin_host::ServerKernel::editor_save")
     }
 
     /// Adds a card to a board column.
-    pub fn board_add_card(&self, pane: NodeId, column: &str, text: &str) {
+    pub fn board_add_card(&self, _pane: NodeId, _column: &str, _text: &str) {
         unimplemented!("server::plugin_host::ServerKernel::board_add_card")
     }
 
     /// Creates a board pane with a storage kind at a path.
-    pub fn create_board(&self, storage: &str, path: &str) -> NodeId {
+    pub fn create_board(&self, _storage: &str, _path: &str) -> NodeId {
         unimplemented!("server::plugin_host::ServerKernel::create_board")
     }
 
@@ -147,12 +144,12 @@ impl ServerKernel {
     }
 
     /// The effective value of a setting.
-    pub fn setting(&self, section: &str, key: &str) -> Option<String> {
+    pub fn setting(&self, _section: &str, _key: &str) -> Option<String> {
         unimplemented!("server::plugin_host::ServerKernel::setting")
     }
 
     /// Applies a setting as the settings dialog would.
-    pub fn apply_setting(&self, section: &str, key: &str, value: &str) -> Result<(), String> {
+    pub fn apply_setting(&self, _section: &str, _key: &str, _value: &str) -> Result<(), String> {
         unimplemented!("server::plugin_host::ServerKernel::apply_setting")
     }
 
@@ -172,17 +169,17 @@ impl ServerKernel {
     }
 
     /// Every byte written to a pane's process.
-    pub fn pane_input_log(&self, pane: NodeId) -> Vec<u8> {
+    pub fn pane_input_log(&self, _pane: NodeId) -> Vec<u8> {
         unimplemented!("server::plugin_host::ServerKernel::pane_input_log")
     }
 
     /// The exit code of a pane's process, once it ended.
-    pub fn pane_exit_code(&self, pane: NodeId) -> Option<i32> {
+    pub fn pane_exit_code(&self, _pane: NodeId) -> Option<i32> {
         unimplemented!("server::plugin_host::ServerKernel::pane_exit_code")
     }
 
     /// Names of the events emitted for a node, in order.
-    pub fn event_names_for(&self, node: NodeId) -> Vec<String> {
+    pub fn event_names_for(&self, _node: NodeId) -> Vec<String> {
         unimplemented!("server::plugin_host::ServerKernel::event_names_for")
     }
 
@@ -192,37 +189,42 @@ impl ServerKernel {
     }
 
     /// The rectangles `(x, y, width, height)` of a split's children at a terminal size.
-    pub fn split_rects(&self, split: NodeId, columns: u16, rows: u16) -> Vec<(u16, u16, u16, u16)> {
+    pub fn split_rects(
+        &self,
+        _split: NodeId,
+        _columns: u16,
+        _rows: u16,
+    ) -> Vec<(u16, u16, u16, u16)> {
         unimplemented!("server::plugin_host::ServerKernel::split_rects")
     }
 
     /// The rectangle `(x, y, width, height)` of a node at a terminal size.
-    pub fn layout_rect(&self, node: NodeId, columns: u16, rows: u16) -> (u16, u16, u16, u16) {
+    pub fn layout_rect(&self, _node: NodeId, _columns: u16, _rows: u16) -> (u16, u16, u16, u16) {
         unimplemented!("server::plugin_host::ServerKernel::layout_rect")
     }
 
     /// The action a key sequence resolves to.
-    pub fn resolve_key(&self, keys: &[&str]) -> Option<String> {
+    pub fn resolve_key(&self, _keys: &[&str]) -> Option<String> {
         unimplemented!("server::plugin_host::ServerKernel::resolve_key")
     }
 
     /// A file under the project root.
-    pub fn read_project_file(&self, path: &str) -> Option<String> {
+    pub fn read_project_file(&self, _path: &str) -> Option<String> {
         unimplemented!("server::plugin_host::ServerKernel::read_project_file")
     }
 
     /// Whether a file exists under the project root.
-    pub fn project_file_exists(&self, path: &str) -> bool {
+    pub fn project_file_exists(&self, _path: &str) -> bool {
         unimplemented!("server::plugin_host::ServerKernel::project_file_exists")
     }
 
     /// Whether a directory exists under the project root.
-    pub fn project_dir_exists(&self, path: &str) -> bool {
+    pub fn project_dir_exists(&self, _path: &str) -> bool {
         unimplemented!("server::plugin_host::ServerKernel::project_dir_exists")
     }
 
     /// The permission bits of a file under the project root.
-    pub fn project_file_mode(&self, path: &str) -> Option<u32> {
+    pub fn project_file_mode(&self, _path: &str) -> Option<u32> {
         unimplemented!("server::plugin_host::ServerKernel::project_file_mode")
     }
 
@@ -237,7 +239,7 @@ impl ServerKernel {
     }
 
     /// Names of the backup files younger than `ms`.
-    pub fn backup_files_younger_than_ms(&self, ms: u64) -> Vec<String> {
+    pub fn backup_files_younger_than_ms(&self, _ms: u64) -> Vec<String> {
         unimplemented!("server::plugin_host::ServerKernel::backup_files_younger_than_ms")
     }
 
@@ -257,29 +259,29 @@ impl ServerKernel {
     }
 
     /// The cursor line of an editor pane.
-    pub fn editor_cursor_line(&self, pane: NodeId) -> Option<u32> {
+    pub fn editor_cursor_line(&self, _pane: NodeId) -> Option<u32> {
         unimplemented!("server::plugin_host::ServerKernel::editor_cursor_line")
     }
 
     /// The cards of a board column.
-    pub fn board_column(&self, pane: NodeId, column: &str) -> Vec<String> {
+    pub fn board_column(&self, _pane: NodeId, _column: &str) -> Vec<String> {
         unimplemented!("server::plugin_host::ServerKernel::board_column")
     }
 
     /// Whether an AI request of this kind passed admission.
-    pub fn ai_request_admitted(&self, kind: &str) -> bool {
+    pub fn ai_request_admitted(&self, _kind: &str) -> bool {
         unimplemented!("server::plugin_host::ServerKernel::ai_request_admitted")
     }
 
     // ---- HTTP and jobs (parity-and-coverage.md) --------------------------------------------
 
     /// A POST to the local HTTP listener: `(status, body)`.
-    pub fn http_post(&self, path: &str, body: serde_json::Value) -> (u16, serde_json::Value) {
+    pub fn http_post(&self, _path: &str, _body: serde_json::Value) -> (u16, serde_json::Value) {
         unimplemented!("server::plugin_host::ServerKernel::http_post")
     }
 
     /// A GET from the local HTTP listener: `(status, body)`.
-    pub fn http_get(&self, path: &str) -> (u16, serde_json::Value) {
+    pub fn http_get(&self, _path: &str) -> (u16, serde_json::Value) {
         unimplemented!("server::plugin_host::ServerKernel::http_get")
     }
 
@@ -289,27 +291,27 @@ impl ServerKernel {
     }
 
     /// Runs a job on a bank and returns its job id.
-    pub fn run_finite_job(&self, bank: &str, job: Box<dyn FnOnce() -> u64 + Send>) -> u64 {
+    pub fn run_finite_job(&self, _bank: &str, _job: Box<dyn FnOnce() -> u64 + Send>) -> u64 {
         unimplemented!("server::plugin_host::ServerKernel::run_finite_job")
     }
 
     /// Runs a job that fails on a bank and returns its job id.
-    pub fn run_failing_job(&self, bank: &str) -> u64 {
+    pub fn run_failing_job(&self, _bank: &str) -> u64 {
         unimplemented!("server::plugin_host::ServerKernel::run_failing_job")
     }
 
     /// The result of a job, once it ended.
-    pub fn job_result(&self, job: u64) -> Option<u64> {
+    pub fn job_result(&self, _job: u64) -> Option<u64> {
         unimplemented!("server::plugin_host::ServerKernel::job_result")
     }
 
     /// Worker threads of a job bank.
-    pub fn bank_worker_count(&self, bank: &str) -> usize {
+    pub fn bank_worker_count(&self, _bank: &str) -> usize {
         unimplemented!("server::plugin_host::ServerKernel::bank_worker_count")
     }
 
     /// Peak concurrency a job bank reached.
-    pub fn bank_peak_concurrency(&self, bank: &str) -> usize {
+    pub fn bank_peak_concurrency(&self, _bank: &str) -> usize {
         unimplemented!("server::plugin_host::ServerKernel::bank_peak_concurrency")
     }
 }
@@ -319,7 +321,7 @@ impl TreeRead for ServerKernel {
         unimplemented!("server::plugin_host::ServerKernel::nodes")
     }
 
-    fn node(&self, id: NodeId) -> Option<TreeNode> {
+    fn node(&self, _id: NodeId) -> Option<TreeNode> {
         unimplemented!("server::plugin_host::ServerKernel::node")
     }
 
@@ -329,21 +331,21 @@ impl TreeRead for ServerKernel {
 }
 
 impl PaneRead for ServerKernel {
-    fn screen_text(&self, pane: NodeId) -> Option<String> {
+    fn screen_text(&self, _pane: NodeId) -> Option<String> {
         unimplemented!("server::plugin_host::ServerKernel::screen_text")
     }
 
-    fn cells(&self, pane: NodeId, rows: std::ops::Range<u16>) -> Option<Vec<Vec<Cell>>> {
+    fn cells(&self, _pane: NodeId, _rows: std::ops::Range<u16>) -> Option<Vec<Vec<Cell>>> {
         unimplemented!("server::plugin_host::ServerKernel::cells")
     }
 
-    fn history(&self, pane: NodeId, lines: u32) -> Option<Vec<String>> {
+    fn history(&self, _pane: NodeId, _lines: u32) -> Option<Vec<String>> {
         unimplemented!("server::plugin_host::ServerKernel::history")
     }
 }
 
 impl KernelFacade for ServerKernel {
-    fn apply_intent(&self, origin: &Origin, intent: Intent) -> IntentResult {
+    fn apply_intent(&self, _origin: &Origin, _intent: Intent) -> IntentResult {
         unimplemented!("server::plugin_host::ServerKernel::apply_intent")
     }
 
@@ -370,6 +372,11 @@ impl ServerPluginHost {
     /// A host that will start in the given mode.
     pub fn new(start_mode: StartMode) -> ServerPluginHost {
         ServerPluginHost { start_mode }
+    }
+
+    /// The mode this host was created to start in (`--safe-plugins`, `--no-plugins`, or normal).
+    pub fn start_mode(&self) -> StartMode {
+        self.start_mode
     }
 
     /// Boot order: engine, registries, core plugins, then the rest (reference-host-architecture.md).
@@ -400,7 +407,7 @@ pub struct PaneIdentity {
 impl ServerKernel {
     /// A kernel over a test tree holding a running, a restored, an exited and a neighbour pane,
     /// with `plugin` holding `grants` (api-panes.md, api-pane-lifecycle.md).
-    pub fn for_test_world(plugin: &str, grants: &[&str]) -> ServerKernel {
+    pub fn for_test_world(_plugin: &str, _grants: &[&str]) -> ServerKernel {
         unimplemented!("server::plugin_host::ServerKernel::for_test_world")
     }
 
@@ -409,13 +416,13 @@ impl ServerKernel {
     /// The lifecycle states a pane passed through, in order.
     pub fn lifecycle_events(
         &self,
-        pane: NodeId,
+        _pane: NodeId,
     ) -> Vec<ilium_plugin_api::generated::types::PaneLifecycleState> {
         unimplemented!("server::plugin_host::ServerKernel::lifecycle_events")
     }
 
     /// The plugin that caused each lifecycle event (`None` for the user or the kernel).
-    pub fn lifecycle_event_causes(&self, pane: NodeId) -> Vec<Option<String>> {
+    pub fn lifecycle_event_causes(&self, _pane: NodeId) -> Vec<Option<String>> {
         unimplemented!("server::plugin_host::ServerKernel::lifecycle_event_causes")
     }
 
@@ -425,32 +432,32 @@ impl ServerKernel {
     }
 
     /// The identity a pane keeps across a process replacement.
-    pub fn pane_identity(&self, pane: NodeId) -> PaneIdentity {
+    pub fn pane_identity(&self, _pane: NodeId) -> PaneIdentity {
         unimplemented!("server::plugin_host::ServerKernel::pane_identity")
     }
 
     /// The working directory of a pane.
-    pub fn pane_cwd(&self, pane: NodeId) -> PathBuf {
+    pub fn pane_cwd(&self, _pane: NodeId) -> PathBuf {
         unimplemented!("server::plugin_host::ServerKernel::pane_cwd")
     }
 
     /// Whether a node is in the tree.
-    pub fn node_exists(&self, node: NodeId) -> bool {
+    pub fn node_exists(&self, _node: NodeId) -> bool {
         unimplemented!("server::plugin_host::ServerKernel::node_exists")
     }
 
     /// Whether a pane shows its process's exit status.
-    pub fn pane_shows_exit_status(&self, pane: NodeId) -> bool {
+    pub fn pane_shows_exit_status(&self, _pane: NodeId) -> bool {
         unimplemented!("server::plugin_host::ServerKernel::pane_shows_exit_status")
     }
 
     /// Makes the pane's process ignore the terminate signal.
-    pub fn make_process_ignore_terminate(&self, pane: NodeId) {
+    pub fn make_process_ignore_terminate(&self, _pane: NodeId) {
         unimplemented!("server::plugin_host::ServerKernel::make_process_ignore_terminate")
     }
 
     /// Milliseconds between the terminate and the kill signal sent to a pane's process.
-    pub fn kill_was_sent_after_ms(&self, pane: NodeId) -> u64 {
+    pub fn kill_was_sent_after_ms(&self, _pane: NodeId) -> u64 {
         unimplemented!("server::plugin_host::ServerKernel::kill_was_sent_after_ms")
     }
 
@@ -462,23 +469,23 @@ impl ServerKernel {
     /// The restructure token of a restructure outcome (api-pane-lifecycle.md PAN-023).
     pub fn last_restructure_token(
         &self,
-        outcome: &ilium_plugin_api::generated::types::Outcome,
+        _outcome: &ilium_plugin_api::generated::types::Outcome,
     ) -> u64 {
         unimplemented!("server::plugin_host::ServerKernel::last_restructure_token")
     }
 
     /// The revision counter of a node.
-    pub fn node_revision(&self, node: NodeId) -> u64 {
+    pub fn node_revision(&self, _node: NodeId) -> u64 {
         unimplemented!("server::plugin_host::ServerKernel::node_revision")
     }
 
     /// Sets a manual icon on a node, as the user would.
-    pub fn set_manual_icon(&self, node: NodeId, icon: &str) {
+    pub fn set_manual_icon(&self, _node: NodeId, _icon: &str) {
         unimplemented!("server::plugin_host::ServerKernel::set_manual_icon")
     }
 
     /// The log lines of a plugin.
-    pub fn plugin_log(&self, plugin: &str) -> Vec<String> {
+    pub fn plugin_log(&self, _plugin: &str) -> Vec<String> {
         unimplemented!("server::plugin_host::ServerKernel::plugin_log")
     }
 
@@ -490,17 +497,17 @@ impl ServerKernel {
     }
 
     /// The pane info a plugin sees for a node, if it is a pane.
-    pub fn pane_info(&self, node: NodeId) -> Option<ilium_plugin_api::generated::types::PaneInfo> {
+    pub fn pane_info(&self, _node: NodeId) -> Option<ilium_plugin_api::generated::types::PaneInfo> {
         unimplemented!("server::plugin_host::ServerKernel::pane_info")
     }
 
     /// Restores a pane from a snapshot that carries no size.
-    pub fn restore_pane_without_saved_size(&self, pane: NodeId) {
+    pub fn restore_pane_without_saved_size(&self, _pane: NodeId) {
         unimplemented!("server::plugin_host::ServerKernel::restore_pane_without_saved_size")
     }
 
     /// Starts the process of a restored pane.
-    pub fn start_restored_process(&self, pane: NodeId) {
+    pub fn start_restored_process(&self, _pane: NodeId) {
         unimplemented!("server::plugin_host::ServerKernel::start_restored_process")
     }
 
@@ -522,7 +529,7 @@ impl ServerKernel {
     }
 
     /// Runs one detection tick with the named fixture detector plugin.
-    pub fn run_detection_tick_with_fixture_detector(&self, fixture: &str) {
+    pub fn run_detection_tick_with_fixture_detector(&self, _fixture: &str) {
         unimplemented!(
             "server::plugin_host::ServerKernel::run_detection_tick_with_fixture_detector"
         )
@@ -539,12 +546,12 @@ impl ServerKernel {
     }
 
     /// Makes every detector call block for `ms`.
-    pub fn set_detector_block_ms(&self, ms: u64) {
+    pub fn set_detector_block_ms(&self, _ms: u64) {
         unimplemented!("server::plugin_host::ServerKernel::set_detector_block_ms")
     }
 
     /// Makes the detector calls of one plugin block for `ms`.
-    pub fn set_detector_block_ms_for(&self, plugin: &str, ms: u64) {
+    pub fn set_detector_block_ms_for(&self, _plugin: &str, _ms: u64) {
         unimplemented!("server::plugin_host::ServerKernel::set_detector_block_ms_for")
     }
 
@@ -554,7 +561,7 @@ impl ServerKernel {
     }
 
     /// Waits up to `timeout` for a detector call of `plugin`; true when it happened.
-    pub fn wait_for_detector_call(&self, plugin: &str, timeout: std::time::Duration) -> bool {
+    pub fn wait_for_detector_call(&self, _plugin: &str, _timeout: std::time::Duration) -> bool {
         unimplemented!("server::plugin_host::ServerKernel::wait_for_detector_call")
     }
 }

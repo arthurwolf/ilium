@@ -13,21 +13,21 @@ pub struct ServicesImport;
 impl HostServices for ServicesImport {
     fn call(
         &mut self,
-        service: String,
-        method: String,
-        payload_json: String,
+        _service: String,
+        _method: String,
+        _payload_json: String,
     ) -> Result<RequestId, PluginError> {
         unimplemented!("host::imports::services::call")
     }
 
-    fn take_reply(&mut self, request: RequestId) -> Option<String> {
+    fn take_reply(&mut self, _request: RequestId) -> Option<String> {
         unimplemented!("host::imports::services::take_reply")
     }
 
     fn reply(
         &mut self,
-        call: u64,
-        outcome: Result<String, PluginError>,
+        _call: u64,
+        _outcome: Result<String, PluginError>,
     ) -> Result<(), PluginError> {
         unimplemented!("host::imports::services::reply")
     }

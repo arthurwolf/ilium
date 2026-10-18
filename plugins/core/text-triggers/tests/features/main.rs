@@ -8,6 +8,7 @@ mod disabled;
 mod doc_page;
 mod extension_points;
 mod manifest;
+mod manual;
 mod matching;
 mod panel;
 mod settings;

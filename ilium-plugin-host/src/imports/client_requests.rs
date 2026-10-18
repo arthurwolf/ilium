@@ -13,22 +13,22 @@ pub struct ClientRequestsImport;
 impl HostClientRequests for ClientRequestsImport {
     fn request(
         &mut self,
-        client: ClientId,
-        kind: String,
-        payload_json: String,
-        timeout_millis: u32,
+        _client: ClientId,
+        _kind: String,
+        _payload_json: String,
+        _timeout_millis: u32,
     ) -> Result<RequestId, PluginError> {
         unimplemented!("host::imports::client_requests::request")
     }
 
-    fn take_answer(&mut self, request: RequestId) -> Option<String> {
+    fn take_answer(&mut self, _request: RequestId) -> Option<String> {
         unimplemented!("host::imports::client_requests::take_answer")
     }
 
     fn respond(
         &mut self,
-        call: u64,
-        outcome: Result<String, PluginError>,
+        _call: u64,
+        _outcome: Result<String, PluginError>,
     ) -> Result<(), PluginError> {
         unimplemented!("host::imports::client_requests::respond")
     }

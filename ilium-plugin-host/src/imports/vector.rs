@@ -11,40 +11,40 @@ use ilium_plugin_api::generated::types::ids::{IndexId, RequestId};
 pub struct VectorImport;
 
 impl HostVector for VectorImport {
-    fn embed(&mut self, texts: Vec<String>, purpose: String) -> Result<RequestId, PluginError> {
+    fn embed(&mut self, _texts: Vec<String>, _purpose: String) -> Result<RequestId, PluginError> {
         unimplemented!("host::imports::vector::embed")
     }
 
-    fn take_vectors(&mut self, request: RequestId) -> Option<Vec<Vec<f32>>> {
+    fn take_vectors(&mut self, _request: RequestId) -> Option<Vec<Vec<f32>>> {
         unimplemented!("host::imports::vector::take_vectors")
     }
 
-    fn create_index(&mut self, name: String, dimensions: u16) -> Result<IndexId, PluginError> {
+    fn create_index(&mut self, _name: String, _dimensions: u16) -> Result<IndexId, PluginError> {
         unimplemented!("host::imports::vector::create_index")
     }
 
     fn upsert(
         &mut self,
-        index: IndexId,
-        entries: Vec<(String, Vec<f32>)>,
+        _index: IndexId,
+        _entries: Vec<(String, Vec<f32>)>,
     ) -> Result<(), PluginError> {
         unimplemented!("host::imports::vector::upsert")
     }
 
-    fn remove_entries(&mut self, index: IndexId, ids: Vec<String>) -> Result<(), PluginError> {
+    fn remove_entries(&mut self, _index: IndexId, _ids: Vec<String>) -> Result<(), PluginError> {
         unimplemented!("host::imports::vector::remove_entries")
     }
 
     fn top_k(
         &mut self,
-        index: IndexId,
-        query: Vec<f32>,
-        k: u16,
+        _index: IndexId,
+        _query: Vec<f32>,
+        _k: u16,
     ) -> Result<Vec<(String, f32)>, PluginError> {
         unimplemented!("host::imports::vector::top_k")
     }
 
-    fn drop_index(&mut self, index: IndexId) {
+    fn drop_index(&mut self, _index: IndexId) {
         unimplemented!("host::imports::vector::drop_index")
     }
 }

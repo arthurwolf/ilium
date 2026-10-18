@@ -35,8 +35,8 @@ pub enum InstanceInput {
 
 /// The next instance state, or the code of an illegal transition (reference-runtime-model.md).
 pub fn next_instance_state(
-    current: InstanceState,
-    input: &InstanceInput,
+    _current: InstanceState,
+    _input: &InstanceInput,
 ) -> Result<InstanceState, Code> {
     unimplemented!("api::lifecycle::next_instance_state")
 }
@@ -70,8 +70,8 @@ pub enum PackageInput {
 
 /// The next package state, or the code of an illegal transition (reference-runtime-model.md).
 pub fn next_package_state(
-    current: PackageState,
-    input: &PackageInput,
+    _current: PackageState,
+    _input: &PackageInput,
 ) -> Result<PackageState, Code> {
     unimplemented!("api::lifecycle::next_package_state")
 }
@@ -89,8 +89,6 @@ pub const FAILURE_WINDOW_MS: u64 = 600_000;
 /// (reference-runtime-model.md "12. Failures and restart").
 #[derive(Debug, Clone, Default)]
 pub struct RestartPolicy {
-    // Failure times of the current window; read by the implementation that replaces the stubs.
-    #[allow(dead_code)]
     failures_ms: Vec<u64>,
 }
 
@@ -105,17 +103,17 @@ pub enum RestartDecision {
 
 impl RestartPolicy {
     /// Records a failure at `now_ms` and decides (reference-runtime-model.md "12. Failures and restart").
-    pub fn on_failure(&mut self, now_ms: u64) -> RestartDecision {
+    pub fn on_failure(&mut self, _now_ms: u64) -> RestartDecision {
         unimplemented!("api::lifecycle::RestartPolicy::on_failure")
     }
 
     /// Failures inside the window ending at `now_ms` (reference-runtime-model.md "12. Failures and restart").
-    pub fn failures_in_window(&self, now_ms: u64) -> u32 {
+    pub fn failures_in_window(&self, _now_ms: u64) -> u32 {
         unimplemented!("api::lifecycle::RestartPolicy::failures_in_window")
     }
 
     /// Forgets every failure, after a manual enable (reference-runtime-model.md "12. Failures and restart").
     pub fn reset(&mut self) {
-        unimplemented!("api::lifecycle::RestartPolicy::reset")
+        self.failures_ms.clear();
     }
 }

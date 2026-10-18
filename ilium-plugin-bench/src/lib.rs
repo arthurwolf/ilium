@@ -2,8 +2,6 @@
 //!
 //! Skeleton: the `perf-budgets` test lane fills in the programs and the budget tests.
 
-#![allow(unused_variables, dead_code)]
-
 use std::collections::BTreeMap;
 
 use ilium_plugin_host::engine::RuntimeSettings;
@@ -80,12 +78,12 @@ impl BenchResult {
 }
 
 /// Runs the program `id` with an explicit spec (reference-host-budgets.md HST-300).
-pub fn run_with(id: &str, spec: &RunSpec) -> Result<BenchResult, BenchError> {
+pub fn run_with(_id: &str, _spec: &RunSpec) -> Result<BenchResult, BenchError> {
     unimplemented!("bench::run_with")
 }
 
 /// Runs the program `id` with the default spec (reference-host-budgets.md HST-300, HST-307).
-pub fn run_benchmark(id: &str) -> Result<BenchResult, BenchError> {
+pub fn run_benchmark(_id: &str) -> Result<BenchResult, BenchError> {
     unimplemented!("bench::run_benchmark")
 }
 
@@ -103,12 +101,12 @@ pub enum Verdict {
 }
 
 /// Judges `value` of `metric` of program `id` against its budget (reference-host-budgets.md HST-302..304).
-pub fn judge(id: &str, metric: &str, value: f64) -> Verdict {
+pub fn judge(_id: &str, _metric: &str, _value: f64) -> Verdict {
     unimplemented!("bench::judge")
 }
 
 /// The process exit code for a set of verdicts: non-zero on any `Fail` or `PlanStop` (HST-302).
-pub fn exit_code_for(verdicts: &[Verdict]) -> i32 {
+pub fn exit_code_for(_verdicts: &[Verdict]) -> i32 {
     unimplemented!("bench::exit_code_for")
 }
 
@@ -133,6 +131,6 @@ pub struct PoolingEvidence {
 }
 
 /// Whether pooling is allowed given the evidence (reference-host-budgets.md HST-312).
-pub fn pooling_allowed(evidence: &PoolingEvidence) -> bool {
+pub fn pooling_allowed(_evidence: &PoolingEvidence) -> bool {
     unimplemented!("bench::pooling_allowed")
 }

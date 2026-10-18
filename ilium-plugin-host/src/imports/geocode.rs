@@ -12,15 +12,15 @@ use ilium_plugin_api::generated::types::ids::RequestId;
 pub struct GeocodeImport;
 
 impl HostGeocode for GeocodeImport {
-    fn search(&mut self, q: GeocodeQuery) -> Result<RequestId, PluginError> {
+    fn search(&mut self, _q: GeocodeQuery) -> Result<RequestId, PluginError> {
         unimplemented!("host::imports::geocode::search")
     }
 
-    fn reverse(&mut self, point: GeoPoint) -> Result<RequestId, PluginError> {
+    fn reverse(&mut self, _point: GeoPoint) -> Result<RequestId, PluginError> {
         unimplemented!("host::imports::geocode::reverse")
     }
 
-    fn take_places(&mut self, request: RequestId) -> Option<Vec<GeoPlace>> {
+    fn take_places(&mut self, _request: RequestId) -> Option<Vec<GeoPlace>> {
         unimplemented!("host::imports::geocode::take_places")
     }
 }

@@ -10,9 +10,8 @@ mod common;
 mod delivery;
 mod doc_page;
 mod extension_points;
+mod feature_support;
 mod footer_client;
-#[path = "../host_ext.rs"]
-mod host_ext;
 mod http_route;
 mod manifest;
 mod probe_contract;

@@ -4,6 +4,7 @@ use ilium_plugin_sdk::types::{DeactivationReason, Event, NodeId};
 use serde_json::Value;
 
 use crate::common::*;
+use crate::feature_support::*;
 
 fn reactivate(session: &mut ilium_plugin_sdk::testing::FakeSession) {
     server(session).deactivate(DeactivationReason::Shutdown);

@@ -2,7 +2,7 @@
 //! watcher's lines are applied but no registration route, so these rows are read from the page
 //! (see ../API_GAPS.md).
 
-use crate::common::*;
+use crate::feature_support::*;
 
 fn watcher_text() -> String {
     let text = page_text();

@@ -12,11 +12,11 @@ pub struct GpuImport;
 impl HostGpu for GpuImport {
     fn run(
         &mut self,
-        kernel: GpuKernel,
-        input: Vec<u8>,
-        width: u32,
-        height: u32,
-        params_json: String,
+        _kernel: GpuKernel,
+        _input: Vec<u8>,
+        _width: u32,
+        _height: u32,
+        _params_json: String,
     ) -> Result<Vec<u8>, PluginError> {
         unimplemented!("host::imports::gpu::run")
     }

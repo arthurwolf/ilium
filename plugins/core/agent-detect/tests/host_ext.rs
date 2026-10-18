@@ -2,8 +2,6 @@
 //!
 //! Plugin-specific scaffolding kept out of the shared harness type. Skeleton bodies.
 
-#![allow(dead_code)]
-
 use ilium_plugin_sdk::generated::exports::detector::{Classification, DetectorScreen};
 use ilium_plugin_sdk::testing::FakeHost;
 

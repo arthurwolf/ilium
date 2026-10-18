@@ -3,6 +3,7 @@
 use ilium_plugin_sdk::types::Outcome;
 
 use crate::common::*;
+use crate::feature_support::*;
 
 const PROBE: &str = "/opt/probe.sh";
 const JOB: &str = "export-412";

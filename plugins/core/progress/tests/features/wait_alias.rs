@@ -2,6 +2,7 @@
 //! the alias `wait` and the kernel keeps no `wait` command of its own.
 
 use crate::common::*;
+use crate::feature_support::*;
 
 const PROBE: &str = "/opt/probe.sh";
 

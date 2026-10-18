@@ -4,6 +4,7 @@ use ilium_plugin_sdk::testing::{assert_golden, FakeSession};
 use ilium_plugin_sdk::types::{ActionKind, ActionValue};
 
 use crate::common::*;
+use crate::feature_support::*;
 
 /// The n-th `pre.term` block of the page, tags removed, HTML unescaped, trailing spaces trimmed per row.
 fn page_figure(index: usize) -> String {

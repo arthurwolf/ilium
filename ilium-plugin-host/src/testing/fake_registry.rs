@@ -11,17 +11,17 @@ pub struct FakeRegistry {
 
 impl FakeRegistry {
     /// An empty registry at a base URL.
-    pub fn new(base_url: &str) -> FakeRegistry {
+    pub fn new(_base_url: &str) -> FakeRegistry {
         unimplemented!("host::testing::fake_registry::FakeRegistry::new")
     }
 
     /// Publishes a package on a channel; panics when the package is refused.
-    pub fn publish(&mut self, package: Vec<u8>, channel: &str) {
+    pub fn publish(&mut self, _package: Vec<u8>, _channel: &str) {
         unimplemented!("host::testing::fake_registry::FakeRegistry::publish")
     }
 
     /// Publishes a package on a channel.
-    pub fn try_publish(&mut self, package: Vec<u8>, channel: &str) -> Result<(), Diagnostic> {
+    pub fn try_publish(&mut self, _package: Vec<u8>, _channel: &str) -> Result<(), Diagnostic> {
         unimplemented!("host::testing::fake_registry::FakeRegistry::try_publish")
     }
 

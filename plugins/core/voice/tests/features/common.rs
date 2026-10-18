@@ -20,31 +20,10 @@ pub fn workspace_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..")
 }
 
-/// A page of the manual.
-pub fn manual_page(name: &str) -> String {
-    let path = workspace_root()
-        .join("docs/plugins-manual/pages")
-        .join(name);
-    std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("page {path:?}: {error}"))
-}
-
-/// The manual page of this plugin.
-pub fn page_text() -> String {
-    manual_page("core-plugin-voice.md")
-}
-
 /// The user guide of voice control (src/docs/voice.md), the source of the existing behaviour.
 pub fn user_guide() -> String {
     let path = workspace_root().join("src/docs/voice.md");
     std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("guide {path:?}: {error}"))
-}
-
-/// Path of a golden file of this suite.
-pub fn golden(name: &str) -> String {
-    format!(
-        "{}/tests/features/golden/{name}",
-        env!("CARGO_MANIFEST_DIR")
-    )
 }
 
 /// A server-side host with the manifest grants and the plugin activated.
@@ -180,36 +159,6 @@ pub fn invoked_commands(submissions: &[Submission]) -> Vec<String> {
             _ => None,
         })
         .collect()
-}
-
-/// Rows of the first table that follows `anchor`: cells of every row after the separator.
-pub fn table_after(page: &str, anchor: &str) -> Vec<Vec<String>> {
-    let start = page
-        .find(anchor)
-        .unwrap_or_else(|| panic!("anchor {anchor} missing"));
-    page[start..]
-        .lines()
-        .skip_while(|line| !line.starts_with('|'))
-        .skip(2)
-        .take_while(|line| line.starts_with('|'))
-        .map(|line| {
-            line.trim_matches('|')
-                .split('|')
-                .map(|cell| cell.trim().to_string())
-                .collect()
-        })
-        .collect()
-}
-
-/// The first json code block after `heading`.
-pub fn json_block_after(page: &str, heading: &str) -> Value {
-    let start = page
-        .find(heading)
-        .unwrap_or_else(|| panic!("heading {heading} missing"));
-    let rest = &page[start..];
-    let open = rest.find("```json\n").expect("json block") + "```json\n".len();
-    let close = rest[open..].find("```").expect("block end");
-    serde_json::from_str(&rest[open..open + close]).expect("page block is JSON")
 }
 
 /// Speaks `text` on an enabled push-to-talk host: press F8, one frame, release, then the transcription job

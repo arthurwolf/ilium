@@ -1,7 +1,5 @@
 //! Twins of the original tests of ilium-client/src/background_animation/replacement_lifecycle_tests.rs (ported through FakeScene / FakeSession).
 use crate::common::*;
-#[allow(unused_imports)]
-use serde_json::json;
 
 /// REQ: PORT:ilium-client/src/background_animation/replacement_lifecycle_tests.rs::cancelling_a_build_retires_its_owned_worker_before_release_is_reported
 #[test]

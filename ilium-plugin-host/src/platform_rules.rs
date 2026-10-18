@@ -8,17 +8,17 @@ use ilium_plugin_api::Diagnostic;
 use ilium_plugin_api::Tier;
 
 /// Whether the tier's sandbox is available on the platform; `sandbox.unavailable` otherwise.
-pub fn check_sandbox(platform: Platform, tier: Tier) -> Result<(), Diagnostic> {
+pub fn check_sandbox(_platform: Platform, _tier: Tier) -> Result<(), Diagnostic> {
     unimplemented!("host::platform_rules::check_sandbox")
 }
 
 /// Normalises a plugin-supplied path to the platform's form.
-pub fn normalize_plugin_path(platform: Platform, path: &str) -> String {
+pub fn normalize_plugin_path(_platform: Platform, _path: &str) -> String {
     unimplemented!("host::platform_rules::normalize_plugin_path")
 }
 
 /// Whether a gap between scheduler ticks is treated as a suspend and not charged.
-pub fn tick_gap_ignored(gap: Duration) -> bool {
+pub fn tick_gap_ignored(_gap: Duration) -> bool {
     unimplemented!("host::platform_rules::tick_gap_ignored")
 }
 
@@ -43,7 +43,7 @@ pub struct TerminationPlan {
 }
 
 /// The termination plan of a platform.
-pub fn termination_plan(platform: Platform) -> TerminationPlan {
+pub fn termination_plan(_platform: Platform) -> TerminationPlan {
     unimplemented!("host::platform_rules::termination_plan")
 }
 
@@ -63,7 +63,7 @@ pub enum WasmArtifact {
 
 impl WasmArtifact {
     /// A precompiled artifact for `triple`.
-    pub fn cwasm(triple: &str) -> WasmArtifact {
+    pub fn cwasm(_triple: &str) -> WasmArtifact {
         unimplemented!("host::platform_rules::WasmArtifact::cwasm")
     }
 
@@ -85,6 +85,6 @@ pub struct Selected {
 }
 
 /// Picks the artifact for `host_triple` from the package's artifacts.
-pub fn select_precompiled(host_triple: &str, artifacts: &[WasmArtifact]) -> Selected {
+pub fn select_precompiled(_host_triple: &str, _artifacts: &[WasmArtifact]) -> Selected {
     unimplemented!("host::platform_rules::select_precompiled")
 }

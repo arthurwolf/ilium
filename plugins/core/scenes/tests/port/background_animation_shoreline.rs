@@ -1,7 +1,5 @@
 //! Twins of the original tests of ilium-client/src/background_animation/shoreline.rs (ported through FakeScene / FakeSession).
 use crate::common::*;
-#[allow(unused_imports)]
-use serde_json::json;
 
 /// REQ: PORT:ilium-client/src/background_animation/shoreline.rs::prepared_lace_preserves_float_bits_at_all_thread_boundaries
 #[test]

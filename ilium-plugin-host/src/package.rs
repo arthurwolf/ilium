@@ -39,11 +39,11 @@ pub struct PackageArchive {
 }
 
 /// Reads package bytes; a structural fault is a `package.*` diagnostic (reference-packaging.md).
-pub fn read_package(bytes: &[u8]) -> Result<PackageArchive, Vec<Diagnostic>> {
+pub fn read_package(_bytes: &[u8]) -> Result<PackageArchive, Vec<Diagnostic>> {
     unimplemented!("host::package::read_package")
 }
 
 /// Writes files as a package in the accepted ZIP subset (reference-packaging.md).
-pub fn write_package(files: &[(String, Vec<u8>)]) -> Result<Vec<u8>, Diagnostic> {
+pub fn write_package(_files: &[(String, Vec<u8>)]) -> Result<Vec<u8>, Diagnostic> {
     unimplemented!("host::package::write_package")
 }

@@ -13,17 +13,17 @@ pub struct CommandsImport;
 impl HostCommands for CommandsImport {
     fn set_state(
         &mut self,
-        command: String,
-        enabled: bool,
-        checked: Option<bool>,
+        _command: String,
+        _enabled: bool,
+        _checked: Option<bool>,
     ) -> Result<(), PluginError> {
         unimplemented!("host::imports::commands::set_state")
     }
 
     fn invoke(
         &mut self,
-        command: String,
-        arguments_json: String,
+        _command: String,
+        _arguments_json: String,
     ) -> Result<RequestId, PluginError> {
         unimplemented!("host::imports::commands::invoke")
     }

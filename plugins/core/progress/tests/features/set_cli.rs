@@ -8,6 +8,7 @@ use proptest::prelude::*;
 use serde_json::{json, Value};
 
 use crate::common::*;
+use crate::feature_support::*;
 
 const PROBE: &str = "/opt/probe.sh";
 const JOB: &str = "export-412";

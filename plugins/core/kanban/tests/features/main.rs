@@ -7,6 +7,7 @@ mod board_file;
 mod checklist;
 mod common;
 mod doc_page;
+mod doc_support;
 mod drag;
 mod extension_points;
 mod keys;

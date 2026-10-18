@@ -11,41 +11,41 @@ use ilium_plugin_api::generated::types::paths::FsPath;
 pub struct MediaImport;
 
 impl HostMedia for MediaImport {
-    fn open_video(&mut self, path: FsPath) -> Result<(u64, VideoInfo), PluginError> {
+    fn open_video(&mut self, _path: FsPath) -> Result<(u64, VideoInfo), PluginError> {
         unimplemented!("host::imports::media::open_video")
     }
 
     fn open_video_bytes(
         &mut self,
-        bytes: Vec<u8>,
-        mime: String,
+        _bytes: Vec<u8>,
+        _mime: String,
     ) -> Result<(u64, VideoInfo), PluginError> {
         unimplemented!("host::imports::media::open_video_bytes")
     }
 
     fn open_video_range(
         &mut self,
-        path: FsPath,
-        start_millis: u64,
-        end_millis: Option<u64>,
+        _path: FsPath,
+        _start_millis: u64,
+        _end_millis: Option<u64>,
     ) -> Result<(u64, VideoInfo), PluginError> {
         unimplemented!("host::imports::media::open_video_range")
     }
 
     fn next_frame(
         &mut self,
-        video: u64,
-        width: u32,
-        height: u32,
+        _video: u64,
+        _width: u32,
+        _height: u32,
     ) -> Result<Option<Vec<u8>>, PluginError> {
         unimplemented!("host::imports::media::next_frame")
     }
 
-    fn seek(&mut self, video: u64, millis: u64) -> Result<(), PluginError> {
+    fn seek(&mut self, _video: u64, _millis: u64) -> Result<(), PluginError> {
         unimplemented!("host::imports::media::seek")
     }
 
-    fn close_video(&mut self, video: u64) {
+    fn close_video(&mut self, _video: u64) {
         unimplemented!("host::imports::media::close_video")
     }
 }

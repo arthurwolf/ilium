@@ -170,7 +170,7 @@ pub struct ServiceRequirement {
 impl ServiceRequirement {
     /// Parses `<interface>@<range>`; a bad entry is `manifest.requires-invalid`
     /// (reference-dependency-resolution.md).
-    pub fn parse(text: &str) -> Result<ServiceRequirement, Diagnostic> {
+    pub fn parse(_text: &str) -> Result<ServiceRequirement, Diagnostic> {
         unimplemented!("api::manifest::ServiceRequirement::parse")
     }
 }

@@ -11,19 +11,19 @@ use ilium_plugin_api::generated::types::ids::RequestId;
 pub struct JobsImport;
 
 impl HostJobs for JobsImport {
-    fn start(&mut self, kind: String, input: Vec<u8>) -> Result<RequestId, PluginError> {
+    fn start(&mut self, _kind: String, _input: Vec<u8>) -> Result<RequestId, PluginError> {
         unimplemented!("host::imports::jobs::start")
     }
 
-    fn cancel(&mut self, job: RequestId) {
+    fn cancel(&mut self, _job: RequestId) {
         unimplemented!("host::imports::jobs::cancel")
     }
 
-    fn take_output(&mut self, job: RequestId) -> Option<Vec<u8>> {
+    fn take_output(&mut self, _job: RequestId) -> Option<Vec<u8>> {
         unimplemented!("host::imports::jobs::take_output")
     }
 
-    fn report_progress(&mut self, percent: f32) {
+    fn report_progress(&mut self, _percent: f32) {
         unimplemented!("host::imports::jobs::report_progress")
     }
 
@@ -31,7 +31,11 @@ impl HostJobs for JobsImport {
         unimplemented!("host::imports::jobs::is_cancelled")
     }
 
-    fn wait_request(&mut self, request: RequestId, timeout_millis: u32) -> Result<(), PluginError> {
+    fn wait_request(
+        &mut self,
+        _request: RequestId,
+        _timeout_millis: u32,
+    ) -> Result<(), PluginError> {
         unimplemented!("host::imports::jobs::wait_request")
     }
 }

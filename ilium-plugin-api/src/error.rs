@@ -86,13 +86,13 @@ pub const MESSAGE_MAX_CHARS: usize = 256;
 
 impl PluginError {
     /// API: message capped at 256 characters (reference-errors-and-limits.md "The plugin error record").
-    pub fn new(code: ErrorCode, message: impl Into<String>) -> PluginError {
+    pub fn new(_code: ErrorCode, _message: impl Into<String>) -> PluginError {
         unimplemented!("api::error::PluginError::new")
     }
 
     /// An error whose message starts with `<extension code>: ` (reference-errors-and-limits.md
     /// "Extension point codes").
-    pub fn with_prefix(code: ErrorCode, extension_code: &Code, message: &str) -> PluginError {
+    pub fn with_prefix(_code: ErrorCode, _extension_code: &Code, _message: &str) -> PluginError {
         unimplemented!("api::error::PluginError::with_prefix")
     }
 
@@ -142,7 +142,7 @@ pub const REFUSAL_REASONS: [&str; 15] = [
 ];
 
 /// The `error-code` of a refusal reason word (reference-errors-and-limits.md "Refusal reasons").
-pub fn refusal_reason_code(reason: &str) -> Option<ErrorCode> {
+pub fn refusal_reason_code(_reason: &str) -> Option<ErrorCode> {
     unimplemented!("api::error::refusal_reason_code")
 }
 

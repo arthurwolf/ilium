@@ -4,6 +4,7 @@ use ilium_plugin_sdk::testing::assert_golden;
 use serde_json::{json, Value};
 
 use crate::common::*;
+use crate::support::*;
 
 fn grouped_hits() -> Value {
     json!([

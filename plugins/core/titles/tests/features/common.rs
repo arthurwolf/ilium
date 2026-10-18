@@ -1,5 +1,4 @@
 //! Shared helpers of the titles feature tests.
-#![allow(dead_code)]
 
 use std::path::PathBuf;
 
@@ -9,7 +8,7 @@ use ilium_plugin_sdk::testing::{manual, FakeHost};
 use ilium_plugin_sdk::types::{
     CommandContext, CommandInvokedEvent, CommandOrigin, ErrorCode, Event, InputSource,
     InputSubmittedEvent, Intent, NodeId, Outcome, PluginError, RenameNodeSpec, RequestId,
-    RequestRef, RequestResult, RestructureSpec, SetInferredIconSpec, Submission, TitleSource,
+    RequestRef, RequestResult, RestructureSpec, SetInferredIconSpec, Submission,
 };
 
 pub const PLUGIN_ID: &str = "ilium.core.titles";
@@ -207,8 +206,4 @@ pub fn call_event(id: RequestId, outcome: Outcome) -> Event {
         request: RequestRef::Call(id),
         outcome,
     })
-}
-
-pub fn inferred() -> TitleSource {
-    TitleSource::Inferred
 }

@@ -1,7 +1,5 @@
 //! Twins of the original tests of ilium-client/src/background_animation/openstreetmap_tests.rs (ported through FakeScene / FakeSession).
 use crate::common::*;
-#[allow(unused_imports)]
-use serde_json::json;
 
 /// REQ: PORT:ilium-client/src/background_animation/openstreetmap_tests.rs::openstreetmap_attribution_reaches_client_glyphs_and_leaves_with_the_scene
 #[test]

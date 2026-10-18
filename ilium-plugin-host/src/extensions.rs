@@ -28,22 +28,20 @@ pub struct Contribution {
 
 /// The registry of extension points and contributions.
 #[derive(Debug)]
-pub struct ExtensionRegistry {
-    contributions: Vec<Contribution>,
-}
+pub struct ExtensionRegistry;
 
 impl ExtensionRegistry {
     /// Adds a contribution.
-    pub fn contribute(&mut self, contribution: Contribution) -> Result<(), PluginError> {
+    pub fn contribute(&mut self, _contribution: Contribution) -> Result<(), PluginError> {
         unimplemented!("host::extensions::ExtensionRegistry::contribute")
     }
 
     /// Runs the chain of an extension point over a payload.
     pub fn run_chain(
         &self,
-        point: &str,
-        mode: ChainMode,
-        payload_json: String,
+        _point: &str,
+        _mode: ChainMode,
+        _payload_json: String,
     ) -> Result<Vec<String>, PluginError> {
         unimplemented!("host::extensions::ExtensionRegistry::run_chain")
     }

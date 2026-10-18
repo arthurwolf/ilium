@@ -2,7 +2,7 @@
 
 use serde_json::Value;
 
-use crate::common::*;
+use crate::feature_support::*;
 
 fn cli_doc() -> String {
     let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))

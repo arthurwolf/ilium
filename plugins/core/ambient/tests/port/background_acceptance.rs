@@ -1,9 +1,6 @@
 //! Twins of the tests of ilium-client/src/background_acceptance.rs.
 
 use crate::common::*;
-#[allow(unused_imports)]
-use ilium_plugin_sdk::types::{ErrorCode, ViewTarget};
-#[allow(unused_imports)]
 use serde_json::json;
 
 /// REQ: PORT:ilium-client/src/background_acceptance.rs::ambient_decoration_preserves_source_and_colored_spaces_but_fills_plain_background

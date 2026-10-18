@@ -2,10 +2,8 @@
 //! for the install pipeline and a CLI environment. Items outside the skeleton are named in
 //! API_GAPS.md.
 
-#![allow(dead_code)]
-
 use std::collections::VecDeque;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use ilium_plugin_api::generated::types::events::Event;
@@ -268,15 +266,4 @@ pub fn file_names(directory: &Path) -> Vec<String> {
         .unwrap_or_default();
     names.sort();
     names
-}
-
-/// The canonical manual pages: `ILIUM_PLUGIN_MANUAL_DIR`, else `<repo>/docs/plugins-manual/pages`.
-pub fn manual_page(name: &str) -> String {
-    let directory = match std::env::var_os("ILIUM_PLUGIN_MANUAL_DIR") {
-        Some(directory) => PathBuf::from(directory),
-        None => PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../docs/plugins-manual/pages"),
-    };
-    let path = directory.join(name);
-    std::fs::read_to_string(&path)
-        .unwrap_or_else(|error| panic!("read {}: {error}", path.display()))
 }

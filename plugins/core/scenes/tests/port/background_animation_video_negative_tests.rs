@@ -1,7 +1,5 @@
 //! Twins of the original tests of ilium-client/src/background_animation/video_negative_tests.rs (ported through FakeScene / FakeSession).
 use crate::common::*;
-#[allow(unused_imports)]
-use serde_json::json;
 
 /// REQ: PORT:ilium-client/src/background_animation/video_negative_tests.rs::actual_public_video_http_without_original_network_right_is_denied_before_decoder
 #[test]

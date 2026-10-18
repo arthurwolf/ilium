@@ -11,11 +11,11 @@ use ilium_plugin_api::generated::types::ids::RequestId;
 pub struct InferenceImport;
 
 impl HostInference for InferenceImport {
-    fn complete(&mut self, request: CompletionRequest) -> Result<RequestId, PluginError> {
+    fn complete(&mut self, _request: CompletionRequest) -> Result<RequestId, PluginError> {
         unimplemented!("host::imports::inference::complete")
     }
 
-    fn take_completion(&mut self, request: RequestId) -> Option<Completion> {
+    fn take_completion(&mut self, _request: RequestId) -> Option<Completion> {
         unimplemented!("host::imports::inference::take_completion")
     }
 
@@ -23,14 +23,14 @@ impl HostInference for InferenceImport {
         unimplemented!("host::imports::inference::models")
     }
 
-    fn take_models(&mut self, request: RequestId) -> Option<Vec<String>> {
+    fn take_models(&mut self, _request: RequestId) -> Option<Vec<String>> {
         unimplemented!("host::imports::inference::take_models")
     }
 
     fn provider_reply(
         &mut self,
-        call: u64,
-        outcome: Result<Completion, PluginError>,
+        _call: u64,
+        _outcome: Result<Completion, PluginError>,
     ) -> Result<(), PluginError> {
         unimplemented!("host::imports::inference::provider_reply")
     }

@@ -4,18 +4,16 @@ use crate::error::HostError;
 
 /// A connection to one helper process.
 #[derive(Debug)]
-pub struct HelperClient {
-    helper_path: std::path::PathBuf,
-}
+pub struct HelperClient;
 
 impl HelperClient {
     /// Spawns the helper through `ilium-platform` and waits for `Ready`.
-    pub fn spawn(helper_path: std::path::PathBuf) -> Result<HelperClient, HostError> {
+    pub fn spawn(_helper_path: std::path::PathBuf) -> Result<HelperClient, HostError> {
         unimplemented!("host::helper_client::HelperClient::spawn")
     }
 
     /// Sends one framed request and waits for the reply.
-    pub fn request(&mut self, payload: &[u8]) -> Result<Vec<u8>, HostError> {
+    pub fn request(&mut self, _payload: &[u8]) -> Result<Vec<u8>, HostError> {
         unimplemented!("host::helper_client::HelperClient::request")
     }
 }

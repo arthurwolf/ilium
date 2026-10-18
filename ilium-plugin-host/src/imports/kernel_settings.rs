@@ -10,7 +10,7 @@ use ilium_plugin_api::generated::types::errors::PluginError;
 pub struct KernelSettingsImport;
 
 impl HostKernelSettings for KernelSettingsImport {
-    fn read(&mut self, tab: String) -> Result<String, PluginError> {
+    fn read(&mut self, _tab: String) -> Result<String, PluginError> {
         unimplemented!("host::imports::kernel_settings::read")
     }
 }

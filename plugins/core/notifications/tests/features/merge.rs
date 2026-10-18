@@ -7,6 +7,7 @@ use proptest::prelude::*;
 use serde_json::json;
 
 use crate::common::*;
+use crate::feature_only::{notices, sounds, task_outcome};
 
 fn failed_alerts(
     host: &mut ilium_plugin_sdk::testing::FakeHost,

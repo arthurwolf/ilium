@@ -2,13 +2,10 @@
 //!
 //! Plugin-specific scaffolding kept out of the shared harness type. Skeleton bodies.
 
-#![allow(dead_code)]
-
 use ilium_plugin_sdk::testing::FakeHost;
 
-/// One startup phase handle returned by `begin_startup_phase`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct StartupPhase(pub u64);
+/// One startup phase handle returned by `begin_startup_phase`; the skeleton passes it around as an identity.
+pub type StartupPhase = u64;
 
 /// Progress-lane hooks. Implemented for `FakeHost` with skeleton bodies.
 pub trait ProgressHostExt {

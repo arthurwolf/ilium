@@ -118,12 +118,7 @@ pub enum ImportResult {
 
 /// The reply of one JSON-argument import call (`HarnessHandle::call_import_json`, HST-*/API-*).
 #[derive(Debug, Clone, Default)]
-pub struct ImportReply {
-    error: Option<PluginError>,
-    trap: Option<String>,
-    request_id: Option<u64>,
-    timer_id: Option<u64>,
-}
+pub struct ImportReply;
 
 impl ImportReply {
     /// The plugin error the call returned, if any (API-001).
@@ -159,9 +154,7 @@ impl ImportReply {
 
 /// One completion the host enqueued for a request (API-005).
 #[derive(Debug, Clone, Default)]
-pub struct CompletionView {
-    failed_code: Option<String>,
-}
+pub struct CompletionView;
 
 impl CompletionView {
     /// The error code if the request failed.
@@ -276,13 +269,13 @@ pub struct RetainedContribution {
 pub struct NullGuest;
 
 impl NativeGuest for NullGuest {
-    fn on_events(&mut self, batch: Vec<Event>) -> Result<Vec<Submission>, Trap> {
+    fn on_events(&mut self, _batch: Vec<Event>) -> Result<Vec<Submission>, Trap> {
         Ok(Vec::new())
     }
 }
 
 /// The side that applies the named intent case (HST-490).
-pub fn applying_side(case: &str) -> Side {
+pub fn applying_side(_case: &str) -> Side {
     unimplemented!("host::testing::applying_side")
 }
 
@@ -561,25 +554,23 @@ impl Default for HostHarness {
 
 /// A running host under test.
 #[derive(Debug)]
-pub struct HarnessHandle {
-    clock: ManualClock,
-}
+pub struct HarnessHandle;
 
 impl HarnessHandle {
     // ---- dispatch and observation (test plan 1.3)
 
     /// Queues events for the plugin.
-    pub fn deliver(&self, events: Vec<Event>) {
+    pub fn deliver(&self, _events: Vec<Event>) {
         unimplemented!("host::testing::HarnessHandle::deliver")
     }
 
     /// Runs the dispatcher until quiet or `max_rounds`.
-    pub fn pump(&self, max_rounds: u32) -> PumpReport {
+    pub fn pump(&self, _max_rounds: u32) -> PumpReport {
         unimplemented!("host::testing::HarnessHandle::pump")
     }
 
     /// The outcomes waiting for the plugin.
-    pub fn outcomes(&self, plugin: &PluginId) -> Vec<RequestResult> {
+    pub fn outcomes(&self, _plugin: &PluginId) -> Vec<RequestResult> {
         unimplemented!("host::testing::HarnessHandle::outcomes")
     }
 
@@ -604,7 +595,7 @@ impl HarnessHandle {
     }
 
     /// Moves the manual clock forward and fires due timers.
-    pub fn advance_clock(&self, by: Duration) {
+    pub fn advance_clock(&self, _by: Duration) {
         unimplemented!("host::testing::HarnessHandle::advance_clock")
     }
 
@@ -614,7 +605,7 @@ impl HarnessHandle {
     }
 
     /// Jumps the wall clock without advancing the monotonic clock (HST-08x clock jumps).
-    pub fn inject_clock_jump(&self, by: Duration) {
+    pub fn inject_clock_jump(&self, _by: Duration) {
         unimplemented!("host::testing::HarnessHandle::inject_clock_jump")
     }
 
@@ -626,21 +617,21 @@ impl HarnessHandle {
     // ---- import calls (CAP-*, API-*)
 
     /// Calls an `ilium:host` import by WIT name with JSON arguments (CAP-0xx, SEC-*).
-    pub fn call_import(&self, name: &str, args: Value) -> ImportResult {
+    pub fn call_import(&self, _name: &str, _args: Value) -> ImportResult {
         unimplemented!("host::testing::HarnessHandle::call_import")
     }
 
     /// Calls an import and returns its JSON value (SEC-* value checks).
-    pub fn call_import_value(&self, name: &str, args: Value) -> Result<Value, PluginError> {
+    pub fn call_import_value(&self, _name: &str, _args: Value) -> Result<Value, PluginError> {
         unimplemented!("host::testing::HarnessHandle::call_import_value")
     }
 
     /// Calls an import by interface and function with a JSON argument text (HST-*/API-*).
     pub fn call_import_json(
         &self,
-        interface: &str,
-        function: &str,
-        args_json: &str,
+        _interface: &str,
+        _function: &str,
+        _args_json: &str,
     ) -> ImportReply {
         unimplemented!("host::testing::HarnessHandle::call_import_json")
     }
@@ -773,39 +764,39 @@ impl HarnessHandle {
     }
 
     /// A second plugin with these grants, sharing this host's kernel (PRI-0xx peer plugins).
-    pub fn peer(&self, plugin: &str, grants: &[&str]) -> HarnessHandle {
+    pub fn peer(&self, _plugin: &str, _grants: &[&str]) -> HarnessHandle {
         unimplemented!("host::testing::HarnessHandle::peer")
     }
 
     /// Calls the plugin's `render` export (PRI basic views).
-    pub fn render(&self, view: ViewTarget, area: Area) -> Result<UiTree, Trap> {
+    pub fn render(&self, _view: ViewTarget, _area: Area) -> Result<UiTree, Trap> {
         unimplemented!("host::testing::HarnessHandle::render")
     }
 
     /// The error code of the last failed completion for this request (PRI editor completions).
-    pub fn last_completion_failure(&self, request: RequestId) -> Option<ErrorCode> {
+    pub fn last_completion_failure(&self, _request: RequestId) -> Option<ErrorCode> {
         unimplemented!("host::testing::HarnessHandle::last_completion_failure")
     }
 
     // ---- requests and completions (API-*, HST-*)
 
     /// Whether the request completed (API catalogs).
-    pub fn request_completed(&self, request: RequestId) -> bool {
+    pub fn request_completed(&self, _request: RequestId) -> bool {
         unimplemented!("host::testing::HarnessHandle::request_completed")
     }
 
     /// The error code the request completed with, if it failed (API timeouts).
-    pub fn request_error(&self, request: RequestId) -> Option<ErrorCode> {
+    pub fn request_error(&self, _request: RequestId) -> Option<ErrorCode> {
         unimplemented!("host::testing::HarnessHandle::request_error")
     }
 
     /// Submits intents directly, bypassing the guest (HST-49x requests and outcomes).
-    pub fn submit_directly(&self, submission: Submission) -> Result<RequestId, ErrorCode> {
+    pub fn submit_directly(&self, _submission: Submission) -> Result<RequestId, ErrorCode> {
         unimplemented!("host::testing::HarnessHandle::submit_directly")
     }
 
     /// Takes the result of a request once; a second take finds nothing (HST-49x).
-    pub fn take_result(&self, request: RequestId) -> Result<RequestResult, ErrorCode> {
+    pub fn take_result(&self, _request: RequestId) -> Result<RequestResult, ErrorCode> {
         unimplemented!("host::testing::HarnessHandle::take_result")
     }
 
@@ -820,7 +811,7 @@ impl HarnessHandle {
     }
 
     /// The completion enqueued for a request id (API-005).
-    pub fn completion_of(&self, request: u64) -> Option<CompletionView> {
+    pub fn completion_of(&self, _request: u64) -> Option<CompletionView> {
         unimplemented!("host::testing::HarnessHandle::completion_of")
     }
 
@@ -830,7 +821,7 @@ impl HarnessHandle {
     }
 
     /// Fills the session pending-request budget to this count (API-073).
-    pub fn fill_session_pending(&self, count: u64) {
+    pub fn fill_session_pending(&self, _count: u64) {
         unimplemented!("host::testing::HarnessHandle::fill_session_pending")
     }
 
@@ -845,7 +836,7 @@ impl HarnessHandle {
     }
 
     /// Forward latency of the submission with this correlation (HST-49x).
-    pub fn forward_latency_of(&self, correlation: u64) -> Duration {
+    pub fn forward_latency_of(&self, _correlation: u64) -> Duration {
         unimplemented!("host::testing::HarnessHandle::forward_latency_of")
     }
 
@@ -855,7 +846,7 @@ impl HarnessHandle {
     }
 
     /// The mirror update index at which this request completed (HST-49x).
-    pub fn request_completed_index(&self, correlation: u64) -> u64 {
+    pub fn request_completed_index(&self, _correlation: u64) -> u64 {
         unimplemented!("host::testing::HarnessHandle::request_completed_index")
     }
 
@@ -872,7 +863,7 @@ impl HarnessHandle {
     }
 
     /// Deactivates and reactivates the instance with this reason (LIF-* restart).
-    pub fn restart_instance(&self, reason: DeactivationReason) {
+    pub fn restart_instance(&self, _reason: DeactivationReason) {
         unimplemented!("host::testing::HarnessHandle::restart_instance")
     }
 
@@ -882,7 +873,7 @@ impl HarnessHandle {
     }
 
     /// Deactivates with this reason and returns the restore bytes (HST scheduling calls).
-    pub fn deactivate(&self, reason: DeactivationReason) -> Option<Vec<u8>> {
+    pub fn deactivate(&self, _reason: DeactivationReason) -> Option<Vec<u8>> {
         unimplemented!("host::testing::HarnessHandle::deactivate")
     }
 
@@ -892,12 +883,12 @@ impl HarnessHandle {
     }
 
     /// Adds a second plugin with these grants and returns its handle (HST-49x).
-    pub fn add_second_plugin(&self, grants: &[&str]) -> HarnessHandle {
+    pub fn add_second_plugin(&self, _grants: &[&str]) -> HarnessHandle {
         unimplemented!("host::testing::HarnessHandle::add_second_plugin")
     }
 
     /// Activates a second plugin that reserves this much memory (HST-4xx session memory).
-    pub fn activate_second_plugin_with_memory(&self, mib: u64) {
+    pub fn activate_second_plugin_with_memory(&self, _mib: u64) {
         unimplemented!("host::testing::HarnessHandle::activate_second_plugin_with_memory")
     }
 
@@ -907,7 +898,7 @@ impl HarnessHandle {
     }
 
     /// Frees this much of the session memory budget (HST-4xx session memory).
-    pub fn free_session_memory_mib(&self, mib: u64) {
+    pub fn free_session_memory_mib(&self, _mib: u64) {
         unimplemented!("host::testing::HarnessHandle::free_session_memory_mib")
     }
 
@@ -932,12 +923,12 @@ impl HarnessHandle {
     }
 
     /// Replaces the native guest (HST-40x).
-    pub fn set_guest(&self, guest: Box<dyn NativeGuest>) {
+    pub fn set_guest(&self, _guest: Box<dyn NativeGuest>) {
         unimplemented!("host::testing::HarnessHandle::set_guest")
     }
 
     /// Makes the next `deactivate` export return this (HST-402/403 restore bytes).
-    pub fn set_deactivate_result(&self, result: Result<Vec<u8>, Trap>) {
+    pub fn set_deactivate_result(&self, _result: Result<Vec<u8>, Trap>) {
         unimplemented!("host::testing::HarnessHandle::set_deactivate_result")
     }
 
@@ -947,12 +938,12 @@ impl HarnessHandle {
     }
 
     /// Makes the next `render` export return this (HST-40x invalid ui tree).
-    pub fn set_render_result(&self, result: Result<UiTree, Trap>) {
+    pub fn set_render_result(&self, _result: Result<UiTree, Trap>) {
         unimplemented!("host::testing::HarnessHandle::set_render_result")
     }
 
     /// Renders the named view (HST-40x).
-    pub fn render_view(&self, view: &str) {
+    pub fn render_view(&self, _view: &str) {
         unimplemented!("host::testing::HarnessHandle::render_view")
     }
 
@@ -969,7 +960,7 @@ impl HarnessHandle {
     }
 
     /// Counted failures on the given side (HST-411).
-    pub fn failure_count_of(&self, side: Side) -> u32 {
+    pub fn failure_count_of(&self, _side: Side) -> u32 {
         unimplemented!("host::testing::HarnessHandle::failure_count_of")
     }
 
@@ -979,7 +970,7 @@ impl HarnessHandle {
     }
 
     /// Records one failure on the given side (HST-411).
-    pub fn fail_side(&self, side: Side) {
+    pub fn fail_side(&self, _side: Side) {
         unimplemented!("host::testing::HarnessHandle::fail_side")
     }
 
@@ -994,12 +985,12 @@ impl HarnessHandle {
     }
 
     /// Seeds a retained contribution with this key (HST scheduling trap).
-    pub fn seed_retained(&self, key: &str) {
+    pub fn seed_retained(&self, _key: &str) {
         unimplemented!("host::testing::HarnessHandle::seed_retained")
     }
 
     /// Replaces the retained contribution with this key (HST scheduling trap).
-    pub fn replace_retained(&self, key: &str) {
+    pub fn replace_retained(&self, _key: &str) {
         unimplemented!("host::testing::HarnessHandle::replace_retained")
     }
 
@@ -1011,22 +1002,22 @@ impl HarnessHandle {
     // ---- grants at runtime (CAP-*, HST-069)
 
     /// Revokes a grant; the plugin is re-activated when the capability was active (CAP-0xx).
-    pub fn revoke(&self, grant: &str) {
+    pub fn revoke(&self, _grant: &str) {
         unimplemented!("host::testing::HarnessHandle::revoke")
     }
 
     /// Revokes a grant without re-activating (HST-069).
-    pub fn revoke_without_reactivation(&self, grant: &str) {
+    pub fn revoke_without_reactivation(&self, _grant: &str) {
         unimplemented!("host::testing::HarnessHandle::revoke_without_reactivation")
     }
 
     /// Grants a capability now (CAP-0xx, HST-069).
-    pub fn grant_now(&self, grant: &str) {
+    pub fn grant_now(&self, _grant: &str) {
         unimplemented!("host::testing::HarnessHandle::grant_now")
     }
 
     /// Declines a capability (HST-069).
-    pub fn decline(&self, grant: &str) {
+    pub fn decline(&self, _grant: &str) {
         unimplemented!("host::testing::HarnessHandle::decline")
     }
 
@@ -1058,7 +1049,7 @@ impl HarnessHandle {
     }
 
     /// Charges CPU time against the plugin's quota (API-07x).
-    pub fn charge_cpu_ms(&self, millis: u64) {
+    pub fn charge_cpu_ms(&self, _millis: u64) {
         unimplemented!("host::testing::HarnessHandle::charge_cpu_ms")
     }
 
@@ -1078,7 +1069,7 @@ impl HarnessHandle {
     }
 
     /// Queues a tick of this timer (API-075).
-    pub fn queue_timer_tick(&self, timer: u64) {
+    pub fn queue_timer_tick(&self, _timer: u64) {
         unimplemented!("host::testing::HarnessHandle::queue_timer_tick")
     }
 
@@ -1090,12 +1081,12 @@ impl HarnessHandle {
     }
 
     /// The models the plugin's provider export reports.
-    pub fn set_provider_models(&self, models: Vec<String>) {
+    pub fn set_provider_models(&self, _models: Vec<String>) {
         unimplemented!("host::testing::HarnessHandle::set_provider_models")
     }
 
     /// Calls the provider `complete` export directly.
-    pub fn call_provider_complete(&self, call: ProviderCall) -> Result<(), PluginError> {
+    pub fn call_provider_complete(&self, _call: ProviderCall) -> Result<(), PluginError> {
         unimplemented!("host::testing::HarnessHandle::call_provider_complete")
     }
 
@@ -1107,17 +1098,17 @@ impl HarnessHandle {
     // ---- detectors (PRI-0xx agent signatures, WIT:ilium:exports/detector)
 
     /// Loads a detector component for the named plugin.
-    pub fn load_detector_wasm(&self, plugin: &str, wasm: &[u8]) {
+    pub fn load_detector_wasm(&self, _plugin: &str, _wasm: &[u8]) {
         unimplemented!("host::testing::HarnessHandle::load_detector_wasm")
     }
 
     /// Runs one detection cycle over these panes.
-    pub fn detect_cycle(&self, panes: &[NodeId]) -> DetectReport {
+    pub fn detect_cycle(&self, _panes: &[NodeId]) -> DetectReport {
         unimplemented!("host::testing::HarnessHandle::detect_cycle")
     }
 
     /// Names of the threads the named plugin's detector ran on.
-    pub fn detector_thread_names(&self, plugin: &str) -> Vec<String> {
+    pub fn detector_thread_names(&self, _plugin: &str) -> Vec<String> {
         unimplemented!("host::testing::HarnessHandle::detector_thread_names")
     }
 
@@ -1127,37 +1118,37 @@ impl HarnessHandle {
     }
 
     /// How often the named plugin's detector was called.
-    pub fn detector_call_count(&self, plugin: &str) -> u32 {
+    pub fn detector_call_count(&self, _plugin: &str) -> u32 {
         unimplemented!("host::testing::HarnessHandle::detector_call_count")
     }
 
     /// The plugin ids asked for this pane, in order.
-    pub fn detector_ask_order(&self, pane: NodeId) -> Vec<String> {
+    pub fn detector_ask_order(&self, _pane: NodeId) -> Vec<String> {
         unimplemented!("host::testing::HarnessHandle::detector_ask_order")
     }
 
     /// Makes the named detector spend this long per call.
-    pub fn set_detector_cost_ms(&self, plugin: &str, millis: u64) {
+    pub fn set_detector_cost_ms(&self, _plugin: &str, _millis: u64) {
         unimplemented!("host::testing::HarnessHandle::set_detector_cost_ms")
     }
 
     /// Makes the named detector identify this signature, or none.
-    pub fn set_detector_identity(&self, plugin: &str, signature: Option<&str>) {
+    pub fn set_detector_identity(&self, _plugin: &str, _signature: Option<&str>) {
         unimplemented!("host::testing::HarnessHandle::set_detector_identity")
     }
 
     /// Makes the named detector classify panes as this activity.
-    pub fn set_detector_classification(&self, plugin: &str, activity: AgentActivity) {
+    pub fn set_detector_classification(&self, _plugin: &str, _activity: AgentActivity) {
         unimplemented!("host::testing::HarnessHandle::set_detector_classification")
     }
 
     /// The signature identified for this pane.
-    pub fn identified_signature(&self, pane: NodeId) -> Option<String> {
+    pub fn identified_signature(&self, _pane: NodeId) -> Option<String> {
         unimplemented!("host::testing::HarnessHandle::identified_signature")
     }
 
     /// The activity the detectors assigned to this pane.
-    pub fn pane_activity(&self, pane: NodeId) -> Option<AgentActivity> {
+    pub fn pane_activity(&self, _pane: NodeId) -> Option<AgentActivity> {
         unimplemented!("host::testing::HarnessHandle::pane_activity")
     }
 
@@ -1167,12 +1158,12 @@ impl HarnessHandle {
     }
 
     /// Deadline breaches of the named detector.
-    pub fn detector_breaches(&self, plugin: &str) -> u32 {
+    pub fn detector_breaches(&self, _plugin: &str) -> u32 {
         unimplemented!("host::testing::HarnessHandle::detector_breaches")
     }
 
     /// Sets (with `Some`) and returns the named detector's deadline in milliseconds.
-    pub fn detector_deadline_ms(&self, plugin: &str, millis: Option<u64>) -> u64 {
+    pub fn detector_deadline_ms(&self, _plugin: &str, _millis: Option<u64>) -> u64 {
         unimplemented!("host::testing::HarnessHandle::detector_deadline_ms")
     }
 
@@ -1214,7 +1205,7 @@ impl HarnessHandle {
     }
 
     /// Runs a named hostile probe as `who` and returns the outcome label (SEC-3xx).
-    pub fn run_hostile_probe(&self, who: &str, attempt: &str) -> String {
+    pub fn run_hostile_probe(&self, _who: &str, _attempt: &str) -> String {
         unimplemented!("host::testing::HarnessHandle::run_hostile_probe")
     }
 
@@ -1229,12 +1220,12 @@ impl HarnessHandle {
     }
 
     /// Injects a raw message on the helper channel (SEC-01x).
-    pub fn inject_helper_message(&self, bytes: &[u8]) {
+    pub fn inject_helper_message(&self, _bytes: &[u8]) {
         unimplemented!("host::testing::HarnessHandle::inject_helper_message")
     }
 
     /// Delivers a peer message from the named sender (SEC-01x).
-    pub fn deliver_peer_message(&self, sender: &str, payload: &[u8]) {
+    pub fn deliver_peer_message(&self, _sender: &str, _payload: &[u8]) {
         unimplemented!("host::testing::HarnessHandle::deliver_peer_message")
     }
 
@@ -1261,22 +1252,22 @@ impl HarnessHandle {
     // ---- network and HTTP API (NET-*)
 
     /// A host-side egress on behalf of the named feature (NET host egress).
-    pub fn host_egress(&self, feature: &str, url: &str) -> Result<(), PluginError> {
+    pub fn host_egress(&self, _feature: &str, _url: &str) -> Result<(), PluginError> {
         unimplemented!("host::testing::HarnessHandle::host_egress")
     }
 
     /// The close reason of an HTTP stream (NET streams).
-    pub fn stream_close_reason(&self, stream: u64) -> Option<String> {
+    pub fn stream_close_reason(&self, _stream: u64) -> Option<String> {
         unimplemented!("host::testing::HarnessHandle::stream_close_reason")
     }
 
     /// Bytes delivered on an HTTP stream (NET streams).
-    pub fn stream_bytes_delivered(&self, stream: u64) -> u64 {
+    pub fn stream_bytes_delivered(&self, _stream: u64) -> u64 {
         unimplemented!("host::testing::HarnessHandle::stream_bytes_delivered")
     }
 
     /// The largest single read on an HTTP stream (NET streams).
-    pub fn stream_largest_read(&self, stream: u64) -> u64 {
+    pub fn stream_largest_read(&self, _stream: u64) -> u64 {
         unimplemented!("host::testing::HarnessHandle::stream_largest_read")
     }
 
@@ -1296,7 +1287,7 @@ impl HarnessHandle {
     }
 
     /// Sends a request to the HTTP API and returns the status (NET http-api).
-    pub fn http_api_request(&self, path: &str, headers: &[(&str, &str)]) -> u16 {
+    pub fn http_api_request(&self, _path: &str, _headers: &[(&str, &str)]) -> u16 {
         unimplemented!("host::testing::HarnessHandle::http_api_request")
     }
 
@@ -1313,12 +1304,12 @@ impl HarnessHandle {
     }
 
     /// Appends an audit event with this detail text.
-    pub fn audit_append(&self, event: &str, detail: &str) {
+    pub fn audit_append(&self, _event: &str, _detail: &str) {
         unimplemented!("host::testing::HarnessHandle::audit_append")
     }
 
     /// Pads the audit log to this size in bytes.
-    pub fn audit_fill_to(&self, bytes: u64) {
+    pub fn audit_fill_to(&self, _bytes: u64) {
         unimplemented!("host::testing::HarnessHandle::audit_fill_to")
     }
 
@@ -1328,7 +1319,7 @@ impl HarnessHandle {
     }
 
     /// Makes audit writes fail (or succeed again).
-    pub fn fail_audit_writes(&self, fail: bool) {
+    pub fn fail_audit_writes(&self, _fail: bool) {
         unimplemented!("host::testing::HarnessHandle::fail_audit_writes")
     }
 
@@ -1358,7 +1349,7 @@ impl HarnessHandle {
     }
 
     /// Edits a store file on disk behind the host's back.
-    pub fn edit_store_file_externally(&self, file: &str) {
+    pub fn edit_store_file_externally(&self, _file: &str) {
         unimplemented!("host::testing::HarnessHandle::edit_store_file_externally")
     }
 
@@ -1368,14 +1359,14 @@ impl HarnessHandle {
     }
 
     /// Pads the privacy log to this size in bytes (SEC privacy log).
-    pub fn privacy_log_fill_to(&self, bytes: u64) {
+    pub fn privacy_log_fill_to(&self, _bytes: u64) {
         unimplemented!("host::testing::HarnessHandle::privacy_log_fill_to")
     }
 
     // ---- secrets and settings (SEC secrets, POL-*)
 
     /// Logs a line as the plugin would.
-    pub fn log_from_plugin(&self, text: &str) {
+    pub fn log_from_plugin(&self, _text: &str) {
         unimplemented!("host::testing::HarnessHandle::log_from_plugin")
     }
 
@@ -1400,42 +1391,42 @@ impl HarnessHandle {
     }
 
     /// A value stored in the keyring for this plugin and key.
-    pub fn keyring_value(&self, plugin: &str, key: &str) -> Option<String> {
+    pub fn keyring_value(&self, _plugin: &str, _key: &str) -> Option<String> {
         unimplemented!("host::testing::HarnessHandle::keyring_value")
     }
 
     /// Marks a project as trusted.
-    pub fn trust_project(&self, path: &str) {
+    pub fn trust_project(&self, _path: &str) {
         unimplemented!("host::testing::HarnessHandle::trust_project")
     }
 
     /// Writes a plugin setting into a project settings file.
-    pub fn write_project_value(&self, project: &str, plugin: &str, key: &str, value: Value) {
+    pub fn write_project_value(&self, _project: &str, _plugin: &str, _key: &str, _value: Value) {
         unimplemented!("host::testing::HarnessHandle::write_project_value")
     }
 
     /// The effective value of a plugin setting.
-    pub fn effective_setting(&self, key: &str) -> Option<Value> {
+    pub fn effective_setting(&self, _key: &str) -> Option<Value> {
         unimplemented!("host::testing::HarnessHandle::effective_setting")
     }
 
     /// Sets a kernel setting as the user would (POL-* locked settings).
-    pub fn user_set_setting(&self, key: &str, value: Value) -> Result<(), PluginError> {
+    pub fn user_set_setting(&self, _key: &str, _value: Value) -> Result<(), PluginError> {
         unimplemented!("host::testing::HarnessHandle::user_set_setting")
     }
 
     /// An error string after secret redaction.
-    pub fn error_string_for(&self, text: &str) -> String {
+    pub fn error_string_for(&self, _text: &str) -> String {
         unimplemented!("host::testing::HarnessHandle::error_string_for")
     }
 
     /// A trap message after secret redaction.
-    pub fn trap_message_for(&self, text: &str) -> String {
+    pub fn trap_message_for(&self, _text: &str) -> String {
         unimplemented!("host::testing::HarnessHandle::trap_message_for")
     }
 
     /// Replaces a secret value now.
-    pub fn set_secret_now(&self, key: &str, value: &str) {
+    pub fn set_secret_now(&self, _key: &str, _value: &str) {
         unimplemented!("host::testing::HarnessHandle::set_secret_now")
     }
 
@@ -1445,7 +1436,7 @@ impl HarnessHandle {
     }
 
     /// The payload text sent on the named channel.
-    pub fn channel_payload_text(&self, channel: &str) -> String {
+    pub fn channel_payload_text(&self, _channel: &str) -> String {
         unimplemented!("host::testing::HarnessHandle::channel_payload_text")
     }
 
@@ -1455,12 +1446,12 @@ impl HarnessHandle {
     }
 
     /// The consent prompt shown for this URL.
-    pub fn consent_prompt_text_for_url(&self, url: &str) -> String {
+    pub fn consent_prompt_text_for_url(&self, _url: &str) -> String {
         unimplemented!("host::testing::HarnessHandle::consent_prompt_text_for_url")
     }
 
     /// Forgets the secrets of one plugin, or of all with `None`.
-    pub fn forget_secrets(&self, plugin: Option<&str>) {
+    pub fn forget_secrets(&self, _plugin: Option<&str>) {
         unimplemented!("host::testing::HarnessHandle::forget_secrets")
     }
 
@@ -1470,24 +1461,24 @@ impl HarnessHandle {
     }
 
     /// A diagnostics report with this extra section text.
-    pub fn diagnostics_report_with_section(&self, text: &str) -> DiagnosticsSection {
+    pub fn diagnostics_report_with_section(&self, _text: &str) -> DiagnosticsSection {
         unimplemented!("host::testing::HarnessHandle::diagnostics_report_with_section")
     }
 
     /// Restores a session snapshot from its text.
-    pub fn restore_snapshot(&self, text: &str) {
+    pub fn restore_snapshot(&self, _text: &str) {
         unimplemented!("host::testing::HarnessHandle::restore_snapshot")
     }
 
     /// The current value of a secret.
-    pub fn secret_value(&self, key: &str) -> Option<String> {
+    pub fn secret_value(&self, _key: &str) -> Option<String> {
         unimplemented!("host::testing::HarnessHandle::secret_value")
     }
 
     // ---- installation, policy and review (SEC-*, POL-*, PKG-*)
 
     /// The plugin details text with this security contact.
-    pub fn details_text_with_contact(&self, contact: &str) -> String {
+    pub fn details_text_with_contact(&self, _contact: &str) -> String {
         unimplemented!("host::testing::HarnessHandle::details_text_with_contact")
     }
 
@@ -1502,71 +1493,71 @@ impl HarnessHandle {
     }
 
     /// Whether the named plugin is disabled.
-    pub fn plugin_disabled(&self, plugin: &str) -> bool {
+    pub fn plugin_disabled(&self, _plugin: &str) -> bool {
         unimplemented!("host::testing::HarnessHandle::plugin_disabled")
     }
 
     /// Writes into the plugin's data directory.
-    pub fn write_plugin_data(&self, name: &str, bytes: &[u8]) {
+    pub fn write_plugin_data(&self, _name: &str, _bytes: &[u8]) {
         unimplemented!("host::testing::HarnessHandle::write_plugin_data")
     }
 
     /// Reads from the plugin's data directory.
-    pub fn read_plugin_data(&self, name: &str) -> Option<Vec<u8>> {
+    pub fn read_plugin_data(&self, _name: &str) -> Option<Vec<u8>> {
         unimplemented!("host::testing::HarnessHandle::read_plugin_data")
     }
 
     /// Writes into another plugin's data directory.
-    pub fn write_other_plugin_data(&self, plugin: &str, name: &str, bytes: &[u8]) {
+    pub fn write_other_plugin_data(&self, _plugin: &str, _name: &str, _bytes: &[u8]) {
         unimplemented!("host::testing::HarnessHandle::write_other_plugin_data")
     }
 
     /// Uninstalls the named plugin.
-    pub fn uninstall(&self, plugin: &str) -> Result<(), String> {
+    pub fn uninstall(&self, _plugin: &str) -> Result<(), String> {
         unimplemented!("host::testing::HarnessHandle::uninstall")
     }
 
     /// Whether the named plugin is installed.
-    pub fn is_installed(&self, plugin: &str) -> bool {
+    pub fn is_installed(&self, _plugin: &str) -> bool {
         unimplemented!("host::testing::HarnessHandle::is_installed")
     }
 
     /// Enables the named plugin (SEC blocked plugins).
-    pub fn enable_plugin(&self, plugin: &str) -> Result<(), String> {
+    pub fn enable_plugin(&self, _plugin: &str) -> Result<(), String> {
         unimplemented!("host::testing::HarnessHandle::enable_plugin")
     }
 
     /// Whether the named plugin's replacement of a core feature is active.
-    pub fn replacement_active(&self, plugin: &str) -> bool {
+    pub fn replacement_active(&self, _plugin: &str) -> bool {
         unimplemented!("host::testing::HarnessHandle::replacement_active")
     }
 
     /// Checks whether a plugin may be installed at this tier (POL-*).
-    pub fn install_check(&self, plugin: &str, tier: Tier) -> Result<(), String> {
+    pub fn install_check(&self, _plugin: &str, _tier: Tier) -> Result<(), String> {
         unimplemented!("host::testing::HarnessHandle::install_check")
     }
 
     /// Install check for a plugin fetched from a URL (POL-* source policy).
-    pub fn install_check_from_url(&self, plugin: &str, tier: Tier) -> Result<(), String> {
+    pub fn install_check_from_url(&self, _plugin: &str, _tier: Tier) -> Result<(), String> {
         unimplemented!("host::testing::HarnessHandle::install_check_from_url")
     }
 
     /// Install check for a plugin signed by this publisher fingerprint (POL-*).
-    pub fn install_check_signed_by(&self, plugin: &str, fingerprint: &str) -> Result<(), String> {
+    pub fn install_check_signed_by(&self, _plugin: &str, _fingerprint: &str) -> Result<(), String> {
         unimplemented!("host::testing::HarnessHandle::install_check_signed_by")
     }
 
     /// Install check for a plugin replacing this core feature (POL-*).
-    pub fn install_check_replacing(&self, plugin: &str, feature: &str) -> Result<(), String> {
+    pub fn install_check_replacing(&self, _plugin: &str, _feature: &str) -> Result<(), String> {
         unimplemented!("host::testing::HarnessHandle::install_check_replacing")
     }
 
     /// Install check with these requested grants (SEC-004 toxic pairs).
     pub fn install_check_with_grants(
         &self,
-        plugin: &str,
-        tier: Tier,
-        grants: &[&str],
+        _plugin: &str,
+        _tier: Tier,
+        _grants: &[&str],
     ) -> Result<(), String> {
         unimplemented!("host::testing::HarnessHandle::install_check_with_grants")
     }
@@ -1574,9 +1565,9 @@ impl HarnessHandle {
     /// Install check with this display name (PKG display-name rules).
     pub fn install_check_with_name(
         &self,
-        plugin: &str,
-        tier: Tier,
-        name: &str,
+        _plugin: &str,
+        _tier: Tier,
+        _name: &str,
     ) -> Result<(), String> {
         unimplemented!("host::testing::HarnessHandle::install_check_with_name")
     }
@@ -1584,8 +1575,8 @@ impl HarnessHandle {
     /// Installs a plugin from a system directory into the user install dir (POL-*).
     pub fn install_from_system_dir(
         &self,
-        directory: &Path,
-        plugin: &str,
+        _directory: &Path,
+        _plugin: &str,
     ) -> Result<PathBuf, String> {
         unimplemented!("host::testing::HarnessHandle::install_from_system_dir")
     }
@@ -1601,27 +1592,27 @@ impl HarnessHandle {
     }
 
     /// Adds a session owned by this user (POL-* session isolation).
-    pub fn add_session(&self, name: &str, owner: &str) {
+    pub fn add_session(&self, _name: &str, _owner: &str) {
         unimplemented!("host::testing::HarnessHandle::add_session")
     }
 
     /// Replaces the system policy file text (POL-*).
-    pub fn replace_system_policy_file(&self, text: &str) {
+    pub fn replace_system_policy_file(&self, _text: &str) {
         unimplemented!("host::testing::HarnessHandle::replace_system_policy_file")
     }
 
     /// Tries to check a locked review row (POL-* locked grants).
-    pub fn try_check_row(&self, grant: &str) -> bool {
+    pub fn try_check_row(&self, _grant: &str) -> bool {
         unimplemented!("host::testing::HarnessHandle::try_check_row")
     }
 
     /// Review rows for these requested grants (SEC-004).
-    pub fn review_rows(&self, grants: &[&str]) -> Vec<ReviewRow> {
+    pub fn review_rows(&self, _grants: &[&str]) -> Vec<ReviewRow> {
         unimplemented!("host::testing::HarnessHandle::review_rows")
     }
 
     /// Review text for these requested grants (SEC-007).
-    pub fn review_text_for(&self, grants: &[&str]) -> String {
+    pub fn review_text_for(&self, _grants: &[&str]) -> String {
         unimplemented!("host::testing::HarnessHandle::review_text_for")
     }
 
@@ -1631,7 +1622,7 @@ impl HarnessHandle {
     }
 
     /// Review text with these `data-use` manifest entries (SEC privacy).
-    pub fn review_text_with_data_use(&self, entries: &[Value]) -> String {
+    pub fn review_text_with_data_use(&self, _entries: &[Value]) -> String {
         unimplemented!("host::testing::HarnessHandle::review_text_with_data_use")
     }
 
@@ -1648,12 +1639,12 @@ impl HarnessHandle {
     // ---- kernel dialogs and screen (SEC extension security)
 
     /// Draws rows as the plugin would (SEC plugin rows under dialogs).
-    pub fn plugin_draw_rows(&self, rows: &[&str]) -> Result<(), PluginError> {
+    pub fn plugin_draw_rows(&self, _rows: &[&str]) -> Result<(), PluginError> {
         unimplemented!("host::testing::HarnessHandle::plugin_draw_rows")
     }
 
     /// Opens a kernel dialog of this kind (`review`, `trust`, `consent`).
-    pub fn open_kernel_dialog(&self, kind: &str) {
+    pub fn open_kernel_dialog(&self, _kind: &str) {
         unimplemented!("host::testing::HarnessHandle::open_kernel_dialog")
     }
 
@@ -1673,12 +1664,12 @@ impl HarnessHandle {
     }
 
     /// Whether the dialog of this kind is topmost.
-    pub fn dialog_is_topmost(&self, kind: &str) -> bool {
+    pub fn dialog_is_topmost(&self, _kind: &str) -> bool {
         unimplemented!("host::testing::HarnessHandle::dialog_is_topmost")
     }
 
     /// Sets the plugin's status bar segment text.
-    pub fn plugin_status_segment(&self, text: &str) {
+    pub fn plugin_status_segment(&self, _text: &str) {
         unimplemented!("host::testing::HarnessHandle::plugin_status_segment")
     }
 
@@ -1693,7 +1684,7 @@ impl HarnessHandle {
     }
 
     /// Marks the user as typing in a terminal (dialogs wait).
-    pub fn set_user_typing_in_terminal(&self, typing: bool) {
+    pub fn set_user_typing_in_terminal(&self, _typing: bool) {
         unimplemented!("host::testing::HarnessHandle::set_user_typing_in_terminal")
     }
 
@@ -1703,7 +1694,7 @@ impl HarnessHandle {
     }
 
     /// Types these keys into the focused surface.
-    pub fn type_keys(&self, keys: &str) {
+    pub fn type_keys(&self, _keys: &str) {
         unimplemented!("host::testing::HarnessHandle::type_keys")
     }
 
@@ -1718,27 +1709,27 @@ impl HarnessHandle {
     }
 
     /// Renders plugin chrome of this kind with this text (SEC chrome spoofing).
-    pub fn render_plugin_chrome(&self, kind: &str, text: &str) -> String {
+    pub fn render_plugin_chrome(&self, _kind: &str, _text: &str) -> String {
         unimplemented!("host::testing::HarnessHandle::render_plugin_chrome")
     }
 
     /// Renders plugin text of this kind (SEC chrome spoofing).
-    pub fn render_plugin_text(&self, kind: &str, text: &str) -> String {
+    pub fn render_plugin_text(&self, _kind: &str, _text: &str) -> String {
         unimplemented!("host::testing::HarnessHandle::render_plugin_text")
     }
 
     /// Renders a kernel dialog at this width and theme, one row per line (SEC-346).
-    pub fn render_dialog(&self, kind: &str, columns: u16, dark: bool) -> Vec<String> {
+    pub fn render_dialog(&self, _kind: &str, _columns: u16, _dark: bool) -> Vec<String> {
         unimplemented!("host::testing::HarnessHandle::render_dialog")
     }
 
     /// The screen-reader text of a kernel dialog (SEC-346).
-    pub fn screen_reader_text(&self, kind: &str) -> String {
+    pub fn screen_reader_text(&self, _kind: &str) -> String {
         unimplemented!("host::testing::HarnessHandle::screen_reader_text")
     }
 
     /// The cells of a kernel dialog, one row per line.
-    pub fn dialog_cells(&self, kind: &str) -> Vec<String> {
+    pub fn dialog_cells(&self, _kind: &str) -> Vec<String> {
         unimplemented!("host::testing::HarnessHandle::dialog_cells")
     }
 
@@ -1748,7 +1739,7 @@ impl HarnessHandle {
     }
 
     /// Writes pane output as the terminal would (SEC screen-changed events).
-    pub fn pane_output(&self, text: &str) {
+    pub fn pane_output(&self, _text: &str) {
         unimplemented!("host::testing::HarnessHandle::pane_output")
     }
 
@@ -1763,14 +1754,14 @@ impl HarnessHandle {
     }
 
     /// Sets the pane's echo mode (off during password prompts).
-    pub fn set_pane_echo(&self, echo: bool) {
+    pub fn set_pane_echo(&self, _echo: bool) {
         unimplemented!("host::testing::HarnessHandle::set_pane_echo")
     }
 }
 
 impl HarnessHandle {
     /// The instance state of one side of the harness plugin (reference-errors-and-limits.md).
-    pub fn state_of(&self, side: Side) -> InstanceState {
+    pub fn state_of(&self, _side: Side) -> InstanceState {
         unimplemented!("host::testing::HarnessHandle::state_of")
     }
 
@@ -1785,17 +1776,17 @@ impl HarnessHandle {
     }
 
     /// Opens an HTTP stream as plugin `plugin_index` of a two-plugin harness (API-070).
-    pub fn open_stream_as(&self, plugin_index: usize) -> ImportReply {
+    pub fn open_stream_as(&self, _plugin_index: usize) -> ImportReply {
         unimplemented!("host::testing::HarnessHandle::open_stream_as")
     }
 
     /// Calls an import as plugin `plugin_index` of a two-plugin harness with JSON arguments.
     pub fn call_import_as(
         &self,
-        plugin_index: usize,
-        interface: &str,
-        function: &str,
-        args_json: &str,
+        _plugin_index: usize,
+        _interface: &str,
+        _function: &str,
+        _args_json: &str,
     ) -> ImportReply {
         unimplemented!("host::testing::HarnessHandle::call_import_as")
     }
@@ -1806,17 +1797,17 @@ impl HarnessHandle {
     }
 
     /// Submits an intent as the plugin (`intents.submit`, reference-wit.md section 5.9).
-    pub fn submit(&self, submission: Submission) -> Result<RequestId, ErrorCode> {
+    pub fn submit(&self, _submission: Submission) -> Result<RequestId, ErrorCode> {
         unimplemented!("host::testing::HarnessHandle::submit")
     }
 
     /// Submits an intent and runs the host until its outcome arrives (reference-events.md).
-    pub fn submit_and_wait(&self, submission: Submission) -> Outcome {
+    pub fn submit_and_wait(&self, _submission: Submission) -> Outcome {
         unimplemented!("host::testing::HarnessHandle::submit_and_wait")
     }
 
     /// Drives one export of the guest (reference-wit.md section 8).
-    pub fn call_export(&self, call: ExportCall) -> Result<ExportReply, Trap> {
+    pub fn call_export(&self, _call: ExportCall) -> Result<ExportReply, Trap> {
         unimplemented!("host::testing::HarnessHandle::call_export")
     }
 }

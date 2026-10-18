@@ -17,18 +17,16 @@ pub struct AuditRecord {
 
 /// The audit log writer.
 #[derive(Debug)]
-pub struct AuditLog {
-    path: std::path::PathBuf,
-}
+pub struct AuditLog;
 
 impl AuditLog {
     /// Opens or creates the log.
-    pub fn open(path: std::path::PathBuf) -> Result<AuditLog, HostError> {
+    pub fn open(_path: std::path::PathBuf) -> Result<AuditLog, HostError> {
         unimplemented!("host::audit::AuditLog::open")
     }
 
     /// Appends one record as a JSON line.
-    pub fn append(&mut self, record: &AuditRecord) -> Result<(), HostError> {
+    pub fn append(&mut self, _record: &AuditRecord) -> Result<(), HostError> {
         unimplemented!("host::audit::AuditLog::append")
     }
 }

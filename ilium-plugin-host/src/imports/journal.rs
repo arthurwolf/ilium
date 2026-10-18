@@ -13,14 +13,14 @@ pub struct JournalImport;
 impl HostJournal for JournalImport {
     fn log_event(
         &mut self,
-        pane: Option<NodeId>,
-        kind: String,
-        payload_json: String,
+        _pane: Option<NodeId>,
+        _kind: String,
+        _payload_json: String,
     ) -> Result<(), PluginError> {
         unimplemented!("host::imports::journal::log_event")
     }
 
-    fn read(&mut self, pane: Option<NodeId>, since: EpochMs, limit: u32) -> Vec<JournalEntry> {
+    fn read(&mut self, _pane: Option<NodeId>, _since: EpochMs, _limit: u32) -> Vec<JournalEntry> {
         unimplemented!("host::imports::journal::read")
     }
 }

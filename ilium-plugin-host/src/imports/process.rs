@@ -13,39 +13,39 @@ use ilium_plugin_api::generated::types::ids::{ChildId, RequestId};
 pub struct ProcessImport;
 
 impl HostProcess for ProcessImport {
-    fn run(&mut self, spec: ProcessSpec) -> Result<RequestId, PluginError> {
+    fn run(&mut self, _spec: ProcessSpec) -> Result<RequestId, PluginError> {
         unimplemented!("host::imports::process::run")
     }
 
-    fn take_exit(&mut self, request: RequestId) -> Option<ProcessExit> {
+    fn take_exit(&mut self, _request: RequestId) -> Option<ProcessExit> {
         unimplemented!("host::imports::process::take_exit")
     }
 
-    fn spawn(&mut self, spec: SpawnSpec) -> Result<ChildHandle, PluginError> {
+    fn spawn(&mut self, _spec: SpawnSpec) -> Result<ChildHandle, PluginError> {
         unimplemented!("host::imports::process::spawn")
     }
 
-    fn child_pid_hint(&mut self, handle: ChildHandle) -> u32 {
+    fn child_pid_hint(&mut self, _handle: ChildHandle) -> u32 {
         unimplemented!("host::imports::process::child_pid_hint")
     }
 
     fn child_write_stdin(
         &mut self,
-        handle: ChildHandle,
-        bytes: Vec<u8>,
+        _handle: ChildHandle,
+        _bytes: Vec<u8>,
     ) -> Result<(), PluginError> {
         unimplemented!("host::imports::process::child_write_stdin")
     }
 
-    fn child_close_stdin(&mut self, handle: ChildHandle) {
+    fn child_close_stdin(&mut self, _handle: ChildHandle) {
         unimplemented!("host::imports::process::child_close_stdin")
     }
 
-    fn child_signal(&mut self, handle: ChildHandle, signal: String) -> Result<(), PluginError> {
+    fn child_signal(&mut self, _handle: ChildHandle, _signal: String) -> Result<(), PluginError> {
         unimplemented!("host::imports::process::child_signal")
     }
 
-    fn child_id(&mut self, handle: ChildHandle) -> ChildId {
+    fn child_id(&mut self, _handle: ChildHandle) -> ChildId {
         unimplemented!("host::imports::process::child_id")
     }
 }

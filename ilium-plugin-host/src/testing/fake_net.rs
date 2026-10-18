@@ -2,7 +2,6 @@
 //! manual does not document this fake; bodies are `unimplemented!()` placeholders.
 
 use std::net::IpAddr;
-use std::sync::{Arc, Mutex};
 
 /// A canned HTTP response the fake network serves for one URL.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -58,70 +57,63 @@ pub struct SeenRequest {
     pub tls_version: Option<String>,
 }
 
-#[derive(Debug, Default)]
-struct FakeNetState {
-    seen: Vec<SeenRequest>,
-}
-
 /// The fake network; clones share one state so a harness and its test see the same traffic.
 #[derive(Debug, Clone, Default)]
-pub struct FakeNet {
-    state: Arc<Mutex<FakeNetState>>,
-}
+pub struct FakeNet;
 
 impl FakeNet {
     /// An empty network that resolves nothing and serves nothing.
     pub fn new() -> FakeNet {
-        FakeNet::default()
+        FakeNet
     }
 
     /// Resolves a host name to these addresses.
-    pub fn dns(&self, host: &str, addresses: &[&str]) {
+    pub fn dns(&self, _host: &str, _addresses: &[&str]) {
         unimplemented!("host::testing::FakeNet::dns")
     }
 
     /// Resolves a host name to the first addresses once, then to the second (NET DNS rebinding).
-    pub fn dns_then(&self, host: &str, first: &[&str], then: &[&str]) {
+    pub fn dns_then(&self, _host: &str, _first: &[&str], _then: &[&str]) {
         unimplemented!("host::testing::FakeNet::dns_then")
     }
 
     /// Serves this response for a URL.
-    pub fn serve(&self, url: &str, response: FakeResponse) {
+    pub fn serve(&self, _url: &str, _response: FakeResponse) {
         unimplemented!("host::testing::FakeNet::serve")
     }
 
     /// Redirects a URL with this status to another URL.
-    pub fn redirect(&self, from: &str, status: u16, to: &str) {
+    pub fn redirect(&self, _from: &str, _status: u16, _to: &str) {
         unimplemented!("host::testing::FakeNet::redirect")
     }
 
     /// Makes the TLS handshake with a host fail.
-    pub fn fail_tls(&self, host: &str) {
+    pub fn fail_tls(&self, _host: &str) {
         unimplemented!("host::testing::FakeNet::fail_tls")
     }
 
     /// The TLS version a host negotiates.
-    pub fn set_tls_version(&self, host: &str, version: &str) {
+    pub fn set_tls_version(&self, _host: &str, _version: &str) {
         unimplemented!("host::testing::FakeNet::set_tls_version")
     }
 
     /// A host's certificate chains to this root name.
-    pub fn require_root(&self, host: &str, root: &str) {
+    pub fn require_root(&self, _host: &str, _root: &str) {
         unimplemented!("host::testing::FakeNet::require_root")
     }
 
     /// A trust bundle file at this path holds this root name.
-    pub fn trust_bundle(&self, path: &str, root: &str) {
+    pub fn trust_bundle(&self, _path: &str, _root: &str) {
         unimplemented!("host::testing::FakeNet::trust_bundle")
     }
 
     /// Marks a loopback port as this Ilium session's own (NET reserved ports).
-    pub fn reserve_ilium_port(&self, port: u16) {
+    pub fn reserve_ilium_port(&self, _port: u16) {
         unimplemented!("host::testing::FakeNet::reserve_ilium_port")
     }
 
     /// Marks a loopback port as another Ilium session's (NET reserved ports).
-    pub fn reserve_ilium_port_of_other_session(&self, port: u16) {
+    pub fn reserve_ilium_port_of_other_session(&self, _port: u16) {
         unimplemented!("host::testing::FakeNet::reserve_ilium_port_of_other_session")
     }
 
@@ -136,7 +128,7 @@ impl FakeNet {
     }
 
     /// How often a host name was resolved.
-    pub fn resolve_count(&self, host: &str) -> u64 {
+    pub fn resolve_count(&self, _host: &str) -> u64 {
         unimplemented!("host::testing::FakeNet::resolve_count")
     }
 }

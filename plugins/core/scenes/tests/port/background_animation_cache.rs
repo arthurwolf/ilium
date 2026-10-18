@@ -1,7 +1,5 @@
 //! Twins of the original tests of ilium-client/src/background_animation/cache.rs (ported through FakeScene / FakeSession).
 use crate::common::*;
-#[allow(unused_imports)]
-use serde_json::json;
 
 /// REQ: PORT:ilium-client/src/background_animation/cache.rs::hillside_and_kelp_wrap_with_an_ordinary_forward_frame_step
 #[test]

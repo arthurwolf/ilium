@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use ilium_plugin_api::generated::types::{Event, Intent, Outcome};
+use ilium_plugin_api::generated::types::Intent;
 use ilium_plugin_api::Side;
 
 use crate::common::*;
@@ -157,6 +157,3 @@ fn hst_494_after_the_completion_the_mirror_no_longer_holds_the_closed_node() {
         .iter()
         .any(|view| view.id.0 == 2));
 }
-
-#[allow(dead_code)]
-fn unused(_: Event, _: Outcome) {}

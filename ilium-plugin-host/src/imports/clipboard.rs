@@ -14,7 +14,7 @@ impl HostClipboard for ClipboardImport {
         unimplemented!("host::imports::clipboard::read_text")
     }
 
-    fn write_text(&mut self, text: String) -> Result<(), PluginError> {
+    fn write_text(&mut self, _text: String) -> Result<(), PluginError> {
         unimplemented!("host::imports::clipboard::write_text")
     }
 }

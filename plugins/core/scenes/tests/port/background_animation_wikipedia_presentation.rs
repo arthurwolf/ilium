@@ -1,7 +1,5 @@
 //! Twins of the original tests of ilium-client/src/background_animation/wikipedia/presentation.rs (ported through FakeScene / FakeSession).
 use crate::common::*;
-#[allow(unused_imports)]
-use serde_json::json;
 
 /// REQ: PORT:ilium-client/src/background_animation/wikipedia/presentation.rs::layout_admission_refusal_keeps_the_last_good_article_frame_visible
 #[test]

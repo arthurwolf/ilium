@@ -14,27 +14,27 @@ pub enum Language {
 
 /// `kebab-case` function to Rust `snake_case`, `%name` keywords escaped as `r#name`
 /// (reference-wit.md section 10).
-pub fn rust_function_name(wit_name: &str) -> String {
+pub fn rust_function_name(_wit_name: &str) -> String {
     unimplemented!("api::naming::rust_function_name")
 }
 
 /// `kebab-case` type to Rust `PascalCase` (reference-wit.md section 10).
-pub fn rust_type_name(wit_name: &str) -> String {
+pub fn rust_type_name(_wit_name: &str) -> String {
     unimplemented!("api::naming::rust_type_name")
 }
 
 /// `kebab-case` function to TypeScript `camelCase`; `-json` becomes `Json` (reference-wit.md section 10).
-pub fn typescript_function_name(wit_name: &str) -> String {
+pub fn typescript_function_name(_wit_name: &str) -> String {
     unimplemented!("api::naming::typescript_function_name")
 }
 
 /// `kebab-case` type to TypeScript `PascalCase` (reference-wit.md section 10).
-pub fn typescript_type_name(wit_name: &str) -> String {
+pub fn typescript_type_name(_wit_name: &str) -> String {
     unimplemented!("api::naming::typescript_type_name")
 }
 
 /// ABI-051: the SDK wrapper names of a function: the plain name, plus the `_request` /
 /// `Request` starting form when the function returns a `request-id`.
-pub fn wrapper_names(function: &WitFunction, language: Language) -> Vec<String> {
+pub fn wrapper_names(_function: &WitFunction, _language: Language) -> Vec<String> {
     unimplemented!("api::naming::wrapper_names")
 }

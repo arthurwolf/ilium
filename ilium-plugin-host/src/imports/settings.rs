@@ -19,47 +19,51 @@ impl HostSettings for SettingsImport {
         unimplemented!("host::imports::settings::get_json")
     }
 
-    fn set_json(&mut self, patch: String) -> Result<(), PluginError> {
+    fn set_json(&mut self, _patch: String) -> Result<(), PluginError> {
         unimplemented!("host::imports::settings::set_json")
     }
 
-    fn set_info(&mut self, key: String, text: String) -> Result<(), PluginError> {
+    fn set_info(&mut self, _key: String, _text: String) -> Result<(), PluginError> {
         unimplemented!("host::imports::settings::set_info")
     }
 
-    fn set_choices(&mut self, key: String, options: Vec<ChoiceOption>) -> Result<(), PluginError> {
+    fn set_choices(
+        &mut self,
+        _key: String,
+        _options: Vec<ChoiceOption>,
+    ) -> Result<(), PluginError> {
         unimplemented!("host::imports::settings::set_choices")
     }
 
-    fn set_row_note(&mut self, key: String, note: Option<String>) -> Result<(), PluginError> {
+    fn set_row_note(&mut self, _key: String, _note: Option<String>) -> Result<(), PluginError> {
         unimplemented!("host::imports::settings::set_row_note")
     }
 
-    fn set_row_state(&mut self, key: String, state: RowState) -> Result<(), PluginError> {
+    fn set_row_state(&mut self, _key: String, _state: RowState) -> Result<(), PluginError> {
         unimplemented!("host::imports::settings::set_row_state")
     }
 
-    fn set_item_states(&mut self, key: String, items: Vec<ItemState>) -> Result<(), PluginError> {
+    fn set_item_states(&mut self, _key: String, _items: Vec<ItemState>) -> Result<(), PluginError> {
         unimplemented!("host::imports::settings::set_item_states")
     }
 
     fn set_choice_items(
         &mut self,
-        key: String,
-        items: Vec<CatalogItem>,
+        _key: String,
+        _items: Vec<CatalogItem>,
     ) -> Result<(), PluginError> {
         unimplemented!("host::imports::settings::set_choice_items")
     }
 
-    fn set_info_rich(&mut self, key: String, text: RichText) -> Result<(), PluginError> {
+    fn set_info_rich(&mut self, _key: String, _text: RichText) -> Result<(), PluginError> {
         unimplemented!("host::imports::settings::set_info_rich")
     }
 
-    fn set_meter(&mut self, id: String, segments: Vec<MeterSegment>) -> Result<(), PluginError> {
+    fn set_meter(&mut self, _id: String, _segments: Vec<MeterSegment>) -> Result<(), PluginError> {
         unimplemented!("host::imports::settings::set_meter")
     }
 
-    fn open(&mut self, target: String) -> Result<(), PluginError> {
+    fn open(&mut self, _target: String) -> Result<(), PluginError> {
         unimplemented!("host::imports::settings::open")
     }
 
@@ -67,11 +71,11 @@ impl HostSettings for SettingsImport {
         unimplemented!("host::imports::settings::list_settings")
     }
 
-    fn get_plugin_json(&mut self, plugin: PluginId) -> Result<String, PluginError> {
+    fn get_plugin_json(&mut self, _plugin: PluginId) -> Result<String, PluginError> {
         unimplemented!("host::imports::settings::get_plugin_json")
     }
 
-    fn set_plugin_json(&mut self, plugin: PluginId, patch: String) -> Result<(), PluginError> {
+    fn set_plugin_json(&mut self, _plugin: PluginId, _patch: String) -> Result<(), PluginError> {
         unimplemented!("host::imports::settings::set_plugin_json")
     }
 }

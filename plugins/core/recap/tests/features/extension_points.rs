@@ -2,7 +2,7 @@
 
 use serde_json::{json, Value};
 
-use crate::common::*;
+use crate::feature_support::*;
 
 fn point(id: &str) -> Value {
     manifest_value()["contributes"]["extension_points"]

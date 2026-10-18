@@ -1,6 +1,7 @@
 //! Redelivery and the supervision of a monitor (original ilium-server/src/progress_watchdog.rs).
 
-use ilium_plugin_sdk::types::Outcome;
+use ilium_plugin_sdk::testing::{FakeHost, TreeNode};
+use ilium_plugin_sdk::types::{AgentView, NodeClass, Outcome};
 
 use crate::common::*;
 use crate::support::*;
@@ -144,4 +145,21 @@ fn port_060_an_outcome_with_an_uncertain_delivery_is_typed_again_at_the_next_rec
     host.process().allow_unexpected();
     pass(&mut host, 20_000);
     assert_eq!(typed_texts(&host, pane).len(), 2);
+}
+
+/// An agent pane in the fake tree; returns its node id.
+pub fn add_agent(host: &mut FakeHost, name: &str, signature: &str) -> u64 {
+    host.tree().add(TreeNode {
+        id: 0,
+        parent: None,
+        name: name.to_string(),
+        class: NodeClass::Pane,
+        content_kind: Some("ilium.terminal".to_string()),
+        agent: Some(AgentView {
+            signature: signature.to_string(),
+            activity: ilium_plugin_sdk::types::AgentActivity::Idle,
+            objective: None,
+            goal: None,
+        }),
+    })
 }

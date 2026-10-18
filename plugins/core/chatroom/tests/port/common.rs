@@ -1,12 +1,11 @@
-#![allow(dead_code)]
 //! Shared helpers: hosts for both sides, the room file, the command line, exact templates of the baseline.
 
 use std::path::PathBuf;
 
 use ilium_plugin_core_chatroom::{ChatroomClient, ChatroomServer};
 use ilium_plugin_sdk::testing::FakeHost;
-use ilium_plugin_sdk::types::events::{MessageEvent, TopicPublishedEvent};
-use ilium_plugin_sdk::types::{Event, Intent, PluginId, PluginSide, Submission};
+use ilium_plugin_sdk::types::events::TopicPublishedEvent;
+use ilium_plugin_sdk::types::{Event, PluginId};
 
 /// Panel view of the client side. The page names no id; the tests assume this one (see API_GAPS.md).
 pub const PANEL: &str = "chatroom.panel";
@@ -28,12 +27,6 @@ pub fn workspace_root() -> PathBuf {
 /// The manual page of this plugin.
 pub fn page_text() -> String {
     let path = workspace_root().join("docs/plugins-manual/pages/core-plugin-chatroom.md");
-    std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("page {path:?}: {error}"))
-}
-
-/// The feature traceability page of the manual.
-pub fn traceability_text() -> String {
-    let path = workspace_root().join("docs/plugins-manual/pages/reference-feature-traceability.md");
     std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("page {path:?}: {error}"))
 }
 
@@ -121,14 +114,6 @@ pub fn room_with(lines: &[String]) -> String {
 pub fn seed_room(host: &mut FakeHost, lines: &[String]) {
     host.fs().write(ROOM, room_with(lines).as_bytes());
     host.settle();
-}
-
-/// A server host with a room holding `count` numbered records.
-pub fn host_with_records(count: usize) -> FakeHost {
-    let mut host = server_host();
-    let lines: Vec<String> = (0..count).map(numbered_line).collect();
-    seed_room(&mut host, &lines);
-    host
 }
 
 /// The room file as text.
@@ -225,49 +210,6 @@ pub fn topic_event(line: &str) -> Event {
     })
 }
 
-/// The `message` event the composer of the client side sends to the server side.
-pub fn composer_message(text: &str) -> Event {
-    Event::Message(MessageEvent {
-        from: PluginId(PLUGIN.to_string()),
-        from_side: PluginSide::Client,
-        from_client: None,
-        channel: "post".to_string(),
-        payload: text.as_bytes().to_vec(),
-    })
-}
-
-/// The `message` event of another plugin posting to the room.
-pub fn peer_message(from: &str, text: &str) -> Event {
-    Event::Message(MessageEvent {
-        from: PluginId(from.to_string()),
-        from_side: PluginSide::Server,
-        from_client: None,
-        channel: "post".to_string(),
-        payload: text.as_bytes().to_vec(),
-    })
-}
-
-/// Titles of every `set-virtual-rows` submission row of kind `chatroom`, in submission order.
-pub fn row_titles(submissions: &[Submission]) -> Vec<String> {
-    let mut titles = Vec::new();
-    for submission in submissions {
-        if let Intent::SetVirtualRows(spec) = &submission.intent {
-            if spec.row_kind != "chatroom" {
-                continue;
-            }
-            for row in &spec.rows {
-                titles.push(
-                    row.label
-                        .iter()
-                        .map(|span| span.text.as_str())
-                        .collect::<String>(),
-                );
-            }
-        }
-    }
-    titles
-}
-
 /// Topic publications of the plugin on `topic`, as parsed JSON payloads in order.
 pub fn published(host: &FakeHost, topic: &str) -> Vec<serde_json::Value> {
     host.published_topics()
@@ -283,34 +225,4 @@ pub fn published_texts(host: &FakeHost) -> Vec<String> {
         .iter()
         .map(|value| value["text"].as_str().expect("text field").to_string())
         .collect()
-}
-
-/// The `<pre class="term">` figure that precedes `caption`, as plain screen text.
-pub fn page_art(caption: &str) -> String {
-    let page = page_text();
-    let caption_at = page
-        .find(caption)
-        .unwrap_or_else(|| panic!("figcaption {caption:?} missing"));
-    let before = &page[..caption_at];
-    let open = before.rfind("<pre class=\"term\">").expect("pre") + "<pre class=\"term\">".len();
-    let close = before[open..].find("</pre>").expect("pre end");
-    let mut out = String::new();
-    let mut in_tag = false;
-    for character in before[open..open + close].chars() {
-        match character {
-            '<' => in_tag = true,
-            '>' => in_tag = false,
-            other if !in_tag => out.push(other),
-            _ => {}
-        }
-    }
-    let text = out
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&amp;", "&");
-    text.lines()
-        .map(|line| line.trim_end().to_string())
-        .collect::<Vec<_>>()
-        .join("\n")
-        + "\n"
 }

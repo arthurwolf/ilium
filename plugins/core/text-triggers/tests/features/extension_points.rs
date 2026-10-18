@@ -5,6 +5,7 @@ use ilium_plugin_sdk::exports::HookReply;
 use serde_json::json;
 
 use crate::common::*;
+use crate::manual::{page_text, table_after};
 
 fn point_rows() -> Vec<Vec<String>> {
     table_after(&page_text(), "| Point | Kind |")

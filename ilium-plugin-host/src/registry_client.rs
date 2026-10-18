@@ -36,7 +36,7 @@ pub trait Fetcher: Send + Sync {
 
     /// Gets a URL with status, redirect target, content type and declared size
     /// (reference-install-and-update.md PKG-260, 261). Fakes that only answer `get` keep the default.
-    fn get_response(&self, url: &str) -> Result<FetchResponse, FetchError> {
+    fn get_response(&self, _url: &str) -> Result<FetchResponse, FetchError> {
         unimplemented!("host::registry_client::Fetcher::get_response")
     }
 }
@@ -62,15 +62,12 @@ pub struct IndexEntry {
 }
 
 /// Talks to a registry and its mirrors.
-pub struct RegistryClient<'fetcher> {
-    fetcher: &'fetcher dyn Fetcher,
-    base_url: String,
-}
+pub struct RegistryClient;
 
-impl<'fetcher> RegistryClient<'fetcher> {
+impl RegistryClient {
     /// A client for a registry base URL.
-    pub fn new(fetcher: &'fetcher dyn Fetcher, base_url: String) -> RegistryClient<'fetcher> {
-        RegistryClient { fetcher, base_url }
+    pub fn new(_fetcher: &dyn Fetcher, _base_url: String) -> RegistryClient {
+        RegistryClient
     }
 
     /// Fetches and verifies the index.
@@ -84,7 +81,7 @@ impl<'fetcher> RegistryClient<'fetcher> {
     }
 
     /// Downloads a package, checking its recorded digest.
-    pub fn download(&self, entry: &IndexEntry) -> Result<Vec<u8>, HostError> {
+    pub fn download(&self, _entry: &IndexEntry) -> Result<Vec<u8>, HostError> {
         unimplemented!("host::registry_client::RegistryClient::download")
     }
 }

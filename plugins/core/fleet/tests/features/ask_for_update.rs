@@ -8,6 +8,7 @@ use ilium_plugin_sdk::types::{
 };
 
 use crate::common::*;
+use crate::feature_only::*;
 
 const FIXED_PROMPT: &str = "please remind me, in a very compact way, what you were doing, what I asked you to do, how it went, etc, remind me what's going on";
 

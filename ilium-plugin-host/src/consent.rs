@@ -18,10 +18,7 @@ pub enum ConsentOutcome {
 
 /// Serialises consent dialogs and enforces their limits.
 #[derive(Debug, Default)]
-pub struct ConsentGate {
-    open: Option<(String, String)>,
-    elapsed: Duration,
-}
+pub struct ConsentGate;
 
 impl ConsentGate {
     /// A gate with no dialog open.
@@ -35,17 +32,17 @@ impl ConsentGate {
     }
 
     /// Opens a consent dialog of `plugin` for `grant`.
-    pub fn open(&mut self, plugin: &str, grant: &str) -> Result<(), ConsentOutcome> {
+    pub fn open(&mut self, _plugin: &str, _grant: &str) -> Result<(), ConsentOutcome> {
         unimplemented!("host::consent::ConsentGate::open")
     }
 
     /// Closes the open dialog with its outcome.
-    pub fn close(&mut self, outcome: ConsentOutcome) {
+    pub fn close(&mut self, _outcome: ConsentOutcome) {
         unimplemented!("host::consent::ConsentGate::close")
     }
 
     /// Time passed; returns the outcome when the open dialog timed out.
-    pub fn tick(&mut self, elapsed: Duration) -> Option<ConsentOutcome> {
+    pub fn tick(&mut self, _elapsed: Duration) -> Option<ConsentOutcome> {
         unimplemented!("host::consent::ConsentGate::tick")
     }
 }
@@ -58,12 +55,12 @@ pub struct DialogGuard {
 
 impl DialogGuard {
     /// A guard for a dialog opened at `opened_at`.
-    pub fn opened_at(opened_at: Duration) -> DialogGuard {
+    pub fn opened_at(_opened_at: Duration) -> DialogGuard {
         unimplemented!("host::consent::DialogGuard::opened_at")
     }
 
     /// Whether input at `now` is accepted.
-    pub fn accepts_input_at(&mut self, now: Duration) -> bool {
+    pub fn accepts_input_at(&mut self, _now: Duration) -> bool {
         unimplemented!("host::consent::DialogGuard::accepts_input_at")
     }
 }

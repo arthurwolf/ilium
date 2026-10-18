@@ -13,7 +13,7 @@ impl HostKeymap for KeymapImport {
         unimplemented!("host::imports::keymap::bindings")
     }
 
-    fn chord_label(&mut self, chord: String) -> String {
+    fn chord_label(&mut self, _chord: String) -> String {
         unimplemented!("host::imports::keymap::chord_label")
     }
 }

@@ -3,50 +3,20 @@
 //! Every use of a testkit item that the skeleton lacks lives here (see ../API_GAPS.md), so a
 //! missing item breaks one file only.
 
-// This module is compiled into both the `features` and `port` test targets (the port twins mount it
-// with #[path]); each target uses a different subset of the helpers, so the rest look dead per target.
-#![allow(dead_code)]
-
 use std::path::PathBuf;
 
 use ilium_plugin_core_fleet::{FleetClient, FleetServer};
 use ilium_plugin_sdk::testing::{FakeHost, TreeNode};
 use ilium_plugin_sdk::types::{
     ActionKind, ActionValue, AgentActivity, AgentView, Event, HttpCalledEvent, Intent,
-    MessageEvent, NodeClass, NodeId, Outcome, PluginId, PluginSide, SendInputSpec, Submission,
-    UiAction, ViewTarget,
+    MessageEvent, NodeClass, NodeId, PluginId, PluginSide, SendInputSpec, Submission, UiAction,
+    ViewTarget,
 };
-use serde_json::{json, Value};
+use serde_json::Value;
 
 /// Path of the plugin manifest (the skeleton file, exact per the manual).
 pub fn manifest_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("manifest.json")
-}
-
-/// Root of the worktree, found from the crate directory (plugins/core/fleet).
-pub fn workspace_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..")
-}
-
-/// The text of a manual page by file stem, for example `core-plugin-fleet`.
-pub fn page(stem: &str) -> String {
-    let path = workspace_root()
-        .join("docs/plugins-manual/pages")
-        .join(format!("{stem}.md"));
-    std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("page {path:?}: {error}"))
-}
-
-/// The manual page of this plugin.
-pub fn page_text() -> String {
-    page("core-plugin-fleet")
-}
-
-/// Path of a golden file in this directory.
-pub fn golden_path(name: &str) -> String {
-    format!(
-        "{}/tests/features/golden/{name}",
-        env!("CARGO_MANIFEST_DIR")
-    )
 }
 
 /// A server-side host with the manifest grants and the plugin activated.
@@ -98,26 +68,6 @@ pub fn add_shell(host: &mut FakeHost, name: &str) -> u64 {
     })
 }
 
-/// One pane record as the `list-panes` cross-session reply carries it (cli-reference.md, `ilium panes`).
-pub fn pane_json(
-    pane_id: u64,
-    name: &str,
-    kind: &str,
-    agent: Option<&str>,
-    state: Option<&str>,
-) -> Value {
-    json!({
-        "pane_id": pane_id,
-        "name": name,
-        "kind": kind,
-        "agent": agent,
-        "state": state,
-        "project": "/home/me/dev/ilium",
-        "cwd": "/home/me/dev/ilium",
-        "is_self": false,
-    })
-}
-
 /// Registers a reachable live session whose `list-panes` reply is the given panes.
 pub fn add_session(host: &mut FakeHost, name: &str, is_self: bool, panes: &[Value]) {
     host.sessions().add_live(
@@ -126,11 +76,6 @@ pub fn add_session(host: &mut FakeHost, name: &str, is_self: bool, panes: &[Valu
         is_self,
         &Value::Array(panes.to_vec()).to_string(),
     );
-}
-
-/// Registers a live session that cannot be read (`session-unreachable`).
-pub fn add_unreachable_session(host: &mut FakeHost, name: &str) {
-    host.sessions().add_unreachable(name, "/home/me/dev/ilium");
 }
 
 /// Parses JSONL text into one value per non-empty line.
@@ -241,9 +186,4 @@ pub fn created_panes(host: &FakeHost) -> Vec<ilium_plugin_sdk::types::CreatePane
             _ => None,
         })
         .collect()
-}
-
-/// Makes every later submission complete with the given outcome.
-pub fn auto_outcome(host: &mut FakeHost, outcome: Outcome) {
-    host.auto_outcome(outcome);
 }

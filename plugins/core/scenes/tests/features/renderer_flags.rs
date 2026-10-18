@@ -1,6 +1,7 @@
 //! Renderer query methods of the three scenes (api-scenes.md "Lifecycle of a renderer", page samples 1, 2, 4).
 //! The testkit has no accessors for them yet (see ../API_GAPS.md).
 use crate::common::*;
+use crate::feature_support::*;
 use serde_json::json;
 
 /// REQ: COR-011, F-096

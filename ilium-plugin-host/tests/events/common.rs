@@ -1,6 +1,5 @@
 //! Shared helpers of the events-intents lane: a scripted native guest, a setup builder over the
 //! host harness, event and intent builders, outcome predicates and manual readers.
-#![allow(dead_code)]
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
@@ -175,12 +174,6 @@ impl Setup {
 
     pub fn tree(mut self, nodes: Vec<NodeView>) -> Setup {
         self.nodes = nodes;
-        self
-    }
-
-    /// Runs a built guest component instead of the scripted native guest.
-    pub fn component(mut self, name: &str) -> Setup {
-        self.component = Some(fixture_component(name));
         self
     }
 
@@ -360,11 +353,6 @@ pub fn folder(id: u64, parent: Option<u64>) -> NodeView {
     node(id, parent, NodeClass::Folder, "folder")
 }
 
-pub fn locked(mut view: NodeView) -> NodeView {
-    view.locked = true;
-    view
-}
-
 /// A root container 1 with panes 2..=count+1 below it.
 pub fn flat_tree(count: u64) -> Vec<NodeView> {
     let mut nodes = vec![node(1, None, NodeClass::Container, "root")];
@@ -540,35 +528,12 @@ pub fn workspace_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..")
 }
 
-/// Text of a manual page (without extension).
-pub fn manual_page(name: &str) -> String {
-    let path = workspace_root()
-        .join("docs/plugins-manual/pages")
-        .join(format!("{name}.md"));
-    match std::fs::read_to_string(&path) {
-        Ok(text) => text,
-        Err(error) => panic!("manual page {} unreadable: {error}", path.display()),
-    }
-}
-
 /// Text of a WIT file below the workspace `wit/` directory.
 pub fn wit_file(relative: &str) -> String {
     let path = workspace_root().join("wit").join(relative);
     match std::fs::read_to_string(&path) {
         Ok(text) => text,
         Err(error) => panic!("wit file {} unreadable: {error}", path.display()),
-    }
-}
-
-/// A built guest component. Fails red with `fixture.missing` until the toolchain builds it.
-pub fn fixture_component(name: &str) -> Vec<u8> {
-    let path = workspace_root()
-        .join("target/plugin-fixtures")
-        .join(format!("{name}.wasm"));
-    assert!(path.exists(), "fixture.missing: {}", path.display());
-    match std::fs::read(&path) {
-        Ok(bytes) => bytes,
-        Err(error) => panic!("fixture.missing: {} ({error})", path.display()),
     }
 }
 

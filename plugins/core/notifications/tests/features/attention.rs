@@ -5,6 +5,7 @@
 use ilium_plugin_sdk::types::{AgentActivity, Event};
 
 use crate::common::*;
+use crate::feature_only::{acks, attention_event, marks, server_grants};
 
 /// REQ: F-048
 #[test]

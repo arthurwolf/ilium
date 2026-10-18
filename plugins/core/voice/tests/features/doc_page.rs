@@ -1,7 +1,8 @@
 //! Rules the page and the traceability tables state in prose and tables (doc_ tests): the kernel tab, the
 //! disabled notice, the extension point table, the traceability rows F-050..F-054, the boot rows.
 
-use crate::common::{manual_page, page_text, table_after, user_guide};
+use crate::common::user_guide;
+use crate::manual::{manual_page, page_text, table_after};
 
 fn row_of(text: &str, id: &str) -> Vec<String> {
     let prefix = format!("| {id} |");

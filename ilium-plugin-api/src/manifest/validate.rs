@@ -58,19 +58,19 @@ pub struct CorePluginSummary {
 }
 
 /// Stage 2: parses `manifest.json` text, stopping at the first error (reference-manifest-schema.md).
-pub fn parse_manifest(json: &str) -> Result<Manifest, Vec<Diagnostic>> {
+pub fn parse_manifest(_json: &str) -> Result<Manifest, Vec<Diagnostic>> {
     unimplemented!("api::manifest::parse_manifest")
 }
 
 /// Stage 3 and later: every rule of the manifest pages, all errors collected
 /// (reference-manifest-schema.md).
-pub fn validate(manifest: &Manifest, context: &ValidationContext) -> Vec<Diagnostic> {
+pub fn validate(_manifest: &Manifest, _context: &ValidationContext) -> Vec<Diagnostic> {
     unimplemented!("api::manifest::validate")
 }
 
 /// Parse plus validate, in install order, one refusal code per package for the API codes
 /// (reference-abi-evolution.md, ABI-021).
-pub fn validate_json(json: &str, context: &ValidationContext) -> Vec<Diagnostic> {
+pub fn validate_json(_json: &str, _context: &ValidationContext) -> Vec<Diagnostic> {
     unimplemented!("api::manifest::validate_json")
 }
 

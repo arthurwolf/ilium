@@ -10,6 +10,7 @@ use ilium_plugin_sdk::types::{
 };
 
 use crate::common::*;
+use crate::feature_only::{marks, notices, sounds};
 
 fn toggle(host: &mut FakeHost, key: &str, kind: ActionKind, value: Option<ActionValue>) {
     host.deliver_one(Event::UiAction(UiAction {

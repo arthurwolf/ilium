@@ -23,10 +23,6 @@ fn parse_codes(text: &str) -> Vec<String> {
     }
 }
 
-fn text_codes_all(text: &str) -> Vec<String> {
-    text_errors(text)
-}
-
 /// A client manifest text padded with trailing spaces (valid JSON whitespace) to `size` bytes.
 fn padded_text(size: usize) -> String {
     let mut text = client().to_string();
@@ -1998,9 +1994,4 @@ fn pkg_035_validate_json_agrees_with_parse_then_validate_for_a_packed_manifest()
         "{:?}",
         error_codes(&direct)
     );
-}
-
-#[allow(dead_code)]
-fn keep_helper_used() {
-    let _ = text_codes_all("{}");
 }

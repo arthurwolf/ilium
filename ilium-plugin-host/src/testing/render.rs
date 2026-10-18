@@ -14,7 +14,7 @@ pub struct Rig {
 
 impl Rig {
     /// A rig for a plugin of the given tier.
-    pub fn new(tier: &str) -> Rig {
+    pub fn new(_tier: &str) -> Rig {
         unimplemented!("host::testing::render::Rig::new")
     }
 
@@ -24,12 +24,12 @@ impl Rig {
     }
 
     /// Adds a prerendered scene.
-    pub fn with_prerendered_scene(self, fps: u32) -> Rig {
+    pub fn with_prerendered_scene(self, _fps: u32) -> Rig {
         unimplemented!("host::testing::render::Rig::with_prerendered_scene")
     }
 
     /// Moves the clock.
-    pub fn advance_ms(&mut self, ms: u64) {
+    pub fn advance_ms(&mut self, _ms: u64) {
         unimplemented!("host::testing::render::Rig::advance_ms")
     }
 
@@ -59,22 +59,22 @@ impl Rig {
     }
 
     /// Blocks the plugin executor.
-    pub fn block_plugin(&mut self, blocked: bool) {
+    pub fn block_plugin(&mut self, _blocked: bool) {
         unimplemented!("host::testing::render::Rig::block_plugin")
     }
 
     /// Opens a view.
-    pub fn open_view(&mut self, name: &str) -> u32 {
+    pub fn open_view(&mut self, _name: &str) -> u32 {
         unimplemented!("host::testing::render::Rig::open_view")
     }
 
     /// Opens a settings view.
-    pub fn open_settings_view(&mut self, name: &str) -> u32 {
+    pub fn open_settings_view(&mut self, _name: &str) -> u32 {
         unimplemented!("host::testing::render::Rig::open_settings_view")
     }
 
     /// Opens a code view with lines.
-    pub fn open_code_view(&mut self, name: &str, lines: u32) -> u32 {
+    pub fn open_code_view(&mut self, _name: &str, _lines: u32) -> u32 {
         unimplemented!("host::testing::render::Rig::open_code_view")
     }
 
@@ -84,12 +84,12 @@ impl Rig {
     }
 
     /// Invalidates a view.
-    pub fn invalidate(&mut self, view: u32) {
+    pub fn invalidate(&mut self, _view: u32) {
         unimplemented!("host::testing::render::Rig::invalidate")
     }
 
     /// Resizes a view.
-    pub fn resize_view(&mut self, view: u32, columns: u16, rows: u16) {
+    pub fn resize_view(&mut self, _view: u32, _columns: u16, _rows: u16) {
         unimplemented!("host::testing::render::Rig::resize_view")
     }
 
@@ -104,42 +104,42 @@ impl Rig {
     }
 
     /// Scrolls a view.
-    pub fn scroll_view(&mut self, view: u32, rows: i32) {
+    pub fn scroll_view(&mut self, _view: u32, _rows: i32) {
         unimplemented!("host::testing::render::Rig::scroll_view")
     }
 
     /// Focuses a view.
-    pub fn focus_view(&mut self, view: u32) {
+    pub fn focus_view(&mut self, _view: u32) {
         unimplemented!("host::testing::render::Rig::focus_view")
     }
 
     /// Render calls of a view.
-    pub fn render_calls(&self, view: u32) -> u32 {
+    pub fn render_calls(&self, _view: u32) -> u32 {
         unimplemented!("host::testing::render::Rig::render_calls")
     }
 
     /// Renders in flight of a view.
-    pub fn render_in_flight(&self, view: u32) -> u32 {
+    pub fn render_in_flight(&self, _view: u32) -> u32 {
         unimplemented!("host::testing::render::Rig::render_in_flight")
     }
 
     /// Renders queued of a view.
-    pub fn render_queued(&self, view: u32) -> u32 {
+    pub fn render_queued(&self, _view: u32) -> u32 {
         unimplemented!("host::testing::render::Rig::render_queued")
     }
 
     /// Render start times of a view.
-    pub fn render_start_times(&self, view: u32) -> Vec<u64> {
+    pub fn render_start_times(&self, _view: u32) -> Vec<u64> {
         unimplemented!("host::testing::render::Rig::render_start_times")
     }
 
     /// Holds renders.
-    pub fn hold_renders(&mut self, hold: bool) {
+    pub fn hold_renders(&mut self, _hold: bool) {
         unimplemented!("host::testing::render::Rig::hold_renders")
     }
 
     /// Sets the cost of a render.
-    pub fn set_render_cost_ms(&mut self, ms: u64) {
+    pub fn set_render_cost_ms(&mut self, _ms: u64) {
         unimplemented!("host::testing::render::Rig::set_render_cost_ms")
     }
 
@@ -149,7 +149,7 @@ impl Rig {
     }
 
     /// The area of the last render of a view.
-    pub fn last_render_area(&self, view: u32) -> Option<(u16, u16)> {
+    pub fn last_render_area(&self, _view: u32) -> Option<(u16, u16)> {
         unimplemented!("host::testing::render::Rig::last_render_area")
     }
 
@@ -174,37 +174,37 @@ impl Rig {
     }
 
     /// Delivers a tree; `Err` is the trap code.
-    pub fn deliver_tree(&mut self, view: u32, tree: UiTree) -> Result<(), String> {
+    pub fn deliver_tree(&mut self, _view: u32, _tree: UiTree) -> Result<(), String> {
         unimplemented!("host::testing::render::Rig::deliver_tree")
     }
 
     /// Delivers a tree of one widget.
-    pub fn deliver_widget(&mut self, view: u32, widget: &str) -> Result<(), String> {
+    pub fn deliver_widget(&mut self, _view: u32, _widget: &str) -> Result<(), String> {
         unimplemented!("host::testing::render::Rig::deliver_widget")
     }
 
     /// Delivers a tree of one widget with items.
     pub fn deliver_widget_with_items(
         &mut self,
-        view: u32,
-        widget: &str,
-        items: u32,
+        _view: u32,
+        _widget: &str,
+        _items: u32,
     ) -> Result<(), String> {
         unimplemented!("host::testing::render::Rig::deliver_widget_with_items")
     }
 
     /// The tree shown in a view.
-    pub fn shown_tree(&self, view: u32) -> Option<UiTree> {
+    pub fn shown_tree(&self, _view: u32) -> Option<UiTree> {
         unimplemented!("host::testing::render::Rig::shown_tree")
     }
 
     /// The tree of the current frame of a view.
-    pub fn frame_tree(&self, view: u32) -> Option<UiTree> {
+    pub fn frame_tree(&self, _view: u32) -> Option<UiTree> {
         unimplemented!("host::testing::render::Rig::frame_tree")
     }
 
     /// Whether a view is stale.
-    pub fn is_stale(&self, view: u32) -> bool {
+    pub fn is_stale(&self, _view: u32) -> bool {
         unimplemented!("host::testing::render::Rig::is_stale")
     }
 
@@ -224,52 +224,52 @@ impl Rig {
     }
 
     /// Scrolls a node.
-    pub fn scroll_node(&mut self, view: u32, key: &str, rows: u32) {
+    pub fn scroll_node(&mut self, _view: u32, _key: &str, _rows: u32) {
         unimplemented!("host::testing::render::Rig::scroll_node")
     }
 
     /// The scroll of a node.
-    pub fn node_scroll(&self, view: u32, key: &str) -> u32 {
+    pub fn node_scroll(&self, _view: u32, _key: &str) -> u32 {
         unimplemented!("host::testing::render::Rig::node_scroll")
     }
 
     /// The scroll of a node in the current frame.
-    pub fn frame_scroll(&self, view: u32, key: &str) -> u32 {
+    pub fn frame_scroll(&self, _view: u32, _key: &str) -> u32 {
         unimplemented!("host::testing::render::Rig::frame_scroll")
     }
 
     /// The user scrolls a node.
-    pub fn user_scroll(&mut self, view: u32, key: &str, rows: u32) {
+    pub fn user_scroll(&mut self, _view: u32, _key: &str, _rows: u32) {
         unimplemented!("host::testing::render::Rig::user_scroll")
     }
 
     /// Selects a tab.
-    pub fn select_tab(&mut self, view: u32, key: &str, tab: u32) {
+    pub fn select_tab(&mut self, _view: u32, _key: &str, _tab: u32) {
         unimplemented!("host::testing::render::Rig::select_tab")
     }
 
     /// The selected tab.
-    pub fn selected_tab(&self, view: u32, key: &str) -> u32 {
+    pub fn selected_tab(&self, _view: u32, _key: &str) -> u32 {
         unimplemented!("host::testing::render::Rig::selected_tab")
     }
 
     /// Sets a cursor.
-    pub fn set_cursor(&mut self, view: u32, key: &str, at: u32) {
+    pub fn set_cursor(&mut self, _view: u32, _key: &str, _at: u32) {
         unimplemented!("host::testing::render::Rig::set_cursor")
     }
 
     /// The cursor.
-    pub fn cursor(&self, view: u32, key: &str) -> u32 {
+    pub fn cursor(&self, _view: u32, _key: &str) -> u32 {
         unimplemented!("host::testing::render::Rig::cursor")
     }
 
     /// Whether a view was repainted.
-    pub fn view_repainted(&self, view: u32) -> bool {
+    pub fn view_repainted(&self, _view: u32) -> bool {
         unimplemented!("host::testing::render::Rig::view_repainted")
     }
 
     /// Hit-tests a cell.
-    pub fn hit_test(&mut self, view: u32, column: u16, row: u16) -> Option<String> {
+    pub fn hit_test(&mut self, _view: u32, _column: u16, _row: u16) -> Option<String> {
         unimplemented!("host::testing::render::Rig::hit_test")
     }
 
@@ -279,67 +279,77 @@ impl Rig {
     }
 
     /// The user focuses a view.
-    pub fn user_focus(&mut self, view: u32) {
+    pub fn user_focus(&mut self, _view: u32) {
         unimplemented!("host::testing::render::Rig::user_focus")
     }
 
     /// The user unfocuses a view.
-    pub fn user_unfocus(&mut self, view: u32) {
+    pub fn user_unfocus(&mut self, _view: u32) {
         unimplemented!("host::testing::render::Rig::user_unfocus")
     }
 
     /// The plugin sets focus.
-    pub fn plugin_set_focus(&mut self, view: u32, key: &str) -> bool {
+    pub fn plugin_set_focus(&mut self, _view: u32, _key: &str) -> bool {
         unimplemented!("host::testing::render::Rig::plugin_set_focus")
     }
 
     /// The focused key.
-    pub fn focused_key(&self, view: u32) -> Option<String> {
+    pub fn focused_key(&self, _view: u32) -> Option<String> {
         unimplemented!("host::testing::render::Rig::focused_key")
     }
 
     /// The server side contributes a node.
-    pub fn server_contribute(&mut self, point: &str, node: &str, text: &str) -> Result<(), String> {
+    pub fn server_contribute(
+        &mut self,
+        _point: &str,
+        _node: &str,
+        _text: &str,
+    ) -> Result<(), String> {
         unimplemented!("host::testing::render::Rig::server_contribute")
     }
 
     /// The client side contributes a node.
-    pub fn client_contribute(&mut self, point: &str, node: &str, text: &str) -> Result<(), String> {
+    pub fn client_contribute(
+        &mut self,
+        _point: &str,
+        _node: &str,
+        _text: &str,
+    ) -> Result<(), String> {
         unimplemented!("host::testing::render::Rig::client_contribute")
     }
 
     /// Entries in the server registry of a point.
-    pub fn server_registry_len(&self, point: &str) -> usize {
+    pub fn server_registry_len(&self, _point: &str) -> usize {
         unimplemented!("host::testing::render::Rig::server_registry_len")
     }
 
     /// Entries in the client store of a point.
-    pub fn client_store_len(&self, point: &str) -> usize {
+    pub fn client_store_len(&self, _point: &str) -> usize {
         unimplemented!("host::testing::render::Rig::client_store_len")
     }
 
     /// Entries in the client mirror of a point.
-    pub fn client_mirror_len(&self, point: &str) -> usize {
+    pub fn client_mirror_len(&self, _point: &str) -> usize {
         unimplemented!("host::testing::render::Rig::client_mirror_len")
     }
 
     /// The contribution cap of a point.
-    pub fn contribution_cap(&self, point: &str) -> u32 {
+    pub fn contribution_cap(&self, _point: &str) -> u32 {
         unimplemented!("host::testing::render::Rig::contribution_cap")
     }
 
     /// Whether a contribution is stale.
-    pub fn contribution_stale(&self, point: &str, node: &str) -> bool {
+    pub fn contribution_stale(&self, _point: &str, _node: &str) -> bool {
         unimplemented!("host::testing::render::Rig::contribution_stale")
     }
 
     /// Whether a mirror entry is stale.
-    pub fn mirror_stale(&self, point: &str, node: &str) -> bool {
+    pub fn mirror_stale(&self, _point: &str, _node: &str) -> bool {
         unimplemented!("host::testing::render::Rig::mirror_stale")
     }
 
     /// Whether a mirror entry is recoloured.
-    pub fn mirror_recoloured(&self, point: &str, node: &str) -> bool {
+    pub fn mirror_recoloured(&self, _point: &str, _node: &str) -> bool {
         unimplemented!("host::testing::render::Rig::mirror_recoloured")
     }
 
@@ -349,7 +359,7 @@ impl Rig {
     }
 
     /// Stops the plugin side.
-    pub fn stop_plugin_side(&mut self, restart_scheduled: bool) {
+    pub fn stop_plugin_side(&mut self, _restart_scheduled: bool) {
         unimplemented!("host::testing::render::Rig::stop_plugin_side")
     }
 
@@ -374,52 +384,52 @@ impl Rig {
     }
 
     /// Activates a contribution.
-    pub fn activate_contribution(&mut self, point: &str, node: &str) -> Option<String> {
+    pub fn activate_contribution(&mut self, _point: &str, _node: &str) -> Option<String> {
         unimplemented!("host::testing::render::Rig::activate_contribution")
     }
 
     /// Sets the visible rows of a view.
-    pub fn set_visible_rows(&mut self, view: u32, first: u32, last: u32) {
+    pub fn set_visible_rows(&mut self, _view: u32, _first: u32, _last: u32) {
         unimplemented!("host::testing::render::Rig::set_visible_rows")
     }
 
     /// The last annotate range.
-    pub fn last_annotate_range(&self, view: u32) -> Option<(u32, u32)> {
+    pub fn last_annotate_range(&self, _view: u32) -> Option<(u32, u32)> {
         unimplemented!("host::testing::render::Rig::last_annotate_range")
     }
 
     /// The last tokens range.
-    pub fn last_tokens_range(&self, view: u32) -> Option<(u32, u32)> {
+    pub fn last_tokens_range(&self, _view: u32) -> Option<(u32, u32)> {
         unimplemented!("host::testing::render::Rig::last_tokens_range")
     }
 
     /// Annotate call times.
-    pub fn annotate_times(&self, view: u32) -> Vec<u64> {
+    pub fn annotate_times(&self, _view: u32) -> Vec<u64> {
         unimplemented!("host::testing::render::Rig::annotate_times")
     }
 
     /// Delays annotate.
-    pub fn delay_annotate(&mut self, view: u32, ms: u64) {
+    pub fn delay_annotate(&mut self, _view: u32, _ms: u64) {
         unimplemented!("host::testing::render::Rig::delay_annotate")
     }
 
     /// Delays tokens.
-    pub fn delay_tokens(&mut self, view: u32, ms: u64) {
+    pub fn delay_tokens(&mut self, _view: u32, _ms: u64) {
         unimplemented!("host::testing::render::Rig::delay_tokens")
     }
 
     /// Annotate returns the given number of spans.
-    pub fn annotate_returns_spans(&mut self, view: u32, spans: u32) {
+    pub fn annotate_returns_spans(&mut self, _view: u32, _spans: u32) {
         unimplemented!("host::testing::render::Rig::annotate_returns_spans")
     }
 
     /// Annotation spans applied.
-    pub fn applied_annotation_spans(&self, view: u32) -> u32 {
+    pub fn applied_annotation_spans(&self, _view: u32) -> u32 {
         unimplemented!("host::testing::render::Rig::applied_annotation_spans")
     }
 
     /// Token spans applied.
-    pub fn applied_token_spans(&self, view: u32) -> u32 {
+    pub fn applied_token_spans(&self, _view: u32) -> u32 {
         unimplemented!("host::testing::render::Rig::applied_token_spans")
     }
 
@@ -429,7 +439,7 @@ impl Rig {
     }
 
     /// The scene writes a row.
-    pub fn scene_write_row(&mut self, row: u32, value: u8) {
+    pub fn scene_write_row(&mut self, _row: u32, _value: u8) {
         unimplemented!("host::testing::render::Rig::scene_write_row")
     }
 
@@ -449,17 +459,17 @@ impl Rig {
     }
 
     /// One front buffer row.
-    pub fn front_buffer_row(&self, row: u32) -> u8 {
+    pub fn front_buffer_row(&self, _row: u32) -> u8 {
         unimplemented!("host::testing::render::Rig::front_buffer_row")
     }
 
     /// One presented row.
-    pub fn presented_row(&self, row: u32) -> u8 {
+    pub fn presented_row(&self, _row: u32) -> u8 {
         unimplemented!("host::testing::render::Rig::presented_row")
     }
 
     /// Sets the cost of a scene frame.
-    pub fn scene_frame_cost_ms(&mut self, ms: u64) {
+    pub fn scene_frame_cost_ms(&mut self, _ms: u64) {
         unimplemented!("host::testing::render::Rig::scene_frame_cost_ms")
     }
 
@@ -469,7 +479,7 @@ impl Rig {
     }
 
     /// Sets the look invert.
-    pub fn set_look_invert(&mut self, invert: bool) {
+    pub fn set_look_invert(&mut self, _invert: bool) {
         unimplemented!("host::testing::render::Rig::set_look_invert")
     }
 
@@ -484,7 +494,7 @@ impl Rig {
     }
 
     /// Starts a scene.
-    pub fn start_scene(&mut self, name: &str) {
+    pub fn start_scene(&mut self, _name: &str) {
         unimplemented!("host::testing::render::Rig::start_scene")
     }
 
@@ -499,12 +509,12 @@ impl Rig {
     }
 
     /// Turns the background on or off.
-    pub fn set_background(&mut self, on: bool) {
+    pub fn set_background(&mut self, _on: bool) {
         unimplemented!("host::testing::render::Rig::set_background")
     }
 
     /// Hides the window.
-    pub fn set_window_hidden(&mut self, hidden: bool) {
+    pub fn set_window_hidden(&mut self, _hidden: bool) {
         unimplemented!("host::testing::render::Rig::set_window_hidden")
     }
 }
@@ -517,52 +527,52 @@ pub struct SceneRig {
 
 impl SceneRig {
     /// A scene rig at the given frame rate.
-    pub fn new(fps: u32) -> SceneRig {
+    pub fn new(_fps: u32) -> SceneRig {
         unimplemented!("host::testing::render::SceneRig::new")
     }
 
     /// The scene flags.
     pub fn flags(
         self,
-        uses_cell_colors: bool,
-        wants_occupancy: bool,
-        wants_pointer: bool,
+        _uses_cell_colors: bool,
+        _wants_occupancy: bool,
+        _wants_pointer: bool,
     ) -> SceneRig {
         unimplemented!("host::testing::render::SceneRig::flags")
     }
 
     /// A grant.
-    pub fn grant(self, name: &str) -> SceneRig {
+    pub fn grant(self, _name: &str) -> SceneRig {
         unimplemented!("host::testing::render::SceneRig::grant")
     }
 
     /// The palette.
-    pub fn palette(self, rgb: &[u32]) -> SceneRig {
+    pub fn palette(self, _rgb: &[u32]) -> SceneRig {
         unimplemented!("host::testing::render::SceneRig::palette")
     }
 
     /// The colour mode.
-    pub fn colour_mode(self, mode: &str) -> SceneRig {
+    pub fn colour_mode(self, _mode: &str) -> SceneRig {
         unimplemented!("host::testing::render::SceneRig::colour_mode")
     }
 
     /// The area.
-    pub fn area(self, columns: u32, rows: u32) -> SceneRig {
+    pub fn area(self, _columns: u32, _rows: u32) -> SceneRig {
         unimplemented!("host::testing::render::SceneRig::area")
     }
 
     /// Runs frames.
-    pub fn run_frames(&mut self, count: u32) {
+    pub fn run_frames(&mut self, _count: u32) {
         unimplemented!("host::testing::render::SceneRig::run_frames")
     }
 
     /// Runs for a duration.
-    pub fn run_for_ms(&mut self, ms: u64) {
+    pub fn run_for_ms(&mut self, _ms: u64) {
         unimplemented!("host::testing::render::SceneRig::run_for_ms")
     }
 
     /// Sets the frame cost.
-    pub fn frame_cost_ms(&mut self, ms: u64) {
+    pub fn frame_cost_ms(&mut self, _ms: u64) {
         unimplemented!("host::testing::render::SceneRig::frame_cost_ms")
     }
 
@@ -572,42 +582,42 @@ impl SceneRig {
     }
 
     /// Scripts readiness.
-    pub fn readiness_script(&mut self, steps: &[&str]) {
+    pub fn readiness_script(&mut self, _steps: &[&str]) {
         unimplemented!("host::testing::render::SceneRig::readiness_script")
     }
 
     /// The scene is ready after a delay.
-    pub fn readiness_after_ms(&mut self, ms: u64) {
+    pub fn readiness_after_ms(&mut self, _ms: u64) {
         unimplemented!("host::testing::render::SceneRig::readiness_after_ms")
     }
 
     /// What reconfigure returns.
-    pub fn reconfigure_returns(&mut self, keep: bool) {
+    pub fn reconfigure_returns(&mut self, _keep: bool) {
         unimplemented!("host::testing::render::SceneRig::reconfigure_returns")
     }
 
     /// Reconfigures.
-    pub fn reconfigure(&mut self, spec: &str) {
+    pub fn reconfigure(&mut self, _spec: &str) {
         unimplemented!("host::testing::render::SceneRig::reconfigure")
     }
 
     /// Changes a setting.
-    pub fn change_setting(&mut self, key: &str, value: &str) -> Result<(), String> {
+    pub fn change_setting(&mut self, _key: &str, _value: &str) -> Result<(), String> {
         unimplemented!("host::testing::render::SceneRig::change_setting")
     }
 
     /// A setting.
-    pub fn setting(&self, key: &str) -> Option<String> {
+    pub fn setting(&self, _key: &str) -> Option<String> {
         unimplemented!("host::testing::render::SceneRig::setting")
     }
 
     /// Revokes a grant.
-    pub fn revoke(&mut self, name: &str) {
+    pub fn revoke(&mut self, _name: &str) {
         unimplemented!("host::testing::render::SceneRig::revoke")
     }
 
     /// Changes the palette.
-    pub fn change_palette(&mut self, rgb: &[u32]) {
+    pub fn change_palette(&mut self, _rgb: &[u32]) {
         unimplemented!("host::testing::render::SceneRig::change_palette")
     }
 
@@ -617,7 +627,7 @@ impl SceneRig {
     }
 
     /// The next frame allocates.
-    pub fn allocate_in_next_frame_mib(&mut self, mib: u32) {
+    pub fn allocate_in_next_frame_mib(&mut self, _mib: u32) {
         unimplemented!("host::testing::render::SceneRig::allocate_in_next_frame_mib")
     }
 
@@ -627,7 +637,7 @@ impl SceneRig {
     }
 
     /// Sets the status text.
-    pub fn status_text(&mut self, text: &str) {
+    pub fn status_text(&mut self, _text: &str) {
         unimplemented!("host::testing::render::SceneRig::status_text")
     }
 
@@ -712,7 +722,7 @@ impl SceneRig {
     }
 
     /// Failures of a plugin side.
-    pub fn plugin_side_failures(&self, side: &str) -> u32 {
+    pub fn plugin_side_failures(&self, _side: &str) -> u32 {
         unimplemented!("host::testing::render::SceneRig::plugin_side_failures")
     }
 
@@ -737,7 +747,7 @@ impl SceneRig {
     }
 
     /// Calls of an export.
-    pub fn query_count(&self, export: &str) -> u32 {
+    pub fn query_count(&self, _export: &str) -> u32 {
         unimplemented!("host::testing::render::SceneRig::query_count")
     }
 
@@ -767,7 +777,7 @@ impl SceneRig {
     }
 
     /// Moves the pointer.
-    pub fn move_pointer(&mut self, column: u32, row: u32) {
+    pub fn move_pointer(&mut self, _column: u32, _row: u32) {
         unimplemented!("host::testing::render::SceneRig::move_pointer")
     }
 }
@@ -780,32 +790,32 @@ pub struct SurfaceRig {
 
 impl SurfaceRig {
     /// A surface of the given size and format.
-    pub fn new(width: u32, height: u32, format: &str) -> SurfaceRig {
+    pub fn new(_width: u32, _height: u32, _format: &str) -> SurfaceRig {
         unimplemented!("host::testing::render::SurfaceRig::new")
     }
 
     /// The scene flags.
     pub fn flags(
         self,
-        uses_cell_colors: bool,
-        wants_occupancy: bool,
-        wants_pointer: bool,
+        _uses_cell_colors: bool,
+        _wants_occupancy: bool,
+        _wants_pointer: bool,
     ) -> SurfaceRig {
         unimplemented!("host::testing::render::SurfaceRig::flags")
     }
 
     /// Writes rows.
-    pub fn write_rows(&mut self, first_row: u32, bytes: &[u8]) -> Result<(), String> {
+    pub fn write_rows(&mut self, _first_row: u32, _bytes: &[u8]) -> Result<(), String> {
         unimplemented!("host::testing::render::SurfaceRig::write_rows")
     }
 
     /// Writes glyphs.
-    pub fn write_glyphs(&mut self, cells: u32) -> Result<(), String> {
+    pub fn write_glyphs(&mut self, _cells: u32) -> Result<(), String> {
         unimplemented!("host::testing::render::SurfaceRig::write_glyphs")
     }
 
     /// Writes cell colours.
-    pub fn write_cell_colors(&mut self, row: u32, colors: &[u32]) {
+    pub fn write_cell_colors(&mut self, _row: u32, _colors: &[u32]) {
         unimplemented!("host::testing::render::SurfaceRig::write_cell_colors")
     }
 
@@ -815,12 +825,12 @@ impl SurfaceRig {
     }
 
     /// Sets owner ids.
-    pub fn set_owner_ids(&mut self, ids: &[u32]) {
+    pub fn set_owner_ids(&mut self, _ids: &[u32]) {
         unimplemented!("host::testing::render::SurfaceRig::set_owner_ids")
     }
 
     /// Sets owner ids, checked.
-    pub fn set_owner_ids_checked(&mut self, ids: &[u32]) -> Result<(), String> {
+    pub fn set_owner_ids_checked(&mut self, _ids: &[u32]) -> Result<(), String> {
         unimplemented!("host::testing::render::SurfaceRig::set_owner_ids_checked")
     }
 
@@ -855,22 +865,22 @@ impl SurfaceRig {
     }
 
     /// Moves the pointer.
-    pub fn move_pointer(&mut self, column: u32, row: u32) {
+    pub fn move_pointer(&mut self, _column: u32, _row: u32) {
         unimplemented!("host::testing::render::SurfaceRig::move_pointer")
     }
 
     /// The bytes of a row.
-    pub fn row_bytes(&self, row: u32) -> Vec<u8> {
+    pub fn row_bytes(&self, _row: u32) -> Vec<u8> {
         unimplemented!("host::testing::render::SurfaceRig::row_bytes")
     }
 
     /// The presented bytes of a row.
-    pub fn presented_row(&self, row: u32) -> Vec<u8> {
+    pub fn presented_row(&self, _row: u32) -> Vec<u8> {
         unimplemented!("host::testing::render::SurfaceRig::presented_row")
     }
 
     /// The cell colours of a row.
-    pub fn cell_colors(&self, row: u32) -> Vec<u32> {
+    pub fn cell_colors(&self, _row: u32) -> Vec<u32> {
         unimplemented!("host::testing::render::SurfaceRig::cell_colors")
     }
 
@@ -890,7 +900,7 @@ impl SurfaceRig {
     }
 
     /// Moves the clock.
-    pub fn advance_ms(&mut self, ms: u64) {
+    pub fn advance_ms(&mut self, _ms: u64) {
         unimplemented!("host::testing::render::SurfaceRig::advance_ms")
     }
 }
@@ -903,7 +913,7 @@ pub struct Font {
 
 impl Font {
     /// Opens a font by name.
-    pub fn new(name: &str) -> Result<Font, String> {
+    pub fn new(_name: &str) -> Result<Font, String> {
         unimplemented!("host::testing::render::Font::new")
     }
 
@@ -913,38 +923,38 @@ impl Font {
     }
 
     /// Rasterizes a character.
-    pub fn rasterize(&self, character: char) -> Result<Vec<u8>, String> {
+    pub fn rasterize(&self, _character: char) -> Result<Vec<u8>, String> {
         unimplemented!("host::testing::render::Font::rasterize")
     }
 
     /// Rasterizes a code point.
-    pub fn rasterize_code(&self, code: u32) -> Result<Vec<u8>, String> {
+    pub fn rasterize_code(&self, _code: u32) -> Result<Vec<u8>, String> {
         unimplemented!("host::testing::render::Font::rasterize_code")
     }
 }
 
 /// Display width of text in cells (WID-019).
-pub fn cell_width(text: &str) -> usize {
+pub fn cell_width(_text: &str) -> usize {
     unimplemented!("host::testing::render::cell_width")
 }
 
 /// Sanitises text for display (RND-019).
-pub fn sanitise(text: &str, single_line: bool) -> String {
+pub fn sanitise(_text: &str, _single_line: bool) -> String {
     unimplemented!("host::testing::render::sanitise")
 }
 
 /// The tooltip text shown for a tooltip (WID-015).
-pub fn tooltip_shown(text: &str) -> String {
+pub fn tooltip_shown(_text: &str) -> String {
     unimplemented!("host::testing::render::tooltip_shown")
 }
 
 /// The tab order of nodes given (tab index, focusable); 1-based node numbers (WID-018).
-pub fn tab_order(nodes: &[(Option<i16>, bool)]) -> Vec<usize> {
+pub fn tab_order(_nodes: &[(Option<i16>, bool)]) -> Vec<usize> {
     unimplemented!("host::testing::render::tab_order")
 }
 
 /// The next node in tab order (WID-018).
-pub fn tab_next(order: &[usize], current: usize) -> usize {
+pub fn tab_next(_order: &[usize], _current: usize) -> usize {
     unimplemented!("host::testing::render::tab_next")
 }
 
@@ -959,32 +969,32 @@ pub fn hit_layers_in_order() -> Vec<&'static str> {
 }
 
 /// The frame budget of a scene (RND-001).
-pub fn frame_budget_ms(fps: u32, frame_deadline_ms: Option<u32>) -> u64 {
+pub fn frame_budget_ms(_fps: u32, _frame_deadline_ms: Option<u32>) -> u64 {
     unimplemented!("host::testing::render::frame_budget_ms")
 }
 
 /// The scene memory limit of a tier (RND-014).
-pub fn scene_memory_limit_mib(tier: &str, requested: Option<u32>) -> u32 {
+pub fn scene_memory_limit_mib(_tier: &str, _requested: Option<u32>) -> u32 {
     unimplemented!("host::testing::render::scene_memory_limit_mib")
 }
 
 /// Installs a prerendered animation (RND-017).
-pub fn install_prerender(frames: u32, fps: u32, mib: u32) -> Result<(), String> {
+pub fn install_prerender(_frames: u32, _fps: u32, _mib: u32) -> Result<(), String> {
     unimplemented!("host::testing::render::install_prerender")
 }
 
 /// Sets a decoration with frames (RND-018).
-pub fn set_decoration_with_frames(frames: usize, frame_ms: u16) -> Result<(), String> {
+pub fn set_decoration_with_frames(_frames: usize, _frame_ms: u16) -> Result<(), String> {
     unimplemented!("host::testing::render::set_decoration_with_frames")
 }
 
 /// A tree with one text node (RND-019).
-pub fn tree_with_text(text: &str) -> UiTree {
+pub fn tree_with_text(_text: &str) -> UiTree {
     unimplemented!("host::testing::render::tree_with_text")
 }
 
 /// A tree with one tooltip (WID-015).
-pub fn tree_with_tooltip(text: &str) -> UiTree {
+pub fn tree_with_tooltip(_text: &str) -> UiTree {
     unimplemented!("host::testing::render::tree_with_tooltip")
 }
 

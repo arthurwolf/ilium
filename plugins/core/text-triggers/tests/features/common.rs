@@ -8,9 +8,8 @@ use ilium_plugin_sdk::types::{
     AgentActivity, AgentView, Delivery, DroppedCount, Event, Intent, NodeClass, NodeId,
     OutputMatchedEvent, SendInputSpec, Submission,
 };
-use serde_json::{json, Value};
+use serde_json::json;
 
-pub const PLUGIN_ID: &str = "ilium.core.text-triggers";
 /// The filter rate the page sample uses (`rate_per_second: 2`).
 pub const RATE_PER_SECOND: u16 = 2;
 /// The list rows of the page sample hold at most this many items (`max_items: 32`).
@@ -19,24 +18,6 @@ pub const MAX_RULES: usize = 32;
 /// Path of the plugin manifest (the skeleton file, exact per the manual).
 pub fn manifest_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("manifest.json")
-}
-
-/// Root of the worktree, found from the crate directory (plugins/core/text-triggers).
-pub fn workspace_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..")
-}
-
-/// A page of the manual by file name.
-pub fn manual_page(name: &str) -> String {
-    let path = workspace_root()
-        .join("docs/plugins-manual/pages")
-        .join(name);
-    std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("page {path:?}: {error}"))
-}
-
-/// The manual page of this plugin.
-pub fn page_text() -> String {
-    manual_page("core-plugin-text-triggers.md")
 }
 
 /// A server-side host with the manifest grants and the plugin activated.
@@ -141,40 +122,4 @@ pub fn expected_spec(node: u64, reply: &str) -> SendInputSpec {
 /// The dedup key the page sample builds: `trigger-{filter_id}-{node}-{row}`.
 pub fn dedup_key(filter_id: &str, node: u64, row: u32) -> String {
     format!("trigger-{filter_id}-{node}-{row}")
-}
-
-/// Parsed `manifest.json`.
-pub fn manifest() -> Value {
-    let text = std::fs::read_to_string(manifest_path()).expect("manifest.json readable");
-    serde_json::from_str(&text).expect("manifest.json is JSON")
-}
-
-/// The first json code block after `heading`.
-pub fn json_block_after(page: &str, heading: &str) -> Value {
-    let start = page
-        .find(heading)
-        .unwrap_or_else(|| panic!("heading {heading} missing"));
-    let rest = &page[start..];
-    let open = rest.find("```json\n").expect("json block") + "```json\n".len();
-    let close = rest[open..].find("```").expect("block end");
-    serde_json::from_str(&rest[open..open + close]).expect("page block is JSON")
-}
-
-/// Rows of the first table that follows `anchor`: cells of every row after the separator.
-pub fn table_after(page: &str, anchor: &str) -> Vec<Vec<String>> {
-    let start = page
-        .find(anchor)
-        .unwrap_or_else(|| panic!("anchor {anchor} missing"));
-    page[start..]
-        .lines()
-        .skip_while(|line| !line.starts_with('|'))
-        .skip(2)
-        .take_while(|line| line.starts_with('|'))
-        .map(|line| {
-            line.trim_matches('|')
-                .split('|')
-                .map(|cell| cell.trim().to_string())
-                .collect()
-        })
-        .collect()
 }

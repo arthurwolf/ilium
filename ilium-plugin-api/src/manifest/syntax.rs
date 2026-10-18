@@ -63,7 +63,7 @@ pub enum ActivationTrigger {
 }
 
 /// Parses one trigger; an unknown kind is refused (reference-manifest.md PKG-059).
-pub fn parse_activation(trigger: &str) -> Result<ActivationTrigger, Diagnostic> {
+pub fn parse_activation(_trigger: &str) -> Result<ActivationTrigger, Diagnostic> {
     unimplemented!("api::manifest::parse_activation")
 }
 
@@ -72,7 +72,7 @@ pub fn parse_activation(trigger: &str) -> Result<ActivationTrigger, Diagnostic> 
 pub struct WhenExpr(pub String);
 
 /// Parses a `when` expression (reference-manifest.md "The when expression").
-pub fn parse_when(expression: &str) -> Result<WhenExpr, Diagnostic> {
+pub fn parse_when(_expression: &str) -> Result<WhenExpr, Diagnostic> {
     unimplemented!("api::manifest::parse_when")
 }
 
@@ -82,6 +82,6 @@ pub fn parse_when(expression: &str) -> Result<WhenExpr, Diagnostic> {
 pub struct Chord(pub Vec<String>);
 
 /// Parses a chord such as `ctrl+shift+p` (reference-manifest.md "Keybinding chords").
-pub fn parse_chord(chord: &str) -> Result<Chord, Diagnostic> {
+pub fn parse_chord(_chord: &str) -> Result<Chord, Diagnostic> {
     unimplemented!("api::manifest::parse_chord")
 }

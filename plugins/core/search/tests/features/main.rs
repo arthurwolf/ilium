@@ -7,3 +7,4 @@ mod manifest;
 mod panel_flow;
 mod renders;
 mod server;
+mod support;

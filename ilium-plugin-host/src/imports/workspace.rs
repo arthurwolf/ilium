@@ -10,11 +10,11 @@ use ilium_plugin_api::generated::types::errors::PluginError;
 pub struct WorkspaceImport;
 
 impl HostWorkspace for WorkspaceImport {
-    fn register(&mut self, spec: WorkspaceSpec) -> Result<u64, PluginError> {
+    fn register(&mut self, _spec: WorkspaceSpec) -> Result<u64, PluginError> {
         unimplemented!("host::imports::workspace::register")
     }
 
-    fn release(&mut self, workspace: u64) -> Result<(), PluginError> {
+    fn release(&mut self, _workspace: u64) -> Result<(), PluginError> {
         unimplemented!("host::imports::workspace::release")
     }
 

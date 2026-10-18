@@ -6,8 +6,6 @@
 //! `install_errors(..)` validates a packed manifest the way the installer does (Install mode)
 //! and needs a `files` list; `packed(..)` adds one.
 
-#![allow(dead_code)]
-
 use std::path::PathBuf;
 
 use ilium_plugin_api::abi::UNSTABLE_FEATURES;
@@ -287,11 +285,6 @@ pub fn manual_dir() -> PathBuf {
         return PathBuf::from(directory);
     }
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../docs/plugins-manual/pages")
-}
-
-/// The repository root (parent of the crate directory).
-pub fn repo_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..")
 }
 
 /// Reads one manual page by file name.

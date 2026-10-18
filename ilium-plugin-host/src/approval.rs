@@ -12,10 +12,7 @@ pub enum ApprovalError {
 
 /// Where a grant request is answered.
 #[derive(Debug)]
-pub struct ApprovalChannel {
-    has_client: bool,
-    script_answer: Option<bool>,
-}
+pub struct ApprovalChannel;
 
 impl ApprovalChannel {
     /// A channel with an attached client.
@@ -29,12 +26,12 @@ impl ApprovalChannel {
     }
 
     /// A scripted answer for the next request.
-    pub fn script_answer(&mut self, yes: bool) {
+    pub fn script_answer(&mut self, _yes: bool) {
         unimplemented!("host::approval::ApprovalChannel::script_answer")
     }
 
     /// Asks for `grants` of `plugin`; `Ok(true)` when approved.
-    pub fn ask(&mut self, plugin: &str, grants: &[Grant]) -> Result<bool, ApprovalError> {
+    pub fn ask(&mut self, _plugin: &str, _grants: &[Grant]) -> Result<bool, ApprovalError> {
         unimplemented!("host::approval::ApprovalChannel::ask")
     }
 }

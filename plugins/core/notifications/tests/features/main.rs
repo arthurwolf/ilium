@@ -11,6 +11,7 @@ mod dedup;
 mod desktop;
 mod doc_page;
 mod extension_points;
+mod feature_only;
 mod manifest;
 mod merge;
 mod mute;

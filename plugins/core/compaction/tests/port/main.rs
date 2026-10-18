@@ -4,8 +4,9 @@
 
 mod common;
 mod fixtures;
-#[path = "../host_ext.rs"]
 mod host_ext;
+#[path = "../support/host_ext_shared.rs"]
+mod host_ext_shared;
 
 mod app_flow;
 mod misc_client;

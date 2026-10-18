@@ -11,11 +11,11 @@ use ilium_plugin_api::generated::types::ids::GrabId;
 pub struct KeysImport;
 
 impl HostKeys for KeysImport {
-    fn grab(&mut self, spec: GrabSpec) -> Result<GrabId, PluginError> {
+    fn grab(&mut self, _spec: GrabSpec) -> Result<GrabId, PluginError> {
         unimplemented!("host::imports::keys::grab")
     }
 
-    fn release(&mut self, grab: GrabId) {
+    fn release(&mut self, _grab: GrabId) {
         unimplemented!("host::imports::keys::release")
     }
 }

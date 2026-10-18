@@ -1,9 +1,6 @@
 //! `ilium plugin ...` forwarding and the plugin start-mode switches (reference-cli.md).
 //! Skeleton: not wired into clap yet, so `ilium --help` and the existing CLI tests stay unchanged.
 
-// Not wired into the CLI yet; the implementation phase calls it from `main`.
-#![allow(dead_code, unused_variables)]
-
 use ilium_plugin_host::cli::CliEnv;
 use ilium_plugin_host::lifecycle::StartMode;
 
@@ -15,10 +12,10 @@ pub const NO_PLUGINS_ENV: &str = "ILIUM_NO_PLUGINS";
 /// Decides the start mode from the flags and environment values (`--no-plugins` beats
 /// `--safe-plugins`; a variable counts as set when it is non-empty and not `0`).
 pub fn parse_start_mode(
-    safe_plugins_flag: bool,
-    no_plugins_flag: bool,
-    safe_plugins_env: Option<&str>,
-    no_plugins_env: Option<&str>,
+    _safe_plugins_flag: bool,
+    _no_plugins_flag: bool,
+    _safe_plugins_env: Option<&str>,
+    _no_plugins_env: Option<&str>,
 ) -> StartMode {
     unimplemented!("cli::plugin_cmd::parse_start_mode")
 }

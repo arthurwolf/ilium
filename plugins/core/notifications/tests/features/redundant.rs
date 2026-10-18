@@ -6,6 +6,7 @@ use ilium_plugin_sdk::types::AgentActivity;
 use serde_json::json;
 
 use crate::common::*;
+use crate::feature_only::{notices, sounds, task_outcome};
 
 fn failed_outcome_on(activity: Option<AgentActivity>) -> (Vec<String>, usize) {
     let mut host = server_host();

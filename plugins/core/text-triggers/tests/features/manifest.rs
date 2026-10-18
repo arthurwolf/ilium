@@ -3,7 +3,7 @@
 
 use serde_json::{json, Value};
 
-use crate::common::{json_block_after, manifest, page_text, PLUGIN_ID};
+use crate::manual::{json_block_after, manifest, page_text, PLUGIN_ID};
 
 fn strings(value: &Value) -> Vec<String> {
     value

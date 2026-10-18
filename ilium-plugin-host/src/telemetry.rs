@@ -28,29 +28,27 @@ impl LogLine {
 
 /// The ring buffer of recent log lines.
 #[derive(Debug)]
-pub struct LogRing {
-    capacity: usize,
-}
+pub struct LogRing;
 
 impl LogRing {
     /// A ring that keeps at most `capacity` lines.
-    pub fn new(capacity: usize) -> LogRing {
-        LogRing { capacity }
+    pub fn new(_capacity: usize) -> LogRing {
+        LogRing
     }
 
     /// Adds a line, dropping the oldest at capacity.
-    pub fn push(&mut self, line: LogLine) {
+    pub fn push(&mut self, _line: LogLine) {
         unimplemented!("host::telemetry::LogRing::push")
     }
 
     /// The lines of a plugin, oldest first.
-    pub fn lines_of(&self, plugin: &str) -> Vec<LogLine> {
+    pub fn lines_of(&self, _plugin: &str) -> Vec<LogLine> {
         unimplemented!("host::telemetry::LogRing::lines_of")
     }
 }
 
 /// Cuts one WASI stderr line to the log line limit (reference-host-runtime.md HST-078).
-pub fn cut_wasi_line(line: &str) -> String {
+pub fn cut_wasi_line(_line: &str) -> String {
     unimplemented!("host::telemetry::cut_wasi_line")
 }
 
@@ -61,28 +59,26 @@ pub fn cut_wasi_line(line: &str) -> String {
 /// Counts calls that used 80 percent or more of their deadline within a five-minute window
 /// (reference-host-budgets.md HST-313).
 #[derive(Debug, Default)]
-pub struct NearMissTracker {
-    near_miss_times_ms: Vec<u64>,
-}
+pub struct NearMissTracker;
 
 impl NearMissTracker {
     /// An empty tracker.
     pub fn new() -> NearMissTracker {
-        NearMissTracker::default()
+        NearMissTracker
     }
 
     /// Records one call; returns whether it was a near miss (HST-313).
-    pub fn record_call(&mut self, now_ms: u64, deadline_ms: u64, took_ms: u64) -> bool {
+    pub fn record_call(&mut self, _now_ms: u64, _deadline_ms: u64, _took_ms: u64) -> bool {
         unimplemented!("host::telemetry::NearMissTracker::record_call")
     }
 
     /// Near misses inside the window ending at `now_ms` (HST-313).
-    pub fn count_in_window(&self, now_ms: u64) -> usize {
+    pub fn count_in_window(&self, _now_ms: u64) -> usize {
         unimplemented!("host::telemetry::NearMissTracker::count_in_window")
     }
 
     /// Whether the plugin counts as degraded at `now_ms` (HST-313).
-    pub fn is_degraded(&self, now_ms: u64) -> bool {
+    pub fn is_degraded(&self, _now_ms: u64) -> bool {
         unimplemented!("host::telemetry::NearMissTracker::is_degraded")
     }
 }
@@ -139,27 +135,27 @@ pub struct HourBucket {
 
 impl HourBucket {
     /// Calls of one class.
-    pub fn calls(&self, class: CallClass) -> u64 {
+    pub fn calls(&self, _class: CallClass) -> u64 {
         unimplemented!("host::telemetry::HourBucket::calls")
     }
 
     /// The 13-bucket duration histogram of one class.
-    pub fn duration_histogram(&self, class: CallClass) -> [u64; 13] {
+    pub fn duration_histogram(&self, _class: CallClass) -> [u64; 13] {
         unimplemented!("host::telemetry::HourBucket::duration_histogram")
     }
 
     /// Near misses of one class.
-    pub fn near_misses(&self, class: CallClass) -> u64 {
+    pub fn near_misses(&self, _class: CallClass) -> u64 {
         unimplemented!("host::telemetry::HourBucket::near_misses")
     }
 
     /// Deadline breaches of one class and kind.
-    pub fn breaches(&self, class: CallClass, kind: BreachKind) -> u64 {
+    pub fn breaches(&self, _class: CallClass, _kind: BreachKind) -> u64 {
         unimplemented!("host::telemetry::HourBucket::breaches")
     }
 
     /// Traps by code.
-    pub fn traps(&self, code: &str) -> u64 {
+    pub fn traps(&self, _code: &str) -> u64 {
         unimplemented!("host::telemetry::HourBucket::traps")
     }
 
@@ -169,12 +165,12 @@ impl HourBucket {
     }
 
     /// Events dropped by topic.
-    pub fn events_dropped(&self, topic: &str) -> u64 {
+    pub fn events_dropped(&self, _topic: &str) -> u64 {
         unimplemented!("host::telemetry::HourBucket::events_dropped")
     }
 
     /// Events coalesced by topic.
-    pub fn events_coalesced(&self, topic: &str) -> u64 {
+    pub fn events_coalesced(&self, _topic: &str) -> u64 {
         unimplemented!("host::telemetry::HourBucket::events_coalesced")
     }
 
@@ -184,7 +180,7 @@ impl HourBucket {
     }
 
     /// Rate-limited calls by import name.
-    pub fn rate_limited(&self, import: &str) -> u64 {
+    pub fn rate_limited(&self, _import: &str) -> u64 {
         unimplemented!("host::telemetry::HourBucket::rate_limited")
     }
 
@@ -199,12 +195,12 @@ impl HourBucket {
     }
 
     /// Restarts by reason.
-    pub fn restarts(&self, reason: &str) -> u64 {
+    pub fn restarts(&self, _reason: &str) -> u64 {
         unimplemented!("host::telemetry::HourBucket::restarts")
     }
 
     /// Failures by reason.
-    pub fn failures(&self, reason: &str) -> u64 {
+    pub fn failures(&self, _reason: &str) -> u64 {
         unimplemented!("host::telemetry::HourBucket::failures")
     }
 
@@ -214,7 +210,7 @@ impl HourBucket {
     }
 
     /// The render-time histogram of one view.
-    pub fn render_ms(&self, view: &str) -> [u64; 13] {
+    pub fn render_ms(&self, _view: &str) -> [u64; 13] {
         unimplemented!("host::telemetry::HourBucket::render_ms")
     }
 }
@@ -222,88 +218,92 @@ impl HourBucket {
 /// The in-memory counters of one plugin side; thread-safe, opens no socket
 /// (reference-host-telemetry.md HST-350..352).
 #[derive(Debug, Default)]
-pub struct SideTelemetry {
-    buckets: std::sync::Mutex<Vec<HourBucket>>,
-}
+pub struct SideTelemetry;
 
 impl SideTelemetry {
     /// Empty counters.
     pub fn new() -> SideTelemetry {
-        SideTelemetry::default()
+        SideTelemetry
     }
 
     /// Records one call: its duration, its deadline and the time (HST-352).
-    pub fn record_call(&self, class: CallClass, took: Duration, deadline: Duration, now_ms: u64) {
+    pub fn record_call(
+        &self,
+        _class: CallClass,
+        _took: Duration,
+        _deadline: Duration,
+        _now_ms: u64,
+    ) {
         unimplemented!("host::telemetry::SideTelemetry::record_call")
     }
 
     /// Records a deadline breach (HST-352).
-    pub fn record_breach(&self, class: CallClass, kind: BreachKind, now_ms: u64) {
+    pub fn record_breach(&self, _class: CallClass, _kind: BreachKind, _now_ms: u64) {
         unimplemented!("host::telemetry::SideTelemetry::record_breach")
     }
 
     /// Records a trap by code (HST-352).
-    pub fn record_trap(&self, code: &str, now_ms: u64) {
+    pub fn record_trap(&self, _code: &str, _now_ms: u64) {
         unimplemented!("host::telemetry::SideTelemetry::record_trap")
     }
 
     /// Records a queue-depth observation (HST-352).
-    pub fn record_queue_depth(&self, depth: u64, now_ms: u64) {
+    pub fn record_queue_depth(&self, _depth: u64, _now_ms: u64) {
         unimplemented!("host::telemetry::SideTelemetry::record_queue_depth")
     }
 
     /// Records dropped events of a topic (HST-352).
-    pub fn record_event_dropped(&self, topic: &str, count: u64, now_ms: u64) {
+    pub fn record_event_dropped(&self, _topic: &str, _count: u64, _now_ms: u64) {
         unimplemented!("host::telemetry::SideTelemetry::record_event_dropped")
     }
 
     /// Records coalesced events of a topic (HST-352).
-    pub fn record_event_coalesced(&self, topic: &str, count: u64, now_ms: u64) {
+    pub fn record_event_coalesced(&self, _topic: &str, _count: u64, _now_ms: u64) {
         unimplemented!("host::telemetry::SideTelemetry::record_event_coalesced")
     }
 
     /// Records a quota rejection (HST-352).
-    pub fn record_quota_rejection(&self, now_ms: u64) {
+    pub fn record_quota_rejection(&self, _now_ms: u64) {
         unimplemented!("host::telemetry::SideTelemetry::record_quota_rejection")
     }
 
     /// Records a rate-limited import call (HST-352).
-    pub fn record_rate_limited(&self, import: &str, now_ms: u64) {
+    pub fn record_rate_limited(&self, _import: &str, _now_ms: u64) {
         unimplemented!("host::telemetry::SideTelemetry::record_rate_limited")
     }
 
     /// Adds CPU milliseconds (HST-352).
-    pub fn record_cpu_ms(&self, cpu_ms: u64, now_ms: u64) {
+    pub fn record_cpu_ms(&self, _cpu_ms: u64, _now_ms: u64) {
         unimplemented!("host::telemetry::SideTelemetry::record_cpu_ms")
     }
 
     /// Records a memory observation; keeps the peak (HST-352).
-    pub fn record_memory(&self, bytes: u64, now_ms: u64) {
+    pub fn record_memory(&self, _bytes: u64, _now_ms: u64) {
         unimplemented!("host::telemetry::SideTelemetry::record_memory")
     }
 
     /// Records a helper round trip (HST-352).
-    pub fn record_helper_round_trip(&self, took: Duration, now_ms: u64) {
+    pub fn record_helper_round_trip(&self, _took: Duration, _now_ms: u64) {
         unimplemented!("host::telemetry::SideTelemetry::record_helper_round_trip")
     }
 
     /// Records a render of one view (HST-352).
-    pub fn record_render(&self, view: &str, took: Duration, now_ms: u64) {
+    pub fn record_render(&self, _view: &str, _took: Duration, _now_ms: u64) {
         unimplemented!("host::telemetry::SideTelemetry::record_render")
     }
 
     /// Records a restart by reason (HST-352).
-    pub fn record_restart(&self, reason: &str, now_ms: u64) {
+    pub fn record_restart(&self, _reason: &str, _now_ms: u64) {
         unimplemented!("host::telemetry::SideTelemetry::record_restart")
     }
 
     /// Records a failure by reason (HST-352).
-    pub fn record_failure(&self, reason: &str, now_ms: u64) {
+    pub fn record_failure(&self, _reason: &str, _now_ms: u64) {
         unimplemented!("host::telemetry::SideTelemetry::record_failure")
     }
 
     /// The retained hour buckets at `now_ms`, oldest first; 24 hours are kept (HST-354).
-    pub fn snapshot(&self, now_ms: u64) -> Vec<HourBucket> {
+    pub fn snapshot(&self, _now_ms: u64) -> Vec<HourBucket> {
         unimplemented!("host::telemetry::SideTelemetry::snapshot")
     }
 
@@ -313,7 +313,7 @@ impl SideTelemetry {
     }
 
     /// Ends the instance: one summary log line, or none without calls (HST-357).
-    pub fn end_instance(&self, now_ms: u64) -> Option<String> {
+    pub fn end_instance(&self, _now_ms: u64) -> Option<String> {
         unimplemented!("host::telemetry::SideTelemetry::end_instance")
     }
 }
@@ -351,29 +351,26 @@ pub struct Summary {
 
 /// All sides' telemetry of one host (reference-host-telemetry.md HST-356).
 #[derive(Debug, Default)]
-pub struct TelemetryRegistry {
-    sides:
-        std::sync::Mutex<std::collections::BTreeMap<(String, Side), std::sync::Arc<SideTelemetry>>>,
-}
+pub struct TelemetryRegistry;
 
 impl TelemetryRegistry {
     /// An empty registry.
     pub fn new() -> TelemetryRegistry {
-        TelemetryRegistry::default()
+        TelemetryRegistry
     }
 
     /// The telemetry of one side, created on first use.
-    pub fn side(&self, plugin: &str, side: Side) -> std::sync::Arc<SideTelemetry> {
+    pub fn side(&self, _plugin: &str, _side: Side) -> std::sync::Arc<SideTelemetry> {
         unimplemented!("host::telemetry::TelemetryRegistry::side")
     }
 
     /// Reads the raw counters; only the kernel, the CLI and the UI may (HST-356).
     pub fn read(
         &self,
-        reader: &Reader,
-        plugin: &str,
-        side: Side,
-        now_ms: u64,
+        _reader: &Reader,
+        _plugin: &str,
+        _side: Side,
+        _now_ms: u64,
     ) -> Result<Vec<HourBucket>, TelemetryError> {
         unimplemented!("host::telemetry::TelemetryRegistry::read")
     }
@@ -381,10 +378,10 @@ impl TelemetryRegistry {
     /// The summary `reader_plugin` may see of `target`; another plugin needs `plugins.manage` (HST-362).
     pub fn plugin_info(
         &self,
-        reader_plugin: &str,
-        target: &str,
-        has_manage: bool,
-        now_ms: u64,
+        _reader_plugin: &str,
+        _target: &str,
+        _has_manage: bool,
+        _now_ms: u64,
     ) -> Result<Summary, TelemetryError> {
         unimplemented!("host::telemetry::TelemetryRegistry::plugin_info")
     }
@@ -407,34 +404,36 @@ pub struct HostLogLine {
 
 /// Builds the host log line of a known condition id; unknown ids are refused (HST-358).
 pub fn host_line(
-    plugin: &str,
-    side: Side,
-    id: &str,
-    detail: &str,
+    _plugin: &str,
+    _side: Side,
+    _id: &str,
+    _detail: &str,
 ) -> Result<HostLogLine, TelemetryError> {
     unimplemented!("host::telemetry::host_line")
 }
 
 /// Admits at most ten lines per condition id, side and minute, then summarises (HST-358).
 #[derive(Debug, Default)]
-pub struct HostLogLimiter {
-    admitted: std::collections::BTreeMap<(Side, String), Vec<u64>>,
-    suppressed: std::collections::BTreeMap<(Side, String), u64>,
-}
+pub struct HostLogLimiter;
 
 impl HostLogLimiter {
     /// An empty limiter.
     pub fn new() -> HostLogLimiter {
-        HostLogLimiter::default()
+        HostLogLimiter
     }
 
     /// Whether a line of `id` on `side` may be written at `now_ms`.
-    pub fn admit(&mut self, side: Side, id: &str, now_ms: u64) -> bool {
+    pub fn admit(&mut self, _side: Side, _id: &str, _now_ms: u64) -> bool {
         unimplemented!("host::telemetry::HostLogLimiter::admit")
     }
 
     /// The summary of lines suppressed in the last minute, once, or `None`.
-    pub fn take_suppressed_summary(&mut self, side: Side, id: &str, now_ms: u64) -> Option<String> {
+    pub fn take_suppressed_summary(
+        &mut self,
+        _side: Side,
+        _id: &str,
+        _now_ms: u64,
+    ) -> Option<String> {
         unimplemented!("host::telemetry::HostLogLimiter::take_suppressed_summary")
     }
 }
@@ -450,31 +449,28 @@ pub struct SlowCallReport {
 
 /// Collects calls that took over half their deadline and reports once a minute (HST-359).
 #[derive(Debug, Default)]
-pub struct SlowCallReporter {
-    pending: Vec<(Side, CallClass, Duration, u64)>,
-    last_report_ms: std::collections::BTreeMap<Side, u64>,
-}
+pub struct SlowCallReporter;
 
 impl SlowCallReporter {
     /// An empty reporter.
     pub fn new() -> SlowCallReporter {
-        SlowCallReporter::default()
+        SlowCallReporter
     }
 
     /// Records one call with its duration and deadline.
     pub fn record(
         &mut self,
-        side: Side,
-        class: CallClass,
-        took: Duration,
-        deadline: Duration,
-        now_ms: u64,
+        _side: Side,
+        _class: CallClass,
+        _took: Duration,
+        _deadline: Duration,
+        _now_ms: u64,
     ) {
         unimplemented!("host::telemetry::SlowCallReporter::record")
     }
 
     /// The report due at `now_ms` for `side`, at most one per minute.
-    pub fn due_report(&mut self, side: Side, now_ms: u64) -> Option<SlowCallReport> {
+    pub fn due_report(&mut self, _side: Side, _now_ms: u64) -> Option<SlowCallReport> {
         unimplemented!("host::telemetry::SlowCallReporter::due_report")
     }
 }
@@ -527,14 +523,11 @@ impl Span {
 
 /// Records spans only when `ILIUM_PLUGIN_SPANS=1` (reference-host-telemetry.md HST-360).
 #[derive(Debug, Default)]
-pub struct SpanRecorder {
-    enabled: bool,
-    spans: Vec<Span>,
-}
+pub struct SpanRecorder;
 
 impl SpanRecorder {
     /// A recorder configured from the value of `ILIUM_PLUGIN_SPANS`.
-    pub fn from_env(value: Option<&str>) -> SpanRecorder {
+    pub fn from_env(_value: Option<&str>) -> SpanRecorder {
         unimplemented!("host::telemetry::SpanRecorder::from_env")
     }
 
@@ -544,7 +537,7 @@ impl SpanRecorder {
     }
 
     /// Records one span when enabled.
-    pub fn record(&mut self, span: Span) {
+    pub fn record(&mut self, _span: Span) {
         unimplemented!("host::telemetry::SpanRecorder::record")
     }
 
@@ -570,7 +563,7 @@ pub struct HealthInputs {
 }
 
 /// The `Why ...` lines of the health signals that fire (HST-363).
-pub fn why_lines(inputs: &HealthInputs) -> Vec<String> {
+pub fn why_lines(_inputs: &HealthInputs) -> Vec<String> {
     unimplemented!("host::telemetry::why_lines")
 }
 
@@ -588,7 +581,7 @@ pub struct Refusal {
 }
 
 /// The folder holding the plugin logs of one session of one project (DEV-650).
-pub fn plugin_log_dir(state_dir: &Path, project: &Path, session: &str) -> PathBuf {
+pub fn plugin_log_dir(_state_dir: &Path, _project: &Path, _session: &str) -> PathBuf {
     unimplemented!("host::telemetry::plugin_log_dir")
 }
 
@@ -645,11 +638,11 @@ impl LogSide {
 
 /// One formatted log line with the fixed columns (DEV-650).
 pub fn format_log_line(
-    at: &str,
-    level: LogLevel,
-    side: LogSide,
-    plugin: &str,
-    message: &str,
+    _at: &str,
+    _level: LogLevel,
+    _side: LogSide,
+    _plugin: &str,
+    _message: &str,
 ) -> String {
     unimplemented!("host::telemetry::format_log_line")
 }
@@ -661,7 +654,7 @@ pub const LOG_MESSAGE_MAX_BYTES: usize = 16_384;
 pub const LOG_ROTATE_BYTES: u64 = 4 * 1024 * 1024;
 
 /// Cuts a message to `LOG_MESSAGE_MAX_BYTES` on a character boundary (DEV-651).
-pub fn truncate_message(message: &str) -> String {
+pub fn truncate_message(_message: &str) -> String {
     unimplemented!("host::telemetry::truncate_message")
 }
 
@@ -690,88 +683,91 @@ impl LogConfig {
     }
 
     /// The configuration for a plugin of a tier (DEV-653).
-    pub fn for_tier(tier: Tier) -> LogConfig {
+    pub fn for_tier(_tier: Tier) -> LogConfig {
         unimplemented!("host::telemetry::LogConfig::for_tier")
     }
 }
 
 /// An open plugin log file (DEV-650..658).
 #[derive(Debug)]
-pub struct PluginLog {
-    path: PathBuf,
-    config: LogConfig,
-}
+pub struct PluginLog;
 
 impl PluginLog {
     /// Opens (creating) the log of `plugin` under `dir`.
-    pub fn open(dir: &Path, plugin: &str, config: LogConfig) -> Result<PluginLog, Refusal> {
+    pub fn open(_dir: &Path, _plugin: &str, _config: LogConfig) -> Result<PluginLog, Refusal> {
         unimplemented!("host::telemetry::PluginLog::open")
     }
 
     /// Writes a host line; returns whether it was written (DEV-652).
-    pub fn write_host(&mut self, at: &str, now_ms: u64, level: LogLevel, message: &str) -> bool {
+    pub fn write_host(
+        &mut self,
+        _at: &str,
+        _now_ms: u64,
+        _level: LogLevel,
+        _message: &str,
+    ) -> bool {
         unimplemented!("host::telemetry::PluginLog::write_host")
     }
 
     /// Writes a plugin line; returns whether it was written (DEV-652, DEV-655).
     pub fn write_plugin(
         &mut self,
-        at: &str,
-        now_ms: u64,
-        side: Side,
-        level: LogLevel,
-        message: &str,
+        _at: &str,
+        _now_ms: u64,
+        _side: Side,
+        _level: LogLevel,
+        _message: &str,
     ) -> bool {
         unimplemented!("host::telemetry::PluginLog::write_plugin")
     }
 
     /// Flushes rate-limit summaries due at `now_ms` (DEV-655).
-    pub fn tick(&mut self, at: &str, now_ms: u64) {
+    pub fn tick(&mut self, _at: &str, _now_ms: u64) {
         unimplemented!("host::telemetry::PluginLog::tick")
     }
 
     /// Records that the log queue overflowed and `dropped` lines were lost (DEV-656).
-    pub fn queue_full(&mut self, at: &str, now_ms: u64, dropped: u64) {
+    pub fn queue_full(&mut self, _at: &str, _now_ms: u64, _dropped: u64) {
         unimplemented!("host::telemetry::PluginLog::queue_full")
     }
 }
 
 /// The effective threshold from a flag, the settings value and the dev flag (DEV-653).
 pub fn resolve_threshold(
-    flag: Option<LogLevel>,
-    setting: Option<&str>,
-    dev_install: bool,
+    _flag: Option<LogLevel>,
+    _setting: Option<&str>,
+    _dev_install: bool,
 ) -> LogLevel {
     unimplemented!("host::telemetry::resolve_threshold")
 }
 
 /// The level and text of the restart line (DEV-659).
-pub fn restart_log(delay_s: u64, failure: u32, of: u32) -> (LogLevel, String) {
+pub fn restart_log(_delay_s: u64, _failure: u32, _of: u32) -> (LogLevel, String) {
     unimplemented!("host::telemetry::restart_log")
 }
 
 /// The level and text of the disabled-after-failures line (DEV-659).
-pub fn disabled_log(failures: u32) -> (LogLevel, String) {
+pub fn disabled_log(_failures: u32) -> (LogLevel, String) {
     unimplemented!("host::telemetry::disabled_log")
 }
 
 /// Marks the logs of an uninstalled plugin for expiry (DEV-661).
-pub fn mark_uninstalled(log_dir: &Path, plugin: &str, now_ms: u64) {
+pub fn mark_uninstalled(_log_dir: &Path, _plugin: &str, _now_ms: u64) {
     unimplemented!("host::telemetry::mark_uninstalled")
 }
 
 /// Clears the expiry mark when the plugin is installed again (DEV-661).
-pub fn mark_reinstalled(log_dir: &Path, plugin: &str) {
+pub fn mark_reinstalled(_log_dir: &Path, _plugin: &str) {
     unimplemented!("host::telemetry::mark_reinstalled")
 }
 
 /// Deletes the logs of plugins uninstalled long enough ago (DEV-661).
-pub fn purge_expired_logs(log_dir: &Path, now_ms: u64) {
+pub fn purge_expired_logs(_log_dir: &Path, _now_ms: u64) {
     unimplemented!("host::telemetry::purge_expired_logs")
 }
 
 /// A time as the local-time column of a log line (DEV-650).
-pub fn format_local_time(time: SystemTime) -> String {
+pub fn format_local_time(_time: SystemTime) -> String {
     unimplemented!("host::telemetry::format_local_time")
 }
 
@@ -826,16 +822,12 @@ pub struct TraceRecord {
 
 /// A ring of the newest `TRACE_RING_CAPACITY` records of the current instance (DEV-670, DEV-671).
 #[derive(Debug, Default)]
-pub struct TraceRing {
-    records: std::collections::VecDeque<TraceRecord>,
-    instance: u64,
-    next_seq: u64,
-}
+pub struct TraceRing;
 
 impl TraceRing {
     /// An empty ring.
     pub fn new() -> TraceRing {
-        TraceRing::default()
+        TraceRing
     }
 
     /// Starts a new instance, clearing the ring; returns its number.
@@ -844,7 +836,7 @@ impl TraceRing {
     }
 
     /// Pushes a record; returns its sequence number.
-    pub fn push(&mut self, time_ms: u64, kind: TraceKind, detail: serde_json::Value) -> u64 {
+    pub fn push(&mut self, _time_ms: u64, _kind: TraceKind, _detail: serde_json::Value) -> u64 {
         unimplemented!("host::telemetry::TraceRing::push")
     }
 
@@ -855,12 +847,12 @@ impl TraceRing {
 }
 
 /// Replaces every payload in a detail by its byte length, keeping the tags (DEV-672).
-pub fn redact_detail(detail: &serde_json::Value) -> serde_json::Value {
+pub fn redact_detail(_detail: &serde_json::Value) -> serde_json::Value {
     unimplemented!("host::telemetry::redact_detail")
 }
 
 /// Whether `--unredacted` is allowed: only for a dev install (DEV-672).
-pub fn check_unredacted(dev_install: bool) -> Result<(), Refusal> {
+pub fn check_unredacted(_dev_install: bool) -> Result<(), Refusal> {
     unimplemented!("host::telemetry::check_unredacted")
 }
 
@@ -882,7 +874,7 @@ pub struct InspectNode {
 }
 
 /// Renders the tree inspector text of a view into `columns` by `rows` (DEV-680, DEV-681).
-pub fn render_inspector(view: &str, tree: &InspectNode, columns: usize, rows: usize) -> String {
+pub fn render_inspector(_view: &str, _tree: &InspectNode, _columns: usize, _rows: usize) -> String {
     unimplemented!("host::telemetry::render_inspector")
 }
 
@@ -906,12 +898,12 @@ pub struct MemoryView {
 }
 
 /// Renders the memory view text of a plugin (DEV-685, DEV-686).
-pub fn render_memory_view(plugin: &str, view: &MemoryView) -> String {
+pub fn render_memory_view(_plugin: &str, _view: &MemoryView) -> String {
     unimplemented!("host::telemetry::render_memory_view")
 }
 
 /// Bytes as a binary-prefixed figure such as `9.8 MiB` (DEV-686).
-pub fn format_binary(bytes: u64) -> String {
+pub fn format_binary(_bytes: u64) -> String {
     unimplemented!("host::telemetry::format_binary")
 }
 
@@ -934,23 +926,21 @@ pub struct TimingRecord {
 
 /// A per-export call profiler (DEV-690, DEV-691).
 #[derive(Debug, Default)]
-pub struct Profiler {
-    samples: std::collections::BTreeMap<String, Vec<Duration>>,
-}
+pub struct Profiler;
 
 impl Profiler {
     /// An empty profiler.
     pub fn new() -> Profiler {
-        Profiler::default()
+        Profiler
     }
 
     /// Records one call of `export`.
-    pub fn record(&mut self, export: &str, took: Duration) {
+    pub fn record(&mut self, _export: &str, _took: Duration) {
         unimplemented!("host::telemetry::Profiler::record")
     }
 
     /// The timing summary of `export`.
-    pub fn timing(&self, export: &str) -> TimingRecord {
+    pub fn timing(&self, _export: &str) -> TimingRecord {
         unimplemented!("host::telemetry::Profiler::timing")
     }
 
@@ -1023,7 +1013,6 @@ pub struct DevReport {
 
 /// The rebuild-and-reload loop of `ilium plugin dev` (DEV-710..716).
 pub struct DevLoop {
-    backend: std::sync::Arc<dyn DevBackend>,
     running_version: Option<String>,
 }
 
@@ -1038,16 +1027,15 @@ impl std::fmt::Debug for DevLoop {
 
 impl DevLoop {
     /// A loop over a backend.
-    pub fn new(backend: std::sync::Arc<dyn DevBackend>) -> DevLoop {
+    pub fn new(_backend: std::sync::Arc<dyn DevBackend>) -> DevLoop {
         DevLoop {
-            backend,
             running_version: None,
         }
     }
 
     /// Starts the dev install of `id`; refused with `dev.id-installed` when a release install
     /// exists and `replace_installed` is false (DEV-710, DEV-715).
-    pub fn start(&mut self, id: &str, replace_installed: bool) -> Result<DevInstall, Refusal> {
+    pub fn start(&mut self, _id: &str, _replace_installed: bool) -> Result<DevInstall, Refusal> {
         unimplemented!("host::telemetry::DevLoop::start")
     }
 

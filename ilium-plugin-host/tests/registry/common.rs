@@ -5,8 +5,6 @@
 //! with Ed25519 over `ilium-registry-metadata-v1`, `0x00`, JCS(signed) (reference-registry.md,
 //! "Metadata documents"); packages follow the vector of reference-package-format.md.
 
-#![allow(dead_code)]
-
 use std::collections::{BTreeMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -270,16 +268,6 @@ impl VersionSpec {
         VersionSpec {
             version: version.to_owned(),
             channel: "stable".to_owned(),
-            yanked: None,
-            package: dummy_package(plugin_id, version),
-            extra: json!({}),
-        }
-    }
-
-    pub fn beta(plugin_id: &str, version: &str) -> VersionSpec {
-        VersionSpec {
-            version: version.to_owned(),
-            channel: "beta".to_owned(),
             yanked: None,
             package: dummy_package(plugin_id, version),
             extra: json!({}),
@@ -886,10 +874,6 @@ impl Sandbox {
 
     pub fn data_dir(&self) -> PathBuf {
         self.dir.path().join("data")
-    }
-
-    pub fn state_dir(&self) -> PathBuf {
-        self.dir.path().join("state")
     }
 
     pub fn config_dir(&self) -> PathBuf {

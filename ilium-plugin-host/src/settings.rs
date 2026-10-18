@@ -11,11 +11,11 @@ pub fn kernel_tab_ids() -> &'static [&'static str] {
 }
 
 /// Validates a settings value against a plugin's declared schema.
-pub fn validate_settings(schema_json: &str, value_json: &str) -> Result<(), Vec<Diagnostic>> {
+pub fn validate_settings(_schema_json: &str, _value_json: &str) -> Result<(), Vec<Diagnostic>> {
     unimplemented!("host::settings::validate_settings")
 }
 
 /// Whether a plugin may write a kernel settings tab (`settings.write-kernel:<tab>`).
-pub fn may_write_kernel_tab(granted: &[ilium_plugin_api::grants::Grant], tab: &str) -> bool {
+pub fn may_write_kernel_tab(_granted: &[ilium_plugin_api::grants::Grant], _tab: &str) -> bool {
     unimplemented!("host::settings::may_write_kernel_tab")
 }

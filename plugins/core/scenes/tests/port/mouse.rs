@@ -1,7 +1,5 @@
 //! Twins of the original tests of ilium-client/src/mouse.rs (ported through FakeScene / FakeSession).
 use crate::common::*;
-#[allow(unused_imports)]
-use serde_json::json;
 
 /// REQ: PORT:ilium-client/src/mouse.rs::clicking_the_top_resize_filter_switch_reveals_animation_resizes
 #[test]

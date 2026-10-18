@@ -8,7 +8,7 @@ use ilium_plugin_sdk::exports::{HookCall, HookReply, ServiceReply};
 use ilium_plugin_sdk::testing::FakeSession;
 use serde_json::Value;
 
-use crate::common::{json_block_after, page_text, workspace_root};
+use crate::doc_support::{json_block_after, page_text, workspace_root};
 
 const PLUGIN: &str = "ilium.core.kanban";
 

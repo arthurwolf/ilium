@@ -12,10 +12,10 @@ pub struct HttpApiImport;
 impl HostHttpApi for HttpApiImport {
     fn respond(
         &mut self,
-        call: u64,
-        status: u16,
-        headers: Vec<(String, String)>,
-        body: Vec<u8>,
+        _call: u64,
+        _status: u16,
+        _headers: Vec<(String, String)>,
+        _body: Vec<u8>,
     ) -> Result<(), PluginError> {
         unimplemented!("host::imports::http_api::respond")
     }

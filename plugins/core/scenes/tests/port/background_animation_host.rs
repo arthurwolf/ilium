@@ -1,7 +1,5 @@
 //! Twins of the original tests of ilium-client/src/background_animation/host.rs (ported through FakeScene / FakeSession).
 use crate::common::*;
-#[allow(unused_imports)]
-use serde_json::json;
 
 /// REQ: PORT:ilium-client/src/background_animation/host.rs::one_writer_fence_survives_release_and_scene_rebuild
 #[test]

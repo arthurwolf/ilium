@@ -3,7 +3,7 @@
 
 use ilium_plugin_sdk::testing::assert_golden;
 
-use crate::common::*;
+use crate::feature_support::*;
 
 /// Rows of the behaviour contract table: `(id, rule, value, source)`.
 fn behaviour_rows() -> Vec<[String; 4]> {

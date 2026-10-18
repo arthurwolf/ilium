@@ -9,7 +9,7 @@ use ilium_plugin_api::generated::host::help::HostHelp;
 pub struct HelpImport;
 
 impl HostHelp for HelpImport {
-    fn topic(&mut self, id: String) -> Option<String> {
+    fn topic(&mut self, _id: String) -> Option<String> {
         unimplemented!("host::imports::help::topic")
     }
 }

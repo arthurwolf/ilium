@@ -41,33 +41,32 @@ pub struct PumpReport {
 
 /// Routes submissions to the kernel and outcomes back to plugins (reference-host-architecture.md).
 pub struct Dispatcher {
-    kernel: Arc<dyn KernelFacade>,
     config: DispatchConfig,
 }
 
 impl Dispatcher {
     /// A dispatcher over a kernel facade.
-    pub fn new(kernel: Arc<dyn KernelFacade>, config: DispatchConfig) -> Dispatcher {
+    pub fn new(_kernel: Arc<dyn KernelFacade>, _config: DispatchConfig) -> Dispatcher {
         unimplemented!("host::dispatch::Dispatcher::new")
     }
 
     /// Queues one submission for an origin and returns its request reference.
-    pub fn submit(&self, origin: Origin, submission: Submission) -> RequestRef {
+    pub fn submit(&self, _origin: Origin, _submission: Submission) -> RequestRef {
         unimplemented!("host::dispatch::Dispatcher::submit")
     }
 
     /// Queues events for delivery to the plugins that subscribed.
-    pub fn deliver(&self, events: Vec<Event>) {
+    pub fn deliver(&self, _events: Vec<Event>) {
         unimplemented!("host::dispatch::Dispatcher::deliver")
     }
 
     /// The outcomes waiting for a plugin.
-    pub fn outcomes(&self, plugin: &PluginId) -> Vec<RequestResult> {
+    pub fn outcomes(&self, _plugin: &PluginId) -> Vec<RequestResult> {
         unimplemented!("host::dispatch::Dispatcher::outcomes")
     }
 
     /// Runs delivery and application rounds until quiet or `max_rounds` is reached.
-    pub fn pump(&self, max_rounds: u32) -> PumpReport {
+    pub fn pump(&self, _max_rounds: u32) -> PumpReport {
         unimplemented!("host::dispatch::Dispatcher::pump")
     }
 

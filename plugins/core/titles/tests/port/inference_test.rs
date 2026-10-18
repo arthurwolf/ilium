@@ -1,8 +1,4 @@
 //! Port twins of the tests of `inference_test.rs`.
-#![allow(unused_imports)]
-
-use ilium_plugin_sdk::types::*;
-use serde_json::json;
 
 use crate::common::*;
 

@@ -239,16 +239,16 @@ impl std::str::FromStr for LimitKey {
 pub struct Limits(pub BTreeMap<String, u64>);
 
 /// The host default of a limit (reference-errors-and-limits.md "Requestable limits").
-pub fn default_of(key: LimitKey) -> u64 {
+pub fn default_of(_key: LimitKey) -> u64 {
     unimplemented!("api::limits::default_of")
 }
 
 /// The ceiling of a limit for a tier (reference-errors-and-limits.md "Requestable limits").
-pub fn ceiling(key: LimitKey, tier: Tier) -> u64 {
+pub fn ceiling(_key: LimitKey, _tier: Tier) -> u64 {
     unimplemented!("api::limits::ceiling")
 }
 
 /// PKG-031: a request above the ceiling is clamped, never refused.
-pub fn clamp(requested: &Limits, tier: Tier) -> Result<BTreeMap<LimitKey, u64>, Diagnostic> {
+pub fn clamp(_requested: &Limits, _tier: Tier) -> Result<BTreeMap<LimitKey, u64>, Diagnostic> {
     unimplemented!("api::limits::clamp")
 }

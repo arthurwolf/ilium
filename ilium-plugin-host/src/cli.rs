@@ -63,13 +63,13 @@ impl CliEnv {
     /// An environment with the given directories, time, CI flag and fetcher; everything else
     /// defaults (no probe, builder, runner or session) (reference-cli.md).
     pub fn new(
-        data_dir: PathBuf,
-        state_dir: PathBuf,
-        config_dir: PathBuf,
-        cwd: PathBuf,
-        now: SystemTime,
-        is_ci: bool,
-        fetcher: Arc<dyn Fetcher>,
+        _data_dir: PathBuf,
+        _state_dir: PathBuf,
+        _config_dir: PathBuf,
+        _cwd: PathBuf,
+        _now: SystemTime,
+        _is_ci: bool,
+        _fetcher: Arc<dyn Fetcher>,
     ) -> CliEnv {
         unimplemented!("host::cli::CliEnv::new")
     }
@@ -139,7 +139,7 @@ pub struct CliOutput {
 }
 
 /// Runs `ilium plugin <args...>`.
-pub fn run(args: &[String], env: &CliEnv) -> CliOutput {
+pub fn run(_args: &[String], _env: &CliEnv) -> CliOutput {
     unimplemented!("host::cli::run")
 }
 
@@ -156,12 +156,12 @@ pub struct CliRunOutput {
 }
 
 /// Runs `ilium plugin <args...>` and returns the raw text output (reference-cli.md).
-pub fn run_cli(env: &CliEnv, args: &[String]) -> CliRunOutput {
+pub fn run_cli(_env: &CliEnv, _args: &[String]) -> CliRunOutput {
     unimplemented!("host::cli::run_cli")
 }
 
 /// Runs `ilium plugin check <dir>` on an unpacked package directory (reference-requirements-api-host.md API-080).
-pub fn run_check_dir(directory: &std::path::Path) -> CliOutput {
+pub fn run_check_dir(_directory: &std::path::Path) -> CliOutput {
     unimplemented!("host::cli::run_check_dir")
 }
 
@@ -319,17 +319,7 @@ pub struct InstallRecord {
 /// An in-memory session for the CLI tests: a `SessionBackend` that also records what the
 /// commands did to it (reference-plugin-cli.md DEV-004, DEV-100..160).
 #[derive(Debug, Default)]
-pub struct MemorySession {
-    state: std::sync::Mutex<MemorySessionState>,
-}
-
-/// The mutable part of a `MemorySession`.
-#[derive(Debug, Default)]
-struct MemorySessionState {
-    reachable: bool,
-    journal: Vec<String>,
-    installs: Vec<InstallRecord>,
-}
+pub struct MemorySession;
 
 impl MemorySession {
     /// A reachable, empty session.
@@ -346,12 +336,12 @@ impl MemorySession {
     /// grants as `(grant, risk, state)` triples.
     pub fn add_plugin(
         &self,
-        id: &str,
-        version: &str,
-        tier: &str,
-        state: &str,
-        dev: bool,
-        grants: &[(&str, &str, &str)],
+        _id: &str,
+        _version: &str,
+        _tier: &str,
+        _state: &str,
+        _dev: bool,
+        _grants: &[(&str, &str, &str)],
     ) {
         unimplemented!("host::cli::MemorySession::add_plugin")
     }
@@ -359,28 +349,28 @@ impl MemorySession {
     /// The same as `add_plugin`; kept for the tests that name the grants explicitly.
     pub fn add_plugin_with_grants(
         &self,
-        id: &str,
-        version: &str,
-        tier: &str,
-        state: &str,
-        dev: bool,
-        grants: &[(&str, &str, &str)],
+        _id: &str,
+        _version: &str,
+        _tier: &str,
+        _state: &str,
+        _dev: bool,
+        _grants: &[(&str, &str, &str)],
     ) {
         unimplemented!("host::cli::MemorySession::add_plugin_with_grants")
     }
 
     /// Records which key signed the installed package.
-    pub fn set_signed_by(&self, id: &str, key_id: &str) {
+    pub fn set_signed_by(&self, _id: &str, _key_id: &str) {
         unimplemented!("host::cli::MemorySession::set_signed_by")
     }
 
     /// The state word of a plugin, when installed.
-    pub fn plugin_state(&self, id: &str) -> Option<String> {
+    pub fn plugin_state(&self, _id: &str) -> Option<String> {
         unimplemented!("host::cli::MemorySession::plugin_state")
     }
 
     /// Whether an interactive client is attached (review dialogs need one).
-    pub fn set_client_attached(&self, attached: bool) {
+    pub fn set_client_attached(&self, _attached: bool) {
         unimplemented!("host::cli::MemorySession::set_client_attached")
     }
 
@@ -395,12 +385,12 @@ impl MemorySession {
     }
 
     /// The grants of a plugin in state `granted`.
-    pub fn granted(&self, id: &str) -> Vec<String> {
+    pub fn granted(&self, _id: &str) -> Vec<String> {
         unimplemented!("host::cli::MemorySession::granted")
     }
 
     /// Whether a grant is high risk.
-    pub fn is_high_risk(&self, grant: &str) -> bool {
+    pub fn is_high_risk(&self, _grant: &str) -> bool {
         unimplemented!("host::cli::MemorySession::is_high_risk")
     }
 
@@ -420,102 +410,102 @@ impl MemorySession {
     }
 
     /// Adds a plugin log line (side, level, message).
-    pub fn add_log_line(&self, id: &str, side: &str, level: &str, message: &str) {
+    pub fn add_log_line(&self, _id: &str, _side: &str, _level: &str, _message: &str) {
         unimplemented!("host::cli::MemorySession::add_log_line")
     }
 
     /// Makes the attached client decline review dialogs.
-    pub fn decline_review(&self, decline: bool) {
+    pub fn decline_review(&self, _decline: bool) {
         unimplemented!("host::cli::MemorySession::decline_review")
     }
 
     /// Makes the attached client decline trust prompts.
-    pub fn decline_trust(&self, decline: bool) {
+    pub fn decline_trust(&self, _decline: bool) {
         unimplemented!("host::cli::MemorySession::decline_trust")
     }
 
     /// The installed version of a plugin.
-    pub fn plugin_version(&self, id: &str) -> Option<String> {
+    pub fn plugin_version(&self, _id: &str) -> Option<String> {
         unimplemented!("host::cli::MemorySession::plugin_version")
     }
 
     /// Activations of a plugin.
-    pub fn activations(&self, id: &str) -> usize {
+    pub fn activations(&self, _id: &str) -> usize {
         unimplemented!("host::cli::MemorySession::activations")
     }
 
     /// The reason word of each deactivation of a plugin, in order (`upgrade`, `disabled`, ...).
-    pub fn deactivations(&self, id: &str) -> Vec<String> {
+    pub fn deactivations(&self, _id: &str) -> Vec<String> {
         unimplemented!("host::cli::MemorySession::deactivations")
     }
 
     /// Restarts of a plugin.
-    pub fn restarts(&self, id: &str) -> usize {
+    pub fn restarts(&self, _id: &str) -> usize {
         unimplemented!("host::cli::MemorySession::restarts")
     }
 
     /// Whether the package files of a plugin are still installed.
-    pub fn package_installed(&self, id: &str) -> bool {
+    pub fn package_installed(&self, _id: &str) -> bool {
         unimplemented!("host::cli::MemorySession::package_installed")
     }
 
     /// Adds a contribution of a plugin (kind, required grant).
-    pub fn add_contribution(&self, id: &str, kind: &str, grant: &str) {
+    pub fn add_contribution(&self, _id: &str, _kind: &str, _grant: &str) {
         unimplemented!("host::cli::MemorySession::add_contribution")
     }
 
     /// Contributions of a plugin still registered.
-    pub fn contribution_count(&self, id: &str) -> usize {
+    pub fn contribution_count(&self, _id: &str) -> usize {
         unimplemented!("host::cli::MemorySession::contribution_count")
     }
 
     /// Creates data, cache, storage buckets and settings values for a plugin.
-    pub fn seed_plugin_data(&self, id: &str) {
+    pub fn seed_plugin_data(&self, _id: &str) {
         unimplemented!("host::cli::MemorySession::seed_plugin_data")
     }
 
     /// Whether the data folder of a plugin exists.
-    pub fn data_folder_exists(&self, id: &str) -> bool {
+    pub fn data_folder_exists(&self, _id: &str) -> bool {
         unimplemented!("host::cli::MemorySession::data_folder_exists")
     }
 
     /// Whether the cache folder of a plugin exists.
-    pub fn cache_folder_exists(&self, id: &str) -> bool {
+    pub fn cache_folder_exists(&self, _id: &str) -> bool {
         unimplemented!("host::cli::MemorySession::cache_folder_exists")
     }
 
     /// Storage buckets of a plugin.
-    pub fn storage_bucket_count(&self, id: &str) -> usize {
+    pub fn storage_bucket_count(&self, _id: &str) -> usize {
         unimplemented!("host::cli::MemorySession::storage_bucket_count")
     }
 
     /// Settings values of a plugin.
-    pub fn settings_value_count(&self, id: &str) -> usize {
+    pub fn settings_value_count(&self, _id: &str) -> usize {
         unimplemented!("host::cli::MemorySession::settings_value_count")
     }
 
     /// Whether the log of a plugin was kept after uninstall.
-    pub fn log_kept(&self, id: &str) -> bool {
+    pub fn log_kept(&self, _id: &str) -> bool {
         unimplemented!("host::cli::MemorySession::log_kept")
     }
 
     /// Keeps log lines (side, level, message) of an uninstalled plugin.
-    pub fn keep_log(&self, id: &str, lines: &[(&str, &str, &str)]) {
+    pub fn keep_log(&self, _id: &str, _lines: &[(&str, &str, &str)]) {
         unimplemented!("host::cli::MemorySession::keep_log")
     }
 
     /// Sets the failure count of a plugin.
-    pub fn set_failure_count(&self, id: &str, count: u32) {
+    pub fn set_failure_count(&self, _id: &str, _count: u32) {
         unimplemented!("host::cli::MemorySession::set_failure_count")
     }
 
     /// The failure count of a plugin.
-    pub fn failure_count(&self, id: &str) -> u32 {
+    pub fn failure_count(&self, _id: &str) -> u32 {
         unimplemented!("host::cli::MemorySession::failure_count")
     }
 
     /// The state word of one grant of a plugin.
-    pub fn grant_state(&self, id: &str, grant: &str) -> Option<String> {
+    pub fn grant_state(&self, _id: &str, _grant: &str) -> Option<String> {
         unimplemented!("host::cli::MemorySession::grant_state")
     }
 
@@ -525,7 +515,7 @@ impl MemorySession {
     }
 
     /// The state words a plugin went through; `with_initial` includes the installed state.
-    pub fn state_history(&self, id: &str, with_initial: bool) -> Vec<String> {
+    pub fn state_history(&self, _id: &str, _with_initial: bool) -> Vec<String> {
         unimplemented!("host::cli::MemorySession::state_history")
     }
 
@@ -535,57 +525,57 @@ impl MemorySession {
     }
 
     /// Attaches `count` interactive clients.
-    pub fn attach_clients(&self, count: usize) {
+    pub fn attach_clients(&self, _count: usize) {
         unimplemented!("host::cli::MemorySession::attach_clients")
     }
 
     /// Sets the bytes the next activation of a plugin restores.
-    pub fn set_restore_bytes(&self, id: &str, bytes: u64) {
+    pub fn set_restore_bytes(&self, _id: &str, _bytes: u64) {
         unimplemented!("host::cli::MemorySession::set_restore_bytes")
     }
 
     /// The bytes restored by each activation of a plugin, in order.
-    pub fn activation_restore_bytes(&self, id: &str) -> Vec<u64> {
+    pub fn activation_restore_bytes(&self, _id: &str) -> Vec<u64> {
         unimplemented!("host::cli::MemorySession::activation_restore_bytes")
     }
 
     /// The effective log level word of a plugin.
-    pub fn log_level(&self, id: &str) -> String {
+    pub fn log_level(&self, _id: &str) -> String {
         unimplemented!("host::cli::MemorySession::log_level")
     }
 
     /// Sets the default log level word.
-    pub fn set_default_log_level(&self, level: &str) {
+    pub fn set_default_log_level(&self, _level: &str) {
         unimplemented!("host::cli::MemorySession::set_default_log_level")
     }
 }
 
 impl SessionBackend for MemorySession {
-    fn plugin(&self, id: &str) -> Option<SessionPlugin> {
+    fn plugin(&self, _id: &str) -> Option<SessionPlugin> {
         unimplemented!("host::cli::MemorySession::plugin")
     }
 
-    fn trace_records(&self, id: &str) -> Vec<TraceRecord> {
+    fn trace_records(&self, _id: &str) -> Vec<TraceRecord> {
         unimplemented!("host::cli::MemorySession::trace_records")
     }
 
-    fn last_tree(&self, id: &str, target: &str) -> Option<InspectNode> {
+    fn last_tree(&self, _id: &str, _target: &str) -> Option<InspectNode> {
         unimplemented!("host::cli::MemorySession::last_tree")
     }
 
-    fn profile_exports(&self, id: &str) -> Vec<String> {
+    fn profile_exports(&self, _id: &str) -> Vec<String> {
         unimplemented!("host::cli::MemorySession::profile_exports")
     }
 
-    fn profile_calls(&self, id: &str, duration_secs: u32) -> Vec<ProfileCall> {
+    fn profile_calls(&self, _id: &str, _duration_secs: u32) -> Vec<ProfileCall> {
         unimplemented!("host::cli::MemorySession::profile_calls")
     }
 
-    fn memory_views(&self, id: &str) -> Vec<MemoryView> {
+    fn memory_views(&self, _id: &str) -> Vec<MemoryView> {
         unimplemented!("host::cli::MemorySession::memory_views")
     }
 
-    fn counters(&self, id: &str) -> Vec<(Side, Vec<HourBucket>)> {
+    fn counters(&self, _id: &str) -> Vec<(Side, Vec<HourBucket>)> {
         unimplemented!("host::cli::MemorySession::counters")
     }
 }
@@ -595,27 +585,27 @@ impl SessionBackend for MemorySession {
 // ---------------------------------------------------------------------------------------------
 
 /// The hash of every build input of a project, as `dist/build.json` records it (DEV-024).
-pub fn project_input_hash(project: &Path) -> Result<String, String> {
+pub fn project_input_hash(_project: &Path) -> Result<String, String> {
     unimplemented!("host::cli::project_input_hash")
 }
 
 /// Whether a component carries a `name` custom section (debug builds keep it, DEV-041).
-pub fn component_has_name_section(component: &[u8]) -> bool {
+pub fn component_has_name_section(_component: &[u8]) -> bool {
     unimplemented!("host::cli::component_has_name_section")
 }
 
 /// The project-relative path of the source map of one side (DEV-041).
-pub fn source_map_path(side: Side) -> PathBuf {
+pub fn source_map_path(_side: Side) -> PathBuf {
     unimplemented!("host::cli::source_map_path")
 }
 
 /// Whether a release tag names the version of the manifest (DEV-044).
-pub fn release_tag_matches(tag: &str, version: &str) -> bool {
+pub fn release_tag_matches(_tag: &str, _version: &str) -> bool {
     unimplemented!("host::cli::release_tag_matches")
 }
 
 /// The `<sha256>  <file name>` line of a sidecar checksum file (DEV-045).
-pub fn sha256_sidecar_line(bytes: &[u8], file_name: &str) -> String {
+pub fn sha256_sidecar_line(_bytes: &[u8], _file_name: &str) -> String {
     unimplemented!("host::cli::sha256_sidecar_line")
 }
 
@@ -631,29 +621,21 @@ pub mod dev {
 
     /// Counts the rebuilds owed after debounced changes (DEV-853).
     #[derive(Debug)]
-    pub struct Debouncer {
-        window: Duration,
-        last_change_ms: Option<u64>,
-        owed: usize,
-    }
+    pub struct Debouncer;
 
     impl Debouncer {
         /// A debouncer with the given window.
-        pub fn new(window: Duration) -> Debouncer {
-            Debouncer {
-                window,
-                last_change_ms: None,
-                owed: 0,
-            }
+        pub fn new(_window: Duration) -> Debouncer {
+            Debouncer
         }
 
         /// Records a change at `at_millis`.
-        pub fn change(&mut self, at_millis: u64) {
+        pub fn change(&mut self, _at_millis: u64) {
             unimplemented!("host::cli::dev::Debouncer::change")
         }
 
         /// The rebuilds due at `now_millis`.
-        pub fn due(&mut self, now_millis: u64) -> usize {
+        pub fn due(&mut self, _now_millis: u64) -> usize {
             unimplemented!("host::cli::dev::Debouncer::due")
         }
     }

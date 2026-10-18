@@ -2,7 +2,7 @@
 //! (reference-grant-review-and-consent.md, reference-audit-log.md). Distinct from
 //! `registry::GrantStore`, which is the file-path view of one `grants.json`.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use ilium_plugin_api::grants::Grant;
 
@@ -19,29 +19,27 @@ pub enum StoreError {
 
 /// The grants store: decisions keyed by plugin, signing key and tier.
 #[derive(Debug)]
-pub struct GrantStore {
-    root: PathBuf,
-}
+pub struct GrantStore;
 
 impl GrantStore {
     /// Opens or creates the store under `root`.
-    pub fn open(root: &Path) -> Result<GrantStore, StoreError> {
+    pub fn open(_root: &Path) -> Result<GrantStore, StoreError> {
         unimplemented!("host::stores::GrantStore::open")
     }
 
     /// Records the grants of a plugin signed by `key` at `tier`.
     pub fn set(
         &mut self,
-        plugin: &str,
-        key: &str,
-        tier: &str,
-        grants: &[Grant],
+        _plugin: &str,
+        _key: &str,
+        _tier: &str,
+        _grants: &[Grant],
     ) -> Result<(), StoreError> {
         unimplemented!("host::stores::GrantStore::set")
     }
 
     /// The grants recorded for a plugin signed by `key` at `tier` (empty when the key or tier changed).
-    pub fn load(&self, plugin: &str, key: &str, tier: &str) -> Result<Vec<Grant>, StoreError> {
+    pub fn load(&self, _plugin: &str, _key: &str, _tier: &str) -> Result<Vec<Grant>, StoreError> {
         unimplemented!("host::stores::GrantStore::load")
     }
 
@@ -51,12 +49,12 @@ impl GrantStore {
     }
 
     /// Revokes one grant of a plugin.
-    pub fn revoke(&mut self, plugin: &str, grant: &str) -> Result<(), StoreError> {
+    pub fn revoke(&mut self, _plugin: &str, _grant: &str) -> Result<(), StoreError> {
         unimplemented!("host::stores::GrantStore::revoke")
     }
 
     /// Forgets every decision of a plugin.
-    pub fn forget(&mut self, plugin: &str) -> Result<(), StoreError> {
+    pub fn forget(&mut self, _plugin: &str) -> Result<(), StoreError> {
         unimplemented!("host::stores::GrantStore::forget")
     }
 }
@@ -72,51 +70,52 @@ pub struct ConsentDecision {
 
 /// The consent store: remembered per-plugin consent answers.
 #[derive(Debug)]
-pub struct ConsentStore {
-    root: PathBuf,
-}
+pub struct ConsentStore;
 
 impl ConsentStore {
     /// Opens or creates the store under `root`.
-    pub fn open(root: &Path) -> Result<ConsentStore, StoreError> {
+    pub fn open(_root: &Path) -> Result<ConsentStore, StoreError> {
         unimplemented!("host::stores::ConsentStore::open")
     }
 
     /// Records one answer.
-    pub fn record(&mut self, plugin: &str, grant: &str, allowed: bool) -> Result<(), StoreError> {
+    pub fn record(
+        &mut self,
+        _plugin: &str,
+        _grant: &str,
+        _allowed: bool,
+    ) -> Result<(), StoreError> {
         unimplemented!("host::stores::ConsentStore::record")
     }
 
     /// Forgets every answer of a plugin.
-    pub fn forget(&mut self, plugin: &str) -> Result<(), StoreError> {
+    pub fn forget(&mut self, _plugin: &str) -> Result<(), StoreError> {
         unimplemented!("host::stores::ConsentStore::forget")
     }
 
     /// The remembered answers of a plugin.
-    pub fn decisions(&self, plugin: &str) -> Vec<ConsentDecision> {
+    pub fn decisions(&self, _plugin: &str) -> Vec<ConsentDecision> {
         unimplemented!("host::stores::ConsentStore::decisions")
     }
 }
 
 /// The trust store: publisher keys and their state.
 #[derive(Debug)]
-pub struct TrustStore {
-    root: PathBuf,
-}
+pub struct TrustStore;
 
 impl TrustStore {
     /// Opens or creates the store under `root`.
-    pub fn open(root: &Path) -> Result<TrustStore, StoreError> {
+    pub fn open(_root: &Path) -> Result<TrustStore, StoreError> {
         unimplemented!("host::stores::TrustStore::open")
     }
 
     /// Records that the user declined a key.
-    pub fn decline(&mut self, key: &str) -> Result<(), StoreError> {
+    pub fn decline(&mut self, _key: &str) -> Result<(), StoreError> {
         unimplemented!("host::stores::TrustStore::decline")
     }
 
     /// The state of a key (`trusted`, `declined`, `unknown`).
-    pub fn state(&self, key: &str) -> String {
+    pub fn state(&self, _key: &str) -> String {
         unimplemented!("host::stores::TrustStore::state")
     }
 }
@@ -134,13 +133,11 @@ pub struct AuditEntry {
 
 /// The audit log as a readable store.
 #[derive(Debug)]
-pub struct AuditLog {
-    root: PathBuf,
-}
+pub struct AuditLog;
 
 impl AuditLog {
     /// Opens the audit log under `root`.
-    pub fn open(root: &Path) -> Result<AuditLog, StoreError> {
+    pub fn open(_root: &Path) -> Result<AuditLog, StoreError> {
         unimplemented!("host::stores::AuditLog::open")
     }
 

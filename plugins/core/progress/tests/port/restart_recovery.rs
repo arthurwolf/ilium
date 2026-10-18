@@ -1,5 +1,6 @@
 //! Restart recovery (original ilium-server/tests/progress_restart_recovery.rs).
 
+use ilium_plugin_sdk::testing::FakeHost;
 use ilium_plugin_sdk::types::DeactivationReason;
 
 use crate::common::*;
@@ -33,4 +34,11 @@ fn port_059_a_monitor_survives_a_restart_and_keeps_observing() {
     assert_eq!(record["monitor_count"], 1);
     assert_eq!(record["monitors"][0]["monitor_health"]["state"], "healthy");
     assert_eq!(record["monitors"][0]["report"]["percent"], 40.0);
+}
+
+/// All probe outputs for a command, used with [`feed`].
+pub fn feed(host: &mut FakeHost, command: &str, outputs: &[String]) {
+    for output in outputs {
+        expect_probe(host, command, output);
+    }
 }

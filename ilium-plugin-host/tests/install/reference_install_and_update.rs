@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use ilium_plugin_api::generated::types::PluginId;
 use ilium_plugin_api::manifest::CheckMode;
-use ilium_plugin_api::{Platform, Tier};
+use ilium_plugin_api::Platform;
 use ilium_plugin_host::autoupdate::{
     decide, later_hides_for, schedule, should_check_network, AutoAction, AutoUpdateConfig,
     AutoUpdateMode, NoticeAction, UpdateCandidate,
@@ -2726,9 +2726,4 @@ fn pkg_305_without_a_policy_the_user_setting_stands() {
 fn doc_pkg_305_page_calls_auto_update_a_policy_item() {
     let page = manual_page("reference-install-and-update.md");
     assert!(page.contains("Auto-update is a policy item"));
-}
-
-#[allow(dead_code)]
-fn unused_tier_marker() -> Tier {
-    Tier::T3
 }

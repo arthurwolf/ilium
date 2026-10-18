@@ -1,6 +1,7 @@
 //! Shared helpers: hosts for both sides, file access on the fake file system, the service calls, block text.
 
 pub use crate::host_ext::*;
+pub use crate::host_ext_features::*;
 use std::path::PathBuf;
 
 use ilium_plugin_core_agent_setup::AgentSetupServer;

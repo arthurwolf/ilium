@@ -5,7 +5,7 @@ use ilium_plugin_sdk::exports::{ServiceCall, ServiceReply};
 use ilium_plugin_sdk::types::PluginId;
 use serde_json::{json, Value};
 
-use crate::common::*;
+use crate::support::*;
 
 fn points_page() -> String {
     page("reference-core-extension-points")

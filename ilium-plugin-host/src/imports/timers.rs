@@ -13,21 +13,21 @@ pub struct TimersImport;
 impl HostTimers for TimersImport {
     fn set(
         &mut self,
-        after_millis: u32,
-        repeat_millis: Option<u32>,
+        _after_millis: u32,
+        _repeat_millis: Option<u32>,
     ) -> Result<TimerId, PluginError> {
         unimplemented!("host::imports::timers::set")
     }
 
-    fn cancel(&mut self, timer: TimerId) {
+    fn cancel(&mut self, _timer: TimerId) {
         unimplemented!("host::imports::timers::cancel")
     }
 
-    fn at(&mut self, epoch: EpochMs, name: String) -> Result<TimerId, PluginError> {
+    fn at(&mut self, _epoch: EpochMs, _name: String) -> Result<TimerId, PluginError> {
         unimplemented!("host::imports::timers::at")
     }
 
-    fn cancel_durable(&mut self, name: String) {
+    fn cancel_durable(&mut self, _name: String) {
         unimplemented!("host::imports::timers::cancel_durable")
     }
 }

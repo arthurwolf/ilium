@@ -12,10 +12,6 @@
 //! Manual: reference-wit.md, reference-abi-evolution.md, reference-errors-and-limits.md,
 //! reference-manifest.md, reference-manifest-schema.md, reference-runtime-model.md.
 
-// The skeleton functions name their parameters for the implementation that replaces the
-// `unimplemented!` bodies; until then the parameters are unused by design (test plan 1.3).
-#![allow(unused_variables)]
-
 pub mod abi;
 pub mod codes;
 pub mod compat;

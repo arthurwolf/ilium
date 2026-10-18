@@ -6,6 +6,7 @@ use ilium_plugin_sdk::types::{
 };
 
 use crate::common::*;
+use crate::feature_support::*;
 
 fn grants() -> Vec<String> {
     manifest()["capabilities"]["server"]

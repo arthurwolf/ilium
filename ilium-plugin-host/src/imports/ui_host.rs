@@ -13,49 +13,49 @@ use ilium_plugin_api::generated::types::ui::{
 pub struct UiHostImport;
 
 impl HostUiHost for UiHostImport {
-    fn invalidate(&mut self, view: ViewTarget) {
+    fn invalidate(&mut self, _view: ViewTarget) {
         unimplemented!("host::imports::ui_host::invalidate")
     }
 
-    fn open_panel(&mut self, panel: String) -> Result<(), PluginError> {
+    fn open_panel(&mut self, _panel: String) -> Result<(), PluginError> {
         unimplemented!("host::imports::ui_host::open_panel")
     }
 
-    fn close_panel(&mut self, panel: String) {
+    fn close_panel(&mut self, _panel: String) {
         unimplemented!("host::imports::ui_host::close_panel")
     }
 
-    fn open_popup(&mut self, popup: String, anchor: PopupAnchor) -> Result<(), PluginError> {
+    fn open_popup(&mut self, _popup: String, _anchor: PopupAnchor) -> Result<(), PluginError> {
         unimplemented!("host::imports::ui_host::open_popup")
     }
 
     fn open_popup_with(
         &mut self,
-        popup: String,
-        anchor: PopupAnchor,
-        options: PopupOptions,
+        _popup: String,
+        _anchor: PopupAnchor,
+        _options: PopupOptions,
     ) -> Result<(), PluginError> {
         unimplemented!("host::imports::ui_host::open_popup_with")
     }
 
-    fn close_popup(&mut self, popup: String) {
+    fn close_popup(&mut self, _popup: String) {
         unimplemented!("host::imports::ui_host::close_popup")
     }
 
-    fn widget_state(&mut self, view: ViewTarget, key: String) -> Option<WidgetState> {
+    fn widget_state(&mut self, _view: ViewTarget, _key: String) -> Option<WidgetState> {
         unimplemented!("host::imports::ui_host::widget_state")
     }
 
     fn set_widget_state(
         &mut self,
-        view: ViewTarget,
-        key: String,
-        state: WidgetState,
+        _view: ViewTarget,
+        _key: String,
+        _state: WidgetState,
     ) -> Result<(), PluginError> {
         unimplemented!("host::imports::ui_host::set_widget_state")
     }
 
-    fn display_width(&mut self, text: String) -> u16 {
+    fn display_width(&mut self, _text: String) -> u16 {
         unimplemented!("host::imports::ui_host::display_width")
     }
 
@@ -69,11 +69,11 @@ impl HostUiHost for UiHostImport {
 
     fn write_surface(
         &mut self,
-        view: ViewTarget,
-        key: String,
-        first_row: u32,
-        format: PixelFormat,
-        data: Vec<u8>,
+        _view: ViewTarget,
+        _key: String,
+        _first_row: u32,
+        _format: PixelFormat,
+        _data: Vec<u8>,
     ) -> Result<(), PluginError> {
         unimplemented!("host::imports::ui_host::write_surface")
     }

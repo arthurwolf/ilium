@@ -5,6 +5,7 @@ use ilium_plugin_sdk::types::{AgentActivity, Delivery, ErrorCode, Event, NodeId}
 use proptest::prelude::*;
 
 use crate::common::*;
+use crate::feature_support::*;
 
 fn pane_session() -> (FakeSession, NodeId) {
     let mut session = session();

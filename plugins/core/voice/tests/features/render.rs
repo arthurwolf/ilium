@@ -7,8 +7,16 @@ use ilium_plugin_sdk::types::{AudioFramesEvent, Event, ViewTarget};
 use proptest::prelude::*;
 
 use crate::common::{
-    add_pane, enabled_client, f8_grab, golden, hear, invoked_commands, key_pressed, CONFIRM_POPUP,
+    add_pane, enabled_client, f8_grab, hear, invoked_commands, key_pressed, CONFIRM_POPUP,
 };
+
+/// Path of a golden file of this suite.
+fn golden(name: &str) -> String {
+    format!(
+        "{}/tests/features/golden/{name}",
+        env!("CARGO_MANIFEST_DIR")
+    )
+}
 
 const STRIP_ROWS: u16 = 5;
 const CONFIRM_ROWS: u16 = 6;

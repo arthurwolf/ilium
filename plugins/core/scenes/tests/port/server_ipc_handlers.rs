@@ -1,7 +1,5 @@
 //! Twins of the original tests of ilium-server/src/ipc/handlers.rs (ported through FakeScene / FakeSession).
 use crate::common::*;
-#[allow(unused_imports)]
-use serde_json::json;
 
 /// REQ: PORT:ilium-server/src/ipc/handlers.rs::durability_barrier_writes_even_after_background_writer_claims_dirty_flag
 #[test]

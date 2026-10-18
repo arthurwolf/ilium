@@ -13,31 +13,31 @@ use ilium_plugin_api::generated::types::tree::AgentActivity;
 pub struct BasicImport;
 
 impl HostBasic for BasicImport {
-    fn set_title(&mut self, pane: NodeId, title: String) -> Result<(), PluginError> {
+    fn set_title(&mut self, _pane: NodeId, _title: String) -> Result<(), PluginError> {
         unimplemented!("host::imports::basic::set_title")
     }
 
-    fn set_status(&mut self, pane: NodeId, status: StyledText) -> Result<(), PluginError> {
+    fn set_status(&mut self, _pane: NodeId, _status: StyledText) -> Result<(), PluginError> {
         unimplemented!("host::imports::basic::set_status")
     }
 
-    fn request_focus(&mut self, pane: NodeId) -> Result<(), PluginError> {
+    fn request_focus(&mut self, _pane: NodeId) -> Result<(), PluginError> {
         unimplemented!("host::imports::basic::request_focus")
     }
 
-    fn size(&mut self, pane: NodeId) -> Option<(u16, u16)> {
+    fn size(&mut self, _pane: NodeId) -> Option<(u16, u16)> {
         unimplemented!("host::imports::basic::size")
     }
 
     fn report_activity(
         &mut self,
-        pane: NodeId,
-        activity: AgentActivity,
+        _pane: NodeId,
+        _activity: AgentActivity,
     ) -> Result<(), PluginError> {
         unimplemented!("host::imports::basic::report_activity")
     }
 
-    fn set_dirty(&mut self, pane: NodeId, dirty: bool) -> Result<(), PluginError> {
+    fn set_dirty(&mut self, _pane: NodeId, _dirty: bool) -> Result<(), PluginError> {
         unimplemented!("host::imports::basic::set_dirty")
     }
 }

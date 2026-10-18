@@ -7,8 +7,9 @@
 mod common;
 mod doc_page;
 mod extension_points;
-#[path = "../host_ext.rs"]
 mod host_ext;
+#[path = "../support/host_ext_shared.rs"]
+mod host_ext_shared;
 mod kernel_tabs;
 mod manifest;
 mod optimizer;

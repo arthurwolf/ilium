@@ -31,12 +31,12 @@ pub struct AutoUpdateConfig {
 
 impl AutoUpdateConfig {
     /// Parses the config TOML; the interval must lie in 1..=168 (PKG-300, 301).
-    pub fn from_toml(text: &str) -> Result<AutoUpdateConfig, Diagnostic> {
+    pub fn from_toml(_text: &str) -> Result<AutoUpdateConfig, Diagnostic> {
         unimplemented!("host::autoupdate::AutoUpdateConfig::from_toml")
     }
 
     /// Applies the system policy mode when set (PKG-305).
-    pub fn with_policy(self, policy_mode: Option<AutoUpdateMode>) -> AutoUpdateConfig {
+    pub fn with_policy(self, _policy_mode: Option<AutoUpdateMode>) -> AutoUpdateConfig {
         unimplemented!("host::autoupdate::AutoUpdateConfig::with_policy")
     }
 }
@@ -53,12 +53,12 @@ pub struct Schedule {
 }
 
 /// The check schedule of a config (PKG-301).
-pub fn schedule(config: &AutoUpdateConfig) -> Schedule {
+pub fn schedule(_config: &AutoUpdateConfig) -> Schedule {
     unimplemented!("host::autoupdate::schedule")
 }
 
 /// Whether a check may use the network (PKG-300, 302).
-pub fn should_check_network(config: &AutoUpdateConfig) -> bool {
+pub fn should_check_network(_config: &AutoUpdateConfig) -> bool {
     unimplemented!("host::autoupdate::should_check_network")
 }
 
@@ -121,7 +121,7 @@ pub enum AutoAction {
 }
 
 /// Decides between a silent install and a notice (PKG-303, 304).
-pub fn decide(config: &AutoUpdateConfig, candidate: &UpdateCandidate) -> AutoAction {
+pub fn decide(_config: &AutoUpdateConfig, _candidate: &UpdateCandidate) -> AutoAction {
     unimplemented!("host::autoupdate::decide")
 }
 

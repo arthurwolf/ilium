@@ -1,9 +1,7 @@
 //! Twins of the tests of ilium-client/src/animation_settings_ui.rs.
 
 use crate::common::*;
-#[allow(unused_imports)]
-use ilium_plugin_sdk::types::{ErrorCode, ViewTarget};
-#[allow(unused_imports)]
+use ilium_plugin_sdk::types::ViewTarget;
 use serde_json::json;
 
 /// REQ: PORT:ilium-client/src/animation_settings_ui.rs::a_color_scene_preview_paints_colored_braille_cells

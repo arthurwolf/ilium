@@ -1,12 +1,8 @@
 //! Shared helpers of the host-runtime lane: guests, harness shortcuts, clock steps, manual-page
 //! readers. Everything uses only the public surface named in API_GAPS.md or the skeleton.
 
-#![allow(dead_code)]
-
 use std::borrow::Cow;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
 use std::time::Duration;
 
 use ilium_plugin_api::generated::host::plugins::InstanceState;
@@ -54,16 +50,6 @@ impl NativeGuest for QuietGuest {
     }
 }
 
-/// A guest that counts its `on-events` calls.
-pub struct CountGuest(pub Arc<AtomicUsize>);
-
-impl NativeGuest for CountGuest {
-    fn on_events(&mut self, _batch: Vec<Event>) -> Result<Vec<Submission>, Trap> {
-        self.0.fetch_add(1, Ordering::SeqCst);
-        Ok(Vec::new())
-    }
-}
-
 /// A guest that returns `count` play-sound submissions on every call.
 pub struct BatchGuest(pub usize);
 
@@ -87,15 +73,6 @@ pub fn sound_submissions(count: usize) -> Vec<Submission> {
 /// A T3 server plugin with the given in-process guest.
 pub fn host_with(guest: impl NativeGuest + 'static) -> HarnessHandle {
     HostHarness::new()
-        .with_native_guest(Box::new(guest))
-        .build()
-        .expect("the harness builds a host for a native guest")
-}
-
-/// Same with a chosen tier.
-pub fn host_with_tier(tier: Tier, guest: impl NativeGuest + 'static) -> HarnessHandle {
-    HostHarness::new()
-        .tier(tier)
         .with_native_guest(Box::new(guest))
         .build()
         .expect("the harness builds a host for a native guest")

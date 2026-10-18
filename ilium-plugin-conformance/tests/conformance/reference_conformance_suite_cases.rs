@@ -952,7 +952,6 @@ fn conf_store_01_a_stored_value_survives_closing_and_reopening() {
     let dir = tempfile::tempdir().expect("tempdir");
     let mut storage = open_storage(dir.path());
     storage.put("state", "k", b"v".to_vec()).expect("put");
-    drop(storage);
     let storage = open_storage(dir.path());
     assert_eq!(storage.get("state", "k").expect("get"), Some(b"v".to_vec()));
 }
@@ -961,7 +960,7 @@ fn conf_store_01_a_stored_value_survives_closing_and_reopening() {
 #[test]
 fn conf_store_01_a_missing_key_reads_none_after_a_reopen() {
     let dir = tempfile::tempdir().expect("tempdir");
-    drop(open_storage(dir.path()));
+    let _ = open_storage(dir.path());
     let storage = open_storage(dir.path());
     assert_eq!(storage.get("state", "never").expect("get"), None);
 }

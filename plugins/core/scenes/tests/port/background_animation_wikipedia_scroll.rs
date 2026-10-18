@@ -1,7 +1,5 @@
 //! Twins of the original tests of ilium-client/src/background_animation/wikipedia/scroll.rs (ported through FakeScene / FakeSession).
 use crate::common::*;
-#[allow(unused_imports)]
-use serde_json::json;
 
 /// REQ: PORT:ilium-client/src/background_animation/wikipedia/scroll.rs::a_reflowed_longer_page_receives_a_full_new_bottom_dwell
 #[test]
