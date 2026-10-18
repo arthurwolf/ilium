@@ -31,7 +31,7 @@ Detection combines two independent signals.
 Further rules:
 
 - One idle sample straight after an active turn is provisional. Ilium keeps the active state, schedules a quick recheck, and marks the turn as finished (unread) only after a second consecutive idle sample from the same process.
-- For Claude Code, the latest recognised completed-turn summary is a boundary: earlier working and background-wait lines belong to the previous turn.
+- For Claude Code, the latest recognised completed-turn summary is a boundary: earlier working and background-wait lines belong to the previous turn. Live activity requires the provider’s spinner, activity label and elapsed-time row; configurable footer text below the composer does not count as activity.
 - Goal state is read from the provider's own status row and is independent of current activity.
 - Unread completion clears when you open the pane, submit new terminal input, or the agent starts working again. Opening the pane clears the bell for every attached client.
 - Ilium can answer known one-time interstitial dialogs for you. Currently this is Claude Code's "resume full session" prompt, answered with one keystroke per agent process. It is on by default (`auto_answer_interstitial_prompts` under `[detection]`).
@@ -46,6 +46,12 @@ Detection is adaptive rather than fixed.
 | Idle, finished, or plain shell | 45 seconds | `idle_poll_seconds` |
 
 Both values are whole seconds, are applied to a running server within moments of saving, and are clamped to a minimum of 500 ms (a value of `0` means 500 ms). They are detection checks only. They do not change how fast an agent works and are unrelated to progress-monitor polling.
+
+### When an activity check is stale
+
+A yellow caution replaces the activity spinner or bell when Ilium has not successfully checked that agent state, or when the last check is older than three check intervals (at least 30 seconds). Hover the activity slot to see the check age and freshness limit. The last known activity, unread completion and goal remain recorded; a stale check does not mean the agent has finished. A successful check clears the warning. Reopening or reconnecting does not make old evidence fresh.
+
+Background checks include panes you have not opened. A busy terminal parser or oversized screen delays only that pane’s observation; its retained display frame is not treated as a new check.
 
 ### Custom agent signatures
 

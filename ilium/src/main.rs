@@ -2593,9 +2593,11 @@ mod tests {
                 message: String::new(),
                 details: String::new(),
                 error: None,
+                eta_seconds: None,
             },
             monitor_health,
             last_observed_unix_millis: 0,
+            timing: Default::default(),
             attention: Default::default(),
         };
         let failed = ilium_core::ProgressMonitorHealth::Failed {

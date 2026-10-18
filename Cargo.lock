@@ -3048,6 +3048,7 @@ dependencies = [
 name = "ilium-kilo-gateway"
 version = "0.1.1"
 dependencies = [
+ "directories",
  "ilium-http",
  "ilium-logging",
  "rand 0.10.2",

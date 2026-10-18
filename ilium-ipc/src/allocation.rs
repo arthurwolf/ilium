@@ -109,6 +109,8 @@ impl ServerEvent {
 impl HeapBytes for PaneDetectionEvidence {
     fn heap_bytes(&self) -> usize {
         let PaneDetectionEvidence {
+            observed_at_unix_millis: _,
+            stale_after_millis: _,
             applied_status,
             identity,
             activity,

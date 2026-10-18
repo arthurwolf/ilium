@@ -190,7 +190,7 @@ Inside tmux, double the prefix to pass it through. Remapping only changes which 
 | Smart Copy light | On / Off | On |
 | Smart Copy light key | Ctrl, Alt, Shift | Ctrl |
 
-A larger scrollback budget does not resurrect output that has already scrolled away and does not grow existing views. With Smart Copy light on, hold the chosen key over a terminal, click regions to select them, and release the key to copy. See [Smart Copy](smart-copy.md).
+A larger scrollback budget does not resurrect output that has already scrolled away and does not grow existing views. Terminal history also yields to the per-pane memory limit: Ilium discards the oldest retained output and scrollback while preserving the live screen and terminal state. With Smart Copy light on, hold the chosen key over a terminal, click regions to select them, and release the key to copy. See [Smart Copy](smart-copy.md).
 
 ### Editor
 

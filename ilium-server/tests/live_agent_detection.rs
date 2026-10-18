@@ -2086,3 +2086,179 @@ async fn claude_resume_full_session_prompt_is_auto_answered() {
         .expect("stop the auto-resume-prompt session");
     let _ = tokio::time::timeout(Duration::from_secs(5), &mut server.server_task).await;
 }
+
+/// Real process identity, live PTY parsing, background scheduling, unchanged
+/// classification refresh and attach replay must all agree on this idle screen.
+#[tokio::test]
+async fn unopened_claude_with_truncated_custom_footer_stays_idle_and_refreshes_observations() {
+    let fake_bin_dir = tempfile::tempdir().expect("isolated Claude fixture directory");
+    let claude = install(
+        fake_bin_dir.path(),
+        "claude",
+        &FixtureBehavior::StaticScreen {
+            text: include_str!(
+                "../../ilium-detect/tests/fixtures/claude_idle_truncated_custom_footer.txt"
+            )
+            .to_string(),
+        },
+    );
+    let session = "background-claude-footer-freshness";
+    let mut server = TestServer::start_with_detection_config(
+        session,
+        DetectionConfig {
+            working_poll_interval: Duration::from_millis(100),
+            idle_poll_interval: Duration::from_millis(100),
+            auto_answer_interstitial_prompts: true,
+        },
+    )
+    .await;
+    let mut client = server.connect().await;
+    write_frame(
+        &mut client,
+        &ClientRequest::Attach {
+            session: session.to_string(),
+        },
+    )
+    .await
+    .unwrap();
+    read_initial_state(&mut client, Duration::from_secs(5)).await;
+    write_frame(
+        &mut client,
+        &ClientRequest::NewPane {
+            request_id: 0,
+            parent_group: ROOT_ID,
+            kind: NewPaneKind::Command(claude.path.to_string_lossy().to_string()),
+            working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
+        },
+    )
+    .await
+    .unwrap();
+    let ServerEvent::TreeSnapshot(tree) =
+        expect_event(&mut client, Duration::from_secs(5), |event| {
+            matches!(event, ServerEvent::TreeSnapshot(_))
+        })
+        .await
+    else {
+        unreachable!("tree snapshot predicate");
+    };
+    let pane_id = first_launch_project_pane(&tree);
+    // Deliberately no SetFocusedPane or SubscribePane: this agent is never opened.
+    // A static fixture emits only once, so later evidence necessarily covers an
+    // unchanged screen and exercises the classifier cache's observation refresh.
+    let last_observed = tokio::time::timeout(WAIT_TIMEOUT, async {
+        let mut previous = None;
+        let mut successful_checks = 0;
+        loop {
+            let event: ServerEvent = read_frame(&mut client)
+                .await
+                .expect("live background detection event");
+            let evidence = match event {
+                ServerEvent::PaneDetectedStateChanged {
+                    pane_id: changed,
+                    status,
+                    evidence,
+                } if changed == pane_id => {
+                    assert_eq!(status, evidence.applied_status);
+                    Some(evidence)
+                }
+                ServerEvent::PaneDetectionEvidenceChanged {
+                    pane_id: changed,
+                    evidence,
+                } if changed == pane_id => Some(evidence),
+                ServerEvent::PaneStatusChanged {
+                    pane_id: changed,
+                    status: PaneStatus::Agent(agent),
+                } if changed == pane_id => {
+                    assert_eq!(
+                        agent.turn,
+                        ilium_core::AgentTurn::Idle,
+                        "unopened idle Claude must never recur as Working"
+                    );
+                    None
+                }
+                _ => None,
+            };
+            let Some(evidence) = evidence else {
+                continue;
+            };
+            let PaneStatus::Agent(agent) = &evidence.applied_status else {
+                continue;
+            };
+            assert_eq!(agent.class, ilium_core::AgentClass::Claude);
+            assert_eq!(
+                agent.turn,
+                ilium_core::AgentTurn::Idle,
+                "truncated footer is not live activity"
+            );
+            assert!(
+                !agent.completion_unread,
+                "initial idle observation must not invent a completed turn"
+            );
+            assert_eq!(evidence.stale_after_millis, 30_000);
+            assert!(evidence.observed_at_unix_millis > 0);
+            if let Some(previous) = previous {
+                assert!(
+                    evidence.observed_at_unix_millis > previous,
+                    "unchanged background checks must refresh successful observation time"
+                );
+            }
+            previous = Some(evidence.observed_at_unix_millis);
+            successful_checks += 1;
+            if successful_checks == 4 {
+                break evidence.observed_at_unix_millis;
+            }
+        }
+    })
+    .await
+    .expect("four successful background checks without opening the agent");
+    let mut reattached = server.connect().await;
+    write_frame(
+        &mut reattached,
+        &ClientRequest::Attach {
+            session: session.to_string(),
+        },
+    )
+    .await
+    .unwrap();
+    let (_, events) = read_initial_state(&mut reattached, Duration::from_secs(5)).await;
+    let replayed = events
+        .iter()
+        .find_map(|event| match event {
+            ServerEvent::PaneStateSnapshot {
+                detection_evidence, ..
+            } => detection_evidence
+                .iter()
+                .find(|(id, _)| *id == pane_id)
+                .map(|(_, evidence)| evidence),
+            _ => None,
+        })
+        .expect("reattach includes the background agent's existing successful observation");
+    assert!(replayed.observed_at_unix_millis >= last_observed);
+    assert_eq!(replayed.stale_after_millis, 30_000);
+    assert!(
+        matches!(&replayed.applied_status, PaneStatus::Agent(agent) if agent.turn == ilium_core::AgentTurn::Idle)
+    );
+    // If another scheduled check raced attach, its evidence must also exist
+    // on the original connection. A snapshot must never mint receipt time.
+    if replayed.observed_at_unix_millis != last_observed {
+        let replayed_at = replayed.observed_at_unix_millis;
+        tokio::time::timeout(WAIT_TIMEOUT, async {
+            loop {
+                let event: ServerEvent = read_frame(&mut client).await.expect("original observation stream");
+                let evidence = match event {
+                    ServerEvent::PaneDetectionEvidenceChanged { pane_id: changed, evidence }
+                    | ServerEvent::PaneDetectedStateChanged { pane_id: changed, evidence, .. } if changed == pane_id => evidence,
+                    _ => continue,
+                };
+                if evidence.observed_at_unix_millis >= replayed_at {
+                    assert_eq!(evidence.observed_at_unix_millis, replayed_at, "attach must replay an actual successful observation, not a new receipt timestamp");
+                    break;
+                }
+            }
+        }).await.expect("attach evidence matches the original server observation stream");
+    }
+    write_frame(&mut client, &ClientRequest::KillSession)
+        .await
+        .unwrap();
+    let _ = tokio::time::timeout(Duration::from_secs(5), &mut server.server_task).await;
+}

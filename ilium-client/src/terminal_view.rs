@@ -267,8 +267,8 @@ fn history_budget_bytes(budget_mib: u16) -> usize {
         .max(1024 * 1024)
 }
 
-/// Admission shadow of private vte std OSC allocation, including retained
-/// capacity after termination. State changes only alongside exact parser bytes.
+/// Bounded observation of OSC parsing state for stream-continuity regressions.
+/// Allocation admission uses the parser's actual fixed-capacity storage.
 #[derive(Default, Clone, Copy)]
 struct OscAllocation {
     escaped: bool,
@@ -292,7 +292,7 @@ impl OscAllocation {
                     }
                     0..=6 | 8..=0x17 | 0x19 | 0x1c..=0x1f | b';' => {}
                     _ => {
-                        self.length = self.length.saturating_add(1);
+                        self.length = self.length.saturating_add(1).min(64 * 1024);
                         self.highwater = self.highwater.max(self.length);
                     }
                 }
@@ -314,6 +314,7 @@ impl OscAllocation {
         }
         self
     }
+    #[cfg(test)]
     fn retained_bytes(self) -> usize {
         self.highwater.saturating_mul(2).max(8)
     }
@@ -331,7 +332,6 @@ pub(crate) struct TerminalState {
     osc_allocation: OscAllocation,
     allocated_max_columns: u16,
     render_scrollback_rows: usize,
-    allocated_max_rows: u16,
     // `vt100::Screen` exposes the current scroll *offset*
     // (`Screen::scrollback`) but no direct "how many rows have
     // accumulated" accessor -- only `Screen::set_scrollback`'s internal
@@ -408,7 +408,6 @@ impl TerminalState {
             osc_allocation: OscAllocation::default(),
             allocated_max_columns: cols,
             render_scrollback_rows: render_scrollback_rows(cols),
-            allocated_max_rows: rows,
             scrollback_total: 0,
             historical_viewport: None,
             last_output_sequence: 0,
@@ -737,7 +736,6 @@ impl TerminalState {
     /// corrupting that frozen view.
     pub fn resize(&mut self, rows: u16, cols: u16) {
         self.allocated_max_columns = self.allocated_max_columns.max(cols);
-        self.allocated_max_rows = self.allocated_max_rows.max(rows);
         self.shrink_render_scrollback_for_width();
         self.parser.screen_mut().set_size(rows, cols);
         self.invalidate_live_render_if_visible();
@@ -750,63 +748,36 @@ impl TerminalState {
         let retained = self.retained_allocation_bytes();
         let old_size = self.parser.screen().size();
         if rows <= old_size.0 && cols <= old_size.1 {
-            // A shrinking resize does not grow either grid.
             return retained;
         }
-        let max_rows = rows.max(self.allocated_max_rows); // Shrinking does not prove capacity was freed.
-        let max_cols = cols.max(self.allocated_max_columns); // Older rows may retain wider allocations.
-        let wanted = render_scrollback_rows(max_cols);
-        let grid_bytes = |rows: u16, cols: u16, scrollback: usize| {
+        let cell_bytes = std::mem::size_of::<vt100::Cell>();
+        let live_cells = |rows: u16, columns: u16| {
             usize::from(rows)
+                .saturating_mul(usize::from(columns))
                 .saturating_mul(2)
-                .saturating_add(scrollback)
-                .saturating_mul(usize::from(cols).saturating_mul(64).saturating_add(128))
+                .saturating_mul(cell_bytes)
         };
-        if wanted >= self.render_scrollback_rows {
-            let replacement = grid_bytes(max_rows, max_cols, self.scrollback_total);
-            return retained
-                .saturating_add(replacement)
-                .saturating_add(128 * 1024);
-        }
-        let mut osc = OscAllocation::default();
-        for segment in &self.history_segments {
-            osc = osc.advance(&segment.bytes[segment.start..]);
-        }
-        let old_live = grid_bytes(
-            self.allocated_max_rows,
-            self.allocated_max_columns,
-            self.scrollback_total,
-        );
-        let other = retained
-            .saturating_sub(old_live)
-            .saturating_sub(self.osc_allocation.retained_bytes());
-        let replay =
-            grid_bytes(old_size.0, old_size.1, wanted).saturating_add(osc.retained_bytes());
-        let rebuilding = retained.saturating_add(replay);
-        let resizing = other
-            .saturating_add(replay)
-            .saturating_add(grid_bytes(max_rows, max_cols, wanted));
-        rebuilding.max(resizing).saturating_add(128 * 1024)
+        // The parser truncates obsolete rows before widening and reserves exact
+        // capacities. Only one growing row and row-vector metadata overlap.
+        retained
+            .saturating_add(
+                live_cells(rows, cols).saturating_sub(live_cells(old_size.0, old_size.1)),
+            )
+            .saturating_add(usize::from(cols).saturating_mul(cell_bytes))
+            .saturating_add(usize::from(rows).saturating_mul(256))
+            .saturating_add(128 * 1024)
     }
 
-    /// Widening a pane lowers its scrollback row cap; the parser's cap is fixed
-    /// at construction, so rebuild it from the retained raw history.
+    /// Widening lowers the retained row cap in place. Replaying a truncated
+    /// journal would lose live cursor, UTF-8 and escape-sequence state.
     fn shrink_render_scrollback_for_width(&mut self) {
         let wanted = render_scrollback_rows(self.allocated_max_columns);
         if wanted >= self.render_scrollback_rows {
             return;
         }
-        let (rows, cols) = self.parser.screen().size();
         self.render_scrollback_rows = wanted;
-        let mut rebuilt = vt100::Parser::new(rows, cols, wanted);
-        let mut rebuilt_osc = OscAllocation::default();
-        for segment in &self.history_segments {
-            let bytes = &segment.bytes[segment.start..];
-            rebuilt_osc = rebuilt_osc.advance(bytes);
-            rebuilt.process(bytes); // Keep parser state and its allocation shadow in lockstep.
-        }
-        self.parser = rebuilt;
-        self.osc_allocation = rebuilt_osc;
+        self.parser.screen_mut().set_scrollback_limit(wanted);
+        self.refresh_scrollback_total();
     }
 
     /// Runs `f` with the screen currently visible to the user, for rendering
@@ -986,26 +957,12 @@ impl TerminalState {
     /// correct pane. The authoritative live parser keeps processing output;
     /// the ordinary live view returns on the next input or wheel journey to
     /// the bottom.
-    fn history_rebuild_budget(&self, end_byte: usize) -> (usize, usize) {
-        let mut remaining = end_byte.min(self.history_retained_len);
-        let mut osc = OscAllocation::default();
-        for segment in &self.history_segments {
-            let bytes = &segment.bytes[segment.start..];
-            let take = remaining.min(bytes.len());
-            osc = osc.advance(&bytes[..take]);
-            remaining -= take;
-            if remaining == 0 {
-                break;
-            }
-        }
+    fn history_rebuild_budget(&self, _end_byte: usize) -> (usize, usize) {
         let (rows, columns) = self.parser.screen().size();
-        // Historical grids use the same widest-column charge as retained_allocation_bytes.
-        let columns = columns.max(self.allocated_max_columns);
-
         let row_bytes = usize::from(columns).saturating_mul(128).saturating_add(256);
         let fixed_bytes = self
             .retained_allocation_bytes()
-            .saturating_add(osc.retained_bytes())
+            .saturating_add(128 * 1024)
             .saturating_add(
                 usize::from(rows)
                     .saturating_mul(2)
@@ -1088,31 +1045,37 @@ impl TerminalState {
     }
 
     fn append_history(&mut self, bytes: &[u8]) {
-        if self.history_segments.len() >= 4096 {
-            let retained = self.collect_retained_history();
-            self.history_segments.clear();
-            self.history_segments.push_back(HistorySegment {
-                bytes: Arc::new(retained),
-                start: 0,
+        // Fixed-size immutable segments bound append peaks independently of the
+        // configured journal budget and avoid copying published generations.
+        const SEGMENT_BYTES: usize = 64 * 1024;
+        for chunk in bytes.chunks(SEGMENT_BYTES) {
+            let needs_segment = self.history_segments.back().is_none_or(|segment| {
+                Arc::strong_count(&segment.bytes) > 1
+                    || segment.bytes.len().saturating_add(chunk.len()) > SEGMENT_BYTES
             });
+            if needs_segment {
+                self.history_segments.push_back(HistorySegment {
+                    bytes: Arc::new(Vec::with_capacity(chunk.len())),
+                    start: 0,
+                });
+            }
+            let segment = self
+                .history_segments
+                .back_mut()
+                .expect("active history segment");
+            let active = Arc::make_mut(&mut segment.bytes);
+            if active.len().saturating_add(chunk.len()) > active.capacity() {
+                let capacity = active
+                    .capacity()
+                    .saturating_mul(2)
+                    .max(active.len().saturating_add(chunk.len()))
+                    .min(SEGMENT_BYTES);
+                active.reserve_exact(capacity.saturating_sub(active.len()));
+            }
+            active.extend_from_slice(chunk);
+            self.history_retained_len = self.history_retained_len.saturating_add(chunk.len());
+            self.trim_history_to_budget();
         }
-        let needs_fresh_segment = self
-            .history_segments
-            .back()
-            .is_some_and(|segment| Arc::strong_count(&segment.bytes) > 1);
-        if needs_fresh_segment {
-            self.history_segments.push_back(HistorySegment {
-                bytes: Arc::new(Vec::new()),
-                start: 0,
-            });
-        }
-        let active_segment = self
-            .history_segments
-            .back_mut()
-            .expect("history always owns an active segment");
-        Arc::make_mut(&mut active_segment.bytes).extend_from_slice(bytes);
-        self.history_retained_len = self.history_retained_len.saturating_add(bytes.len());
-        self.trim_history_to_budget();
     }
 
     fn collect_retained_history(&self) -> Vec<u8> {
@@ -1152,16 +1115,6 @@ impl TerminalState {
             if oldest_segment.start == oldest_segment.bytes.len() && self.history_segments.len() > 1
             {
                 self.history_segments.pop_front();
-            }
-        }
-
-        let compaction_threshold = (self.history_budget_bytes / 2).max(64 * 1024);
-        if let Some(oldest_segment) = self.history_segments.front_mut() {
-            if oldest_segment.start >= compaction_threshold
-                && Arc::strong_count(&oldest_segment.bytes) == 1
-            {
-                Arc::make_mut(&mut oldest_segment.bytes).drain(..oldest_segment.start);
-                oldest_segment.start = 0;
             }
         }
     }
@@ -1387,26 +1340,25 @@ impl TerminalState {
     pub(crate) fn input_peak_bytes(&self, bytes: &[u8]) -> usize {
         let chunk = bytes.len();
         let columns = usize::from(self.parser.screen().size().1);
+        // One final CSI byte can scroll an entire viewport, including when
+        // its introducer arrived in another chunk. Vendor commands clamp each
+        // scroll to the viewport height; repeated commands remain bounded here.
         let rows = self
             .render_scrollback_rows
-            .saturating_sub(self.scrollback_total)
-            .min(chunk);
-        let history_extra = self.history_segments.back().map_or(chunk, |segment| {
-            if Arc::strong_count(&segment.bytes) > 1 {
-                chunk.saturating_mul(2)
-            } else if segment.bytes.len().saturating_add(chunk) > segment.bytes.capacity() {
-                segment.bytes.capacity().max(chunk).saturating_mul(2)
-            } else {
-                0
-            }
-        });
+            .min(chunk.saturating_mul(usize::from(self.parser.screen().size().0)));
+        let history_extra = 64 * 1024 + chunk;
+        // A fresh shared-history segment can also grow the deque. VecDeque
+        // may retain its old buffer while allocating twice its prior capacity.
+        let segment_metadata_peak = self
+            .history_segments
+            .capacity()
+            .max(1)
+            .saturating_mul(2)
+            .saturating_mul(std::mem::size_of::<HistorySegment>());
         self.retained_allocation_bytes()
-            .saturating_add(
-                self.osc_allocation
-                    .advance(bytes)
-                    .retained_bytes()
-                    .saturating_sub(self.osc_allocation.retained_bytes()),
-            )
+            // An alternate-screen activation can be completed by one final
+            // byte after a split CSI, even with visual history disabled.
+            .saturating_add(self.parser.screen().pending_screen_allocation_bytes())
             .saturating_add(
                 self.osc8_stream
                     .len()
@@ -1421,13 +1373,15 @@ impl TerminalState {
                 // lossy UTF-8 conversion, label/URI clones and deque growth.
                 64 * 1024 * 8 + self.osc8_links.capacity() * std::mem::size_of::<(String, String)>()
             })
-            .saturating_add(rows.saturating_mul(columns).saturating_mul(64))
+            .saturating_add(
+                rows.saturating_mul(
+                    columns
+                        .saturating_mul(std::mem::size_of::<vt100::Cell>())
+                        .saturating_add(128),
+                ),
+            )
             .saturating_add(history_extra)
-            .saturating_add(if self.history_segments.len() >= 4096 {
-                self.history_retained_len
-            } else {
-                0
-            })
+            .saturating_add(segment_metadata_peak)
             .saturating_add(4096)
     }
     pub(crate) fn apply_ordered_output(
@@ -1437,7 +1391,7 @@ impl TerminalState {
         bytes: &[u8],
         track: bool,
         cursor: &mut OrderedOutputCursor,
-        mut before: impl FnMut(&Self, &[u8]) -> Result<(), String>,
+        mut before: impl FnMut(&mut Self, &[u8]) -> Result<(), String>,
     ) -> Result<Option<VisibleTextEvidence>, String> {
         if sequence <= self.last_output_sequence {
             return Ok(None);
@@ -1469,7 +1423,7 @@ impl TerminalState {
         bytes: &[u8],
         sequence: u64,
         cursor: &mut OrderedOutputCursor,
-        mut before: impl FnMut(&Self, &[u8]) -> Result<(), String>,
+        mut before: impl FnMut(&mut Self, &[u8]) -> Result<(), String>,
     ) -> Result<(), String> {
         if sequence <= self.last_output_sequence {
             return Ok(());
@@ -1487,7 +1441,11 @@ impl TerminalState {
             self.osc8_stream.clear();
             self.render_scrollback_rows =
                 render_scrollback_rows(cols.max(self.allocated_max_columns));
+            // Release the old replay generation before allocating its replacement.
+            // A tiny parser bounds replacement overlap independently of old geometry.
+            self.parser = vt100::Parser::new(1, 1, 0);
             self.parser = vt100::Parser::new(rows, cols, self.render_scrollback_rows);
+            self.allocated_max_columns = cols;
             self.osc_allocation = OscAllocation::default();
             self.scrollback_total = 0;
             cursor.replay_started = true;
@@ -1508,14 +1466,101 @@ impl TerminalState {
         self.refresh_visible_text_fingerprint();
         Ok(())
     }
+    /// Recovers an engine whose retained allocation exceeds `limit` so its
+    /// completed command can publish instead of being deferred forever (which
+    /// fenced the pane and, through the shared parser queue, the whole client).
+    /// Drops oldest raw segments first, then oldest visual scrollback rows.
+    /// Never reconstructs the live parser or copies the complete journal.
+    /// Returns true when `retained_allocation_bytes() <= limit` afterwards.
+    pub(crate) fn fit_to_allocation_limit(&mut self, limit: usize) -> bool {
+        if self.retained_allocation_bytes() <= limit {
+            return true;
+        }
+        let target = limit.saturating_sub(limit / 8);
+        while self.retained_allocation_bytes() > target {
+            if let Some(segment) = self.history_segments.pop_front() {
+                self.history_retained_len = self
+                    .history_retained_len
+                    .saturating_sub(segment.bytes.len().saturating_sub(segment.start));
+                self.history_origin = Arc::new(());
+            } else {
+                let before = self.parser.allocation_bytes();
+                // Active alternate-screen offsets cannot reveal retained primary
+                // history. Trim the primary grid even when the active count is zero.
+                self.parser
+                    .screen_mut()
+                    .trim_scrollback(self.scrollback_total / 2);
+                self.refresh_scrollback_total();
+                self.history_segments.shrink_to_fit();
+                if self.parser.allocation_bytes() < before {
+                    continue;
+                }
+                if let Some(view) = self.historical_viewport.as_mut() {
+                    let before = view.screen.allocation_bytes();
+                    // Keep exactly the chosen visible history rows; discard
+                    // offscreen history on both sides without copying cells.
+                    view.screen.retain_visible_scrollback();
+                    view.scrollback_total = Self::measure_scrollback_total(&mut view.screen);
+                    if view.screen.allocation_bytes() < before {
+                        continue;
+                    }
+                }
+                break;
+            }
+        }
+        if limit > 0
+            && self.retained_allocation_bytes() > limit
+            && self.historical_viewport.is_some()
+        {
+            // If even two visible grids cannot fit, return to the live view.
+            // Never let an optional frozen viewport fence PTY output.
+            self.historical_viewport = None;
+            self.invalidate_render();
+        }
+        self.retained_allocation_bytes() <= limit
+    }
+
+    /// Reclaim only expendable retention before reserving an operation's peak.
+    /// The live parser and detached viewport retain their semantic state.
+    pub(crate) fn prepare_input(&mut self, bytes: &[u8], limit: usize) {
+        let configured_rows = render_scrollback_rows(self.allocated_max_columns);
+        if configured_rows > self.render_scrollback_rows {
+            let previous = self.render_scrollback_rows;
+            self.render_scrollback_rows = configured_rows;
+            if self.input_peak_bytes(bytes) <= limit {
+                self.parser
+                    .screen_mut()
+                    .set_scrollback_limit(configured_rows);
+            } else {
+                self.render_scrollback_rows = previous;
+            }
+        }
+        loop {
+            let extra = self
+                .input_peak_bytes(bytes)
+                .saturating_sub(self.retained_allocation_bytes());
+            self.fit_to_allocation_limit(limit.saturating_sub(extra));
+            if self.input_peak_bytes(bytes) <= limit {
+                break;
+            }
+            if self.render_scrollback_rows == 0 {
+                if self.historical_viewport.take().is_some() {
+                    self.invalidate_render();
+                    continue;
+                }
+                break;
+            }
+            // Frozen viewports can occupy the remaining share. Bound future
+            // live-history growth too; parser/cursor/modes remain untouched.
+            self.render_scrollback_rows /= 2;
+            self.parser
+                .screen_mut()
+                .set_scrollback_limit(self.render_scrollback_rows);
+            self.refresh_scrollback_total();
+        }
+    }
+
     pub(crate) fn retained_allocation_bytes(&self) -> usize {
-        // Installed vt100 0.16.2 cells are fixed 32 bytes. Charge twice that
-        // for retained Vec growth, plus row/deque metadata and parser scratch.
-        let rows = usize::from(self.allocated_max_rows) * 2 + self.scrollback_total;
-        let historic = self.historical_viewport.as_ref().map_or(0, |view| {
-            usize::from(view.screen.size().0) * 2 + view.scrollback_total
-        });
-        let screen_rows = rows.saturating_add(historic);
         let history = self
             .history_segments
             .iter()
@@ -1527,13 +1572,12 @@ impl TerminalState {
             .map(|(label, target)| label.capacity().saturating_add(target.capacity()))
             .sum::<usize>();
         history
-            .saturating_add(self.osc_allocation.retained_bytes())
+            .saturating_add(self.parser.allocation_bytes())
             .saturating_add(
-                screen_rows
-                    .saturating_mul(usize::from(self.allocated_max_columns))
-                    .saturating_mul(64),
+                self.historical_viewport
+                    .as_ref()
+                    .map_or(0, |view| view.screen.allocation_bytes()),
             )
-            .saturating_add(screen_rows.saturating_mul(128))
             .saturating_add(
                 self.history_segments
                     .capacity()
@@ -2827,7 +2871,7 @@ mod search_origin_tests {
     }
 
     #[test]
-    fn widening_rebuild_replaces_private_osc_accounting_with_retained_journal() {
+    fn widening_preserves_private_osc_state_independently_of_retained_journal() {
         let mut state = TerminalState::with_scrollback_budget_mib(3, 80, 1);
         let mut old = b"\x1b]0;".to_vec();
         old.extend(std::iter::repeat_n(b'x', 256 * 1024));
@@ -2850,7 +2894,7 @@ mod search_origin_tests {
         assert_eq!(state.osc_allocation.escaped, expected.escaped);
         assert_eq!(state.osc_allocation.active, expected.active);
         assert_eq!(state.osc_allocation.length, expected.length);
-        assert_eq!(state.osc_allocation.highwater, expected.highwater);
+        assert_eq!(state.osc_allocation.retained_bytes(), old_scratch);
         state.feed(b"\x07visible");
         assert!(!state.osc_allocation.active);
         assert_eq!(state.with_screen(|screen| screen.contents()), "visible");

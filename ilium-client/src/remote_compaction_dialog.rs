@@ -166,7 +166,7 @@ impl RemoteCompactionDialogState {
     }
 
     pub fn fail(&mut self, message: String) {
-        self.push_log(format!("Failed: {message}"));
+        self.push_log(format!("F9 details · Failed: {message}"));
         self.phase = RemoteCompactionPhase::Failed(message);
     }
 
@@ -516,12 +516,20 @@ fn render_compact(
         }
     }
 
-    let phase_height = if state.is_failed() { 2 } else { 1 };
+    let phase_height = if state.is_failed() {
+        Paragraph::new(phase_line(state))
+            .wrap(Wrap { trim: true })
+            .line_count(remaining.width.max(1))
+            .min(usize::from(remaining.height))
+            .max(1) as u16
+    } else {
+        1
+    };
     frame.render_widget(
         Paragraph::new(phase_line(state)).wrap(Wrap { trim: true }),
         take_rows(&mut remaining, phase_height),
     );
-    if remaining.height > 0 {
+    if remaining.height > 0 && !state.is_failed() {
         let ratio = f64::from(state.progress.clamp(0.0, 1.0));
         frame.render_widget(
             Gauge::default()
@@ -623,7 +631,10 @@ pub fn render(
     banner_text: Option<&str>,
 ) {
     frame.render_widget(Clear, area);
-    let title = format!("Remote compaction · {}", state.provider.label());
+    let title = format!(
+        "Remote compaction · F9 details · {}",
+        state.provider.label()
+    );
     let border_color = if state.is_failed() {
         Color::Red
     } else {
@@ -775,7 +786,7 @@ mod tests {
         screen_text_at(state, banner, 100, 44)
     }
 
-    const PRIVACY_NOTICE: &str = "Remote compaction sends this session's transcript (your prompts, code and tool output, possibly including secrets) to Kilo Gateway / stepfun/step-5-preview-free as currently configured in the Inference tab. That is a privacy decision.";
+    const PRIVACY_NOTICE: &str = "Remote compaction sends this session's transcript (your prompts, code and tool output, possibly including secrets) to Kilo Gateway / dots-studio/dots-3-note-preview:free as currently configured in the Inference tab. That is a privacy decision.";
 
     #[test]
     fn events_update_steps_progress_tokens_and_log() {
@@ -881,8 +892,7 @@ mod tests {
             let prose = text
                 .replace('│', " ")
                 .split_whitespace()
-                .collect::<Vec<_>>()
-                .join(" ");
+                .collect::<String>();
             for expected in [
                 "Privacy decision",
                 "[x]",
@@ -891,7 +901,7 @@ mod tests {
                 "tool output",
                 "secrets",
                 "Kilo Gateway",
-                "stepfun/step-5-preview-free",
+                "dots-studio/dots-3-note-preview:free",
                 "Failed:",
                 "safely",
                 "Enter resume",
@@ -899,7 +909,7 @@ mod tests {
                 "x hide",
             ] {
                 assert!(
-                    prose.contains(expected),
+                    prose.contains(&expected.split_whitespace().collect::<String>()),
                     "{width}x{height}: missing {expected:?} in\n{text}"
                 );
             }

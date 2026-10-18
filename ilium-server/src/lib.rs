@@ -23,6 +23,7 @@ mod chatroom_router;
 pub mod config;
 mod config_refresh;
 mod detection;
+mod detection_effects;
 pub mod error;
 mod execution;
 mod foreground_observation;

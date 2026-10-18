@@ -1818,7 +1818,7 @@ fn render_plugin_request(
             mailbox.output = Some(Arc::new(snapshot));
         }
         Ok(None) => {}
-        Err(error) => mailbox.status.error = Some(error.chars().take(240).collect()),
+        Err(error) => mailbox.status.error = Some(error),
     }
 }
 

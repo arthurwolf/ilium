@@ -2395,6 +2395,7 @@ pub struct App {
     /// Set while Smart Copy light (no model call) owns [`Mode::SmartCopy`].
     pub smart_copy_light: Option<crate::smart_copy_light::SmartCopyLightState>,
     /// The "Preview" dialog shown for a second after a light selection is copied.
+    pub(crate) diagnostic_view: Option<crate::diagnostic::DiagnosticView>,
     pub smart_copy_preview: Option<crate::smart_copy_light::SmartCopyPreview>,
     pub(crate) light_copy_selection: Option<crate::smart_copy_selection::SelectionOwner>,
     pub(crate) light_copy_preview_generation: Option<u64>,
@@ -2992,6 +2993,7 @@ impl App {
             hovered_agent_toolbar_action: None,
             smart_copy_session: None,
             smart_copy_light: None,
+            diagnostic_view: None,
             smart_copy_preview: None,
             light_copy_selection: None,
             light_copy_preview_generation: None,
@@ -4751,17 +4753,49 @@ impl App {
         visible.get(index).copied()
     }
 
-    /// Hides expired result text without resizing or mutating retained data.
+    /// The clock the progress footer renders its relative times against.
+    pub(crate) fn progress_display_now_unix_millis(&self) -> u64 {
+        self.progress_display_now_unix_millis
+    }
+
+    /// Who owns the monitors on `pane_id`, for the progress popover: the
+    /// agent (or plain terminal) running in the pane and the pane's name.
+    pub(crate) fn progress_owner_label(&self, pane_id: NodeId) -> Option<String> {
+        let node = self.tree.get(pane_id)?;
+        let NodeKind::Pane { status, .. } = &node.kind else {
+            return None;
+        };
+        let who = match status.agent_state().map(|state| &state.class) {
+            Some(ilium_core::AgentClass::Claude) => "Claude Code".to_string(),
+            Some(ilium_core::AgentClass::Codex) => "Codex".to_string(),
+            Some(ilium_core::AgentClass::Antigravity) => "Antigravity".to_string(),
+            Some(ilium_core::AgentClass::Other(name)) => name.clone(),
+            None => "terminal".to_string(),
+        };
+        Some(format!("{who} in pane \"{}\"", node.name))
+    }
+
+    /// Advances the footer clock. Reports whether anything visible changed:
+    /// a footer appearing or expiring, or (at most once a second) the
+    /// relative times of a monitor that is still running.
     pub(crate) fn tick_completed_progress_display(&mut self, now_unix_millis: u64) -> bool {
         let previous = self
             .displayed_pane_ids()
             .into_iter()
             .map(|pane_id| (pane_id, self.shows_progress_footer(pane_id)))
             .collect::<Vec<_>>();
+        let second_changed = now_unix_millis / 1000 != self.progress_display_now_unix_millis / 1000;
         self.progress_display_now_unix_millis = now_unix_millis;
-        previous
-            .into_iter()
-            .any(|(pane_id, was_visible)| was_visible != self.shows_progress_footer(pane_id))
+        let visibility_changed = previous
+            .iter()
+            .any(|(pane_id, was_visible)| *was_visible != self.shows_progress_footer(*pane_id));
+        visibility_changed
+            || (second_changed
+                && previous.iter().any(|(pane_id, _)| {
+                    self.visible_progress_monitors(*pane_id)
+                        .iter()
+                        .any(|progress| !progress.is_terminal())
+                }))
     }
 
     /// The provider driving `pane_id`'s toolbar buttons right now, or `None`
@@ -9165,7 +9199,6 @@ impl App {
                 let detail: String = error
                     .chars()
                     .filter(|character| !character.is_control())
-                    .take(512)
                     .collect();
                 model.issue_details.push(format!("Runtime: {detail}"));
                 if let Some(index) = model
@@ -19932,7 +19965,7 @@ mod tests {
     }
 
     #[test]
-    fn plugin_panel_exposes_sanitized_bounded_runtime_error_details() {
+    fn plugin_panel_exposes_sanitized_complete_runtime_error_details() {
         use crate::background_animation::test_support::{fake_host, FakeProbe};
 
         let mut app = app();
@@ -19970,7 +20003,7 @@ mod tests {
 
         assert_eq!(model.labels[issue_row], "1 package/runtime issue(s)");
         assert_eq!(model.issue_details.len(), 1);
-        assert_eq!(model.issue_details[0].len(), "Runtime: ".len() + 512);
+        assert!(model.issue_details[0].ends_with(&format!("{}[31m", "x".repeat(600))));
         assert!(model.issue_details[0].starts_with("Runtime: runtime failed"));
         assert!(!model.issue_details[0].contains('\n'));
         assert!(!model.issue_details[0].contains('\u{1b}'));
@@ -21283,6 +21316,7 @@ mod tests {
                 message: "retained expiry footer marker".to_owned(),
                 details: String::new(),
                 error: None,
+                eta_seconds: None,
             },
             1000,
         )
@@ -21372,6 +21406,7 @@ mod tests {
                         message: "retained split result".into(),
                         details: String::new(),
                         error: None,
+                        eta_seconds: None,
                     },
                     1000,
                 )
@@ -22450,7 +22485,7 @@ mod tests {
             ilium_inference::InferenceProviderKind::KiloGateway,
             ilium_inference::kilo_gateway_model_catalog_url(),
             Duration::from_millis(100),
-            Ok(vec!["stepfun/step-5-preview-free".to_string()]),
+            Ok(vec!["dots-studio/dots-3-note-preview:free".to_string()]),
         );
         app.settle_model_catalog_for_test();
 
@@ -22460,7 +22495,7 @@ mod tests {
         );
         assert!(app
             .kilo_gateway_models
-            .contains(&"stepfun/step-5-preview-free".to_string()));
+            .contains(&"dots-studio/dots-3-note-preview:free".to_string()));
         app.settings_adjust_kilo_gateway_model(1);
         assert_eq!(app.inference_settings.kilo_gateway.model, "kilo-auto/free");
     }
@@ -29562,7 +29597,9 @@ impl App {
             return true;
         }
         if let Err(error) = session.handle_key(&bridge, key.code) {
-            session.set_error(&error);
+            if let Err(admission_error) = session.set_error(&error) {
+                self.status_message = Some(admission_error);
+            }
         }
         true // Protected review consumes paste/keys instead of forwarding them.
     }
@@ -29578,7 +29615,9 @@ impl App {
             return true;
         };
         if let Err(error) = session.handle_mouse(&bridge, self.layout.screen_area, mouse) {
-            session.set_error(&error);
+            if let Err(admission_error) = session.set_error(&error) {
+                self.status_message = Some(admission_error);
+            }
         }
         true
     }
@@ -29605,7 +29644,10 @@ impl App {
                 return false;
             }
             self.animation_frame.occlude_composed(screen, rect);
-            frame.render_widget(ratatui::widgets::Paragraph::new(status.message()), rect);
+            frame.render_widget(
+                ratatui::widgets::Paragraph::new(format!("F9 details · {}", status.message())),
+                rect,
+            );
             return false;
         };
         self.animation_frame.discard_composed_receipt();

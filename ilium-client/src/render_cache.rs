@@ -1036,6 +1036,8 @@ mod tests {
         let status = PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Idle, None);
         tree.set_pane_status(pane_id, status.clone()).unwrap();
         let evidence = |rule: &str| ilium_ipc::PaneDetectionEvidence {
+            observed_at_unix_millis: 1_700_000_000_000,
+            stale_after_millis: 30_000,
             applied_status: status.clone(),
             identity: Some(ilium_ipc::DetectionReason {
                 rule: rule.to_string(),
@@ -1066,6 +1068,17 @@ mod tests {
                 .unwrap()
                 .rule,
             "new process"
+        );
+        let received_evidence = &app.pane_detection_evidence[&pane_id];
+        assert_eq!(received_evidence.observed_at_unix_millis, 1_700_000_000_000);
+        assert!(
+            crate::status_icons::detection_freshness_warning(
+                &status,
+                Some(received_evidence),
+                1_700_000_030_001,
+            )
+            .is_some(),
+            "reattach must preserve the age of a stale server observation"
         );
         apply(
             &mut app,
@@ -1193,6 +1206,8 @@ mod tests {
         apply(&mut app, ServerEvent::TreeSnapshot(tree));
         let status = PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Working, None);
         let evidence = ilium_ipc::PaneDetectionEvidence {
+            observed_at_unix_millis: 1_700_000_000_000,
+            stale_after_millis: 30_000,
             applied_status: status.clone(),
             identity: Some(ilium_ipc::DetectionReason {
                 rule: "exact codex process".to_string(),

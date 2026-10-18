@@ -41,9 +41,26 @@ impl Row {
         self.cells.get_mut(usize::from(col))
     }
 
-    pub fn insert(&mut self, i: u16, cell: crate::Cell) {
-        self.cells.insert(usize::from(i), cell);
+    pub fn insert_blank_cells(&mut self, column: u16, count: u16) {
+        let start = usize::from(column);
+        let count = usize::from(count).min(self.cells.len().saturating_sub(start));
+        if count == 0 {
+            return;
+        }
+        if self.cells[start].is_wide_continuation() {
+            self.clear_wide(column);
+            let attrs = *self.cells[start].attrs();
+            self.cells[start].clear(attrs);
+        }
+        self.cells[start..].rotate_right(count);
+        self.cells[start..start + count].fill(crate::Cell::new());
         self.wrapped = false;
+        // Rotation can drop the continuation of a wide glyph at the right edge.
+        if let Some(last) = self.cells.last_mut() {
+            if last.is_wide() {
+                last.clear(*last.attrs());
+            }
+        }
     }
 
     pub fn remove(&mut self, i: u16) {
@@ -64,18 +81,12 @@ impl Row {
         }
     }
 
-    pub fn truncate(&mut self, len: u16) {
-        self.cells.truncate(usize::from(len));
-        self.wrapped = false;
-        let last_cell = &mut self.cells[usize::from(len) - 1];
-        if last_cell.is_wide() {
-            last_cell.clear(*last_cell.attrs());
-        }
-    }
-
     pub fn resize(&mut self, len: u16, cell: crate::Cell) {
         let old_len = self.cells.len();
+        self.cells
+            .reserve_exact(usize::from(len).saturating_sub(self.cells.len()));
         self.cells.resize(usize::from(len), cell);
+        self.cells.shrink_to_fit();
         self.wrapped = false;
         // A shrinking resize can remove a wide character's continuation while
         // retaining its leading cell at the new row edge. Clear that orphan so
@@ -87,6 +98,21 @@ impl Row {
                 last_cell.clear(*last_cell.attrs());
             }
         }
+    }
+
+    pub fn heap_allocation_bytes(&self) -> usize {
+        self.cells
+            .capacity()
+            .saturating_mul(std::mem::size_of::<crate::Cell>())
+    }
+
+    #[cfg(test)]
+    pub fn allocated_cells(&self) -> usize {
+        self.cells.capacity()
+    }
+
+    pub fn shrink_to_fit(&mut self) {
+        self.cells.shrink_to_fit();
     }
 
     pub fn wrap(&mut self, wrap: bool) {
