@@ -29,5 +29,6 @@
     "startup",
     "view:sessions.list"
   ],
+  "replaceable": false,
   "limits_tier": "first-party"
 }

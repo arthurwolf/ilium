@@ -108,6 +108,11 @@ impl Rig {
         unimplemented!("host::testing::render::Rig::scroll_view")
     }
 
+    /// A user action (click or key) inside a view (HST-251).
+    pub fn user_action(&mut self, _view: u32) {
+        unimplemented!("host::testing::render::Rig::user_action")
+    }
+
     /// Focuses a view.
     pub fn focus_view(&mut self, _view: u32) {
         unimplemented!("host::testing::render::Rig::focus_view")

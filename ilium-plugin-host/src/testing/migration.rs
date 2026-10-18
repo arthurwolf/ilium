@@ -176,6 +176,16 @@ pub struct MigServer {
 }
 
 impl MigServer {
+    /// Whether the server still runs (COR-090: it boots with defaults after a parse error).
+    pub fn is_running(&self) -> bool {
+        unimplemented!("host::testing::migration::MigServer::is_running")
+    }
+
+    /// Writes one setting through the host's settings write path (COR-090).
+    pub fn write_setting(&self, _table: &str, _key: &str, _value: &str) {
+        unimplemented!("host::testing::migration::MigServer::write_setting")
+    }
+
     /// Activates a plugin.
     pub fn activate(&self, _id: &str) -> ActivateReport {
         unimplemented!("host::testing::migration::MigServer::activate")
@@ -337,6 +347,11 @@ impl MigrationRig {
     /// The migrate lock path.
     pub fn lock_path(&self, _id: &str) -> PathBuf {
         unimplemented!("host::testing::migration::MigrationRig::lock_path")
+    }
+
+    /// The current bytes of the config file as text (COR-090).
+    pub fn config_text(&self) -> String {
+        unimplemented!("host::testing::migration::MigrationRig::config_text")
     }
 
     /// Writes the config file.

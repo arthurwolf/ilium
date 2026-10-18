@@ -123,7 +123,7 @@ fn manifest_050_activates_at_startup_and_on_the_panel_view() {
 
 /// REQ: COR-050, F-030
 #[test]
-fn manifest_050_contributes_exactly_signatures_slots_and_display_modes() {
+fn manifest_050_contributes_exactly_signatures_panels_slots_and_display_modes() {
     let manifest = manifest();
     let mut keys: Vec<&String> = manifest["contributes"]
         .as_object()
@@ -131,7 +131,10 @@ fn manifest_050_contributes_exactly_signatures_slots_and_display_modes() {
         .keys()
         .collect();
     keys.sort();
-    assert_eq!(keys, ["decoration_slots", "display_modes", "signatures"]);
+    assert_eq!(
+        keys,
+        ["decoration_slots", "display_modes", "panels", "signatures"]
+    );
 }
 
 /// REQ: F-026, F-030
