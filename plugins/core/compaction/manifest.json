@@ -37,7 +37,7 @@
     ]
   },
   "activation": [
-    "event:agent-context-low",
+    "event:agent-activity-changed",
     "service:compact",
     "view:compaction.optimizer"
   ],

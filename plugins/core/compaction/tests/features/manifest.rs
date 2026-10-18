@@ -133,7 +133,7 @@ fn manifest_050_activation_triggers_are_event_service_and_view() {
     assert_eq!(
         manifest()["activation"],
         json!([
-            "event:agent-context-low",
+            "event:agent-activity-changed",
             "service:compact",
             "view:compaction.optimizer"
         ])

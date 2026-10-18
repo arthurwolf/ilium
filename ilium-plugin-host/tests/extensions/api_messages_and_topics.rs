@@ -427,7 +427,7 @@ fn svc_026_message_queue_never_drops_an_accepted_message() {
         !accepted_payloads.is_empty(),
         "at least one send is accepted"
     );
-    // manual does not pin whether later sends are refused or restart the plugin
+    // sends beyond capacity complete refused(busy); the receiver is not restarted (SVC-030)
     let delivered: Vec<Vec<u8>> = world
         .messages_received(RECV)
         .into_iter()

@@ -143,10 +143,10 @@ fn manifest_010_two_commands_in_the_help_category_with_the_documented_titles() {
 
 /// REQ: F-007, F-010
 #[test]
-fn manifest_007_one_prefix_mode_keybinding_on_the_question_mark() {
+fn manifest_007_one_prefix_mode_keybinding_on_f1_not_the_kernel_help_chord() {
     assert_eq!(
         manifest()["contributes"]["keybindings"],
-        json!([{"command": "ilium.core.keys-and-help/show-keys", "chord": "?", "mode": "prefix"}])
+        json!([{"command": "ilium.core.keys-and-help/show-keys", "chord": "F1", "mode": "prefix"}])
     );
 }
 

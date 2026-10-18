@@ -106,20 +106,20 @@ fn process_run_stdin_bytes_reach_the_program() {
 
 /// REQ: WIT:ilium:host/process.run
 #[test]
-fn process_run_program_not_in_the_grants_invalid_argument() {
+fn process_run_program_not_in_the_grants_not_permitted() {
     let mut fixture = runner(&["echo"]);
     assert_eq!(
         expect_code(fixture.process().run(spec("ls", &[]))),
-        ErrorCode::InvalidArgument
+        ErrorCode::NotPermitted
     );
 }
 
 /// REQ: WIT:ilium:host/process.run
 #[test]
-fn process_run_without_any_process_grant_not_permitted_or_invalid_argument() {
+fn process_run_without_any_process_grant_not_permitted() {
     let mut fixture = fixture(Tier::T1, &[]);
     let code = expect_code(fixture.process().run(spec("echo", &[])));
-    assert_eq!(code, ErrorCode::InvalidArgument);
+    assert_eq!(code, ErrorCode::NotPermitted);
 }
 
 /// REQ: WIT:ilium:host/process.run

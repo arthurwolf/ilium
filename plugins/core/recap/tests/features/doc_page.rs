@@ -43,7 +43,7 @@ fn doc_f_112_extensions_tab_render_fits_48_columns_and_has_the_stopped_label() {
         text.lines().all(|line| width(line) <= 48),
         "a line exceeds 48 columns:\n{text}"
     );
-    assert!(text.contains("stopped after 3 timeouts"));
+    assert!(text.contains("stopped after 3 failures"));
     assert!(text.contains("[Reset]"));
     assert!(text.contains("Run order: lower priority number first."));
     assert!(text.contains("fact-sources (collect)"));

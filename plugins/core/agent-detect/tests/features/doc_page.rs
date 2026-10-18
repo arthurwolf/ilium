@@ -46,7 +46,7 @@ fn doc_011_agent_class_enum_lists_claude_codex_antigravity_and_other() {
 fn doc_027_activity_enum_lists_six_values_in_order() {
     assert_eq!(
         enum_row("Activity"),
-        "`working`, `waiting-background`, `background-task-still-running`, `waiting-approval`, `done`, `idle`"
+        "`none`, `working`, `idle`, `awaiting-approval`, `done`, `menu` (the `agent-activity` enum of [WIT](/pages/reference-wit/))"
     );
 }
 

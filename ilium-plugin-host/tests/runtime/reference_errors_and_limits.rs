@@ -571,7 +571,7 @@ fn api_010_import_whose_capability_was_never_requested_traps_and_restarts() {
     let reply = host.call_import_json("ilium:host/fs", "read", "{}");
     assert_eq!(
         reply.trap_code().as_deref(),
-        Some("trap.import-not-requested")
+        Some("host.capability-not-requested")
     );
     assert_eq!(host.state(), InstanceState::RestartScheduled);
     assert!(log_text(&host).contains("ilium:host/fs"));
@@ -663,7 +663,6 @@ fn api_081_the_eight_codes_are_exactly_the_documented_set_and_each_is_logged() {
         "trap.table",
         "trap.submission-batch",
         "trap.invalid-ui-tree",
-        "trap.import-not-requested",
         "trap.abi",
         "trap.panic",
     ];

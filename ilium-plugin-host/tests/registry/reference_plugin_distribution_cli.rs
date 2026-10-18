@@ -457,7 +457,7 @@ fn pkg_430_without_a_client_and_without_yes_install_fails_with_needs_input() {
     let sandbox = Sandbox::standard();
     let path = sandbox.project_file("ask.iliumpkg", &signed_package("com.acme.fresh", "1.0.0"));
     let output = sandbox.run(&["install", path.to_str().unwrap()]);
-    assert_failed(&output, "install.needs-input", 1);
+    assert_failed(&output, "install.review-required", 1);
     assert!(sandbox.installed().is_empty());
 }
 

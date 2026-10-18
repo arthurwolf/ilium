@@ -23,7 +23,7 @@
     ]
   },
   "activation": [
-    "pane-kind:kanban"
+    "pane-kind:board"
   ],
   "contributes": {
     "pane_kinds": [

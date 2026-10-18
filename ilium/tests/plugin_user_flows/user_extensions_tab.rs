@@ -249,7 +249,7 @@ fn usr_053_three_breaches_stop_the_extension_with_a_notice_and_reset() {
     assert!(
         rig.notices()
             .iter()
-            .any(|text| text.contains("stopped after 3 timeouts") || text.contains("stopped")),
+            .any(|text| text.contains("stopped after 3 failures") || text.contains("stopped")),
         "{:?}",
         rig.notices()
     );

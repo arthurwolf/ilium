@@ -47,7 +47,7 @@
     "keybindings": [
       {
         "command": "ilium.core.keys-and-help/show-keys",
-        "chord": "?",
+        "chord": "F1",
         "mode": "prefix"
       }
     ],

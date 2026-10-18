@@ -739,7 +739,7 @@ fn conf_grant_05_call_of_a_capability_never_requested_traps_import_not_requested
     )
     .build()
     .expect("builds");
-    assert!(has_failure(&handle, "trap.import-not-requested"));
+    assert!(has_failure(&handle, "host.capability-not-requested"));
 }
 
 /// REQ: CONF-GRANT-05
@@ -751,7 +751,7 @@ fn conf_grant_05_call_of_a_requested_capability_does_not_trap() {
     )
     .build()
     .expect("builds");
-    assert!(!has_failure(&handle, "trap.import-not-requested"));
+    assert!(!has_failure(&handle, "host.capability-not-requested"));
 }
 
 // -------------------------------------------------------------------------- Views

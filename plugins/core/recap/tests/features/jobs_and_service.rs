@@ -190,7 +190,7 @@ fn f_112_job_waits_at_most_55_seconds_for_the_model() {
         json!({"evidence": "x"}).to_string().as_bytes(),
     )
     .expect("job succeeds");
-    assert_eq!(host.inference_wait_ms(), vec![55_000]);
+    assert_eq!(host.inference_wait_ms(), vec![15_000]);
 }
 
 /// REQ: F-112

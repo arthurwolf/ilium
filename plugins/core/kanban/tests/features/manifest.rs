@@ -97,7 +97,7 @@ fn manifest_050_holds_no_grant_the_page_does_not_name() {
 #[test]
 fn manifest_050_activates_on_the_pane_kind_and_has_first_party_limits() {
     let manifest = manifest();
-    assert_eq!(manifest["activation"], json!(["pane-kind:kanban"]));
+    assert_eq!(manifest["activation"], json!(["pane-kind:board"]));
     assert_eq!(manifest["limits_tier"], "first-party");
 }
 
@@ -237,7 +237,7 @@ fn manifest_050_the_boot_table_activates_kanban_on_the_pane_kind() {
     let boot = std::fs::read_to_string(path).expect("kernel and boot page");
     let row = boot
         .lines()
-        .find(|line| line.starts_with("| Kanban | none | `pane-kind:kanban` |"))
+        .find(|line| line.starts_with("| Kanban | none | `pane-kind:board` |"))
         .expect("row");
     assert!(row.contains("In plugin form it starts with a board pane"));
 }

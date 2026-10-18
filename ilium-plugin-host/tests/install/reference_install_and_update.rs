@@ -510,7 +510,7 @@ fn pkg_264_install_with_input_unavailable_does_not_proceed_on_its_own() {
     let out = fx.run(&["install", &path, "--allow-unsigned"]);
     assert_eq!(out.exit_code, 1);
     assert!(
-        out.has_error("install.needs-input"),
+        out.has_error("install.review-required"),
         "{:?}",
         out.error_codes()
     );
@@ -2326,7 +2326,7 @@ fn pkg_294_reinstall_asks_for_grants_again() {
     let path = fx.write_file("again.iliumpkg", &spec.build());
     let out = fx.run(&["install", &path, "--allow-unsigned"]);
     assert!(
-        out.has_error("install.needs-input"),
+        out.has_error("install.review-required"),
         "grants were deleted, so the review is needed again: {:?}",
         out.error_codes()
     );

@@ -71,7 +71,6 @@ pub mod codes {
         "trap.table",
         "trap.submission-batch",
         "trap.invalid-ui-tree",
-        "trap.import-not-requested",
         "trap.abi",
         "trap.panic",
     ];
