@@ -19,7 +19,7 @@ Declare the grants you use in `capabilities.server` of the manifest. Each grant 
 | `terminal.pointer` | `claim_pointer`, `release_pointer`, `set_highlights`, `clear_highlights`, `pointer` events while a claim is held |
 | `terminal.write` | the `send-input` intent and `prompt_epoch` |
 
-The primitive is available to the server side only, through the `ilium:server/base` world. Import it from `ilium_plugin_sdk::primitives::terminal` in Rust, or from `@ilium/plugin-sdk/primitives/terminal` in TypeScript. Agent identification is a separate contract, described in [primitives-agent](/pages/primitives-agent/).
+The primitive is available to both the server and the client sides, through the `ilium:server/base` and `ilium:client/base` worlds. Import it from `ilium_plugin_sdk::primitives::terminal` in Rust, or from `@ilium/plugin-sdk/primitives/terminal` in TypeScript. Agent identification is a separate contract, described in [primitives-agent](/pages/primitives-agent/).
 
 ```json
 {

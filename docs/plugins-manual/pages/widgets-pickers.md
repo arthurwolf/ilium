@@ -457,7 +457,7 @@ onEvents(batch) {
 | A `location-picker` with `search` and no `location.geocode` | The Address box is hidden. Coordinates mode still works. |
 | The user declines the geocoding consent | The search returns `not-permitted` and the status line says so. |
 | A latitude outside -90 to 90, or a longitude outside -180 to 180 | The number entry shows its error and nothing is sent. |
-| A `bind` key that is not an own `location` key | `invalid-argument` on render. |
+| A `bind` key that is not an own `location` key | The tree is invalid: the render traps with `ui.invalid-tree`. `render` has no result type. |
 | A catalogue source that does not exist | The dialog shows an empty list and the status line `0 of 0 options`. |
 | A stale item id on commit | The host refuses it and keeps the old value. |
 

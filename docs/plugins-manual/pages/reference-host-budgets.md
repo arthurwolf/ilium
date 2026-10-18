@@ -53,7 +53,7 @@ A miss of more than 2x on B1, B3 or B4 stops the platform plan. The design assum
 | B19 | Delay of a PTY frame while the plugin event queue is full (`event_queue` entries, 1,024 by default) | Under 1 ms at the 99th percentile |
 | B20 | Server decoration change to the client mirror | Under 5 ms at the 99th percentile |
 | B21 | Helper start: spawn to `Ready` for a 2 MiB component | Record only (no pass or fail threshold) |
-| B22 | Session memory: 40 bundled plugins plus 8 T2 helpers, steady state | Added RSS under 120 MiB for the bundled set; helpers under `memory_mib + 32` MiB each |
+| B22 | Session memory: 40 bundled plugins plus 8 T2 helpers, steady state | Added RSS under 120 MiB for the bundled set; each helper under the sum of its hosted instances' `memory_mib` plus 32 MiB |
 | B23 | `ilium` CLI cold run (CLI-COLD) | Under 60 ms with a warm file cache |
 | B24 | Idle cost: 40 loaded plugins, no events, 10 minutes | Under 0.5 % of one core; at most 100 wake-ups per second |
 

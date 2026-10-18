@@ -77,7 +77,7 @@ An author looks the code in an install error up in the error table above and cha
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| Plugin disabled after three failures in 10 minutes | Repeated traps | Fix the first trap in the log. Then `ilium plugin reset-failures <id>` |
+| Plugin disabled after three failures in 10 minutes | Repeated traps | Fix the first trap in the log. Then `ilium plugin reset-failures <id>`, which clears the count without starting the plugin; turn it on again in Settings > Plugins or with `ilium plugin enable <id>` |
 | Event handler trap on time | A handler ran over the 20 ms default (50 ms is only the T1 ceiling of `event_deadline_ms`; T2 and T3 stop at 20 ms. A hook handler may use 5 to 50 ms at any tier) | Move slow work to jobs or requests |
 | Command trap on time | Over 50 ms | Return a pending state and finish later |
 | Render trap | `render` over 10 ms, or a tree over its limit | Cut the tree. See [Performance](/pages/performance/) |

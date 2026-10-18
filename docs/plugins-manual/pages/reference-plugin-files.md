@@ -60,8 +60,8 @@ Paths start at `<config>`, `<data>`, `<cache>`, `<state>` or `<project>`. The pl
 | Plugin settings, user scope | `<config>/config.toml`, table `[plugins."<id>"]` | TOML | The Settings screen | `uninstall --purge`, Forget settings |
 | Plugin settings, project scope | `<project>/.ilium/config.yaml`, key `plugins.<id>` | YAML | The Settings screen | Same two actions, for the open project |
 | Plugin limits | `<config>/config.toml`, table `[plugins.limits]` | TOML | The user | The user |
-| Plugin cache | `<cache>/plugins/<id>/` | Whatever the plugin writes | The plugin, through `fs.write:cache` | The host may evict it at any time. Every uninstall removes it |
-| Compile cache | `<cache>/plugins/compile/` | Compiled components | Install of a T2 or T3 plugin | The host, when space is low |
+| Plugin cache | `<cache dir>/ilium/plugins/<id>/` | Whatever the plugin writes | The plugin, through `fs.write:cache` | The host may evict it at any time. Every uninstall removes it |
+| Compile cache | `<cache dir>/ilium/plugins/compile/` | Compiled components | Install of a T2 or T3 plugin | The host, when space is low |
 | Plugin log | `<data>/plugins/logs/<id>.log` and rotated files | Text, four columns | The plugin and the host | Rotation. See below |
 | User extension order and toggles | `<config>/config.toml`, table `[plugins.extensions]` | TOML | The Extensions tab | Every uninstall of the owner |
 | Replacement record | `<config>/config.toml`, table `[plugins.replaces]` | TOML | The replace confirmation | Undoing the replacement |
@@ -93,7 +93,7 @@ The grant file has one entry per side. A grant value is `granted`, `declined` or
 
 `first_start_not_now` counts how often the user chose Not now at the first-start prompt of a bundled plugin. See [Install and manage plugins](/pages/user-install-and-manage/#first-start-of-a-bundled-plugin).
 
-The fingerprint of a key is shown as 64 lowercase hexadecimal characters in 16 groups of 4 (see the CLI reference, [DEV-112]). The short form is the first 8 digits, for example `3f2a91c0`. It is shown only beside the full form or in `trust list` ([SEC-177]).
+The fingerprint of a key is shown as 64 lowercase hexadecimal characters in 16 groups of 4 (see the CLI reference, [DEV-112]). The short form is the first 8 characters, for example `3f2a91c0`. It is shown only beside the full form or in `trust list` ([SEC-177]).
 
 ### The plugin log
 

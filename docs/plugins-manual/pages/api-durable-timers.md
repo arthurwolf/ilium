@@ -290,8 +290,7 @@ The plugin log records what happened around a restart:
 | `at` | `invalid-argument` | `epoch` is in the past by more than 1 s. |
 | `at` | `quota-exceeded` | The plugin already holds `durable_timers` timers. |
 | `log-event` | `invalid-argument` | The payload is over 4 KiB. |
-| `log-event` | `quota-exceeded` | The `journal_entries` quota is full. |
-| `log-event` | `rate-limited` | Too many entries in a short time. |
+| `log-event` | `rate-limited` | More than 20 `log-event` calls per second per plugin (see the rate table in the [errors and limits reference](/pages/reference-errors-and-limits/)). When `journal_entries` is full the oldest entries are trimmed, with no error. |
 | `cancel-durable`, `read` | none | These functions return no error. |
 | journaled `send-input` | as for `send-input` | The `journal` field adds no error code of its own. |
 

@@ -149,6 +149,16 @@ The user always sees who added a section. A plugin tab shows its name and versio
 | All values of one plugin, serialized | 256 KiB |
 | Manifest titles, section titles, descriptions, info text, button labels | 48, 40, 200, 120 and 20 characters |
 
+The caps above are the standard tier. A bundled T1 plugin whose id starts with `ilium.` and that sets `limits_tier: "first-party"` gets these higher caps instead (any other package is refused with `manifest.limits-tier`; see [design decisions](/pages/design-decisions/)):
+
+| Item | Standard | First-party |
+|---|---|---|
+| Tabs per plugin | 2 | 8 |
+| Value keys per plugin | 128 | 2,048 |
+| Rows per section | 24 | 64 |
+| List items | 64 | 1,024 |
+| Choice options | 64 | 512 |
+
 When the limit for plugin sections in one built-in tab is reached, the extra sections are not drawn. They are listed on the recovery page with the warning `settings.section-dropped`. Install-time errors name the item, its path in the manifest and the limit.
 
 ### Values and saving

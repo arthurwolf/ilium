@@ -350,7 +350,7 @@ A third-party plugin that wants a core topic lists it in `contributes.topics.sub
 
 ### Timing of hooks on core points
 
-A hook on a core plugin's point runs on the side that owns the point (see the Side column of [Core extension points](/pages/reference-core-extension-points/)), one handler after another, under the deadlines in [Extension points](/pages/api-extension-points/) (20 ms per handler on every core hook, 100 ms for the chain, measured from the first handler). For `veto`, `transform` and `first` points the core plugin holds that one action until the chain completes (at most the 100 ms cap plus one deadline) and keeps serving other events meanwhile. For `observe` points the action does not wait, and observe handlers may run after it. [EXT-029] See [Host scheduling](/pages/reference-host-scheduling/).
+A hook on a core plugin's point runs on the side that owns the point (see the Side column of [Core extension points](/pages/reference-core-extension-points/)), one handler after another, under the deadlines in [Extension points](/pages/api-extension-points/) (20 ms per handler by default, set per handler by its manifest `deadline_ms` between 5 and 50 ms, 100 ms for the chain, measured from the first handler). For `veto`, `transform` and `first` points the core plugin holds that one action until the chain completes (at most the 100 ms cap plus one deadline) and keeps serving other events meanwhile. For `observe` points the action does not wait, and observe handlers may run after it. [EXT-029] See [Host scheduling](/pages/reference-host-scheduling/).
 
 ### Ordering, priorities and the user
 
@@ -412,7 +412,7 @@ No. A hook exists only where the owner declared a point. If you need one, ask fo
 A hook can refuse or change data only where the mode allows it. A hook that is late, traps or errors is ignored, and three consecutive breaches stop it. A hook cannot crash the owner.
 
 **Does a hook slow the feature down?**
-A little. T1 handlers share the process. T2 and T3 handlers cost one helper round trip. A handler gets 5 to 50 ms (20 by default) and a chain gets 100 ms. Owners should not put hooks on a path hotter than about 100 calls per second.
+A little. T1 handlers share the process. T2 and T3 handlers cost one helper round trip. A handler gets 20 ms by default (its manifest `deadline_ms` may set 5 to 50 ms) and a chain gets 100 ms. Owners should not put hooks on a path hotter than about 100 calls per second.
 
 **What if the owner is not installed?**
 Your contribution is dormant. It does nothing, and the Plugins screen shows `waiting for <owner-id>`. It becomes active when the owner appears.

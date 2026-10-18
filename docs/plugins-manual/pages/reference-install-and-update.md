@@ -31,7 +31,7 @@ Requirement ids such as `PKG-260` can be cited by tests. See [Requirements: mani
 
 | Id | Rule |
 |---|---|
-| [PKG-260] | A URL install downloads the file into the cache folder (`{cache}/plugins/downloads/`), then treats it as a local file. A URL with the scheme `http` is refused with `install.insecure-url`. The download follows at most 3 redirects, all to HTTPS. |
+| [PKG-260] | A URL install downloads the file into the cache folder (`<cache dir>/ilium/plugins/downloads/`), then treats it as a local file. A URL with the scheme `http` is refused with `install.insecure-url`. The download follows at most 3 redirects, all to HTTPS. |
 | [PKG-261] | The download is at most 300 MiB. A larger response is aborted with `install.size`. The server's content type is ignored. The file is judged only by the package format. |
 | [PKG-262] | A URL install of an unsigned package needs `--allow-unsigned`, as a file does. A URL does not change the trust rules. |
 | [PKG-263] | A registry id with a range resolves through [Versions and dependencies](/pages/reference-dependency-resolution/) to one version and then installs that package. The recorded `source` is `registry` and the record keeps the registry URL. |
@@ -45,8 +45,8 @@ The folder layout, the registry file `installed.json`, the lock `installed.lock`
 |---|---|
 | [PKG-265] | Each plugin entry of `installed.json` follows the one schema of [Install, update and uninstall](/pages/reference-install-update-uninstall/#the-registry-file): `source` is `bundled`, `file`, `url`, `registry` or `dev`; `channel` is `stable`, `beta`, `dev` or `file`; `key_id` is 64 lowercase hexadecimal characters or null; `package_sha256` and `manifest_sha256` are 64 lowercase hexadecimal characters; `skip` and `declined` are lists of version strings; `installed_at` is RFC 3339 in UTC with the suffix `Z`; `update` is null or `{ candidate, state, attempts, started_at }`. The page that owns the schema is the only place that lists the fields. |
 | [PKG-266] | The package file is kept as `store/<id>/<version>/package.iliumpkg` next to the unpacked files, so that `verify` and `rollback` need no network. Files in `store/` are written once and made read-only. An update writes a new folder and never changes an old one. |
-| [PKG-267] | The user trust store is `$XDG_STATE_HOME/ilium/trust.json` (Linux `~/.local/state/ilium/trust.json` when `XDG_STATE_HOME` is unset), mode 0600, written atomically. The variable `ILIUM_TRUST_STORE` replaces it and holds an absolute file path. The format is that of [Signing and trust](/pages/reference-signing-and-trust/#the-trust-store). Downloads in progress live in `<cache>/plugins/downloads/`. Cached registry metadata lives in `<cache>/plugins/registry/<hash-of-url>/`. |
-| [PKG-268] | The compiled cache `<cache>/plugins/compile/` is derived data, keyed by the component SHA-256 and an engine id (the Wasmtime version and settings). The host MUST be able to delete it at any time and recompile. |
+| [PKG-267] | The user trust store is `$XDG_STATE_HOME/ilium/trust.json` (Linux `~/.local/state/ilium/trust.json` when `XDG_STATE_HOME` is unset), mode 0600, written atomically. The variable `ILIUM_TRUST_STORE` replaces it and holds an absolute file path. The format is that of [Signing and trust](/pages/reference-signing-and-trust/#the-trust-store). Downloads in progress live in `<cache dir>/ilium/plugins/downloads/`. Cached registry metadata lives in `<cache dir>/ilium/plugins/registry/<hash-of-url>/`. |
+| [PKG-268] | The compiled cache `<cache dir>/ilium/plugins/compile/` is derived data, keyed by the component SHA-256 and an engine id (the Wasmtime version and settings). The host MUST be able to delete it at any time and recompile. |
 | [PKG-269] | A crash leaves `installed.json` unchanged, because the registry file is the single commit point (steps 6 below). Orphans in `staging/` are deleted at the next start. |
 
 ## The install transaction
@@ -165,7 +165,7 @@ An update is an install of a higher version of an installed id.
 | `package.version-reused` | The same version with a different hash |
 | `package.platform-unsupported` | T2 or T3 on a platform with no sandbox |
 
-Each step prints one JSONL line with `type` `progress`, `step` (`acquire`, `fetch`, `validate`, `review`, `stage`, `commit`, `notify`) and `status`. The final line has `type` `result` with `id`, `version`, `tier`, `action` (`installed`, `updated`, `downgraded`, `rolled-back`, `uninstalled`) and `active_from` (`now` or `restart`). Exit codes are in [Plugin command line](/pages/reference-plugin-cli/#exit-codes) and [Distribution commands](/pages/reference-plugin-distribution-cli/).
+Each step prints one JSONL line with `type` `progress`, `step` (the number of the step, from 1), `of` (the number of steps) and `message` (the step name, one of `acquire`, `fetch`, `validate`, `review`, `stage`, `commit`, `notify`). The final line has `type` `result` with `id`, `version`, `tier`, `action` (`installed`, `updated`, `downgraded`, `rolled-back`, `uninstalled`) and `active_from` (`now` or `restart`). Exit codes are in [Plugin command line](/pages/reference-plugin-cli/#exit-codes) and [Distribution commands](/pages/reference-plugin-distribution-cli/).
 
 ## Worked example: a crash during an update
 

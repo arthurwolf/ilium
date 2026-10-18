@@ -95,7 +95,7 @@ Contract version: `ilium:plugin@0.1.0`. Requirement ids have the form `[USR-nnn]
 
 **Can I stop users from installing plugins?** Yes, with the policy file. See [Administration guide](/pages/guide-administration/) and [Plugin policy](/pages/reference-plugin-policy/).
 
-**Can I allow only signed plugins from my company?** Yes. Set `allowed_tiers` and `allowed_publishers`.
+**Can I allow only signed plugins from my company?** Yes. Set `packages.allowed_tiers` and `publishers.allow` in the policy file ([Plugin policy](/pages/reference-plugin-policy/)).
 
 **Can I see what was installed?** The audit log is always on. See [Audit log](/pages/reference-audit-log/) for where it is stored and how to read it.
 

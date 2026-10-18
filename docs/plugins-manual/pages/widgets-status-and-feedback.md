@@ -10,7 +10,7 @@ Status widgets tell the user that something is happening, that something changed
 
 | Widget | Shows | Event |
 |---|---|---|
-| `badge` | A dot, a label or a count | `activated` when focusable |
+| `badge` | A dot, a label or a count | `activated` when it has a `key` (a keyed badge is focusable) |
 | `spinner` | A moving frame set with an optional label | none |
 | `notice` | An inline banner with a tone, text and actions | `activated`, `closed` |
 | `icon` | One glyph from a slot or a literal | none |
@@ -50,7 +50,7 @@ A tone is one of `info`, `success`, `warning`, `danger` or `muted`. It sets the 
 
 | Input | Behaviour |
 |---|---|
-| Enter | Activates a focusable badge. |
+| Enter | Activates a badge that has a `key`. |
 | Left click | Focuses and activates. |
 
 Theme roles: the `tone` role.

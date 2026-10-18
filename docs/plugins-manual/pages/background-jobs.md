@@ -46,9 +46,12 @@ Each kind is listed under `contributes.jobs`. The plugin also lists `job-runner`
 | CPU deadline (`deadline_ms`) | 2,000 ms | 60,000 ms | 10,000 ms | `failed(timed-out)` |
 | Wall-clock deadline (`job_wall_ms`) | 20,000 ms | 600,000 ms | 100,000 ms | `failed(timed-out)` |
 | Memory (`memory_mib`) | 64 MiB | 512 MiB | 256 MiB | `failed(quota-exceeded)` |
-| Input, and output, each | 16 MiB | 64 MiB | 16 MiB | Input: `invalid-argument` at the call. Output: `failed(invalid-argument)` |
+| Input, and output, each (`job_io_mib`) | 16 MiB | 64 MiB | 16 MiB | Input: `invalid-argument` at the call. Output: `failed(invalid-argument)` |
 | Concurrent jobs | 2 | 8 | 2 | Extra jobs wait in the queue |
 | Queued jobs | 16 | 64 | 16 | `busy` at the start call |
+| Hold of a finished result for `take-output` | 30 s | 30 s | 30 s | `none` after the hold (ABI-012) |
+
+The quota group is the `ilium-execution` CPU token bucket of [Resource accounting](/pages/reference-resource-accounting/): 2,000 ms of CPU time, refilled at 500 ms per second, one group for each plugin side in each process. A job start spends from it.
 
 The CPU deadline counts CPU time only. Time spent in `wait-request` or waiting for the disk counts against the wall-clock deadline instead.
 

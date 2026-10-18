@@ -168,7 +168,7 @@ Each instance has a memory cap, and the session has a pool for all instances.
 | Session memory pool (all instances) | 1,024 MiB | 4,096 MiB, all tiers (user config only) | same, no per-tier ceiling | The new instance is refused with `session.memory-exceeded`. Not counted as a failure. |
 | `job_memory_mib` (one job instance) | 64 | 512 | 256 | `failed(quota-exceeded)` |
 
-The server total of 1,024 MiB is the default of the pool. At activation an instance charges its effective `memory_mib` to the pool, and a sandbox helper charges its `memory_mib` plus 32 MiB [HST-164]. Growth below the limit never fails on the pool. An instance that grows past its cap traps at the growth call; the guest never sees `-1` from `memory.grow` [ABI-027]. A refusal because the pool is full is logged as `host-capacity` and the plugin can be started again when memory is free.
+The server total of 1,024 MiB is the default of the pool. At activation an instance charges its effective `memory_mib` to the pool, and a sandbox helper charges the sum of its hosted instances' `memory_mib` plus 32 MiB [HST-164]. Growth below the limit never fails on the pool. An instance that grows past its cap traps at the growth call; the guest never sees `-1` from `memory.grow` [ABI-027]. A refusal because the pool is full is logged as `host-capacity` and the plugin can be started again when memory is free.
 
 ## 8. JSON in strings
 

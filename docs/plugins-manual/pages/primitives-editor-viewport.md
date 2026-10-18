@@ -47,7 +47,7 @@ Events: `editor-viewport-changed(editor-viewport)`, coalesced per pane at 100 ms
 
 ### Minimap marks
 
-The minimap is the narrow strip at the right of an editor pane; the host draws it from the text density with the ramp `·`, `-`, `=`, `≡`, `≣`, `█`. A plugin adds marks to three lanes (0 to 2) to show diagnostics, search hits or changes. A mark has a line and a colour; the layer name scopes the set to the plugin, and each call replaces the layer. At most 4,096 marks per layer. Marks are removed when the plugin stops.
+The minimap is the narrow strip at the right of an editor pane; the host draws it from the text density with the ramp `·`, `-`, `=`, `≡`, `≣`, `█`. A plugin adds marks to three lanes (0 to 2) to show diagnostics, search hits or changes. A mark has a line and a colour; the layer name scopes the set to the plugin, and each call replaces the layer. At most 4,096 marks per layer. A layer name is 1 to 32 characters from `[a-z0-9-]` and is scoped to the calling plugin. A plugin has at most 16 layers per buffer. Marks are removed when the plugin stops.
 
 <pre class="term">╭──≡ ● · main.rs───────────────────────────────────────╮
 │fn main() {                                       <span class="t-dim">·</span>   │
@@ -149,7 +149,8 @@ export const { lifecycle, handler, tokenProvider } = definePlugin({
 | Case | Result |
 |---|---|
 | `viewport` for a pane that is not an editor | `none` |
-| `set-minimap-marks` over 4,096 marks, or lane over 2 | `invalid-argument` |
+| `set-minimap-marks` over 4,096 marks, lane over 2, or a bad layer name | `invalid-argument` |
+| `set-minimap-marks` on a 17th layer of the buffer | `quota-exceeded` |
 | `set-minimap-marks` for an unknown buffer | `not-found` |
 | `tokens` over 10 ms | lines stay plain; the host calls again at the next change of the buffer or viewport (no timer, so no interval), with no retry limit, and each call has the same 10 ms deadline |
 | Missing grant | `not-permitted` |

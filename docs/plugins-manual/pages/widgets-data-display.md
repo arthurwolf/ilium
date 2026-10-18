@@ -54,7 +54,7 @@ The host calls the plugin's `render` function when the view first opens, after `
 | `bar-chart` | Bars in groups | `selected` (a bar) when focusable |
 | `chart` | Datasets on axes | `selected` (a point) when focusable |
 | `canvas` | Shapes in a coordinate space | `activated` with a cell when focusable |
-| `calendar` | One month (unstable) | `selected` (a day) |
+| `calendar` | One month (unstable) | `selected` (a day); focusable by default |
 | `progress-row` | The state of one job | `activated` |
 | `meter` | A segmented bar | `selected` (a segment) when focusable |
 | `minimap` | The shape of a long text | `activated`, `scrolled` |
@@ -253,7 +253,7 @@ Mirrors `ratatui::widgets::Chart`. A chart has datasets, two axes and an optiona
 | | `bounds` | `tuple<f64, f64>` | The lowest and highest value on the axis. |
 | | `labels` | `list<styled-text>` | Tick labels drawn along the axis. |
 | `legend-position` | | `option<legend-position>` | `top`, `top-right`, `top-left`, `left`, `right`, `bottom`, `bottom-right` or `bottom-left`. None hides the legend. |
-| `render` | | `braille` or `text-line` | The render. Default `braille`. |
+| `render` | | `braille` or `text-line` | The render. Default `braille`. Where the terminal cannot draw Braille, the host falls back to `text-line`. |
 | `y-label-width` | | `option<u16>` | The width of the y labels in cells. |
 
 When the node is focusable, Left and Right move a cursor along the points and `selected` with `index(u32)` reports the point. Hovering a point shows it as a tooltip. Roles: the dataset styles, and `muted` for the axes.

@@ -147,7 +147,7 @@ The host loads the contract version it ships and the one before it. A package wh
 | Your plugin lists an unstable feature that was renamed | Refused with `manifest.unstable-unknown` | Read the changelog of Ilium before upgrading, and update the name |
 | An item you use is marked `@since` a newer version than your `api` | Refused with `manifest.grant-unknown` or an import error | Raise `api` and rebuild |
 
-A plugin SHOULD rebuild and publish against each new minor contract version within the lifetime of the previous one, so that users never hold a plugin outside the window. [AUT-209]
+A plugin SHOULD rebuild and publish against each new minor contract version before the host drops the minor it was built for (the host loads the current minor and the previous one), so that users never hold a plugin outside the window. [AUT-209]
 
 A published plugin MUST NOT list an unstable feature unless the plugin is for development use, because a T2 or T3 package that lists one is installable only in development mode. [AUT-210]
 

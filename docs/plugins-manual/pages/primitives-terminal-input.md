@@ -48,11 +48,11 @@ Some agent programs lose text that arrives in the same read as the submit key. A
 
 ### Preconditions
 
-`if-current` makes a write conditional. `activity` must equal the agent activity the host detects, `screen-revision` must equal the revision from `read-cells` or `read-screen`, and `foreground` must equal the name of the foreground process. The check order is the base checks (shape, grant, duplicate key, pane, rate, prompt epoch), then `if-current`, then the lock. The refusal is `refused(conflict)` and names the failed condition, and no key is reserved, so the plugin can retry after reading again.
+`if-current` makes a write conditional. `activity` must equal the agent activity the host detects, `screen-revision` must equal the revision from `read-cells` or `read-screen`, and `foreground` must equal the name of the foreground process. The check order is the base checks (shape, grant, duplicate key, pane, pane restored, rate, prompt epoch), then `if-current`, then the lock. The refusal is `refused(conflict)` and names the failed condition, and no key is reserved, so the plugin can retry after reading again.
 
 ### Input lock
 
-`lock-input` holds the user's keys in a queue for up to 2,000 ms. The keys are not lost: they are delivered after `unlock-input` or when the time runs out, in order. Only one lock per pane exists; a second `lock-input` from another plugin returns `conflict`. The `lock-user-input` field of `send-input` takes the lock for exactly the duration of its stages, so a `send-input` with `lock-user-input` and a total stage delay over 2 s is refused with `invalid-argument`. `unlock-input` has no result and no failure: it does nothing when this plugin holds no lock on the pane or when the pane does not exist.
+`lock-input` holds the user's keys in a queue for up to 2,000 ms. The keys are not lost: they are delivered after `unlock-input` or when the time runs out, in order. Only one lock per pane exists; a second `lock-input` from another plugin returns `conflict`. The `lock-user-input` field of `send-input` takes the lock for exactly the duration of its stages, so a `send-input` with `lock-user-input` and a total stage delay over 2 s is refused with `invalid-argument`. If another plugin holds the lock when a batch with `lock-user-input` starts, the whole `send-input` is `refused(conflict)` and no stage is sent. When the pane closes or the plugin is disabled, the host drops the stages still queued for that pane, releases the lock the plugin holds and delivers the held user keys; no event is sent. `unlock-input` has no result and no failure: it does nothing when this plugin holds no lock on the pane or when the pane does not exist.
 
 ### Journaled writes
 

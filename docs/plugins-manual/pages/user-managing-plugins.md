@@ -50,7 +50,7 @@ If the failed plugin replaced a built-in one, the built-in plugin is turned on a
 
 ### The recovery page
 
-The recovery page lists plugins with state and last failure. It offers: enable or disable, uninstall, reset failures, forget settings, and start in safe mode ([Safe mode](/pages/user-safe-mode-and-troubleshooting/)). Open it with `Ctrl+B`, then `:` (the command prompt).
+The recovery page lists plugins with state and last failure. It offers seven actions: enable, disable, reset failures, uninstall, forget settings, safe mode and open config file ([Safe mode](/pages/user-safe-mode-and-troubleshooting/)). Open it with `Ctrl+B`, then `:` (the command prompt).
 
 ### Update, rollback and uninstall
 

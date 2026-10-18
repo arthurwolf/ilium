@@ -133,7 +133,7 @@ names the field path, for example `process_names[2]: empty name`.
     "process_names": ["example-agent"],
     "aliases": ["ea"],
     "icon": "robot",
-    "actions": { "compact": { "keys": "/compact\r", "allowed_when": ["idle", "done"] } },
+    "actions": [{ "id": "compact", "keys": "/compact\r", "allowed_when": ["idle", "done"] }],
     "resume": ["example-agent", "--resume", "{session}"],
     "session_scope": "agent-sessions:claude"
   }],

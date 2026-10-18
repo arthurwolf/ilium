@@ -259,7 +259,7 @@ the universal codes (`not-permitted` for a path escape, `revoked`, `internal`) a
 | `storage.put` | key empty or over 256 bytes, value over 1 MiB | `invalid-argument` |
 | `storage.put` | bucket over 16 MiB (256 MiB at T1) | `quota-exceeded` |
 | `storage.write-batch` | more than 256 entries or 4 MiB of key and value bytes | `invalid-argument` |
-| `storage.put` in `shared` | bucket over `shared_cache_mib` | `quota-exceeded` |
+| `storage.put` in `shared` | bucket over `shared_cache_mib` | oldest entries evicted, no error |
 | `settings.set-json` | patch over 256 KiB, or a value that breaks the schema | `invalid-argument` |
 | `settings.set-json` | key of the other side | `invalid-argument` |
 | `codec` | input over 16 MiB, or corrupt data | `invalid-argument` |

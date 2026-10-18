@@ -502,14 +502,13 @@ if (event.tag === 'ui-action' && event.val.key === 'chord' && event.val.kind ===
 | `invalid-argument` | A chord breaks the grammar, the list is empty or has more than 32 chords, or the client cannot report the chord. |
 | `not-found` | The `pane` does not exist. |
 | `conflict` | Another plugin already holds that chord in the same scope. Choose another chord or wait. |
-| `quota-exceeded` | The plugin holds its maximum of grabs. The limit `key_grabs` is 8 per plugin by default and 32 at most, and `session_key_grabs` caps all plugins together at 32. Release a grab, then retry. |
+| `quota-exceeded` | The plugin holds its maximum of grabs. The limit `key_grabs` is 8 per plugin by default and at most 32 for tier 1 and 8 for tiers 2 and 3. Release a grab, then retry. |
 | `revoked` | The grant was revoked while the call was in flight. |
 
 | Limit | Value |
 |---|---|
 | Chords per grab | 32 |
-| Grabs per plugin (`key_grabs`) | 8 by default, 32 at most |
-| Grabs per session, all plugins (`session_key_grabs`) | 32 |
+| Grabs per plugin (`key_grabs`) | 8 by default, 32 at most for tier 1, 8 for tiers 2 and 3 |
 | Chords per `key-capture` widget | 1 |
 | `mode_label` | 16 cells |
 

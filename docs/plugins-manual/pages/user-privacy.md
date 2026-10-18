@@ -93,7 +93,7 @@ Ilium's own features that use the network are unchanged: for example, AI provide
 | What | Where | Who can read it |
 |---|---|---|
 | Installed packages | your plugin store | you |
-| Your permissions and answers | one file per plugin | you |
+| Your permissions and answers | `grants.json` and `consents.json`, one file each for all plugins | you |
 | Plugin settings | your `config.toml` and the project's `.ilium` folder | you, and anyone who gets those files |
 | Plugin data and notes | one folder and database per plugin | you and that plugin |
 | Plugin logs | one file per plugin | you |
@@ -109,7 +109,7 @@ Plugin logs are plain text. Plugins are told not to write secrets there, but Ili
 |---|---|
 | Everything of one plugin | `ilium plugin uninstall <id> --purge` |
 | A plugin's settings only | Recovery page > Forget settings |
-| A plugin's logs | `--purge`, or wait: logs of an uninstalled plugin are deleted after 7 days |
+| A plugin's logs | `--purge` |
 | One project's plugin data | Delete the plugin's files in the project's `.ilium` folder, or use `--purge` while the project is open |
 | My trusted publisher keys | `ilium plugin trust remove <key_id>` |
 | Everything | Remove the plugin folders listed in [Plugin files on disk](/pages/reference-plugin-files/) with Ilium stopped |

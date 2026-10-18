@@ -40,7 +40,7 @@ The table of [Plugin command line](/pages/reference-plugin-cli/#exit-codes) hold
 
 ## install
 
-`ilium plugin install <source> [--allow-unsigned] [--allow-downgrade] [--trust <key_id>] [--channel stable|beta|dev] [--yes] [--grant <grant>]... [--locked] [--dry-run] [--registry <url>] [--from-bundle <dir>]`
+`ilium plugin install <source> [--allow-unsigned] [--allow-downgrade] [--trust <key_id>] [--channel stable|beta|dev] [--yes] [--grant <grant>]... [--locked] [--dry-run] [--registry <url>] [--from-bundle <dir>] [--unskip]`
 
 A source is a path to a `.iliumpkg` file, an `https://` URL, or a registry id with an optional range (`com.example.notes@^1.2`).
 

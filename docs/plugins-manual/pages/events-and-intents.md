@@ -49,7 +49,7 @@ An event reaches a plugin only when the plugin holds the listed grant. Lazily ac
 | `input-submitted` | `node`, `text`, `source` (user, plugin, scheduled, voice), `epoch: u64` | `agent.read-prompts` | Never dropped |
 | `output-matched` | `node`, `filter-id`, `line`, `row` | `terminal.output-filter` | Drop oldest, counted |
 | `link-activated` | `node`, `detector-id`, `text` | own `link_detectors` | Never dropped |
-| `pointer` | `node`, `row`, `column`, `kind` (down, up, drag, wheel), `button` | `terminal.pointer`, while claimed | Coalesced (drag) |
+| `pointer` | `node`, `row`, `column`, `kind` (down, up, move, drag, wheel-up, wheel-down, wheel-left, wheel-right), `button` | `terminal.pointer`, while claimed | Coalesced (drag) |
 | `editor-opened`, `editor-closed` | `buffer-ref` | `editor.read` | Never dropped |
 | `editor-changed` | `buffer`, `revision`, `first-line`, `last-line` | `editor.read` | Coalesced by buffer, debounced 100 ms |
 | `editor-saved` | `buffer`, `path` | `editor.read` | Never dropped |
@@ -263,7 +263,7 @@ Every intent needs its grant. The outcome column lists the codes beyond `ok`.
 | `invoke-command` | `command`, `arguments-json` | `commands.invoke` | `refused(not-found)`, `failed(timed-out)` after 30 s |
 | `message` | `to`, `channel`, `payload` | `messages.peer:<plugin-id>` | `refused(not-found)`, `refused(invalid-argument)` over 1 MiB |
 | `editor-apply-edits` | `buffer`, `base-revision`, `edits` | `editor.edit` | `refused(conflict)` for a stale revision, `refused(invalid-argument)` for overlapping edits |
-| `editor-open` | `path`, `line`, `placement` (new pane, split, replace) | `editor.edit` | `ok-node`; `refused(not-permitted)`, `failed(not-found)`, `failed(io)` |
+| `editor-open` | `path`, `line`, `placement` (new pane, split, replace) | `editor.edit`, `fs.read` | `ok-node`; `refused(not-permitted)`, `failed(not-found)`, `failed(io)` |
 
 ## Extended intents
 

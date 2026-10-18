@@ -79,6 +79,9 @@ The contract also has nine requestable limits in the same form. They bound the h
 | `journal_entries` (per pane) | 5,000 | 20,000 | 5,000 | Oldest trimmed |
 | `toasts_pending` | 3 | 3 | 3 | Oldest replaced |
 | `package_assets_mib` | 64 | 256 | 64 | `manifest.asset-size` |
+| `event_queue` | 1,024 | 4,096 | 1,024 | Stuck plugin is restarted |
+| `ui_tree_nodes` | 4,096 | 16,384 | 4,096 | Trap (`ui.too-large`) |
+| `table_elements` | 10,000 | 50,000 | 20,000 | Instance trapped |
 
 A bundled plugin with the top-level manifest key `limits_tier: "first-party"` also lifts the settings caps and the `list-editor` cap. That tier is for bundled `ilium.` plugins only.
 
@@ -119,6 +122,7 @@ New provider exports run under short deadlines. A breach counts like any other d
 |---|---|
 | `catalog-provider.query-catalog`, `menu-provider.menu-items`, `virtual-rows-provider.list-virtual-children` | 20 ms |
 | `token-provider.tokens` | 10 ms per call |
+| `settings-validate` (the optional export that checks a settings save) | 100 ms; a breach counts like any other deadline breach, and the save fails and keeps the previous value |
 | `client-requests.request` timeout | 1 to 30,000 ms, set per request |
 
 The host also limits how often a plugin may call some imports. A call over the rate is refused with `rate-limited` and `retry-after-ms`, so a plugin that updates a widget in a loop spends nothing on the refused calls.
@@ -265,7 +269,7 @@ The host has a fixed set of budgets and a benchmark for each. They are not rules
 | Choice | Cost | What to do |
 |---|---|---|
 | T1 plugin | A host call is a function call inside the process: about 1 µs. | Nothing special. |
-| T2 or T3 plugin | Each host call that has an effect, such as `storage.set` or a submission, is one round trip to the host: 0.2 ms median and 0.5 ms at the 99th percentile. Pure imports such as `codec` and `vector` run inside the helper with no round trip. | Batch work. In a 20 ms batch, 20 forwarded calls can use half of the budget. Read once, write once. |
+| T2 or T3 plugin | Each host call that has an effect, such as `storage.set` or a submission, is one round trip to the host: 0.2 ms median and 0.5 ms at the 99th percentile. Pure imports such as `codec` and `vector` run inside the helper with no round trip. | Batch work. At the 99th percentile (0.5 ms), 20 forwarded calls use 10 ms, half of a 20 ms batch. Read once, write once. |
 | T2 or T3 start | A helper process starts at the first activation: record 20 to 80 ms. | Use lazy activation triggers; do not activate at startup without need. |
 | Rust component | Instance about 4 MiB, start under 5 ms. | The default choice for scenes and detectors. |
 | TypeScript component | Includes a JavaScript engine: a larger component and instance, and slower code than Rust. Budget it at several times the memory of a Rust plugin and measure your handlers. | Keep TypeScript handlers short. Put heavy loops in a job, or write them in Rust. Measure a TypeScript scene against its frame budget. |

@@ -531,7 +531,7 @@ The text widgets return no error codes of their own. The errors below come from 
 | Two widgets with the same `key` in one view | The tree is invalid and the instance traps. |
 | A tree with more than 4,096 nodes, or a child index out of range | The tree is invalid and the instance traps. |
 | A scrollable paragraph with no `key` | Its offset resets on every render. |
-| A tooltip longer than 200 characters | Not allowed. The limit is 200 characters. |
+| A tooltip longer than 200 characters | The host cuts it at 199 Unicode scalar values and appends an ellipsis. There is no error. |
 | `set-widget-state` with an unknown key | `not-found`. |
 | `set-widget-state` with `offset` on a `leader-row` | `invalid-argument`, because the state kind does not fit the widget. |
 | A link, span or hint whose command the plugin may not invoke | `not-permitted`. The command does not run. |

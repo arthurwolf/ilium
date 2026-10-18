@@ -299,7 +299,7 @@ Event::JobProgress(progress) => scan::on_job_progress(progress.request_id, progr
 Points to notice:
 
 - A failed scan takes the same branch as a successful one. `take_entries` returns `None`, and the log says `scan finished without a result`.
-- A second scan replaces the first id in its slot, so the first completion is ignored. The host holds that result for 30 seconds and then drops it (N16).
+- A second scan replaces the first id in its slot, so the first completion is ignored. The host holds that result for 30 seconds and then drops it.
 - A job failure never counts toward the plugin's restart rule.
 
 ### Client: the results panel
@@ -411,7 +411,7 @@ Points to notice:
 
 ### The same workflow in TypeScript
 
-The TypeScript server uses the same commands, topics and manifest. `start` resolves with the job output and gives no job id (N5), so the scan sets a `scanning` flag and forwards each `job-progress` event while it is set. Errors are thrown as `PluginError`, and a `u64` such as the read offset is a `bigint` (S5).
+The TypeScript server uses the same commands, topics and manifest. `start` resolves with the job output and gives no job id, so the scan sets a `scanning` flag and forwards each `job-progress` event while it is set. Errors are thrown as `PluginError`, and a `u64` such as the read offset is a `bigint` (S5).
 
 **TypeScript**
 

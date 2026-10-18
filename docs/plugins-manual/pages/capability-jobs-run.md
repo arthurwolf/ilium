@@ -130,7 +130,7 @@ The starting side gets a request id at once. A job waits in the queue while the 
 |---|---|
 | Grant declined, or revoked while the plugin runs | `start` returns `not-permitted`, and `run` is never called. Pending jobs that need the grant complete as `failed(revoked)`. |
 | Kind not listed in `contributes.jobs` | `start` returns `invalid-argument`. |
-| Input over the input limit | `start` returns `invalid-argument` at once. Nothing is queued. |
+| Input over `job_io_mib` (input and output together; default 16 MiB, ceiling 64 for tier 1 and 16 for tiers 2 and 3) | `start` returns `invalid-argument` at once. Nothing is queued. |
 | Job queue full | `start` returns `busy`. Jobs within the queue limit wait without an error. |
 | Output over the output limit | The job completes as `failed(invalid-argument)`. |
 | CPU or wall-clock deadline passed | `failed(timed-out)`. |

@@ -588,7 +588,7 @@ The spinner steps its frames in the host (`⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ �
 // types::ui::{VideoSource, MediaFit}
 let clip = tree.video(VideoSource::Asset("loops/shore.webm".into()))
     .autoplay(true).looped(true).fit(MediaFit::Cover).key("clip");
-let term = tree.terminal_view(self.pane).interactive(true).scrollback(true).key("term"); // needs terminal.raw-input
+let term = tree.terminal_view(self.pane).interactive(true).scrollback(true).key("term"); // needs terminal.read-screen, and terminal.raw-input because it is interactive
 ```
 
 **TypeScript**
@@ -597,7 +597,7 @@ let term = tree.terminal_view(self.pane).interactive(true).scrollback(true).key(
 import { video, terminalView } from '@ilium/plugin-sdk/ui/build';
 
 const clip = video({ tag: 'asset', val: 'loops/shore.webm' }, { key: 'clip', autoplay: true, loop: true, fit: 'cover' });
-const term = terminalView(pane, { key: 'term', interactive: true, scrollback: true }); // needs terminal.raw-input
+const term = terminalView(pane, { key: 'term', interactive: true, scrollback: true }); // needs terminal.read-screen, and terminal.raw-input because it is interactive
 ```
 
 ### Hover, pointer, drag feedback, popovers and theme tokens
@@ -749,11 +749,11 @@ let ids = vector::embed(&["notes on retries".to_string()], "search").await?;
 let child = process::spawn(SpawnSpec { process: spec, stdin_open: true, line_mode: true })?;
 child.write_stdin(b"ping\n")?;
 // durable timers and journal.
-timers::at("nightly", 86_400_000, true)?;
-journal::log_event("moved", &payload)?;
+timers::at(1_790_000_000_000, "nightly")?; // epoch in ms, then the timer name
+journal::log_event(None, "moved", &payload)?;
 // kernel settings and keymap (read-only).
-let value = kernel_settings::read("terminal.scrollback")?;
-let chord = keymap::bindings("palette.open")?;
+let value = kernel_settings::read("terminal")?; // the tab; JSON text
+let bindings = keymap::bindings();
 // client requests: ask the attached client to do something.
 let answer = client_requests::request("pick-file", &args).await?;
 // sessions (server): list and send to another session.

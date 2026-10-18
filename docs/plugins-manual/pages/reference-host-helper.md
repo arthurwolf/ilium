@@ -151,7 +151,7 @@ When the charge for an activation would pass `session_memory_mib`, the activatio
 
 With cgroup v2 delegated, the kernel enforces `memory.max`. Without it, the helper uses `RLIMIT_AS` and the host samples RSS once a second. An out-of-memory kill is reported as a `trap.memory` and counts as a failure.
 
-- **[HST-164]** The host MUST charge `memory_mib + 32` MiB per helper to `session_memory_mib` at spawn and release it at exit.
+- **[HST-164]** The host MUST charge the sum of the hosted instances' `memory_mib` plus 32 MiB per helper to `session_memory_mib` at spawn and release it at exit.
 - **[HST-165]** An activation that would exceed `session_memory_mib` MUST be refused with `session.memory-exceeded`, MUST NOT count as a failure, and MUST leave the side `inactive` with the reason `host-capacity`.
 
 ## Helper count

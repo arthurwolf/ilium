@@ -131,7 +131,7 @@ A **world variant** is a base world plus the export fragments that a plugin impl
 | `with-hook-handler` | `hook-handler`, which dispatches the hook extensions of the plugin on this side | yes | yes | no |
 | `with-migrator` | `migrator`, which converts stored data when `data_version` rose | yes | yes | no |
 
-The `hook-handler` export is listed in the manifest `exports` of every side that has hook extensions. The `collect` kind of extension point needs no export, because entries are data. A plugin that owns a point and runs hooks does not export `hook-handler` (see [Extension points](/pages/api-extension-points/)).
+A side lists `hook-handler` in its manifest `exports` when it contributes handlers to hook extension points, its own or another plugin's. Owning a point and running its hooks does not need the export. A plugin that both owns a point and contributes handlers lists `hook-handler` on each side that contributes handlers; a plugin that only owns points never lists it. The `collect` kind of extension point needs no export, because entries are data (see [Extension points](/pages/api-extension-points/)).
 
 ### Where each side runs
 

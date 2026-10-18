@@ -27,7 +27,7 @@ Read [Retained mode](/pages/retained-mode/) and [Accessibility and theming](/pag
 | Rust | `fn render(&mut self, view: ViewTarget, area: Area) -> UiTree` |
 | TypeScript | `render(view: ViewTarget, area: Area): UiTree` inside `definePlugin` |
 
-The kernel calls `render` when the view first opens, after `ui.invalidate` for that view, and when the view's area changes. It never runs on every frame. Every change of the view's area triggers one render with the new area, coalesced to at most one per 16 ms; until it returns, the host lays out the previous tree in the new area through the same constraint solver. `area` gives the `columns` and `rows` the view may use. The host clips every widget to that area. [Layout constraints](/pages/layout/) shows how a plugin uses `area`.
+The kernel calls `render` when the view first opens, after `ui.invalidate` for that view, when the view's area changes, and after a theme or font change. It never runs on every frame. Every change of the view's area triggers one render with the new area, coalesced to at most one per 16 ms; until it returns, the host lays out the previous tree in the new area through the same constraint solver. `area` gives the `columns` and `rows` the view may use. The host clips every widget to that area. [Layout constraints](/pages/layout/) shows how a plugin uses `area`.
 
 ### View targets
 
@@ -61,7 +61,7 @@ record ui-tree { version: u32, nodes: list<ui-node>, root: u32 }
 - Each `key` must be unique across the whole view, not only among siblings. A duplicate key anywhere in one `ui-tree` traps with `ui.duplicate-key`. The host matches nodes by key across the whole view, so a keyed node that moves to another parent keeps its host-owned state.
 - The depth is at most 32, and the root is depth 1. A node at depth 33 traps with `ui.too-deep`.
 - A `layout` needs one child per constraint, and a `ratio` with denominator 0 is invalid (`ui.invalid-tree`).
-- `views.render` returns a `ui-tree`, not a `result`, so it cannot return `invalid-argument`. There is one outcome for every invalid tree: the host keeps the previous tree (marked stale), logs one error, and the instance traps with `trap.invalid-ui-tree`, whose logged detail reason is a `ui.*` code. The trap counts as one failure under the restart rule (see [Errors and limits](/pages/reference-errors-and-limits/)). The codes are `ui.invalid-tree` (structure, duplicate item ids, a prop out of range, more than 256 check-list items, more items than `max-items`, a bad validation regex), `ui.duplicate-key`, `ui.too-deep`, `ui.too-large` (more than 4,096 nodes or 1 MiB) and `ui.widget-not-allowed` (a `menu`, `list-editor` or other input widget in a settings page). A render over its deadline traps with `ui.render-timeout`.
+- `views.render` returns a `ui-tree`, not a `result`, so it cannot return `invalid-argument`. There is one outcome for every invalid tree: the host keeps the previous tree (marked stale), logs one error, and the instance traps with `trap.invalid-ui-tree`, whose logged detail reason is a `ui.*` code. The trap counts as one failure under the restart rule (see [Errors and limits](/pages/reference-errors-and-limits/)). The codes are `ui.invalid-tree` (structure, a prop out of range, more than 256 check-list items, more items than `max-items`, a bad validation regex), `ui.duplicate-key` (two nodes with the same key, or two items with the same item `id` in one widget), `ui.too-deep`, `ui.too-large` (more than 4,096 nodes or 1 MiB) and `ui.widget-not-allowed` (a `menu`, `list-editor` or other input widget in a settings page). A render over its deadline traps with `ui.render-timeout`.
 
 The Rust and TypeScript builders fill `version`, the widget defaults and the child indices. A wrong layout stops the render before the tree leaves the plugin, and the message names the layout key.
 
@@ -129,11 +129,13 @@ Each node carries one `widget` variant. There are 51 widgets in seven families. 
 | Layout and containers | `scroll-view`, `scrollbar` | `scrolled` with `index(u32)` | [Layout and containers](/pages/widgets-layout-and-containers/) |
 | Text | `paragraph` | `scrolled` when scrollable; `activated` for clickable spans | [Text](/pages/widgets-text/) |
 | Text | `markdown` | `activated` with `text(target)` without `link-command` | [Text](/pages/widgets-text/) |
-| Text | `leader-row`, `key-hints`, `diff-view` | nothing; `key-hints` runs its command on the host | [Text](/pages/widgets-text/) |
+| Text | `leader-row`, `key-hints` | nothing; `key-hints` runs its command on the host | [Text](/pages/widgets-text/) |
+| Text | `diff-view` | `selected`, `activated` with `index(u32)` (hunk or line) | [Text](/pages/widgets-text/) |
 | Collections | `%list`, `table`, `tree-list`, `menu`, `check-list`, `list-editor` | `selected`, `activated`, `toggled`, `changed`, `context-requested`, `closed` | [Collections](/pages/widgets-collections/) |
 | Data display | `gauge`, `line-gauge`, `sparkline`, `bar-chart`, `canvas`, `calendar`, `minimap` | nothing | [Data display](/pages/widgets-data-display/) |
 | Data display | `chart`, `progress-row`, `meter` | `selected` (focusable chart), `activated` (progress row) | [Data display](/pages/widgets-data-display/) |
-| Input | `button`, `toggle`, `choice`, `number`, `text-input`, `text-area`, `schema-form`, `key-capture`, `color-picker`, `path-field`, `location-picker` | `activated`, `changed`, `submitted`, `filter-changed` | [Input](/pages/widgets-input/) |
+| Input | `button`, `toggle`, `choice`, `number`, `text-input`, `text-area`, `key-capture`, `color-picker`, `path-field`, `location-picker` | `activated`, `changed`, `submitted`, `filter-changed` | [Input](/pages/widgets-input/) |
+| Input | `schema-form` | nothing; the owning plugin receives `settings-changed` | [Input](/pages/widgets-input/) |
 | Status and feedback | `badge`, `spinner`, `notice`, `icon` | nothing; `notice` may send `closed` | [Widget catalogue](/pages/widgets-index/) |
 | Media and embedded | `surface`, `terminal-view`, `code-view` | `activated` with `cell`, `pointer`, `changed` | [Media and embedded](/pages/widgets-media-and-embedded/) |
 | Media and embedded | `image`, `video` | nothing | [Media and embedded](/pages/widgets-media-and-embedded/) |
@@ -505,7 +507,7 @@ const list = listWidget(items, { key: 'list', tabIndex: 3 });
 
 A `draggable` node dropped on a `drop-target` node produces one `dropped` action. Its value is `drop(drop-value)` (a record with `source-key`, `target-key` and `index`), with `index` as the insertion position. The event `key` is the target key. The host does not move data; the plugin moves its own.
 
-While a drag hovers a drop target, the host sends `drag-over` with `drag-over-value { source-key, target-key, index, accept }` once each time the target changes. The host decides the position from the pointer row inside the target's area, and `accept` carries the result: `before`, `after`, `inside` or `none`. For a `tree-item` with `expandable` set, the top third is `before`, the middle third is `inside` and the bottom third is `after`, with rows rounded down. For any other target, the top half is `before` and the bottom half is `after`. A target with `drop-target` unset accepts nothing. A drop sends `dropped` to the target key with the position in the `drop` value, and for a `tree-list` the source item id as `text`. The host draws the insertion line or the inside highlight, and scrolls the list when the pointer is near an edge.
+While a drag hovers a drop target, the host sends `drag-over` with `drag-over-value { source-key, target-key, index, accept }` once each time the target changes. The host decides the position from the pointer row inside the target's area, and `accept` carries the result: `before`, `after`, `inside` or `none`. For a `tree-item` with `expandable` set, the top third is `before`, the middle third is `inside` and the bottom third is `after`, with rows rounded down. For any other target, the top half is `before` and the bottom half is `after`. A target with `drop-target` unset accepts nothing. A drop sends `dropped` to the target key with the position in the `drop` value, and for a `tree-list` the target item id as `text`. The host draws the insertion line or the inside highlight, and scrolls the list when the pointer is near an edge.
 
 ## Settings views
 

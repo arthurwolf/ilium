@@ -6,7 +6,7 @@ permalink: /pages/api-http-streams/
 
 ## http streams
 
-A stream is an HTTP response that the plugin reads piece by piece while it is still arriving. Use it for server-sent events, newline-delimited JSON, long downloads and live feeds, where `fetch` (which waits for the whole body) does not fit. Streams are specified in the `http-stream` functions of the [WIT reference](/pages/reference-wit/#5-12-http). They use the same `http:<host-pattern>` grant as [http](/pages/api-http/), so read that page for request, header and host-pattern rules.
+A stream is an HTTP response that the plugin reads piece by piece while it is still arriving. Use it for server-sent events, newline-delimited JSON, long downloads and live feeds, where `fetch` (which waits for the whole body) does not fit. Streams are specified in the `http-stream` functions of the [WIT reference](/pages/reference-wit/#512-http). They use the same `http:<host-pattern>` grant as [http](/pages/api-http/), so read that page for request, header and host-pattern rules.
 
 ### What you need
 
@@ -33,7 +33,7 @@ open-websocket: func(url: string, protocols: list<string>) -> result<stream-id, 
 send-websocket: func(stream: stream-id, text: string) -> result<_, plugin-error>;
 ```
 
-Events (defined in the [WIT reference](/pages/reference-wit/#4-12-events)):
+Events (defined in the [WIT reference](/pages/reference-wit/#412-events)):
 
 | Event | Payload | Delivery |
 |---|---|---|

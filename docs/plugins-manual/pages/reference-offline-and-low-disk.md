@@ -61,7 +61,7 @@ If the data folder is not writable, the host starts in a read-only mode. Install
 
 ### The compile cache
 
-T2 and T3 components are compiled ahead of use and cached in `<cache>/plugins/compile/`. The key is the component hash, the Wasmtime version and the CPU features. A change of any part makes a new entry. The cache may be removed at any time and is rebuilt on demand. It is not needed to run, only to start fast.
+T2 and T3 components are compiled ahead of use and cached in `<cache dir>/ilium/plugins/compile/`. The key is the component hash, the Wasmtime version and the CPU features. A change of any part makes a new entry. The cache may be removed at any time and is rebuilt on demand. It is not needed to run, only to start fast.
 
 - [LIF-176] The compile cache key MUST include the component hash, the Wasmtime version and the CPU features, and a missing cache MUST NOT stop a plugin. Test: delete the cache and start.
 

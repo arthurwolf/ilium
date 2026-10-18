@@ -350,8 +350,7 @@ Failures older than 10 minutes drop out of the count on their own, so a plugin t
 | `activate` returns an error | yes | Also when a `service:` or `cli:` call triggered the activation. |
 | `activate` misses its deadline | yes | |
 | `handler.on-events`, `views.render` or another export misses its deadline | yes | |
-| `deactivate` misses its deadline, reason `disabled` or `shutdown` | no | The plugin is leaving anyway. The instance is dropped and a warn line is logged. |
-| `deactivate` misses its deadline, reason `upgrade` or `revoked` | yes | The plugin was to continue. |
+| `deactivate` misses its deadline, any reason | no | The miss is logged and dropped: the instance is dropped, its restore bytes are discarded and a warn line is logged [HST-191]. |
 | Event queue overflow (more than 1,024 events by default) | yes | |
 | Memory limit of the instance reached | yes | A trap. |
 | Instantiation refused because the session memory pool is full | no | Host capacity, see below. |
@@ -451,7 +450,7 @@ A reinstalled plugin reads its kept values again. The recovery page is the only 
 
 Revoking a grant in Settings > Plugins > Capabilities, or with `ilium plugin grants <id> --revoke <grant>`, bumps the authorization epoch. Calls in flight return `revoked`, and pending requests that need the capability complete as `failed(revoked)`. The plugin receives `deactivate(revoked)` and is activated again with the reduced grant set and its restore bytes. Decorations, toolbar state, grabs, claims, highlights, filters, watches and routes that need the capability are withdrawn.
 
-A capability added later by the user, or by an accepted upgrade, produces `deactivate(shutdown)` and a re-activation with the new set. Neither revocation nor a grant change counts as a failure.
+A capability added later by the user, or by an accepted upgrade, produces `deactivate(granted)` and a re-activation with the new set. Neither revocation nor a grant change counts as a failure.
 
 ## Development reload
 

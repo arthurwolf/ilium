@@ -55,7 +55,7 @@ close-video: func(video: u64);
 
 - **Frame rate.** The decoder does not pace the frames. The plugin decides how often it calls `next-frame`, usually from a timer ([timers](/pages/api-clock-and-timers/)).
 - **Frame size.** Each dimension must be at least 1, and `width` by `height` may not exceed 3,840 by 2,160. The frame size must match the pixel size of the surface that receives it. The host derives that pixel size from the surface's `min-columns` and `min-rows` and the sub-cell factor of the shared dither mode, so the plugin sets those widget props to give the size it asks for.
-- **Buffer.** The host decodes frames ahead, as many as fit in `video_buffer_mib` (64 MiB by default, 256 MiB at most) for each open video, and always at least one. A call that finds a buffered frame returns at once.
+- **Buffer.** The host decodes frames ahead, as many as fit in `video_buffer_mib` (64 MiB by default, 256 MiB at most for tier 1, 64 MiB for tiers 2 and 3) for each open video, and always at least one. A call that finds a buffered frame returns at once.
 - **Open videos.** A plugin may hold 2 open videos at once, and the ceiling is 8. A third `open-video` returns `quota-exceeded` until one is closed.
 - **Closing.** Call `close-video` as soon as the plugin no longer needs the video. Each open video holds its decoder and its frame buffer until then.
 

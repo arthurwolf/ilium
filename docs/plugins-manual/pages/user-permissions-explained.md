@@ -186,6 +186,7 @@ A started program runs in the same sandbox as the plugin, with no network. Stopp
 | `settings.contribute:<tab>` | Add rows to one named built-in Settings tab | normal |
 | `settings.read-kernel:<tab>` | Read the values of one built-in Settings tab | normal; HIGH for the api tab |
 | `settings.read-all`, `settings.write-all` | Read or change every setting. Bundled plugins only | HIGH |
+| `settings.write-kernel:<tab>` | Change the values of one built-in Settings tab. Bundled plugins only, one holder per tab | HIGH |
 | `plugins.manage` | Install, remove and turn plugins on and off. Bundled plugins only | HIGH |
 | `help.read` | Read the Ilium help topics | normal |
 | `gpu.kernels` | Run graphics code. Development builds only | normal |

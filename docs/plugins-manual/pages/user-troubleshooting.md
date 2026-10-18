@@ -58,7 +58,7 @@ Start it in one of three ways:
 
 1. From a terminal: `ilium --safe-mode`.
 2. From the recovery page, press the Safe mode action. Ilium restarts the client with third-party plugins off.
-3. If Ilium fails to start twice in a row while a plugin starts, Ilium offers safe mode at the next start. (Pending decision: the offer after two failed starts is proposed.)
+3. If Ilium crashes during start three times within 5 minutes, the next start uses safe mode with third-party plugins off (LIF-186).
 
 In safe mode, a banner stays at the top of the screen: "Safe mode: third-party plugins are off." The Plugins tab still works. Every third-party row shows **Off** with the reason `safe-mode`. You can read logs, uninstall plugins and use the bisect tool. You cannot turn a third-party plugin on until you leave safe mode.
 
@@ -127,7 +127,7 @@ ilium plugin bisect bad      # the problem is still there
 ilium plugin bisect reset    # stop and put everything back
 ```
 
-Bisect changes nothing on disk. The plugins it turns off are off for this run, as in safe mode, and `reset` or a restart brings them back. When bisect has found the plugin, it names it and offers to turn it off for good or to open its log.
+Bisect writes only its own state file, `<data>/plugins/bisect.json`, and changes no plugin file and no setting. The plugins it turns off are off for this run, as in safe mode, and `reset` or a restart brings them back. When bisect has found the plugin, it names it and offers to turn it off for good or to open its log.
 
 1. Run `ilium plugin bisect start`.
 2. Look at whether the problem is still there. Answer `good` when it is gone, `bad` when it is still there.

@@ -105,7 +105,7 @@ activate: func(context: activation) -> result<_, plugin-error>;
 deactivate: func(reason: deactivation-reason) -> option<list<u8>>;
 ```
 
-The record `activation` is defined once in the [WIT reference](/pages/reference-wit/) (`lifecycle`, [section 4.13](/pages/reference-wit/#4-13-lifecycle)). It has the fields `plugin`, `api`, `instance`, `side`, `settings-json`, `granted` and `restored`.
+The record `activation` is defined once in the [WIT reference](/pages/reference-wit/) (`lifecycle`, [section 4.13](/pages/reference-wit/#413-lifecycle)). It has the fields `plugin`, `api`, `instance`, `side`, `settings-json`, `granted` and `restored`.
 
 `granted` lists the capabilities actually granted, so a plugin can hide features it cannot use. The bytes that `deactivate` returns come back as `restored` on the next activation. Use them to keep state across a restart.
 

@@ -143,7 +143,7 @@ com.example.cursor    <span class="t-err">failed</span>     -      -
 | A plugin is stuck inside a slow host call | The call returns, then the epoch traps it at the next safe point. |
 | `activate` never returns | The activate deadline traps it. One failure counts. |
 | A T1 plugin loops while the UI waits for its render | The render deadline traps it within 30 ms on the client. The view shows its last good frame, marked stale. |
-| The machine sleeps during a call | The monotonic clock may not advance; the host treats a jump larger than 5 s as a clock skip and does not count the call as a breach. |
+| The machine sleeps during a call | The monotonic clock may not advance; the host treats a gap of more than 1 s as a clock skip and does not count the call as a breach. |
 
 ### See also
 

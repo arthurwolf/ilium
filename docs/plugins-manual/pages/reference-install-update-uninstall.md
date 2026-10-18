@@ -26,7 +26,7 @@ All paths are relative to the plugin root, `<data dir>/plugins/`, where `<data d
 <data dir>/plugins/
   installed.json            registry, versioned format
   installed.lock            exclusive OS advisory lock; holder pid and boot id for messages
-  store/<id>/<version>/     immutable package: manifest.json, manifest.sha256, components, files
+  store/<id>/<version>/     immutable package: package.iliumpkg, manifest.json, manifest.sha256, components, files
   staging/<uuid>/           uncommitted unpack of one operation
   locks/<id>.migrate.lock   cross-process lock of one data migration
   backups/<id>/<version>-<utc timestamp>/   pre-migration copy of data and buckets
@@ -190,7 +190,7 @@ Grant review in a non-interactive run (no TTY): normal grants are accepted only 
 
 A higher version of an installed id is an update. It is the same pipeline, committed beside the old version, followed by a swap. The candidate lives in `store/<id>/<version>/` from step 5 on, so the waiting period never depends on `staging/`.
 
-1. Steps 1 to 5 run as for an install. The dialog shows only the new capabilities. The package state is `update-staged`.
+1. Steps 1 to 5 run as for an install. The dialog shows only the new capabilities. The package state is `update-staged` only when the new version asks for grants beyond those the user accepted, and stays so until the review is answered (LIF-078); otherwise the update goes on to step 2.
 2. Step 6 writes `previous_version` and `update: { candidate, state: "staged", attempts: 0, started_at }`, and leaves `active_version` unchanged.
 3. Each running server receives the change. At the next safe point ([Install and update](/pages/reference-install-and-update/), PKG-278) each live instance receives `deactivate(upgrade)` and returns its restore bytes ([LIF-044](/pages/lifecycle/)).
 4. Before the host calls `migrate`, it writes `update.state: "migrating"` to `installed.json` with fsync. The data migration runs ([Data migration](/pages/guide-data-migration/)). If the host stops while the state is `migrating`, the next start restores the backup, increments `attempts` and runs the migration again; when `attempts` reaches 2 the host rolls back with `migration.interrupted` and marks the candidate `skip`.
@@ -227,11 +227,11 @@ If activation of the new version is deferred (a lazy plugin has no trigger yet),
 |---|---|---|---|
 | Store entries (all versions) | deleted | deleted | deleted |
 | Data directory | kept | deleted | kept |
-| Cache directory and compile cache | deleted | deleted | deleted |
+| Cache directory and compile cache | kept | deleted | kept |
 | Global bucket | kept with the data directory | deleted | kept |
 | Project bucket | kept | deleted for this project, tombstone for others | kept |
 | Session bucket | kept until its session is deleted | deleted for this session, tombstone for others | kept |
-| Shared bucket | deleted | deleted | deleted |
+| Shared bucket | kept | deleted | kept |
 | Settings values | kept | deleted | kept |
 | Grants and first-use answers | deleted | deleted | deleted |
 | Node metadata in snapshots | kept, inert | deleted for the live session, tombstone for others | kept, inert |
@@ -261,7 +261,7 @@ All commands print JSON lines when output is not a terminal, or when `--json` is
 
 | Command | Purpose |
 |---|---|
-| `ilium plugin install <file> [--allow-unsigned] [--allow-downgrade] [--yes] [--grant <name>]...` | Install or update from a package file. |
+| `ilium plugin install <source> [--allow-unsigned] [--allow-downgrade] [--trust <key_id>] [--channel stable\|beta\|dev] [--yes] [--grant <name>]... [--locked] [--unskip]` | Install or update from a package file, URL or registry id. `--unskip` clears the `skip` mark that a rollback set on that version. Full flag list: [Distribution commands](/pages/reference-plugin-distribution-cli/#install). |
 | `ilium plugin update <file>` | Same as install, but fails with `install.not-installed` when the id is not installed. |
 | `ilium plugin uninstall <id> [--purge] [--keep-data]` | Remove a plugin. The two flags exclude each other. |
 | `ilium plugin enable <id> [--scope <scope>] [--session <name>]` | Turn a plugin on. |

@@ -249,8 +249,6 @@ The table lists the per-plugin limits. The values belong to API version `ilium:p
 | `job_queue` | 16 | 64 | 16 | `busy` |
 | `event_queue` | 1,024 | 4,096 | 1,024 | Stuck plugin is restarted |
 | `pending_requests` (ABI-013) | 64 | 256 | 64 | `busy` |
-
-`pending_requests` counts the requests that have a request id and no delivered completion: accepted submissions, calls that return a `request-id` (including deferred service calls) and jobs. A request enters the count when its id is returned and leaves it when its `request-completed` is enqueued for the plugin. Refused submissions, synchronous calls and the host-internal work of a request do not count. A call that would make the count exceed the limit returns `busy`, and in a batch it is refused as `refused(busy)` for that submission only. [API-073]
 | `timers` | 64 | 256 | 64 | `quota-exceeded` |
 | `output_filters` | 32 | 128 | 32 | `quota-exceeded` |
 | `watches` | 64 | 256 | 64 | `quota-exceeded` |
@@ -269,7 +267,9 @@ The table lists the per-plugin limits. The values belong to API version `ilium:p
 | `open_videos` | 2 | 8 | 2 | `quota-exceeded` |
 | `audio_captures` | 2 | 4 | 2 | `quota-exceeded` |
 
-The CPU time of a plugin is also charged to the `ilium-execution` quota group [API-072]. There is one group for each plugin side in each process. The group is a token bucket that holds 2,000 ms of CPU time and refills at 500 ms of CPU time per second. These values are fixed for ilium:plugin@0.1.0 and are not manifest keys. The group charges the thread time of `on-events`, `views.render`, `command`, scene frames, annotators and jobs, and it charges 1 ms for every 64 KiB of payload in a submission or a call that returns a `request-id`. When the bucket is empty, every call that returns a `request-id` and every submission returns `quota-exceeded` with The bucket balance can go below zero, because a call is charged after it ends. The bucket is empty when the balance is 0 or less. `retry-after-ms` = max(100, ceil_10(-balance_ms * 2)), where `ceil_10` rounds up to the next 10 ms: the wall time until the balance refills to 0 at 500 ms per second, never below 100. A balance of -100 ms gives 200. A trap inside a call still charges the time used. Test: run jobs that spin 2,150 ms of CPU in total from a full bucket (balance -150 ms) and assert that the next submission returns `quota-exceeded` with `retry-after-ms` 300. Second test: drive the balance to -100 ms, submit, and expect `retry-after-ms` 200. A per-kind job limit in `contributes.jobs` (`deadline_ms`, `memory_mib`) overrides the job values for that kind, within the same ceilings.
+`pending_requests` counts the requests that have a request id and no delivered completion: accepted submissions, calls that return a `request-id` (including deferred service calls) and jobs. A request enters the count when its id is returned and leaves it when its `request-completed` is enqueued for the plugin. Refused submissions, synchronous calls and the host-internal work of a request do not count. A call that would make the count exceed the limit returns `busy`, and in a batch it is refused as `refused(busy)` for that submission only. [API-073]
+
+The CPU time of a plugin is also charged to the `ilium-execution` quota group [API-072]. There is one group for each plugin side in each process. The group is a token bucket that holds 2,000 ms of CPU time and refills at 500 ms of CPU time per second. These values are fixed for ilium:plugin@0.1.0 and are not manifest keys. The group charges the thread time of `on-events`, `views.render`, `command`, scene frames, annotators and jobs, and it charges 1 ms for every 64 KiB of payload in a submission or a call that returns a `request-id`. When the bucket is empty, every call that returns a `request-id` and every submission returns `quota-exceeded` with a `retry-after-ms` value. The bucket balance can go below zero, because a call is charged after it ends. The bucket is empty when the balance is 0 or less. `retry-after-ms` = max(100, ceil_10(-balance_ms * 2)), where `ceil_10` rounds up to the next 10 ms: the wall time until the balance refills to 0 at 500 ms per second, never below 100. A balance of -100 ms gives 200. A trap inside a call still charges the time used. Test: run jobs that spin 2,150 ms of CPU in total from a full bucket (balance -150 ms) and assert that the next submission returns `quota-exceeded` with `retry-after-ms` 300. Second test: drive the balance to -100 ms, submit, and expect `retry-after-ms` 200. A per-kind job limit in `contributes.jobs` (`deadline_ms`, `memory_mib`) overrides the job values for that kind, within the same ceilings.
 
 Some caps are fixed and no manifest or user setting changes them: 256 submissions per `on-events` return (a trap when exceeded), 1 MiB for a synchronous `fs.read`, 4,096 entries for `fs.list-dir`, 8 MiB, 64 headers and 8 KiB of URL per HTTP request, a timer interval of at least 50 ms, and 64 picked paths per plugin (the oldest is forgotten). A call over a fixed cap that the plugin can check in advance returns `invalid-argument`, and nothing is written or sent. The host never truncates a value silently, with the exceptions in the next table. This table is the complete list of cuts and clamps [API-060]. Every other over-limit input is refused with a code.
 
@@ -288,7 +288,7 @@ Some caps are fixed and no manifest or user setting changes them: 256 submission
 | Event queues, journal, shared cache | Drop or evict the oldest entry and count it |
 | `fs.scan` over 65,536 entries | Stops at 65,536 and returns `truncated: true` |
 
-Per-call caps that a plugin can check before the call return `invalid-argument`. The caps that return `quota-exceeded` instead (`read-cells` rows, CLI stdin, `write-glyphs` cells, the popup stack) do so because they depend on held or cumulative state that the plugin cannot see in advance: other panes' frozen snapshots, bytes already written to the invocation, cells already queued in the frame, and popups already open [API-061].
+Per-call caps that a plugin can check before the call return `invalid-argument`. The caps that return `quota-exceeded` instead (`read-cells` rows, which return `none` and log the code, CLI stdin, `write-glyphs` cells, the popup stack) do so because they depend on held or cumulative state that the plugin cannot see in advance: other panes' frozen snapshots, bytes already written to the invocation, cells already queued in the frame, and popups already open [API-061].
 
 ### Host rules for limits and restarts
 
@@ -304,8 +304,8 @@ Limits that apply to a whole session (all plugins of one hosting process togethe
 
 | Key | Default | Ceiling | Effect when reached |
 |---|---|---|---|
-| `session_memory_mib` | 1,024 | 4,096 | Activation refused with `session.memory-exceeded`; the side stays `inactive` with the reason `host-capacity`; no failure |
-| `session_helpers` | 16 | 32 | Activation refused with `helper.too-many`; no failure |
+| `session_memory_mib` | 1,024 | 4,096 | Activation refused with `session.memory-exceeded` ([Host helper](/pages/reference-host-helper/)); the side stays `inactive` with the reason `host-capacity`; no failure |
+| `session_helpers` | 16 | 32 | Activation refused with `helper.too-many` ([Host helper](/pages/reference-host-helper/)); no failure |
 | `session_processes` | 16 | 64 | `process.run` returns `busy` and `process.spawn` returns `quota-exceeded`; one count covers both kinds of child |
 | `session_http_streams` | 64 | 256 | `http.open-stream` returns `quota-exceeded` |
 | `session_decorations` | 65,536 | 262,144 | `refused(quota-exceeded)` |
@@ -324,7 +324,7 @@ Restart delay, per side, within a window of 10 minutes: the first failure restar
 - **[HST-497]** `session_processes` MUST allow 16 children per session, counting `process.run` and `process.spawn` children together; when it is full `process.run` MUST return `busy` and `process.spawn` MUST return `quota-exceeded`.
 - **[HST-498]** A soft deadline breach MUST trap and count as a failure when it reaches the streak limit of its call class (3, or 30 for scene frames) or runs 100 ms past its deadline; a hook-handler breach MUST NOT count as a failure and MUST disable that extension handler.
 - **[HST-499]** The reply deadlines MUST be: command 30,000 ms, service 30,000 ms, sessions send reply 30,000 ms, inference completion 120,000 ms, HTTP API respond 30,000 ms, client request default 5,000 ms (settable 1 to 30,000) and job cancel grace 1,000 ms; each returns `timed-out` to the caller.
-- **[HST-406]** The host MUST enforce the five session keys `session_memory_mib`, `session_helpers`, `session_processes`, `session_http_streams` and `session_decorations`, and MUST apply a user value under `[plugins.limits]` for them only when it is lower than the default.
+- **[HST-406]** The host MUST enforce the five session keys `session_memory_mib`, `session_helpers`, `session_processes`, `session_http_streams` and `session_decorations`, and MUST apply a user value under `[plugins.limits]` for them only when it is lower than the current session value (the default, or the value already set); a higher value is clamped to the current session value and the host logs a warning.
 - **[HST-407]** A refusal because of `session_memory_mib` or `session_helpers` MUST leave the side `inactive` with the reason `host-capacity` and MUST retry the activation when capacity returns.
 - **[HST-408]** `event_queue` MUST default to 1,024 with a ceiling of 4,096 for T1 and 1,024 for T2 and T3.
 - **[HST-409]** `detector_deadline_ms` MUST default to 20 ms with ceilings of 50 ms for T1 and 20 ms for T2 and T3.
@@ -357,6 +357,7 @@ Install errors for `contributes.settings`. Each names the item, its JSON path an
 | `manifest.settings-command` | `settings row at <json path> names command "<id>" that the plugin does not contribute` |
 | `manifest.settings-glyph` | `settings tab glyph "<glyph>" must be one character 1 or 2 cells wide` |
 | `manifest.settings-limit` | `settings <item> at <json path> exceeds the limit of <n>` |
+| `manifest.settings-owner` | `another plugin already owns the settings tab "<tab>"` (raised when a second plugin claims a tab that already has an owner) |
 
 Load warnings are not install errors. They appear in `ilium plugin list` and on the recovery page:
 
@@ -367,7 +368,7 @@ Load warnings are not install errors. They appear in `ilium plugin list` and on 
 | `settings.anchor-missing` | An own-section anchor no longer exists; the section is placed at the end |
 | `settings.value-ignored` | A stored value no longer matches its row; the default applies and the stored text is kept |
 
-Limits are in [Errors and limits](/pages/reference-errors-and-limits/#settings-limits). The validation answer has a deadline of 100 ms, and a timeout refuses the save with `Could not check this value: <plugin name> did not answer.`
+Limits are in [Errors and limits](/pages/reference-errors-and-limits/#settings-codes-limits-and-warnings). The validation answer has a deadline of 100 ms, and a timeout refuses the save with `Could not check this value: <plugin name> did not answer.`
 
 ### Config, snapshot and settings-write codes
 
@@ -552,9 +553,9 @@ Fixed caps. They are the same for every tier unless `limits_tier` is `first-part
 | Backup copy before a migration (`migration_backup_mib`) | 2,048 MiB | the migration is refused with `migration.backup-too-large` |
 | Input lock | 2 s | `invalid-argument` |
 | `history-text` | 4 MiB, newest kept | truncated |
-| `read-cells` rows per call | 1,000 | `quota-exceeded` |
+| `read-cells` rows per call | 1,000 | `none`, and the host logs `quota-exceeded` |
 | Transcript per call | 512 turns or 4 MiB | oldest dropped |
-| HTTP stream chunk | 1 MiB | split |
+| HTTP stream chunk | 64 KiB | split |
 | CLI stdin per invocation | 4 MiB | `quota-exceeded` |
 | `write-glyphs` cells per frame | 131,072 | `quota-exceeded` |
 | Decoration frames, frame time | 16, at least 90 ms | `invalid-argument` |
@@ -603,6 +604,8 @@ Rates:
 | `topics.publish` | 100 per second per plugin |
 | `notify` | 6 per minute per plugin |
 | `play-sound` | 4 per second per plugin |
+| `open-external` | 10 per 60 s per plugin (sliding window) |
+| `run-hook` | 200 per second per extension point (sliding window) |
 | `mark-attention`, `ack-attention` | 10 per second per node per plugin, together |
 | `screen-changed` delivery | 10 per second per pane |
 
@@ -667,7 +670,7 @@ The complete list of install, signature, trust, registry and dependency codes, w
 
 An install, an update and `ilium plugin verify` report a code with the path of the fault. Codes that start with `manifest.` are about what the manifest says. Codes that start with `package.` are about the archive. The settings and extension point tables on this page give those codes with their messages. This index lists the other codes in one place, with the page that defines each. Codes of the `ilium plugin` command itself (`toolchain.`, `new.`, `dev.`, `inspect.`, `trace.` and `usage.`) are in [Plugin command-line reference](/pages/reference-plugin-cli/), the `component.` and `lint.` rules are in [Check and lint rules](/pages/reference-check-and-lint-rules/), and the `harness.` and `fixture.` codes are in [Test harness reference](/pages/reference-test-harness/). When two pages differ, the defining page decides, and a page that cites an install code MUST use the cause that the defining page gives. [AUT-110]
 
-Older drafts used other spellings for these codes. The current names are `manifest.unknown-key`, `manifest.api-version` and the four `manifest.file-*` codes; the [install error catalogue](/pages/reference-manifest-schema/#error-catalogue) is the only list.
+Older drafts used other spellings for these codes. The current names are `manifest.unknown-key`, `manifest.api-version` and the five `manifest.file-*` codes; the [install error catalogue](/pages/reference-manifest-schema/#error-catalogue) is the only list.
 
 | Code | Cause | Defined in |
 |---|---|---|

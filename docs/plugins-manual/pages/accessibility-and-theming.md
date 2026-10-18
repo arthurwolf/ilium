@@ -145,7 +145,7 @@ record style { fg: option<color>, bg: option<color>, add: modifiers, remove: mod
 record span { text: string, style: style }
 ```
 
-An empty style inherits the theme. A colour given as `rgb` or `indexed` is painted exactly as given. Use it only where a scene or an editor needs a natural colour. The host's contrast guarantee covers roles. A plugin that picks its own colours is responsible for contrast on both backgrounds.
+An empty style inherits the theme. A colour given as `rgb` or `indexed` is painted exactly as given. Use it only where a scene or an editor needs a natural colour. The host guarantees a contrast ratio of at least 4.5:1 between each of the nine foreground roles and the theme background, in every built-in theme; a theme test computes the ratio from the token values. This guarantee covers roles only. A plugin that picks its own colours is responsible for contrast on both backgrounds.
 
 ## The full surface
 
@@ -330,7 +330,7 @@ Meaning carried by sound, a desktop notice or a toast MUST also be carried by te
 | Theme changes during a render | The next render uses the new tokens. Bursts of `theme-changed` arrive as one event. |
 | Stable-glyph mode is on | The host draws the stable glyphs. The plugin keeps its own glyph names unchanged. |
 | Reduced motion is on | `spinner` shows one static frame. A plugin timer that animates should stop. |
-| Tree above its limit (default 4,096 nodes or 1,024 KiB) | The plugin traps. Repeated traps count toward the restart and disable rule. A first-party (T1) plugin may raise the limits through `limits` in its manifest, up to 16,384 nodes and 4,096 KiB. |
+| Tree above its limit (`ui_tree_nodes`, default 4,096 nodes; `ui_tree_kib`, default 1,024 KiB) | The plugin traps. Repeated traps count toward the restart and disable rule. A first-party (T1) plugin may raise the limits through `limits` in its manifest, up to 16,384 nodes and 4,096 KiB. |
 | `render` runs past its deadline (default 10 ms) | The render is a trap, like any other `views.render` failure. |
 
 A T1 plugin may raise the render deadline through `render_deadline_ms`, up to 20 ms. The styling functions return no error code. `theme()` and `display-width()` always answer, and styled-text fields have no validation error. Limits show up only as traps or as cut text.
@@ -347,7 +347,7 @@ A T1 plugin may raise the render deadline through `render_deadline_ms`, up to 20
 
 ### What the contract does not provide
 
-`ilium:plugin@0.1.0` has no accessible-label, screen-reader or high-contrast import, and no locale import. The terminal has no accessibility tree, so the plugin carries meaning in text. A plugin MUST NOT use colour as the only carrier of meaning, and MUST give every status a word or a glyph beside its colour role. [AUT-501] A plugin MUST read `reduced-motion` and stop its own animating timers when it is true. [AUT-502] A plugin SHOULD work in `compact` density at 40 columns and in both icon modes, and SHOULD end every icon-only control with a text label that stays when icons are not drawn. [AUT-503] A plugin SHOULD use the nine colour roles and avoid `rgb` and `indexed` colours, because only a role follows the theme and the user's contrast choice. [AUT-504] The list for release time is in [Quality checklist](/pages/guide-quality-checklist/), and width rules for other scripts are in [Internationalisation](/pages/guide-internationalisation/).
+`ilium:plugin@0.1.0` has no accessible-label, screen-reader or high-contrast import, and no locale import. The terminal has no accessibility tree, so the plugin carries meaning in text. A plugin MUST NOT use colour as the only carrier of meaning, and MUST give every status a word or a glyph beside its colour role. [AUT-501] A plugin MUST read `reduced-motion` and stop its own animating timers when it is true. [AUT-502] A plugin MUST work in `compact` density at 40 columns and in both icon modes, and MUST end every icon-only control with a text label that stays when icons are not drawn. [AUT-503] A plugin MUST use the nine colour roles and avoid `rgb` and `indexed` colours, because only a role follows the theme. [AUT-504] The list for release time is in [Quality checklist](/pages/guide-quality-checklist/), and width rules for other scripts are in [Internationalisation](/pages/guide-internationalisation/).
 
 ### See also
 
