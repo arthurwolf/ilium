@@ -14,6 +14,7 @@ development period. Dates are commit dates (`YYYY-MM-DD`).
 ## [Unreleased]
 
 ### Changed
+- Saved Minecraft landscapes render chunks that are only partly generated; a route is rejected only when a source chunk has no saved data at all
 - The progress-monitor instructions Ilium installs for agents (version 11) use a unit-test run as the example progress message instead of a release build, so agents are not nudged toward release builds; installed instruction blocks are refreshed automatically.
 - Codex session conversion now bounds app-server output records and queued reader events, clipping oversized diagnostics and failing closed on oversized protocol lines.
 - Live ambient data pollers and fleet-marker preparers now reserve persistent worker capacity from the host's shared quota before starting.

@@ -54,89 +54,18 @@ const PREPARATION_BUSY_ACTIVITY_INTERVAL: Duration = Duration::from_secs(3);
 const MIN_OVERALL_ETA_SAMPLE: Duration = Duration::from_secs(60);
 const MIN_OVERALL_ETA_PROGRESS_PERCENT: usize = 10;
 
+// Partly generated chunks are eligible: the user chose to render partly generated terrain
+// (2026-10-18). A chunk with no allocation has no data at all, so it still cannot be rendered.
 fn route_support_is_eligible(
     support: &BTreeSet<[i32; 2]>,
     allocated: &BTreeSet<[i32; 2]>,
-    mut has_full_status: impl FnMut([i32; 2]) -> Result<bool, String>,
 ) -> Result<(), String> {
     for position in support {
         if !allocated.contains(position) {
             return Err(format!("source chunk {position:?} is not allocated"));
         }
-        if !has_full_status(*position)? {
-            return Err(format!(
-                "source chunk {position:?} is unfinished or has no readable generation status"
-            ));
-        }
     }
     Ok(())
-}
-
-fn saved_chunk_has_full_generation_status(
-    bundle: &Bundle,
-    bound: &BoundMap,
-    position: [i32; 2],
-    cancelled: &dyn Fn() -> bool,
-    progress: &PreparationProgress,
-) -> Result<bool, String> {
-    if cancelled() {
-        return Err("Saved route preparation cancelled".into());
-    }
-    let chunk = if let Some(selected) = &bundle.selected {
-        let child = selected
-            .children
-            .get(&bound.directory)
-            .ok_or("Selected route child descriptor missing")?;
-        let region = selected
-            .regions
-            .get(&bound.directory)
-            .ok_or("Selected route region descriptor missing")?;
-        bound
-            .verify_pinned(&bundle.root, &selected.root, child)
-            .map_err(|error| format!("Selected route binding changed: {error}"))?;
-        if child
-            .child("region", false)
-            .map_err(|error| error.to_string())?
-            .identity()
-            != region.identity()
-        {
-            return Err("Selected route region descriptor changed".into());
-        }
-        super::region::read_chunk_pinned(
-            region,
-            position,
-            super::region::Limits::default(),
-            cancelled,
-        )
-    } else {
-        bound
-            .verify(&bundle.root)
-            .map_err(|error| format!("Saved route binding changed: {error}"))?;
-        let result = super::region::read_chunk(
-            &bound.directory.join("region"),
-            position,
-            super::region::Limits::default(),
-            cancelled,
-        );
-        bound
-            .verify(&bundle.root)
-            .map_err(|error| format!("Saved route binding changed during status read: {error}"))?;
-        result
-    };
-    match chunk {
-        Ok(Some(chunk)) => super::chunk::has_full_generation_status(&chunk.document, position)
-            .map_err(|error| {
-                format!("chunk {position:?} generation status could not be decoded: {error}")
-            }),
-        Ok(None) => Ok(false),
-        Err(super::region::Error::Cancelled) => Err("Saved route preparation cancelled".into()),
-        Err(error) => {
-            progress.record(&format!(
-                "Chunk {position:?} status could not be verified before full route decode: {error}"
-            ));
-            Ok(false)
-        }
-    }
 }
 
 #[derive(Clone)]
@@ -2673,29 +2602,13 @@ fn prepare_selection(
                 let support = footprint.support_chunks();
                 progress.phase(
                     3,
-                    "Checking saved chunk generation status",
+                    "Checking saved chunk allocation",
                     &format!(
                         "Checking {} source chunks for candidate {attempted} before full viewport decode",
                         support.len()
                     ),
                 );
-                let mut status_reads = 0;
-                let support_status = route_support_is_eligible(support, allocated, |position| {
-                    status_reads += 1;
-                    progress.work(
-                            &bound.directory,
-                            "Checking saved chunk generation status",
-                            status_reads,
-                            support.len().max(1),
-                            &format!(
-                                "Candidate {attempted} of {MAX_ROUTE_QUALIFICATIONS}: checking chunk {position:?}"
-                            ),
-                        );
-                    saved_chunk_has_full_generation_status(
-                        bundle, bound, position, &cancelled, progress,
-                    )
-                });
-                if let Err(reason) = support_status {
+                if let Err(reason) = route_support_is_eligible(support, allocated) {
                     if cancelled() {
                         return Err("Saved route preparation cancelled".into());
                     }

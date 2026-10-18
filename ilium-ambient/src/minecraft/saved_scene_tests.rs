@@ -4,38 +4,20 @@ use std::cell::RefCell;
 use std::time::{Duration, Instant};
 
 #[test]
-fn allocated_proto_chunks_are_rejected_before_full_route_decode() {
+fn partly_generated_allocated_chunks_are_eligible_for_route_decode() {
     let support = BTreeSet::from([[-18, -7], [-18, -6]]);
     let allocated = BTreeSet::from([[-18, -7], [-18, -6]]);
-    let full = BTreeSet::from([[-18, -6]]);
+    assert!(route_support_is_eligible(&support, &allocated).is_ok());
+}
 
-    let unfinished =
-        route_support_is_eligible(
-            &support,
-            &allocated,
-            |position| Ok(full.contains(&position)),
-        )
-        .unwrap_err();
-    assert!(
-        unfinished.contains("[-18, -7]") && unfinished.contains("unfinished"),
-        "the rejected support chunk and reason should be retained: {unfinished}"
-    );
-    assert!(route_support_is_eligible(&support, &allocated, |_| Ok(true)).is_ok());
-    let absent = route_support_is_eligible(&support, &BTreeSet::from([[-18, -6]]), |_| Ok(true))
-        .unwrap_err();
+#[test]
+fn unallocated_support_chunks_are_rejected_with_the_exact_chunk() {
+    let support = BTreeSet::from([[-18, -7], [-18, -6]]);
+    let absent = route_support_is_eligible(&support, &BTreeSet::from([[-18, -6]])).unwrap_err();
     assert!(
         absent.contains("[-18, -7]") && absent.contains("not allocated"),
         "missing allocation should identify the exact chunk: {absent}"
     );
-    let unreadable = route_support_is_eligible(&support, &allocated, |position| {
-        if position == [-18, -7] {
-            Err("NBT status parse failed".into())
-        } else {
-            Ok(true)
-        }
-    })
-    .unwrap_err();
-    assert!(unreadable.contains("NBT status parse failed"));
 }
 
 #[test]
