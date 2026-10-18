@@ -7,7 +7,7 @@ import build_linux_packages as linux_packages
 import build_windows_installers as windows_installers
 import hashlib
 import json
-from pathlib import Path, PureWindowsPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 import platform
 import posixpath
 
@@ -239,10 +239,10 @@ def linux_container_proof(proof, kind, image, audit, audit_path, source, arch,
             catalogue.get('client_sha256') == audit['files']['ilium'] and
             catalogue.get('helper_sha256') == audit['files']['ilium-animation-helper'],
             'Linux container used another animation client or helper')
-    client = Path(proof['client_path'])
+    client = PurePosixPath(proof['client_path'])
     require(client.is_absolute() and client.name == 'ilium' and
-            Path(proof['helper_path']) == client.with_name('ilium-animation-helper') and
-            (client.parent == Path('/usr/lib/ilium') if kind in ('deb', 'rpm') else
+            PurePosixPath(proof['helper_path']) == client.with_name('ilium-animation-helper') and
+            (client.parent == PurePosixPath('/usr/lib/ilium') if kind in ('deb', 'rpm') else
              client.parent.parent.name == 'appimage'),
             'Linux container installed path differs')
 
@@ -326,8 +326,8 @@ def linux_events(rows, *, command, formats, target, package_files,
 
 
 def linux_host_proof(proof, kind, target, audit, source, tag):
-    root = Path(proof.get('installed_root', ''))
-    executable = Path(proof.get('executable_root', ''))
+    root = PurePosixPath(proof.get('installed_root', ''))
+    executable = PurePosixPath(proof.get('executable_root', ''))
     command = proof.get('launcher_command')
     require(isinstance(command, list) and command[-1:] == ['release-animation-probe'],
             'Linux host animation launcher is missing')
@@ -338,15 +338,15 @@ def linux_host_proof(proof, kind, target, audit, source, tag):
                                executable_root=executable, command=command,
                                source_hashes={name: source[name] for name in animation.SOURCE_FILES})
     require((kind == 'deb' and command == ['/usr/bin/ilium', 'release-animation-probe'] and
-             root == Path('/usr/lib/ilium')) or
+             root == PurePosixPath('/usr/lib/ilium')) or
             (kind == 'snap' and command == ['snap', 'run', 'ilium', 'release-animation-probe'] and
              root == executable and any(str(root).startswith(prefix) for prefix in
                                         ('/snap/ilium/', '/var/lib/snapd/snap/ilium/'))) or
-            (kind == 'flatpak' and Path(command[0]).is_absolute() and
+            (kind == 'flatpak' and PurePosixPath(command[0]).is_absolute() and
              command[0].endswith('/flatpak-client.sh') and
-             executable == Path('/app/lib/ilium') and root.is_absolute() and
+             executable == PurePosixPath('/app/lib/ilium') and root.is_absolute() and
              root.parent.name == 'lib' and root.parent.parent.name == 'files') or
-            (kind == 'appimage' and Path(command[0]).is_absolute() and
+            (kind == 'appimage' and PurePosixPath(command[0]).is_absolute() and
              command[0].endswith('/appimage-client.sh') and
              root == executable and root.parent.name == 'appimage'),
             'Linux host proof did not use the required installed launcher')

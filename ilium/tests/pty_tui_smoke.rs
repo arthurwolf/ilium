@@ -3566,6 +3566,17 @@ async fn newly_created_panes_flash_and_the_flash_fades_including_for_a_multi_cre
     // The selected default group contains both panes, so Close opens the real
     // destructive confirmation. Cancel it with the rendered mouse button and
     // prove the obscured tree received no leaked click or close request.
+    assert!(
+        wait_until(
+            || tui.with_screen(|screen| {
+                !rows_containing_before_column(screen, "default", TREE_TEXT_COLUMNS).is_empty()
+            }),
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "the default group row should be visible in the tree, got: {:?}",
+        tui.screen_text()
+    );
     let default_row = tui
         .with_screen(|screen| rows_containing_before_column(screen, "default", TREE_TEXT_COLUMNS))
         [0];

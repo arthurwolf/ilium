@@ -18,6 +18,7 @@ development period. Dates are commit dates (`YYYY-MM-DD`).
 - Padding settings tab with Disabled, Size dependent (default threshold 200 columns, minimum 11) and Enabled cards, plus a Padding fine-tuning dialog with a live preview. Tree and right panels (terminals and agents, editors, boards) get independent 0 to 3 cell padding per side, optionally linked, saved under `[padding]`. Padding moves only the content inward; toolbars, banners and the progress footer stay full width.
 
 ### Fixed
+- Test-suite robustness on loaded CI runners: the RAM media full-body throughput test takes the best of three transfers, the text-measure quota test tolerates concurrently retiring engines, and the animation smoke validator checks Linux package paths as POSIX paths on every host.
 - Release workflow tests now pass on Windows (POSIX path validation of container fixture records, short/long temp-path comparison), and the voice actor exit reason is logged.
 - The snapshot service waits a bounded time for a briefly busy worker-admission gate instead of failing session persistence on a transient `Busy`.
 - Release pipeline Linux tests use a delegated user systemd scope; slow-runner waits in background cache and image-query tests are polled with longer deadlines.

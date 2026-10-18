@@ -5354,7 +5354,9 @@ mod pure_source_contracts {
             .evaluate_json("__ilium_host.text.measure({text:'A',size_px:16})")
             .unwrap();
         assert!(measured["width"].as_u64().is_some_and(|width| width > 0));
-        assert_eq!(quota.snapshot().worker_bytes, baseline);
+        // Another fixture's engine can still be retiring its own bytes, which
+        // only lowers the total, so the measurement must not raise it.
+        assert!(quota.snapshot().worker_bytes <= baseline);
 
         // Leave room for V8's small result and diagnostic buffers while
         // refusing the existing 32 MiB native font setup charge. An
@@ -5378,7 +5380,7 @@ mod pure_source_contracts {
             .as_str()
             .is_some_and(|message| message.contains("budget_exceeded")));
         drop(pressure);
-        assert_eq!(quota.snapshot().worker_bytes, baseline);
+        assert!(quota.snapshot().worker_bytes <= baseline);
         assert!(engine
             .evaluate_json("__ilium_host.text.measure({text:'A'}).width")
             .unwrap()
