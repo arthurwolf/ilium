@@ -2070,6 +2070,7 @@ fn render_icons_tab(frame: &mut Frame, area: Rect, app: &App, state: &SettingsSt
                 titles_loading: &app.titles_loading,
                 recently_created: &app.recently_created,
                 terminal_activity: &app.terminal_activity,
+                detection_evidence: Some(&app.pane_detection_evidence),
                 focused_pane_id: app.focused_pane_id(),
                 transitions: &app.tree_transitions,
                 agent_identifiers: &app.ui_settings.agent_identifiers,
@@ -5598,7 +5599,7 @@ fn reset_planning_lines(app: &App, selected: usize) -> Vec<Line<'static>> {
         }
         let status = app.reset_monitor_state.provider(provider);
         if let Some(error) = &status.last_error {
-            return format!("On · check failed: {error}");
+            return format!("On · F9 details · check failed: {error}");
         }
         if status.last_checked.is_none() {
             return "On · checking…".to_owned();

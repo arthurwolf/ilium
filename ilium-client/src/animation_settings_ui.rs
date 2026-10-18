@@ -1239,12 +1239,10 @@ fn render_plugin_editor(
     }
     if inner.height >= 2 {
         frame.render_widget(
-            Paragraph::new(
-                editor
-                    .error
-                    .as_deref()
-                    .unwrap_or("Enter applies · Esc cancels"),
-            )
+            Paragraph::new(editor.error.as_deref().map_or_else(
+                || "Enter applies · Esc cancels".to_owned(),
+                |error| format!("F9 details · {error}"),
+            ))
             .style(ink),
             Rect::new(inner.x, action_row.y.saturating_sub(1), inner.width, 1),
         );
@@ -1504,7 +1502,17 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
         .or(app.status_message.as_deref())
         .unwrap_or(generic_saved_status);
     frame.render_widget(
-        Paragraph::new(fit(status_message, usize::from(panel.width))).style(ink),
+        Paragraph::new(fit(
+            &if app.status_message.as_deref() == Some(status_message)
+                || semantic_error.as_deref() == Some(status_message)
+            {
+                format!("F9 details · {status_message}")
+            } else {
+                status_message.to_owned()
+            },
+            usize::from(panel.width),
+        ))
+        .style(ink),
         Rect::new(panel.x, status_y, panel.width, 1),
     );
     let instructions = if activity_visible {

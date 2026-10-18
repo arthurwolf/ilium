@@ -713,8 +713,10 @@ pub struct TreeRenderOptions<'a> {
     /// Real animation-clock offset even when decorative motion is disabled.
     /// Activity-window expiry must not freeze merely because its glyph does.
     pub terminal_activity_elapsed_ms: u128,
-    /// Current wall-clock time used only for durable absolute countdowns.
+    /// Wall-clock time for durable countdowns and observation freshness.
     pub current_unix_millis: u64,
+    /// The live renderer supplies evidence; geometry-only builders can omit it.
+    pub detection_evidence: Option<&'a HashMap<NodeId, ilium_ipc::PaneDetectionEvidence>>,
     pub project_name: Option<&'a str>,
     pub project_icon: Option<&'a str>,
     pub is_project_name_loading: bool,
@@ -778,6 +780,7 @@ struct TreeItemBuildContext<'a> {
     elapsed_ms: u128,
     terminal_activity_elapsed_ms: u128,
     current_unix_millis: u64,
+    detection_evidence: Option<&'a HashMap<NodeId, ilium_ipc::PaneDetectionEvidence>>,
     titles_loading: &'a HashSet<NodeId>,
     recently_created: &'a HashMap<NodeId, u128>,
     terminal_activity: &'a TerminalActivityTracker,
@@ -1106,6 +1109,30 @@ fn build_item(
                     attention_running_indicator: context.attention_running_indicator,
                 },
             );
+            let label = if context.detection_evidence.is_some_and(|evidence| {
+                crate::status_icons::detection_freshness_warning(
+                    status,
+                    evidence.get(&node.id),
+                    context.current_unix_millis,
+                )
+                .is_some()
+            }) {
+                // Rebuild the slots rather than overwriting cells: Attention can
+                // omit the live slot, so its title must move to make room.
+                let identity = label.spans[0].clone();
+                let objective = label.spans[1].clone();
+                let now = Span::styled("⚠", Style::new().fg(Color::Yellow));
+                let text = label.spans[3].clone();
+                if context.agent_monitoring_mode
+                    == crate::agent_monitoring::AgentMonitoringMode::Attention
+                {
+                    attention_row_label(identity, objective, now, text)
+                } else {
+                    status_row_label(identity, objective, now, text)
+                }
+            } else {
+                label
+            };
             let label = apply_unread_title_bold(
                 label,
                 should_apply_unread_title_bold(
@@ -2404,6 +2431,7 @@ impl TreeItemCache {
                     elapsed_ms: 0,
                     terminal_activity_elapsed_ms: 0,
                     current_unix_millis: 0,
+                    detection_evidence: None,
                     titles_loading: &HashSet::new(),
                     recently_created: &HashMap::new(),
                     terminal_activity: &TerminalActivityTracker::default(),
@@ -2473,6 +2501,7 @@ pub(crate) fn render(
             elapsed_ms: options.elapsed_ms,
             terminal_activity_elapsed_ms: options.terminal_activity_elapsed_ms,
             current_unix_millis: options.current_unix_millis,
+            detection_evidence: options.detection_evidence,
             titles_loading: options.titles_loading,
             recently_created: options.recently_created,
             terminal_activity: options.terminal_activity,
@@ -2536,6 +2565,7 @@ pub(crate) fn render(
                 elapsed_ms: options.elapsed_ms,
                 terminal_activity_elapsed_ms: options.terminal_activity_elapsed_ms,
                 current_unix_millis: options.current_unix_millis,
+                detection_evidence: options.detection_evidence,
                 titles_loading: options.titles_loading,
                 recently_created: options.recently_created,
                 terminal_activity: options.terminal_activity,
@@ -3523,7 +3553,15 @@ mod tests {
             area,
             branch_rendering,
             &HashMap::new(),
+            None,
         )
+    }
+
+    #[derive(Clone, Copy)]
+    struct DetectionRenderInput<'a> {
+        evidence: &'a HashMap<NodeId, ilium_ipc::PaneDetectionEvidence>,
+        now: u64,
+        mode: crate::agent_monitoring::AgentMonitoringMode,
     }
 
     #[allow(clippy::too_many_arguments)] // Test renderer takes every tree model input explicitly.
@@ -3536,6 +3574,7 @@ mod tests {
         area: Rect,
         branch_rendering: (bool, &HashMap<NodeId, WorkspaceGitStatus>, bool),
         agent_models: &HashMap<NodeId, String>,
+        detection: Option<DetectionRenderInput<'_>>,
     ) -> Buffer {
         let (show_branch_line, workspace_git_statuses, show_project_separators) = branch_rendering;
         let titles_loading = HashSet::new();
@@ -3552,7 +3591,8 @@ mod tests {
                         focused: false,
                         elapsed_ms,
                         terminal_activity_elapsed_ms: elapsed_ms,
-                        current_unix_millis: 0,
+                        current_unix_millis: detection.map_or(0, |input| input.now),
+                        detection_evidence: detection.map(|input| input.evidence),
                         project_name: None,
                         project_icon: None,
                         is_project_name_loading: false,
@@ -3570,7 +3610,10 @@ mod tests {
                         show_project_separators,
                         sidebar_density: SidebarDensity::default(),
                         use_stable_glyphs: false,
-                        agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
+                        agent_monitoring_mode: detection.map_or(
+                            crate::agent_monitoring::AgentMonitoringMode::Normal,
+                            |input| input.mode,
+                        ),
                         attention_progress_reports: true,
                         attention_running_indicator:
                             crate::agent_monitoring::AttentionRunningIndicator::default(),
@@ -3592,6 +3635,118 @@ mod tests {
         (buffer.area.x..buffer.area.right())
             .map(|column| buffer[(column, row)].symbol())
             .collect()
+    }
+
+    #[test]
+    fn detection_freshness_renders_expiry_recovery_unknown_and_retains_goal_and_unread() {
+        use crate::agent_monitoring::AgentMonitoringMode;
+        let mut tree = Tree::new();
+        let group = tree.add_group(ROOT_ID, "work").unwrap();
+        let pane = tree
+            .add_pane(
+                group,
+                "freshness probe",
+                ilium_core::PaneContentKind::Terminal,
+            )
+            .unwrap();
+        let working = PaneStatus::from_activity(
+            AgentClass::Codex,
+            AgentActivity::Working,
+            Some(GoalState::Active),
+        );
+        tree.set_pane_status(pane, working.clone()).unwrap();
+        let observed = 1_700_000_000_000;
+        let mut evidence = HashMap::from([(
+            pane,
+            ilium_ipc::PaneDetectionEvidence {
+                applied_status: working.clone(),
+                observed_at_unix_millis: observed,
+                stale_after_millis: 30_000,
+                identity: None,
+                activity: None,
+                goal: None,
+            },
+        )]);
+        let render_row = |tree: &Tree,
+                          evidence: &HashMap<NodeId, ilium_ipc::PaneDetectionEvidence>,
+                          now,
+                          mode| {
+            let mut state = TreeState::default();
+            state.open(vec![group]);
+            let buffer = render_tree_buffer_with_models(
+                tree,
+                &mut state,
+                &TreeTransitions::default(),
+                &HashMap::new(),
+                0,
+                Rect::new(0, 0, 80, 10),
+                (false, &HashMap::new(), false),
+                &HashMap::new(),
+                Some(DetectionRenderInput {
+                    evidence,
+                    now,
+                    mode,
+                }),
+            );
+            (0..buffer.area.height)
+                .map(|row| buffer_row_text(&buffer, row))
+                .find(|row| row.contains("freshness probe"))
+                .unwrap()
+        };
+        for mode in [AgentMonitoringMode::Normal, AgentMonitoringMode::Attention] {
+            let fresh = render_row(&tree, &evidence, observed + 29_999, mode);
+            assert!(!fresh.contains('⚠'), "{fresh}");
+            assert_eq!(
+                fresh.contains("🎯"),
+                mode == AgentMonitoringMode::Normal,
+                "Attention's working priority intentionally hides the goal slot: {fresh}"
+            );
+            let stale = render_row(&tree, &evidence, observed + 30_000, mode);
+            assert!(stale.contains('⚠'), "{stale}");
+            assert_eq!(
+                stale.contains("🎯"),
+                mode == AgentMonitoringMode::Normal,
+                "Freshness must preserve the selected monitoring projection: {stale}"
+            );
+            assert!(
+                matches!(&tree.get(pane).unwrap().kind, NodeKind::Pane { status, .. } if status == &working)
+            );
+            assert!(!stale.chars().any(|glyph| SPINNER_FRAMES.contains(&glyph)));
+            assert!(crate::status_icons::detection_freshness_expired_since(
+                &evidence,
+                observed + 29_999,
+                observed + 30_000
+            ));
+        }
+        evidence.get_mut(&pane).unwrap().observed_at_unix_millis = observed + 30_000;
+        assert!(!render_row(
+            &tree,
+            &evidence,
+            observed + 30_001,
+            AgentMonitoringMode::Normal
+        )
+        .contains('⚠'));
+        assert!(render_row(
+            &tree,
+            &HashMap::new(),
+            observed,
+            AgentMonitoringMode::Normal
+        )
+        .contains('⚠'));
+        let done = PaneStatus::from_activity(
+            AgentClass::Codex,
+            AgentActivity::Done,
+            Some(GoalState::Active),
+        );
+        tree.set_pane_status(pane, done.clone()).unwrap();
+        let unread = render_row(&tree, &evidence, observed, AgentMonitoringMode::Normal);
+        assert!(
+            unread.contains('⚠') && unread.contains("[done]") && unread.contains("🎯"),
+            "{unread}"
+        );
+        assert!(
+            matches!(&tree.get(pane).unwrap().kind, NodeKind::Pane { status, .. } if status == &done)
+        );
     }
 
     #[test]
@@ -3885,6 +4040,7 @@ mod tests {
             Rect::new(0, 0, 64, 28),
             (true, &HashMap::new(), false),
             &models,
+            None,
         );
 
         for (title, glyph) in rows {
@@ -3955,6 +4111,7 @@ mod tests {
             Rect::new(0, 0, 64, 24),
             (true, &HashMap::new(), false),
             &models,
+            None,
         );
 
         for (title, expected_glyph) in expected_rows {
@@ -4602,6 +4759,7 @@ mod tests {
                         elapsed_ms: 0,
                         terminal_activity_elapsed_ms: 0,
                         current_unix_millis: 0,
+                        detection_evidence: None,
                         project_name: None,
                         project_icon: None,
                         is_project_name_loading: false,
@@ -4656,6 +4814,7 @@ mod tests {
                         elapsed_ms: 0,
                         terminal_activity_elapsed_ms: 0,
                         current_unix_millis: 0,
+                        detection_evidence: None,
                         project_name: None,
                         project_icon: None,
                         is_project_name_loading: false,
@@ -4738,6 +4897,7 @@ mod tests {
                         elapsed_ms: 0,
                         terminal_activity_elapsed_ms: 0,
                         current_unix_millis: 0,
+                        detection_evidence: None,
                         project_name: None,
                         project_icon: None,
                         is_project_name_loading: false,
@@ -5499,6 +5659,7 @@ mod tests {
                 elapsed_ms: 0,
                 terminal_activity_elapsed_ms: 0,
                 current_unix_millis: 0,
+                detection_evidence: None,
                 titles_loading: &HashSet::new(),
                 recently_created: &HashMap::new(),
                 terminal_activity: &TerminalActivityTracker::default(),
@@ -5657,6 +5818,7 @@ mod tests {
                 elapsed_ms: 0,
                 terminal_activity_elapsed_ms: 0,
                 current_unix_millis: 0,
+                detection_evidence: None,
                 titles_loading: &HashSet::new(),
                 recently_created: &HashMap::new(),
                 terminal_activity: &TerminalActivityTracker::default(),
@@ -5696,6 +5858,7 @@ mod tests {
                 elapsed_ms: 0,
                 terminal_activity_elapsed_ms: 0,
                 current_unix_millis: 0,
+                detection_evidence: None,
                 titles_loading: &HashSet::new(),
                 recently_created: &HashMap::new(),
                 terminal_activity: &TerminalActivityTracker::default(),
@@ -5735,6 +5898,7 @@ mod tests {
                 elapsed_ms: 0,
                 terminal_activity_elapsed_ms: 0,
                 current_unix_millis: 0,
+                detection_evidence: None,
                 titles_loading: &HashSet::new(),
                 recently_created: &HashMap::new(),
                 terminal_activity: &TerminalActivityTracker::default(),
@@ -5797,6 +5961,7 @@ mod tests {
                 elapsed_ms: 0,
                 terminal_activity_elapsed_ms: 0,
                 current_unix_millis: 0,
+                detection_evidence: None,
                 titles_loading: &HashSet::new(),
                 recently_created: &HashMap::new(),
                 terminal_activity: &TerminalActivityTracker::default(),
@@ -6052,6 +6217,7 @@ mod tests {
                 elapsed_ms: 0,
                 terminal_activity_elapsed_ms: 0,
                 current_unix_millis: 0,
+                detection_evidence: None,
                 titles_loading: &HashSet::new(),
                 recently_created: &recently_created,
                 terminal_activity: &TerminalActivityTracker::default(),
@@ -6345,6 +6511,7 @@ mod tests {
                 elapsed_ms: 0,
                 terminal_activity_elapsed_ms: 0,
                 current_unix_millis: 0,
+                detection_evidence: None,
                 titles_loading: &HashSet::new(),
                 recently_created: &HashMap::new(),
                 terminal_activity: &TerminalActivityTracker::default(),
@@ -6599,6 +6766,7 @@ mod cost_indicator_tests {
                         elapsed_ms: 0,
                         terminal_activity_elapsed_ms: 0,
                         current_unix_millis: 0,
+                        detection_evidence: None,
                         project_name: None,
                         project_icon: None,
                         is_project_name_loading: false,

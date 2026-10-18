@@ -122,6 +122,8 @@ pub mod presentation;
 pub mod progress_bar;
 pub mod progress_display;
 pub mod progress_guard;
+pub mod progress_popover;
+pub mod progress_time;
 pub mod project_config;
 pub mod project_naming;
 pub mod prompt_queue;
@@ -166,6 +168,7 @@ pub use smart_copy_selection::{
     RestoredSelection, SelectionCompletion, SelectionShutdownCustody, SelectionShutdownErrors,
 };
 pub mod agent_message_dialog;
+pub(crate) mod diagnostic;
 pub mod goal_resume_link;
 mod input_backlog;
 mod paste_cursor;
@@ -1306,6 +1309,7 @@ async fn run_inner(
     let mut needs_redraw = true;
     let mut needs_immediate_redraw = true;
     let mut last_draw_at = Instant::now();
+    let mut detection_freshness_checked_at = crate::scheduled_input::unix_millis_now();
     let mut last_animation_frame_bucket = None;
     let mut last_onboarding_animation_active = false;
     let mut last_recorded_status_message = None;
@@ -1962,6 +1966,13 @@ async fn run_inner(
         if animation_frame_bucket != last_animation_frame_bucket {
             needs_redraw = true;
         }
+        let freshness_now = crate::scheduled_input::unix_millis_now();
+        needs_redraw |= crate::status_icons::detection_freshness_expired_since(
+            &app.pane_detection_evidence,
+            detection_freshness_checked_at,
+            freshness_now,
+        );
+        detection_freshness_checked_at = freshness_now;
         let can_draw = output_redraw_is_due(needs_immediate_redraw, Instant::now(), last_draw_at);
         // Reserve before composition: graphics uploads and exact animation
         // receipts must follow the ordered frame that really reaches output.

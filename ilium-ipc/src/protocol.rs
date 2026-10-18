@@ -1164,6 +1164,10 @@ pub struct DetectionReason {
 /// state while an incremental status event and its evidence cross IPC.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PaneDetectionEvidence {
+    /// Time of the last successful server-applied classification, not receipt time.
+    pub observed_at_unix_millis: u64,
+    /// Maximum age for presenting this observation as current.
+    pub stale_after_millis: u64,
     pub applied_status: PaneStatus,
     pub identity: Option<DetectionReason>,
     pub activity: Option<DetectionReason>,

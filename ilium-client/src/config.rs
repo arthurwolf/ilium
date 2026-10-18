@@ -3598,7 +3598,7 @@ mod tests {
             restructure_prompt_token_limit: 345_678,
             selected_provider: ilium_inference::InferenceProviderKind::KiloGateway,
             kilo_gateway: ilium_inference::KiloGatewaySettings {
-                model: "stepfun/step-5-preview-free".to_string(),
+                model: "dots-studio/dots-3-note-preview:free".to_string(),
                 ..ilium_inference::KiloGatewaySettings::default()
             },
             openrouter: ilium_inference::OpenRouterSettings {

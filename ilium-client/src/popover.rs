@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use ilium_core::{AgentProvider, BuiltinAgentProvider};
 use ratatui::layout::{Position, Rect};
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::widgets::{Clear, Paragraph};
+use ratatui::widgets::{Clear, Paragraph, Wrap};
 use ratatui::Frame;
 
 use crate::theme::{self, ColorScheme};
@@ -183,13 +183,28 @@ pub fn layout(bounds: Rect, popover: &AgentPopover) -> Option<PopoverLayout> {
     } else {
         WIDE_WIDTH
     };
-    let height = if compact { 1 } else { WIDE_HEIGHT };
+    let diagnostic = !popover.enabled && available_height >= 4;
+    let header_height = if diagnostic {
+        Paragraph::new(header_text(popover))
+            .wrap(Wrap { trim: false })
+            .line_count(width.saturating_sub(4).max(1))
+            .min(usize::from(available_height.saturating_sub(3))) as u16
+    } else {
+        1
+    };
+    let height = if diagnostic {
+        header_height + 3
+    } else if compact {
+        1
+    } else {
+        WIDE_HEIGHT
+    };
     let min_x = bounds.x.saturating_add(1);
     let max_x = bounds.right().saturating_sub(1).saturating_sub(width);
     let x = popover.anchor.x.clamp(min_x, max_x);
     let y = popover.anchor.y.saturating_sub(height);
     let area = Rect::new(x, y, width, height);
-    let (header, choices) = if compact {
+    let (header, choices) = if compact && !diagnostic {
         (
             Rect::default(),
             [
@@ -199,12 +214,25 @@ pub fn layout(bounds: Rect, popover: &AgentPopover) -> Option<PopoverLayout> {
         )
     } else {
         (
-            Rect::new(x + 2, y + 1, width - 4, 1),
+            Rect::new(x + 2, y + 1, width - 4, header_height),
             [
-                (PopoverChoice::NewWorktree, Rect::new(x + 2, y + 2, 12, 1)),
+                (
+                    PopoverChoice::NewWorktree,
+                    Rect::new(
+                        x + 1 + u16::from(!compact),
+                        y + height - 2,
+                        if compact { 6 } else { 12 },
+                        1,
+                    ),
+                ),
                 (
                     PopoverChoice::ExistingWorktree,
-                    Rect::new(x + 15, y + 2, 13, 1),
+                    Rect::new(
+                        x + if compact { 7 } else { 15 },
+                        y + height - 2,
+                        if compact { 11 } else { 13 },
+                        1,
+                    ),
                 ),
             ],
         )
@@ -231,10 +259,21 @@ pub fn render(
         Paragraph::new("").style(Style::new().bg(background)),
         geometry.area,
     );
-    if !geometry.compact {
-        frame.render_widget(theme::block(false), geometry.area);
+    if !popover.enabled && geometry.header.height == 0 {
+        frame.render_widget(Paragraph::new("F9: full error"), geometry.area);
+        return;
+    }
+    if geometry.header.height > 0 {
+        let block = if popover.enabled {
+            theme::block(false)
+        } else {
+            theme::block(false).title_bottom("F9 details")
+        };
+        frame.render_widget(block, geometry.area);
         frame.render_widget(
-            Paragraph::new(header_text(popover)).style(Style::new().fg(label_color(scheme))),
+            Paragraph::new(header_text(popover))
+                .wrap(Wrap { trim: false })
+                .style(Style::new().fg(label_color(scheme))),
             geometry.header,
         );
     }
@@ -307,6 +346,32 @@ mod tests {
     }
 
     #[test]
+    fn unavailable_reason_is_fully_rendered_in_wide_and_narrow_sidebars() {
+        use ratatui::{backend::TestBackend, Terminal};
+        let reason = "Cannot create an agent because this directory is not a Git repository. Initialize Git in the project directory, then retry. FINALDETAIL";
+        for width in [24, 80] {
+            let mut state = popover(Instant::now());
+            state.enabled = false;
+            state.unavailable_reason = Some(reason.into());
+            let geometry = layout(Rect::new(0, 0, width, 24), &state).unwrap();
+            let mut terminal = Terminal::new(TestBackend::new(width, 24)).unwrap();
+            terminal
+                .draw(|frame| render(frame, &geometry, &state, ColorScheme::Dark))
+                .unwrap();
+            let buffer = terminal.backend().buffer();
+            let rendered: String = (geometry.header.y..geometry.header.bottom())
+                .flat_map(|y| (geometry.header.x..geometry.header.right()).map(move |x| (x, y)))
+                .map(|position| buffer[position].symbol())
+                .collect();
+            let actual: String = rendered.chars().filter(|c| !c.is_whitespace()).collect();
+            let expected: String = reason.chars().filter(|c| !c.is_whitespace()).collect();
+            assert_eq!(actual, expected, "sidebar width {width}");
+            assert!(geometry.area.height > WIDE_HEIGHT);
+            assert_eq!(geometry.area.bottom(), state.anchor.y);
+        }
+    }
+
+    #[test]
     fn hover_delay_and_leave_grace_are_independent() {
         let start = Instant::now();
         let mut state = popover(start);
@@ -319,6 +384,32 @@ mod tests {
         );
         assert!(!state.should_close(start + HOVER_DELAY + LEAVE_DELAY - Duration::from_millis(1)));
         assert!(state.should_close(start + HOVER_DELAY + LEAVE_DELAY));
+    }
+
+    #[test]
+    fn oversized_error_stays_inside_sidebar_and_advertises_details() {
+        use ratatui::{backend::TestBackend, Terminal};
+        let mut state = popover(Instant::now());
+        state.enabled = false;
+        state.unavailable_reason = Some("long failure ".repeat(200));
+        for height in [4, 24] {
+            state.anchor.y = height - 2;
+            let geometry = layout(Rect::new(0, 0, 24, height), &state).unwrap();
+            assert!(geometry.area.y >= 1);
+            assert_eq!(geometry.area.bottom(), state.anchor.y);
+            let mut terminal = Terminal::new(TestBackend::new(24, height)).unwrap();
+            terminal
+                .draw(|frame| render(frame, &geometry, &state, ColorScheme::Dark))
+                .unwrap();
+            let text: String = terminal
+                .backend()
+                .buffer()
+                .content
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect();
+            assert!(text.contains("F9"));
+        }
     }
 
     #[test]
