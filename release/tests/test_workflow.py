@@ -3,7 +3,7 @@ from copy import deepcopy
 import hashlib
 import json
 import os
-from pathlib import Path, PureWindowsPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 import re
 import sys
 import tempfile
@@ -30,7 +30,8 @@ def synthetic_animation_receipt(target, pair_directory, source_inputs, *,
                                 client_hash='e' * 64, server_hash='f' * 64,
                                 helper_hash='0' * 64, audit_hash='c' * 64):
     """Create an inert but complete publication-validator fixture for one target."""
-    pair = PureWindowsPath(pair_directory) if target['os'] == 'windows' else Path(pair_directory)
+    # Linux container and host paths are POSIX even when the test runs on Windows.
+    pair = PureWindowsPath(pair_directory) if target['os'] == 'windows' else PurePosixPath(pair_directory)
     client, server, helper = target['executables']
     catalogue = {'type': 'artifact', 'gate': 'installed_catalogue',
                  'packages': ['beach', 'carpet'], 'client_path': str(pair / client),

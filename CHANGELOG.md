@@ -18,6 +18,9 @@ development period. Dates are commit dates (`YYYY-MM-DD`).
 - Padding settings tab with Disabled, Size dependent (default threshold 200 columns, minimum 11) and Enabled cards, plus a Padding fine-tuning dialog with a live preview. Tree and right panels (terminals and agents, editors, boards) get independent 0 to 3 cell padding per side, optionally linked, saved under `[padding]`. Padding moves only the content inward; toolbars, banners and the progress footer stay full width.
 
 ### Fixed
+- The RAM video endpoint no longer naps 10 ms per blocked socket write while a body transfer is in flight (1 ms instead), which capped body throughput on macOS.
+- The Windows release test helper builds Linux container paths as POSIX paths, so the animation smoke checks pass on Windows runners.
+- The bootstrap format round-trip test runs with a 10 s per-phase budget; latency stays covered by the deadline tests, and the production default is unchanged.
 - Test-suite robustness on loaded CI runners: the RAM media full-body throughput test takes the best of three transfers, the text-measure quota test tolerates concurrently retiring engines, and the animation smoke validator checks Linux package paths as POSIX paths on every host.
 - Release workflow tests now pass on Windows (POSIX path validation of container fixture records, short/long temp-path comparison), and the voice actor exit reason is logged.
 - The snapshot service waits a bounded time for a briefly busy worker-admission gate instead of failing session persistence on a transient `Busy`.

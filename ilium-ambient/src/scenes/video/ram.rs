@@ -326,8 +326,18 @@ impl RamMedia {
                 }
                 if made_progress {
                     std::thread::yield_now();
-                } else if !sleep_unless_stopped(&stop, Duration::from_millis(10)) {
-                    break;
+                } else {
+                    // A blocked socket usually frees within a millisecond. Napping
+                    // 10 ms per full send buffer capped body throughput, so the
+                    // short nap applies while any transfer is in flight.
+                    let nap = if connections.is_empty() {
+                        Duration::from_millis(10)
+                    } else {
+                        Duration::from_millis(1)
+                    };
+                    if !sleep_unless_stopped(&stop, nap) {
+                        break;
+                    }
                 }
             }
             drop(connections);
@@ -607,14 +617,6 @@ mod tests {
     }
 
     fn request(endpoint: &MediaInput, request: &str) -> Vec<u8> {
-        request_with_read_timeout(endpoint, request, Duration::from_secs(3))
-    }
-
-    fn request_with_read_timeout(
-        endpoint: &MediaInput,
-        request: &str,
-        read_timeout: Duration,
-    ) -> Vec<u8> {
         let MediaInput::Url(url) = endpoint else {
             panic!("test endpoint must be a URL");
         };
@@ -625,7 +627,9 @@ mod tests {
             .next()
             .unwrap();
         let mut stream = TcpStream::connect(address).unwrap();
-        stream.set_read_timeout(Some(read_timeout)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
         stream.write_all(request.as_bytes()).unwrap();
         let mut response = Vec::new();
         stream.read_to_end(&mut response).unwrap();
@@ -653,22 +657,12 @@ mod tests {
             panic!("test endpoint must be a URL")
         };
         let path = format!("/{}", url.split('/').next_back().unwrap());
-        // A loaded CI runner can stall one transfer for seconds, which says
-        // nothing about throttling; a throttled body is slow on every attempt.
-        let mut elapsed = Duration::MAX;
-        let mut response = Vec::new();
-        for _ in 0..3 {
-            let started = Instant::now();
-            response = request_with_read_timeout(
-                &media.endpoint,
-                &format!("GET {path} HTTP/1.1\r\nHost: localhost\r\n\r\n"),
-                Duration::from_secs(30),
-            );
-            elapsed = elapsed.min(started.elapsed());
-            if elapsed < Duration::from_secs(3) {
-                break;
-            }
-        }
+        let started = Instant::now();
+        let response = request(
+            &media.endpoint,
+            &format!("GET {path} HTTP/1.1\r\nHost: localhost\r\n\r\n"),
+        );
+        let elapsed = started.elapsed();
         let split = response
             .windows(4)
             .position(|bytes| bytes == b"\r\n\r\n")
