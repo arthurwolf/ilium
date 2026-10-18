@@ -24,6 +24,93 @@ fn note(uses: &mut Uses, id: &str, file: &str) {
         .insert(file.to_owned());
 }
 
+/// Last segments that make a backticked `a.b` a file name (`manifest.json`), not a code.
+const FILE_EXTENSIONS: [&str; 7] = ["json", "toml", "sha256", "md", "wasm", "zip", "txt"];
+
+/// Keys of the installed-state, session-selector and policy files. They look like
+/// `ns.name` but are fields, not codes: `session.server`/`session.client` select a plugin
+/// side in the test harness, `update.*` are fields of the installed record, `grants.*` are
+/// policy-file keys (two of them also appear as retired spellings in a mapping table).
+const FIELD_KEYS: [&str; 8] = [
+    "session.client",
+    "session.server",
+    "update.attempts",
+    "update.candidate",
+    "update.state",
+    "grants.deny",
+    "grants.forbidden",
+    "grants.preapproved",
+];
+
+/// Host function names of reference-wit.md: `interface NAME {` followed by indented
+/// `fn-name: func(` lines, joined as `NAME.fn-name` (`settings.get-json`).
+fn wit_function_names(text: &str) -> BTreeSet<String> {
+    let mut names = BTreeSet::new();
+    let mut interface = None;
+    for line in text.lines() {
+        if let Some(rest) = line.trim_start().strip_prefix("interface ") {
+            interface = rest.split_whitespace().next().map(str::to_owned);
+        } else if let (Some(interface), Some(rest)) = (&interface, line.strip_prefix("  ")) {
+            if let Some((name, tail)) = rest.split_once(": ") {
+                let tail = tail.strip_prefix("static ").unwrap_or(tail);
+                if tail.starts_with("func") && !name.contains(' ') {
+                    names.insert(format!("{interface}.{name}"));
+                }
+            }
+        }
+    }
+    names
+}
+
+/// Every backticked name in the first cell of a grants table row plus the "Always granted"
+/// bullets, without `:argument` (a row may list several grants).
+fn all_grant_tokens(text: &str) -> BTreeSet<String> {
+    let mut names = BTreeSet::new();
+    for cells in text.lines().filter_map(table_cells) {
+        for (_, token, _) in backticked(cells[0]) {
+            names.insert(token.split(':').next().unwrap_or(token).to_owned());
+        }
+    }
+    let section = text
+        .split("## Always granted")
+        .nth(1)
+        .and_then(|rest| rest.split("\n## ").next())
+        .unwrap_or("");
+    for line in section.lines().filter(|line| line.starts_with("- ")) {
+        for (_, token, _) in backticked(line) {
+            names.insert(token.split(':').next().unwrap_or(token).to_owned());
+        }
+    }
+    names
+}
+
+/// The retired spellings (first cell of the "Retired and orphan codes" table) and the
+/// invalid grant names shown as bad examples (first cell of a row whose result is
+/// `manifest.grant-unknown`). Neither is meant to be in the catalogue.
+fn deliberately_wrong_names(all: &[(String, String)]) -> BTreeSet<String> {
+    let mut names = BTreeSet::new();
+    let schema = page(all, "reference-manifest-schema.md");
+    let retired = schema
+        .split_once("\n## Retired and orphan codes")
+        .map(|(_, rest)| rest.split("\n## ").next().unwrap_or(rest))
+        .unwrap_or_else(|| panic!("reference-manifest-schema.md lost its retired codes heading"));
+    for cells in retired.lines().filter_map(table_cells) {
+        for (_, token, _) in backticked(cells[0]) {
+            names.insert(token.to_owned());
+        }
+    }
+    for (_, text) in all {
+        for cells in text.lines().filter_map(table_cells) {
+            if cells.len() >= 3 && cells[2].starts_with("`manifest.grant-unknown`") {
+                for (_, token, _) in backticked(cells[0]) {
+                    names.insert(token.to_owned());
+                }
+            }
+        }
+    }
+    names
+}
+
 /// Prose mentions of `ns.name` where `ns` is a namespace of the catalogue or of `codes.rs`
 /// must be in the catalogue.
 #[test]
@@ -37,11 +124,25 @@ fn doc_xref_error_ids_in_prose_are_in_the_catalogue() {
     for value in constant_values(&codes_source()) {
         namespaces.insert(namespace_of(&value).to_owned());
     }
+    let mut not_codes = wit_function_names(page(&all, "reference-wit.md"));
+    not_codes.extend(all_grant_tokens(page(&all, "reference-capabilities.md")));
+    not_codes.extend(deliberately_wrong_names(&all));
+    not_codes.extend(FIELD_KEYS.iter().map(|key| (*key).to_owned()));
+    let is_file_name = |token: &str| {
+        token
+            .rsplit('.')
+            .next()
+            .is_some_and(|last| FILE_EXTENSIONS.contains(&last))
+    };
     let mut uses = Uses::new();
     for (file, text) in &all {
         for line in prose_lines(text) {
             for (_, token, _) in backticked(line) {
-                if is_dotted_id(token) && namespaces.contains(namespace_of(token)) {
+                if is_dotted_id(token)
+                    && namespaces.contains(namespace_of(token))
+                    && !is_file_name(token)
+                    && !not_codes.contains(token)
+                {
                     note(&mut uses, token, file);
                 }
             }

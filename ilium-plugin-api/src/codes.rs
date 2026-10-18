@@ -276,8 +276,6 @@ pub mod manifest {
 pub mod trust {
     /// `trust.declined`.
     pub const DECLINED: &str = "trust.declined";
-    /// `trust.unsigned`.
-    pub const UNSIGNED: &str = "trust.unsigned";
     /// `trust.key-unknown`.
     pub const KEY_UNKNOWN: &str = "trust.key-unknown";
     /// `trust.key-revoked`.
@@ -288,8 +286,6 @@ pub mod trust {
     pub const KEY_MALFORMED: &str = "trust.key-malformed";
     /// `trust.key-exists`.
     pub const KEY_EXISTS: &str = "trust.key-exists";
-    /// `trust.key-permissions`.
-    pub const KEY_PERMISSIONS: &str = "trust.key-permissions";
     /// `trust.already-trusted`.
     pub const ALREADY_TRUSTED: &str = "trust.already-trusted";
     /// `trust.not-found`.
@@ -308,6 +304,10 @@ pub mod trust {
     pub const ROTATION_INVALID: &str = "trust.rotation-invalid";
     /// `trust.collision`.
     pub const COLLISION: &str = "trust.collision";
+    /// `trust.unreadable`.
+    pub const UNREADABLE: &str = "trust.unreadable";
+    /// `trust.removed`.
+    pub const REMOVED: &str = "trust.removed";
 }
 
 /// `sign.*` codes (reference-manifest-schema.md).
@@ -410,6 +410,8 @@ pub mod install {
     pub const SIZE: &str = "install.size";
     /// `install.already-installed`.
     pub const ALREADY_INSTALLED: &str = "install.already-installed";
+    /// `install.ok`.
+    pub const OK: &str = "install.ok";
 }
 
 /// `rollback.*` codes (reference-manifest-schema.md).
@@ -428,6 +430,12 @@ pub mod migration {
     pub const FAILED: &str = "migration.failed";
     /// `migration.backup-too-large`.
     pub const BACKUP_TOO_LARGE: &str = "migration.backup-too-large";
+    /// `migration.io`.
+    pub const IO: &str = "migration.io";
+    /// `migration.skipped`.
+    pub const SKIPPED: &str = "migration.skipped";
+    /// `migration.no-backup-failed`.
+    pub const NO_BACKUP_FAILED: &str = "migration.no-backup-failed";
 }
 
 /// `plugin.*` codes (reference-manifest-schema.md).
@@ -442,12 +450,20 @@ pub mod plugin {
     pub const SERVER_MISSING: &str = "plugin.server-missing";
     /// `plugin.version-skew`.
     pub const VERSION_SKEW: &str = "plugin.version-skew";
+    /// `plugin.blocked`.
+    pub const BLOCKED: &str = "plugin.blocked";
+    /// `plugin.not-running`.
+    pub const NOT_RUNNING: &str = "plugin.not-running";
 }
 
 /// `grants.*` codes (reference-manifest-schema.md).
 pub mod grants {
     /// `grants.not-requested`.
     pub const NOT_REQUESTED: &str = "grants.not-requested";
+    /// `grants.unreadable`.
+    pub const UNREADABLE: &str = "grants.unreadable";
+    /// `grants.unsafe-permissions`.
+    pub const UNSAFE_PERMISSIONS: &str = "grants.unsafe-permissions";
 }
 
 /// `update.*` codes (reference-manifest-schema.md).
@@ -514,6 +530,8 @@ pub mod registry {
     pub const CONFUSABLE: &str = "registry.confusable";
     /// `registry.category-unknown`.
     pub const CATEGORY_UNKNOWN: &str = "registry.category-unknown";
+    /// `registry.namespace-not-dormant`.
+    pub const NAMESPACE_NOT_DORMANT: &str = "registry.namespace-not-dormant";
 }
 
 /// `publish.*` codes (reference-manifest-schema.md).
@@ -608,6 +626,14 @@ pub mod settings {
     pub const ANCHOR_MISSING: &str = "settings.anchor-missing";
     /// `settings.value-ignored`.
     pub const VALUE_IGNORED: &str = "settings.value-ignored";
+    /// `settings.invalid-value`.
+    pub const INVALID_VALUE: &str = "settings.invalid-value";
+    /// `settings.key-not-owned`.
+    pub const KEY_NOT_OWNED: &str = "settings.key-not-owned";
+    /// `settings.locked`.
+    pub const LOCKED: &str = "settings.locked";
+    /// `settings.unknown-key`.
+    pub const UNKNOWN_KEY: &str = "settings.unknown-key";
 }
 
 /// `extension.*` codes (reference-errors-and-limits.md).
@@ -634,18 +660,86 @@ pub mod extension {
     pub const DISABLED: &str = "extension.disabled";
     /// `extension.chain-cap`.
     pub const CHAIN_CAP: &str = "extension.chain-cap";
+    /// `extension.contributor-not-ready`.
+    pub const CONTRIBUTOR_NOT_READY: &str = "extension.contributor-not-ready";
+    /// `extension.depth-exceeded`.
+    pub const DEPTH_EXCEEDED: &str = "extension.depth-exceeded";
+    /// `extension.entry-rejected`.
+    pub const ENTRY_REJECTED: &str = "extension.entry-rejected";
+    /// `extension.veto-overridden`.
+    pub const VETO_OVERRIDDEN: &str = "extension.veto-overridden";
 }
 
 /// `host.*` codes (reference-errors-and-limits.md).
 pub mod host {
     /// `host.capability-not-requested`.
     pub const CAPABILITY_NOT_REQUESTED: &str = "host.capability-not-requested";
+    /// `host.cache-unavailable`.
+    pub const CACHE_UNAVAILABLE: &str = "host.cache-unavailable";
+    /// `host.cwasm-incompatible`.
+    pub const CWASM_INCOMPATIBLE: &str = "host.cwasm-incompatible";
+    /// `host.engine-error`.
+    pub const ENGINE_ERROR: &str = "host.engine-error";
+    /// `host.engine-failed`.
+    pub const ENGINE_FAILED: &str = "host.engine-failed";
+    /// `host.grants-unreadable`.
+    pub const GRANTS_UNREADABLE: &str = "host.grants-unreadable";
+    /// `host.helper-missing`.
+    pub const HELPER_MISSING: &str = "host.helper-missing";
+    /// `host.import-panic`.
+    pub const IMPORT_PANIC: &str = "host.import-panic";
+    /// `host.late`.
+    pub const LATE: &str = "host.late";
+    /// `host.queue-timeout`.
+    pub const QUEUE_TIMEOUT: &str = "host.queue-timeout";
+    /// `host.shutdown-timeout`.
+    pub const SHUTDOWN_TIMEOUT: &str = "host.shutdown-timeout";
+    /// `host.slow-calls`.
+    pub const SLOW_CALLS: &str = "host.slow-calls";
+    /// `host.stack-overflow`.
+    pub const STACK_OVERFLOW: &str = "host.stack-overflow";
+    /// `host.start-slow`.
+    pub const START_SLOW: &str = "host.start-slow";
+    /// `host.trap`.
+    pub const TRAP: &str = "host.trap";
 }
 
 /// `component.*` codes (reference-host-runtime.md).
 pub mod component {
     /// `component.wasi-forbidden`.
     pub const WASI_FORBIDDEN: &str = "component.wasi-forbidden";
+    /// `component.custom-section-too-large`.
+    pub const CUSTOM_SECTION_TOO_LARGE: &str = "component.custom-section-too-large";
+    /// `component.import-ungranted`.
+    pub const IMPORT_UNGRANTED: &str = "component.import-ungranted";
+    /// `component.import-unknown`.
+    pub const IMPORT_UNKNOWN: &str = "component.import-unknown";
+    /// `component.invalid`.
+    pub const INVALID: &str = "component.invalid";
+    /// `component.missing`.
+    pub const MISSING: &str = "component.missing";
+    /// `component.size-warning`.
+    pub const SIZE_WARNING: &str = "component.size-warning";
+    /// `component.too-large`.
+    pub const TOO_LARGE: &str = "component.too-large";
+    /// `component.world-mismatch`.
+    pub const WORLD_MISMATCH: &str = "component.world-mismatch";
+}
+
+/// `config.*` codes (reference-errors-and-limits.md).
+pub mod config {
+    /// `config.parse-error`.
+    pub const PARSE_ERROR: &str = "config.parse-error";
+    /// `config.unknown-key`.
+    pub const UNKNOWN_KEY: &str = "config.unknown-key";
+}
+
+/// `snapshot.*` codes (reference-errors-and-limits.md).
+pub mod snapshot {
+    /// `snapshot.section-too-large`.
+    pub const SECTION_TOO_LARGE: &str = "snapshot.section-too-large";
+    /// `snapshot.write-failed`.
+    pub const WRITE_FAILED: &str = "snapshot.write-failed";
 }
 
 /// Every code of this module, in manual order.
@@ -758,7 +852,6 @@ pub const ALL: &[&str] = &[
     package::SIGNATURE_FORMAT,
     manifest::SIGNATURE_INVALID,
     trust::DECLINED,
-    trust::UNSIGNED,
     trust::KEY_UNKNOWN,
     trust::KEY_REVOKED,
     trust::BUNDLED_TAMPERED,
@@ -767,7 +860,6 @@ pub const ALL: &[&str] = &[
     package::PUBLISHER_KEY_CHANGED,
     trust::KEY_MALFORMED,
     trust::KEY_EXISTS,
-    trust::KEY_PERMISSIONS,
     trust::ALREADY_TRUSTED,
     trust::NOT_FOUND,
     trust::IN_USE,
@@ -926,4 +1018,49 @@ pub const ALL: &[&str] = &[
     extension::CHAIN_CAP,
     host::CAPABILITY_NOT_REQUESTED,
     component::WASI_FORBIDDEN,
+    trust::UNREADABLE,
+    trust::REMOVED,
+    install::OK,
+    migration::IO,
+    migration::SKIPPED,
+    migration::NO_BACKUP_FAILED,
+    plugin::BLOCKED,
+    plugin::NOT_RUNNING,
+    registry::NAMESPACE_NOT_DORMANT,
+    grants::UNREADABLE,
+    grants::UNSAFE_PERMISSIONS,
+    settings::INVALID_VALUE,
+    settings::KEY_NOT_OWNED,
+    settings::LOCKED,
+    settings::UNKNOWN_KEY,
+    extension::CONTRIBUTOR_NOT_READY,
+    extension::DEPTH_EXCEEDED,
+    extension::ENTRY_REJECTED,
+    extension::VETO_OVERRIDDEN,
+    host::CACHE_UNAVAILABLE,
+    host::CWASM_INCOMPATIBLE,
+    host::ENGINE_ERROR,
+    host::ENGINE_FAILED,
+    host::GRANTS_UNREADABLE,
+    host::HELPER_MISSING,
+    host::IMPORT_PANIC,
+    host::LATE,
+    host::QUEUE_TIMEOUT,
+    host::SHUTDOWN_TIMEOUT,
+    host::SLOW_CALLS,
+    host::STACK_OVERFLOW,
+    host::START_SLOW,
+    host::TRAP,
+    component::CUSTOM_SECTION_TOO_LARGE,
+    component::IMPORT_UNGRANTED,
+    component::IMPORT_UNKNOWN,
+    component::INVALID,
+    component::MISSING,
+    component::SIZE_WARNING,
+    component::TOO_LARGE,
+    component::WORLD_MISMATCH,
+    config::PARSE_ERROR,
+    config::UNKNOWN_KEY,
+    snapshot::SECTION_TOO_LARGE,
+    snapshot::WRITE_FAILED,
 ];

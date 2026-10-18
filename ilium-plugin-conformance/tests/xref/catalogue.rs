@@ -6,13 +6,21 @@ use crate::manual::{page, sole_backticked, table_cells};
 
 /// Namespaces whose first-cell rows on the errors page are error codes. The same page also
 /// lists host functions in the first cell (`fs.tail`), which are not codes.
-const ERROR_NAMESPACES: [&str; 6] = [
+const ERROR_NAMESPACES: [&str; 14] = [
     "trap",
     "manifest",
     "settings",
     "config",
     "snapshot",
     "extension",
+    "component",
+    "host",
+    "grants",
+    "trust",
+    "install",
+    "migration",
+    "plugin",
+    "registry",
 ];
 
 /// `namespace.kebab-name`: a lowercase namespace and one kebab-case name.
@@ -46,13 +54,19 @@ fn errors_page_codes(text: &str) -> BTreeSet<String> {
         .collect()
 }
 
-/// Rows of the install and package catalogue of reference-manifest-schema.md: a backticked
-/// code followed by a numeric stage (the retired-code table has no stage).
+/// Rows of the "Error catalogue" section of reference-manifest-schema.md: a backticked code
+/// in the first cell of any table. The stage column is a number or a letter (`I`, `C`, `R`,
+/// `T`, `L`) and some tables add a type column, so the section is read by heading. The table
+/// of retired codes that follows lists names that no host prints, so it is not part of it.
 fn schema_catalogue_codes(text: &str) -> BTreeSet<String> {
-    text.lines()
+    let section = text
+        .split_once("\n## Error catalogue")
+        .and_then(|(_, rest)| rest.split_once("\n## Retired and orphan codes"))
+        .map(|(section, _)| section)
+        .unwrap_or_else(|| panic!("reference-manifest-schema.md lost its catalogue headings"));
+    section
+        .lines()
         .filter_map(table_cells)
-        .filter(|cells| cells.len() >= 2)
-        .filter(|cells| !cells[1].is_empty() && cells[1].chars().all(|c| c.is_ascii_digit()))
         .filter_map(|cells| sole_backticked(cells[0]).map(str::to_owned))
         .filter(|code| is_dotted_id(code))
         .collect()

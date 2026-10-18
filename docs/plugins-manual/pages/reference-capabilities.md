@@ -113,7 +113,7 @@ Every grant is listed once. Capabilities with several grants share one row.
 | `agent.transcript` | none | S C | **H** | [page](/pages/capability-agent-transcript/) | [primitives-agent](/pages/primitives-agent/) |
 | `editor.read` | none | C | normal | [page](/pages/capability-editor-read/) | [primitives-editor](/pages/primitives-editor/) |
 | `editor.edit` | none | C | normal | [page](/pages/capability-editor-edit/) | [primitives-editor](/pages/primitives-editor/) |
-| `editor.provide` (reserved, refused in 0.1.0) | none | C | **H** | [page](/pages/capability-editor-provide/) | [primitives-editor](/pages/primitives-editor/) |
+| `editor.provide` | none (reserved, refused in 0.1.0) | C | **H** | [page](/pages/capability-editor-provide/) | [primitives-editor](/pages/primitives-editor/) |
 | `ui.panels` | none | C | normal | [page](/pages/capability-ui-panels/) | [api-ui](/pages/api-ui/), [widgets-index](/pages/widgets-index/) |
 | `ui.chrome` | none | S C | normal | [page](/pages/capability-ui-chrome/) | [api-ui](/pages/api-ui/), [api-intents](/pages/api-intents/) |
 | `keys.intercept` | none | C | **H** | [page](/pages/capability-keys-intercept/) | [api-keys](/pages/api-keys/) |
@@ -412,7 +412,7 @@ The figure shows how one import call is decided.
 
 Old animation rights map to grants: `network.http` becomes `http:<host>`, and `audio.microphone` becomes `audio.capture`. The full list is in [Porting from .iliumanim](/pages/porting-iliumanim/).
 
-Requirement ids for this page: [CAP-001], [CAP-002], [CAP-003], [CAP-004], [CAP-005], [CAP-006], [CAP-007], [CAP-010], [CAP-011], [CAP-012], [CAP-013], [CAP-014], [CAP-015], [CAP-016], [CAP-017], [CAP-018], [CAP-019], [CAP-020], [CAP-021]. See the [requirements index](/pages/reference-requirements/).
+Requirement ids for this page: [CAP-001], [CAP-002], [CAP-003], [CAP-004], [CAP-005], [CAP-006], [CAP-007], [CAP-010], [CAP-011], [CAP-012], [CAP-013], [CAP-014], [CAP-015], [CAP-016], [CAP-017], [CAP-018]. See the [requirements index](/pages/reference-requirements/).
 
 ## See also
 

@@ -268,7 +268,7 @@ fn sec_184_install_checks_fail_with_the_named_policy_codes() {
     }
 }
 
-/// REQ: SEC-184
+/// REQ: SEC-184, SEC-198
 #[test]
 fn sec_184_a_denied_grant_does_not_fail_the_install() {
     let rig = setup(&[]).system_policy(DENY_CLIPBOARD, true).start();
@@ -279,7 +279,7 @@ fn sec_184_a_denied_grant_does_not_fail_the_install() {
     );
 }
 
-/// REQ: SEC-184
+/// REQ: SEC-184, SEC-198
 #[test]
 fn sec_184_runtime_refusal_is_not_permitted_with_reason_policy_and_no_policy_text() {
     let rig = setup(&["clipboard.read"])
@@ -754,5 +754,28 @@ fn sec_199_the_manual_points_to_the_enterprise_guide() {
             "/pages/guide-enterprise-deployment/",
             "No store is shared between users.",
         ],
+    );
+}
+
+/// REQ: SEC-193
+#[test]
+fn doc_sec_193_the_manual_lists_the_five_grant_pattern_forms() {
+    assert_page_has(
+        "reference-admin-policy.md",
+        &[
+            "`<name>:<arg>`",
+            "`<name>:*`",
+            "`<prefix>.*`",
+            "`http:*.<domain>`",
+        ],
+    );
+}
+
+/// REQ: SEC-382
+#[test]
+fn doc_sec_382_the_manual_treats_a_denied_extension_point_as_a_denied_grant() {
+    assert_page_has(
+        "reference-admin-policy.md",
+        &["extensions.deny_points", "treated as a denied grant"],
     );
 }

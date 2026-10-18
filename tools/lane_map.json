@@ -324,7 +324,7 @@
   "config-migration": {
    "ranges": [
     "LIF-095..121",
-    "COR-030..033",
+    "COR-030..034",
     "COR-090"
    ],
    "patterns": [

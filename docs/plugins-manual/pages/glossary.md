@@ -97,7 +97,7 @@ A plugin is a WebAssembly component that the host loads, checks and runs. It rea
 
 **Scene.** An animated background, written as a `scene` component that implements the `renderer` export. A scene draws into a surface, and the host applies the shared look to the result. See [Scenes](/pages/api-scenes/).
 
-**Scope.** A named area of the file system that a `fs` grant refers to, such as `project`, `data` or `cache`. See [File access](/pages/file-access/).
+**Scope.** A named area of the file system that an `fs.*` grant refers to, such as `project`, `data` or `cache`. See [File access](/pages/file-access/).
 
 **Shared look.** The colour, style and dithering settings that the user sets once and the host applies to every scene and surface. A plugin does not add its own brightness or palette controls. See [Accessibility and theming](/pages/accessibility-and-theming/).
 

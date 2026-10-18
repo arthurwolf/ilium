@@ -206,13 +206,13 @@ Rust components built for `wasm32-wasip2` and TypeScript components built by `co
 | `wasi:cli/exit` | A call traps with `wasi.exit` |
 | `wasi:clocks`, `wasi:random` | Allowed. Wall-clock time is the real clock; monotonic time is the host monotonic clock; random bytes come from the operating system |
 | `wasi:io` | Allowed |
-| `wasi:filesystem` | Linked, but with preopens only for scopes that an `fs.*` grant makes available, mapped through `ilium-platform` secure file access. With no `fs` grant the preopen list is empty |
+| `wasi:filesystem` | Linked, but with preopens only for scopes that an `fs.*` grant makes available, mapped through `ilium-platform` secure file access. With no `fs.*` grant the preopen list is empty |
 | `wasi:sockets` | Refused. A component that imports it is refused at load with `component.wasi-forbidden` |
 | `wasi:http` | Refused in the same way. HTTP goes only through the `http` capability, which applies allowlists, size caps and the outbound-request rules |
 
 Package-time composition with `wasi-virt` is a supported alternative for a plugin author who wants a smaller import set. It does not change the host rules.
 
-- **[HST-076]** The host MUST link WASI Preview 2 with captured stdout and stderr, an empty environment, no stdin, `wasi:cli/exit` as a trap, and preopens only from `fs` grants.
+- **[HST-076]** The host MUST link WASI Preview 2 with captured stdout and stderr, an empty environment, no stdin, `wasi:cli/exit` as a trap, and preopens only from `fs.*` grants.
 - **[HST-077]** A component that imports `wasi:sockets` or `wasi:http` MUST be refused at load with `component.wasi-forbidden` and MUST NOT be instantiated.
 - **[HST-078]** A stdout or stderr line longer than 16 KiB MUST be cut at 16 KiB and marked `[cut]`.
 

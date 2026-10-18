@@ -380,6 +380,55 @@ Run-time codes of the [config and data migration](/pages/reference-config-and-da
 | `settings.unknown-key` | A write names a key the kernel does not know in that tab. Nothing is written |
 | `snapshot.section-too-large` | A snapshot section is larger than its `max_bytes`. It is dropped and the previous value is kept |
 | `section-unsupported` | The plugin answers `restore-section` with a `schema_version` it does not accept. The section stays unchanged |
+| `settings.invalid-value` | A write is outside the range of a row. Nothing is written |
+| `settings.key-not-owned` | A write through `settings.write-kernel:<tab>` names a key outside the "Keys written" column of that tab (COR-034). Nothing is written |
+| `settings.locked` | A write to a key in the administrator policy `settings.locked`, by the user, by `ilium config set` or by a plugin with `settings.write-all` (SEC-190) |
+| `snapshot.write-failed` | A snapshot write failed. The server keeps running, the previous snapshot file is kept and the write is retried at the next snapshot (LIF-154) |
+
+### Component, host and store codes
+
+Codes of the component checks, of the host runtime and of the grant and trust stores. A rule that the host logs carries the code in the log line. A rule that traps carries it as the trap code. The checks of `ilium plugin check` are in [Check and lint rules](/pages/reference-check-and-lint-rules/), the runtime rules are in [Host runtime](/pages/reference-host-runtime/) and [Host architecture](/pages/reference-host-architecture/).
+
+| Code | Raised when |
+|---|---|
+| `component.custom-section-too-large` | A custom section is over 4 MiB, or the custom sections together are over 8 MiB |
+| `component.import-ungranted` | The component imports a host function whose grant the side does not request |
+| `component.import-unknown` | The component imports an interface that is not in the contract |
+| `component.invalid` | The file is not a valid WebAssembly component |
+| `component.missing` | A declared side has no component |
+| `component.size-warning` | A component is larger than 8 MiB. Above 32 MiB it is an error |
+| `component.too-large` | The component is larger than 32 MiB |
+| `component.wasi-forbidden` | A component imports `wasi:sockets` or `wasi:http`. It is refused at load and not instantiated (HST-077) |
+| `component.world-mismatch` | The world of the component differs from `world` in the manifest |
+| `host.capability-not-requested` | A plugin calls a function that its manifest never requested. The call traps |
+| `host.cache-unavailable` | The compile cache is unreadable, unwritable or full. The host compiles in memory and logs the code once (HST-062) |
+| `host.cwasm-incompatible` | No `.cwasm` fits the target triple or the engine fingerprint. The component is compiled at load and the start is slower |
+| `host.engine-error` | A Wasmtime engine-level error, or a Store over its limit of 16 instances, 8 tables or 4 memories. The load or instantiation fails and the plugin is not activated |
+| `host.engine-failed` | The Wasmtime engine cannot be created. The process continues without a plugin host, as with `--no-plugins` (HST-037) |
+| `host.grants-unreadable` | The grant store is unreadable at start. The host starts with default grants for T1 only and refuses T2 and T3 packages until the file is repaired |
+| `host.import-panic` | A Rust panic inside a host import. Only the calling instance traps (HST-036) |
+| `host.late` | A call finished after a soft or a hard deadline. Written to the telemetry log with the class and the duration |
+| `host.queue-timeout` | The deadline of a call passes while it waits in the queue. The call is abandoned and a breach is counted (HST-216) |
+| `host.shutdown-timeout` | Shutdown of the server host takes longer than 5 s. The remaining plugins are dropped without `deactivate` |
+| `host.slow-calls` | Report, at most once a minute per side, of the 3 slowest calls of the last minute when a call took over 50 % of its deadline (HST-359) |
+| `host.stack-overflow` | A stack overflow in guest code. The instance traps and the process keeps running (HST-089) |
+| `host.start-slow` | A startup plugin takes longer than `HOST-START`. Boot continues and the plugin is reported late |
+| `host.trap` | A trap, written to the telemetry log with the trap code |
+| `grants.unreadable` | The grant store file cannot be parsed. It is renamed to `<name>.corrupt-<YYYYMMDD-HHmmss>`, starts with no entries and the grants are asked again (SEC-114) |
+| `grants.unsafe-permissions` | Another user can write the grant file or the trust store. T2 and T3 plugins are refused at load until the file is fixed (USR-207) |
+| `trust.unreadable` | The trust store file cannot be parsed. It is handled like the grant store (SEC-114) |
+| `trust.removed` | A trusted key was removed with `trust remove <key_id> --force`. A plugin that it signed is shown as `Untrusted` |
+
+### Install, migration and registry log codes
+
+Codes that are logged or refused outside the install pipeline of [Manifest schema and error catalogue](/pages/reference-manifest-schema/#error-catalogue).
+
+| Code | Raised when |
+|---|---|
+| `install.ok` | Logged when an install completes |
+| `migration.no-backup-failed` | An update installed with `--no-backup` fails in `migrate`. The previous version stays active and the data may be half migrated. Logged at level error |
+| `plugin.blocked` | `ilium plugin enable <id>` on a blocked plugin without `--accept-risk` (USR-175) |
+| `registry.namespace-not-dormant` | A registry refuses to give a namespace to another publisher because it is not dormant, or the notice period is not over (PKG-656) |
 
 ### Error codes of the extended functions
 
@@ -456,6 +505,10 @@ Run codes, returned by the `extensions` host functions or written to the plugin 
 | `extension.vetoed` | A `veto` handler refused, or, with `on_failure: refuse`, a guard handler failed on a plugin-started action (reason `guard-failed`). The run completes as `refused(conflict)` |
 | `extension.disabled` | The extension stopped after three breaches in a row, until the plugin restarts or the user presses Reset |
 | `extension.chain-cap` | Handlers after the 100 ms chain cap were skipped. Log-only |
+| `extension.contributor-not-ready` | A hook call met a contributor that is not yet `active`. The host skips it, treats it as `pass` and logs the code (LIF-056) |
+| `extension.depth-exceeded` | A `run-hook` from a handler at depth 3. It counts as `pass`, not as a breach. Travels as `reentrant` |
+| `extension.entry-rejected` | The owner refused an entry outside its allowlist (SEC-283). Log-only, to the log of the contributor and of the owner |
+| `extension.veto-overridden` | The user overrode a `veto` chain or a guard on an action that the user started (SEC-291). The chain completes `ok` and the owner's log gets the code |
 
 ### Requestable limits
 

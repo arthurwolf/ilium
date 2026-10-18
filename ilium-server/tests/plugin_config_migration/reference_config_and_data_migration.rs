@@ -1,4 +1,4 @@
-//! COR-030..COR-033.
+//! COR-030..COR-034.
 
 use proptest::prelude::*;
 
@@ -341,5 +341,16 @@ proptest! {
         let after = rig.read_config();
         let needle = format!("[extra_{key}]\nunknown = {value}");
         prop_assert!(after.contains(&needle));
+    }
+}
+
+/// REQ: COR-034
+#[test]
+fn doc_cor_034_the_manual_pins_the_keys_written_column_to_settings_key_not_owned() {
+    let page = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../docs/plugins-manual/pages/reference-config-and-data-migration.md");
+    let text = std::fs::read_to_string(&page).expect("the config migration page");
+    for needle in ["settings.write-kernel:<tab>", "settings.key-not-owned"] {
+        assert!(text.contains(needle), "{needle} missing from {page:?}");
     }
 }

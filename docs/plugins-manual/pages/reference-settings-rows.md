@@ -497,7 +497,7 @@ A file or a directory chosen with the kernel file picker.
 | Validation | `type: string`; the extension list is checked on confirm |
 | Written | on confirm |
 
-The row stores the path as text. It grants no file access: the plugin needs its own `fs` grant to open the path, and the path must lie inside a scope it holds.
+The row stores the path as text. It grants no file access: the plugin needs its own `fs.*` grant to open the path, and the path must lie inside a scope it holds.
 
 <figure>
 <pre class="term">╭  ≡ ● · Path states────────────────────────────────────╮

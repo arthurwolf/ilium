@@ -24,7 +24,7 @@ Each operation needs a grant in the form `<grant>:<scope>`.
 
 Other rules that apply:
 
-- `fs.roots` needs any `fs` grant. The `package`, `data` and `cache` scopes are always granted, so a manifest does not list them.
+- `fs.roots` needs any `fs.*` grant. The `package`, `data` and `cache` scopes are always granted, so a manifest does not list them.
 - `fs.pick` without `fs.read:picked` or `fs.write:picked` fails at install with `manifest.grant-dependency`.
 - `fs.write:agent-sessions:<agent>` is refused at install.
 - `fs.read:path:` with a literal absolute path, `fs.watch:path:` with one, and `fs.write:worktrees` are high-risk grants. The user checks each one by hand.
@@ -59,7 +59,7 @@ Every scope except `package` and the `agent-config` scopes can be watched (a wat
 
 | Function | Grant | Kind | Result and meaning |
 |---|---|---|---|
-| `roots` | any `fs` grant | sync | List of `(scope, writable)` pairs for the granted scopes. |
+| `roots` | any `fs.*` grant | sync | List of `(scope, writable)` pairs for the granted scopes. |
 | `metadata(path)` | `fs.read` | sync | `fs-metadata` of one entry. `not-found` when it is absent. |
 | `list_dir(path, max_entries)` | `fs.read` | sync | Children of a folder, at most 4,096. Each is a `dir-entry`. |
 | `read(path, offset, max_bytes)` | `fs.read` | sync | Bytes from `offset`, at most 1 MiB per call. |

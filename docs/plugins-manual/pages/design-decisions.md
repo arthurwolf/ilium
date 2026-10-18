@@ -472,7 +472,7 @@ function statusSubmissions(): Submission[] {
 
 **Why replacement needs a surface.** A replacement that provides only part of a core plugin would leave dangling services, commands, pane kinds and topics for other plugins. The `surface` list is the checklist, and `manifest.replaces-surface-incomplete` names what is missing. Replacement needs the user's confirmation, not a grant, because the user decides which built-in behaviour to give up. `ilium.core.sessions` and `ilium.core.settings` are not replaceable, because they protect saved data and the Plugins screen itself.
 
-**Why no wildcard grants.** A wildcard such as "contribute to any point" would let one package place code in every flow. The user could not read the review dialog and decide. Each point is named, so the dialog can show `Text triggers > Before fire: can stop a trigger from sending text (high risk)`. The grant `extensions.contribute-any` does not exist.
+**Why no wildcard grants.** A wildcard such as "contribute to any point" would let one package place code in every flow. The user could not read the review dialog and decide. Each point is named, so the dialog can show `Text triggers > Before fire: can stop a trigger from sending text (high risk)`. The name `extensions.contribute-any` is not a grant and does not exist.
 
 **Alternative.** Per-plugin special hooks, which give core plugins a private API, or a single global event bus with veto rights, which cannot show the user what a package may stop.
 

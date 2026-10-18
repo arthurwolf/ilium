@@ -333,7 +333,7 @@ Code that reads a restart-only value gets the value that was current at the star
 | Two startup plugins `require` each other | Both stay off | `manifest.requires-cycle` |
 | `snapshot-sections` entry has an unknown `schema_version` | Section kept unchanged | `section-unsupported` |
 | A route for `/create_agent` is registered twice | The second registration is refused | `http-api.route-taken` |
-| `config.toml` fails to parse at boot | Moved aside, defaults used, recovery page opens | `config.parse-failed` |
+| `config.toml` fails to parse at boot | Moved aside, defaults used, recovery page opens | `config.parse-error` |
 | A startup plugin takes longer than `HOST-START` | Boot continues. The plugin is reported late | `host.start-slow` (logged) |
 | A scene side declares `extensions.provide` | Install refused | `manifest.grant-side` |
 
