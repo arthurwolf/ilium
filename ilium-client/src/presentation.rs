@@ -409,11 +409,11 @@ impl Presenter {
                     frame._reservation.slots.allocation.clone(),
                 ),
                 frame,
-            }));
+            });
         }
         let mut queue = self.shared.queue.lock().unwrap_or_else(|e| e.into_inner());
         if queue.closing || queue.frames.len() >= FRAME_SLOTS {
-            return Err(Box::new(SubmissionError {
+            return Err(SubmissionError {
                 error: guarded_failure(
                     io::Error::new(
                         io::ErrorKind::BrokenPipe,
@@ -422,7 +422,7 @@ impl Presenter {
                     frame._reservation.slots.allocation.clone(),
                 ),
                 frame,
-            }));
+            });
         }
         queue.frames.push_back(frame);
         drop(queue);
