@@ -122,6 +122,7 @@ pub mod presentation;
 pub mod progress_bar;
 pub mod progress_display;
 pub mod progress_guard;
+pub mod progress_popover;
 pub mod progress_time;
 pub mod project_config;
 pub mod project_naming;
