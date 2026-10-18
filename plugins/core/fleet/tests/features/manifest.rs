@@ -235,7 +235,7 @@ fn manifest_050_has_no_startup_activation() {
 fn manifest_040_panes_is_a_jsonl_command_that_needs_no_server() {
     assert_eq!(
         cli_entry("panes"),
-        json!({"name": "panes", "summary": "List panes in every session", "output": "jsonl", "requires_server": false})
+        json!({"name": "panes", "summary": "List panes in every session", "output": "jsonl", "requires_server": true})
     );
 }
 
@@ -248,7 +248,7 @@ fn manifest_040_broadcast_uses_the_pane_selector_argument_group() {
             "name": "broadcast",
             "summary": "Send a line to agents",
             "output": "jsonl",
-            "requires_server": false,
+            "requires_server": true,
             "argument_groups": ["pane-selector"],
         })
     );

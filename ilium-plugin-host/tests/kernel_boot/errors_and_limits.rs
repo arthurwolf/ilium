@@ -9,55 +9,55 @@ use ilium_plugin_host::limits_rules::{
 };
 use proptest::prelude::*;
 
-fn expected_retry_after(bucket_ms: i64) -> i64 {
-    let raw = ((100 - bucket_ms) as f64 / 0.5 / 10.0).ceil() as i64 * 10;
+fn expected_retry_after(balance_ms: i64) -> i64 {
+    let raw = (-balance_ms * 2 + 9).div_euclid(10) * 10;
     raw.max(100)
 }
 
 /// REQ: HST-496
 #[test]
-fn hst_496_a_full_bucket_waits_the_minimum() {
+fn hst_496_a_positive_balance_waits_the_minimum() {
     assert_eq!(retry_after_ms(100), 100);
 }
 
 /// REQ: HST-496
 #[test]
-fn hst_496_half_a_bucket_still_waits_the_minimum() {
-    assert_eq!(retry_after_ms(50), 100);
+fn hst_496_a_small_deficit_still_waits_the_minimum() {
+    assert_eq!(retry_after_ms(-25), 100);
 }
 
 /// REQ: HST-496
 #[test]
-fn hst_496_a_quarter_bucket_waits_150() {
-    assert_eq!(retry_after_ms(25), 150);
+fn hst_496_a_deficit_of_33_rounds_up_to_100() {
+    assert_eq!(retry_after_ms(-33), 100);
 }
 
 /// REQ: HST-496
 #[test]
-fn hst_496_bucket_33_rounds_up_to_140() {
-    assert_eq!(retry_after_ms(33), 140);
+fn hst_496_an_empty_bucket_waits_the_minimum() {
+    assert_eq!(retry_after_ms(0), 100);
 }
 
 /// REQ: HST-496
 #[test]
-fn hst_496_an_empty_bucket_waits_200() {
-    assert_eq!(retry_after_ms(0), 200);
+fn hst_496_a_deficit_of_100_waits_200() {
+    assert_eq!(retry_after_ms(-100), 200);
 }
 
 /// REQ: HST-496
 #[test]
-fn hst_496_the_lowest_bucket_waits_400() {
-    assert_eq!(retry_after_ms(-100), 400);
+fn hst_496_a_deficit_of_51_rounds_up_to_110() {
+    assert_eq!(retry_after_ms(-51), 110);
 }
 
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(128))]
     // REQ: HST-496
     #[test]
-    fn hst_496_matches_the_formula_and_stays_in_range(bucket in -100i64..=100) {
+    fn hst_496_matches_the_formula_and_stays_in_range(bucket in -500i64..=100) {
         let value = retry_after_ms(bucket);
         prop_assert_eq!(value, expected_retry_after(bucket));
-        prop_assert!((100..=400).contains(&value));
+        prop_assert!(value >= 100);
         prop_assert_eq!(value % 10, 0);
     }
 }

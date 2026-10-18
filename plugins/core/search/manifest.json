@@ -33,9 +33,8 @@
     ]
   },
   "activation": [
-    "command:search",
-    "job:index",
-    "view:search.panel"
+    "command:ilium.core.search/open",
+    "view:search"
   ],
   "contributes": {
     "commands": [

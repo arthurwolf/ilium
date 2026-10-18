@@ -920,13 +920,13 @@ fn locked_fx() -> (Fx, Value) {
     );
     let out = fx.run(&["lock"]);
     assert_eq!(out.exit_code, 0, "{:?}", out.stdout_jsonl);
-    let text = std::fs::read_to_string(fx.cwd.join("plugins.lock")).unwrap_or_default();
+    let text = std::fs::read_to_string(fx.cwd.join("ilium-plugins.lock")).unwrap_or_default();
     let lock: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
     (fx, lock)
 }
 
 fn write_lock(fx: &Fx, lock: &Value) -> String {
-    fx.write_file("plugins.lock", lock.to_string().as_bytes())
+    fx.write_file("ilium-plugins.lock", lock.to_string().as_bytes())
 }
 
 fn fresh_with_same_registry(source: &Fx) -> Fx {
@@ -1041,7 +1041,7 @@ fn pkg_359_resolution_that_differs_from_the_lock_is_a_lock_mismatch() {
 fn pkg_359_lock_of_an_empty_installed_set_has_no_plugins() {
     let fx = Fx::new();
     assert_eq!(fx.run(&["lock"]).exit_code, 0);
-    let text = std::fs::read_to_string(fx.cwd.join("plugins.lock")).unwrap_or_default();
+    let text = std::fs::read_to_string(fx.cwd.join("ilium-plugins.lock")).unwrap_or_default();
     let lock: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
     assert_eq!(lock["format"], "ilium-lock/1");
     assert_eq!(lock["plugins"].as_array().map(Vec::len), Some(0));

@@ -1533,7 +1533,7 @@ fn hst_084_wrong_api_section_and_forbidden_import_reports_api_version_first() {
     );
     assert_eq!(
         refusal_code(&bytes, &bare_context()),
-        "component.api-version-mismatch"
+        "manifest.api-version"
     );
 }
 
@@ -1594,7 +1594,7 @@ fn hst_085_each_of_the_three_fields_must_match() {
         let bytes = with_custom_section(empty_component(), "ilium:api-version", &wrong);
         assert_eq!(
             refusal_code(&bytes, &bare_context()),
-            "component.api-version-mismatch",
+            "manifest.api-version",
             "bytes {wrong:?}"
         );
     }
@@ -1607,7 +1607,7 @@ fn hst_085_five_and_seven_byte_sections_are_refused() {
         let bytes = with_custom_section(empty_component(), "ilium:api-version", &payload);
         assert_eq!(
             refusal_code(&bytes, &bare_context()),
-            "component.api-version-mismatch",
+            "manifest.api-version",
             "len {}",
             payload.len()
         );
@@ -1619,7 +1619,7 @@ fn hst_085_five_and_seven_byte_sections_are_refused() {
 fn hst_085_missing_section_is_refused() {
     assert_eq!(
         refusal_code(&empty_component(), &bare_context()),
-        "component.api-version-mismatch"
+        "manifest.api-version"
     );
 }
 
@@ -1633,7 +1633,7 @@ fn hst_085_fields_are_big_endian() {
     );
     assert_eq!(
         refusal_code(&bytes, &bare_context()),
-        "component.api-version-mismatch"
+        "manifest.api-version"
     );
 }
 

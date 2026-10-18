@@ -172,16 +172,7 @@ fn doc_pkg_581_the_page_maps_the_old_code_to_source_denied() {
 /// REQ: PKG-582
 #[test]
 fn pkg_582_every_kernel_subcommand_refused_cli_name_reserved() {
-    for name in [
-        "plugin",
-        "session",
-        "recap",
-        "progress",
-        "chat",
-        "kill-session",
-        "help",
-        "version",
-    ] {
+    for name in ["plugin", "session", "kill-session", "help", "version"] {
         let value = set(
             client(),
             "/contributes/cli",
@@ -212,7 +203,7 @@ fn pkg_582_a_reserved_alias_is_refused_cli_name_reserved() {
     let value = set(
         client(),
         "/contributes/cli",
-        json!([{ "name": "tool", "summary": "S", "aliases": ["chat"] }]),
+        json!([{ "name": "tool", "summary": "S", "aliases": ["help"] }]),
     );
     assert_has(&errors(&value), "manifest.cli-name-reserved");
 }

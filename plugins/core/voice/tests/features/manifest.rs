@@ -140,7 +140,10 @@ fn manifest_050_contributes_one_jsonl_cli_command_that_needs_a_server() {
     let manifest = manifest();
     assert_eq!(
         manifest["contributes"],
-        json!({ "cli": { "name": "voice", "summary": "Voice control: say", "output": "jsonl", "requires_server": true } })
+        json!({
+            "cli": { "name": "voice", "summary": "Voice control: say", "output": "jsonl", "requires_server": true },
+            "jobs": [{ "kind": "transcribe", "deadline_ms": 30000, "memory_mib": 512 }],
+        })
     );
 }
 

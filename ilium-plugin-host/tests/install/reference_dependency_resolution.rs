@@ -538,21 +538,14 @@ fn pkg_326_wait_ms_4999_and_zero() {
 
 /// REQ: PKG-327
 #[test]
-fn pkg_327_service_forms_at_0_1_and_0_1_0_are_the_same() {
-    let short =
+fn pkg_327_service_form_requires_a_full_version_meaning_caret() {
+    assert!(
         ilium_plugin_host::resolve::parse_service_requirement("ilium:inference/provider@0.1")
-            .expect("short");
+            .is_err()
+    );
     let long =
         ilium_plugin_host::resolve::parse_service_requirement("ilium:inference/provider@0.1.0")
             .expect("long");
-    assert_eq!(short.interface, long.interface);
-    for probe in ["0.1.0", "0.1.7", "0.2.0", "1.0.0"] {
-        assert_eq!(
-            short.range.matches(&version(probe), false),
-            long.range.matches(&version(probe), false),
-            "{probe}"
-        );
-    }
     assert!(
         long.range.matches(&version("0.1.7"), false)
             && !long.range.matches(&version("0.2.0"), false)
@@ -561,15 +554,16 @@ fn pkg_327_service_forms_at_0_1_and_0_1_0_are_the_same() {
 
 /// REQ: PKG-327
 #[test]
-fn pkg_327_service_form_uses_the_range_grammar() {
-    let service = ilium_plugin_host::resolve::parse_service_requirement(
+fn pkg_327_service_form_refuses_ranges() {
+    for text in [
         "ilium:inference/provider@>=0.1.0 <0.3.0",
-    )
-    .expect("range");
-    assert!(
-        service.range.matches(&version("0.2.5"), false)
-            && !service.range.matches(&version("0.3.0"), false)
-    );
+        "ilium:inference/provider@^0.1.0",
+    ] {
+        assert!(
+            ilium_plugin_host::resolve::parse_service_requirement(text).is_err(),
+            "{text}"
+        );
+    }
 }
 
 /// REQ: PKG-328

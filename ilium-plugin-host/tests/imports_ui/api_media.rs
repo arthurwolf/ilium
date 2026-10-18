@@ -133,7 +133,7 @@ fn wit_media_open_video_bytes_sixteen_mib_boundary_quota_exceeded() {
 
 /// REQ: WIT:ilium:host/media.open-video-bytes
 #[test]
-fn wit_media_open_video_bytes_unknown_mime_invalid_argument() {
+fn wit_media_open_video_bytes_unknown_mime_unsupported() {
     let rig = seeded();
     assert_eq!(
         code_of(
@@ -141,7 +141,7 @@ fn wit_media_open_video_bytes_unknown_mime_invalid_argument() {
                 .media()
                 .open_video_bytes(vec![0; 8], "text/plain".to_owned())
         ),
-        ErrorCode::InvalidArgument
+        ErrorCode::Unsupported
     );
 }
 

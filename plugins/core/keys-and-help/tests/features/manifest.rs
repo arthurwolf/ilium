@@ -124,7 +124,11 @@ fn manifest_030_the_read_grants_name_one_tab_and_no_wildcard() {
 fn manifest_050_activation_triggers_are_the_command_and_the_keyboard_settings_tab() {
     assert_eq!(
         manifest()["activation"],
-        json!(["command:keys-and-help.open", "settings:keyboard"])
+        json!([
+            "command:ilium.core.keys-and-help/show-keys",
+            "command:ilium.core.keys-and-help/show-plugins",
+            "settings:keyboard"
+        ])
     );
 }
 

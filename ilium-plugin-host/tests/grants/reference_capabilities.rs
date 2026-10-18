@@ -293,7 +293,7 @@ fn cap_014_refused_intent_is_logged_with_grant_and_reason() {
     assert!(
         rig.log_messages()
             .iter()
-            .any(|line| line == "refused sound.play because declined"),
+            .any(|line| line.starts_with("refused sound.play by ") && line.ends_with(" (declined)")),
         "{:?}",
         rig.log_messages()
     );
@@ -315,7 +315,7 @@ fn cap_014_refused_import_is_logged_with_a_refused_prefix() {
     assert!(
         lines
             .iter()
-            .any(|line| line.starts_with("refused fs.read:project because ")),
+            .any(|line| line.starts_with("refused fs.read:project by ") && line.ends_with(')')),
         "{lines:?}"
     );
 }
@@ -354,7 +354,10 @@ fn cap_014_reason_is_one_word_of_the_closed_list() {
         .into_iter()
         .find(|line| line.starts_with("refused "))
         .expect("a refusal line");
-    let reason = line.rsplit(" because ").next().expect("reason");
+    let reason = line
+        .rsplit_once(" (")
+        .and_then(|(_, tail)| tail.strip_suffix(')'))
+        .expect("reason");
     assert!(closed.contains(&reason), "{line}");
 }
 

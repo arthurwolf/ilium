@@ -304,8 +304,8 @@ fn dev_655_restart_message_is_exact_at_level_warn() {
 /// REQ: DEV-655
 #[test]
 fn dev_655_restart_message_carries_the_delay_and_failure_count_of_that_restart() {
-    let (_, message) = restart_log(4, 2, 3);
-    assert_eq!(message, "restarting in 4 s (failure 2 of 3 in 10 minutes)");
+    let (_, message) = restart_log(5, 2, 3);
+    assert_eq!(message, "restarting in 5 s (failure 2 of 3 in 10 minutes)");
 }
 
 /// REQ: DEV-655

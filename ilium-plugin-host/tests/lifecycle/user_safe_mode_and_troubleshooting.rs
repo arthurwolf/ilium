@@ -1,4 +1,4 @@
-//! user-safe-mode-and-troubleshooting.md: LIF-180..184. LIF-185 and LIF-186 belong to part 2.
+//! user-safe-mode-and-troubleshooting.md: LIF-180..184. LIF-185, LIF-186 and LIF-187 belong to part 2.
 
 use crate::support::*;
 

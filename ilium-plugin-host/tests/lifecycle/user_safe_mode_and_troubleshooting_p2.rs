@@ -1,4 +1,4 @@
-//! Part 2: LIF-185, LIF-186 (bisect step bound, crash-loop guard).
+//! Part 2: LIF-185, LIF-186, LIF-294, LIF-187 (bisect step bound, crash-loop guard, bisect without a culprit).
 use crate::support::*;
 
 fn host_with(n: usize) -> LifeHost {
@@ -112,9 +112,9 @@ fn lif_186_three_crashes_spread_over_more_than_five_minutes_do_not_select_safe_m
     assert!(matches!(host.safe_mode(), SafeMode::Off));
 }
 
-/// REQ: LIF-186
+/// REQ: LIF-294
 #[test]
-fn lif_186_guard_clears_after_a_start_that_stays_up_five_minutes() {
+fn lif_294_guard_clears_after_a_start_that_stays_up_five_minutes() {
     let mut host = LifeHost::new();
     host.install(PluginSpec::new(A).sides(&[Side::Server]).startup());
     for _ in 0..3 {
@@ -126,4 +126,30 @@ fn lif_186_guard_clears_after_a_start_that_stays_up_five_minutes() {
     host.shutdown();
     host.start_after_crashes();
     assert!(matches!(host.safe_mode(), SafeMode::Off));
+}
+
+/// REQ: LIF-187
+#[test]
+fn lif_187_a_fault_outside_every_plugin_ends_with_not_a_plugin() {
+    let mut host = host_with(4);
+    host.cli(&["plugin", "bisect", "start"]);
+    let mut last = None;
+    for _ in 0..40 {
+        let out = host.cli(&["plugin", "bisect", "bad"]);
+        let record = out
+            .stdout_jsonl
+            .iter()
+            .find(|line| line["type"] == "bisect")
+            .cloned();
+        let finished = record
+            .as_ref()
+            .is_some_and(|line| line["reason"] == "not-a-plugin");
+        last = record;
+        if finished {
+            break;
+        }
+    }
+    let record = last.expect("a bisect record");
+    assert_eq!(record["reason"], "not-a-plugin", "{record}");
+    assert!(record["found"].is_null(), "{record}");
 }

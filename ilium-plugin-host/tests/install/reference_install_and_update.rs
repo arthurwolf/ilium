@@ -1691,7 +1691,7 @@ fn pkg_282_grant_flag_for_that_exact_grant_confirms() {
     assert_eq!(fx.install(&Spec::new("example.a", "1.0.0")).exit_code, 0);
     let out = fx.update_with(
         &Spec::new("example.a", "1.1.0").grant("commands.invoke:*"),
-        &["--grant", "server:commands.invoke:*"],
+        &["--grant", "commands.invoke:*"],
     );
     assert_eq!(out.exit_code, 0, "{:?}", out.stdout_jsonl);
     assert_eq!(
@@ -1707,7 +1707,7 @@ fn pkg_282_grant_flag_for_another_grant_does_not_confirm() {
     assert_eq!(fx.install(&Spec::new("example.a", "1.0.0")).exit_code, 0);
     let out = fx.update_with(
         &Spec::new("example.a", "1.1.0").grant("commands.invoke:*"),
-        &["--grant", "server:commands.invoke:other.*"],
+        &["--grant", "commands.invoke:other.*"],
     );
     assert_eq!(out.exit_code, 1);
     assert!(fx.record("example.a").expect("record")["update"].is_null());

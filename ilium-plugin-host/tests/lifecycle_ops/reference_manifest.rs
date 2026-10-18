@@ -6,19 +6,19 @@ use crate::common::*;
 
 /// REQ: LIF-277
 #[test]
-fn lif_277_negative_data_version_is_refused_manifest_schema() {
+fn lif_277_negative_data_version_is_refused_manifest_data_version() {
     let rig = rig();
     let output = install(&rig, &pkg(NOTES, "1.0.0").raw_data_version("-1"));
     assert_eq!(output.exit_code, 1);
-    assert!(error_codes(&output).contains(&"manifest.schema".to_owned()));
+    assert!(error_codes(&output).contains(&"manifest.data-version".to_owned()));
 }
 
 /// REQ: LIF-277
 #[test]
-fn lif_277_data_version_above_u32_max_is_refused_manifest_schema() {
+fn lif_277_data_version_above_u32_max_is_refused_manifest_data_version() {
     let rig = rig();
     let output = install(&rig, &pkg(NOTES, "1.0.0").raw_data_version("4294967296"));
-    assert!(error_codes(&output).contains(&"manifest.schema".to_owned()));
+    assert!(error_codes(&output).contains(&"manifest.data-version".to_owned()));
 }
 
 /// REQ: LIF-277
@@ -31,7 +31,7 @@ fn lif_277_data_version_zero_and_u32_max_are_accepted() {
             &pkg(NOTES, "1.0.0").raw_data_version(value).migrator_both(),
         );
         assert!(
-            !error_codes(&output).contains(&"manifest.schema".to_owned()),
+            !error_codes(&output).contains(&"manifest.data-version".to_owned()),
             "{value}"
         );
     }
@@ -44,7 +44,7 @@ fn lif_277_fractional_or_string_data_version_is_refused() {
         let rig = rig();
         let output = install(&rig, &pkg(NOTES, "1.0.0").raw_data_version(value));
         assert!(
-            error_codes(&output).contains(&"manifest.schema".to_owned()),
+            error_codes(&output).contains(&"manifest.data-version".to_owned()),
             "{value}"
         );
     }
@@ -75,12 +75,12 @@ fn lif_277_stored_version_above_the_manifest_value_is_handled_as_a_downgrade() {
 proptest! {
     /// REQ: LIF-277
     #[test]
-    fn lif_277_data_version_is_valid_exactly_for_integers_in_0_to_u32_max(value in -10i64..=4_294_967_300i64) {
+    fn lif_277_data_version_is_valid_exactly_for_integers_in_1_to_u32_max(value in -10i64..=4_294_967_300i64) {
         let rig = rig();
         let spec = pkg(NOTES, "1.0.0").raw_data_version(&value.to_string()).migrator_both();
         let output = install(&rig, &spec);
-        let refused = error_codes(&output).contains(&"manifest.schema".to_owned());
-        prop_assert_eq!(refused, !(0..=4_294_967_295i64).contains(&value));
+        let refused = error_codes(&output).contains(&"manifest.data-version".to_owned());
+        prop_assert_eq!(refused, !(1..=4_294_967_295i64).contains(&value));
     }
 }
 

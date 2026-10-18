@@ -203,7 +203,7 @@ const WASMTIME_ROWS: [&str; 7] = [
     "| Linear-memory guard pages | On, 2 GiB guard region on 64-bit |",
     "| Spectre mitigations | On (bounds-check hardening for table and memory access) |",
     "| Epoch interruption | On, deadlines set per call; a missed deadline traps |",
-    "| `wasi:sockets`, `wasi:http` imports | Refused at load. A component that imports them is not instantiated |",
+    "| `wasi:sockets`, `wasi:http` imports | Refused at install, and checked again at load; a component that imports them is never instantiated |",
     "| `wasi:clocks`, `wasi:random` | Virtualised: clocks coarsened ([SEC-370]), random from the host CSPRNG |",
     "| Wasmtime version | Pinned exactly in the release, recorded in the build metadata,",
     "| Memory and table maximums | From the manifest `limits`, clamped to the tier ceiling |",

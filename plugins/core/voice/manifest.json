@@ -38,6 +38,9 @@
       "summary": "Voice control: say",
       "output": "jsonl",
       "requires_server": true
-    }
+    },
+    "jobs": [
+      { "kind": "transcribe", "deadline_ms": 30000, "memory_mib": 512 }
+    ]
   }
 }

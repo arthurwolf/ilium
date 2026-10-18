@@ -44,13 +44,13 @@
         "name": "panes",
         "summary": "List panes in every session",
         "output": "jsonl",
-        "requires_server": false
+        "requires_server": true
       },
       {
         "name": "broadcast",
         "summary": "Send a line to agents",
         "output": "jsonl",
-        "requires_server": false,
+        "requires_server": true,
         "argument_groups": [
           "pane-selector"
         ]

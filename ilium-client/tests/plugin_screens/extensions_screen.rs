@@ -73,7 +73,7 @@ fn usr_053_contributor_view_shows_the_stop_notice_and_a_reset_button() {
     rig.breach_extension("com.example.first", "com.example.owner", "After copy", 3);
     rig.open_extensions_contributor_view("com.example.first");
     let screen = rig.screen_text();
-    assert!(screen.contains("stopped after 3 timeouts"), "{screen}");
+    assert!(screen.contains("stopped after 3 failures"), "{screen}");
     assert!(screen.contains("[Reset]"), "{screen}");
 }
 
@@ -83,11 +83,11 @@ fn usr_053_two_breaches_show_no_notice_and_pressing_reset_clears_the_notice() {
     let mut rig = rig_with_two_contributors();
     rig.breach_extension("com.example.first", "com.example.owner", "After copy", 2);
     rig.open_extensions_contributor_view("com.example.first");
-    assert!(!rig.screen_text().contains("stopped after 3 timeouts"));
+    assert!(!rig.screen_text().contains("stopped after 3 failures"));
     rig.breach_extension("com.example.first", "com.example.owner", "After copy", 1);
     assert!(rig.screen_text().contains("[Reset]"));
     rig.activate("[Reset]");
-    assert!(!rig.screen_text().contains("stopped after 3 timeouts"));
+    assert!(!rig.screen_text().contains("stopped after 3 failures"));
 }
 
 /// REQ: USR-053
@@ -97,7 +97,7 @@ fn usr_053_after_a_client_restart_the_stop_notice_is_gone() {
     rig.breach_extension("com.example.first", "com.example.owner", "After copy", 3);
     rig.restart_client();
     rig.open_extensions_contributor_view("com.example.first");
-    assert!(!rig.screen_text().contains("stopped after 3 timeouts"));
+    assert!(!rig.screen_text().contains("stopped after 3 failures"));
 }
 
 // ---- USR-054 ----

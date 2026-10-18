@@ -1008,7 +1008,7 @@ fn pkg_212_group_or_other_readable_key_is_refused_key_permissions() {
         let out = sign_with_mode(mode);
         assert_ne!(out.exit_code, 0, "mode {mode:o}");
         assert!(
-            all_codes(&out).contains(&"trust.key-permissions".to_string()),
+            all_codes(&out).contains(&"sign.key-permissions".to_string()),
             "mode {mode:o}: {}",
             all_text(&out)
         );

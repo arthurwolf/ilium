@@ -29,7 +29,7 @@
     ]
   },
   "activation": [
-    "event:agent-state-changed",
+    "event:agent-activity-changed",
     "startup"
   ],
   "contributes": {

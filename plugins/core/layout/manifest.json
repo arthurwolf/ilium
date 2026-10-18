@@ -18,6 +18,7 @@
     "server": [
       "panes.read",
       "panes.lifecycle",
+      "panes.create",
       "tree.restructure"
     ],
     "client": [

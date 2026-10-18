@@ -24,7 +24,8 @@
     ]
   },
   "activation": [
-    "command:keys-and-help.open",
+    "command:ilium.core.keys-and-help/show-keys",
+    "command:ilium.core.keys-and-help/show-plugins",
     "settings:keyboard"
   ],
   "contributes": {

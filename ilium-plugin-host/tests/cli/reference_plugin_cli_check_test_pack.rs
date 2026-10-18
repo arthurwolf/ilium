@@ -1029,12 +1029,12 @@ fn dev_100_pack_prints_no_signature_artifact() {
 
 /// REQ: DEV-101
 #[test]
-fn dev_101_a_package_over_128_mib_fails_size_cap() {
+fn dev_101_a_package_over_300_mib_fails_size_cap() {
     let root = scratch();
     let env = env(root.path());
     let dir = server_project(&env, root.path());
     write_dist(&dir, &["server"], "release");
-    let big = vec![0xa5u8; (128 * 1024 * 1024) + 1];
+    let big = vec![0xa5u8; (300 * 1024 * 1024) + 1];
     std::fs::create_dir_all(dir.join("assets")).expect("create");
     std::fs::write(dir.join("assets/blob.bin"), &big).expect("write");
     let output = run_in(&env, &dir, &["pack"]);

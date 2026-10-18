@@ -225,8 +225,13 @@ fn pkg_426_an_https_url_is_downloaded() {
 fn pkg_426_another_scheme_fails_with_source_scheme() {
     let sandbox = Sandbox::standard();
     sandbox.net.clear_log();
-    for url in [
+    let output = sandbox.run(&[
+        "install",
         "http://downloads.example.org/a.iliumpkg",
+        "--yes",
+    ]);
+    assert_failed(&output, "install.insecure-url", 1);
+    for url in [
         "ftp://downloads.example.org/a.iliumpkg",
         "git://example.org/a",
         "file:///tmp/a.iliumpkg",
@@ -758,13 +763,17 @@ fn pkg_438_registry_add_without_a_root_key_fails() {
 
 /// REQ: PKG-438
 #[test]
-fn pkg_438_registry_add_with_a_non_https_url_fails_with_invalid_value() {
+fn pkg_438_registry_add_with_a_non_https_url_fails() {
     let sandbox = Sandbox::new();
-    for url in [
+    let output = sandbox.run(&[
+        "registry",
+        "add",
         "http://plugins.example.org/",
-        "ftp://plugins.example.org/",
-        "plugins.example.org",
-    ] {
+        "--root-key",
+        &key_id_of(KEY_A),
+    ]);
+    assert_failed(&output, "registry.insecure-url", 1);
+    for url in ["ftp://plugins.example.org/", "plugins.example.org"] {
         let output = sandbox.run(&["registry", "add", url, "--root-key", &key_id_of(KEY_A)]);
         assert_failed(&output, "usage.invalid-value", 2);
     }
@@ -1173,14 +1182,14 @@ fn pkg_445_trust_remove_of_a_key_in_use_exits_1() {
 
 /// REQ: PKG-445
 #[test]
-fn doc_pkg_445_a_declined_prompt_exits_7() {
+fn doc_pkg_445_a_declined_prompt_exits_1() {
     let text = page_text("reference-plugin-distribution-cli.md");
     let row = text
         .lines()
         .find(|line| line.contains("[PKG-445]"))
         .expect("row");
     assert!(
-        row.contains("`trust.not-found` (5)") && row.contains("a declined prompt (7)"),
+        row.contains("`trust.not-found` (5)") && !row.contains("a declined prompt (7)"),
         "{row}"
     );
 }

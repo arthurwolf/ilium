@@ -108,7 +108,7 @@ fn manifest_050_client_grants_are_read_read_prompts_and_ui_chrome() {
 fn manifest_050_activation_triggers_are_agent_state_event_then_startup() {
     assert_eq!(
         strings(&manifest()["activation"]),
-        ["event:agent-state-changed", "startup"]
+        ["event:agent-activity-changed", "startup"]
     );
 }
 

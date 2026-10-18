@@ -1247,7 +1247,7 @@ fn conf_pkg_03_an_entry_with_a_wrong_length_is_refused_manifest_file_length() {
 
 /// REQ: CONF-PKG-04
 #[test]
-fn conf_pkg_04_an_unsigned_package_is_refused_trust_unsigned_without_allow_unsigned() {
+fn conf_pkg_04_an_unsigned_package_is_refused_install_unsigned_without_allow_unsigned() {
     let dir = tempfile::tempdir().expect("tempdir");
     let package = pack_fixture(
         &manifest_text("minimal.json"),
@@ -1257,11 +1257,11 @@ fn conf_pkg_04_an_unsigned_package_is_refused_trust_unsigned_without_allow_unsig
     std::fs::write(&file, package).expect("write package");
     let env = crate::common::cli_env(dir.path());
     let output = crate::common::run_cli(&env, &["install", file.to_str().expect("utf8"), "--yes"]);
-    assert_eq!(output.exit_code, 2);
+    assert_eq!(output.exit_code, 1);
     assert!(output
         .stdout_jsonl
         .iter()
-        .any(|r| r["code"] == "trust.unsigned"));
+        .any(|r| r["code"] == "install.unsigned"));
 }
 
 /// REQ: CONF-PKG-04

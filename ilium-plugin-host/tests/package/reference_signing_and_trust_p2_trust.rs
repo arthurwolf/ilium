@@ -384,7 +384,7 @@ fn pkg_228_two_valid_signatures_one_trusted_is_t2() {
 fn pkg_229_unsigned_without_flag_refused_unsigned() {
     let fixture = cli_fixture();
     let out = install(&fixture, &vector_unsigned(), &[]);
-    assert!(has(&out, "trust.unsigned"), "{}", all_text(&out));
+    assert!(has(&out, "install.unsigned"), "{}", all_text(&out));
     assert_ne!(out.exit_code, 0);
 }
 
@@ -406,7 +406,7 @@ fn pkg_229_unsigned_with_allow_unsigned_installs_as_t3() {
 fn pkg_229_yes_does_not_replace_allow_unsigned() {
     let fixture = cli_fixture();
     let out = install(&fixture, &vector_unsigned(), &["--yes"]);
-    assert!(has(&out, "trust.unsigned"), "{}", all_text(&out));
+    assert!(has(&out, "install.unsigned"), "{}", all_text(&out));
 }
 
 /// REQ: PKG-230
