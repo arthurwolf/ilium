@@ -365,7 +365,7 @@ fn remote_080_a_model_that_keeps_failing_gives_the_offline_fallback_summary() {
         Err(failure),
     ]);
     let output = host
-        .run_job("compact", b"first request\nsecond request".to_vec())
+        .run_job("compact", b"first request\nsecond request")
         .expect("fallback instead of failure");
     assert!(!output.is_empty());
 }
@@ -446,7 +446,7 @@ fn remote_080_with_redaction_off_the_transcript_text_is_sent_as_is() {
         .set("remote_compaction.redact_secrets", json!(false))
         .expect("setting accepted");
     host.script_inference(vec![reply(GOOD_SUMMARY)]);
-    host.run_job("compact", b"plain text with token-12345".to_vec())
+    host.run_job("compact", b"plain text with token-12345")
         .expect("job succeeds");
     let sent: Vec<String> = host
         .inference_requests()

@@ -385,7 +385,7 @@ fn pri_023_an_edit_at_99_ms_makes_no_second_call() {
 #[test]
 fn pri_023_the_rate_is_per_buffer() {
     let wasm = fixture_wasm("annotator-counter");
-    let mut rig = rig_with_wasm(&wasm, EDIT);
+    let rig = rig_with_wasm(&wasm, EDIT);
     let first = open_buffer(&rig, 10);
     let second = open_buffer(&rig, 10);
     rig.kernel.edit_buffer(first, 0);
@@ -632,7 +632,7 @@ fn wit_editor_selections_without_grant_is_empty() {
 /// REQ: WIT:ilium:primitives/editor.load-file, WIT:ilium:primitives/editor.take-buffer
 #[test]
 fn wit_editor_load_file_completes_with_a_buffer() {
-    let mut rig = rig(EDIT);
+    let rig = rig(EDIT);
     rig.kernel
         .put_file("project", "notes.txt", b"alpha\nbeta\n");
     let request = rig
@@ -662,7 +662,7 @@ fn wit_editor_load_file_completes_with_a_buffer() {
 /// REQ: WIT:ilium:primitives/editor.load-file
 #[test]
 fn wit_editor_load_file_missing_file_fails_not_found() {
-    let mut rig = rig(EDIT);
+    let rig = rig(EDIT);
     let request = rig
         .host
         .editor()
@@ -682,7 +682,7 @@ fn wit_editor_load_file_missing_file_fails_not_found() {
 /// REQ: WIT:ilium:primitives/editor.load-file
 #[test]
 fn wit_editor_load_file_binary_file_fails_invalid_argument() {
-    let mut rig = rig(EDIT);
+    let rig = rig(EDIT);
     rig.kernel
         .put_file("project", "blob.bin", &[0, 159, 146, 150, 0, 0]);
     let request = rig
@@ -721,7 +721,7 @@ fn wit_editor_save_buffer_without_path_on_a_pathless_buffer_invalid_argument() {
 /// REQ: WIT:ilium:primitives/editor.save-buffer
 #[test]
 fn wit_editor_save_buffer_writes_the_file() {
-    let mut rig = rig(EDIT);
+    let rig = rig(EDIT);
     let buffer = open_buffer(&rig, 2);
     let path = FsPath {
         scope: "project".into(),
@@ -743,7 +743,7 @@ fn wit_editor_save_buffer_writes_the_file() {
 /// REQ: WIT:ilium:primitives/editor.save-buffer
 #[test]
 fn wit_editor_save_buffer_changed_on_disk_fails_conflict() {
-    let mut rig = rig(EDIT);
+    let rig = rig(EDIT);
     rig.kernel.put_file("project", "shared.txt", b"one\n");
     let load = rig
         .host

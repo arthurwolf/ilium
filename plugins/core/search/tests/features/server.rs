@@ -277,7 +277,7 @@ fn search_009_job_progress_does_not_produce_an_answer_before_the_job_completes()
 /// REQ: F-009
 #[test]
 fn search_009_job_runner_refuses_an_unknown_kind_with_invalid_argument() {
-    let mut runner = ilium_plugin_core_search::SearchServer::default();
+    let mut runner = ilium_plugin_core_search::SearchServer;
     let error = runner
         .run("other-kind".to_string(), Vec::new())
         .expect_err("unknown kind");
@@ -287,7 +287,7 @@ fn search_009_job_runner_refuses_an_unknown_kind_with_invalid_argument() {
 /// REQ: F-009
 #[test]
 fn search_009_job_runner_scan_files_accepts_an_empty_path_list() {
-    let mut runner = ilium_plugin_core_search::SearchServer::default();
+    let mut runner = ilium_plugin_core_search::SearchServer;
     assert!(runner.run("scan-files".to_string(), Vec::new()).is_ok());
 }
 

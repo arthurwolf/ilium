@@ -229,7 +229,7 @@ fn cor_050_the_server_host_built_from_the_manifest_holds_the_server_grants() {
 fn cor_050_a_missing_manifest_file_is_refused_by_the_host_builder() {
     let result = FakeHost::for_manifest(manifest_path().with_file_name("missing-manifest.json"));
     // manual does not pin the error code of a missing manifest file
-    let error = result.err().expect("a missing manifest file is refused");
+    let error = result.expect_err("a missing manifest file is refused");
     assert!(
         !error.code.is_empty() && !error.message.is_empty(),
         "{error}"

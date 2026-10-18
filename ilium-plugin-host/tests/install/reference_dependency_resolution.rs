@@ -816,7 +816,7 @@ fn pkg_333_no_common_version_is_a_conflict_listing_constraints_and_versions() {
     let installed = vec![needs(pkg("example.c", "1.0.0"), "example.b", "^1.0", false)];
     let result = resolve_plan(&input(incoming, installed, b_sources()));
     assert_eq!(codes(&result), vec!["dependency.conflict".to_owned()]);
-    let message = result.err().expect("err")[0].message.clone();
+    let message = result.expect_err("err")[0].message.clone();
     for fragment in ["example.a", "example.c", "^2.0", "^1.0", "1.2.0"] {
         assert!(
             message.contains(fragment),
@@ -837,8 +837,7 @@ fn pkg_334_every_missing_id_is_listed_with_its_range() {
     let result = resolve_plan(&input(incoming, Vec::new(), Vec::new()));
     assert_eq!(codes(&result), vec!["dependency.unresolved".to_owned(); 2]);
     let text: String = result
-        .err()
-        .expect("err")
+        .expect_err("err")
         .iter()
         .map(|d| d.message.clone())
         .collect::<Vec<_>>()
@@ -855,7 +854,7 @@ fn pkg_335_hard_cycle_is_refused_and_named_in_order() {
     let b = needs(pkg("example.b", "1.0.0"), "example.a", "^1.0", false);
     let result = resolve_plan(&input(vec![a, b], Vec::new(), Vec::new()));
     assert_eq!(codes(&result), vec!["dependency.cycle".to_owned()]);
-    let message = result.err().expect("err")[0].message.clone();
+    let message = result.expect_err("err")[0].message.clone();
     let a_at = message.find("example.a").expect("a named");
     let b_at = message.find("example.b").expect("b named");
     assert!(a_at < b_at, "{message}");
@@ -998,7 +997,7 @@ fn pkg_341_two_dependants_with_disjoint_ranges_conflict_naming_both() {
     ];
     let result = resolve_plan(&input(incoming, installed, b_sources()));
     assert_eq!(codes(&result), vec!["dependency.conflict".to_owned()]);
-    let message = result.err().expect("err")[0].message.clone();
+    let message = result.expect_err("err")[0].message.clone();
     assert!(
         message.contains("example.a") && message.contains("example.c"),
         "{message}"
@@ -1114,7 +1113,7 @@ fn pkg_348_update_that_strands_a_dependant_is_a_conflict_offering_update_all() {
     request.is_update = true;
     let result = resolve_plan(&request);
     assert_eq!(codes(&result), vec!["dependency.conflict".to_owned()]);
-    let message = result.err().expect("err")[0].message.clone();
+    let message = result.expect_err("err")[0].message.clone();
     assert!(
         message.contains("update --all") || message.contains("update example.b example.a"),
         "{message}"

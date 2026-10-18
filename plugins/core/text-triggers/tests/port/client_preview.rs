@@ -1,8 +1,7 @@
 //! Twins of the dialog preview tests: the test-rule service answers a sample against a pattern and reply.
 
-use ilium_plugin_sdk::testing::FakeHost;
-use ilium_plugin_sdk::types::{ActionKind, ActionValue, ErrorCode, Event, Outcome, ViewTarget};
-use serde_json::{json, Value};
+use ilium_plugin_sdk::types::ErrorCode;
+use serde_json::json;
 
 use crate::common::*;
 use crate::support::*;

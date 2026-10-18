@@ -268,7 +268,7 @@ proptest! {
     ) {
         let mut nodes: Vec<StartNode> = ids.iter().enumerate().map(|(index, id)| node(id, tiers[index], &[], &[])).collect();
         let mut expected = nodes.clone();
-        expected.sort_by(|left, right| (left.tier, left.id.clone()).cmp(&(right.tier, right.id.clone())));
+        expected.sort_by_key(|left| (left.tier, left.id.clone()));
         let expected: Vec<String> = expected.into_iter().map(|n| n.id).collect();
         let len = nodes.len();
         nodes.rotate_left(seed % len);

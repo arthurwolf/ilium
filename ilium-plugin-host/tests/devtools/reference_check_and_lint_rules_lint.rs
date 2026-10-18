@@ -154,7 +154,7 @@ fn dev_212_lint_renders_views_in_the_embedded_host_without_a_session() {
     let code = error_code(&output);
     assert!(
         code.as_deref()
-            .map_or(true, |code| !code.starts_with("session.")),
+            .is_none_or(|code| !code.starts_with("session.")),
         "{code:?}"
     );
     assert_ne!(output.exit_code, 6);
@@ -177,7 +177,7 @@ fn dev_212_lint_replays_fixtures_without_a_session() {
     );
     let output = lint(&env, &[]);
     assert_ne!(output.exit_code, 6);
-    assert!(error_code(&output).map_or(true, |code| !code.starts_with("session.")));
+    assert!(error_code(&output).is_none_or(|code| !code.starts_with("session.")));
 }
 
 fn grant_unused_output(
@@ -583,7 +583,7 @@ fn dev_219_high_risk_grants_are_listed_by_name_in_the_message() {
         list.push(json!("terminal.raw-input"));
     });
     let record = finding(&lint(&env, &[]), "lint", "lint.high-risk-grants")
-        .map(|record| record.clone())
+        .cloned()
         .expect("finding");
     let message = record["message"].as_str().expect("message");
     assert!(

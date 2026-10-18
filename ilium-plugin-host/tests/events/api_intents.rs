@@ -74,7 +74,7 @@ fn hst_491_two_clients_each_get_only_their_own_outcome() {
     let env = client_setup().tree(flat_tree(1)).build();
     let other = env.host.attach_second_client();
     env.run(vec![sub(1, rename(2, "a"))]);
-    other.submit(sub(9, rename(2, "b")));
+    let _ = other.submit(sub(9, rename(2, "b")));
     env.settle();
     assert_eq!(other.received_outcomes().len(), 1);
     assert_eq!(count_for(&env.outcomes(), 9), 0);

@@ -42,7 +42,7 @@ fn seeded() -> Rig {
 /// REQ: WIT:ilium:host/geocode.search
 #[test]
 fn wit_geocode_search_completes_with_places() {
-    let mut rig = seeded();
+    let rig = seeded();
     let id = rig
         .host
         .geocode()
@@ -56,7 +56,7 @@ fn wit_geocode_search_completes_with_places() {
 /// REQ: WIT:ilium:host/geocode.search
 #[test]
 fn wit_geocode_search_text_length_boundaries_invalid_argument() {
-    let mut rig = seeded();
+    let rig = seeded();
     assert_eq!(
         code_of(rig.host.geocode().search(search_for(text_of(1), 5))),
         ErrorCode::InvalidArgument
@@ -78,7 +78,7 @@ fn wit_geocode_search_text_length_boundaries_invalid_argument() {
 /// REQ: WIT:ilium:host/geocode.search
 #[test]
 fn wit_geocode_search_limit_boundaries_invalid_argument() {
-    let mut rig = seeded();
+    let rig = seeded();
     assert_eq!(
         code_of(rig.host.geocode().search(search_for("Paris".to_owned(), 0))),
         ErrorCode::InvalidArgument
@@ -104,7 +104,7 @@ fn wit_geocode_search_limit_boundaries_invalid_argument() {
 /// REQ: WIT:ilium:host/geocode.search
 #[test]
 fn wit_geocode_search_second_call_within_a_second_rate_limited() {
-    let mut rig = seeded();
+    let rig = seeded();
     rig.host
         .geocode()
         .search(search_for("Paris".to_owned(), 5))
@@ -120,7 +120,7 @@ fn wit_geocode_search_second_call_within_a_second_rate_limited() {
 /// REQ: WIT:ilium:host/geocode.search
 #[test]
 fn wit_geocode_search_after_a_second_the_gate_reopens() {
-    let mut rig = seeded();
+    let rig = seeded();
     rig.host
         .geocode()
         .search(search_for("Paris".to_owned(), 5))
@@ -136,7 +136,7 @@ fn wit_geocode_search_after_a_second_the_gate_reopens() {
 /// REQ: WIT:ilium:host/geocode.search
 #[test]
 fn wit_geocode_search_ten_seconds_without_answer_timed_out() {
-    let mut rig = seeded();
+    let rig = seeded();
     rig.kernel.set_geocode_silent(true);
     let id = rig
         .host
@@ -151,7 +151,7 @@ fn wit_geocode_search_ten_seconds_without_answer_timed_out() {
 /// REQ: WIT:ilium:host/geocode.search
 #[test]
 fn wit_geocode_search_declined_grant_not_permitted() {
-    let mut rig = declined_rig(&["location.geocode"]);
+    let rig = declined_rig(&["location.geocode"]);
     assert_eq!(
         code_of(rig.host.geocode().search(search_for("Paris".to_owned(), 5))),
         ErrorCode::NotPermitted
@@ -161,7 +161,7 @@ fn wit_geocode_search_declined_grant_not_permitted() {
 /// REQ: WIT:ilium:host/geocode.reverse
 #[test]
 fn wit_geocode_reverse_completes_with_a_place() {
-    let mut rig = seeded();
+    let rig = seeded();
     let id = rig
         .host
         .geocode()
@@ -182,7 +182,7 @@ fn wit_geocode_reverse_completes_with_a_place() {
 /// REQ: WIT:ilium:host/geocode.reverse
 #[test]
 fn wit_geocode_reverse_rate_limited_within_a_second() {
-    let mut rig = seeded();
+    let rig = seeded();
     rig.host
         .geocode()
         .reverse(GeoPoint { lat: 1.0, lon: 1.0 })
@@ -196,7 +196,7 @@ fn wit_geocode_reverse_rate_limited_within_a_second() {
 /// REQ: WIT:ilium:host/geocode.reverse
 #[test]
 fn wit_geocode_reverse_declined_grant_not_permitted() {
-    let mut rig = declined_rig(&["location.geocode"]);
+    let rig = declined_rig(&["location.geocode"]);
     assert_eq!(
         code_of(rig.host.geocode().reverse(GeoPoint { lat: 0.0, lon: 0.0 })),
         ErrorCode::NotPermitted
@@ -206,7 +206,7 @@ fn wit_geocode_reverse_declined_grant_not_permitted() {
 /// REQ: WIT:ilium:host/geocode.take-places
 #[test]
 fn wit_geocode_take_places_returns_the_list_once() {
-    let mut rig = seeded();
+    let rig = seeded();
     let id = rig
         .host
         .geocode()
@@ -220,6 +220,6 @@ fn wit_geocode_take_places_returns_the_list_once() {
 /// REQ: WIT:ilium:host/geocode.take-places
 #[test]
 fn wit_geocode_take_places_unknown_request_is_none() {
-    let mut rig = seeded();
+    let rig = seeded();
     assert!(rig.host.geocode().take_places(RequestId(55_555)).is_none());
 }

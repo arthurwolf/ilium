@@ -58,14 +58,6 @@ pub fn add_node(host: &mut FakeHost, parent: Option<u64>, name: &str, class: Nod
     })
 }
 
-/// The intents of a submission list, in order.
-pub fn intents(submissions: &[Submission]) -> Vec<Intent> {
-    submissions
-        .iter()
-        .map(|submission| submission.intent.clone())
-        .collect()
-}
-
 /// Node ids named by every `close-node` intent in the list.
 pub fn closed_nodes(submissions: &[Submission]) -> Vec<NodeId> {
     submissions

@@ -16,7 +16,7 @@ fn plugin(id: &str) -> PluginId {
 /// REQ: WIT:ilium:host/help.topic
 #[test]
 fn wit_help_topic_returns_the_markdown() {
-    let mut rig = rig(GRANTS);
+    let rig = rig(GRANTS);
     rig.kernel
         .set_help_topics(&[("getting-started", "# Start\n")]);
     assert_eq!(
@@ -28,7 +28,7 @@ fn wit_help_topic_returns_the_markdown() {
 /// REQ: WIT:ilium:host/help.topic
 #[test]
 fn wit_help_topic_unknown_id_is_none_without_failing() {
-    let mut rig = rig(GRANTS);
+    let rig = rig(GRANTS);
     assert_eq!(rig.host.help().topic("no-such-topic".to_owned()), None);
     assert!(rig.host.failures().is_empty());
 }
@@ -36,7 +36,7 @@ fn wit_help_topic_unknown_id_is_none_without_failing() {
 /// REQ: WIT:ilium:host/help.topic
 #[test]
 fn wit_help_topic_declined_grant_is_none() {
-    let mut rig = declined_rig(&["help.read"]);
+    let rig = declined_rig(&["help.read"]);
     rig.kernel.set_help_topics(&[("a", "text")]);
     assert_eq!(rig.host.help().topic("a".to_owned()), None);
 }
@@ -44,7 +44,7 @@ fn wit_help_topic_declined_grant_is_none() {
 /// REQ: WIT:ilium:host/plugins.list
 #[test]
 fn wit_plugins_list_reports_installed_plugins() {
-    let mut rig = rig(GRANTS);
+    let rig = rig(GRANTS);
     rig.kernel
         .set_installed_plugins(&["com.example.a", "com.example.b"]);
     let listed = rig.host.plugins().list();
@@ -55,7 +55,7 @@ fn wit_plugins_list_reports_installed_plugins() {
 /// REQ: WIT:ilium:host/plugins.list
 #[test]
 fn wit_plugins_list_info_carries_the_enabled_flag() {
-    let mut rig = rig(GRANTS);
+    let rig = rig(GRANTS);
     rig.kernel.set_installed_plugins(&["com.example.a"]);
     rig.host
         .plugins()
@@ -74,7 +74,7 @@ fn wit_plugins_list_info_carries_the_enabled_flag() {
 /// REQ: WIT:ilium:host/plugins.list
 #[test]
 fn wit_plugins_list_declined_grant_is_empty() {
-    let mut rig = declined_rig(&["plugins.manage"]);
+    let rig = declined_rig(&["plugins.manage"]);
     rig.kernel.set_installed_plugins(&["com.example.a"]);
     assert!(rig.host.plugins().list().is_empty());
 }
@@ -82,7 +82,7 @@ fn wit_plugins_list_declined_grant_is_empty() {
 /// REQ: WIT:ilium:host/plugins.set-enabled
 #[test]
 fn wit_plugins_set_enabled_disables_and_enables() {
-    let mut rig = rig(GRANTS);
+    let rig = rig(GRANTS);
     rig.kernel.set_installed_plugins(&["com.example.a"]);
     rig.host
         .plugins()
@@ -99,7 +99,7 @@ fn wit_plugins_set_enabled_disables_and_enables() {
 /// REQ: WIT:ilium:host/plugins.set-enabled
 #[test]
 fn wit_plugins_set_enabled_same_state_is_ok() {
-    let mut rig = rig(GRANTS);
+    let rig = rig(GRANTS);
     rig.kernel.set_installed_plugins(&["com.example.a"]);
     assert!(rig
         .host
@@ -111,7 +111,7 @@ fn wit_plugins_set_enabled_same_state_is_ok() {
 /// REQ: WIT:ilium:host/plugins.set-enabled
 #[test]
 fn wit_plugins_set_enabled_unknown_plugin_not_found() {
-    let mut rig = rig(GRANTS);
+    let rig = rig(GRANTS);
     assert_eq!(
         code_of(
             rig.host
@@ -125,7 +125,7 @@ fn wit_plugins_set_enabled_unknown_plugin_not_found() {
 /// REQ: WIT:ilium:host/plugins.set-enabled
 #[test]
 fn wit_plugins_set_enabled_declined_grant_not_permitted() {
-    let mut rig = declined_rig(&["plugins.manage"]);
+    let rig = declined_rig(&["plugins.manage"]);
     assert_eq!(
         code_of(
             rig.host

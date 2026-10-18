@@ -1,6 +1,6 @@
 //! api-log.md: `log.log` levels, the 16,384-byte message cap and the per-second line budget.
 
-use ilium_plugin_api::generated::host::{HostLog, Level};
+use ilium_plugin_api::generated::host::Level;
 use ilium_plugin_api::Tier;
 use proptest::prelude::*;
 

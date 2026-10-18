@@ -2,7 +2,6 @@
 //! project trust (SEC-280..283, 284, 286, 287, 291, 292, 293, 310..315).
 
 use crate::support::*;
-use proptest::prelude::*;
 
 /// The shape of the hook point of the chain tests: mode, risk and final_check.
 #[derive(Clone)]
@@ -279,9 +278,9 @@ fn sec_282_each_data_class_accepts_its_own_grant() {
         );
         let mut contributor =
             contributor_manifest_on("com.example.con", "com.example.cls/sens", vec![]);
-        contributor["capabilities"]["server"]
-            .as_array_mut()
-            .map(|list| list.push(json!(grant)));
+        if let Some(list) = contributor["capabilities"]["server"].as_array_mut() {
+            list.push(json!(grant));
+        }
         assert_eq!(
             diag_code(&world.install(Tier::T3, contributor, Vec::new())),
             "ok",
@@ -293,7 +292,7 @@ fn sec_282_each_data_class_accepts_its_own_grant() {
 /// REQ: SEC-283
 #[test]
 fn sec_283_review_dialog_shows_a_can_make_line_per_privileged_entry_type() {
-    let mut world = ExtWorld::with_core_plugins();
+    let world = ExtWorld::with_core_plugins();
     let contributor = json!({
         "id": "com.example.steps",
         "capabilities": {"server": ["extensions.contribute:ilium.core.worktrees/post-create-steps", "process.run:git"]},
@@ -516,7 +515,7 @@ const OVERRIDABLE: [&str; 6] = [
 /// REQ: SEC-291
 #[test]
 fn sec_291_a_user_started_veto_on_the_six_listed_points_can_be_overridden() {
-    let mut world = ExtWorld::with_core_plugins();
+    let world = ExtWorld::with_core_plugins();
     for point in OVERRIDABLE {
         assert!(world.veto_overridable(point, "user"), "{point}");
     }
@@ -525,7 +524,7 @@ fn sec_291_a_user_started_veto_on_the_six_listed_points_can_be_overridden() {
 /// REQ: SEC-291
 #[test]
 fn sec_291_a_plugin_started_action_cannot_be_overridden_by_the_user() {
-    let mut world = ExtWorld::with_core_plugins();
+    let world = ExtWorld::with_core_plugins();
     for point in OVERRIDABLE {
         assert!(
             !world.veto_overridable(point, "plugin:com.example.x"),
@@ -537,7 +536,7 @@ fn sec_291_a_plugin_started_action_cannot_be_overridden_by_the_user() {
 /// REQ: SEC-291
 #[test]
 fn sec_291_each_user_source_value_counts_as_user_started() {
-    let mut world = ExtWorld::with_core_plugins();
+    let world = ExtWorld::with_core_plugins();
     for source in ["user", "paste", "mouse", "keys", "manual-trigger"] {
         assert!(
             world.veto_overridable("ilium.core.tree/before-close", source),
@@ -550,7 +549,7 @@ fn sec_291_each_user_source_value_counts_as_user_started() {
 /// REQ: SEC-291
 #[test]
 fn sec_291_other_points_have_no_user_override() {
-    let mut world = ExtWorld::with_core_plugins();
+    let world = ExtWorld::with_core_plugins();
     assert!(!world.veto_overridable("ilium.core.fleet/before-broadcast", "user"));
 }
 

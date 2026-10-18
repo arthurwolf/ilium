@@ -294,10 +294,8 @@ impl NativeEntry for StaleGuard {
                 Event::RequestCompleted(RequestResult {
                     request: RequestRef::Submission(correlation),
                     ..
-                }) => {
-                    if self.latest.accept(correlation) {
-                        out.push(Submission::new(Intent::DismissToast("apply".to_string())));
-                    }
+                }) if self.latest.accept(correlation) => {
+                    out.push(Submission::new(Intent::DismissToast("apply".to_string())));
                 }
                 _ => {}
             }
@@ -334,15 +332,13 @@ impl NativeEntry for OptionalGrant {
                 Event::RequestCompleted(RequestResult {
                     request: RequestRef::Submission(correlation),
                     outcome,
-                }) => {
-                    if self.pending == Some(correlation) {
-                        self.pending = None;
-                        if let Outcome::Refused(error) = outcome {
-                            if error.code == ilium_plugin_sdk::types::ErrorCode::NotPermitted {
-                                out.push(Submission::new(Intent::DismissToast(
-                                    "fallback".to_string(),
-                                )));
-                            }
+                }) if self.pending == Some(correlation) => {
+                    self.pending = None;
+                    if let Outcome::Refused(error) = outcome {
+                        if error.code == ilium_plugin_sdk::types::ErrorCode::NotPermitted {
+                            out.push(Submission::new(Intent::DismissToast(
+                                "fallback".to_string(),
+                            )));
                         }
                     }
                 }

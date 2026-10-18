@@ -3,12 +3,16 @@
 //! Every use of a testkit item that the skeleton lacks lives here (see ../API_GAPS.md), so a
 //! missing item breaks one file only.
 
+// This module is compiled into both the `features` and `port` test targets (the port twins mount it
+// with #[path]); each target uses a different subset of the helpers, so the rest look dead per target.
+#![allow(dead_code)]
+
 use std::path::PathBuf;
 
 use ilium_plugin_core_fleet::{FleetClient, FleetServer};
 use ilium_plugin_sdk::testing::{FakeHost, TreeNode};
 use ilium_plugin_sdk::types::{
-    ActionKind, ActionValue, AgentActivity, AgentView, Delivery, Event, HttpCalledEvent, Intent,
+    ActionKind, ActionValue, AgentActivity, AgentView, Event, HttpCalledEvent, Intent,
     MessageEvent, NodeClass, NodeId, Outcome, PluginId, PluginSide, SendInputSpec, Submission,
     UiAction, ViewTarget,
 };
@@ -238,9 +242,6 @@ pub fn created_panes(host: &FakeHost) -> Vec<ilium_plugin_sdk::types::CreatePane
         })
         .collect()
 }
-
-/// The `Delivery::Submitted` marker, for readability in asserts.
-pub const SUBMITTED: Delivery = Delivery::Submitted;
 
 /// Makes every later submission complete with the given outcome.
 pub fn auto_outcome(host: &mut FakeHost, outcome: Outcome) {

@@ -6,7 +6,6 @@
 
 use std::time::Duration;
 
-use ilium_plugin_api::generated::host::HostTimers;
 use ilium_plugin_api::generated::types::{DurableTimerEvent, EpochMs, ErrorCode, Event, TimerId};
 use ilium_plugin_host::testing::imports_fixture::ImportsFixture;
 use proptest::prelude::*;

@@ -1,6 +1,5 @@
 //! api-panes.md: `panes.info` and `panes.focused`, with the `panes.read` grant and pane lifecycle.
 
-use ilium_plugin_api::generated::host::HostPanes;
 use ilium_plugin_api::generated::types::NodeId;
 use ilium_plugin_api::Tier;
 

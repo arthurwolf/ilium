@@ -98,7 +98,7 @@ fn sec_370_the_virtualised_wasi_clock_gets_the_same_coarsening() {
 /// REQ: SEC-370
 #[test]
 fn sec_370_a_sub_millisecond_interval_is_not_measurable() {
-    let mut rig = t3(&[]);
+    let rig = t3(&[]);
     let first = rig.host.guest_clock_nanos();
     rig.host.advance_clock(Duration::from_micros(10));
     let second = rig.host.guest_clock_nanos();
@@ -178,7 +178,7 @@ fn emit_outputs(rig: &mut Rig, count: u32, gap_millis: u64) -> usize {
 /// REQ: SEC-371
 #[test]
 fn sec_371_a_burst_of_output_is_coalesced_into_one_event() {
-    let mut rig = screen_rig();
+    let rig = screen_rig();
     for index in 0..50 {
         rig.host.pane_output(&format!("burst {index}\n"));
     }
@@ -225,7 +225,7 @@ fn sec_371_events_resume_when_echo_is_back_on() {
 /// REQ: SEC-371
 #[test]
 fn sec_371_output_written_in_no_echo_mode_is_not_delivered_after_echo_returns_as_a_stale_event() {
-    let mut rig = screen_rig();
+    let rig = screen_rig();
     rig.host.set_pane_echo(false);
     rig.host.pane_output("password: ");
     rig.host.set_pane_echo(true);

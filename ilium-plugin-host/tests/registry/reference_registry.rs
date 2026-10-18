@@ -1836,7 +1836,7 @@ fn pkg_412_bundle_holds_the_original_signed_metadata_and_the_blobs() {
         "original signatures kept"
     );
     assert!(
-        !tree.contains_key(&format!("plugins/com.acme.git-tools.json")),
+        !tree.contains_key("plugins/com.acme.git-tools.json"),
         "filtered to the listed plugins"
     );
 }

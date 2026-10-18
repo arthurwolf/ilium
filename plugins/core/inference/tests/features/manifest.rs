@@ -2,7 +2,7 @@
 //! page, the kernel boot table and the capability pages say about activation, grants and tabs.
 
 use ilium_plugin_sdk::testing::FakeHost;
-use serde_json::{json, Value};
+use serde_json::json;
 
 use crate::common::{
     json_block_after, manifest, manifest_path, manual_page, page_text, section, table_rows,
@@ -224,7 +224,7 @@ fn manifest_033_settings_stay_kernel_settings_so_the_manifest_declares_none() {
     assert!(manifest.get("settings").is_none());
     assert!(manifest
         .get("contributes")
-        .map_or(true, |contributes| contributes.get("settings").is_none()));
+        .is_none_or(|contributes| contributes.get("settings").is_none()));
 }
 
 /// REQ: COR-050, F-084
@@ -264,7 +264,7 @@ fn manifest_050_host_takes_grants_from_the_manifest_for_each_side() {
         .expect("loads")
         .side("client")
         .build();
-    drop((server, client));
+    let _ = (server, client);
 }
 
 /// REQ: COR-050

@@ -281,17 +281,6 @@ pub fn set_text(session: &mut FakeSession, view: &str, key: &str, text: &str) {
     host.settle();
 }
 
-pub fn set_number(session: &mut FakeSession, view: &str, key: &str, value: f64) {
-    let host = client(session);
-    host.send_action(
-        popup(view),
-        key,
-        ActionKind::Changed,
-        ActionValue::Number(value),
-    );
-    host.settle();
-}
-
 pub fn set_flag(session: &mut FakeSession, view: &str, key: &str, value: bool) {
     let host = client(session);
     host.send_action(

@@ -54,11 +54,6 @@ pub fn fixture_component(name: &str) -> PathBuf {
     path
 }
 
-/// A valid event that needs no grant.
-pub fn theme_event() -> Event {
-    Event::ThemeChanged
-}
-
 /// `count` distinct timer events (each keyed by its own timer, so none coalesce).
 pub fn timer_events(count: usize) -> Vec<Event> {
     (0..count as u64)

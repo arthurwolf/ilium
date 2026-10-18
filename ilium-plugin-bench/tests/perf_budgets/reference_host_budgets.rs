@@ -415,18 +415,9 @@ fn hst_312_pooling_enabled_when_on_demand_misses_start_and_pooling_meets_both() 
 /// REQ: HST-312
 #[test]
 fn hst_312_pooling_enabled_when_on_demand_misses_b2_only() {
-    assert_eq!(
-        pooling_allowed(&evidence(100.0, 6.0, 100.0, 4.0, 10.0)),
-        true
-    );
-    assert_eq!(
-        pooling_allowed(&evidence(100.0, 6.0, 100.0, 4.0, 16.0)),
-        true
-    );
-    assert_eq!(
-        pooling_allowed(&evidence(100.0, 6.0, 100.0, 4.0, 16.5)),
-        false
-    );
+    assert!(pooling_allowed(&evidence(100.0, 6.0, 100.0, 4.0, 10.0)));
+    assert!(pooling_allowed(&evidence(100.0, 6.0, 100.0, 4.0, 16.0)));
+    assert!(!pooling_allowed(&evidence(100.0, 6.0, 100.0, 4.0, 16.5)));
 }
 
 /// REQ: HST-312

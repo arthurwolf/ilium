@@ -30,13 +30,6 @@ pub fn startup(id: &str) -> PluginSpec {
         .activation(&["startup"])
 }
 
-/// A core plugin that waits for a command.
-pub fn lazy(id: &str) -> PluginSpec {
-    PluginSpec::new(id, Tier::T1)
-        .core()
-        .activation(&["command:open"])
-}
-
 /// A started server run with the given plugins.
 pub fn started(plugins: Vec<PluginSpec>) -> BootRun {
     let mut harness = BootHarness::new(ProcessKind::Server);

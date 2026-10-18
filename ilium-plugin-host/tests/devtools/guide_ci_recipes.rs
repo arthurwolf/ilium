@@ -90,7 +90,7 @@ fn dev_761_offline_commands_work_with_no_session_and_no_terminal() {
         let output = run(&env, &args);
         assert_ne!(output.exit_code, 6, "{command} must not need a session");
         assert!(
-            error_code(&output).map_or(true, |code| !code.starts_with("session.")),
+            error_code(&output).is_none_or(|code| !code.starts_with("session.")),
             "{command}"
         );
     }
@@ -280,8 +280,7 @@ fn dev_770_build_json_records_toolchain_and_input_hash() {
     let json: serde_json::Value =
         serde_json::from_str(&read_text(&dir, "dist/build.json")).unwrap();
     assert!(
-        json["toolchain"].is_object()
-            && json["input_hash"].as_str().map_or(false, |h| h.len() == 64)
+        json["toolchain"].is_object() && json["input_hash"].as_str().is_some_and(|h| h.len() == 64)
     );
 }
 

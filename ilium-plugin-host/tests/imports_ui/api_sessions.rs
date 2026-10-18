@@ -29,7 +29,7 @@ fn request(name: &str) -> CrossRequest {
 /// REQ: WIT:ilium:host/sessions.list-live
 #[test]
 fn wit_sessions_list_live_reports_the_live_sessions() {
-    let mut rig = rig(GRANTS);
+    let rig = rig(GRANTS);
     rig.kernel
         .set_live_sessions(vec![session("default", true), session("other", false)]);
     let live = rig.host.sessions().list_live();
@@ -40,7 +40,7 @@ fn wit_sessions_list_live_reports_the_live_sessions() {
 /// REQ: WIT:ilium:host/sessions.list-live
 #[test]
 fn wit_sessions_list_live_declined_grant_is_empty() {
-    let mut rig = declined_rig(&["sessions.cross"]);
+    let rig = declined_rig(&["sessions.cross"]);
     rig.kernel.set_live_sessions(vec![session("default", true)]);
     assert!(rig.host.sessions().list_live().is_empty());
 }
@@ -48,7 +48,7 @@ fn wit_sessions_list_live_declined_grant_is_empty() {
 /// REQ: WIT:ilium:host/sessions.send
 #[test]
 fn wit_sessions_send_returns_a_request_id_and_forwards_the_command() {
-    let mut rig = rig(GRANTS);
+    let rig = rig(GRANTS);
     rig.kernel.set_live_sessions(vec![session("other", false)]);
     let id = rig
         .host
@@ -65,7 +65,7 @@ fn wit_sessions_send_returns_a_request_id_and_forwards_the_command() {
 /// REQ: WIT:ilium:host/sessions.send
 #[test]
 fn wit_sessions_send_unknown_session_not_found() {
-    let mut rig = rig(GRANTS);
+    let rig = rig(GRANTS);
     assert_eq!(
         code_of(rig.host.sessions().send(request("ghost"))),
         ErrorCode::NotFound
@@ -75,7 +75,7 @@ fn wit_sessions_send_unknown_session_not_found() {
 /// REQ: WIT:ilium:host/sessions.send
 #[test]
 fn wit_sessions_send_declined_grant_not_permitted() {
-    let mut rig = declined_rig(&["sessions.cross"]);
+    let rig = declined_rig(&["sessions.cross"]);
     assert_eq!(
         code_of(rig.host.sessions().send(request("other"))),
         ErrorCode::NotPermitted
@@ -85,7 +85,7 @@ fn wit_sessions_send_declined_grant_not_permitted() {
 /// REQ: WIT:ilium:host/sessions.take-reply
 #[test]
 fn wit_sessions_take_reply_returns_the_reply_once() {
-    let mut rig = rig(GRANTS);
+    let rig = rig(GRANTS);
     rig.kernel.set_live_sessions(vec![session("other", false)]);
     rig.kernel.set_session_reply("other", "{\"ok\":true}");
     let id = rig
@@ -104,7 +104,7 @@ fn wit_sessions_take_reply_returns_the_reply_once() {
 /// REQ: WIT:ilium:host/sessions.take-reply
 #[test]
 fn wit_sessions_take_reply_unknown_request_is_none() {
-    let mut rig = rig(GRANTS);
+    let rig = rig(GRANTS);
     assert_eq!(
         rig.host
             .sessions()

@@ -9,8 +9,8 @@ use std::time::Duration;
 
 use ilium_plugin_host::cli::CliOutput;
 pub use ilium_plugin_host::testing::ops::{
-    DevSession, Fault, LifeEvent, LockHold, Marker, OpsRig, PackageSpec, RegistryStep,
-    ServerHandle, UninstallStep, UpdateStage,
+    Fault, LifeEvent, Marker, OpsRig, PackageSpec, RegistryStep, ServerHandle, UninstallStep,
+    UpdateStage,
 };
 use serde_json::Value;
 

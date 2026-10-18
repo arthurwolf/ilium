@@ -183,7 +183,7 @@ fn topic_010_no_topic_is_published_without_a_change() {
 fn topic_010_the_manifest_lists_the_changed_topic() {
     assert!(manifest()["contributes"]["topics"]["publishes"]
         .as_array()
-        .map_or(false, |topics| topics
+        .is_some_and(|topics| topics
             .iter()
             .any(|topic| topic == "changed" || topic == TOPIC)));
 }

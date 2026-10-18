@@ -16,10 +16,10 @@ fn call(host: &mut ilium_plugin_sdk::testing::FakeHost, id: u64, method: &str, p
     host.settle();
 }
 
-fn replies_to(
-    host: &ilium_plugin_sdk::testing::FakeHost,
-    id: u64,
-) -> Vec<(u16, Vec<(String, String)>, Vec<u8>)> {
+/// Status, headers and body of one reply, without the call id.
+type RouteReply = (u16, Vec<(String, String)>, Vec<u8>);
+
+fn replies_to(host: &ilium_plugin_sdk::testing::FakeHost, id: u64) -> Vec<RouteReply> {
     http_replies(host)
         .into_iter()
         .filter(|r| r.0 == id)

@@ -250,8 +250,7 @@ fn dev_552_the_terminal_summary_counts_a_failing_case() {
     let last = run
         .stdout
         .lines()
-        .filter(|l| !l.trim().is_empty())
-        .last()
+        .rfind(|l| !l.trim().is_empty())
         .expect("output")
         .to_string();
     assert!(

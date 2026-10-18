@@ -100,7 +100,7 @@ impl FakeBackend {
 
 impl SessionBackend for FakeBackend {
     fn plugin(&self, id: &str) -> Option<SessionPlugin> {
-        (id == self.plugin_id).then(|| SessionPlugin {
+        (id == self.plugin_id).then_some(SessionPlugin {
             dev: self.dev,
             running: self.running,
         })

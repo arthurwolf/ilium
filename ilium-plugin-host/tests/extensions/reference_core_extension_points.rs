@@ -2,7 +2,6 @@
 //! (EXT-040, EXT-041, EXT-042, EXT-052). Doc tests parse the manual page.
 
 use crate::support::*;
-use proptest::prelude::*;
 
 fn kind_of(cell: &str) -> (String, Option<String>) {
     match cell.split_once(':') {

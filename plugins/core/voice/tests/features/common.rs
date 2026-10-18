@@ -1,14 +1,12 @@
 //! Shared helpers: hosts for both sides, event builders, readers for the page and for JSONL output.
 
-pub use crate::host_ext::*;
 use std::path::PathBuf;
 
 use ilium_plugin_core_voice::{VoiceClient, VoiceServer};
 use ilium_plugin_sdk::testing::FakeHost;
 use ilium_plugin_sdk::types::{
-    ActionKind, CliInvokedEvent, ClientId, ClientRequestEvent, CommandContext, CommandInvokedEvent,
-    CommandOrigin, Event, GrabId, Intent, KernelSettingsEvent, KeyEvent, Submission, UiAction,
-    ViewTarget,
+    ActionKind, ClientId, ClientRequestEvent, CommandContext, CommandInvokedEvent, CommandOrigin,
+    Event, GrabId, Intent, KernelSettingsEvent, KeyEvent, Submission, UiAction, ViewTarget,
 };
 use serde_json::{json, Value};
 
@@ -135,16 +133,6 @@ pub fn command_invoked(command: &str) -> Event {
     })
 }
 
-/// `cli-invoked` for `ilium voice <argv>`.
-pub fn cli_invoked(invocation: u64, argv: &[&str]) -> Event {
-    Event::CliInvoked(CliInvokedEvent {
-        invocation,
-        name: "voice".to_string(),
-        argv: argv.iter().map(|argument| argument.to_string()).collect(),
-        cwd: "/work".to_string(),
-    })
-}
-
 /// `client-request` of kind `kind` with a JSON payload.
 pub fn client_request(call: u64, kind: &str, payload: Value) -> Event {
     Event::ClientRequest(ClientRequestEvent {
@@ -268,7 +256,7 @@ pub fn contribute_phrase(
         "ilium.core.voice/voice-intents",
         id,
         50,
-        &json!({ "phrases": [phrase], "command": command, "confirm": confirm }).to_string(),
+        json!({ "phrases": [phrase], "command": command, "confirm": confirm }).to_string(),
     );
 }
 

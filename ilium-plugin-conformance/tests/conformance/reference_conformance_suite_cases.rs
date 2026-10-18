@@ -552,7 +552,7 @@ fn conf_evt_08_same_key_after_ten_minutes_is_not_a_duplicate() {
     use ilium_plugin_api::generated::types::requests::Outcome;
     let (guest, _recorder) =
         ScriptedGuest::answering(Box::new(|_| Ok(vec![play_sound(1, Some("again"))])));
-    let mut handle = harness_with(guest, &["sound.play"]);
+    let handle = harness_with(guest, &["sound.play"]);
     deliver_and_pump(&handle, vec![Event::ThemeChanged]);
     handle.advance_clock(std::time::Duration::from_millis(600_001));
     deliver_and_pump(&handle, vec![Event::ThemeChanged]);

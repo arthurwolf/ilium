@@ -75,7 +75,7 @@ fn wit_lifecycle_activate_signature_matches_the_wit_file() {
 /// REQ: WIT:ilium:exports/lifecycle.deactivate
 #[test]
 fn wit_lifecycle_deactivate_is_called_once_on_a_clean_stop() {
-    let mut env = Setup::new(&[]).build();
+    let env = Setup::new(&[]).build();
     env.host.deactivate_plugin();
     env.settle();
     assert_eq!(lock(&env.probe.deactivations).len(), 1);

@@ -31,7 +31,7 @@ fn usage_038_window_parameter_is_accepted() {
 /// REQ: F-038
 #[test]
 fn usage_038_unknown_method_is_not_found() {
-    let mut server = ilium_plugin_core_cost::CostServer::default();
+    let mut server = ilium_plugin_core_cost::CostServer;
     use ilium_plugin_sdk::ServiceProvider;
     let reply = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         server.handle(ilium_plugin_sdk::exports::ServiceCall {

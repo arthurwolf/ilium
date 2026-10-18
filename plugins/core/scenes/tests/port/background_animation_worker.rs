@@ -283,7 +283,10 @@ fn port_same_size_scene_revision_fences_an_in_flight_old_frame() {
 fn port_scene_retirement_waits_for_emitted_old_frame_ack_but_not_display_arc() {
     let mut old = fake_scene("waves", 24, 12);
     let emitted = old.frame(braille_frame(24, 12, 900));
-    drop(old);
+    {
+        // Retire the old scene at this point; a plain drop() call is flagged for non-Drop types.
+        let _retired_scene = old;
+    }
     let mut successor = fake_scene("waves", 24, 12);
     let next = successor.frame(braille_frame(24, 12, 900));
     assert_eq!(

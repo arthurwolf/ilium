@@ -180,7 +180,7 @@ fn rqo_004_same_key_twice_gives_duplicate_naming_the_first_and_no_second_effect(
 /// REQ: RQO-004
 #[test]
 fn rqo_004_at_599_999_ms_the_key_is_still_reserved() {
-    let mut env = writer().tree(flat_tree(1)).build();
+    let env = writer().tree(flat_tree(1)).build();
     env.run(vec![keyed(1, "k:1", send_input(2, "a"))]);
     env.host.advance_clock(Duration::from_millis(599_999));
     env.run(vec![keyed(2, "k:1", send_input(2, "a"))]);
@@ -190,7 +190,7 @@ fn rqo_004_at_599_999_ms_the_key_is_still_reserved() {
 /// REQ: RQO-004
 #[test]
 fn rqo_004_at_600_000_ms_the_key_is_free() {
-    let mut env = writer().tree(flat_tree(1)).build();
+    let env = writer().tree(flat_tree(1)).build();
     env.run(vec![keyed(1, "k:1", send_input(2, "a"))]);
     env.host.advance_clock(Duration::from_millis(600_000));
     env.run(vec![keyed(2, "k:1", send_input(2, "a"))]);
@@ -200,7 +200,7 @@ fn rqo_004_at_600_000_ms_the_key_is_free() {
 /// REQ: RQO-004
 #[test]
 fn rqo_004_at_600_001_ms_the_key_is_free() {
-    let mut env = writer().tree(flat_tree(1)).build();
+    let env = writer().tree(flat_tree(1)).build();
     env.run(vec![keyed(1, "k:1", send_input(2, "a"))]);
     env.host.advance_clock(Duration::from_millis(600_001));
     env.run(vec![keyed(2, "k:1", send_input(2, "a"))]);
@@ -536,7 +536,7 @@ fn rqo_021_two_plugins_with_the_same_key_never_collide() {
 /// REQ: RQO-021
 #[test]
 fn rqo_021_the_key_is_reserved_for_10_minutes() {
-    let mut env = writer().tree(flat_tree(1)).build();
+    let env = writer().tree(flat_tree(1)).build();
     env.run(vec![keyed(1, "k", send_input(2, "a"))]);
     env.host.advance_clock(Duration::from_secs(599));
     env.run(vec![keyed(2, "k", send_input(2, "a"))]);

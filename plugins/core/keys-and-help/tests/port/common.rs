@@ -9,8 +9,6 @@ use ilium_plugin_sdk::testing::FakeHost;
 use ilium_plugin_sdk::types::events::KernelSettingsEvent;
 use serde_json::{json, Value};
 
-pub const PLUGIN_ID: &str = "ilium.core.keys-and-help";
-
 pub fn manifest_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("manifest.json")
 }
@@ -157,7 +155,7 @@ pub enum Column {
 }
 
 impl Column {
-    pub fn key<'a>(self, row: &'a ActionRow) -> &'a str {
+    pub fn key(self, row: &ActionRow) -> &str {
         match self {
             Column::Default => &row.default,
             Column::Screen => &row.screen,

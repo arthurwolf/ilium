@@ -204,7 +204,7 @@ fn pkg_225_yes_alone_never_trusts_a_new_key() {
     let fixture = cli_fixture();
     let out = install(&fixture, &vector_signed(), &[]);
     assert!(has(&out, "trust.key-unknown"), "{}", all_text(&out));
-    assert!(read_trust(&fixture).map_or(true, |s| !s.contains(VECTOR_KEY_ID)));
+    assert!(read_trust(&fixture).is_none_or(|s| !s.contains(VECTOR_KEY_ID)));
 }
 
 /// REQ: PKG-225
@@ -576,8 +576,7 @@ fn pkg_235_installing_unsigned_never_yields_t1_or_t2() {
 // ---- PKG-236..241: key changes and rotation ----
 
 fn update_fixture() -> CliFixture {
-    let fixture = installed_fixture();
-    fixture
+    installed_fixture()
 }
 
 fn newer(seed: u8) -> Vec<u8> {

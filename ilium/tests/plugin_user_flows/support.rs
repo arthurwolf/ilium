@@ -11,8 +11,8 @@ use serde_json::Value;
 pub use ilium_plugin_host::cli::CliOutput;
 pub use ilium_plugin_host::lifecycle::StartMode;
 pub use ilium_plugin_host::testing::user_rig::{
-    CallOutcome, DialogAnswer, GrantEntry, HookBehaviour, KeyPair, KillPoint, PackageSpec,
-    Platform, PluginRow, ReviewDialog, ReviewRow, UserRig,
+    CallOutcome, DialogAnswer, HookBehaviour, KeyPair, KillPoint, PackageSpec, Platform, PluginRow,
+    UserRig,
 };
 
 /// The workspace root.

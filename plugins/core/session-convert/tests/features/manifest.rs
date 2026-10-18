@@ -353,5 +353,8 @@ fn manifest_050_host_takes_grants_from_the_manifest_for_each_side() {
         .expect("loads")
         .side("client")
         .build();
-    drop((server, client));
+    {
+        // Both hosts are released here; a plain drop() call is flagged for non-Drop tuples.
+        let _released_hosts = (server, client);
+    }
 }

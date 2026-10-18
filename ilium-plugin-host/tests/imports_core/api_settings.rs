@@ -3,7 +3,7 @@
 //!
 //! WIT ids: `ilium:host/settings` functions up to `set-choices`. `set-info` onward is part 2.
 
-use ilium_plugin_api::generated::host::{ChoiceOption, HostSettings};
+use ilium_plugin_api::generated::host::ChoiceOption;
 use ilium_plugin_api::generated::types::{
     CatalogItem, ErrorCode, Event, PluginId, Preview, SettingsOrigin,
 };

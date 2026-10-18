@@ -1,6 +1,6 @@
 //! api-codec.md: `inflate`, `deflate`, `image-info`, `decode-image`, `sha256`, `rasterize-text`.
 
-use ilium_plugin_api::generated::host::{Compression, HostCodec, RasterText};
+use ilium_plugin_api::generated::host::{Compression, RasterText};
 use ilium_plugin_api::generated::types::ErrorCode;
 use proptest::prelude::*;
 

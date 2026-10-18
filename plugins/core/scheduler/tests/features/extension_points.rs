@@ -1,11 +1,9 @@
 //! The extension points, service and topic the page declares: `schedule-sources` (collect),
 //! `before-send-scheduled` (hook, veto), service `ilium.core.scheduler/queue`, topic `ilium.core.scheduler/fired`.
 
+use crate::common::*;
 use ilium_plugin_sdk::exports::{HookCall, HookReply};
 use ilium_plugin_sdk::testing::FakeSession;
-use serde_json::Value;
-
-use crate::common::*;
 
 /// Rows of the Extension points table: `(point, kind, what, payload, risk)`.
 fn point_rows() -> Vec<[String; 5]> {
@@ -248,11 +246,12 @@ fn points_the_queue_service_refuses_an_unknown_mode() {
     );
 }
 
-// Tests that need harness items the skeleton lacks (see API_GAPS.md). They compile once the
-// `api-gaps` feature exists in Cargo.toml and the items are added.
-#[cfg(feature = "api-gaps")]
+// Tests that need harness items the skeleton lacks (see API_GAPS.md). They stay compiled out
+// (`cfg(any())` is always false) until the items are added and the gate is replaced.
+#[cfg(any())]
 mod needs_harness_items {
     use super::*;
+    use serde_json::Value;
 
     /// REQ: F-055
     #[test]

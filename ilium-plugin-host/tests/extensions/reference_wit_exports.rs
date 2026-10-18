@@ -43,7 +43,7 @@ fn wit_annotator_annotate_returns_annotations_inside_the_given_lines() {
                 && item.line < 13
                 && item.first_column <= item.last_column));
         }
-        other => assert!(false, "expected annotations, got {other:?}"),
+        other => panic!("expected annotations, got {other:?}"),
     }
 }
 
@@ -82,7 +82,7 @@ fn wit_token_provider_tokens_stay_inside_their_lines_and_return_a_state() {
                 .iter()
                 .all(|token| (token.line as usize) < 4 && token.length > 0));
         }
-        other => assert!(false, "expected tokens, got {other:?}"),
+        other => panic!("expected tokens, got {other:?}"),
     }
 }
 
@@ -101,10 +101,7 @@ fn wit_token_provider_tokens_accept_the_state_of_the_previous_call() {
     );
     let state = match first {
         Ok(ExportReply::Tokens(_, state)) => state,
-        other => {
-            assert!(false, "expected tokens, got {other:?}");
-            None
-        }
+        other => panic!("expected tokens, got {other:?}"),
     };
     let second = world.call_export(
         GUEST,
@@ -183,12 +180,11 @@ fn wit_virtual_rows_provider_returns_a_page_and_a_cursor_that_ends_with_none() {
                 cursor = next;
             }
             other => {
-                assert!(false, "expected a page, got {other:?}");
-                return;
+                panic!("expected a page, got {other:?}");
             }
         }
     }
-    assert!(false, "the cursor never ended within 50 pages");
+    panic!("the cursor never ended within 50 pages");
 }
 
 /// REQ: WIT:ilium:exports/virtual-rows-provider.list-virtual-children
@@ -235,7 +231,7 @@ fn wit_service_provider_handle_returns_done_with_a_json_string() {
                 "{text}"
             );
         }
-        other => assert!(false, "expected done, got {other:?}"),
+        other => panic!("expected done, got {other:?}"),
     }
 }
 

@@ -1,6 +1,6 @@
 //! api-http.md: `fetch` and `take-response`, validation limits, grants, redirects, body cap.
 
-use ilium_plugin_api::generated::host::{HostHttp, HttpRequest};
+use ilium_plugin_api::generated::host::HttpRequest;
 use ilium_plugin_api::generated::types::{ErrorCode, Header, RequestId};
 use ilium_plugin_api::Tier;
 use ilium_plugin_host::testing::imports_fixture::ImportsFixture;

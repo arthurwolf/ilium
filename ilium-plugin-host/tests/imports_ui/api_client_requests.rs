@@ -20,7 +20,7 @@ fn seeded() -> Rig {
 /// REQ: WIT:ilium:host/client-requests.request
 #[test]
 fn wit_client_requests_request_returns_a_request_id_and_reaches_the_client() {
-    let mut rig = seeded();
+    let rig = seeded();
     let id = rig
         .host
         .client_requests()
@@ -55,7 +55,7 @@ fn wit_client_requests_request_timeout_boundaries_invalid_argument() {
 /// REQ: WIT:ilium:host/client-requests.request
 #[test]
 fn wit_client_requests_request_unknown_client_not_found() {
-    let mut rig = seeded();
+    let rig = seeded();
     let result = rig.host.client_requests().request(
         ClientId(404),
         "clipboard-text".to_owned(),
@@ -68,7 +68,7 @@ fn wit_client_requests_request_unknown_client_not_found() {
 /// REQ: WIT:ilium:host/client-requests.request
 #[test]
 fn wit_client_requests_request_undeclared_kind_not_found() {
-    let mut rig = seeded();
+    let rig = seeded();
     let result =
         rig.host
             .client_requests()
@@ -79,7 +79,7 @@ fn wit_client_requests_request_undeclared_kind_not_found() {
 /// REQ: WIT:ilium:host/client-requests.request
 #[test]
 fn wit_client_requests_request_unanswered_completes_timed_out() {
-    let mut rig = seeded();
+    let rig = seeded();
     let id = rig
         .host
         .client_requests()
@@ -93,7 +93,7 @@ fn wit_client_requests_request_unanswered_completes_timed_out() {
 /// REQ: WIT:ilium:host/client-requests.take-answer
 #[test]
 fn wit_client_requests_take_answer_returns_the_answer_once() {
-    let mut rig = seeded();
+    let rig = seeded();
     let id = rig
         .host
         .client_requests()
@@ -112,7 +112,7 @@ fn wit_client_requests_take_answer_returns_the_answer_once() {
 /// REQ: WIT:ilium:host/client-requests.take-answer
 #[test]
 fn wit_client_requests_take_answer_before_the_answer_is_none() {
-    let mut rig = seeded();
+    let rig = seeded();
     let id = rig
         .host
         .client_requests()
@@ -124,7 +124,7 @@ fn wit_client_requests_take_answer_before_the_answer_is_none() {
 /// REQ: WIT:ilium:host/client-requests.take-answer
 #[test]
 fn wit_client_requests_take_answer_unknown_request_is_none() {
-    let mut rig = seeded();
+    let rig = seeded();
     assert_eq!(
         rig.host.client_requests().take_answer(RequestId(1_234_567)),
         None
@@ -134,7 +134,7 @@ fn wit_client_requests_take_answer_unknown_request_is_none() {
 /// REQ: WIT:ilium:host/client-requests.respond
 #[test]
 fn wit_client_requests_respond_delivers_the_answer_to_the_server() {
-    let mut rig = rig(GRANTS);
+    let rig = rig(GRANTS);
     let call = rig.kernel.start_client_request_call("clipboard-text", "{}");
     rig.host
         .client_requests()
@@ -149,7 +149,7 @@ fn wit_client_requests_respond_delivers_the_answer_to_the_server() {
 /// REQ: WIT:ilium:host/client-requests.respond
 #[test]
 fn wit_client_requests_respond_with_an_error_outcome_is_forwarded() {
-    let mut rig = rig(GRANTS);
+    let rig = rig(GRANTS);
     let call = rig.kernel.start_client_request_call("clipboard-text", "{}");
     let failure = PluginError {
         code: ErrorCode::NotPermitted,
@@ -166,7 +166,7 @@ fn wit_client_requests_respond_with_an_error_outcome_is_forwarded() {
 /// REQ: WIT:ilium:host/client-requests.respond
 #[test]
 fn wit_client_requests_respond_second_answer_not_found() {
-    let mut rig = rig(GRANTS);
+    let rig = rig(GRANTS);
     let call = rig.kernel.start_client_request_call("clipboard-text", "{}");
     rig.host
         .client_requests()
@@ -181,7 +181,7 @@ fn wit_client_requests_respond_second_answer_not_found() {
 /// REQ: WIT:ilium:host/client-requests.respond
 #[test]
 fn wit_client_requests_respond_unknown_call_not_found() {
-    let mut rig = rig(GRANTS);
+    let rig = rig(GRANTS);
     assert_eq!(
         code_of(
             rig.host

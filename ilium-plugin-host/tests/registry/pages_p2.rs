@@ -127,8 +127,3 @@ pub fn verify_bytes(sandbox: &Sandbox, bytes: &[u8]) -> CliOutput {
 pub fn has_error(output: &CliOutput, code: &str) -> bool {
     error_codes(output).iter().any(|found| found == code)
 }
-
-/// The three policy files the administration tests need, as TOML text.
-pub fn policy_with(packages: &str, extra: &str) -> String {
-    format!("version = 1\n[packages]\n{packages}\n{extra}\n")
-}

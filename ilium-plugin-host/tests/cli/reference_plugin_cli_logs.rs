@@ -3,7 +3,6 @@
 use ilium_plugin_host::cli::{DevEvent, MemorySession};
 
 use crate::common::*;
-use crate::common_p2::*;
 
 fn logged_session() -> std::sync::Arc<MemorySession> {
     let session = MemorySession::new();

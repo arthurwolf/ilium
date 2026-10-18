@@ -1,8 +1,6 @@
 //! Twins of ilium-server ipc/connection.rs and encoded_storage_tests.rs: rule distribution to panes and clients, ordering, and stale payloads.
 
-use ilium_plugin_sdk::testing::FakeHost;
-use ilium_plugin_sdk::types::{ErrorCode, Event, Outcome};
-use serde_json::{json, Value};
+use serde_json::json;
 
 use crate::common::*;
 use crate::support::*;

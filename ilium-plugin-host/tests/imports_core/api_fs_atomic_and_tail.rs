@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use ilium_plugin_api::generated::host::{HostFs, PickKind, PickSpec, WriteMode};
+use ilium_plugin_api::generated::host::{PickKind, PickSpec, WriteMode};
 use ilium_plugin_api::generated::types::{ErrorCode, RequestId};
 use ilium_plugin_api::Tier;
 use ilium_plugin_host::testing::imports_fixture::ImportsFixture;

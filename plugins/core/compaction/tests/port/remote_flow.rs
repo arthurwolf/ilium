@@ -70,7 +70,7 @@ fn flow_a_success_clears_the_failure_streak() {
 /// REQ: PORT:ilium-client/src/remote_compaction_flow.rs::only_claude_and_codex_map_to_a_transcript_format
 #[test]
 fn flow_only_claude_and_codex_map_to_a_transcript_format() {
-    let mut host = server_host();
+    let host = server_host();
     assert_eq!(
         host.transcript_format_for("claude").as_deref(),
         Some("claude")

@@ -1,8 +1,7 @@
 //! Twin of the execution lease: with two clients only one answers, because the host dedups a send-input by key.
 
-use ilium_plugin_sdk::testing::FakeHost;
-use ilium_plugin_sdk::types::{ActionKind, ActionValue, ErrorCode, Event, Outcome, ViewTarget};
-use serde_json::{json, Value};
+use ilium_plugin_sdk::types::{ActionKind, ActionValue, ErrorCode, Outcome};
+use serde_json::json;
 
 use crate::common::*;
 use crate::support::*;
@@ -24,7 +23,6 @@ fn port_001_only_one_client_executes_and_another_takes_over_after_drop() {
         1,
         "{again:?}"
     );
-    drop(first);
     let takeover = second.deliver_one(hit(second_pane, 1));
     assert_eq!(texts(&takeover), ["yes"]);
 }

@@ -446,7 +446,7 @@ fn port_internal_a_namespace_error_is_terminal_and_makes_one_request_at_most() {
 /// REQ: PORT:ilium/tests/pty_tui_smoke.rs::right_click_restart_reloads_only_the_client_and_preserves_the_server
 #[test]
 fn port_internal_the_server_side_keeps_working_after_the_client_side_is_rebuilt() {
-    let (mut server, _pane) = server_showing(&["src/lib.rs"]);
+    let (server, _pane) = server_showing(&["src/lib.rs"]);
     let before = scan(&["src/lib.rs"]);
     let mut client = client_host();
     client.deliver_one(candidates_message(&["src/lib.rs"]));

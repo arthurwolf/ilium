@@ -102,7 +102,7 @@ fn reset_088_non_200_logs_a_warning_and_stores_no_forecast() {
 /// REQ: F-088
 #[test]
 fn reset_088_successful_poll_stores_forecast_anthropic() {
-    let mut host = monitored_host(200);
+    let host = monitored_host(200);
     let stored = host.storage().get(Bucket::Global, "forecast/anthropic");
     assert!(stored.map(|bytes| bytes.len() == 8).unwrap_or(false));
 }

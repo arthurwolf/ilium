@@ -2,7 +2,9 @@
 //!
 //! Every use of a testkit item that the skeleton lacks lives in the "gap helpers" section at the
 //! end of this file (see ../API_GAPS.md), so a missing item breaks this file only.
-#![allow(dead_code)]
+// The port target mounts this file via #[path] and relies on the host_ext re-export below,
+// which the features target never uses.
+#![allow(dead_code, unused_imports)]
 
 pub use crate::host_ext::*;
 use std::path::PathBuf;
@@ -502,8 +504,11 @@ pub fn set_pane_env(host: &mut FakeHost, pane: Option<u64>) {
     }
 }
 
+/// One reply the plugin gave to an `http-called` call: `(call, status, headers, body)`.
+pub type HttpReply = (u64, u16, Vec<(String, String)>, Vec<u8>);
+
 /// Every reply the plugin gave to an `http-called` call: `(call, status, headers, body)`.
-pub fn http_replies(host: &FakeHost) -> Vec<(u64, u16, Vec<(String, String)>, Vec<u8>)> {
+pub fn http_replies(host: &FakeHost) -> Vec<HttpReply> {
     host.http_replies()
 }
 

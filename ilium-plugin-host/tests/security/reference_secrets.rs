@@ -191,7 +191,7 @@ fn sec_243_length_boundary_5_6_7() {
 /// REQ: SEC-243
 #[test]
 fn sec_243_replacement_is_case_sensitive() {
-    let out = redact(&format!("{}", SECRET.to_uppercase()), &[SECRET.to_owned()]);
+    let out = redact(&SECRET.to_uppercase(), &[SECRET.to_owned()]);
     assert!(!out.contains("<redacted>"));
 }
 
@@ -228,7 +228,7 @@ proptest! {
             hex_lower(secret.as_bytes()),
         ];
         for variant in variants {
-            let out = redact(&format!("{prefix}{variant}{suffix}"), &[secret.clone()]);
+            let out = redact(&format!("{prefix}{variant}{suffix}"), std::slice::from_ref(&secret));
             prop_assert!(!out.contains(&variant));
         }
     }
@@ -236,8 +236,8 @@ proptest! {
     // REQ: SEC-243
     #[test]
     fn sec_243_redaction_is_idempotent(secret in "[A-Za-z0-9]{6,20}", text in "[a-z ]{0,30}") {
-        let once = redact(&format!("{text}{secret}"), &[secret.clone()]);
-        prop_assert_eq!(redact(&once, &[secret.clone()]), once);
+        let once = redact(&format!("{text}{secret}"), std::slice::from_ref(&secret));
+        prop_assert_eq!(redact(&once, std::slice::from_ref(&secret)), once);
     }
 }
 
@@ -312,7 +312,7 @@ fn sec_245_the_manual_names_the_residual_risk() {
 /// REQ: SEC-246
 #[test]
 fn sec_246_old_value_is_overwritten_and_still_redacted_for_60_seconds() {
-    let mut rig = setup(&[]).secret("token", SECRET).start();
+    let rig = setup(&[]).secret("token", SECRET).start();
     rig.host.set_secret_now("token", "rotated-secret-value");
     assert!(
         !rig.host.stored_secret_text().contains(SECRET),

@@ -134,8 +134,7 @@ fn keymap_port_known_letters_are_rows_of_their_actions() {
         let (row, _) = screen.find(name).unwrap_or_else(|| panic!("{name} row"));
         let line = screen.row(row);
         assert!(
-            line.trim_end_matches(|c: char| c == ' ' || c == '│')
-                .contains(key),
+            line.trim_end_matches([' ', '│']).contains(key),
             "{name}: {line}"
         );
     }
@@ -217,8 +216,7 @@ fn keymap_port_default_keys_follow_tmux_for_navigation() {
         let (row, _) = screen.find(name).unwrap_or_else(|| panic!("{name} row"));
         let line = screen.row(row);
         assert!(
-            line.trim_end_matches(|c: char| c == ' ' || c == '│')
-                .ends_with(key),
+            line.trim_end_matches([' ', '│']).ends_with(key),
             "{name}: {line}"
         );
     }

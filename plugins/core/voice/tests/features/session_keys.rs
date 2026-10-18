@@ -336,7 +336,7 @@ fn session_050_a_phrase_heard_runs_the_matched_command_through_an_invoke_command
         "ilium.core.voice/voice-intents",
         "open-board",
         50,
-        &json!({ "phrases": ["open the board"], "command": "open-board", "confirm": false })
+        json!({ "phrases": ["open the board"], "command": "open-board", "confirm": false })
             .to_string(),
     );
     host.deliver_one(frames(capture, vec![1]));

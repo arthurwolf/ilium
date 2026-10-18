@@ -8,7 +8,7 @@ use proptest::prelude::*;
 
 fn expected_retry(balance_ms: i64) -> u32 {
     let doubled = (-balance_ms * 2) as u64;
-    let rounded = (doubled + 9) / 10 * 10;
+    let rounded = doubled.div_ceil(10) * 10;
     rounded.max(100) as u32
 }
 

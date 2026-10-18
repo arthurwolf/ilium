@@ -1,6 +1,6 @@
 //! api-http-streams.md: `open-stream`, `close-stream`, `open-websocket`, `send-websocket`.
 
-use ilium_plugin_api::generated::host::{HostHttp, HttpRequest, StreamFraming, StreamRequest};
+use ilium_plugin_api::generated::host::{HttpRequest, StreamFraming, StreamRequest};
 use ilium_plugin_api::generated::types::{ErrorCode, StreamId};
 use ilium_plugin_api::Tier;
 use ilium_plugin_host::testing::imports_fixture::ImportsFixture;

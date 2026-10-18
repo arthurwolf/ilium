@@ -183,6 +183,6 @@ fn wit_commands_invoke_not_answered_in_30_s_completes_failed_timed_out() {
     world.settle();
     match world.outcome(CALLER, id) {
         Some(Outcome::Failed(error)) => assert_eq!(code_of(&error), ErrorCode::TimedOut),
-        other => assert!(false, "expected failed(timed-out), got {other:?}"),
+        other => panic!("expected failed(timed-out), got {other:?}"),
     }
 }

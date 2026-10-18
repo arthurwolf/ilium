@@ -616,7 +616,7 @@ fn doc_sec_057_platform_matrix_rows() {
 /// REQ: SEC-057
 #[test]
 fn sec_057_on_linux_the_helper_binary_starts() {
-    assert!(cfg!(target_os = "linux"));
+    const { assert!(cfg!(target_os = "linux")) };
     let mut helper = Helper::spawn();
     helper.expect_hello();
 }

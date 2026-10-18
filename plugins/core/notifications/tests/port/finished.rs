@@ -43,155 +43,177 @@ fn assert_alert_channels_agree(submissions: &[Submission]) -> bool {
 /// REQ: PORT:ilium-server/src/notifications.rs::working_to_idle_is_a_parked_agent_and_does_not_notify
 #[test]
 fn finished_port_working_to_idle_is_a_parked_agent_and_does_not_notify() {
-    assert_eq!(
-        finished_alert(AgentActivity::Working, AgentActivity::Idle, None, None),
-        false
-    );
+    assert!(!finished_alert(
+        AgentActivity::Working,
+        AgentActivity::Idle,
+        None,
+        None
+    ));
 }
 
 /// REQ: PORT:ilium-server/src/notifications.rs::working_to_done_notifies
 #[test]
 fn finished_port_working_to_done_notifies() {
-    assert_eq!(
-        finished_alert(AgentActivity::Working, AgentActivity::Done, None, None),
-        true
-    );
+    assert!(finished_alert(
+        AgentActivity::Working,
+        AgentActivity::Done,
+        None,
+        None
+    ));
 }
 
 /// REQ: PORT:ilium-server/src/notifications.rs::idle_to_working_does_not_notify
 #[test]
 fn finished_port_idle_to_working_does_not_notify() {
-    assert_eq!(
-        finished_alert(AgentActivity::Idle, AgentActivity::Working, None, None),
-        false
-    );
+    assert!(!finished_alert(
+        AgentActivity::Idle,
+        AgentActivity::Working,
+        None,
+        None
+    ));
 }
 
 /// REQ: PORT:ilium-server/src/notifications.rs::done_to_working_does_not_notify
 #[test]
 fn finished_port_done_to_working_does_not_notify() {
-    assert_eq!(
-        finished_alert(AgentActivity::Done, AgentActivity::Working, None, None),
-        false
-    );
+    assert!(!finished_alert(
+        AgentActivity::Done,
+        AgentActivity::Working,
+        None,
+        None
+    ));
 }
 
 /// REQ: PORT:ilium-server/src/notifications.rs::working_to_waiting_approval_does_not_notify
 #[test]
 fn finished_port_working_to_waiting_approval_does_not_notify() {
-    assert_eq!(
-        finished_alert(
-            AgentActivity::Working,
-            AgentActivity::AwaitingApproval,
-            None,
-            None
-        ),
-        false
-    );
+    assert!(!finished_alert(
+        AgentActivity::Working,
+        AgentActivity::AwaitingApproval,
+        None,
+        None
+    ));
 }
 
 /// REQ: PORT:ilium-server/src/notifications.rs::waiting_approval_to_idle_does_not_notify
 #[test]
 fn finished_port_waiting_approval_to_idle_does_not_notify() {
-    assert_eq!(
-        finished_alert(
-            AgentActivity::AwaitingApproval,
-            AgentActivity::Idle,
-            None,
-            None
-        ),
-        false
-    );
+    assert!(!finished_alert(
+        AgentActivity::AwaitingApproval,
+        AgentActivity::Idle,
+        None,
+        None
+    ));
 }
 
 /// REQ: PORT:ilium-server/src/notifications.rs::working_to_waiting_background_does_not_notify
 #[test]
 fn finished_port_working_to_waiting_background_does_not_notify() {
-    assert_eq!(
-        finished_alert(AgentActivity::Working, AgentActivity::Working, None, None),
-        false
-    );
+    assert!(!finished_alert(
+        AgentActivity::Working,
+        AgentActivity::Working,
+        None,
+        None
+    ));
 }
 
 /// REQ: PORT:ilium-server/src/notifications.rs::waiting_background_to_idle_does_not_notify
 #[test]
 fn finished_port_waiting_background_to_idle_does_not_notify() {
-    assert_eq!(
-        finished_alert(AgentActivity::Working, AgentActivity::Idle, None, None),
-        false
-    );
+    assert!(!finished_alert(
+        AgentActivity::Working,
+        AgentActivity::Idle,
+        None,
+        None
+    ));
 }
 
 /// REQ: PORT:ilium-server/src/notifications.rs::working_to_background_task_still_running_does_not_notify
 #[test]
 fn finished_port_working_to_background_task_still_running_does_not_notify() {
-    assert_eq!(
-        finished_alert(AgentActivity::Working, AgentActivity::Working, None, None),
-        false
-    );
+    assert!(!finished_alert(
+        AgentActivity::Working,
+        AgentActivity::Working,
+        None,
+        None
+    ));
 }
 
 /// REQ: PORT:ilium-server/src/notifications.rs::background_task_still_running_to_done_notifies
 #[test]
 fn finished_port_background_task_still_running_to_done_notifies() {
-    assert_eq!(
-        finished_alert(AgentActivity::Working, AgentActivity::Done, None, None),
-        true
-    );
+    assert!(finished_alert(
+        AgentActivity::Working,
+        AgentActivity::Done,
+        None,
+        None
+    ));
 }
 
 /// REQ: PORT:ilium-server/src/notifications.rs::waiting_background_to_done_notifies
 #[test]
 fn finished_port_waiting_background_to_done_notifies() {
-    assert_eq!(
-        finished_alert(AgentActivity::Working, AgentActivity::Done, None, None),
-        true
-    );
+    assert!(finished_alert(
+        AgentActivity::Working,
+        AgentActivity::Done,
+        None,
+        None
+    ));
 }
 
 /// REQ: PORT:ilium-server/src/notifications.rs::waiting_background_to_waiting_background_does_not_notify
 #[test]
 fn finished_port_waiting_background_to_waiting_background_does_not_notify() {
-    assert_eq!(
-        finished_alert(AgentActivity::Working, AgentActivity::Working, None, None),
-        false
-    );
+    assert!(!finished_alert(
+        AgentActivity::Working,
+        AgentActivity::Working,
+        None,
+        None
+    ));
 }
 
 /// REQ: PORT:ilium-server/src/notifications.rs::idle_to_done_does_not_notify
 #[test]
 fn finished_port_idle_to_done_does_not_notify() {
-    assert_eq!(
-        finished_alert(AgentActivity::Idle, AgentActivity::Done, None, None),
-        false
-    );
+    assert!(!finished_alert(
+        AgentActivity::Idle,
+        AgentActivity::Done,
+        None,
+        None
+    ));
 }
 
 /// REQ: PORT:ilium-server/src/notifications.rs::done_to_idle_does_not_notify
 #[test]
 fn finished_port_done_to_idle_does_not_notify() {
-    assert_eq!(
-        finished_alert(AgentActivity::Done, AgentActivity::Idle, None, None),
-        false
-    );
+    assert!(!finished_alert(
+        AgentActivity::Done,
+        AgentActivity::Idle,
+        None,
+        None
+    ));
 }
 
 /// REQ: PORT:ilium-server/src/notifications.rs::working_to_working_does_not_notify
 #[test]
 fn finished_port_working_to_working_does_not_notify() {
-    assert_eq!(
-        finished_alert(AgentActivity::Working, AgentActivity::Working, None, None),
-        false
-    );
+    assert!(!finished_alert(
+        AgentActivity::Working,
+        AgentActivity::Working,
+        None,
+        None
+    ));
 }
 
 /// REQ: PORT:ilium-server/src/notifications.rs::idle_to_idle_does_not_notify
 #[test]
 fn finished_port_idle_to_idle_does_not_notify() {
-    assert_eq!(
-        finished_alert(AgentActivity::Idle, AgentActivity::Idle, None, None),
-        false
-    );
+    assert!(!finished_alert(
+        AgentActivity::Idle,
+        AgentActivity::Idle,
+        None,
+        None
+    ));
 }
 
 /// REQ: PORT:ilium-server/src/notifications.rs::first_ever_classification_never_notifies_even_if_it_looks_finished
@@ -231,58 +253,46 @@ fn finished_port_working_to_done_notifies_regardless_of_which_agent_class() {
 /// REQ: PORT:ilium-server/src/notifications.rs::agent_with_goal_working_to_agent_with_goal_done_notifies
 #[test]
 fn finished_port_agent_with_goal_working_to_agent_with_goal_done_notifies() {
-    assert_eq!(
-        finished_alert(
-            AgentActivity::Working,
-            AgentActivity::Done,
-            Some("ship it"),
-            Some("ship it")
-        ),
-        true
-    );
+    assert!(finished_alert(
+        AgentActivity::Working,
+        AgentActivity::Done,
+        Some("ship it"),
+        Some("ship it")
+    ));
 }
 
 /// REQ: PORT:ilium-server/src/notifications.rs::agent_with_goal_working_to_plain_agent_done_notifies_when_goal_clears_on_completion
 #[test]
 fn finished_port_agent_with_goal_working_to_plain_agent_done_notifies_when_goal_clears_on_completion(
 ) {
-    assert_eq!(
-        finished_alert(
-            AgentActivity::Working,
-            AgentActivity::Done,
-            Some("ship it"),
-            None
-        ),
-        true
-    );
+    assert!(finished_alert(
+        AgentActivity::Working,
+        AgentActivity::Done,
+        Some("ship it"),
+        None
+    ));
 }
 
 /// REQ: PORT:ilium-server/src/notifications.rs::agent_with_goal_waiting_background_to_agent_with_goal_done_notifies
 #[test]
 fn finished_port_agent_with_goal_waiting_background_to_agent_with_goal_done_notifies() {
-    assert_eq!(
-        finished_alert(
-            AgentActivity::Working,
-            AgentActivity::Done,
-            Some("ship it"),
-            Some("ship it")
-        ),
-        true
-    );
+    assert!(finished_alert(
+        AgentActivity::Working,
+        AgentActivity::Done,
+        Some("ship it"),
+        Some("ship it")
+    ));
 }
 
 /// REQ: PORT:ilium-server/src/notifications.rs::agent_with_goal_working_to_agent_with_goal_waiting_approval_does_not_notify
 #[test]
 fn finished_port_agent_with_goal_working_to_agent_with_goal_waiting_approval_does_not_notify() {
-    assert_eq!(
-        finished_alert(
-            AgentActivity::Working,
-            AgentActivity::AwaitingApproval,
-            Some("ship it"),
-            Some("ship it")
-        ),
-        false
-    );
+    assert!(!finished_alert(
+        AgentActivity::Working,
+        AgentActivity::AwaitingApproval,
+        Some("ship it"),
+        Some("ship it")
+    ));
 }
 
 /// REQ: PORT:ilium-server/src/notifications.rs::working_to_plain_shell_does_not_notify

@@ -124,7 +124,7 @@ fn aut_004_delay_below_50_ms_is_refused_invalid_argument() {
         debounce.touch(&mut timers, 50).is_ok(),
         "50 ms is the lowest accepted delay"
     );
-    assert!(QUIET_MILLIS >= 50);
+    const { assert!(QUIET_MILLIS >= 50) };
 }
 
 // ---------------------------------------------------------------- recipe 2: throttle
@@ -294,7 +294,7 @@ fn with_group_separator(value: usize) -> String {
     let digits = value.to_string();
     let mut out = String::new();
     for (index, digit) in digits.chars().enumerate() {
-        if index > 0 && (digits.len() - index) % 3 == 0 {
+        if index > 0 && (digits.len() - index).is_multiple_of(3) {
             out.push(',');
         }
         out.push(digit);

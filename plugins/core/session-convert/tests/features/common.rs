@@ -16,8 +16,6 @@ pub const WATCHDOG_MILLIS: u64 = 10 * 60 * 1000;
 pub const CLOCK_START_MS: u64 = 1_893_456_000_000;
 /// Session id of the source session used by the tests.
 pub const SOURCE_SESSION: &str = "11111111-1111-4111-8111-111111111111";
-/// Session id of the converted session used by the tests.
-pub const NEW_SESSION: &str = "22222222-2222-4222-8222-222222222222";
 
 /// Path of the plugin manifest (the skeleton file, exact per the manual).
 pub fn manifest_path() -> PathBuf {

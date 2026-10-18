@@ -23,7 +23,7 @@ fn port_pane_empty_buffer_has_no_path_and_is_not_dirty() {
     let buffer = first_buffer(&mut editor);
     assert_eq!(buffer.get("dirty"), Some(&json!(false)), "{buffer}");
     assert!(
-        buffer.get("path").map_or(true, |path| path.is_null()),
+        buffer.get("path").is_none_or(|path| path.is_null()),
         "{buffer}"
     );
     let lines = read_lines(&mut editor, 1, 0, 10);

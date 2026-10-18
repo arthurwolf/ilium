@@ -1,7 +1,6 @@
 //! api-jobs.md: `start`, `cancel`, `take-output`, `report-progress`, `is-cancelled`,
 //! `wait-request`, and what a job instance may call.
 
-use ilium_plugin_api::generated::host::{HostJobs, HostSettings};
 use ilium_plugin_api::generated::types::{ErrorCode, Outcome, PluginError, RequestId};
 use ilium_plugin_api::Tier;
 use ilium_plugin_host::testing::imports_fixture::ImportsFixture;
@@ -12,15 +11,15 @@ use crate::support::*;
 
 const KIND: &str = "work";
 
+type JobRunner = Box<dyn FnMut(&str, &[u8]) -> Result<Vec<u8>, PluginError>>;
+
 fn manifest_with_job() -> String {
     let mut manifest = minimal_manifest();
     manifest["contributes"] = json!({ "jobs": [{ "kind": KIND, "title": "Work" }] });
     manifest.to_string()
 }
 
-fn job_fixture(
-    runner: Box<dyn FnMut(&str, &[u8]) -> Result<Vec<u8>, PluginError>>,
-) -> ImportsFixture {
+fn job_fixture(runner: JobRunner) -> ImportsFixture {
     ImportsFixture::builder()
         .tier(Tier::T2)
         .grants(&["jobs.run"])
@@ -358,7 +357,7 @@ fn jobs_job_instance_calls_to_settings_are_unsupported() {
 /// REQ: WIT:ilium:host/jobs.start
 #[test]
 fn jobs_job_instance_may_call_clock_and_log() {
-    use ilium_plugin_api::generated::host::{HostClock, HostLog, Level};
+    use ilium_plugin_api::generated::host::Level;
     let mut fixture = echo_fixture();
     let mut instance = fixture.job_instance(KIND, b"");
     assert_eq!(instance.clock().now_unix_millis(), TEST_CLOCK_START_MILLIS);

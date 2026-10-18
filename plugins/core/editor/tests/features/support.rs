@@ -97,10 +97,8 @@ pub fn activation(settings_json: &str) -> Activation {
 
 /// An activated plugin instance driven directly (no host context).
 pub fn direct(settings_json: &str) -> EditorClient {
-    let mut editor = EditorClient::default();
-    Lifecycle::activate(&mut editor, activation(settings_json))
-        .ok()
-        .expect("activate");
+    let mut editor = EditorClient;
+    Lifecycle::activate(&mut editor, activation(settings_json)).expect("activate");
     editor
 }
 
@@ -173,7 +171,6 @@ pub fn read_lines(
 /// A FakeHost built from the plugin manifest (client side, the manifest grants).
 pub fn host() -> FakeHost {
     FakeHost::for_manifest(MANIFEST_PATH)
-        .ok()
         .expect("manifest")
         .build()
 }
@@ -214,7 +211,7 @@ pub fn pane_tree(editor: &mut EditorClient, columns: u16, rows: u16) -> UiTree {
 }
 
 /// All nodes of a tree whose widget matches.
-pub fn nodes_where<'a>(tree: &'a UiTree, matches: impl Fn(&Widget) -> bool) -> Vec<&'a UiNode> {
+pub fn nodes_where(tree: &UiTree, matches: impl Fn(&Widget) -> bool) -> Vec<&UiNode> {
     tree.nodes
         .iter()
         .filter(|node| matches(&node.widget))

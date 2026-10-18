@@ -7,10 +7,7 @@ const OK_PAYLOAD: &str = r#"{"text":"hi"}"#;
 fn failed_error(outcome: &Option<Outcome>) -> PluginError {
     match outcome {
         Some(Outcome::Failed(error)) => error.clone(),
-        other => {
-            assert!(false, "expected failed(..), got {other:?}");
-            perr(ErrorCode::Internal, "unreachable")
-        }
+        other => panic!("expected failed(..), got {other:?}"),
     }
 }
 

@@ -27,7 +27,7 @@ const ALL_CODES: [&str; 15] = [
 ];
 
 fn bad_argument_reply() -> ilium_plugin_host::testing::ImportReply {
-    let mut host = host_with(QuietGuest);
+    let host = host_with(QuietGuest);
     host.call_import_json(
         "ilium:host/timers",
         "set",
@@ -48,7 +48,7 @@ fn api_001_fallible_function_returns_err_with_code_message_and_optional_retry_af
 /// REQ: API-001
 #[test]
 fn api_001_a_successful_call_carries_no_error_record() {
-    let mut host = host_with(QuietGuest);
+    let host = host_with(QuietGuest);
     let reply = host.call_import_json(
         "ilium:host/timers",
         "set",
@@ -60,7 +60,7 @@ fn api_001_a_successful_call_carries_no_error_record() {
 /// REQ: API-001
 #[test]
 fn api_001_rate_limited_error_carries_the_retry_after_field() {
-    let mut host = host_with(QuietGuest);
+    let host = host_with(QuietGuest);
     for _ in 0..5 {
         host.call_import_json("ilium:host/sounds", "play", "{\"name\":\"bell\"}");
     }
@@ -74,7 +74,7 @@ fn api_001_rate_limited_error_carries_the_retry_after_field() {
 /// REQ: API-002
 #[test]
 fn api_002_every_provoked_failure_uses_a_code_from_the_list_of_15() {
-    let mut host = host_with(QuietGuest);
+    let host = host_with(QuietGuest);
     let calls = [
         (
             "ilium:host/timers",
@@ -126,7 +126,7 @@ fn api_002_the_manual_lists_the_same_15_codes() {
 /// REQ: API-003
 #[test]
 fn api_003_toast_over_the_rate_is_rate_limited_with_positive_retry_after() {
-    let mut host = host_with(QuietGuest);
+    let host = host_with(QuietGuest);
     for _ in 0..3 {
         host.call_import_json("ilium:host/toasts", "show", "{\"text\":\"a\"}");
     }
@@ -141,7 +141,7 @@ fn api_003_toast_over_the_rate_is_rate_limited_with_positive_retry_after() {
 /// REQ: API-003
 #[test]
 fn api_003_cpu_budget_quota_exceeded_carries_retry_after() {
-    let mut host = host_with(QuietGuest);
+    let host = host_with(QuietGuest);
     host.charge_cpu_ms(2_500);
     let error = host
         .call_import_json("ilium:host/sounds", "play", "{\"name\":\"bell\"}")
@@ -154,7 +154,7 @@ fn api_003_cpu_budget_quota_exceeded_carries_retry_after() {
 /// REQ: API-003
 #[test]
 fn api_003_other_quota_exceeded_and_invalid_argument_have_no_retry_after() {
-    let mut host = host_with(QuietGuest);
+    let host = host_with(QuietGuest);
     let error = host
         .call_import_json(
             "ilium:host/panes",
@@ -178,7 +178,7 @@ fn api_003_message_text_is_not_a_contract_two_runs_may_differ_but_the_code_is_st
 /// REQ: API-004
 #[test]
 fn api_004_not_permitted_revoked_and_internal_are_allowed_from_any_result_function() {
-    let mut host = HostHarness::new()
+    let host = HostHarness::new()
         .grants(&["tree.write"])
         .with_native_guest(Box::new(QuietGuest))
         .build()
@@ -199,7 +199,7 @@ fn api_004_not_permitted_revoked_and_internal_are_allowed_from_any_result_functi
 /// REQ: API-004
 #[test]
 fn api_004_request_id_function_with_4097_pending_in_the_session_returns_busy() {
-    let mut host = HostHarness::new()
+    let host = HostHarness::new()
         .grants(&["http:example.com"])
         .session_pending_requests(4_096)
         .with_native_guest(Box::new(QuietGuest))
@@ -212,7 +212,7 @@ fn api_004_request_id_function_with_4097_pending_in_the_session_returns_busy() {
 /// REQ: API-004
 #[test]
 fn api_004_a_function_without_a_request_id_may_omit_busy_or_return_it() {
-    let mut host = host_with(QuietGuest);
+    let host = host_with(QuietGuest);
     let reply = host.call_import_json(
         "ilium:host/timers",
         "set",
@@ -225,7 +225,7 @@ fn api_004_a_function_without_a_request_id_may_omit_busy_or_return_it() {
 /// REQ: API-005
 #[test]
 fn api_005_path_outside_the_scope_fails_in_the_call_not_in_the_completion() {
-    let mut host = HostHarness::new()
+    let host = HostHarness::new()
         .grants(&["fs.read:project"])
         .with_native_guest(Box::new(QuietGuest))
         .build()
@@ -238,7 +238,7 @@ fn api_005_path_outside_the_scope_fails_in_the_call_not_in_the_completion() {
 /// REQ: API-005
 #[test]
 fn api_005_a_file_that_vanished_arrives_as_failed_not_found_in_the_completion() {
-    let mut host = HostHarness::new()
+    let host = HostHarness::new()
         .grants(&["fs.read:project"])
         .with_native_guest(Box::new(QuietGuest))
         .build()
@@ -255,7 +255,7 @@ fn api_005_a_file_that_vanished_arrives_as_failed_not_found_in_the_completion() 
 /// REQ: API-005
 #[test]
 fn api_005_a_per_call_cap_breach_fails_in_the_call() {
-    let mut host = HostHarness::new()
+    let host = HostHarness::new()
         .grants(&["http:example.com"])
         .with_native_guest(Box::new(QuietGuest))
         .build()

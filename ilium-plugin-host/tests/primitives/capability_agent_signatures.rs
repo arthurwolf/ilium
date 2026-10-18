@@ -37,7 +37,7 @@ fn detector_host(
 #[test]
 fn hst_450_detector_call_runs_on_the_plugin_executor_thread() {
     let wasm = fixture_wasm("detector-thread-name");
-    let (kernel, mut host) = detector_host(&[("test.plugin", Tier::T3)]);
+    let (kernel, host) = detector_host(&[("test.plugin", Tier::T3)]);
     host.load_detector_wasm("test.plugin", &wasm);
     host.detect_cycle(&[PANE]);
     let names = host.detector_thread_names("test.plugin");
@@ -52,7 +52,7 @@ fn hst_450_detector_call_runs_on_the_plugin_executor_thread() {
 /// REQ: HST-450
 #[test]
 fn hst_450_detector_call_never_runs_on_the_loop_thread() {
-    let (_kernel, mut host) = detector_host(&[("test.plugin", Tier::T3)]);
+    let (_kernel, host) = detector_host(&[("test.plugin", Tier::T3)]);
     host.detect_cycle(&[PANE]);
     let loop_thread = host.detection_loop_thread_name();
     assert!(host
@@ -66,7 +66,7 @@ fn hst_450_detector_call_never_runs_on_the_loop_thread() {
 /// REQ: HST-451
 #[test]
 fn hst_451_one_detector_call_per_pane_per_cycle() {
-    let (_kernel, mut host) = detector_host(&[("test.plugin", Tier::T3)]);
+    let (_kernel, host) = detector_host(&[("test.plugin", Tier::T3)]);
     host.detect_cycle(&[PANE, EDITOR_PANE, BASIC_PANE]);
     assert_eq!(host.detector_call_count("test.plugin"), 3);
 }
@@ -74,7 +74,7 @@ fn hst_451_one_detector_call_per_pane_per_cycle() {
 /// REQ: HST-451
 #[test]
 fn hst_451_a_tick_returns_before_a_blocked_detector_call_finishes() {
-    let (_kernel, mut host) = detector_host(&[("test.plugin", Tier::T3)]);
+    let (_kernel, host) = detector_host(&[("test.plugin", Tier::T3)]);
     host.set_detector_cost_ms("test.plugin", 5_000);
     let started = std::time::Instant::now();
     host.detect_cycle(&[PANE]);
@@ -89,7 +89,7 @@ fn hst_451_a_tick_returns_before_a_blocked_detector_call_finishes() {
 /// REQ: HST-452
 #[test]
 fn hst_452_t1_detectors_are_asked_before_others() {
-    let (_kernel, mut host) = detector_host(&[("a.third", Tier::T3), ("z.first", Tier::T1)]);
+    let (_kernel, host) = detector_host(&[("a.third", Tier::T3), ("z.first", Tier::T1)]);
     host.detect_cycle(&[PANE]);
     assert_eq!(
         host.detector_ask_order(PANE),
@@ -100,7 +100,7 @@ fn hst_452_t1_detectors_are_asked_before_others() {
 /// REQ: HST-452
 #[test]
 fn hst_452_equal_tiers_are_asked_by_plugin_id() {
-    let (_kernel, mut host) = detector_host(&[
+    let (_kernel, host) = detector_host(&[
         ("b.two", Tier::T3),
         ("a.one", Tier::T3),
         ("c.three", Tier::T3),
@@ -115,7 +115,7 @@ fn hst_452_equal_tiers_are_asked_by_plugin_id() {
 /// REQ: HST-452, WIT:ilium:exports/detector.identify
 #[test]
 fn hst_452_first_signature_id_wins_and_stops_the_search() {
-    let (_kernel, mut host) = detector_host(&[("a.one", Tier::T3), ("b.two", Tier::T3)]);
+    let (_kernel, host) = detector_host(&[("a.one", Tier::T3), ("b.two", Tier::T3)]);
     host.set_detector_identity("a.one", Some("sig-a"));
     host.set_detector_identity("b.two", Some("sig-b"));
     host.detect_cycle(&[PANE]);
@@ -126,7 +126,7 @@ fn hst_452_first_signature_id_wins_and_stops_the_search() {
 /// REQ: HST-452, WIT:ilium:exports/detector.identify
 #[test]
 fn hst_452_no_detector_identifies_leaves_the_pane_unidentified() {
-    let (_kernel, mut host) = detector_host(&[("a.one", Tier::T3)]);
+    let (_kernel, host) = detector_host(&[("a.one", Tier::T3)]);
     host.set_detector_identity("a.one", None);
     host.detect_cycle(&[PANE]);
     assert_eq!(host.identified_signature(PANE), None);
@@ -135,7 +135,7 @@ fn hst_452_no_detector_identifies_leaves_the_pane_unidentified() {
 /// REQ: WIT:ilium:exports/detector.classify
 #[test]
 fn wit_detector_classify_result_becomes_the_pane_activity() {
-    let (kernel, mut host) = detector_host(&[("a.one", Tier::T3)]);
+    let (kernel, host) = detector_host(&[("a.one", Tier::T3)]);
     kernel.set_tree(vec![agent_node(
         PANE,
         "sig-a",
@@ -155,7 +155,7 @@ fn wit_detector_classify_result_becomes_the_pane_activity() {
 /// REQ: WIT:ilium:exports/detector.classify
 #[test]
 fn wit_detector_classify_unchanged_result_emits_no_event() {
-    let (kernel, mut host) = detector_host(&[("a.one", Tier::T3)]);
+    let (kernel, host) = detector_host(&[("a.one", Tier::T3)]);
     kernel.set_tree(vec![agent_node(
         PANE,
         "sig-a",
@@ -178,7 +178,7 @@ fn many_panes(count: u64) -> Vec<NodeId> {
 /// REQ: HST-453
 #[test]
 fn hst_453_cycle_spends_at_most_50_ms_of_detector_time() {
-    let (_kernel, mut host) = detector_host(&[("test.plugin", Tier::T3)]);
+    let (_kernel, host) = detector_host(&[("test.plugin", Tier::T3)]);
     host.set_detector_cost_ms("test.plugin", 10);
     let report = host.detect_cycle(&many_panes(30));
     assert!(report.spent_ms <= 50, "{} ms", report.spent_ms);
@@ -187,7 +187,7 @@ fn hst_453_cycle_spends_at_most_50_ms_of_detector_time() {
 /// REQ: HST-453
 #[test]
 fn hst_453_a_cycle_that_fits_the_budget_serves_every_pane() {
-    let (_kernel, mut host) = detector_host(&[("test.plugin", Tier::T3)]);
+    let (_kernel, host) = detector_host(&[("test.plugin", Tier::T3)]);
     host.set_detector_cost_ms("test.plugin", 1);
     assert_eq!(host.detect_cycle(&many_panes(30)).served.len(), 30);
 }
@@ -195,7 +195,7 @@ fn hst_453_a_cycle_that_fits_the_budget_serves_every_pane() {
 /// REQ: HST-453
 #[test]
 fn hst_453_the_start_pane_rotates_between_cycles() {
-    let (_kernel, mut host) = detector_host(&[("test.plugin", Tier::T3)]);
+    let (_kernel, host) = detector_host(&[("test.plugin", Tier::T3)]);
     host.set_detector_cost_ms("test.plugin", 10);
     let panes = many_panes(30);
     let first = host.detect_cycle(&panes).served.first().copied();
@@ -206,7 +206,7 @@ fn hst_453_the_start_pane_rotates_between_cycles() {
 /// REQ: HST-453
 #[test]
 fn hst_453_unserved_panes_keep_their_last_activity() {
-    let (kernel, mut host) = detector_host(&[("test.plugin", Tier::T3)]);
+    let (kernel, host) = detector_host(&[("test.plugin", Tier::T3)]);
     host.set_detector_cost_ms("test.plugin", 20);
     host.set_detector_classification(
         "test.plugin",
@@ -228,7 +228,7 @@ proptest! {
     // REQ: HST-453
     #[test]
     fn hst_453_spent_time_never_exceeds_the_budget(cost in 1u64..40, count in 1u64..40) {
-        let (_kernel, mut host) = detector_host(&[("test.plugin", Tier::T3)]);
+        let (_kernel, host) = detector_host(&[("test.plugin", Tier::T3)]);
         host.set_detector_cost_ms("test.plugin", cost);
         prop_assert!(host.detect_cycle(&many_panes(count)).spent_ms <= 50);
     }
@@ -239,7 +239,7 @@ proptest! {
 /// REQ: HST-454
 #[test]
 fn hst_454_missed_deadline_keeps_the_previous_classification_and_emits_nothing() {
-    let (kernel, mut host) = detector_host(&[("test.plugin", Tier::T3)]);
+    let (kernel, host) = detector_host(&[("test.plugin", Tier::T3)]);
     kernel.set_tree(vec![agent_node(
         PANE,
         "sig",
@@ -261,7 +261,7 @@ fn hst_454_missed_deadline_keeps_the_previous_classification_and_emits_nothing()
 /// REQ: HST-454
 #[test]
 fn hst_454_a_call_at_the_deadline_counts_and_one_over_is_a_breach() {
-    let (_kernel, mut host) = detector_host(&[("test.plugin", Tier::T3)]);
+    let (_kernel, host) = detector_host(&[("test.plugin", Tier::T3)]);
     host.set_detector_cost_ms("test.plugin", 20);
     host.detect_cycle(&[PANE]);
     assert_eq!(host.detector_breaches("test.plugin"), 0);
@@ -273,7 +273,7 @@ fn hst_454_a_call_at_the_deadline_counts_and_one_over_is_a_breach() {
 /// REQ: HST-454
 #[test]
 fn hst_454_the_third_breach_in_a_row_traps_the_side() {
-    let (_kernel, mut host) = detector_host(&[("test.plugin", Tier::T3)]);
+    let (_kernel, host) = detector_host(&[("test.plugin", Tier::T3)]);
     host.set_detector_cost_ms("test.plugin", 30);
     host.detect_cycle(&[PANE]);
     host.detect_cycle(&[PANE]);
@@ -285,7 +285,7 @@ fn hst_454_the_third_breach_in_a_row_traps_the_side() {
 /// REQ: HST-454
 #[test]
 fn hst_454_a_good_call_resets_the_breach_count() {
-    let (_kernel, mut host) = detector_host(&[("test.plugin", Tier::T3)]);
+    let (_kernel, host) = detector_host(&[("test.plugin", Tier::T3)]);
     host.set_detector_cost_ms("test.plugin", 30);
     host.detect_cycle(&[PANE]);
     host.detect_cycle(&[PANE]);
@@ -302,7 +302,7 @@ fn hst_454_a_good_call_resets_the_breach_count() {
 /// REQ: HST-455
 #[test]
 fn hst_455_a_slow_detector_does_not_delay_another_plugins_detector() {
-    let (_kernel, mut host) = detector_host(&[("a.slow", Tier::T3), ("b.fast", Tier::T3)]);
+    let (_kernel, host) = detector_host(&[("a.slow", Tier::T3), ("b.fast", Tier::T3)]);
     host.set_detector_cost_ms("a.slow", 5_000);
     host.set_detector_cost_ms("b.fast", 0);
     let started = std::time::Instant::now();
@@ -314,7 +314,7 @@ fn hst_455_a_slow_detector_does_not_delay_another_plugins_detector() {
 /// REQ: HST-455
 #[test]
 fn hst_455_a_slow_detector_does_not_delay_the_detection_loop() {
-    let (_kernel, mut host) = detector_host(&[("a.slow", Tier::T3)]);
+    let (_kernel, host) = detector_host(&[("a.slow", Tier::T3)]);
     host.set_detector_cost_ms("a.slow", 5_000);
     let first = host.detect_cycle(&[PANE]);
     let second = host.detect_cycle(&[PANE]);
@@ -363,7 +363,7 @@ proptest! {
 /// REQ: HST-457
 #[test]
 fn hst_457_classify_30_panes_costs_under_half_a_millisecond_per_pane_p99() {
-    let (_kernel, mut host) = detector_host(&[("test.plugin", Tier::T3)]);
+    let (_kernel, host) = detector_host(&[("test.plugin", Tier::T3)]);
     host.set_detector_cost_ms("test.plugin", 0);
     let panes = many_panes(30);
     let mut per_pane_micros: Vec<u128> = Vec::new();
@@ -382,7 +382,7 @@ fn hst_457_classify_30_panes_costs_under_half_a_millisecond_per_pane_p99() {
 fn wit_detector_classify_without_grant_is_never_called() {
     let kernel = Arc::new(FakeKernel::new(ProcessKind::Server));
     kernel.set_tree(standard_tree());
-    let mut host = HostHarness::new()
+    let host = HostHarness::new()
         .side(Side::Server)
         .grants(&[])
         .kernel(kernel)

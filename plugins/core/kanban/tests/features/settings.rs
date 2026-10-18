@@ -255,14 +255,8 @@ fn settings_024_a_wider_column_width_redraws_the_board_wider() {
         .set("column_width", json!(60))
         .expect("valid");
     let wide = crate::common::draw(&mut host, node, 120, 20);
-    let (_, narrow_doing) = narrow
-        .find("Doing")
-        .map(|(row, column)| (row, column))
-        .expect("Doing header");
-    let (_, wide_doing) = wide
-        .find("Doing")
-        .map(|(row, column)| (row, column))
-        .expect("Doing header");
+    let (_, narrow_doing) = narrow.find("Doing").expect("Doing header");
+    let (_, wide_doing) = wide.find("Doing").expect("Doing header");
     assert!(
         wide_doing > narrow_doing,
         "Doing starts at {narrow_doing} then {wide_doing}"

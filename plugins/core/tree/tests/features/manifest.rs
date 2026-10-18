@@ -115,13 +115,12 @@ fn manifest_050_description_is_the_first_sentence_prefix_of_the_page() {
 #[test]
 fn manifest_050_host_takes_grants_from_the_manifest_for_each_side() {
     // for_manifest reads id, side, grants and tier (DEV-411); building must not fail for either side.
-    let server = FakeHost::for_manifest(manifest_path())
+    let _server = FakeHost::for_manifest(manifest_path())
         .expect("loads")
         .side("server")
         .build();
-    let client = FakeHost::for_manifest(manifest_path())
+    let _client = FakeHost::for_manifest(manifest_path())
         .expect("loads")
         .side("client")
         .build();
-    drop((server, client));
 }

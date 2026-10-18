@@ -250,7 +250,7 @@ fn manifest_050_host_takes_grants_from_the_manifest_for_the_client_side() {
         .expect("loads")
         .side("client")
         .build();
-    drop(client);
+    let _ = client;
 }
 
 /// REQ: COR-050

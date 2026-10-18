@@ -2,7 +2,6 @@
 
 use std::time::Duration;
 
-use ilium_plugin_api::generated::host::HostClock;
 use proptest::prelude::*;
 
 use crate::support::*;

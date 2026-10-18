@@ -7,7 +7,7 @@
 
 use std::time::Duration;
 
-use ilium_plugin_api::generated::host::{HostSettings, ItemState};
+use ilium_plugin_api::generated::host::ItemState;
 use ilium_plugin_api::generated::types::{
     ErrorCode, MeterSegment, RichSpan, RowState, RowStateKind, SpanTarget, Style, Tone,
 };
@@ -44,7 +44,7 @@ fn dynamic_fixture() -> ImportsFixture {
 }
 
 fn repeat_char(character: char, count: usize) -> String {
-    std::iter::repeat(character).take(count).collect()
+    std::iter::repeat_n(character, count).collect()
 }
 
 fn state(kind: RowStateKind, message: Option<&str>) -> RowState {

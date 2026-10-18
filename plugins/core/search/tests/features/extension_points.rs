@@ -118,7 +118,7 @@ fn doc_f_009_the_issues_example_contributes_to_sources_with_priority_50() {
 
 fn call_query(payload: &str) -> ServiceReply {
     use ilium_plugin_sdk::ServiceProvider;
-    let mut server = ilium_plugin_core_search::SearchServer::default();
+    let mut server = ilium_plugin_core_search::SearchServer;
     server.handle(ServiceCall {
         call: 1,
         service: QUERY_SERVICE.to_string(),

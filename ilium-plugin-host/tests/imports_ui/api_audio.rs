@@ -24,7 +24,7 @@ fn device(id: &str, is_input: bool) -> AudioDevice {
 /// REQ: WIT:ilium:host/audio.devices
 #[test]
 fn wit_audio_devices_lists_the_scripted_devices() {
-    let mut rig = rig(GRANTS);
+    let rig = rig(GRANTS);
     rig.kernel
         .set_audio_devices(vec![device("mic", true), device("out", false)]);
     let devices = rig.host.audio().devices();
@@ -36,11 +36,11 @@ fn wit_audio_devices_lists_the_scripted_devices() {
 /// REQ: WIT:ilium:host/audio.devices
 #[test]
 fn wit_audio_devices_without_the_grant_is_empty() {
-    let mut rig = declined_rig(&["audio.devices"]);
+    let rig = declined_rig(&["audio.devices"]);
     rig.kernel.set_audio_devices(vec![device("mic", true)]);
     assert!(rig.host.audio().devices().is_empty());
     // Positive control: the same scripted device is listed once the grant is held.
-    let mut granted = crate::common::rig(GRANTS);
+    let granted = crate::common::rig(GRANTS);
     granted.kernel.set_audio_devices(vec![device("mic", true)]);
     assert_eq!(granted.host.audio().devices().len(), 1);
     // manual does not pin an error code for the declined listing (it returns an empty list).
@@ -49,7 +49,7 @@ fn wit_audio_devices_without_the_grant_is_empty() {
 /// REQ: WIT:ilium:host/audio.open-capture
 #[test]
 fn wit_audio_open_capture_returns_a_capture_id() {
-    let mut rig = rig(GRANTS);
+    let rig = rig(GRANTS);
     rig.kernel.set_audio_devices(vec![device("mic", true)]);
     let id = rig
         .host
@@ -62,7 +62,7 @@ fn wit_audio_open_capture_returns_a_capture_id() {
 /// REQ: WIT:ilium:host/audio.open-capture
 #[test]
 fn wit_audio_open_capture_default_device_with_none() {
-    let mut rig = rig(GRANTS);
+    let rig = rig(GRANTS);
     rig.kernel.set_audio_devices(vec![device("mic", true)]);
     assert!(rig.host.audio().open_capture(None, 8_000, 2).is_ok());
 }
@@ -70,7 +70,7 @@ fn wit_audio_open_capture_default_device_with_none() {
 /// REQ: WIT:ilium:host/audio.open-capture
 #[test]
 fn wit_audio_open_capture_zero_channels_invalid_argument() {
-    let mut rig = rig(GRANTS);
+    let rig = rig(GRANTS);
     assert_eq!(
         code_of(rig.host.audio().open_capture(None, 16_000, 0)),
         ErrorCode::InvalidArgument
@@ -80,7 +80,7 @@ fn wit_audio_open_capture_zero_channels_invalid_argument() {
 /// REQ: WIT:ilium:host/audio.open-capture
 #[test]
 fn wit_audio_open_capture_three_channels_unsupported() {
-    let mut rig = rig(GRANTS);
+    let rig = rig(GRANTS);
     assert_eq!(
         code_of(rig.host.audio().open_capture(None, 16_000, 3)),
         ErrorCode::Unsupported
@@ -90,7 +90,7 @@ fn wit_audio_open_capture_three_channels_unsupported() {
 /// REQ: WIT:ilium:host/audio.open-capture
 #[test]
 fn wit_audio_open_capture_sample_rate_boundaries_invalid_argument() {
-    let mut rig = rig(GRANTS);
+    let rig = rig(GRANTS);
     assert_eq!(
         code_of(rig.host.audio().open_capture(None, 7_999, 1)),
         ErrorCode::InvalidArgument
@@ -107,7 +107,7 @@ fn wit_audio_open_capture_sample_rate_boundaries_invalid_argument() {
 /// REQ: WIT:ilium:host/audio.open-capture
 #[test]
 fn wit_audio_open_capture_rate_above_the_ceiling_invalid_argument() {
-    let mut rig = rig(GRANTS);
+    let rig = rig(GRANTS);
     assert_eq!(
         code_of(rig.host.audio().open_capture(None, 192_001, 1)),
         ErrorCode::InvalidArgument
@@ -117,7 +117,7 @@ fn wit_audio_open_capture_rate_above_the_ceiling_invalid_argument() {
 /// REQ: WIT:ilium:host/audio.open-capture
 #[test]
 fn wit_audio_open_capture_third_capture_quota_exceeded() {
-    let mut rig = rig(GRANTS);
+    let rig = rig(GRANTS);
     rig.host
         .audio()
         .open_capture(None, 16_000, 1)
@@ -135,7 +135,7 @@ fn wit_audio_open_capture_third_capture_quota_exceeded() {
 /// REQ: WIT:ilium:host/audio.open-capture
 #[test]
 fn wit_audio_open_capture_unknown_device_not_found() {
-    let mut rig = rig(GRANTS);
+    let rig = rig(GRANTS);
     assert_eq!(
         code_of(
             rig.host
@@ -149,7 +149,7 @@ fn wit_audio_open_capture_unknown_device_not_found() {
 /// REQ: WIT:ilium:host/audio.open-capture
 #[test]
 fn wit_audio_open_capture_declined_grant_not_permitted() {
-    let mut rig = declined_rig(&["audio.capture"]);
+    let rig = declined_rig(&["audio.capture"]);
     assert_eq!(
         code_of(rig.host.audio().open_capture(None, 16_000, 1)),
         ErrorCode::NotPermitted
@@ -159,7 +159,7 @@ fn wit_audio_open_capture_declined_grant_not_permitted() {
 /// REQ: WIT:ilium:host/audio.open-loopback
 #[test]
 fn wit_audio_open_loopback_returns_a_capture_id() {
-    let mut rig = rig(GRANTS);
+    let rig = rig(GRANTS);
     let id = rig.host.audio().open_loopback(16_000, 2).expect("opens");
     assert!(rig.kernel.open_captures().contains(&id));
 }
@@ -167,7 +167,7 @@ fn wit_audio_open_loopback_returns_a_capture_id() {
 /// REQ: WIT:ilium:host/audio.open-loopback
 #[test]
 fn wit_audio_open_loopback_no_monitor_source_unsupported() {
-    let mut rig = rig(GRANTS);
+    let rig = rig(GRANTS);
     rig.kernel.set_loopback_available(false);
     assert_eq!(
         code_of(rig.host.audio().open_loopback(16_000, 2)),
@@ -178,7 +178,7 @@ fn wit_audio_open_loopback_no_monitor_source_unsupported() {
 /// REQ: WIT:ilium:host/audio.open-loopback
 #[test]
 fn wit_audio_open_loopback_zero_channels_invalid_argument() {
-    let mut rig = rig(GRANTS);
+    let rig = rig(GRANTS);
     assert_eq!(
         code_of(rig.host.audio().open_loopback(16_000, 0)),
         ErrorCode::InvalidArgument
@@ -188,7 +188,7 @@ fn wit_audio_open_loopback_zero_channels_invalid_argument() {
 /// REQ: WIT:ilium:host/audio.open-loopback
 #[test]
 fn wit_audio_open_loopback_declined_grant_not_permitted() {
-    let mut rig = declined_rig(&["audio.loopback"]);
+    let rig = declined_rig(&["audio.loopback"]);
     assert_eq!(
         code_of(rig.host.audio().open_loopback(16_000, 2)),
         ErrorCode::NotPermitted
@@ -198,7 +198,7 @@ fn wit_audio_open_loopback_declined_grant_not_permitted() {
 /// REQ: WIT:ilium:host/audio.close-capture
 #[test]
 fn wit_audio_close_capture_releases_the_slot() {
-    let mut rig = rig(GRANTS);
+    let rig = rig(GRANTS);
     let first = rig
         .host
         .audio()
@@ -215,7 +215,7 @@ fn wit_audio_close_capture_releases_the_slot() {
 /// REQ: WIT:ilium:host/audio.close-capture
 #[test]
 fn wit_audio_close_capture_unknown_id_is_a_no_op() {
-    let mut rig = rig(GRANTS);
+    let rig = rig(GRANTS);
     rig.host.audio().close_capture(424_242);
     assert!(rig.host.failures().is_empty());
 }
@@ -223,7 +223,7 @@ fn wit_audio_close_capture_unknown_id_is_a_no_op() {
 /// REQ: WIT:ilium:host/audio.close-capture
 #[test]
 fn wit_audio_close_capture_twice_is_a_no_op() {
-    let mut rig = rig(GRANTS);
+    let rig = rig(GRANTS);
     let id = rig
         .host
         .audio()
@@ -237,7 +237,7 @@ fn wit_audio_close_capture_twice_is_a_no_op() {
 /// REQ: WIT:ilium:host/audio.play
 #[test]
 fn wit_audio_play_queues_the_samples() {
-    let mut rig = rig(GRANTS);
+    let rig = rig(GRANTS);
     let request = rig
         .host
         .audio()
@@ -251,7 +251,7 @@ fn wit_audio_play_queues_the_samples() {
 /// REQ: WIT:ilium:host/audio.play
 #[test]
 fn wit_audio_play_samples_not_a_multiple_of_channels_invalid_argument() {
-    let mut rig = rig(GRANTS);
+    let rig = rig(GRANTS);
     assert_eq!(
         code_of(rig.host.audio().play(vec![0i16; 3], 16_000, 2)),
         ErrorCode::InvalidArgument
@@ -262,7 +262,7 @@ fn wit_audio_play_samples_not_a_multiple_of_channels_invalid_argument() {
 /// REQ: WIT:ilium:host/audio.play
 #[test]
 fn wit_audio_play_thirty_seconds_boundary_invalid_argument() {
-    let mut rig = rig(GRANTS);
+    let rig = rig(GRANTS);
     let thirty_seconds = 8_000 * 30;
     assert!(rig
         .host
@@ -282,7 +282,7 @@ fn wit_audio_play_thirty_seconds_boundary_invalid_argument() {
 /// REQ: WIT:ilium:host/audio.play
 #[test]
 fn wit_audio_play_over_sixteen_mib_invalid_argument() {
-    let mut rig = rig(GRANTS);
+    let rig = rig(GRANTS);
     let limit = 16 * MIB / 2;
     assert_eq!(
         code_of(rig.host.audio().play(vec![0i16; limit + 1], 48_000, 2)),
@@ -293,7 +293,7 @@ fn wit_audio_play_over_sixteen_mib_invalid_argument() {
 /// REQ: WIT:ilium:host/audio.play
 #[test]
 fn wit_audio_play_three_channels_unsupported() {
-    let mut rig = rig(GRANTS);
+    let rig = rig(GRANTS);
     assert_eq!(
         code_of(rig.host.audio().play(vec![0i16; 3], 16_000, 3)),
         ErrorCode::Unsupported
@@ -303,7 +303,7 @@ fn wit_audio_play_three_channels_unsupported() {
 /// REQ: WIT:ilium:host/audio.play
 #[test]
 fn wit_audio_play_declined_grant_not_permitted() {
-    let mut rig = declined_rig(&["audio.playback"]);
+    let rig = declined_rig(&["audio.playback"]);
     assert_eq!(
         code_of(rig.host.audio().play(vec![0i16; 2], 16_000, 1)),
         ErrorCode::NotPermitted

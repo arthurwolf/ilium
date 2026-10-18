@@ -184,10 +184,10 @@ impl Spec {
         }
         for (key, raw) in &self.extra_top_level {
             if key != "requires"
-                || !(self.host_range.is_some()
-                    || !self.needs.is_empty()
-                    || !self.services.is_empty()
-                    || self.wait_ms.is_some())
+                || (self.host_range.is_none()
+                    && self.needs.is_empty()
+                    && self.services.is_empty()
+                    && self.wait_ms.is_none())
             {
                 text.push_str(&format!("  {}: {},\n", json_string(key), raw));
             }

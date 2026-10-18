@@ -240,14 +240,13 @@ pub fn latest_cost_decoration(
     let submitted = host.submitted();
     cost_decorations(&submitted[already_seen..])
         .into_iter()
-        .filter(|spec| spec.node == NodeId(pane))
-        .last()
+        .rfind(|spec| spec.node == NodeId(pane))
 }
 
 /// Calls the usage service the way the host does: through the `service-provider` export.
 pub fn call_usage(method: &str, payload_json: &str) -> ServiceReply {
     use ilium_plugin_sdk::ServiceProvider;
-    let mut server = CostServer::default();
+    let mut server = CostServer;
     server.handle(ServiceCall {
         call: 1,
         service: USAGE_SERVICE.to_string(),

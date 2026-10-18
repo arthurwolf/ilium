@@ -78,7 +78,7 @@ fn port_069_the_first_publication_before_any_probe_is_not_claimed_as_fully_check
     assert!(
         published
             .get("full_checked_at_unix_millis")
-            .map_or(true, |value| value.is_null()),
+            .is_none_or(|value| value.is_null()),
         "{published}"
     );
 }

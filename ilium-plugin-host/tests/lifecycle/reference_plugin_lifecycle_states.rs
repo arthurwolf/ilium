@@ -1,7 +1,6 @@
 //! reference-plugin-lifecycle-states.md: LIF-001..020.
 
 use crate::support::*;
-use ilium_plugin_api::generated::host::plugins::HostPlugins;
 use ilium_plugin_api::generated::types::ErrorCode;
 use ilium_plugin_api::ids::PluginId;
 use ilium_plugin_api::lifecycle::{next_instance_state, InstanceInput};

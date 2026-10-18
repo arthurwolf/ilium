@@ -179,8 +179,7 @@ fn f_043_malformed_replies_are_retried_up_to_three_attempts_in_all() {
     for _ in 0..MAX_ATTEMPTS + 2 {
         let Some((id, _)) = restructure_requests(&host).into_iter().find(|(id, _)| {
             host.pending_requests()
-                .iter()
-                .any(|pending| *pending == ilium_plugin_sdk::types::RequestRef::Call(*id))
+                .contains(&ilium_plugin_sdk::types::RequestRef::Call(*id))
         }) else {
             break;
         };

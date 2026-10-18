@@ -40,7 +40,7 @@ const TAB_IDS: [&str; 25] = [
 /// REQ: WIT:ilium:host/kernel-settings.read
 #[test]
 fn wit_kernel_settings_read_returns_a_json_object() {
-    let mut rig = rig(GRANTS);
+    let rig = rig(GRANTS);
     rig.kernel
         .set_kernel_tab("terminal", "{\"scrollback\":5000}");
     let json = rig
@@ -57,7 +57,7 @@ fn wit_kernel_settings_read_returns_a_json_object() {
 /// REQ: WIT:ilium:host/kernel-settings.read
 #[test]
 fn wit_kernel_settings_read_every_documented_tab_id_resolves() {
-    let mut rig = rig(GRANTS);
+    let rig = rig(GRANTS);
     for tab in TAB_IDS {
         rig.kernel.set_kernel_tab(tab, "{}");
         let json = rig
@@ -72,7 +72,7 @@ fn wit_kernel_settings_read_every_documented_tab_id_resolves() {
 /// REQ: WIT:ilium:host/kernel-settings.read
 #[test]
 fn wit_kernel_settings_read_unknown_tab_not_found() {
-    let mut rig = rig(GRANTS);
+    let rig = rig(GRANTS);
     assert_eq!(
         code_of(rig.host.kernel_settings().read("no-such-tab".to_owned())),
         ErrorCode::NotFound
@@ -82,7 +82,7 @@ fn wit_kernel_settings_read_unknown_tab_not_found() {
 /// REQ: WIT:ilium:host/kernel-settings.read
 #[test]
 fn wit_kernel_settings_read_secrets_are_redacted() {
-    let mut rig = rig(GRANTS);
+    let rig = rig(GRANTS);
     rig.kernel
         .set_kernel_tab_secret("inference", "api_key", "sk-live-123");
     let json = rig
@@ -97,7 +97,7 @@ fn wit_kernel_settings_read_secrets_are_redacted() {
 /// REQ: WIT:ilium:host/kernel-settings.read
 #[test]
 fn wit_kernel_settings_read_declined_grant_not_permitted() {
-    let mut rig = declined_rig(&["settings.read-kernel:*"]);
+    let rig = declined_rig(&["settings.read-kernel:*"]);
     assert_eq!(
         code_of(rig.host.kernel_settings().read("terminal".to_owned())),
         ErrorCode::NotPermitted
@@ -107,7 +107,7 @@ fn wit_kernel_settings_read_declined_grant_not_permitted() {
 /// REQ: WIT:ilium:host/keymap.bindings
 #[test]
 fn wit_keymap_bindings_lists_commands_with_their_chords() {
-    let mut rig = rig(GRANTS);
+    let rig = rig(GRANTS);
     rig.kernel.set_keymap(vec![Binding {
         command: "example.notes/new-note".to_owned(),
         chords: vec!["ctrl+n".to_owned(), "ctrl+shift+n".to_owned()],
@@ -123,7 +123,7 @@ fn wit_keymap_bindings_lists_commands_with_their_chords() {
 /// REQ: WIT:ilium:host/keymap.bindings
 #[test]
 fn wit_keymap_bindings_empty_keymap_is_empty() {
-    let mut rig = rig(GRANTS);
+    let rig = rig(GRANTS);
     rig.kernel.set_keymap(Vec::new());
     assert!(rig.host.keymap().bindings().is_empty());
 }
@@ -131,7 +131,7 @@ fn wit_keymap_bindings_empty_keymap_is_empty() {
 /// REQ: WIT:ilium:host/keymap.bindings
 #[test]
 fn wit_keymap_bindings_declined_grant_is_empty() {
-    let mut rig = declined_rig(&["keymap.read"]);
+    let rig = declined_rig(&["keymap.read"]);
     rig.kernel.set_keymap(vec![Binding::default()]);
     assert!(rig.host.keymap().bindings().is_empty());
 }
@@ -139,7 +139,7 @@ fn wit_keymap_bindings_declined_grant_is_empty() {
 /// REQ: WIT:ilium:host/keymap.chord-label
 #[test]
 fn wit_keymap_chord_label_capitalises_modifiers_and_key() {
-    let mut rig = rig(GRANTS);
+    let rig = rig(GRANTS);
     assert_eq!(
         rig.host.keymap().chord_label("ctrl+shift+k".to_owned()),
         "Ctrl+Shift+K"
@@ -149,14 +149,14 @@ fn wit_keymap_chord_label_capitalises_modifiers_and_key() {
 /// REQ: WIT:ilium:host/keymap.chord-label
 #[test]
 fn wit_keymap_chord_label_single_key() {
-    let mut rig = rig(GRANTS);
+    let rig = rig(GRANTS);
     assert_eq!(rig.host.keymap().chord_label("f5".to_owned()), "F5");
 }
 
 /// REQ: WIT:ilium:host/keymap.chord-label
 #[test]
 fn wit_keymap_chord_label_is_idempotent_on_its_own_output() {
-    let mut rig = rig(GRANTS);
+    let rig = rig(GRANTS);
     let once = rig.host.keymap().chord_label("alt+enter".to_owned());
     assert_eq!(rig.host.keymap().chord_label(once.clone()), once);
 }
@@ -167,7 +167,7 @@ proptest! {
     fn wit_keymap_chord_label_keeps_one_segment_per_chord_part(
         parts in proptest::collection::vec("[a-z][a-z0-9]{0,5}", 1..4)
     ) {
-        let mut rig = rig(GRANTS);
+        let rig = rig(GRANTS);
         let label = rig.host.keymap().chord_label(parts.join("+"));
         prop_assert_eq!(label.split('+').count(), parts.len());
     }

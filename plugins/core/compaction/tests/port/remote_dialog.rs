@@ -105,7 +105,7 @@ fn rdlg_render_shows_stages_tokens_destination_and_banner() {
 /// REQ: PORT:ilium-client/src/remote_compaction_dialog.rs::render_without_banner_publishes_no_close_rect
 #[test]
 fn rdlg_render_without_banner_publishes_no_close_rect() {
-    let mut host = dialog();
+    let host = dialog();
     let text = host.dialog_render(100, 44, None);
     assert!(!text.contains("privacy"));
     assert_eq!(host.dialog_banner_close_width(), 0);

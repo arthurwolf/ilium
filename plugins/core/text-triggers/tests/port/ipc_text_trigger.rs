@@ -1,8 +1,7 @@
 //! Twins of ilium-ipc text_trigger.rs: the rule model as seen through the settings rows (delays, ids, targets).
 
-use ilium_plugin_sdk::testing::FakeHost;
-use ilium_plugin_sdk::types::{ErrorCode, Event, Outcome};
-use serde_json::{json, Value};
+use ilium_plugin_sdk::types::ErrorCode;
+use serde_json::json;
 
 use crate::common::*;
 use crate::support::*;

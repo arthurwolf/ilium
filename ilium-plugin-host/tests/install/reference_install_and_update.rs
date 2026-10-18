@@ -34,7 +34,6 @@ fn installer(fx: &Fx, options: InstallOptions) -> Installer {
 fn unsigned_ok() -> InstallOptions {
     InstallOptions {
         allow_unsigned: true,
-        ..InstallOptions::default()
     }
 }
 
@@ -1237,7 +1236,8 @@ fn pkg_274_reinstall_rewrites_the_store_folder_from_the_package() {
     assert_eq!(fx.install(&spec).exit_code, 0);
     let wasm = fx.store_dir("example.a", "1.0.0").join("server.wasm");
     let mut permissions = std::fs::metadata(&wasm).expect("metadata").permissions();
-    permissions.set_readonly(false);
+    use std::os::unix::fs::PermissionsExt;
+    permissions.set_mode(permissions.mode() | 0o200);
     std::fs::set_permissions(&wasm, permissions).expect("chmod");
     std::fs::write(&wasm, b"damaged").expect("damage");
     let out = fx.install_with(&spec, &["--reinstall"]);

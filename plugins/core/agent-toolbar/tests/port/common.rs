@@ -55,8 +55,3 @@ pub fn ask(place: Place, op: &str, request: Value) -> Value {
 pub fn text(value: &Value) -> &str {
     value.as_str().unwrap_or("")
 }
-
-/// True when the JSON string value contains `needle`.
-pub fn has(value: &Value, needle: &str) -> bool {
-    text(value).contains(needle)
-}

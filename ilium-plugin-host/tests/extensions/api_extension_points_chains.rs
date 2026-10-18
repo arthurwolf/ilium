@@ -221,10 +221,7 @@ fn hst_470_completion_arrives_as_request_completed_later() {
     let request = world.run_hook(OWNER, POINT, PAYLOAD);
     let id = match request {
         Ok(id) => id,
-        Err(error) => {
-            assert!(false, "{error:?}");
-            return;
-        }
+        Err(error) => panic!("{error:?}"),
     };
     assert!(world.outcome(OWNER, id).is_none());
     world.settle();

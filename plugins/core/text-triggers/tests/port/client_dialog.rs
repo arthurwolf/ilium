@@ -1,8 +1,7 @@
 //! Twins of the client dialog, app and ui tests: the Text Triggers tab rows for delay and target, saving, and the match marking.
 
-use ilium_plugin_sdk::testing::FakeHost;
-use ilium_plugin_sdk::types::{ActionKind, ActionValue, ErrorCode, Event, Outcome, ViewTarget};
-use serde_json::{json, Value};
+use ilium_plugin_sdk::types::{ActionKind, ActionValue, ErrorCode, Outcome};
+use serde_json::json;
 
 use crate::common::*;
 use crate::support::*;

@@ -230,7 +230,7 @@ fn sec_222_policy_loaded_is_written_once_per_start() {
 /// REQ: SEC-222
 #[test]
 fn sec_222_h_grant_refusals_are_summarised_once_per_plugin_and_kind_per_minute() {
-    let mut rig = t3(&[]);
+    let rig = t3(&[]);
     for _ in 0..25 {
         let _ = rig.call(
             "ilium:host/process.run",
@@ -383,7 +383,7 @@ fn sec_224_rotation_at_the_size_limit_boundary() {
 /// REQ: SEC-224
 #[test]
 fn sec_224_rotation_by_age_and_removal_after_keep_days() {
-    let mut rig = setup(&[])
+    let rig = setup(&[])
         .system_policy("version = 1\n[audit]\nkeep_days = 30\n", true)
         .start();
     rig.host.audit_append("enable", "first");
@@ -427,7 +427,7 @@ fn sec_224_defaults_are_64_mib_and_365_days() {
 /// REQ: SEC-225
 #[test]
 fn sec_225_a_failed_write_keeps_the_server_running_and_retries_every_10_seconds() {
-    let mut rig = t3(&[]);
+    let rig = t3(&[]);
     rig.host.fail_audit_writes(true);
     rig.host.audit_append("enable", "while the disk is full");
     assert!(matches!(
@@ -466,7 +466,7 @@ fn sec_225_queue_holds_1000_records_and_drops_the_low_priority_ones_first() {
         .iter()
         .all(|event| event != "h-grant-refused"));
     rig.host.fail_audit_writes(false);
-    let mut rig = rig;
+    let rig = rig;
     rig.host.advance_clock(Duration::from_secs(10));
     let dropped = rig.audit_events("audit-dropped");
     assert_eq!(dropped.len(), 1);

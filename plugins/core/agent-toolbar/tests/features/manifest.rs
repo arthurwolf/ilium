@@ -213,15 +213,14 @@ fn manifest_050_description_is_the_first_sentence_of_the_page() {
 /// REQ: COR-050
 #[test]
 fn manifest_050_host_takes_grants_from_the_manifest_for_each_side() {
-    let server = FakeHost::for_manifest(manifest_path())
+    let _server = FakeHost::for_manifest(manifest_path())
         .expect("loads")
         .side("server")
         .build();
-    let client = FakeHost::for_manifest(manifest_path())
+    let _client = FakeHost::for_manifest(manifest_path())
         .expect("loads")
         .side("client")
         .build();
-    drop((server, client));
     let page = json_block_after(&page_text(), "### Complete manifest");
     let manifest = manifest();
     assert_eq!(

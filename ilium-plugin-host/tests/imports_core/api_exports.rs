@@ -3,7 +3,6 @@
 use std::time::Duration;
 
 use ilium_plugin_api::generated::host::FieldError;
-use ilium_plugin_api::generated::host::HostJobs;
 use ilium_plugin_api::generated::types::{ErrorCode, PluginError};
 use ilium_plugin_api::Tier;
 use ilium_plugin_host::testing::imports_fixture::{ImportsFixture, UserInput, UserSave};
@@ -13,9 +12,9 @@ use crate::support::*;
 
 const DEADLINE_MESSAGE: &str = "Could not check this value: Imports did not answer.";
 
-fn validating(
-    validate: Box<dyn FnMut(&str, &str) -> Result<(), Vec<FieldError>>>,
-) -> ImportsFixture {
+type FieldValidator = Box<dyn FnMut(&str, &str) -> Result<(), Vec<FieldError>>>;
+
+fn validating(validate: FieldValidator) -> ImportsFixture {
     ImportsFixture::builder()
         .tier(Tier::T2)
         .manifest_json(&runtime_settings_manifest().to_string())

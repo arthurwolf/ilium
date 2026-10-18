@@ -794,7 +794,7 @@ fn wit_agent_take_transcript_unknown_request_is_none() {
 /// REQ: WIT:ilium:primitives/agent.take-transcript
 #[test]
 fn wit_agent_take_transcript_second_take_is_none() {
-    let mut rig = agent_rig(ALL);
+    let rig = agent_rig(ALL);
     rig.kernel.set_agent_transcript(AGENT_PANE, turns(3));
     let request = rig
         .host

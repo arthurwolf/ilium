@@ -331,7 +331,7 @@ fn hst_259_invalidate_during_spacing_is_deferred_not_dropped() {
     rig.advance_ms(1);
     rig.invalidate(view);
     rig.advance_ms(40);
-    assert!(rig.render_calls(view) >= base + 1);
+    assert!(rig.render_calls(view) > base);
 }
 
 /// REQ: HST-260
@@ -586,7 +586,7 @@ fn hst_268_contributions_recoloured_without_calling_plugin() {
     assert!(rig.mirror_recoloured("decoration", "n0"));
     assert_eq!(
         rig.plugin_calls_received(),
-        calls + rig.theme_changed_events() as u32 + rig.open_view_count() as u32
+        calls + rig.theme_changed_events() + rig.open_view_count() as u32
     );
 }
 
@@ -771,7 +771,7 @@ fn rnd_015_render_over_deadline_traps_render_timeout() {
 /// REQ: RND-015
 #[test]
 fn rnd_015_default_deadline_is_10_ms_ceiling_20_ms() {
-    let mut rig = rig_t2();
+    let rig = rig_t2();
     assert_eq!(rig.render_deadline_ms(), 10);
     assert_eq!(rig.render_deadline_ceiling_ms(), 20);
 }

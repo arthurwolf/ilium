@@ -346,7 +346,7 @@ fn sec_329_the_badge_is_absent_without_safe_mode() {
 /// REQ: SEC-329
 #[test]
 fn sec_329_the_badge_persists_over_time() {
-    let mut rig = setup(&[]).safe_mode().start();
+    let rig = setup(&[]).safe_mode().start();
     rig.host.advance_clock(std::time::Duration::from_secs(3600));
     assert!(rig.host.status_bar_text().contains("SAFE"));
 }

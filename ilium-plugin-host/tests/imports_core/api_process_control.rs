@@ -1,6 +1,6 @@
 //! api-process-control.md: `run`, `take-exit`, `spawn` and the `child` handle calls.
 
-use ilium_plugin_api::generated::host::{ChildHandle, HostProcess, ProcessSpec, SpawnSpec};
+use ilium_plugin_api::generated::host::{ChildHandle, ProcessSpec, SpawnSpec};
 use ilium_plugin_api::generated::types::{ErrorCode, Event, RequestId};
 use ilium_plugin_api::Tier;
 use ilium_plugin_host::testing::imports_fixture::ImportsFixture;

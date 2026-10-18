@@ -57,9 +57,10 @@ impl NativeGuest for DepthGuest {
     }
 }
 
-fn depth_host(
-    command: Option<Intent>,
-) -> (HarnessHandle, Arc<AtomicUsize>, Arc<Mutex<Vec<Vec<Event>>>>) {
+/// Every batch a guest received, in delivery order.
+type RecordedBatches = Arc<Mutex<Vec<Vec<Event>>>>;
+
+fn depth_host(command: Option<Intent>) -> (HarnessHandle, Arc<AtomicUsize>, RecordedBatches) {
     let deepest = Arc::new(AtomicUsize::new(0));
     let batches = Arc::new(Mutex::new(Vec::new()));
     let guest = DepthGuest {

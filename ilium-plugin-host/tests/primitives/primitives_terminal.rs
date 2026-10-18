@@ -486,7 +486,7 @@ proptest! {
 // ---------------------------------------------------------------- PRI-006
 
 fn flood(rate: u16, matches: usize) -> (Rig, usize) {
-    let mut rig = rig(FILTER);
+    let rig = rig(FILTER);
     rig.host
         .terminal()
         .add_output_filter(PANE, filter("errors", "^ERR", rate))
@@ -530,7 +530,7 @@ fn pri_006_one_match_over_the_rate_is_dropped() {
 /// REQ: PRI-006
 #[test]
 fn pri_006_next_batch_starts_with_events_dropped() {
-    let (mut rig, _) = flood(10, 500);
+    let (rig, _) = flood(10, 500);
     rig.host.deliver(one_event());
     rig.host.pump(8);
     let seen = rig.seen.lock().expect("seen lock");
@@ -672,7 +672,7 @@ fn wit_terminal_add_output_filter_session_limit_512_quota_exceeded() {
 /// REQ: WIT:ilium:primitives/terminal.remove-output-filter
 #[test]
 fn wit_terminal_remove_output_filter_stops_delivery() {
-    let mut rig = rig(FILTER);
+    let rig = rig(FILTER);
     rig.host
         .terminal()
         .add_output_filter(PANE, filter("errors", "^ERR", 50))
@@ -1284,7 +1284,7 @@ fn wit_terminal_read_snapshot_cells_over_1000_rows_quota_exceeded() {
 /// REQ: WIT:ilium:primitives/terminal.search-history, WIT:ilium:primitives/terminal.take-matches
 #[test]
 fn wit_terminal_search_history_returns_the_matches() {
-    let mut rig = rig(HISTORY);
+    let rig = rig(HISTORY);
     rig.kernel.set_screen(PANE, screen_with_history(20, 64));
     let request = rig
         .host
@@ -1299,7 +1299,7 @@ fn wit_terminal_search_history_returns_the_matches() {
 /// REQ: WIT:ilium:primitives/terminal.search-history
 #[test]
 fn wit_terminal_search_history_max_matches_limits_the_result() {
-    let mut rig = rig(HISTORY);
+    let rig = rig(HISTORY);
     rig.kernel.set_screen(PANE, screen_with_history(20, 64));
     let request = rig
         .host
@@ -1350,7 +1350,7 @@ fn wit_terminal_search_history_regex_exactly_1_kib_accepted() {
 /// REQ: WIT:ilium:primitives/terminal.take-matches
 #[test]
 fn wit_terminal_take_matches_second_take_returns_none() {
-    let mut rig = rig(HISTORY);
+    let rig = rig(HISTORY);
     let request = rig
         .host
         .terminal()

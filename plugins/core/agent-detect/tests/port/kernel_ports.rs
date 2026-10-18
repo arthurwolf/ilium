@@ -456,9 +456,8 @@ fn port_026_remembered_launcher_cannot_replace_exited_native_child_but_native_ca
 fn port_026_background_diagnostics_choose_the_newest_eligible_matching_line() {
     let _host = server_host();
     let c = classify_text("claude", &fixture("claude_code_waiting_background.txt"));
-    assert_eq!(
+    assert!(
         is_busy(&c.activity),
-        true,
         "claude_code_waiting_background.txt: {:?}",
         c.activity
     );
@@ -600,9 +599,8 @@ fn port_026_already_idle_stays_idle_rather_than_becoming_done() {
 fn port_026_background_task_still_running_polls_on_the_fast_tier_like_working() {
     let _host = server_host();
     let c = classify_text("claude", &fixture("claude_code_monitor_still_running.txt"));
-    assert_eq!(
+    assert!(
         is_busy(&c.activity),
-        true,
         "claude_code_monitor_still_running.txt: {:?}",
         c.activity
     );
@@ -807,9 +805,8 @@ fn port_026_force_check_is_debounced() {
 fn port_026_idle_done_and_plain_shell_poll_on_the_slow_tier() {
     let _host = server_host();
     let c = classify_text("claude", &fixture("claude_code_idle.txt"));
-    assert_eq!(
-        is_busy(&c.activity),
-        false,
+    assert!(
+        !is_busy(&c.activity),
         "claude_code_idle.txt: {:?}",
         c.activity
     );
@@ -839,9 +836,8 @@ fn port_026_no_prior_status_never_promotes_to_done() {
 fn port_026_non_idle_raw_activity_clears_completion() {
     let _host = server_host();
     let c = classify_text("claude", &fixture("claude_code_working.txt"));
-    assert_eq!(
+    assert!(
         is_busy(&c.activity),
-        true,
         "claude_code_working.txt: {:?}",
         c.activity
     );
@@ -956,9 +952,8 @@ fn port_026_volatile_terminal_counters_do_not_create_distinct_detection_evidence
 fn port_026_waiting_approval_polls_on_the_fast_tier_like_working() {
     let _host = server_host();
     let c = classify_text("claude", &fixture("claude_code_awaiting_approval.txt"));
-    assert_eq!(
+    assert!(
         is_busy(&c.activity),
-        true,
         "claude_code_awaiting_approval.txt: {:?}",
         c.activity
     );
@@ -969,9 +964,8 @@ fn port_026_waiting_approval_polls_on_the_fast_tier_like_working() {
 fn port_026_waiting_background_polls_on_the_fast_tier_like_working() {
     let _host = server_host();
     let c = classify_text("claude", &fixture("claude_code_waiting_background.txt"));
-    assert_eq!(
+    assert!(
         is_busy(&c.activity),
-        true,
         "claude_code_waiting_background.txt: {:?}",
         c.activity
     );

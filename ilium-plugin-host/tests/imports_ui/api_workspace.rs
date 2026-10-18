@@ -38,7 +38,7 @@ fn seeded() -> Rig {
 /// REQ: WIT:ilium:host/workspace.register
 #[test]
 fn wit_workspace_register_returns_an_id_and_lists_it() {
-    let mut rig = seeded();
+    let rig = seeded();
     let id = rig
         .host
         .workspace()
@@ -51,7 +51,7 @@ fn wit_workspace_register_returns_an_id_and_lists_it() {
 /// REQ: WIT:ilium:host/workspace.register
 #[test]
 fn wit_workspace_register_empty_branch_invalid_argument() {
-    let mut rig = seeded();
+    let rig = seeded();
     assert_eq!(
         code_of(rig.host.workspace().register(spec("w1", ""))),
         ErrorCode::InvalidArgument
@@ -61,7 +61,7 @@ fn wit_workspace_register_empty_branch_invalid_argument() {
 /// REQ: WIT:ilium:host/workspace.register
 #[test]
 fn wit_workspace_register_invalid_branch_name_invalid_argument() {
-    let mut rig = seeded();
+    let rig = seeded();
     assert_eq!(
         code_of(rig.host.workspace().register(spec("w1", "bad..name"))),
         ErrorCode::InvalidArgument
@@ -71,7 +71,7 @@ fn wit_workspace_register_invalid_branch_name_invalid_argument() {
 /// REQ: WIT:ilium:host/workspace.register
 #[test]
 fn wit_workspace_register_duplicate_path_conflict() {
-    let mut rig = seeded();
+    let rig = seeded();
     rig.host
         .workspace()
         .register(spec("w1", "a"))
@@ -85,7 +85,7 @@ fn wit_workspace_register_duplicate_path_conflict() {
 /// REQ: WIT:ilium:host/workspace.register
 #[test]
 fn wit_workspace_register_not_a_git_repository_not_found() {
-    let mut rig = rig(GRANTS);
+    let rig = rig(GRANTS);
     assert_eq!(
         code_of(rig.host.workspace().register(spec("w1", "a"))),
         ErrorCode::NotFound
@@ -95,7 +95,7 @@ fn wit_workspace_register_not_a_git_repository_not_found() {
 /// REQ: WIT:ilium:host/workspace.register
 #[test]
 fn wit_workspace_register_missing_owner_node_not_found() {
-    let mut rig = seeded();
+    let rig = seeded();
     let mut with_owner = spec("w1", "a");
     with_owner.owner = Some(MISSING_PANE);
     assert_eq!(
@@ -107,7 +107,7 @@ fn wit_workspace_register_missing_owner_node_not_found() {
 /// REQ: WIT:ilium:host/workspace.register
 #[test]
 fn wit_workspace_register_declined_grant_not_permitted() {
-    let mut rig = declined_rig(&["workspace.manage"]);
+    let rig = declined_rig(&["workspace.manage"]);
     assert_eq!(
         code_of(rig.host.workspace().register(spec("w1", "a"))),
         ErrorCode::NotPermitted
@@ -117,7 +117,7 @@ fn wit_workspace_register_declined_grant_not_permitted() {
 /// REQ: WIT:ilium:host/workspace.release
 #[test]
 fn wit_workspace_release_removes_the_workspace() {
-    let mut rig = seeded();
+    let rig = seeded();
     let id = rig
         .host
         .workspace()
@@ -130,7 +130,7 @@ fn wit_workspace_release_removes_the_workspace() {
 /// REQ: WIT:ilium:host/workspace.release
 #[test]
 fn wit_workspace_release_twice_not_found() {
-    let mut rig = seeded();
+    let rig = seeded();
     let id = rig
         .host
         .workspace()
@@ -146,7 +146,7 @@ fn wit_workspace_release_twice_not_found() {
 /// REQ: WIT:ilium:host/workspace.release
 #[test]
 fn wit_workspace_release_in_use_conflict() {
-    let mut rig = seeded();
+    let rig = seeded();
     let id = rig
         .host
         .workspace()
@@ -162,14 +162,14 @@ fn wit_workspace_release_in_use_conflict() {
 /// REQ: WIT:ilium:host/workspace.list
 #[test]
 fn wit_workspace_list_is_empty_before_any_registration() {
-    let mut rig = seeded();
+    let rig = seeded();
     assert!(rig.host.workspace().list().is_empty());
 }
 
 /// REQ: WIT:ilium:host/workspace.list
 #[test]
 fn wit_workspace_list_reports_in_use_flag() {
-    let mut rig = seeded();
+    let rig = seeded();
     let id = rig
         .host
         .workspace()
@@ -187,6 +187,6 @@ fn wit_workspace_list_reports_in_use_flag() {
 /// REQ: WIT:ilium:host/workspace.list
 #[test]
 fn wit_workspace_list_declined_grant_is_empty() {
-    let mut rig = declined_rig(&["workspace.manage"]);
+    let rig = declined_rig(&["workspace.manage"]);
     assert!(rig.host.workspace().list().is_empty());
 }

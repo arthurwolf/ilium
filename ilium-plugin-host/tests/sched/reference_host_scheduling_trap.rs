@@ -278,7 +278,7 @@ fn hst_199_redelivered_event_sits_at_the_head_of_the_new_queue() {
         .expect("message redelivered");
     let first_theme = batches
         .iter()
-        .position(|batch| contains_kind(&[batch.clone()], &theme()))
+        .position(|batch| contains_kind(std::slice::from_ref(batch), &theme()))
         .expect("theme delivered");
     assert!(message_again <= first_theme);
 }

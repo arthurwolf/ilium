@@ -11,14 +11,12 @@ pub use ilium_plugin_api::generated::exports::hook_handler::HookReply;
 pub use ilium_plugin_api::generated::exports::menu_provider::MenuContext;
 pub use ilium_plugin_api::generated::exports::service_provider::{ServiceCall, ServiceReply};
 pub use ilium_plugin_api::generated::host::catalogs::CatalogQuery;
-pub use ilium_plugin_api::generated::host::extensions::ExtensionEntry;
 pub use ilium_plugin_api::generated::types::ids::BufferId;
 pub use ilium_plugin_api::generated::types::ids::RequestId;
 pub use ilium_plugin_api::generated::types::requests::Outcome;
 pub use ilium_plugin_api::{Diagnostic, ErrorCode, PluginError, Side, Tier};
 pub use ilium_plugin_host::instance::{ExportCall, ExportReply};
-pub use ilium_plugin_host::telemetry::LogLine;
-pub use ilium_plugin_host::testing::{ExtWorld, HandlerAction, HandlerRun, HandlerScript};
+pub use ilium_plugin_host::testing::{ExtWorld, HandlerAction, HandlerScript};
 pub use proptest::prelude::*;
 pub use serde_json::{json, Value};
 
@@ -61,10 +59,7 @@ pub fn message_has_prefix(error: &PluginError, code: &str) -> bool {
 pub fn err_of<T: std::fmt::Debug>(result: Result<T, PluginError>) -> PluginError {
     match result {
         Err(error) => error,
-        Ok(value) => {
-            assert!(false, "expected an error, got Ok({value:?})");
-            perr(ErrorCode::Internal, "unreachable")
-        }
+        Ok(value) => panic!("expected an error, got Ok({value:?})"),
     }
 }
 
@@ -72,10 +67,7 @@ pub fn err_of<T: std::fmt::Debug>(result: Result<T, PluginError>) -> PluginError
 pub fn refused_error(outcome: &Option<Outcome>) -> PluginError {
     match outcome {
         Some(Outcome::Refused(error)) => error.clone(),
-        other => {
-            assert!(false, "expected refused(..), got {other:?}");
-            perr(ErrorCode::Internal, "unreachable")
-        }
+        other => panic!("expected refused(..), got {other:?}"),
     }
 }
 
@@ -356,10 +348,7 @@ pub fn run_chain_on(
 ) -> (Option<Outcome>, Option<String>) {
     let request = match world.run_hook(caller, point, payload_json) {
         Ok(request) => request,
-        Err(error) => {
-            assert!(false, "run-hook failed synchronously: {error:?}");
-            return (None, None);
-        }
+        Err(error) => panic!("run-hook failed synchronously: {error:?}"),
     };
     world.settle();
     let outcome = world.outcome(caller, request);
@@ -428,10 +417,7 @@ pub fn page(name: &str) -> String {
     let path = pages_dir().join(name);
     match std::fs::read_to_string(&path) {
         Ok(text) => text,
-        Err(error) => {
-            assert!(false, "cannot read manual page {}: {error}", path.display());
-            String::new()
-        }
+        Err(error) => panic!("cannot read manual page {}: {error}", path.display()),
     }
 }
 
@@ -578,5 +564,5 @@ pub fn echo_payload_of_size(total: usize) -> String {
 /// Menu-provider harness (gap: MenuHarness, see API_GAPS.md).
 pub mod menu {
     pub use ilium_plugin_api::generated::exports::menu_provider::{MenuContext, MenuEntry};
-    pub use ilium_plugin_host::testing::{MenuHarness, MenuOpening};
+    pub use ilium_plugin_host::testing::MenuHarness;
 }

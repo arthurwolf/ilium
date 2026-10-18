@@ -1,8 +1,6 @@
 //! Twins of ilium-server/tests/text_triggers.rs: end to end behaviour of detection, delay and answering on a live pane.
 
-use ilium_plugin_sdk::testing::FakeHost;
-use ilium_plugin_sdk::types::{ErrorCode, Event, Outcome};
-use serde_json::{json, Value};
+use serde_json::json;
 
 use crate::common::*;
 use crate::support::*;

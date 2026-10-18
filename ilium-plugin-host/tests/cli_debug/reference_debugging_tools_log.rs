@@ -165,7 +165,7 @@ proptest! {
     // REQ: DEV-651
     #[test]
     fn dev_651_truncated_message_never_exceeds_the_limit(extra in 0usize..2_000, ch in prop::sample::select(vec!['a', 'é', '€', '😀'])) {
-        let message: String = std::iter::repeat(ch).take(16_384 / ch.len_utf8() + extra).collect();
+        let message: String = std::iter::repeat_n(ch, 16_384 / ch.len_utf8() + extra).collect();
         let cut = truncate_message(&message);
         prop_assert!(cut.len() <= 16_384);
         if message.len() > 16_384 {

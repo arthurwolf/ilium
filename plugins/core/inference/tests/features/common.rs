@@ -103,14 +103,6 @@ pub fn table_rows(text: &str) -> Vec<Vec<String>> {
         .collect()
 }
 
-/// A server-side host with the manifest grants, not yet activated.
-pub fn server_host_unactivated() -> FakeHost {
-    FakeHost::for_manifest(manifest_path())
-        .expect("manifest loads")
-        .side("server")
-        .build()
-}
-
 /// A client-side host with the manifest grants, not yet activated.
 pub fn client_host_unactivated() -> FakeHost {
     FakeHost::for_manifest(manifest_path())

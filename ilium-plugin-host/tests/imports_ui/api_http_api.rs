@@ -16,7 +16,7 @@ fn open_call(rig: &Rig) -> u64 {
 /// REQ: WIT:ilium:host/http-api.respond
 #[test]
 fn wit_http_api_respond_delivers_status_headers_and_body() {
-    let mut rig = server_rig(GRANTS);
+    let rig = server_rig(GRANTS);
     let call = open_call(&rig);
     rig.host
         .http_api()
@@ -35,7 +35,7 @@ fn wit_http_api_respond_delivers_status_headers_and_body() {
 /// REQ: WIT:ilium:host/http-api.respond
 #[test]
 fn wit_http_api_respond_status_boundaries_invalid_argument() {
-    let mut rig = server_rig(GRANTS);
+    let rig = server_rig(GRANTS);
     for status in [99u16, 600] {
         let call = open_call(&rig);
         assert_eq!(
@@ -63,7 +63,7 @@ fn wit_http_api_respond_status_boundaries_invalid_argument() {
 /// REQ: WIT:ilium:host/http-api.respond
 #[test]
 fn wit_http_api_respond_body_size_boundaries_invalid_argument() {
-    let mut rig = server_rig(GRANTS);
+    let rig = server_rig(GRANTS);
     let at_limit = open_call(&rig);
     assert!(rig
         .host
@@ -90,7 +90,7 @@ fn wit_http_api_respond_body_size_boundaries_invalid_argument() {
 /// REQ: WIT:ilium:host/http-api.respond
 #[test]
 fn wit_http_api_respond_each_hop_by_hop_header_invalid_argument() {
-    let mut rig = server_rig(GRANTS);
+    let rig = server_rig(GRANTS);
     for name in [
         "connection",
         "keep-alive",
@@ -116,7 +116,7 @@ fn wit_http_api_respond_each_hop_by_hop_header_invalid_argument() {
 /// REQ: WIT:ilium:host/http-api.respond
 #[test]
 fn wit_http_api_respond_second_answer_not_found() {
-    let mut rig = server_rig(GRANTS);
+    let rig = server_rig(GRANTS);
     let call = open_call(&rig);
     rig.host
         .http_api()
@@ -135,7 +135,7 @@ fn wit_http_api_respond_second_answer_not_found() {
 /// REQ: WIT:ilium:host/http-api.respond
 #[test]
 fn wit_http_api_respond_unknown_call_not_found() {
-    let mut rig = server_rig(GRANTS);
+    let rig = server_rig(GRANTS);
     assert_eq!(
         code_of(
             rig.host
@@ -149,7 +149,7 @@ fn wit_http_api_respond_unknown_call_not_found() {
 /// REQ: WIT:ilium:host/http-api.respond
 #[test]
 fn wit_http_api_respond_after_thirty_seconds_not_found() {
-    let mut rig = server_rig(GRANTS);
+    let rig = server_rig(GRANTS);
     let call = open_call(&rig);
     rig.host.advance_clock(Duration::from_secs(30));
     rig.host.pump(8);

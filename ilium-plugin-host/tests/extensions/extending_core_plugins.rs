@@ -68,7 +68,7 @@ fn ext_051_replacement_missing_one_surface_item_fails_and_names_it() {
             );
             assert!(diagnostic.message.contains(&item), "{}", diagnostic.message);
         }
-        Ok(()) => assert!(false, "an incomplete surface must be refused"),
+        Ok(()) => panic!("an incomplete surface must be refused"),
     }
 }
 

@@ -10,7 +10,7 @@ use crate::support::*;
 /// REQ: SEC-260
 #[test]
 fn sec_260_a_session_with_every_bundled_plugin_makes_no_outbound_connection() {
-    let mut rig = setup(&[]).tier(Tier::T1).start();
+    let rig = setup(&[]).tier(Tier::T1).start();
     rig.host.deliver(one_event());
     rig.host.pump(16);
     rig.host.advance_clock(std::time::Duration::from_secs(3600));
@@ -226,7 +226,7 @@ fn sec_265_ts_is_utc_iso_8601() {
 #[test]
 fn sec_265_retention_is_90_days_boundary() {
     for (age_days, kept) in [(89_u64, true), (90, true), (91, false)] {
-        let mut rig = inference_rig();
+        let rig = inference_rig();
         ask(&rig, "old");
         rig.host
             .advance_clock(std::time::Duration::from_secs(age_days * 86_400));

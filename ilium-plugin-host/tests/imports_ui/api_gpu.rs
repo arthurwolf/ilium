@@ -12,7 +12,7 @@ fn scene_rig() -> Rig {
 /// REQ: WIT:ilium:host/gpu.available
 #[test]
 fn wit_gpu_available_true_when_a_device_exists() {
-    let mut rig = scene_rig();
+    let rig = scene_rig();
     rig.kernel.set_gpu_available(true);
     assert!(rig.host.gpu().available());
 }
@@ -20,7 +20,7 @@ fn wit_gpu_available_true_when_a_device_exists() {
 /// REQ: WIT:ilium:host/gpu.available
 #[test]
 fn wit_gpu_available_false_without_a_device() {
-    let mut rig = scene_rig();
+    let rig = scene_rig();
     rig.kernel.set_gpu_available(false);
     assert!(!rig.host.gpu().available());
 }
@@ -28,14 +28,14 @@ fn wit_gpu_available_false_without_a_device() {
 /// REQ: WIT:ilium:host/gpu.available
 #[test]
 fn wit_gpu_available_never_fails_without_the_grant() {
-    let mut rig = declined_rig(&["gpu.kernels"]);
+    let rig = declined_rig(&["gpu.kernels"]);
     assert!(!rig.host.gpu().available());
 }
 
 /// REQ: WIT:ilium:host/gpu.run
 #[test]
 fn wit_gpu_run_threshold_returns_the_output_pixels() {
-    let mut rig = scene_rig();
+    let rig = scene_rig();
     rig.kernel.set_gpu_available(true);
     let input = vec![0u8, 255, 0, 255];
     let out = rig
@@ -55,7 +55,7 @@ fn wit_gpu_run_threshold_returns_the_output_pixels() {
 /// REQ: WIT:ilium:host/gpu.run
 #[test]
 fn wit_gpu_run_zero_width_invalid_argument() {
-    let mut rig = scene_rig();
+    let rig = scene_rig();
     rig.kernel.set_gpu_available(true);
     assert_eq!(
         code_of(
@@ -70,7 +70,7 @@ fn wit_gpu_run_zero_width_invalid_argument() {
 /// REQ: WIT:ilium:host/gpu.run
 #[test]
 fn wit_gpu_run_input_size_mismatch_invalid_argument() {
-    let mut rig = scene_rig();
+    let rig = scene_rig();
     rig.kernel.set_gpu_available(true);
     assert_eq!(
         code_of(
@@ -85,7 +85,7 @@ fn wit_gpu_run_input_size_mismatch_invalid_argument() {
 /// REQ: WIT:ilium:host/gpu.run
 #[test]
 fn wit_gpu_run_without_a_device_unsupported() {
-    let mut rig = scene_rig();
+    let rig = scene_rig();
     rig.kernel.set_gpu_available(false);
     assert_eq!(
         code_of(
@@ -100,7 +100,7 @@ fn wit_gpu_run_without_a_device_unsupported() {
 /// REQ: WIT:ilium:host/gpu.run
 #[test]
 fn wit_gpu_run_declined_grant_not_permitted() {
-    let mut rig = declined_rig(&["gpu.kernels"]);
+    let rig = declined_rig(&["gpu.kernels"]);
     assert_eq!(
         code_of(
             rig.host

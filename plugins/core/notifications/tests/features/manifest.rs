@@ -152,7 +152,7 @@ fn manifest_050_a_host_takes_the_server_grants_from_the_manifest() {
         .expect("loads")
         .side("server")
         .build();
-    drop(host);
+    let _ = host;
 }
 
 /// REQ: COR-030, COR-033

@@ -82,7 +82,7 @@ pub fn screen_from_text(text: &str) -> DetectorScreen {
 
 /// Runs `classify` of the server side on a screen text.
 pub fn classify_text(signature: &str, text: &str) -> Classification {
-    AgentDetectServer::default().classify(signature.to_string(), screen_from_text(text))
+    AgentDetectServer.classify(signature.to_string(), screen_from_text(text))
 }
 
 /// Runs `classify` on a captured fixture and returns the activity.
@@ -105,7 +105,7 @@ pub fn process(name: &str, argv: &[&str]) -> DetectorProcess {
 
 /// Runs `identify` of the server side on a list of processes.
 pub fn identify(processes: Vec<DetectorProcess>) -> Option<String> {
-    AgentDetectServer::default().identify(processes)
+    AgentDetectServer.identify(processes)
 }
 
 /// Runs `identify` on one process named `name` with `argv = [name]`.

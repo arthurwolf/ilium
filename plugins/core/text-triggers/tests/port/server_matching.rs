@@ -1,8 +1,6 @@
 //! Twins of ilium-server text_triggers/matching.rs: ordering, cancellation and resumption of matching work, seen as the order and count of send-inputs.
 
-use ilium_plugin_sdk::testing::FakeHost;
-use ilium_plugin_sdk::types::{ErrorCode, Event, Outcome};
-use serde_json::{json, Value};
+use ilium_plugin_sdk::types::{ErrorCode, Outcome};
 
 use crate::common::*;
 use crate::support::*;

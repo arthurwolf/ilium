@@ -140,7 +140,7 @@ fn cor_003_every_config_table_named_appears_in_the_migration_key_table() {
     let migration = page("reference-config-and-data-migration");
     for row in rows {
         for token in row[config]
-            .split(|c: char| c == ',' || c == ' ')
+            .split([',', ' '])
             .filter(|t| t.starts_with('[') && t.ends_with(']'))
         {
             assert!(
@@ -190,7 +190,7 @@ fn cor_043_every_core_plugin_complete_manifest_passes_check_without_manifest_err
                     && r["severity"] == "error"
                     && r["rule"]
                         .as_str()
-                        .map_or(false, |rule| rule.starts_with("manifest."))
+                        .is_some_and(|rule| rule.starts_with("manifest."))
             })
             .collect();
         assert!(bad.is_empty(), "{name}: {bad:?}");
@@ -225,7 +225,7 @@ fn cor_043_a_page_with_a_broken_manifest_would_be_detected() {
         .any(|r| r["severity"] == "error"
             && r["rule"]
                 .as_str()
-                .map_or(false, |rule| rule.starts_with("manifest."))));
+                .is_some_and(|rule| rule.starts_with("manifest."))));
 }
 
 /// REQ: COR-050

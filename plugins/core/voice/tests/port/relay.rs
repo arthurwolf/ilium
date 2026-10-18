@@ -96,8 +96,7 @@ fn relay_052_start_is_offered_only_after_the_plain_offers_were_declined() {
     let _run = host.cli().invoke(&["say", "--start", "hello"], b"");
     host.settle();
     let mut seen: Vec<(u64, bool)> = Vec::new();
-    let mut index = 0;
-    for _ in 0..8 {
+    for index in 0..8 {
         let Some(offer) = host.client_requests().sent().get(index).cloned() else {
             break;
         };
@@ -108,7 +107,6 @@ fn relay_052_start_is_offered_only_after_the_plain_offers_were_declined() {
             Ok(error_line("voice-off", "voice control is off")),
         );
         host.settle();
-        index += 1;
     }
     let start_offers: Vec<_> = seen.iter().filter(|(_, start)| *start).collect();
     assert_eq!(start_offers.len(), 1, "{seen:?}");

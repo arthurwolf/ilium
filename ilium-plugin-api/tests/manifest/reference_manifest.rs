@@ -1495,7 +1495,8 @@ fn pkg_027_list_boundaries_32_and_33_for_services_and_plugins() {
             .map(|index| json!({ "id": format!("com.other.p{index}") }))
             .collect()
     };
-    for count in [32usize] {
+    {
+        let count = 32usize;
         assert_lacks(
             &errors(&set(
                 client(),
@@ -1962,7 +1963,7 @@ fn pkg_035_a_path_listed_twice_refused_files_order() {
 #[test]
 fn pkg_035_manifest_and_signature_must_not_be_listed_refused_file_self() {
     for path in ["manifest.json", "signature"] {
-        let mut paths = vec![path.to_owned(), "client.wasm".to_owned()];
+        let mut paths = [path.to_owned(), "client.wasm".to_owned()];
         paths.sort();
         let files: Vec<Value> = paths.iter().map(|entry| file_entry(entry, 1)).collect();
         assert_has(&files_codes(files), "manifest.file-self");

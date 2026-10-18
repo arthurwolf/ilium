@@ -182,13 +182,11 @@ fn test_084_the_second_run_replaces_the_first_so_the_first_result_is_ignored() {
         Some("Not run yet".to_string())
     );
     finish_ok(&mut host, second, "ok", "new-model", 7);
-    assert_eq!(
-        host.settings()
-            .info("last_test")
-            .expect("row")
-            .ends_with(", new-model"),
-        true
-    );
+    assert!(host
+        .settings()
+        .info("last_test")
+        .expect("row")
+        .ends_with(", new-model"));
 }
 
 /// REQ: F-084

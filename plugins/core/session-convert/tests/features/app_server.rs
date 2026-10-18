@@ -291,7 +291,7 @@ fn f_077_an_app_server_that_exits_early_fails_the_conversion() {
 /// REQ: F-077
 #[test]
 fn f_077_the_frozen_claude_pane_stays_open_after_a_failure() {
-    let (mut host, pane) = failed_claude_to_codex();
+    let (host, pane) = failed_claude_to_codex();
     assert!(closed(&host.submitted()).iter().all(|node| *node != pane));
 }
 

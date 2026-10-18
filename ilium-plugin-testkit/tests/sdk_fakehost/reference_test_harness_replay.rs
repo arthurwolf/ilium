@@ -1,6 +1,6 @@
 //! reference-test-harness.md "Replay files": DEV-540 to DEV-544.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use ilium_plugin_testkit::replay::ReplayHeader;
 use ilium_plugin_testkit::FakeHost;
@@ -31,7 +31,7 @@ fn lines_of(path: &PathBuf) -> Vec<String> {
         .collect()
 }
 
-fn replay_on_fresh_host(path: &PathBuf) -> Result<(), ilium_plugin_testkit::ReplayMismatch> {
+fn replay_on_fresh_host(path: &Path) -> Result<(), ilium_plugin_testkit::ReplayMismatch> {
     spy_reset();
     let mut host = FakeHost::new();
     host.activate::<Spy>();

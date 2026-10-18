@@ -377,9 +377,9 @@ fn sentence_case(title: &str) -> bool {
     let first_ok = words
         .next()
         .and_then(|w| w.chars().next())
-        .map_or(false, char::is_uppercase);
+        .is_some_and(char::is_uppercase);
     let rest_ok = words.all(|w| {
-        w.chars().next().map_or(true, |c| !c.is_uppercase()) || w.chars().all(|c| c.is_uppercase())
+        w.chars().next().is_none_or(|c| !c.is_uppercase()) || w.chars().all(|c| c.is_uppercase())
     });
     first_ok && rest_ok && !title.ends_with('.')
 }

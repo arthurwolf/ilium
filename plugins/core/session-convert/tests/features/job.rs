@@ -71,7 +71,7 @@ fn standard_lines() -> Vec<String> {
 
 fn output_of(host: &mut FakeHost) -> (String, u64, u64) {
     let bytes = host
-        .run_job("codex-to-claude", &input())
+        .run_job("codex-to-claude", input())
         .expect("job result");
     let value: Value = serde_json::from_slice(&bytes).expect("JSON output");
     (
@@ -216,7 +216,7 @@ fn f_077_job_stops_with_cancelled_when_the_user_cancels() {
     let mut host = host_with_rollout(&standard_lines());
     host.jobs().request_cancel();
     let error = host
-        .run_job("codex-to-claude", &input())
+        .run_job("codex-to-claude", input())
         .expect_err("cancelled");
     assert_eq!(error.code, ErrorCode::Cancelled);
 }
@@ -226,7 +226,7 @@ fn f_077_job_stops_with_cancelled_when_the_user_cancels() {
 fn f_077_job_a_missing_rollout_fails_with_not_found() {
     let mut host = server_host();
     let error = host
-        .run_job("codex-to-claude", &input())
+        .run_job("codex-to-claude", input())
         .expect_err("missing rollout");
     assert_eq!(error.code, ErrorCode::NotFound);
 }
@@ -246,7 +246,7 @@ fn f_077_job_malformed_input_fails_with_invalid_argument() {
 fn f_077_job_unknown_kind_fails_with_invalid_argument() {
     let mut host = host_with_rollout(&standard_lines());
     let error = host
-        .run_job("claude-to-codex", &input())
+        .run_job("claude-to-codex", input())
         .expect_err("no such job");
     assert_eq!(error.code, ErrorCode::InvalidArgument);
 }

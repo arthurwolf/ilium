@@ -5,7 +5,6 @@
 //!
 //! Tree building helpers on the fixture are listed in API_GAPS_p2.md.
 
-use ilium_plugin_api::generated::host::HostTree;
 use ilium_plugin_api::generated::types::{ErrorCode, NodeClass, NodeId, NodeQuery};
 use ilium_plugin_api::Tier;
 use ilium_plugin_host::testing::imports_fixture::ImportsFixture;

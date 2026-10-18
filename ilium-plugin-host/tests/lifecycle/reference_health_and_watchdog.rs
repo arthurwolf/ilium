@@ -1,7 +1,6 @@
 //! reference-health-and-watchdog.md: LIF-122..138.
 
 use crate::support::*;
-use ilium_plugin_api::generated::host::plugins::HostPlugins;
 use ilium_plugin_api::generated::types::requests::Outcome;
 use ilium_plugin_api::ids::PluginId;
 use ilium_plugin_host::engine::PluginEngine;
@@ -187,7 +186,7 @@ proptest! {
     #[test]
     fn lif_128_deadline_is_ceil_d_over_10_plus_one_ticks(deadline in 1u64..10_000) {
         let engine = PluginEngine::new(host_engine_config()).expect("engine builds");
-        prop_assert_eq!(engine.deadline_ticks(deadline), (deadline + 9) / 10 + 1);
+        prop_assert_eq!(engine.deadline_ticks(deadline), deadline.div_ceil(10) + 1);
     }
 }
 

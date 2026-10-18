@@ -784,8 +784,7 @@ fn pkg_210_unencrypted_key_der_is_pkcs8_ed25519_of_48_bytes() {
         .filter(|l| !l.starts_with("-----"))
         .collect();
     let der = unb64url(
-        &body
-            .replace('+', "-")
+        body.replace('+', "-")
             .replace('/', "_")
             .trim_end_matches('='),
     );
@@ -851,8 +850,7 @@ fn pkg_211_encrypted_key_is_pbes2_with_at_least_600000_iterations() {
         .filter(|l| !l.starts_with("-----"))
         .collect();
     let der = unb64url(
-        &body
-            .replace('+', "-")
+        body.replace('+', "-")
             .replace('/', "_")
             .trim_end_matches('='),
     );

@@ -27,10 +27,10 @@ fn component_listing() -> Listing {
     )
 }
 
-fn replaced(text: &str, from: &str, to: &str) -> Vec<u8> {
+fn replaced(from: &str, to: &str) -> Vec<u8> {
     let source = String::from_utf8(vector_manifest()).expect("utf8");
     assert!(source.contains(from), "vector manifest lacks {from}");
-    package_of_manifest(source.replace(from, to).replace(text, text).into_bytes())
+    package_of_manifest(source.replace(from, to).into_bytes())
 }
 
 fn has(codes: &[String], code: &str) -> bool {
@@ -54,18 +54,14 @@ fn pkg_133_vector_files_item_is_accepted() {
 /// REQ: PKG-133
 #[test]
 fn pkg_133_extra_key_in_a_files_item_refused_key_unknown() {
-    let bytes = replaced(
-        "",
-        "\"length\": 34,",
-        "\"length\": 34,\n      \"mode\": 420,",
-    );
+    let bytes = replaced("\"length\": 34,", "\"length\": 34,\n      \"mode\": 420,");
     assert!(has(&check_codes(&bytes), "manifest.key-unknown"));
 }
 
 /// REQ: PKG-133
 #[test]
 fn pkg_133_missing_key_in_a_files_item_refused_key_missing() {
-    let bytes = replaced("", "      \"length\": 34,\n", "");
+    let bytes = replaced("      \"length\": 34,\n", "");
     assert!(has(&check_codes(&bytes), "manifest.key-missing"));
 }
 
@@ -117,7 +113,7 @@ fn pkg_133_hash_of_65_characters_refused_pattern_mismatch() {
 /// REQ: PKG-133
 #[test]
 fn pkg_133_negative_length_refused_value_out_of_range() {
-    let bytes = replaced("", "\"length\": 34", "\"length\": -1");
+    let bytes = replaced("\"length\": 34", "\"length\": -1");
     let codes = check_codes(&bytes);
     assert!(
         has(&codes, "manifest.value-out-of-range") || has(&codes, "manifest.type-mismatch"),
@@ -459,13 +455,12 @@ fn pkg_142_truncated_component_body_refused_component_invalid() {
 /// REQ: PKG-142
 #[test]
 fn pkg_142_exports_not_matching_the_manifest_refused_exports_mismatch() {
-    let component = vector_component();
     let source = String::from_utf8(vector_manifest()).expect("utf8");
     let declared = source.replace(
         "\"exports\": []",
         "\"exports\": [\n      \"ilium:server/missing@0.1.0\"\n    ]",
     );
-    let manifest = declared.replace(&sha256_hex(&component), &sha256_hex(&component));
+    let manifest = declared;
     let bytes = package_of_manifest(manifest.into_bytes());
     assert!(has(&check_codes(&bytes), "manifest.exports-mismatch"));
 }

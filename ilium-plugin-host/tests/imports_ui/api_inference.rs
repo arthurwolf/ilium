@@ -73,7 +73,7 @@ fn wit_inference_complete_round_trip_through_the_provider() {
 /// REQ: WIT:ilium:host/inference.complete
 #[test]
 fn wit_inference_complete_no_messages_invalid_argument() {
-    let mut rig = seeded();
+    let rig = seeded();
     let mut empty = request();
     empty.messages.clear();
     assert_eq!(
@@ -85,7 +85,7 @@ fn wit_inference_complete_no_messages_invalid_argument() {
 /// REQ: WIT:ilium:host/inference.complete
 #[test]
 fn wit_inference_complete_no_provider_selected_not_found() {
-    let mut rig = rig(GRANTS);
+    let rig = rig(GRANTS);
     assert_eq!(
         code_of(rig.host.inference().complete(request())),
         ErrorCode::NotFound
@@ -95,7 +95,7 @@ fn wit_inference_complete_no_provider_selected_not_found() {
 /// REQ: WIT:ilium:host/inference.complete
 #[test]
 fn wit_inference_complete_schema_size_boundaries_invalid_argument() {
-    let mut rig = seeded();
+    let rig = seeded();
     let schema = |len: usize| format!("\"{}\"", "a".repeat(len - 2));
     let mut at_limit = request();
     at_limit.json_schema = Some(schema(64 * KIB));
@@ -111,7 +111,7 @@ fn wit_inference_complete_schema_size_boundaries_invalid_argument() {
 /// REQ: WIT:ilium:host/inference.complete
 #[test]
 fn wit_inference_complete_schema_not_json_invalid_argument() {
-    let mut rig = seeded();
+    let rig = seeded();
     let mut bad = request();
     bad.json_schema = Some("{not json".to_owned());
     assert_eq!(
@@ -123,7 +123,7 @@ fn wit_inference_complete_schema_not_json_invalid_argument() {
 /// REQ: WIT:ilium:host/inference.complete
 #[test]
 fn wit_inference_complete_messages_over_four_mib_invalid_argument() {
-    let mut rig = seeded();
+    let rig = seeded();
     let mut big = request();
     big.messages[0].content = text_of(4 * MIB + 1);
     assert_eq!(
@@ -135,7 +135,7 @@ fn wit_inference_complete_messages_over_four_mib_invalid_argument() {
 /// REQ: WIT:ilium:host/inference.complete
 #[test]
 fn wit_inference_complete_sixty_fifth_pending_request_busy() {
-    let mut rig = seeded();
+    let rig = seeded();
     for _ in 0..64 {
         rig.host
             .inference()
@@ -171,7 +171,7 @@ fn wit_inference_complete_just_before_120_seconds_still_pending() {
 /// REQ: WIT:ilium:host/inference.complete
 #[test]
 fn wit_inference_complete_declined_grant_not_permitted() {
-    let mut rig = declined_rig(&["inference.complete"]);
+    let rig = declined_rig(&["inference.complete"]);
     assert_eq!(
         code_of(rig.host.inference().complete(request())),
         ErrorCode::NotPermitted
@@ -203,7 +203,7 @@ fn wit_inference_take_completion_before_the_reply_is_none() {
 /// REQ: WIT:ilium:host/inference.take-completion
 #[test]
 fn wit_inference_take_completion_unknown_request_is_none() {
-    let mut rig = seeded();
+    let rig = seeded();
     assert!(rig
         .host
         .inference()
@@ -214,7 +214,7 @@ fn wit_inference_take_completion_unknown_request_is_none() {
 /// REQ: WIT:ilium:host/inference.models
 #[test]
 fn wit_inference_models_round_trip_lists_the_provider_models() {
-    let mut rig = seeded();
+    let rig = seeded();
     rig.host
         .set_provider_models(vec!["alpha".to_owned(), "beta".to_owned()]);
     let id = rig.host.inference().models().expect("accepted");
@@ -228,14 +228,14 @@ fn wit_inference_models_round_trip_lists_the_provider_models() {
 /// REQ: WIT:ilium:host/inference.models
 #[test]
 fn wit_inference_models_no_provider_selected_not_found() {
-    let mut rig = rig(GRANTS);
+    let rig = rig(GRANTS);
     assert_eq!(code_of(rig.host.inference().models()), ErrorCode::NotFound);
 }
 
 /// REQ: WIT:ilium:host/inference.models
 #[test]
 fn wit_inference_models_declined_grant_not_permitted() {
-    let mut rig = declined_rig(&["inference.complete"]);
+    let rig = declined_rig(&["inference.complete"]);
     assert_eq!(
         code_of(rig.host.inference().models()),
         ErrorCode::NotPermitted
@@ -245,7 +245,7 @@ fn wit_inference_models_declined_grant_not_permitted() {
 /// REQ: WIT:ilium:host/inference.take-models
 #[test]
 fn wit_inference_take_models_returns_once() {
-    let mut rig = seeded();
+    let rig = seeded();
     rig.host.set_provider_models(vec!["alpha".to_owned()]);
     let id = rig.host.inference().models().expect("accepted");
     rig.host.pump(8);
@@ -256,7 +256,7 @@ fn wit_inference_take_models_returns_once() {
 /// REQ: WIT:ilium:host/inference.take-models
 #[test]
 fn wit_inference_take_models_unknown_request_is_none() {
-    let mut rig = seeded();
+    let rig = seeded();
     assert!(rig.host.inference().take_models(RequestId(78)).is_none());
 }
 
@@ -281,7 +281,7 @@ fn wit_inference_provider_reply_error_outcome_fails_the_request() {
 /// REQ: WIT:ilium:host/inference.provider-reply
 #[test]
 fn wit_inference_provider_reply_unknown_call_not_found() {
-    let mut rig = seeded();
+    let rig = seeded();
     assert_eq!(
         code_of(
             rig.host
@@ -364,7 +364,7 @@ fn wit_inference_provider_complete_export_receives_the_call_and_request() {
 /// REQ: WIT:ilium:exports/inference-provider.complete
 #[test]
 fn wit_inference_provider_complete_export_can_be_called_directly() {
-    let mut rig = seeded();
+    let rig = seeded();
     let call = ProviderCall {
         call: 5,
         request: request(),
@@ -375,7 +375,7 @@ fn wit_inference_provider_complete_export_can_be_called_directly() {
 /// REQ: WIT:ilium:exports/inference-provider.complete
 #[test]
 fn wit_inference_provider_complete_export_not_provided_not_found() {
-    let mut rig = rig(&["inference.complete"]);
+    let rig = rig(&["inference.complete"]);
     let call = ProviderCall {
         call: 5,
         request: request(),
@@ -389,7 +389,7 @@ fn wit_inference_provider_complete_export_not_provided_not_found() {
 /// REQ: WIT:ilium:exports/inference-provider.models
 #[test]
 fn wit_inference_provider_models_export_returns_the_models() {
-    let mut rig = seeded();
+    let rig = seeded();
     rig.host.set_provider_models(vec!["alpha".to_owned()]);
     assert_eq!(
         rig.host.call_provider_models(),
@@ -400,7 +400,7 @@ fn wit_inference_provider_models_export_returns_the_models() {
 /// REQ: WIT:ilium:exports/inference-provider.models
 #[test]
 fn wit_inference_provider_models_export_empty_list_is_valid() {
-    let mut rig = seeded();
+    let rig = seeded();
     rig.host.set_provider_models(Vec::new());
     assert_eq!(rig.host.call_provider_models(), Ok(Vec::new()));
 }

@@ -78,7 +78,7 @@ pub fn short_after_answer(screen: &[&str], files: &[(&str, &str)], body: Value) 
     let (mut host, _, invocation) = start_shell_run(screen);
     for (path, content) in files {
         host.fs()
-            .write(&format!("project:{path}"), content.as_bytes());
+            .write(format!("project:{path}"), content.as_bytes());
     }
     let records = finish_run(&mut host, &invocation, body.to_string().into_bytes());
     first_recap(&records)["short"].clone()

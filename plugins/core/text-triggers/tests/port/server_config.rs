@@ -1,8 +1,7 @@
 //! Twins of ilium-server text_trigger_config.rs: how the plugin reloads the [text_triggers] table of config.toml and keeps the last valid rules.
 
-use ilium_plugin_sdk::testing::FakeHost;
-use ilium_plugin_sdk::types::{ErrorCode, Event, Outcome};
-use serde_json::{json, Value};
+use ilium_plugin_sdk::types::ErrorCode;
+use serde_json::json;
 
 use crate::common::*;
 use crate::support::*;

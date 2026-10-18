@@ -293,7 +293,7 @@ fn report_priced_models_produce_dollar_figures() {
 /// REQ: PORT:ilium-client/src/compaction_report/tests.rs::price_weights_map_the_table_rates
 #[test]
 fn report_price_weights_map_the_table_rates() {
-    let mut host = server_host();
+    let host = server_host();
     let weights = host
         .price_weights("claude-sonnet-5-5")
         .expect("a priced model");
@@ -308,7 +308,7 @@ fn report_price_weights_map_the_table_rates() {
 /// REQ: PORT:ilium-client/src/compaction_report/tests.rs::grids_cover_the_documented_ranges
 #[test]
 fn report_grids_cover_the_documented_ranges() {
-    let mut host = server_host();
+    let host = server_host();
     let claude = host.default_grid("claude");
     assert_eq!(claude.first(), Some(&120_000));
     assert_eq!(claude.last(), Some(&600_000));
@@ -333,7 +333,7 @@ fn report_stated_codex_windows_set_the_cap() {
 /// REQ: PORT:ilium-client/src/compaction_report/tests.rs::formatting_helpers_are_compact_and_stable
 #[test]
 fn report_formatting_helpers_are_compact_and_stable() {
-    let mut host = server_host();
+    let host = server_host();
     let cases: [(&str, f64, &str); 21] = [
         ("humanize_tokens", 0.0, "0"),
         ("humanize_tokens", 950.0, "950"),
@@ -585,7 +585,7 @@ fn report_a_normal_optimum_does_not_widen_the_grid() {
 /// REQ: PORT:ilium-client/src/compaction_report/tests.rs::widening_triggers_cover_floor_ceiling_and_limits
 #[test]
 fn report_widening_triggers_cover_floor_ceiling_and_limits() {
-    let mut host = server_host();
+    let host = server_host();
     let claude_grid = host.default_grid("claude");
     assert_eq!(
         host.widening_triggers("claude", &claude_grid, 120_000),

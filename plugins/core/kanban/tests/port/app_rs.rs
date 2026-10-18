@@ -129,17 +129,17 @@ fn port_app_clicking_a_card_opens_and_escape_closes_its_detail_panel() {
     let (row, column) = draw(&mut host, node, 120, 30).find("Task").expect("card");
     assert!(host.click(ViewTarget::Pane(node), column, row));
     host.settle();
-    assert!(!draw(&mut host, node, 120, 30)
+    assert!(draw(&mut host, node, 120, 30)
         .find("complete body")
-        .is_some_and(|(_, c)| c >= 80));
+        .is_none_or(|(_, c)| c < 80));
     press(&mut host, node, "enter");
     assert!(draw(&mut host, node, 120, 30)
         .text()
         .contains("complete body"));
     press(&mut host, node, "escape");
-    assert!(!draw(&mut host, node, 120, 30)
+    assert!(draw(&mut host, node, 120, 30)
         .find("complete body")
-        .is_some_and(|(_, c)| c >= 80));
+        .is_none_or(|(_, c)| c < 80));
 }
 
 /// REQ: PORT:ilium-client/src/app.rs::successful_editor_and_board_edits_report_node_activity, PORT:ilium-client/src/app.rs::shutdown_without_editor_drains_board_creation_and_reports_open_cancellation

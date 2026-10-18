@@ -98,7 +98,7 @@ fn port_001_a_small_popup_keeps_its_fields_and_a_border_click_sends_nothing() {
     let text = host.render(popup(), 40, 12).text();
     assert!(text.contains("All agents"), "{text}");
     assert!(text.contains("Message"), "{text}");
-    assert_eq!(host.click(popup(), 0, 0), false);
+    assert!(!host.click(popup(), 0, 0));
     host.settle();
     assert_eq!(messages(&host), Vec::<(String, Vec<u8>)>::new());
 }
@@ -110,7 +110,7 @@ fn port_003_clicking_the_painted_send_button_sends_the_typed_message_once() {
     type_text(&mut host, "status please");
     let screen = host.render(popup(), 80, 24);
     let (row, column) = screen.find("Send").expect("a Send button is painted");
-    assert_eq!(host.click(popup(), column, row), true);
+    assert!(host.click(popup(), column, row));
     host.settle();
     assert_eq!(
         messages(&host),
@@ -123,7 +123,7 @@ fn port_003_clicking_the_painted_send_button_sends_the_typed_message_once() {
 fn port_006_a_stray_click_keeps_the_typed_text_for_the_later_send() {
     let mut host = open_dialog();
     type_text(&mut host, "keep this");
-    assert_eq!(host.click(popup(), 0, 0), false);
+    assert!(!host.click(popup(), 0, 0));
     host.deliver_one(dialog_action(
         "update-send",
         ActionKind::Activated,
@@ -253,7 +253,7 @@ fn port_036_a_lookup_that_finds_no_project_replies_400_with_a_json_error() {
     let (status, body) = reply(&host, 1);
     let value: Value = serde_json::from_slice(&body).expect("JSON body");
     assert_eq!(status, 400);
-    assert_eq!(value["error"].is_string(), true);
+    assert!(value["error"].is_string());
     assert_eq!(created_panes(&host).len(), 0);
 }
 

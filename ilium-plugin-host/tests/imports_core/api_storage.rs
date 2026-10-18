@@ -7,7 +7,7 @@
 
 use std::time::Duration;
 
-use ilium_plugin_api::generated::host::{Bucket, Entry, HostStorage};
+use ilium_plugin_api::generated::host::{Bucket, Entry};
 use ilium_plugin_api::generated::types::ErrorCode;
 use ilium_plugin_host::testing::imports_fixture::ImportsFixture;
 use proptest::prelude::*;

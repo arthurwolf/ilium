@@ -73,7 +73,7 @@ proptest! {
 #[test]
 fn lif_279_the_real_host_harness_walks_the_same_states_after_a_trap() {
     let (guest, _recorder) = ScriptedGuest::answering(Box::new(|_| Err(trap("trap.deadline"))));
-    let mut handle = harness_with(guest, &[]);
+    let handle = harness_with(guest, &[]);
     deliver_and_pump(&handle, vec![Event::ThemeChanged]);
     assert_eq!(gap::state_name(handle.state()), "restart-scheduled");
     handle.advance_clock(Duration::from_millis(1_000));
@@ -85,7 +85,7 @@ fn lif_279_the_real_host_harness_walks_the_same_states_after_a_trap() {
 #[test]
 fn lif_279_the_real_host_harness_stops_after_the_third_trap() {
     let (guest, _recorder) = ScriptedGuest::answering(Box::new(|_| Err(trap("trap.deadline"))));
-    let mut handle = harness_with(guest, &[]);
+    let handle = harness_with(guest, &[]);
     for wait_ms in [1_000u64, 5_000, 0] {
         deliver_and_pump(&handle, vec![Event::ThemeChanged]);
         handle.advance_clock(Duration::from_millis(wait_ms));

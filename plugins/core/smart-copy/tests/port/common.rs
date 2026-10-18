@@ -11,8 +11,8 @@ use ilium_plugin_core_smart_copy::{SmartCopyClient, SmartCopyServer};
 use ilium_plugin_sdk::testing::{FakeHost, TreeNode};
 use ilium_plugin_sdk::types::{
     CommandContext, CommandInvokedEvent, CommandOrigin, Event, Intent, MessageEvent, NodeClass,
-    NodeId, PaneInfo, PluginId, PluginSide, PointerButton, PointerEvent, PointerKind,
-    PointerModifiers, PrimitiveKind, Submission, ViewTarget,
+    NodeId, PluginId, PluginSide, PointerButton, PointerEvent, PointerKind, PointerModifiers,
+    Submission, ViewTarget,
 };
 
 /// The plugin id of the page.
@@ -21,24 +21,6 @@ pub const PLUGIN_ID: &str = "ilium.core.smart-copy";
 /// Path of the plugin manifest (the skeleton file, exact per the manual).
 pub fn manifest_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("manifest.json")
-}
-
-/// Root of the worktree, found from the crate directory (plugins/core/smart-copy).
-pub fn workspace_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..")
-}
-
-/// A page of the manual by file name.
-pub fn manual_page(name: &str) -> String {
-    let path = workspace_root()
-        .join("docs/plugins-manual/pages")
-        .join(name);
-    std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("page {path:?}: {error}"))
-}
-
-/// The manual page of this plugin.
-pub fn page_text() -> String {
-    manual_page("core-plugin-smart-copy.md")
 }
 
 /// A server-side host with the manifest grants, not yet activated.
@@ -92,20 +74,6 @@ pub fn add_editor_pane(host: &mut FakeHost, name: &str) -> u64 {
         class: NodeClass::Pane,
         content_kind: Some("ilium.editor".to_string()),
         agent: None,
-    })
-}
-
-/// The `pane-created` event of a pane.
-pub fn pane_created(node: u64, content_kind: &str, primitive: PrimitiveKind) -> Event {
-    Event::PaneCreated(PaneInfo {
-        node: NodeId(node),
-        content_kind: content_kind.to_string(),
-        primitive,
-        columns: 80,
-        rows: 24,
-        focused: false,
-        title: String::new(),
-        is_restored: false,
     })
 }
 
@@ -212,35 +180,6 @@ pub fn status_contains(submissions: &[Submission], needle: &str) -> bool {
                 .contains(needle),
             _ => false,
         })
-}
-
-/// The `<pre class="term">` figure with this index on the page, tags removed, rows without trailing spaces.
-pub fn page_figure(index: usize) -> Vec<String> {
-    let page = page_text();
-    let mut rest = page.as_str();
-    let mut found = None;
-    for _ in 0..=index {
-        let start = rest.find("<pre class=\"term\">").expect("figure present")
-            + "<pre class=\"term\">".len();
-        let end = rest[start..].find("</pre>").expect("figure end");
-        found = Some(&rest[start..start + end]);
-        rest = &rest[start + end..];
-    }
-    let raw = found.expect("figure found");
-    let mut text = String::new();
-    let mut in_tag = false;
-    for character in raw.chars() {
-        match character {
-            '<' => in_tag = true,
-            '>' => in_tag = false,
-            other if !in_tag => text.push(other),
-            _ => {}
-        }
-    }
-    text.lines()
-        .map(|line| line.trim_end().to_string())
-        .filter(|line| !line.is_empty())
-        .collect()
 }
 
 // ---- helpers of the ports part ----

@@ -1,6 +1,5 @@
 //! api-durable-timers.md, journal half: `journal.log-event` and `journal.read`.
 
-use ilium_plugin_api::generated::host::HostJournal;
 use ilium_plugin_api::generated::types::{EpochMs, ErrorCode};
 use ilium_plugin_api::Tier;
 use proptest::prelude::*;

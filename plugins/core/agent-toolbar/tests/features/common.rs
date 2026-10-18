@@ -7,7 +7,7 @@ use ilium_plugin_sdk::testing::{FakeHost, TreeNode};
 use ilium_plugin_sdk::types::{
     AgentActivity, AgentActivityEvent, AgentModel, AgentModelEvent, AgentView, CommandContext,
     CommandInvokedEvent, CommandOrigin, EpochMs, Event, Intent, MessageEvent, NodeClass, NodeId,
-    PluginId, PluginSide, RichSpan, RichText, SpanTarget, Style, Submission, UserLineEvent,
+    PluginId, PluginSide, RichText, Submission, UserLineEvent,
 };
 
 pub const PLUGIN_ID: &str = "ilium.core.agent-toolbar";
@@ -101,16 +101,6 @@ pub fn add_agent_pane(
     })
 }
 
-/// Rich text of one plain span, as the banner and recover slots carry it.
-pub fn plain(text: &str) -> RichText {
-    vec![RichSpan {
-        text: text.to_string(),
-        style: Style::default(),
-        target: SpanTarget::None,
-        tooltip: None,
-    }]
-}
-
 /// Concatenated text of a rich text.
 pub fn rich_to_string(content: &RichText) -> String {
     content.iter().map(|span| span.text.as_str()).collect()
@@ -174,14 +164,6 @@ pub fn message_from(side: PluginSide, channel: &str, payload: &[u8]) -> Event {
         channel: channel.to_string(),
         payload: payload.to_vec(),
     })
-}
-
-/// The intents of a submission list, in order.
-pub fn intents(submissions: &[Submission]) -> Vec<Intent> {
-    submissions
-        .iter()
-        .map(|submission| submission.intent.clone())
-        .collect()
 }
 
 /// `(pane, slot, text)` of every `set-frame-slot` intent, in order.

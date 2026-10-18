@@ -1,16 +1,8 @@
 //! Shared helpers of the kernel-boot lane for the host crate: workspace and manual access,
-//! the crate edge checker (HST-001..005) and a recording native guest.
+//! the crate edge checker (HST-001..005).
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
-
-use ilium_plugin_api::generated::types::events::Event;
-use ilium_plugin_api::generated::types::intents::Submission;
-use ilium_plugin_api::generated::types::lifecycle::{Activation, DeactivationReason};
-use ilium_plugin_api::PluginError;
-use ilium_plugin_host::calls::Trap;
-use ilium_plugin_host::testing::NativeGuest;
 
 /// The workspace root (the parent of this crate).
 pub fn workspace_root() -> PathBuf {
@@ -247,57 +239,6 @@ pub fn synthetic_crate(dir: &str, name: &str, dependencies: &[&str]) -> CrateMan
             .iter()
             .map(|value| (*value).to_owned())
             .collect(),
-    }
-}
-
-/// What a [`RecordingGuest`] saw.
-#[derive(Debug, Default, Clone)]
-pub struct GuestLog {
-    pub activations: Vec<Activation>,
-    pub batches: Vec<Vec<Event>>,
-    pub deactivations: Vec<DeactivationReason>,
-}
-
-/// A native guest that records its calls and returns no submissions.
-pub struct RecordingGuest {
-    pub log: Arc<Mutex<GuestLog>>,
-}
-
-impl RecordingGuest {
-    /// A guest and the shared log it writes to.
-    pub fn new() -> (RecordingGuest, Arc<Mutex<GuestLog>>) {
-        let log = Arc::new(Mutex::new(GuestLog::default()));
-        (
-            RecordingGuest {
-                log: Arc::clone(&log),
-            },
-            log,
-        )
-    }
-}
-
-impl NativeGuest for RecordingGuest {
-    fn activate(&mut self, activation: Activation) -> Result<(), PluginError> {
-        self.log
-            .lock()
-            .expect("log lock")
-            .activations
-            .push(activation);
-        Ok(())
-    }
-
-    fn deactivate(&mut self, reason: DeactivationReason) -> Option<Vec<u8>> {
-        self.log
-            .lock()
-            .expect("log lock")
-            .deactivations
-            .push(reason);
-        None
-    }
-
-    fn on_events(&mut self, batch: Vec<Event>) -> Result<Vec<Submission>, Trap> {
-        self.log.lock().expect("log lock").batches.push(batch);
-        Ok(Vec::new())
     }
 }
 

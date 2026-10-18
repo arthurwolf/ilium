@@ -335,7 +335,7 @@ fn dev_497_with_storage_snapshot_after_activate_fails_with_setup_closed() {
 #[test]
 fn dev_497_with_data_version_after_activate_fails_with_setup_closed() {
     with_clean_env(|| {
-        let mut host = active();
+        let host = active();
         assert_fails_with(codes::SETUP_CLOSED, || host.with_data_version(2));
     });
 }

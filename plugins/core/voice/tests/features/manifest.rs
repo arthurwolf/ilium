@@ -184,13 +184,12 @@ fn manifest_050_has_no_key_outside_the_documented_set() {
 #[test]
 fn manifest_050_loads_into_a_fake_host_for_both_sides() {
     assert!(FakeHost::for_manifest(manifest_path()).is_ok());
-    let server = FakeHost::for_manifest(manifest_path())
+    let _server = FakeHost::for_manifest(manifest_path())
         .expect("loads")
         .side("server")
         .build();
-    let client = FakeHost::for_manifest(manifest_path())
+    let _client = FakeHost::for_manifest(manifest_path())
         .expect("loads")
         .side("client")
         .build();
-    drop((server, client));
 }

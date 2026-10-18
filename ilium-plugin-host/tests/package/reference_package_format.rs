@@ -925,7 +925,7 @@ proptest! {
         left in "assets/x[a-zA-Z0-9._-]{0,10}[a-zA-Z0-9_-]",
         right in "assets/x[a-zA-Z0-9._-]{0,10}[a-zA-Z0-9_-]",
     ) {
-        prop_assume!(left.to_ascii_lowercase() != right.to_ascii_lowercase());
+        prop_assume!(!left.eq_ignore_ascii_case(&right));
         let (first, second) = if left.as_bytes() < right.as_bytes() { (left, right) } else { (right, left) };
         let mut ordered = base();
         ordered.insert(0, Z::new(&first, b"1"));

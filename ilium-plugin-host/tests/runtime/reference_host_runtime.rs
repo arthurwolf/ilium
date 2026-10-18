@@ -359,7 +359,6 @@ fn hst_056_instantiate_call_and_drop_under_the_pinned_concurrency_setting() {
     host.deliver(one_event());
     let report = host.pump(8);
     assert_eq!(report.traps, 0);
-    drop(host);
 }
 
 /// REQ: HST-057
@@ -803,7 +802,7 @@ fn hst_068_a_refused_package_installs_nothing() {
 /// REQ: HST-069
 #[test]
 fn hst_069_grant_changes_increment_the_instance_pre_generation() {
-    let mut host = HostHarness::new()
+    let host = HostHarness::new()
         .grants(&["tree.read"])
         .with_native_guest(Box::new(QuietGuest))
         .build()
@@ -819,7 +818,7 @@ fn hst_069_grant_changes_increment_the_instance_pre_generation() {
 /// REQ: HST-069
 #[test]
 fn hst_069_existing_instance_keeps_running_after_a_grant_change() {
-    let mut host = host_with(QuietGuest);
+    let host = host_with(QuietGuest);
     host.grant_now("tree.read");
     assert_eq!(host.state(), InstanceState::Active);
 }
@@ -827,7 +826,7 @@ fn hst_069_existing_instance_keeps_running_after_a_grant_change() {
 /// REQ: HST-069
 #[test]
 fn hst_069_an_unchanged_grant_set_keeps_the_generation() {
-    let mut host = host_with(QuietGuest);
+    let host = host_with(QuietGuest);
     let before = host.instance_pre_generation();
     host.pump(2);
     assert_eq!(host.instance_pre_generation(), before);
@@ -906,7 +905,7 @@ fn hst_071_declined_capability_returns_not_permitted_without_kernel_code() {
     let kernel = Arc::new(ilium_plugin_host::testing::FakeKernel::new(
         ProcessKind::Server,
     ));
-    let mut host = HostHarness::new()
+    let host = HostHarness::new()
         .kernel(kernel.clone())
         .grants(&[])
         .with_native_guest(Box::new(QuietGuest))
@@ -921,7 +920,7 @@ fn hst_071_declined_capability_returns_not_permitted_without_kernel_code() {
 /// REQ: HST-071
 #[test]
 fn hst_071_revoked_capability_returns_not_permitted_not_a_trap() {
-    let mut host = HostHarness::new()
+    let host = HostHarness::new()
         .grants(&["tree.write"])
         .with_native_guest(Box::new(QuietGuest))
         .build()
@@ -1004,7 +1003,7 @@ fn hst_073_unrequested_function_in_a_linked_interface_traps() {
 /// REQ: HST-073
 #[test]
 fn hst_073_the_trap_counts_as_a_failure() {
-    let mut host = HostHarness::new()
+    let host = HostHarness::new()
         .grants(&["fs.read:project"])
         .with_native_guest(Box::new(QuietGuest))
         .build()
@@ -1084,7 +1083,7 @@ fn hst_074_job_instance_uses_job_memory_mib() {
 /// REQ: HST-075
 #[test]
 fn hst_075_import_after_revoke_returns_revoked() {
-    let mut host = HostHarness::new()
+    let host = HostHarness::new()
         .grants(&["fs.read:project"])
         .with_native_guest(Box::new(QuietGuest))
         .build()
@@ -1354,7 +1353,7 @@ fn hst_079_two_engines_have_two_tickers() {
 /// REQ: HST-080
 #[test]
 fn hst_080_callback_is_installed_before_each_call_and_sees_the_call_state() {
-    let mut host = host_with(QuietGuest);
+    let host = host_with(QuietGuest);
     host.deliver(one_event());
     host.pump(8);
     let observed = host.tick_observations();

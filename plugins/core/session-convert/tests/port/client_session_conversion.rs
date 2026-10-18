@@ -322,7 +322,7 @@ fn port_session_conversion_success_closes_the_dialog() {
 /// REQ: PORT:ilium-client/src/session_conversion.rs::failure_after_the_stop_offers_resuming_the_original_session
 #[test]
 fn port_session_conversion_failure_after_the_stop_offers_resuming_the_original_session() {
-    let (mut host, pane) = failed_codex_to_claude();
+    let (host, pane) = failed_codex_to_claude();
     let submissions = host.submitted();
     assert_eq!(
         failed_payload(&submissions).expect("failed message")["can_resume"],

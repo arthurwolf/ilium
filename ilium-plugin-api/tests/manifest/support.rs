@@ -274,7 +274,7 @@ pub fn server_with_grants(grants: &[&str]) -> Value {
 
 /// A string of `count` copies of `character`.
 pub fn repeat(character: char, count: usize) -> String {
-    std::iter::repeat(character).take(count).collect()
+    std::iter::repeat_n(character, count).collect()
 }
 
 // ---------------------------------------------------------------------------------------------

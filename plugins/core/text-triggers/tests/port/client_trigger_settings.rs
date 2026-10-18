@@ -1,8 +1,8 @@
 //! Twins of trigger_settings.rs and trigger_settings_ui.rs: the event action settings and their tab.
 
 use ilium_plugin_sdk::testing::FakeHost;
-use ilium_plugin_sdk::types::{ActionKind, ActionValue, ErrorCode, Event, Outcome, ViewTarget};
-use serde_json::{json, Value};
+use ilium_plugin_sdk::types::{ActionKind, ActionValue};
+use serde_json::json;
 
 use crate::common::*;
 use crate::support::*;

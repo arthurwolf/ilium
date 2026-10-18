@@ -329,7 +329,7 @@ fn manifest_050_a_host_built_for_the_manifest_loads_with_every_declared_grant() 
         .expect("manifest loads")
         .side("server")
         .build();
-    drop(host);
+    let _host = host;
 }
 
 /// REQ: COR-050

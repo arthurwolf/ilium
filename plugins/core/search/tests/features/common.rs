@@ -333,7 +333,7 @@ pub fn ask(host: &mut FakeHost, revision: u64, query: &str) -> Vec<Value> {
 pub fn drive_jobs(host: &mut FakeHost) {
     use ilium_plugin_sdk::JobRunner;
     for record in host.jobs().list() {
-        let mut runner = SearchServer::default();
+        let mut runner = SearchServer;
         let result = runner.run(record.kind.clone(), record.input.clone());
         host.jobs().finish(record.request, result);
     }

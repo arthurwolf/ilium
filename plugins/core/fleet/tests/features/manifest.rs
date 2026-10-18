@@ -325,13 +325,12 @@ fn manifest_109_the_cost_column_needs_the_cost_usage_service_grant() {
 /// REQ: COR-050
 #[test]
 fn manifest_050_host_takes_grants_from_the_manifest_for_each_side() {
-    let server = FakeHost::for_manifest(manifest_path())
+    let _server = FakeHost::for_manifest(manifest_path())
         .expect("loads")
         .side("server")
         .build();
-    let client = FakeHost::for_manifest(manifest_path())
+    let _client = FakeHost::for_manifest(manifest_path())
         .expect("loads")
         .side("client")
         .build();
-    drop((server, client));
 }

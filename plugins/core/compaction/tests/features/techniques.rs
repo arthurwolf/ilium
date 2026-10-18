@@ -55,7 +55,7 @@ fn run(
 ) -> (FakeHost, Result<Vec<u8>, PluginError>) {
     let mut host = host_with_technique(technique, custom_prompt);
     host.script_inference(vec![Ok(reply.to_string())]);
-    let result = host.run_job("compact", input.to_vec());
+    let result = host.run_job("compact", input);
     (host, result)
 }
 
@@ -203,7 +203,7 @@ fn technique_080_an_unterminated_analysis_block_cleans_to_nothing_and_is_retried
         Ok("<analysis>never closed 1. Primary Request".to_string()),
         Ok(CLAUDE_REPLY.to_string()),
     ]);
-    host.run_job("compact", b"hello".to_vec())
+    host.run_job("compact", b"hello")
         .expect("second reply is valid");
     let requests = host.inference_requests();
     assert_eq!(requests.len(), 2);
@@ -226,7 +226,7 @@ fn technique_080_the_claude_validator_names_the_missing_sections_in_the_retry_no
         Ok("1. Primary Request and Intent: x and more text here".to_string()),
         Ok(CLAUDE_REPLY.to_string()),
     ]);
-    host.run_job("compact", b"hello".to_vec())
+    host.run_job("compact", b"hello")
         .expect("second reply is valid");
     let retry = host.inference_requests()[1]
         .1
@@ -247,7 +247,7 @@ fn technique_080_a_too_short_codex_summary_is_rejected_and_retried() {
         Ok("short".to_string()),
         Ok("A perfectly fine plain-text handoff summary.".to_string()),
     ]);
-    host.run_job("compact", b"hello".to_vec())
+    host.run_job("compact", b"hello")
         .expect("second reply is valid");
     assert_eq!(host.inference_requests().len(), 2);
 }
@@ -273,7 +273,7 @@ fn technique_080_opencode_summary_without_its_three_headings_is_rejected() {
         Ok("## Objective\n- x and some more words".to_string()),
         Ok("## Objective\n- x\n## Work State\n### Active\n- y\n## Next Move\n1. z".to_string()),
     ]);
-    host.run_job("compact", b"hello".to_vec())
+    host.run_job("compact", b"hello")
         .expect("second reply is valid");
     assert_eq!(host.inference_requests().len(), 2);
 }
@@ -287,7 +287,7 @@ fn technique_080_a_half_open_gemini_snapshot_is_rejected() {
         Ok("<state_snapshot>half open and long enough".to_string()),
         Ok(good.to_string()),
     ]);
-    host.run_job("compact", b"hello".to_vec())
+    host.run_job("compact", b"hello")
         .expect("second reply is valid");
     assert_eq!(host.inference_requests().len(), 2);
 }
@@ -338,7 +338,7 @@ fn technique_080_an_empty_reply_every_time_ends_in_the_offline_fallback_not_an_e
         Ok(String::new()),
         Ok(String::new()),
     ]);
-    let result = host.run_job("compact", b"first request\nsecond request".to_vec());
+    let result = host.run_job("compact", b"first request\nsecond request");
     assert!(result.is_ok());
 }
 

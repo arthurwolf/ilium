@@ -407,7 +407,7 @@ fn cor_024_http_port_and_safe_switches_need_a_server_restart() {
     let mut run = full_core_run(ProcessKind::Server);
     run.change_http_port(8123);
     assert_ne!(run.live_http_port(), 8123);
-    let mut restarted = run.restart_server();
+    let restarted = run.restart_server();
     assert_eq!(restarted.live_http_port(), 8123);
 }
 

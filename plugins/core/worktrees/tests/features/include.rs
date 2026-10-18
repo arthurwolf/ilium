@@ -12,18 +12,18 @@ const ROOT: &str = "/project";
 fn seeded() -> FakeHost {
     let mut host = server_host();
     host.fs().seed(
-        &format!("{ROOT}/.worktreeinclude"),
+        format!("{ROOT}/.worktreeinclude"),
         b".env\n# comment\n\nconfig/*.toml\n",
     );
-    host.fs().seed(&format!("{ROOT}/.env"), b"SECRET=1");
-    host.fs().seed(&format!("{ROOT}/config/a.toml"), b"a=1");
+    host.fs().seed(format!("{ROOT}/.env"), b"SECRET=1");
+    host.fs().seed(format!("{ROOT}/config/a.toml"), b"a=1");
     host
 }
 
 fn dest(host: &mut FakeHost, rel: &str) -> Option<Vec<u8>> {
     let add = worktree_add_calls(&host.process().calls());
     let path = add.first()?.arguments[4].clone();
-    host.fs().read(&format!("{path}/{rel}"))
+    host.fs().read(format!("{path}/{rel}"))
 }
 
 /// REQ: F-071, PORT:ilium-server/src/worktree_include.rs::copies_selected_files_and_tracks_created_paths
@@ -40,7 +40,7 @@ fn port_071_listed_files_are_copied_into_the_new_worktree_and_comments_are_skipp
 #[test]
 fn port_071_without_a_worktreeinclude_file_nothing_is_copied_and_creation_succeeds() {
     let mut host = server_host();
-    host.fs().seed(&format!("{ROOT}/.env"), b"x");
+    host.fs().seed(format!("{ROOT}/.env"), b"x");
     let submitted = create_worktree(&mut host, &json!({"branch": "fix-auth"}));
     assert_eq!(dest(&mut host, ".env"), None);
     assert_eq!(create_panes(&submitted).len(), 1);
@@ -59,9 +59,9 @@ fn port_071_an_existing_destination_file_is_never_overwritten() {
 #[test]
 fn port_071_a_selected_symlink_is_rejected_and_no_pane_is_created() {
     let mut host = seeded();
-    host.fs().symlink(&format!("{ROOT}/link"), "/etc/passwd");
+    host.fs().symlink(format!("{ROOT}/link"), "/etc/passwd");
     host.fs()
-        .seed(&format!("{ROOT}/.worktreeinclude"), b"link\n");
+        .seed(format!("{ROOT}/.worktreeinclude"), b"link\n");
     let submitted = create_worktree(&mut host, &json!({"branch": "fix-auth"}));
     assert!(create_panes(&submitted).is_empty());
 }
@@ -71,7 +71,7 @@ fn port_071_a_selected_symlink_is_rejected_and_no_pane_is_created() {
 fn port_071_a_failed_creation_removes_only_the_files_it_copied() {
     let mut host = seeded();
     host.fs().seed(
-        &format!("{ROOT}/.worktreeinclude"),
+        format!("{ROOT}/.worktreeinclude"),
         b".env\n/etc/shadow\n../escape\n",
     );
     let submitted = create_worktree(&mut host, &json!({"branch": "fix-auth"}));
@@ -100,7 +100,7 @@ fn feature_071_the_include_file_of_64_kib_is_read_and_one_byte_more_is_refused()
         let mut host = seeded();
         let mut body = b".env\n".to_vec();
         body.resize(size, b'#');
-        host.fs().seed(&format!("{ROOT}/.worktreeinclude"), &body);
+        host.fs().seed(format!("{ROOT}/.worktreeinclude"), &body);
         let submitted = create_worktree(&mut host, &json!({"branch": "fix-auth"}));
         assert_eq!(!create_panes(&submitted).is_empty(), expect_pane, "{size}");
     }
@@ -115,9 +115,9 @@ fn port_071_the_copy_limit_is_64_mib_and_larger_selections_write_nothing() {
         (64 * 1024 * 1024 + 1, false),
     ] {
         let mut host = seeded();
-        host.fs().seed_sparse(&format!("{ROOT}/big.bin"), size);
+        host.fs().seed_sparse(format!("{ROOT}/big.bin"), size);
         host.fs()
-            .seed(&format!("{ROOT}/.worktreeinclude"), b"big.bin\n");
+            .seed(format!("{ROOT}/.worktreeinclude"), b"big.bin\n");
         let submitted = create_worktree(&mut host, &json!({"branch": "fix-auth"}));
         assert_eq!(!create_panes(&submitted).is_empty(), expect_pane, "{size}");
         if !expect_pane {
@@ -132,10 +132,10 @@ fn feature_071_the_copy_limit_is_1000_files() {
     for (count, expect_pane) in [(999usize, true), (1000, true), (1001, false)] {
         let mut host = server_host();
         for index in 0..count {
-            host.fs().seed(&format!("{ROOT}/inc/f{index}"), b"x");
+            host.fs().seed(format!("{ROOT}/inc/f{index}"), b"x");
         }
         host.fs()
-            .seed(&format!("{ROOT}/.worktreeinclude"), b"inc/\n");
+            .seed(format!("{ROOT}/.worktreeinclude"), b"inc/\n");
         let submitted = create_worktree(&mut host, &json!({"branch": "fix-auth"}));
         assert_eq!(!create_panes(&submitted).is_empty(), expect_pane, "{count}");
     }
@@ -146,10 +146,10 @@ fn feature_071_the_copy_limit_is_1000_files() {
 fn port_071_more_than_10000_visited_source_entries_are_refused_before_copying() {
     let mut host = server_host();
     for index in 0..10_001 {
-        host.fs().seed(&format!("{ROOT}/many/f{index}"), b"");
+        host.fs().seed(format!("{ROOT}/many/f{index}"), b"");
     }
     host.fs()
-        .seed(&format!("{ROOT}/.worktreeinclude"), b"many/\n");
+        .seed(format!("{ROOT}/.worktreeinclude"), b"many/\n");
     let submitted = create_worktree(&mut host, &json!({"branch": "fix-auth"}));
     assert!(create_panes(&submitted).is_empty());
 }
@@ -310,8 +310,8 @@ proptest! {
     #[test]
     fn feature_071_include_lines_that_are_comments_or_blank_copy_nothing(lines in prop::collection::vec("(#[ -~]{0,20}| *)", 0..8)) {
         let mut host = server_host();
-        host.fs().seed(&format!("{ROOT}/.worktreeinclude"), lines.join("\n").as_bytes());
-        host.fs().seed(&format!("{ROOT}/.env"), b"x");
+        host.fs().seed(format!("{ROOT}/.worktreeinclude"), lines.join("\n").as_bytes());
+        host.fs().seed(format!("{ROOT}/.env"), b"x");
         let submitted = create_worktree(&mut host, &json!({"branch": "fix-auth"}));
         prop_assert_eq!(create_panes(&submitted).len(), 1);
         prop_assert_eq!(dest(&mut host, ".env"), None);

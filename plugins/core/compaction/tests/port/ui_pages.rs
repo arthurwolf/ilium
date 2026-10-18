@@ -18,7 +18,7 @@ fn squeezed(text: &str) -> String {
 /// REQ: PORT:ilium-client/src/compaction_ui/tests.rs::wrap_text_wraps_by_cells_and_splits_long_words
 #[test]
 fn ui_wrap_text_wraps_by_cells_and_splits_long_words() {
-    let mut host = opened();
+    let host = opened();
     assert_eq!(
         host.wrap_text("abcdefghijklmnopqrstuvwxyz", 10),
         vec!["abcdefghij", "klmnopqrst", "uvwxyz"]
@@ -30,7 +30,7 @@ fn ui_wrap_text_wraps_by_cells_and_splits_long_words() {
 /// REQ: PORT:ilium-client/src/compaction_ui/tests.rs::truncate_to_marks_a_cut_with_an_ellipsis
 #[test]
 fn ui_truncate_to_marks_a_cut_with_an_ellipsis() {
-    let mut host = opened();
+    let host = opened();
     assert_eq!(host.truncate_to("short", 10), "short");
     assert_eq!(host.truncate_to("abcdefghij", 6), "abcde…");
     assert_eq!(host.truncate_to("abc", 0), "");
@@ -39,7 +39,7 @@ fn ui_truncate_to_marks_a_cut_with_an_ellipsis() {
 /// REQ: PORT:ilium-client/src/compaction_ui/tests.rs::bars_fill_in_proportion_and_clamp
 #[test]
 fn ui_bars_fill_in_proportion_and_clamp() {
-    let mut host = opened();
+    let host = opened();
     assert_eq!(
         host.bar_parts(0.5, 10),
         ("█████".to_owned(), "░░░░░".to_owned())
@@ -54,7 +54,7 @@ fn ui_bars_fill_in_proportion_and_clamp() {
 /// REQ: PORT:ilium-client/src/compaction_ui/tests.rs::table_columns_drop_least_important_first_and_keep_rank_zero
 #[test]
 fn ui_table_columns_drop_least_important_first_and_keep_rank_zero() {
-    let mut host = opened();
+    let host = opened();
     let columns = [("A", 10, 0), ("B", 10, 1), ("C", 10, 2), ("D", 10, 3)];
     assert_eq!(host.kept_columns(&columns, 100), vec!["A", "B", "C", "D"]);
     assert_eq!(host.kept_columns(&columns, 36), vec!["A", "B", "C"]);

@@ -1,7 +1,7 @@
 //! api-fs.md: roots, metadata, list-dir, read, read-all, scan, write, create-dir, remove, rename,
 //! watch and unwatch, with the `take-*` results for the async calls.
 
-use ilium_plugin_api::generated::host::{EntryKind, HostFs, WriteMode};
+use ilium_plugin_api::generated::host::{EntryKind, WriteMode};
 use ilium_plugin_api::generated::types::{ErrorCode, Outcome};
 use ilium_plugin_api::Tier;
 use proptest::prelude::*;

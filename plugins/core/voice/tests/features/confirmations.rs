@@ -174,13 +174,13 @@ fn confirm_051_the_higher_priority_entry_wins_for_the_same_phrase() {
         "ilium.core.voice/voice-intents",
         "low",
         10,
-        &json!({ "phrases": ["go"], "command": "low-command", "confirm": false }).to_string(),
+        json!({ "phrases": ["go"], "command": "low-command", "confirm": false }).to_string(),
     );
     host.contribute_extension(
         "ilium.core.voice/voice-intents",
         "high",
         90,
-        &json!({ "phrases": ["go"], "command": "high-command", "confirm": false }).to_string(),
+        json!({ "phrases": ["go"], "command": "high-command", "confirm": false }).to_string(),
     );
     hear(&mut host, "go");
     assert_eq!(invoked_commands(&host.submitted()), ["high-command"]);

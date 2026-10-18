@@ -1,5 +1,8 @@
 //! Shared helpers: the server host, panes with agents, event builders and submission readers.
 
+// Also mounted by the features_gaps target, which uses a subset of these helpers.
+#![allow(dead_code)]
+
 use std::path::PathBuf;
 
 use ilium_plugin_core_notifications::NotificationsServer;

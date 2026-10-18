@@ -714,8 +714,10 @@ fn dev_055_missing_rustc_exits_four() {
 #[test]
 fn dev_055_missing_wasm_target_exits_four_with_a_toolchain_code() {
     let root = scratch();
-    let mut probe = FakeProbe::default();
-    probe.rust_target = false;
+    let probe = FakeProbe {
+        rust_target: false,
+        ..Default::default()
+    };
     let env = env(root.path()).with_probe(Arc::new(probe));
     let dir = server_project(&env, root.path());
     let output = run_in(&env, &dir, &["build"]);

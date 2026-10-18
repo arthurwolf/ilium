@@ -135,7 +135,7 @@ fn pri_030_zero_size_area_is_not_an_error() {
 /// REQ: PRI-030
 #[test]
 fn pri_030_basic_pane_side_receives_on_events_like_any_plugin_side() {
-    let mut rig = body_rig();
+    let rig = body_rig();
     rig.host.deliver(vec![Event::PaneCreated(PaneInfo {
         node: BASIC_PANE,
         content_kind: "example.scratchpad.notes".to_owned(),

@@ -865,8 +865,7 @@ fn evt_014_wit_outcome_variant_lists_the_seven_cases() {
     ] {
         let has_case = block.lines().skip(1).any(|line| {
             let trimmed = line.trim().trim_start_matches('/').trim();
-            trimmed.starts_with(case)
-                && trimmed[case.len()..].starts_with(|c: char| c == ',' || c == '(' || c == ' ')
+            trimmed.starts_with(case) && trimmed[case.len()..].starts_with([',', '(', ' '])
         });
         assert!(has_case, "case {case} missing in: {block}");
     }
@@ -981,7 +980,7 @@ fn evt_022_journal_entry_is_written_before_the_keys_reach_the_pane() {
 /// REQ: EVT-022
 #[test]
 fn evt_022_restart_between_journal_and_outcome_gives_input_uncertain_and_no_replay() {
-    let mut env = Setup::new(&["terminal.write"]).tree(flat_tree(1)).build();
+    let env = Setup::new(&["terminal.write"]).tree(flat_tree(1)).build();
     env.kernel.interrupt_after_journal(NodeId(2), "send:1");
     env.run(vec![keyed(1, "send:1", send_input_journaled(2, "x"))]);
     let writes_before = env
@@ -1063,7 +1062,7 @@ fn evt_030_the_last_origin_is_kept() {
 /// REQ: EVT-030
 #[test]
 fn evt_030_a_change_after_delivery_is_a_new_event() {
-    let mut env = Setup::new(&[]).build();
+    let env = Setup::new(&[]).build();
     env.deliver(vec![settings_changed(&["a"], SettingsOrigin::User)]);
     env.host.advance_clock(std::time::Duration::from_secs(5));
     env.deliver(vec![settings_changed(&["b"], SettingsOrigin::User)]);
@@ -1588,7 +1587,7 @@ fn evt_047_300_nodes_arrive_in_a_single_event_whatever_the_count() {
 /// REQ: EVT-047
 #[test]
 fn evt_047_every_re_activation_starts_with_one_tree_changed() {
-    let mut env = Setup::new(&["tree.read"]).tree(flat_tree(2)).build();
+    let env = Setup::new(&["tree.read"]).tree(flat_tree(2)).build();
     env.deliver(vec![trigger()]);
     env.host.restart_instance(DeactivationReason::CrashRestart);
     env.deliver(vec![trigger()]);
@@ -1648,7 +1647,7 @@ fn evt_048_a_later_successful_activation_gets_no_events_dropped_report() {
     });
     let probe = setup.probe.clone();
     let (built, _probe, kernel) = setup.try_build();
-    let mut host = match built {
+    let host = match built {
         Ok(host) => host,
         Err(_) => return_failed_activation_then_reactivate(&probe, &kernel),
     };

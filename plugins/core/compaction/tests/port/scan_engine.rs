@@ -97,7 +97,7 @@ fn scan_listing_observes_a_stop_request() {
 /// REQ: PORT:ilium-client/src/compaction_scan/tests.rs::bounded_line_reader_cuts_oversize_lines_and_keeps_the_next_one
 #[test]
 fn scan_bounded_line_reader_cuts_oversize_lines_and_keeps_the_next_one() {
-    let mut host = server_host();
+    let host = server_host();
     let reads = host.read_bounded_lines(b"aaaaaaaaaaaaaaaaaaaa\nok\n", 5);
     assert_eq!(reads.len(), 2);
     assert_eq!(reads[0]["kind"], "Oversize");
@@ -109,7 +109,7 @@ fn scan_bounded_line_reader_cuts_oversize_lines_and_keeps_the_next_one() {
 /// REQ: PORT:ilium-client/src/compaction_scan/tests.rs::bounded_line_reader_stops_when_the_callback_says_so
 #[test]
 fn scan_bounded_line_reader_stops_when_the_callback_says_so() {
-    let mut host = server_host();
+    let host = server_host();
     let reads = host.read_bounded_lines_stop_after(b"one\ntwo\nthree\n", 100, 1);
     assert_eq!(reads.len(), 1);
 }
@@ -467,7 +467,7 @@ fn scan_a_cache_that_cannot_be_written_is_a_warning_not_a_failure() {
 /// REQ: PORT:ilium-client/src/compaction_scan/tests.rs::default_cache_paths_are_separate_per_agent_and_versioned
 #[test]
 fn scan_default_cache_paths_are_separate_per_agent_and_versioned() {
-    let mut host = server_host();
+    let host = server_host();
     let claude = host.default_cache_path("claude");
     let codex = host.default_cache_path("codex");
     assert_ne!(claude, codex);
@@ -485,7 +485,7 @@ fn scan_the_retention_cap_keeps_the_most_recent_sessions() {
         .scan_agent_homes("claude", Some(CACHE), Some(one * 3), None)
         .expect("scan");
     let kept = traces(&report).len();
-    assert!(kept < 6 && kept >= 1, "{kept}");
+    assert!((1..6).contains(&kept), "{kept}");
     assert_eq!(
         summary(&report)["sessions_dropped_for_cap"]
             .as_u64()

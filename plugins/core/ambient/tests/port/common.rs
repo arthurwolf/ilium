@@ -131,7 +131,7 @@ pub fn manifest_capabilities() -> Vec<String> {
 
 pub fn direct_tree(view: &str, columns: u16, rows: u16) -> ilium_plugin_sdk::types::UiTree {
     use ilium_plugin_sdk::Views;
-    let mut client = AmbientClient::default();
+    let mut client = AmbientClient;
     client.render(
         ViewTarget::Panel(view.to_string()),
         ilium_plugin_sdk::types::Area { columns, rows },

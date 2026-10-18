@@ -111,7 +111,7 @@ fn f_077_success_tells_the_client_the_conversion_ended_well() {
         .into_iter()
         .filter(|m| m.1 == PluginSide::Client && m.2 == "finished")
         .map(|m| serde_json::from_str::<Value>(&m.3).unwrap())
-        .last()
+        .next_back()
         .expect("finished message");
     assert_eq!(finished, json!({"pane": pane, "ok": true}));
 }

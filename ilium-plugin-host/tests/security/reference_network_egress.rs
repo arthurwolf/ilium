@@ -828,7 +828,7 @@ fn sec_083_budget_is_16_mib_per_minute_with_retry_after() {
 /// REQ: SEC-083
 #[test]
 fn sec_083_budget_refills_after_a_minute() {
-    let mut rig = public_rig(&["http:example.com"]);
+    let rig = public_rig(&["http:example.com"]);
     rig.net
         .serve("https://example.com/b", FakeResponse::sized(4 * MIB));
     while rig.get("https://example.com/b", &[]).is_ok() {}

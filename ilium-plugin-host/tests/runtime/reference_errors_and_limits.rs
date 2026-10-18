@@ -156,7 +156,7 @@ fn api_015_second_restart_waits_5_s() {
 /// REQ: HST-411
 #[test]
 fn hst_411_client_and_server_keep_independent_failure_counts() {
-    let mut host = HostHarness::new()
+    let host = HostHarness::new()
         .both_sides()
         .with_native_guest(Box::new(TrapGuest("trap.panic")))
         .build()
@@ -172,7 +172,7 @@ fn hst_411_client_and_server_keep_independent_failure_counts() {
 /// REQ: HST-411
 #[test]
 fn hst_411_disabling_one_side_leaves_the_other_running() {
-    let mut host = HostHarness::new()
+    let host = HostHarness::new()
         .both_sides()
         .with_native_guest(Box::new(TrapGuest("trap.panic")))
         .build()
@@ -232,7 +232,7 @@ fn hst_401_trap_deadline_and_activate_error_count_as_failures() {
     let mut host = host_with(TrapGuest("trap.deadline"));
     fail_once(&mut host);
     assert_eq!(host.failure_count(), 1);
-    let mut activate = HostHarness::new()
+    let activate = HostHarness::new()
         .activate_error("io")
         .with_native_guest(Box::new(QuietGuest))
         .build()
@@ -244,7 +244,7 @@ fn hst_401_trap_deadline_and_activate_error_count_as_failures() {
 /// REQ: HST-401, API-042
 #[test]
 fn hst_401_revoke_disable_upgrade_shutdown_and_failed_job_do_not_count() {
-    let mut host = host_with(QuietGuest);
+    let host = host_with(QuietGuest);
     for _ in 0..3 {
         host.revoke("tree.read");
         host.pump(8);
@@ -262,7 +262,7 @@ fn hst_401_revoke_disable_upgrade_shutdown_and_failed_job_do_not_count() {
 /// REQ: HST-403
 #[test]
 fn hst_403_trap_in_deactivate_drops_the_instance_and_does_not_count() {
-    let mut host = host_with(QuietGuest);
+    let host = host_with(QuietGuest);
     host.set_deactivate_result(Err(trap_with("trap.deadline")));
     host.disable();
     assert_eq!(host.failure_count(), 0);
@@ -272,7 +272,7 @@ fn hst_403_trap_in_deactivate_drops_the_instance_and_does_not_count() {
 /// REQ: HST-403
 #[test]
 fn hst_403_clean_deactivate_keeps_restore_bytes() {
-    let mut host = host_with(QuietGuest);
+    let host = host_with(QuietGuest);
     host.set_deactivate_result(Ok(vec![1, 2, 3]));
     host.disable();
     assert_eq!(host.restore_bytes(), Some(vec![1, 2, 3]));
@@ -281,7 +281,7 @@ fn hst_403_clean_deactivate_keeps_restore_bytes() {
 /// REQ: API-044
 #[test]
 fn api_044_a_trapping_view_restarts_the_plugin_not_only_the_view() {
-    let mut host = host_with(QuietGuest);
+    let host = host_with(QuietGuest);
     host.set_render_result(Err(trap_with("trap.invalid-ui-tree")));
     host.render_view("main");
     assert_eq!(host.state(), InstanceState::RestartScheduled);
@@ -290,7 +290,7 @@ fn api_044_a_trapping_view_restarts_the_plugin_not_only_the_view() {
 /// REQ: API-045
 #[test]
 fn api_045_a_scene_frame_trap_restarts_the_client_side_after_1_s() {
-    let mut host = HostHarness::new()
+    let host = HostHarness::new()
         .both_sides()
         .with_native_guest(Box::new(QuietGuest))
         .build()
@@ -303,7 +303,7 @@ fn api_045_a_scene_frame_trap_restarts_the_client_side_after_1_s() {
 /// REQ: API-046, HST-407
 #[test]
 fn api_046_session_memory_budget_refuses_the_instance_and_the_side_stays_inactive() {
-    let mut host = HostHarness::new()
+    let host = HostHarness::new()
         .session_memory_mib(32)
         .with_native_guest(Box::new(QuietGuest))
         .build()
@@ -321,7 +321,7 @@ fn api_046_session_memory_budget_refuses_the_instance_and_the_side_stays_inactiv
 /// REQ: HST-407
 #[test]
 fn hst_407_refused_activation_retries_when_capacity_returns() {
-    let mut host = HostHarness::new()
+    let host = HostHarness::new()
         .session_memory_mib(32)
         .with_native_guest(Box::new(QuietGuest))
         .build()
@@ -335,7 +335,7 @@ fn hst_407_refused_activation_retries_when_capacity_returns() {
 /// REQ: HST-407
 #[test]
 fn hst_407_session_helpers_limit_gives_the_same_refusal() {
-    let mut host = HostHarness::new()
+    let host = HostHarness::new()
         .session_helpers(1)
         .with_native_guest(Box::new(QuietGuest))
         .build()
@@ -351,7 +351,7 @@ fn hst_407_session_helpers_limit_gives_the_same_refusal() {
 /// REQ: HST-407, API-046
 #[test]
 fn hst_407_exactly_at_the_budget_is_accepted() {
-    let mut host = HostHarness::new()
+    let host = HostHarness::new()
         .session_memory_mib(32)
         .with_native_guest(Box::new(QuietGuest))
         .build()
@@ -529,7 +529,7 @@ fn hst_406_all_five_session_keys_have_the_documented_defaults() {
 /// REQ: HST-410, API-010, API-016
 #[test]
 fn hst_410_unrequested_capability_traps_and_the_log_names_interface_and_function() {
-    let mut host = HostHarness::new()
+    let host = HostHarness::new()
         .grants(&["fs.read:project"])
         .with_native_guest(Box::new(QuietGuest))
         .build()
@@ -548,7 +548,7 @@ fn hst_410_unrequested_capability_traps_and_the_log_names_interface_and_function
 /// REQ: HST-410, API-016
 #[test]
 fn hst_410_declined_grant_returns_not_permitted_and_logs_one_line_with_three_fields() {
-    let mut host = HostHarness::new()
+    let host = HostHarness::new()
         .grants(&[])
         .with_native_guest(Box::new(QuietGuest))
         .build()
@@ -563,7 +563,7 @@ fn hst_410_declined_grant_returns_not_permitted_and_logs_one_line_with_three_fie
 /// REQ: API-010
 #[test]
 fn api_010_import_whose_capability_was_never_requested_traps_and_restarts() {
-    let mut host = HostHarness::new()
+    let host = HostHarness::new()
         .grants(&[])
         .with_native_guest(Box::new(QuietGuest))
         .build()
@@ -599,7 +599,7 @@ fn api_011_tree_with_4097_nodes_traps_invalid_ui_tree() {
 /// REQ: API-011
 #[test]
 fn api_011_tree_with_4096_nodes_is_accepted() {
-    let mut host = host_with_fixture("tree-4096-nodes", Tier::T3);
+    let host = host_with_fixture("tree-4096-nodes", Tier::T3);
     host.render_view("main");
     assert!(host.failures().is_empty());
 }
@@ -688,7 +688,7 @@ fn api_081_a_trap_with_an_unknown_code_is_recorded_as_trap_abi_never_invented() 
 /// REQ: API-060
 #[test]
 fn api_060_65_kib_raw_input_is_refused_invalid_argument_and_sends_no_bytes() {
-    let mut host = host_with(QuietGuest);
+    let host = host_with(QuietGuest);
     let reply = host.call_import_json(
         "ilium:host/panes",
         "send-raw",
@@ -701,7 +701,7 @@ fn api_060_65_kib_raw_input_is_refused_invalid_argument_and_sends_no_bytes() {
 /// REQ: API-060
 #[test]
 fn api_060_64_kib_raw_input_is_accepted() {
-    let mut host = host_with(QuietGuest);
+    let host = host_with(QuietGuest);
     let reply = host.call_import_json(
         "ilium:host/panes",
         "send-raw",
@@ -713,7 +713,7 @@ fn api_060_64_kib_raw_input_is_accepted() {
 /// REQ: API-061
 #[test]
 fn api_061_state_dependent_cap_returns_quota_exceeded_and_precheckable_cap_invalid_argument() {
-    let mut host = host_with(QuietGuest);
+    let host = host_with(QuietGuest);
     let rows = host.call_import_json(
         "ilium:host/panes",
         "read-cells",
@@ -731,7 +731,7 @@ fn api_061_state_dependent_cap_returns_quota_exceeded_and_precheckable_cap_inval
 /// REQ: API-061
 #[test]
 fn api_061_the_boundary_values_1000_rows_and_16_stages_pass_the_cap_check() {
-    let mut host = host_with(QuietGuest);
+    let host = host_with(QuietGuest);
     let rows = host.call_import_json(
         "ilium:host/panes",
         "read-cells",
@@ -749,7 +749,7 @@ fn api_061_the_boundary_values_1000_rows_and_16_stages_pass_the_cap_check() {
 /// REQ: API-062
 #[test]
 fn api_062_timer_of_10_ms_is_invalid_argument_and_50_ms_is_accepted() {
-    let mut host = host_with(QuietGuest);
+    let host = host_with(QuietGuest);
     assert_eq!(
         host.call_import_json(
             "ilium:host/timers",
@@ -782,7 +782,7 @@ fn api_062_timer_of_10_ms_is_invalid_argument_and_50_ms_is_accepted() {
 /// REQ: API-062
 #[test]
 fn api_062_sync_fs_read_over_1_mib_is_invalid_argument_and_1_mib_is_accepted() {
-    let mut host = HostHarness::new()
+    let host = HostHarness::new()
         .grants(&["fs.read:project"])
         .with_native_guest(Box::new(QuietGuest))
         .build()
@@ -812,7 +812,7 @@ fn api_062_sync_fs_read_over_1_mib_is_invalid_argument_and_1_mib_is_accepted() {
 /// REQ: API-070
 #[test]
 fn api_070_two_plugins_open_32_streams_each_and_a_65th_is_quota_exceeded() {
-    let mut host = HostHarness::new()
+    let host = HostHarness::new()
         .two_plugins()
         .grants(&["http:example.com"])
         .with_native_guest(Box::new(QuietGuest))
@@ -856,7 +856,7 @@ fn sound_host() -> ilium_plugin_host::testing::HarnessHandle {
 /// REQ: API-071
 #[test]
 fn api_071_play_sound_allows_4_per_second_and_refuses_the_fifth() {
-    let mut host = sound_host();
+    let host = sound_host();
     for _ in 0..4 {
         assert!(host
             .call_import_json("ilium:host/sounds", "play", "{\"name\":\"bell\"}")
@@ -939,7 +939,7 @@ fn api_071_window_survives_a_restart_of_the_plugin_side() {
 /// REQ: API-071
 #[test]
 fn api_071_topics_publish_allows_100_per_second_and_refuses_the_101st() {
-    let mut host = HostHarness::new()
+    let host = HostHarness::new()
         .grants(&["topics.publish:demo"])
         .with_native_guest(Box::new(QuietGuest))
         .build()
@@ -970,7 +970,7 @@ fn api_071_topics_publish_allows_100_per_second_and_refuses_the_101st() {
 /// REQ: API-071
 #[test]
 fn api_071_journal_log_event_allows_20_per_second_and_refuses_the_21st() {
-    let mut host = host_with(QuietGuest);
+    let host = host_with(QuietGuest);
     for _ in 0..20 {
         assert!(host
             .call_import_json(
@@ -1019,7 +1019,7 @@ fn api_071_geocode_allows_one_per_second() {
 /// REQ: API-071
 #[test]
 fn api_071_rates_are_per_plugin_not_shared_between_plugins() {
-    let mut host = HostHarness::new()
+    let host = HostHarness::new()
         .two_plugins()
         .with_native_guest(Box::new(QuietGuest))
         .build()
@@ -1057,7 +1057,7 @@ fn api_072_balance_never_refills_above_2000_ms() {
 /// REQ: API-072, API-003
 #[test]
 fn api_072_empty_bucket_refuses_with_quota_exceeded_and_the_documented_retry_after() {
-    let mut host = host_with(QuietGuest);
+    let host = host_with(QuietGuest);
     host.charge_cpu_ms(2_000);
     assert_eq!(
         host.call_import_json("ilium:host/sounds", "play", "{\"name\":\"bell\"}")
@@ -1077,7 +1077,7 @@ fn api_072_negative_balance_retry_after_is_max_100_ceil10_of_double_the_deficit(
         (2_000 + 51, 110),
         (2_000 + 500, 1_000),
     ] {
-        let mut host = host_with(QuietGuest);
+        let host = host_with(QuietGuest);
         host.charge_cpu_ms(charge);
         let reply = host.call_import_json("ilium:host/sounds", "play", "{\"name\":\"bell\"}");
         assert_eq!(reply.retry_after_ms(), Some(expected), "charge {charge}");
@@ -1087,7 +1087,7 @@ fn api_072_negative_balance_retry_after_is_max_100_ceil10_of_double_the_deficit(
 /// REQ: API-072
 #[test]
 fn api_072_a_balance_of_exactly_one_ms_is_not_empty() {
-    let mut host = host_with(QuietGuest);
+    let host = host_with(QuietGuest);
     host.charge_cpu_ms(1_999);
     assert!(host
         .call_import_json("ilium:host/sounds", "play", "{\"name\":\"bell\"}")
@@ -1100,7 +1100,7 @@ fn api_072_a_balance_of_exactly_one_ms_is_not_empty() {
 /// REQ: API-073
 #[test]
 fn api_073_the_65th_pending_request_returns_busy() {
-    let mut host = HostHarness::new()
+    let host = HostHarness::new()
         .grants(&["http:example.com"])
         .with_native_guest(Box::new(QuietGuest))
         .build()
@@ -1117,7 +1117,7 @@ fn api_073_the_65th_pending_request_returns_busy() {
 /// REQ: API-073
 #[test]
 fn api_073_a_completed_request_frees_its_slot_when_the_completion_is_enqueued() {
-    let mut host = HostHarness::new()
+    let host = HostHarness::new()
         .grants(&["http:example.com"])
         .with_native_guest(Box::new(QuietGuest))
         .build()
@@ -1132,7 +1132,7 @@ fn api_073_a_completed_request_frees_its_slot_when_the_completion_is_enqueued() 
 /// REQ: API-073
 #[test]
 fn api_073_refused_submissions_and_sync_calls_do_not_count() {
-    let mut host = host_with(QuietGuest);
+    let host = host_with(QuietGuest);
     for _ in 0..70 {
         host.call_import_json("ilium:host/sounds", "play", "{\"name\":\"\"}");
     }
@@ -1148,7 +1148,7 @@ fn api_073_default_is_64_and_limit_key_is_pending_requests() {
 /// REQ: API-074
 #[test]
 fn api_074_timer_never_fires_inside_the_call_that_set_it() {
-    let mut host = host_with(QuietGuest);
+    let host = host_with(QuietGuest);
     host.call_import_json(
         "ilium:host/timers",
         "set",
@@ -1194,7 +1194,7 @@ fn api_074_cancel_removes_a_queued_undelivered_tick() {
 /// REQ: API-074
 #[test]
 fn api_074_cancelling_an_unknown_id_is_a_silent_no_op() {
-    let mut host = host_with(QuietGuest);
+    let host = host_with(QuietGuest);
     let reply = host.call_import_json("ilium:host/timers", "cancel", "{\"id\":987654}");
     assert!(reply.error_code().is_none());
     assert!(reply.trap_code().is_none());

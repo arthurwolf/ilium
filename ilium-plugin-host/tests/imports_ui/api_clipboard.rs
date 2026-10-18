@@ -10,7 +10,7 @@ const GRANTS: &[&str] = &["clipboard.read", "clipboard.write"];
 /// REQ: WIT:ilium:host/clipboard.read-text
 #[test]
 fn wit_clipboard_read_text_returns_the_clipboard_text() {
-    let mut rig = rig(GRANTS);
+    let rig = rig(GRANTS);
     rig.kernel.set_clipboard(Some("hello".to_owned()));
     assert_eq!(rig.host.clipboard().read_text(), Some("hello".to_owned()));
 }
@@ -18,7 +18,7 @@ fn wit_clipboard_read_text_returns_the_clipboard_text() {
 /// REQ: WIT:ilium:host/clipboard.read-text
 #[test]
 fn wit_clipboard_read_text_empty_clipboard_is_none() {
-    let mut rig = rig(GRANTS);
+    let rig = rig(GRANTS);
     rig.kernel.set_clipboard(None);
     assert_eq!(rig.host.clipboard().read_text(), None);
 }
@@ -26,7 +26,7 @@ fn wit_clipboard_read_text_empty_clipboard_is_none() {
 /// REQ: WIT:ilium:host/clipboard.read-text
 #[test]
 fn wit_clipboard_read_text_declined_grant_is_none() {
-    let mut rig = declined_rig(&["clipboard.read"]);
+    let rig = declined_rig(&["clipboard.read"]);
     rig.kernel.set_clipboard(Some("secret".to_owned()));
     assert_eq!(rig.host.clipboard().read_text(), None);
 }
@@ -34,7 +34,7 @@ fn wit_clipboard_read_text_declined_grant_is_none() {
 /// REQ: WIT:ilium:host/clipboard.write-text
 #[test]
 fn wit_clipboard_write_text_sets_the_clipboard() {
-    let mut rig = rig(GRANTS);
+    let rig = rig(GRANTS);
     rig.host
         .clipboard()
         .write_text("copied".to_owned())
@@ -45,7 +45,7 @@ fn wit_clipboard_write_text_sets_the_clipboard() {
 /// REQ: WIT:ilium:host/clipboard.write-text
 #[test]
 fn wit_clipboard_write_text_one_mib_boundary_invalid_argument() {
-    let mut rig = rig(GRANTS);
+    let rig = rig(GRANTS);
     assert!(rig.host.clipboard().write_text(text_of(MIB - 1)).is_ok());
     assert!(rig.host.clipboard().write_text(text_of(MIB)).is_ok());
     assert_eq!(
@@ -57,7 +57,7 @@ fn wit_clipboard_write_text_one_mib_boundary_invalid_argument() {
 /// REQ: WIT:ilium:host/clipboard.write-text
 #[test]
 fn wit_clipboard_write_text_declined_grant_not_permitted() {
-    let mut rig = declined_rig(&["clipboard.write"]);
+    let rig = declined_rig(&["clipboard.write"]);
     assert_eq!(
         code_of(rig.host.clipboard().write_text("x".to_owned())),
         ErrorCode::NotPermitted

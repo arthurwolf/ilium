@@ -21,7 +21,7 @@ fn texts(count: usize) -> Vec<String> {
 /// REQ: WIT:ilium:host/vector.embed
 #[test]
 fn wit_vector_embed_returns_a_request_id_that_completes_with_vectors() {
-    let mut rig = seeded();
+    let rig = seeded();
     let id = rig
         .host
         .vector()
@@ -36,7 +36,7 @@ fn wit_vector_embed_returns_a_request_id_that_completes_with_vectors() {
 /// REQ: WIT:ilium:host/vector.embed
 #[test]
 fn wit_vector_embed_text_count_boundaries_invalid_argument() {
-    let mut rig = seeded();
+    let rig = seeded();
     assert_eq!(
         code_of(rig.host.vector().embed(Vec::new(), "p".to_owned())),
         ErrorCode::InvalidArgument
@@ -51,7 +51,7 @@ fn wit_vector_embed_text_count_boundaries_invalid_argument() {
 /// REQ: WIT:ilium:host/vector.embed
 #[test]
 fn wit_vector_embed_text_size_boundaries_invalid_argument() {
-    let mut rig = seeded();
+    let rig = seeded();
     assert!(rig
         .host
         .vector()
@@ -75,7 +75,7 @@ fn wit_vector_embed_text_size_boundaries_invalid_argument() {
 /// REQ: WIT:ilium:host/vector.embed
 #[test]
 fn wit_vector_embed_without_a_provider_unsupported() {
-    let mut rig = rig(GRANTS);
+    let rig = rig(GRANTS);
     rig.kernel.set_embedder(None);
     assert_eq!(
         code_of(rig.host.vector().embed(texts(1), "p".to_owned())),
@@ -86,7 +86,7 @@ fn wit_vector_embed_without_a_provider_unsupported() {
 /// REQ: WIT:ilium:host/vector.embed
 #[test]
 fn wit_vector_embed_declined_grant_not_permitted() {
-    let mut rig = declined_rig(&["inference.embed"]);
+    let rig = declined_rig(&["inference.embed"]);
     assert_eq!(
         code_of(rig.host.vector().embed(texts(1), "p".to_owned())),
         ErrorCode::NotPermitted
@@ -96,7 +96,7 @@ fn wit_vector_embed_declined_grant_not_permitted() {
 /// REQ: WIT:ilium:host/vector.take-vectors
 #[test]
 fn wit_vector_take_vectors_returns_once() {
-    let mut rig = seeded();
+    let rig = seeded();
     let id = rig
         .host
         .vector()
@@ -110,7 +110,7 @@ fn wit_vector_take_vectors_returns_once() {
 /// REQ: WIT:ilium:host/vector.take-vectors
 #[test]
 fn wit_vector_take_vectors_unknown_request_is_none() {
-    let mut rig = seeded();
+    let rig = seeded();
     assert!(rig
         .host
         .vector()
@@ -121,7 +121,7 @@ fn wit_vector_take_vectors_unknown_request_is_none() {
 /// REQ: WIT:ilium:host/vector.create-index
 #[test]
 fn wit_vector_create_index_returns_distinct_ids() {
-    let mut rig = seeded();
+    let rig = seeded();
     let first = rig
         .host
         .vector()
@@ -138,7 +138,7 @@ fn wit_vector_create_index_returns_distinct_ids() {
 /// REQ: WIT:ilium:host/vector.create-index
 #[test]
 fn wit_vector_create_index_dimension_boundaries_invalid_argument() {
-    let mut rig = seeded();
+    let rig = seeded();
     assert_eq!(
         code_of(rig.host.vector().create_index("z".to_owned(), 0)),
         ErrorCode::InvalidArgument
@@ -164,7 +164,7 @@ fn wit_vector_create_index_dimension_boundaries_invalid_argument() {
 /// REQ: WIT:ilium:host/vector.create-index
 #[test]
 fn wit_vector_create_index_fifth_index_quota_exceeded() {
-    let mut rig = seeded();
+    let rig = seeded();
     for n in 0..4 {
         rig.host
             .vector()
@@ -180,7 +180,7 @@ fn wit_vector_create_index_fifth_index_quota_exceeded() {
 /// REQ: WIT:ilium:host/vector.upsert
 #[test]
 fn wit_vector_upsert_inserts_then_replaces_by_id() {
-    let mut rig = seeded();
+    let rig = seeded();
     let index = rig
         .host
         .vector()
@@ -206,7 +206,7 @@ fn wit_vector_upsert_inserts_then_replaces_by_id() {
 /// REQ: WIT:ilium:host/vector.upsert
 #[test]
 fn wit_vector_upsert_length_mismatch_invalid_argument() {
-    let mut rig = seeded();
+    let rig = seeded();
     let index = rig
         .host
         .vector()
@@ -225,7 +225,7 @@ fn wit_vector_upsert_length_mismatch_invalid_argument() {
 /// REQ: WIT:ilium:host/vector.upsert
 #[test]
 fn wit_vector_upsert_unknown_index_not_found() {
-    let mut rig = seeded();
+    let rig = seeded();
     assert_eq!(
         code_of(
             rig.host
@@ -239,7 +239,7 @@ fn wit_vector_upsert_unknown_index_not_found() {
 /// REQ: WIT:ilium:host/vector.upsert
 #[test]
 fn wit_vector_upsert_entry_quota_boundary_quota_exceeded() {
-    let mut rig = seeded();
+    let rig = seeded();
     rig.kernel.set_vector_entry_limit(2);
     let index = rig
         .host
@@ -265,7 +265,7 @@ fn wit_vector_upsert_entry_quota_boundary_quota_exceeded() {
 /// REQ: WIT:ilium:host/vector.remove-entries
 #[test]
 fn wit_vector_remove_entries_drops_the_named_entries() {
-    let mut rig = seeded();
+    let rig = seeded();
     let index = rig
         .host
         .vector()
@@ -292,7 +292,7 @@ fn wit_vector_remove_entries_drops_the_named_entries() {
 /// REQ: WIT:ilium:host/vector.remove-entries
 #[test]
 fn wit_vector_remove_entries_unknown_ids_are_ignored() {
-    let mut rig = seeded();
+    let rig = seeded();
     let index = rig
         .host
         .vector()
@@ -308,7 +308,7 @@ fn wit_vector_remove_entries_unknown_ids_are_ignored() {
 /// REQ: WIT:ilium:host/vector.remove-entries
 #[test]
 fn wit_vector_remove_entries_unknown_index_not_found() {
-    let mut rig = seeded();
+    let rig = seeded();
     assert_eq!(
         code_of(
             rig.host
@@ -322,7 +322,7 @@ fn wit_vector_remove_entries_unknown_index_not_found() {
 /// REQ: WIT:ilium:host/vector.top-k
 #[test]
 fn wit_vector_top_k_orders_by_similarity_and_limits_to_k() {
-    let mut rig = seeded();
+    let rig = seeded();
     let index = rig
         .host
         .vector()
@@ -354,7 +354,7 @@ fn wit_vector_top_k_orders_by_similarity_and_limits_to_k() {
 /// REQ: WIT:ilium:host/vector.top-k
 #[test]
 fn wit_vector_top_k_k_boundaries_invalid_argument() {
-    let mut rig = seeded();
+    let rig = seeded();
     let index = rig
         .host
         .vector()
@@ -375,7 +375,7 @@ fn wit_vector_top_k_k_boundaries_invalid_argument() {
 /// REQ: WIT:ilium:host/vector.top-k
 #[test]
 fn wit_vector_top_k_query_length_mismatch_invalid_argument() {
-    let mut rig = seeded();
+    let rig = seeded();
     let index = rig
         .host
         .vector()
@@ -390,7 +390,7 @@ fn wit_vector_top_k_query_length_mismatch_invalid_argument() {
 /// REQ: WIT:ilium:host/vector.drop-index
 #[test]
 fn wit_vector_drop_index_frees_the_quota_slot_and_invalidates_the_id() {
-    let mut rig = seeded();
+    let rig = seeded();
     let ids: Vec<_> = (0..4)
         .map(|n| {
             rig.host
@@ -414,7 +414,7 @@ fn wit_vector_drop_index_frees_the_quota_slot_and_invalidates_the_id() {
 /// REQ: WIT:ilium:host/vector.drop-index
 #[test]
 fn wit_vector_drop_index_unknown_id_is_a_no_op() {
-    let mut rig = seeded();
+    let rig = seeded();
     rig.host.vector().drop_index(IndexId(31_337));
     assert!(rig.host.failures().is_empty());
 }

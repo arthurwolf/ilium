@@ -247,5 +247,5 @@ pub fn contribute(session: &mut FakeSession, point: &str, id: &str, priority: u8
     session
         .plugin(PLUGIN_ID)
         .extensions()
-        .contribute(point, id, priority, &entry.to_string());
+        .contribute(point, id, priority, entry.to_string());
 }

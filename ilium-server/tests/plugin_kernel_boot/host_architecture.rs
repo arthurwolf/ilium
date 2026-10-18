@@ -432,7 +432,7 @@ fn hst_020_the_cli_host_starts_no_server_and_takes_no_session_lock() {
 /// REQ: HST-024
 #[test]
 fn hst_024_the_server_host_owns_the_retained_contribution_registry() {
-    let mut run = started(vec![
+    let run = started(vec![
         startup("ilium.core.notifications").contributes("ilium.core.titles/before-title")
     ]);
     assert_eq!(run.contribution_registry_owner(), ProcessKind::Server);
@@ -755,7 +755,7 @@ fn hst_040_disabling_a_core_plugin_keeps_the_session_running() {
 fn hst_040_the_disabled_state_persists_across_restarts() {
     let mut run = started(vec![startup("ilium.core.titles")]);
     run.fail_until_disabled("ilium.core.titles", Side::Server);
-    let mut again = run.restart_server();
+    let again = run.restart_server();
     assert!(again.disabled_reason("ilium.core.titles").is_some());
 }
 

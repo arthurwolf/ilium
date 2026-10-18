@@ -51,7 +51,7 @@ fn seeded(popups: &[&str]) -> Rig {
 /// REQ: WIT:ilium:host/ui-host.open-panel
 #[test]
 fn wit_ui_host_open_panel_shows_a_declared_panel() {
-    let mut rig = seeded(&[]);
+    let rig = seeded(&[]);
     rig.host
         .ui_host()
         .open_panel("notes".to_owned())
@@ -62,7 +62,7 @@ fn wit_ui_host_open_panel_shows_a_declared_panel() {
 /// REQ: WIT:ilium:host/ui-host.open-panel
 #[test]
 fn wit_ui_host_open_panel_undeclared_panel_not_found() {
-    let mut rig = seeded(&[]);
+    let rig = seeded(&[]);
     assert_eq!(
         code_of(rig.host.ui_host().open_panel("ghost".to_owned())),
         ErrorCode::NotFound
@@ -72,7 +72,7 @@ fn wit_ui_host_open_panel_undeclared_panel_not_found() {
 /// REQ: WIT:ilium:host/ui-host.open-panel
 #[test]
 fn wit_ui_host_open_panel_declined_grant_not_permitted() {
-    let mut rig = declined_rig(&["ui.panels"]);
+    let rig = declined_rig(&["ui.panels"]);
     rig.kernel.declare_panel("notes");
     assert_eq!(
         code_of(rig.host.ui_host().open_panel("notes".to_owned())),
@@ -83,7 +83,7 @@ fn wit_ui_host_open_panel_declined_grant_not_permitted() {
 /// REQ: WIT:ilium:host/ui-host.close-panel
 #[test]
 fn wit_ui_host_close_panel_hides_the_panel() {
-    let mut rig = seeded(&[]);
+    let rig = seeded(&[]);
     rig.host
         .ui_host()
         .open_panel("notes".to_owned())
@@ -95,7 +95,7 @@ fn wit_ui_host_close_panel_hides_the_panel() {
 /// REQ: WIT:ilium:host/ui-host.close-panel
 #[test]
 fn wit_ui_host_close_panel_not_open_is_a_no_op() {
-    let mut rig = seeded(&[]);
+    let rig = seeded(&[]);
     rig.host.ui_host().close_panel("notes".to_owned());
     assert!(rig.host.failures().is_empty());
 }
@@ -103,7 +103,7 @@ fn wit_ui_host_close_panel_not_open_is_a_no_op() {
 /// REQ: WIT:ilium:host/ui-host.close-panel
 #[test]
 fn wit_ui_host_close_panel_undeclared_panel_is_a_no_op() {
-    let mut rig = seeded(&[]);
+    let rig = seeded(&[]);
     rig.host.ui_host().close_panel("ghost".to_owned());
     assert!(rig.host.failures().is_empty());
 }
@@ -111,7 +111,7 @@ fn wit_ui_host_close_panel_undeclared_panel_is_a_no_op() {
 /// REQ: WIT:ilium:host/ui-host.open-popup
 #[test]
 fn wit_ui_host_open_popup_shows_the_popup_node_of_the_committed_tree() {
-    let mut rig = seeded(&["keys-help"]);
+    let rig = seeded(&["keys-help"]);
     rig.host
         .ui_host()
         .open_panel("notes".to_owned())
@@ -129,7 +129,7 @@ fn wit_ui_host_open_popup_shows_the_popup_node_of_the_committed_tree() {
 /// REQ: WIT:ilium:host/ui-host.open-popup
 #[test]
 fn wit_ui_host_open_popup_no_matching_node_not_found() {
-    let mut rig = seeded(&[]);
+    let rig = seeded(&[]);
     assert_eq!(
         code_of(
             rig.host
@@ -143,7 +143,7 @@ fn wit_ui_host_open_popup_no_matching_node_not_found() {
 /// REQ: WIT:ilium:host/ui-host.open-popup
 #[test]
 fn wit_ui_host_open_popup_two_matching_nodes_invalid_argument() {
-    let mut rig = seeded(&["dup", "dup"]);
+    let rig = seeded(&["dup", "dup"]);
     assert_eq!(
         code_of(rig.host.ui_host().open_popup("dup".to_owned(), centered())),
         ErrorCode::InvalidArgument
@@ -153,7 +153,7 @@ fn wit_ui_host_open_popup_two_matching_nodes_invalid_argument() {
 /// REQ: WIT:ilium:host/ui-host.open-popup
 #[test]
 fn wit_ui_host_open_popup_fifth_popup_in_one_view_quota_exceeded() {
-    let mut rig = seeded(&["p1", "p2", "p3", "p4", "p5"]);
+    let rig = seeded(&["p1", "p2", "p3", "p4", "p5"]);
     for name in ["p1", "p2", "p3", "p4"] {
         rig.host
             .ui_host()
@@ -169,7 +169,7 @@ fn wit_ui_host_open_popup_fifth_popup_in_one_view_quota_exceeded() {
 /// REQ: WIT:ilium:host/ui-host.open-popup
 #[test]
 fn wit_ui_host_open_popup_declined_grant_not_permitted() {
-    let mut rig = declined_rig(&["ui.panels"]);
+    let rig = declined_rig(&["ui.panels"]);
     assert_eq!(
         code_of(rig.host.ui_host().open_popup("p".to_owned(), centered())),
         ErrorCode::NotPermitted
@@ -179,7 +179,7 @@ fn wit_ui_host_open_popup_declined_grant_not_permitted() {
 /// REQ: WIT:ilium:host/ui-host.open-popup-with
 #[test]
 fn wit_ui_host_open_popup_with_anchors_at_a_key() {
-    let mut rig = seeded(&["detail"]);
+    let rig = seeded(&["detail"]);
     let anchor = PopupAnchor::AtKey(KeyAnchor {
         key: "delete".to_owned(),
         side: AnchorSide::Right,
@@ -195,7 +195,7 @@ fn wit_ui_host_open_popup_with_anchors_at_a_key() {
 /// REQ: WIT:ilium:host/ui-host.open-popup-with
 #[test]
 fn wit_ui_host_open_popup_with_anchor_key_not_in_the_view_invalid_argument() {
-    let mut rig = seeded(&["detail"]);
+    let rig = seeded(&["detail"]);
     let anchor = PopupAnchor::AtKey(KeyAnchor {
         key: "no-such-key".to_owned(),
         side: AnchorSide::Below,
@@ -213,7 +213,7 @@ fn wit_ui_host_open_popup_with_anchor_key_not_in_the_view_invalid_argument() {
 /// REQ: WIT:ilium:host/ui-host.open-popup-with
 #[test]
 fn wit_ui_host_open_popup_with_unknown_popup_not_found() {
-    let mut rig = seeded(&[]);
+    let rig = seeded(&[]);
     assert_eq!(
         code_of(rig.host.ui_host().open_popup_with(
             "ghost".to_owned(),
@@ -227,7 +227,7 @@ fn wit_ui_host_open_popup_with_unknown_popup_not_found() {
 /// REQ: WIT:ilium:host/ui-host.open-popup-with
 #[test]
 fn wit_ui_host_open_popup_with_fifth_popup_quota_exceeded() {
-    let mut rig = seeded(&["p1", "p2", "p3", "p4", "p5"]);
+    let rig = seeded(&["p1", "p2", "p3", "p4", "p5"]);
     for name in ["p1", "p2", "p3", "p4"] {
         rig.host
             .ui_host()
@@ -247,7 +247,7 @@ fn wit_ui_host_open_popup_with_fifth_popup_quota_exceeded() {
 /// REQ: WIT:ilium:host/ui-host.close-popup
 #[test]
 fn wit_ui_host_close_popup_hides_it_and_frees_a_slot() {
-    let mut rig = seeded(&["p1", "p2", "p3", "p4", "p5"]);
+    let rig = seeded(&["p1", "p2", "p3", "p4", "p5"]);
     for name in ["p1", "p2", "p3", "p4"] {
         rig.host
             .ui_host()
@@ -266,7 +266,7 @@ fn wit_ui_host_close_popup_hides_it_and_frees_a_slot() {
 /// REQ: WIT:ilium:host/ui-host.close-popup
 #[test]
 fn wit_ui_host_close_popup_not_open_is_a_no_op() {
-    let mut rig = seeded(&["p1"]);
+    let rig = seeded(&["p1"]);
     rig.host.ui_host().close_popup("p1".to_owned());
     rig.host.ui_host().close_popup("ghost".to_owned());
     assert!(rig.host.failures().is_empty());
@@ -275,7 +275,7 @@ fn wit_ui_host_close_popup_not_open_is_a_no_op() {
 /// REQ: WIT:ilium:host/ui-host.invalidate
 #[test]
 fn wit_ui_host_invalidate_queues_one_render_of_the_view() {
-    let mut rig = seeded(&[]);
+    let rig = seeded(&[]);
     rig.host.ui_host().invalidate(panel_view());
     rig.host.pump(8);
     assert_eq!(rig.kernel.render_count("notes"), 1);
@@ -284,7 +284,7 @@ fn wit_ui_host_invalidate_queues_one_render_of_the_view() {
 /// REQ: WIT:ilium:host/ui-host.invalidate
 #[test]
 fn wit_ui_host_invalidate_repeated_calls_coalesce_into_one_render() {
-    let mut rig = seeded(&[]);
+    let rig = seeded(&[]);
     for _ in 0..5 {
         rig.host.ui_host().invalidate(panel_view());
     }
@@ -295,7 +295,7 @@ fn wit_ui_host_invalidate_repeated_calls_coalesce_into_one_render() {
 /// REQ: WIT:ilium:host/ui-host.invalidate
 #[test]
 fn wit_ui_host_invalidate_unknown_view_never_fails() {
-    let mut rig = seeded(&[]);
+    let rig = seeded(&[]);
     rig.host
         .ui_host()
         .invalidate(ViewTarget::Panel("ghost".to_owned()));
@@ -305,7 +305,7 @@ fn wit_ui_host_invalidate_unknown_view_never_fails() {
 /// REQ: WIT:ilium:host/ui-host.widget-state
 #[test]
 fn wit_ui_host_widget_state_reads_the_host_owned_state() {
-    let mut rig = seeded(&[]);
+    let rig = seeded(&[]);
     rig.kernel
         .set_widget_state("notes", "title", WidgetState::Text("abc".to_owned()));
     assert_eq!(
@@ -319,7 +319,7 @@ fn wit_ui_host_widget_state_reads_the_host_owned_state() {
 /// REQ: WIT:ilium:host/ui-host.widget-state
 #[test]
 fn wit_ui_host_widget_state_unknown_key_is_none() {
-    let mut rig = seeded(&[]);
+    let rig = seeded(&[]);
     assert_eq!(
         rig.host
             .ui_host()
@@ -331,7 +331,7 @@ fn wit_ui_host_widget_state_unknown_key_is_none() {
 /// REQ: WIT:ilium:host/ui-host.widget-state
 #[test]
 fn wit_ui_host_widget_state_unknown_view_is_none() {
-    let mut rig = seeded(&[]);
+    let rig = seeded(&[]);
     assert_eq!(
         rig.host
             .ui_host()
@@ -343,7 +343,7 @@ fn wit_ui_host_widget_state_unknown_view_is_none() {
 /// REQ: WIT:ilium:host/ui-host.set-widget-state
 #[test]
 fn wit_ui_host_set_widget_state_selects_a_list_row() {
-    let mut rig = seeded(&[]);
+    let rig = seeded(&[]);
     rig.host
         .ui_host()
         .set_widget_state(
@@ -363,7 +363,7 @@ fn wit_ui_host_set_widget_state_selects_a_list_row() {
 /// REQ: WIT:ilium:host/ui-host.set-widget-state
 #[test]
 fn wit_ui_host_set_widget_state_unknown_key_not_found() {
-    let mut rig = seeded(&[]);
+    let rig = seeded(&[]);
     let result = rig.host.ui_host().set_widget_state(
         panel_view(),
         "ghost".to_owned(),
@@ -375,7 +375,7 @@ fn wit_ui_host_set_widget_state_unknown_key_not_found() {
 /// REQ: WIT:ilium:host/ui-host.set-widget-state
 #[test]
 fn wit_ui_host_set_widget_state_offset_on_a_button_invalid_argument() {
-    let mut rig = seeded(&[]);
+    let rig = seeded(&[]);
     let result = rig.host.ui_host().set_widget_state(
         panel_view(),
         "delete".to_owned(),
@@ -387,7 +387,7 @@ fn wit_ui_host_set_widget_state_offset_on_a_button_invalid_argument() {
 /// REQ: WIT:ilium:host/ui-host.display-width
 #[test]
 fn wit_ui_host_display_width_ascii_counts_one_cell_per_character() {
-    let mut rig = seeded(&[]);
+    let rig = seeded(&[]);
     assert_eq!(rig.host.ui_host().display_width("hello".to_owned()), 5);
     assert_eq!(rig.host.ui_host().display_width(String::new()), 0);
 }
@@ -395,7 +395,7 @@ fn wit_ui_host_display_width_ascii_counts_one_cell_per_character() {
 /// REQ: WIT:ilium:host/ui-host.display-width
 #[test]
 fn wit_ui_host_display_width_wide_glyphs_count_two_cells() {
-    let mut rig = seeded(&[]);
+    let rig = seeded(&[]);
     assert_eq!(
         rig.host
             .ui_host()
@@ -407,14 +407,14 @@ fn wit_ui_host_display_width_wide_glyphs_count_two_cells() {
 /// REQ: WIT:ilium:host/ui-host.display-width
 #[test]
 fn wit_ui_host_display_width_combining_marks_add_no_width() {
-    let mut rig = seeded(&[]);
+    let rig = seeded(&[]);
     assert_eq!(rig.host.ui_host().display_width("e\u{301}".to_owned()), 1);
 }
 
 /// REQ: WIT:ilium:host/ui-host.theme
 #[test]
 fn wit_ui_host_theme_returns_the_active_tokens() {
-    let mut rig = seeded(&[]);
+    let rig = seeded(&[]);
     rig.kernel.set_theme(0x00_11_22_33, true);
     let theme = rig.host.ui_host().theme();
     assert_eq!(theme.foreground, 0x00_11_22_33);
@@ -424,7 +424,7 @@ fn wit_ui_host_theme_returns_the_active_tokens() {
 /// REQ: WIT:ilium:host/ui-host.theme
 #[test]
 fn wit_ui_host_theme_colours_use_only_the_low_24_bits() {
-    let mut rig = seeded(&[]);
+    let rig = seeded(&[]);
     let theme = rig.host.ui_host().theme();
     for colour in [
         theme.foreground,
@@ -442,7 +442,7 @@ fn wit_ui_host_theme_colours_use_only_the_low_24_bits() {
 /// REQ: WIT:ilium:host/ui-host.theme
 #[test]
 fn wit_ui_host_theme_stable_glyphs_follow_the_icon_mode() {
-    let mut rig = seeded(&[]);
+    let rig = seeded(&[]);
     rig.kernel.set_icon_mode(IconMode::Stable);
     assert!(rig.host.ui_host().theme().stable_glyphs);
     rig.kernel.set_icon_mode(IconMode::Normal);
@@ -452,7 +452,7 @@ fn wit_ui_host_theme_stable_glyphs_follow_the_icon_mode() {
 /// REQ: WIT:ilium:host/ui-host.theme-extras
 #[test]
 fn wit_ui_host_theme_extras_reports_density_and_reduced_motion() {
-    let mut rig = seeded(&[]);
+    let rig = seeded(&[]);
     rig.kernel.set_density(Density::Compact);
     rig.kernel.set_reduced_motion(true);
     let extras = rig.host.ui_host().theme_extras();
@@ -463,7 +463,7 @@ fn wit_ui_host_theme_extras_reports_density_and_reduced_motion() {
 /// REQ: WIT:ilium:host/ui-host.theme-extras
 #[test]
 fn wit_ui_host_theme_extras_icon_mode_is_normal_by_default() {
-    let mut rig = seeded(&[]);
+    let rig = seeded(&[]);
     assert_eq!(
         rig.host.ui_host().theme_extras().icon_mode,
         IconMode::Normal
@@ -473,7 +473,7 @@ fn wit_ui_host_theme_extras_icon_mode_is_normal_by_default() {
 /// REQ: WIT:ilium:host/ui-host.write-surface
 #[test]
 fn wit_ui_host_write_surface_writes_whole_rows() {
-    let mut rig = seeded(&[]);
+    let rig = seeded(&[]);
     let row = 4 * 3;
     rig.host
         .ui_host()
@@ -494,7 +494,7 @@ fn wit_ui_host_write_surface_writes_whole_rows() {
 /// REQ: WIT:ilium:host/ui-host.write-surface
 #[test]
 fn wit_ui_host_write_surface_partial_row_invalid_argument() {
-    let mut rig = seeded(&[]);
+    let rig = seeded(&[]);
     let result = rig.host.ui_host().write_surface(
         panel_view(),
         "canvas".to_owned(),
@@ -508,7 +508,7 @@ fn wit_ui_host_write_surface_partial_row_invalid_argument() {
 /// REQ: WIT:ilium:host/ui-host.write-surface
 #[test]
 fn wit_ui_host_write_surface_format_differs_invalid_argument() {
-    let mut rig = seeded(&[]);
+    let rig = seeded(&[]);
     let result = rig.host.ui_host().write_surface(
         panel_view(),
         "canvas".to_owned(),
@@ -522,7 +522,7 @@ fn wit_ui_host_write_surface_format_differs_invalid_argument() {
 /// REQ: WIT:ilium:host/ui-host.write-surface
 #[test]
 fn wit_ui_host_write_surface_past_the_surface_height_invalid_argument() {
-    let mut rig = seeded(&[]);
+    let rig = seeded(&[]);
     let result = rig.host.ui_host().write_surface(
         panel_view(),
         "canvas".to_owned(),
@@ -542,7 +542,6 @@ fn wit_ui_host_write_surface_over_sixteen_mib_invalid_argument() {
     rig.kernel.declare_panel("notes");
     rig.kernel
         .commit_view_tree("notes", &[("surface:gray8:1x17000000", "canvas")], &[]);
-    let mut rig = rig;
     let over = rig.host.ui_host().write_surface(
         panel_view(),
         "canvas".to_owned(),
@@ -564,7 +563,7 @@ fn wit_ui_host_write_surface_over_sixteen_mib_invalid_argument() {
 /// REQ: WIT:ilium:host/ui-host.write-surface
 #[test]
 fn wit_ui_host_write_surface_unknown_key_not_found() {
-    let mut rig = seeded(&[]);
+    let rig = seeded(&[]);
     let result = rig.host.ui_host().write_surface(
         panel_view(),
         "ghost".to_owned(),

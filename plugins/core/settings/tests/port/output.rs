@@ -2,7 +2,7 @@
 //! plugin only has to keep every frame it draws bounded, deterministic and failure-tolerant
 //! (F-089, F-090).
 
-use ilium_plugin_sdk::types::{ActionKind, ActionValue, ErrorCode, PluginError, ViewTarget};
+use ilium_plugin_sdk::types::{ErrorCode, PluginError, ViewTarget};
 use serde_json::json;
 
 use crate::common::*;

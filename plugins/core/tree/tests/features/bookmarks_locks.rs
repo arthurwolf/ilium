@@ -217,10 +217,7 @@ fn feature_006_bookmarks_survive_a_restart_of_the_server_side() {
         .deactivate(ilium_plugin_sdk::types::DeactivationReason::Shutdown);
     let metadata_before = session.server("ilium.core.tree").tree().metadata(node);
     // The flag lives in tree metadata, so the plugin may save no state of its own (None) or some bytes.
-    let saved_bytes = match saved {
-        Some(bytes) => bytes,
-        None => Vec::new(),
-    };
+    let saved_bytes = saved.unwrap_or_default();
     session.server("ilium.core.tree").restart_with(saved_bytes);
     assert_eq!(
         session.server("ilium.core.tree").tree().metadata(node),

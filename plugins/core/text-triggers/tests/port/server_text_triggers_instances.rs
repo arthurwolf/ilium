@@ -1,8 +1,7 @@
 //! Twins of ilium-server text_triggers.rs (instance tracking): what the plugin does with output-matched events, keyed by trigger-{filter}-{node}-{row} inside the 10 minute host dedup window.
 
-use ilium_plugin_sdk::testing::FakeHost;
-use ilium_plugin_sdk::types::{ErrorCode, Event, Outcome};
-use serde_json::{json, Value};
+use ilium_plugin_sdk::types::ErrorCode;
+use serde_json::json;
 
 use crate::common::*;
 use crate::support::*;

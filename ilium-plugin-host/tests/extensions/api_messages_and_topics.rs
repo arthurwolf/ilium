@@ -242,7 +242,7 @@ fn svc_024_star_inside_a_word_fails_and_names_the_pattern() {
     let result = install_subscriber("a*b");
     match result {
         Err(diagnostic) => assert!(diagnostic.message.contains("a*b"), "{}", diagnostic.message),
-        Ok(()) => assert!(false, "a*b must be refused"),
+        Ok(()) => panic!("a*b must be refused"),
     }
 }
 
@@ -264,7 +264,7 @@ fn svc_024_star_in_the_middle_of_a_path_fails() {
                     diagnostic.message
                 );
             }
-            Ok(()) => assert!(false, "{pattern} must be refused"),
+            Ok(()) => panic!("{pattern} must be refused"),
         }
     }
 }
@@ -472,10 +472,7 @@ fn message_outcome(world: &mut ExtWorld, channel: &str, payload: &[u8]) -> Optio
     world.settle();
     match id {
         Ok(id) => world.outcome(SENDER, id),
-        Err(error) => {
-            assert!(false, "message was refused synchronously: {error:?}");
-            None
-        }
+        Err(error) => panic!("message was refused synchronously: {error:?}"),
     }
 }
 

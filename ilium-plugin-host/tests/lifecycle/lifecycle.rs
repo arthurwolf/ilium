@@ -1,7 +1,6 @@
 //! lifecycle.md: LIF-025..059.
 
 use crate::support::*;
-use ilium_plugin_api::generated::host::plugins::HostPlugins;
 use ilium_plugin_api::generated::types::ErrorCode;
 use ilium_plugin_api::ids::PluginId;
 use proptest::prelude::*;
@@ -206,8 +205,7 @@ fn lif_032_next_activation_not_earlier_than_delay() {
     let last = host
         .activations()
         .into_iter()
-        .filter(|r| r.plugin == A)
-        .last()
+        .rfind(|r| r.plugin == A)
         .unwrap();
     assert!(last.begin_ms >= dropped_at + 1000);
 }
@@ -222,8 +220,7 @@ fn lif_032_next_activation_begins_within_250_ms_after_delay() {
     let last = host
         .activations()
         .into_iter()
-        .filter(|r| r.plugin == A)
-        .last()
+        .rfind(|r| r.plugin == A)
         .unwrap();
     assert!(last.begin_ms <= dropped_at + 1250);
 }

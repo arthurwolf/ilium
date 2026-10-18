@@ -245,12 +245,11 @@ impl Rig {
     /// stores are re-read).
     pub fn restart(self) -> Rig {
         let Rig {
-            host,
+            host: _stopped_host,
             net,
             state,
             setup,
         } = self;
-        drop(host);
         let host = Rig::build(&setup, state.path(), &net).expect("the harness builds again");
         Rig {
             host,

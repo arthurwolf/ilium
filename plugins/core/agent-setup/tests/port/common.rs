@@ -3,7 +3,7 @@
 pub use crate::host_ext::*;
 use std::path::PathBuf;
 
-use ilium_plugin_core_agent_setup::{AgentSetupClient, AgentSetupServer};
+use ilium_plugin_core_agent_setup::AgentSetupServer;
 use ilium_plugin_sdk::testing::FakeHost;
 use ilium_plugin_sdk::types::{FsPath, PluginError};
 use serde_json::{json, Value};
@@ -36,15 +36,6 @@ pub fn project_host() -> FakeHost {
     let mut host = server_host();
     host.open_project("ilium");
     host.settle();
-    host
-}
-
-pub fn client_host() -> FakeHost {
-    let mut host = FakeHost::for_manifest(manifest_path())
-        .expect("manifest loads")
-        .side("client")
-        .build();
-    host.activate::<AgentSetupClient>();
     host
 }
 

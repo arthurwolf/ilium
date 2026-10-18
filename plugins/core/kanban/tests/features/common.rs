@@ -1,5 +1,9 @@
 //! Shared helpers: the host, a board pane bound to the sample file, and readers.
 
+// This module is compiled into both the `features` and `port` test targets (the port twins mount it
+// with #[path]); each target uses a different subset of the helpers, so the rest look dead per target.
+#![allow(dead_code)]
+
 use std::path::PathBuf;
 
 use ilium_plugin_core_kanban::KanbanClient;

@@ -103,7 +103,7 @@ fn rnd_003_one_second_without_present_writes_one_warn() {
 #[test]
 fn rnd_004_gray8_row_accepts_exactly_width_bytes() {
     let mut s = SurfaceRig::new(8, 4, "gray8");
-    assert!(s.write_rows(0, &vec![7u8; 8]).is_ok());
+    assert!(s.write_rows(0, &[7u8; 8]).is_ok());
     assert_eq!(s.row_bytes(0), vec![7u8; 8]);
 }
 
@@ -111,7 +111,7 @@ fn rnd_004_gray8_row_accepts_exactly_width_bytes() {
 #[test]
 fn rnd_004_extra_byte_in_gray8_is_dropped_with_one_warn() {
     let mut s = SurfaceRig::new(8, 4, "gray8");
-    let _ = s.write_rows(0, &vec![7u8; 9]);
+    let _ = s.write_rows(0, &[7u8; 9]);
     assert_eq!(s.row_bytes(0), vec![7u8; 8]);
     assert_eq!(s.row_bytes(1), vec![0u8; 8]);
     assert_eq!(s.warn_count(), 1);
@@ -121,7 +121,7 @@ fn rnd_004_extra_byte_in_gray8_is_dropped_with_one_warn() {
 #[test]
 fn rnd_004_rgb8_needs_three_bytes_per_cell() {
     let mut s = SurfaceRig::new(4, 2, "rgb8");
-    let _ = s.write_rows(0, &vec![1u8; 13]);
+    let _ = s.write_rows(0, &[1u8; 13]);
     assert_eq!(s.row_bytes(0).len(), 12);
     assert_eq!(s.row_bytes(1), vec![0u8; 12]);
     assert_eq!(s.warn_count(), 1);
@@ -131,7 +131,7 @@ fn rnd_004_rgb8_needs_three_bytes_per_cell() {
 #[test]
 fn rnd_004_rgba8_needs_four_bytes_per_cell() {
     let mut s = SurfaceRig::new(4, 2, "rgba8");
-    let _ = s.write_rows(0, &vec![1u8; 33]);
+    let _ = s.write_rows(0, &[1u8; 33]);
     assert_eq!(s.row_bytes(0).len(), 16);
     assert_eq!(s.row_bytes(1), vec![1u8; 16]);
     assert_eq!(s.warn_count(), 1);
@@ -142,11 +142,11 @@ fn rnd_004_rgba8_needs_four_bytes_per_cell() {
 fn rnd_004_remainder_warning_limited_to_once_per_second() {
     let mut s = SurfaceRig::new(8, 4, "gray8");
     for _ in 0..10 {
-        let _ = s.write_rows(0, &vec![7u8; 9]);
+        let _ = s.write_rows(0, &[7u8; 9]);
     }
     assert_eq!(s.warn_count(), 1);
     s.advance_ms(1000);
-    let _ = s.write_rows(0, &vec![7u8; 9]);
+    let _ = s.write_rows(0, &[7u8; 9]);
     assert_eq!(s.warn_count(), 2);
 }
 
@@ -155,7 +155,7 @@ fn rnd_004_remainder_warning_limited_to_once_per_second() {
 fn rnd_005_rows_at_or_past_height_are_ignored() {
     let mut s = SurfaceRig::new(8, 4, "gray8");
     let before = s.frame_text();
-    let _ = s.write_rows(4, &vec![255u8; 8]);
+    let _ = s.write_rows(4, &[255u8; 8]);
     assert_eq!(s.frame_text(), before);
 }
 
@@ -163,7 +163,7 @@ fn rnd_005_rows_at_or_past_height_are_ignored() {
 #[test]
 fn rnd_005_partial_overflow_keeps_rows_inside_height() {
     let mut s = SurfaceRig::new(8, 4, "gray8");
-    let _ = s.write_rows(3, &vec![9u8; 16]);
+    let _ = s.write_rows(3, &[9u8; 16]);
     assert_eq!(s.row_bytes(3), vec![9u8; 8]);
 }
 

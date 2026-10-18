@@ -277,7 +277,7 @@ fn rsui_settings_screen_paints_and_hits_remote_controls_in_the_same_geometry() {
 /// REQ: PORT:ilium-client/src/remote_compaction_settings_ui.rs::scroll_follows_the_selection_and_the_page_scrolls_to_its_end
 #[test]
 fn rsui_scroll_follows_the_selection_and_the_page_scrolls_to_its_end() {
-    let mut host = dismissed();
+    let host = dismissed();
     let height = 12;
     assert_eq!(host.settings_scroll_for_selection(height, 0, 0), 0);
     let last = host.settings_rows().len() - 1;

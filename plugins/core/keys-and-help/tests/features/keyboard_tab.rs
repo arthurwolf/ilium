@@ -62,9 +62,7 @@ fn keyboard_007_each_action_row_has_its_key_after_a_leader() {
     let after_name = &line[line.find("new_terminal").unwrap() + "new_terminal".len()..];
     assert!(after_name.contains('…'));
     assert!(
-        after_name
-            .trim_end_matches(|c: char| c == ' ' || c == '│')
-            .ends_with('c'),
+        after_name.trim_end_matches([' ', '│']).ends_with('c'),
         "{line}"
     );
 }

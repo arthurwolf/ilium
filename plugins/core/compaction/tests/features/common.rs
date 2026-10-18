@@ -7,7 +7,7 @@ use ilium_plugin_core_compaction::{CompactionClient, CompactionServer};
 use ilium_plugin_sdk::testing::{FakeHost, TreeNode};
 use ilium_plugin_sdk::types::{
     AgentActivity, AgentView, CommandContext, CommandInvokedEvent, CommandOrigin, Event, Intent,
-    MessageEvent, NodeClass, NodeId, PluginId, PluginSide, Submission,
+    NodeClass, NodeId, Submission,
 };
 
 pub const PLUGIN_ID: &str = "ilium.core.compaction";
@@ -96,38 +96,11 @@ pub fn command_on(command: &str, origin: CommandOrigin, pane: Option<u64>) -> Ev
     })
 }
 
-/// A `message` event as the other side of this plugin would send it.
-pub fn message_from(side: PluginSide, channel: &str, payload: &[u8]) -> Event {
-    Event::Message(MessageEvent {
-        from: PluginId(PLUGIN_ID.to_string()),
-        from_side: side,
-        from_client: None,
-        channel: channel.to_string(),
-        payload: payload.to_vec(),
-    })
-}
-
 /// The intents of a submission list, in order.
 pub fn intents(submissions: &[Submission]) -> Vec<Intent> {
     submissions
         .iter()
         .map(|submission| submission.intent.clone())
-        .collect()
-}
-
-/// `(target plugin, target side, channel, payload)` of every `message` intent, in order.
-pub fn messages(submissions: &[Submission]) -> Vec<(String, PluginSide, String, Vec<u8>)> {
-    submissions
-        .iter()
-        .filter_map(|submission| match &submission.intent {
-            Intent::Message(spec) => Some((
-                spec.to.plugin.0.clone(),
-                spec.to.side,
-                spec.channel.clone(),
-                spec.payload.clone(),
-            )),
-            _ => None,
-        })
         .collect()
 }
 
