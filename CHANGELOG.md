@@ -20,6 +20,8 @@ development period. Dates are commit dates (`YYYY-MM-DD`).
 - The Voice control Settings tab uses a single-width glyph, so its row no longer shifts the columns beside it.
 - The empty terminal placeholder uses the same inner padding and dimmed text as the pane frames.
 - Editor panes reserve a one-column strip beside the text for the scrollbar, so the scrollbar no longer draws over source lines or rendered markdown; the text width and the minimap position follow that strip.
+- A window the server drops while it is running (for example after a failed lag resynchronization) is relaunched automatically when the session server is still live, at most five times per ten minutes, instead of leaving a dead terminal. The exit error now reads "lost the connection to the ilium server" rather than "failed to enter raw/alternate-screen terminal mode".
+- When a state resynchronization gives up, the server log lists why each of the eight attempts was discarded (tree changed, pane output moved, pane session replaced, tree grew).
 - Keep the terminal parser's bounded metadata buffer on the heap so pane startup does not exhaust debug worker stacks.
 - Scanner recommendations require at least one correctly solved agentic task that used a native tool call. Visual recommendations accept at least 80% correct image answers despite unavailable requests, while checking completion and score bounds.
 - Agent-launcher errors wrap and grow above the footer. Worktree and message dialogs grow for diagnostics; choice and plugin errors keep their complete text. F9 opens a scrollable full diagnostic from compact status rows, settings, tooltips and dialogs without losing the underlying draft.

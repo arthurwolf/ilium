@@ -1,0 +1,1236 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Keys and help | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details open><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/" aria-current="page">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Core plugins</b></p>
+<h1>Keys and help</h1>
+
+<p>The Keys and help plugin (id <code>ilium.core.keys-and-help</code>, side: client) is the plugin form of Ilium's keyboard and help surfaces. It draws the key reference, shows the prefix and the active preset, offers a key-capture field for remapping, shows per-option help topics, adds commands to the command palette, and lists installed plugins with a switch for each.</p>
+<p>The keymap itself is kernel-native: the kernel matches chords, applies the tmux or Screen preset and stores remaps. The plugin reads the keymap and the Keyboard tab through the contract and never changes how a chord is dispatched.</p>
+<h3 id="what-it-covers">What it covers</h3>
+<ul>
+<li><strong>Prefix, keybindings, presets and remapping.</strong> Steps 6, 7, 10 and 11 of Getting started describe the prefix, the presets and remapping a key.</li>
+<li><strong>Help and key reference.</strong> Every keybinding is listed in step 7 of Getting started, and each Settings option has its own help topic (see Per-option help in the Settings page).</li>
+<li><strong>Command palette entries.</strong> Commands appear in the palette under a category.</li>
+<li><strong>Plugin manager.</strong> The list of installed plugins, with a switch to turn each on or off.</li>
+</ul>
+<h3 id="see-it">See it</h3>
+<figure><img src="/assets/demos/keys-and-help-hints-frame.png" alt="The bottom status row of the Ilium client showing key hints for the focused board" loading="lazy"><figcaption>A real frame from the settings tour. The bottom row lists the hints for the focused view. The keys reference, prefix presets and palette have no recording, so those parts use renders.</figcaption></figure>
+
+<h3 id="what-the-user-sees">What the user sees</h3>
+<figure><pre class="term">╭─ Key reference ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                                                                                                                                                                           │
+│ <span class="t-hi">Panes</span>                                                                                                                                                                                                     │
+│ Split vertically ……………………………………………… Prefix  %                                                                                                                                                             │
+│ Split horizontally ………………………………………… Prefix  "                                                                                                                                                             │
+│ <span class="t-hi">Tree</span>                                                                                                                                                                                                      │
+│ Move up …………………………………………………………………… Prefix  Up                                                                                                                                                             │
+│ Rename ………………………………………………………………………… Prefix  r                                                                                                                                                             │
+│                                                                                                                                                                                                           │
+│ <span class="t-dim">Prefix is Ctrl+B. Preset: tmux.</span>                                                                                                                                                                           │
+│                                                                                                                                                                                                           │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯</pre><figcaption>Rendered at 48 columns. Illustrative. A <code>key-hints</code> panel groups the bindings by area. Labels come from the keymap, so a remap shows here after <code>keymap-changed</code>.</figcaption></figure>
+<figure><pre class="term">╭─ Keyboard ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                                                                                                                                                                                  │
+│ Prefix ………………………………………………………………………………… Ctrl+B                                                                                                                                                                    │
+│ Preset …………………………………………………………………………… ‹ tmux ›                                                                                                                                                                    │
+│ Split vertically ……………………………………………… Prefix  %                                                                                                                                                                    │
+│                                                                                                                                                                                                                  │
+│ Press the new key chord.                                                                                                                                                                                         │
+│                                                                                                                                                                                                                  │
+│ <span class="t-hi">Ctrl+Shift+K</span>                                                                                                                                                                                                     │
+│ <span class="t-warn">used by Paste in pane</span>                                                                                                                                                                                            │
+│                                                                                                                                                                                                                  │
+│ Esc cancel · Enter apply                                                                                                                                                                                         │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯</pre><figcaption>Rendered at 48 columns. Illustrative. The Keyboard tab with a key-capture field recording a chord. The warning line appears when the kernel already binds the chord.</figcaption></figure>
+<h3 id="manifest">Manifest</h3>
+<p>This block is a fragment. It lists the contributions. The whole manifest is in <a href="#complete-manifest">Complete manifest</a>.</p>
+<pre><code class="language-json">{
+  &quot;api&quot;: &quot;ilium:plugin@0.1.0&quot;,
+  &quot;id&quot;: &quot;ilium.core.keys-and-help&quot;,
+  &quot;name&quot;: &quot;Keys and help&quot;,
+  &quot;version&quot;: &quot;0.1.0&quot;,
+  &quot;publisher&quot;: &quot;Ilium&quot;,
+  &quot;client&quot;: {
+    &quot;entry&quot;: &quot;client.wasm&quot;,
+    &quot;world&quot;: &quot;ilium:client/base@0.1.0&quot;,
+    &quot;exports&quot;: [&quot;views&quot;]
+  },
+  &quot;capabilities&quot;: {
+    &quot;client&quot;: [&quot;keymap.read&quot;, &quot;settings.read-kernel:keyboard&quot;, &quot;help.read&quot;,
+               &quot;plugins.manage&quot;, &quot;ui.panels&quot;]
+  },
+  &quot;contributes&quot;: {
+    &quot;commands&quot;: [
+      { &quot;id&quot;: &quot;show-keys&quot;, &quot;title&quot;: &quot;Show the key reference&quot;,
+        &quot;category&quot;: &quot;Help&quot;, &quot;keywords&quot;: [&quot;shortcut&quot;, &quot;binding&quot;] },
+      { &quot;id&quot;: &quot;show-plugins&quot;, &quot;title&quot;: &quot;Manage plugins&quot;, &quot;category&quot;: &quot;Help&quot; }
+    ],
+    &quot;keybindings&quot;: [
+      { &quot;command&quot;: &quot;ilium.core.keys-and-help/show-keys&quot;, &quot;chord&quot;: &quot;?&quot;, &quot;mode&quot;: &quot;prefix&quot; }
+    ],
+    &quot;panels&quot;: [
+      { &quot;id&quot;: &quot;keys&quot;, &quot;title&quot;: &quot;Keys&quot;, &quot;modal&quot;: false },
+      { &quot;id&quot;: &quot;plugins&quot;, &quot;title&quot;: &quot;Plugins&quot;, &quot;modal&quot;: false }
+    ],
+    &quot;help&quot;: [{ &quot;id&quot;: &quot;keys-overview&quot;, &quot;file&quot;: &quot;help/keys-overview.md&quot;, &quot;title&quot;: &quot;Keys&quot; }],
+    &quot;settings&quot;: [
+      { &quot;kind&quot;: &quot;section&quot;, &quot;id&quot;: &quot;chords&quot;, &quot;tab&quot;: &quot;keyboard&quot;, &quot;placement&quot;: &quot;end&quot;,
+        &quot;title&quot;: &quot;Plugin keys&quot;, &quot;scope&quot;: &quot;client&quot;,
+        &quot;rows&quot;: [
+          { &quot;type&quot;: &quot;keybinding&quot;, &quot;key&quot;: &quot;show_keys&quot;, &quot;title&quot;: &quot;Key reference&quot;,
+            &quot;command&quot;: &quot;show-keys&quot;, &quot;default&quot;: &quot;?&quot; }
+        ] }
+    ]
+  }
+}
+</code></pre>
+<h3 id="complete-manifest">Complete manifest</h3>
+<p>This is the whole manifest of the plugin at <code>ilium:plugin@0.1.0</code>. The Manifest section above shows the contributions in detail; here the required keys, the sides, the <code>capabilities</code> per side and the <code>activation</code> triggers are all present. Activation follows <a href="/pages/reference-kernel-and-boot/#startup-and-lazy-activation-of-the-30-core-plugins">startup and lazy activation</a>. [COR-050]</p>
+<pre><code class="language-json">{
+  &quot;api&quot;: &quot;ilium:plugin@0.1.0&quot;,
+  &quot;id&quot;: &quot;ilium.core.keys-and-help&quot;,
+  &quot;name&quot;: &quot;Keys and help&quot;,
+  &quot;version&quot;: &quot;0.1.0&quot;,
+  &quot;publisher&quot;: &quot;Ilium&quot;,
+  &quot;description&quot;: &quot;The Keys and help plugin (id ilium.core.keys-and-help, side: client) is the plugin form of Ilium's keyboard and help surfaces.&quot;,
+  &quot;license&quot;: &quot;MIT&quot;,
+  &quot;client&quot;: {
+    &quot;entry&quot;: &quot;client.wasm&quot;,
+    &quot;world&quot;: &quot;ilium:client/base@0.1.0&quot;,
+    &quot;exports&quot;: [
+      &quot;views&quot;
+    ]
+  },
+  &quot;capabilities&quot;: {
+    &quot;client&quot;: [
+      &quot;keymap.read&quot;,
+      &quot;settings.read-kernel:keyboard&quot;,
+      &quot;help.read&quot;,
+      &quot;plugins.manage&quot;,
+      &quot;ui.panels&quot;,
+      &quot;settings.write-kernel:keyboard&quot;
+    ]
+  },
+  &quot;activation&quot;: [
+    &quot;command:keys-and-help.open&quot;,
+    &quot;settings:keyboard&quot;
+  ],
+  &quot;contributes&quot;: {
+    &quot;commands&quot;: [
+      {
+        &quot;id&quot;: &quot;show-keys&quot;,
+        &quot;title&quot;: &quot;Show the key reference&quot;,
+        &quot;category&quot;: &quot;Help&quot;,
+        &quot;keywords&quot;: [
+          &quot;shortcut&quot;,
+          &quot;binding&quot;
+        ]
+      },
+      {
+        &quot;id&quot;: &quot;show-plugins&quot;,
+        &quot;title&quot;: &quot;Manage plugins&quot;,
+        &quot;category&quot;: &quot;Help&quot;
+      }
+    ],
+    &quot;keybindings&quot;: [
+      {
+        &quot;command&quot;: &quot;ilium.core.keys-and-help/show-keys&quot;,
+        &quot;chord&quot;: &quot;?&quot;,
+        &quot;mode&quot;: &quot;prefix&quot;
+      }
+    ],
+    &quot;panels&quot;: [
+      {
+        &quot;id&quot;: &quot;keys&quot;,
+        &quot;title&quot;: &quot;Keys&quot;,
+        &quot;modal&quot;: false
+      },
+      {
+        &quot;id&quot;: &quot;plugins&quot;,
+        &quot;title&quot;: &quot;Plugins&quot;,
+        &quot;modal&quot;: false
+      }
+    ],
+    &quot;help&quot;: [
+      {
+        &quot;id&quot;: &quot;keys-overview&quot;,
+        &quot;file&quot;: &quot;help/keys-overview.md&quot;,
+        &quot;title&quot;: &quot;Keys&quot;
+      }
+    ],
+    &quot;settings&quot;: [
+      {
+        &quot;kind&quot;: &quot;section&quot;,
+        &quot;id&quot;: &quot;chords&quot;,
+        &quot;tab&quot;: &quot;keyboard&quot;,
+        &quot;placement&quot;: &quot;end&quot;,
+        &quot;title&quot;: &quot;Plugin keys&quot;,
+        &quot;scope&quot;: &quot;client&quot;,
+        &quot;rows&quot;: [
+          {
+            &quot;type&quot;: &quot;keybinding&quot;,
+            &quot;key&quot;: &quot;show_keys&quot;,
+            &quot;title&quot;: &quot;Key reference&quot;,
+            &quot;command&quot;: &quot;show-keys&quot;,
+            &quot;default&quot;: &quot;?&quot;
+          }
+        ]
+      }
+    ]
+  },
+  &quot;limits_tier&quot;: &quot;first-party&quot;
+}
+</code></pre>
+<h3 id="action-names-command-ids-and-presets">Action names, command ids and presets</h3>
+<p>The kernel owns the keymap table. The plugin owns the Keyboard tab and the key reference screen, so it shows exactly these 35 actions. Each action has a stable name (the key in <code>[keybindings]</code>), a global command id <code>kernel.&lt;name&gt;</code> that a plugin can read from <code>keymap.bindings</code>, and a default key after the prefix. [COR-011]</p>
+<figure>
+<pre class="term"><span class="t-dim">╭──────────────────────────────────────────────╮</span>
+<span class="t-dim">│</span> Keyboard                                     <span class="t-dim">│</span>
+<span class="t-dim">│</span> Preset………………… tmux      Prefix…… Ctrl+B      <span class="t-dim">│</span>
+<span class="t-dim">│</span> Navigation prefix………………………… Ctrl+B           <span class="t-dim">│</span>
+<span class="t-dim">│</span>                                              <span class="t-dim">│</span>
+<span class="t-dim">│</span>  new_terminal ………………………………………… c             <span class="t-dim">│</span>
+<span class="t-dim">│</span>  close_pane ……………………………………………… x             <span class="t-dim">│</span>
+<span class="t-dim">│</span>  rename ………………………………………………… ,                <span class="t-dim">│</span>
+<span class="t-dim">│</span>  focus_pane_left ……………………………… Left           <span class="t-dim">│</span>
+<span class="t-dim">│</span>  quit ……………………………………………… &                   <span class="t-dim">│</span>
+<span class="t-dim">╰──────────────────────────────────────────────╯</span></pre>
+<figcaption>Rendered at 48 columns. Illustrative. The Keyboard tab: the preset, the two prefixes and the first rows of the action list. The plugin draws the rows from the 35 action names; the kernel stores the choice.</figcaption>
+</figure>
+
+<table>
+<thead>
+<tr>
+<th>Action name</th>
+<th>Command id</th>
+<th>Default</th>
+<th>GNU Screen preset</th>
+<th>tmux preset</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>new_terminal</code></td>
+<td><code>kernel.new_terminal</code></td>
+<td><code>c</code></td>
+<td><code>c</code></td>
+<td><code>c</code></td>
+</tr>
+<tr>
+<td><code>new_agent_worktree</code></td>
+<td><code>kernel.new_agent_worktree</code></td>
+<td><code>W</code></td>
+<td><code>W</code></td>
+<td><code>W</code></td>
+</tr>
+<tr>
+<td><code>new_editor</code></td>
+<td><code>kernel.new_editor</code></td>
+<td><code>e</code></td>
+<td><code>e</code></td>
+<td><code>e</code></td>
+</tr>
+<tr>
+<td><code>new_board</code></td>
+<td><code>kernel.new_board</code></td>
+<td><code>B</code></td>
+<td><code>B</code></td>
+<td><code>B</code></td>
+</tr>
+<tr>
+<td><code>close_pane</code></td>
+<td><code>kernel.close_pane</code></td>
+<td><code>x</code></td>
+<td><code>k</code></td>
+<td><code>x</code></td>
+</tr>
+<tr>
+<td><code>new_group</code></td>
+<td><code>kernel.new_group</code></td>
+<td><code>g</code></td>
+<td><code>g</code></td>
+<td><code>g</code></td>
+</tr>
+<tr>
+<td><code>new_split_view</code></td>
+<td><code>kernel.new_split_view</code></td>
+<td><code>"</code></td>
+<td><code>S</code></td>
+<td><code>"</code></td>
+</tr>
+<tr>
+<td><code>new_folder</code></td>
+<td><code>kernel.new_folder</code></td>
+<td><code>F</code></td>
+<td><code>F</code></td>
+<td><code>F</code></td>
+</tr>
+<tr>
+<td><code>rename</code></td>
+<td><code>kernel.rename</code></td>
+<td>unbound</td>
+<td><code>A</code></td>
+<td><code>,</code></td>
+</tr>
+<tr>
+<td><code>toggle_move</code></td>
+<td><code>kernel.toggle_move</code></td>
+<td><code>m</code></td>
+<td><code>m</code></td>
+<td><code>m</code></td>
+</tr>
+<tr>
+<td><code>focus_tree</code></td>
+<td><code>kernel.focus_tree</code></td>
+<td><code>w</code></td>
+<td><code>t</code></td>
+<td><code>w</code></td>
+</tr>
+<tr>
+<td><code>focus_pane</code></td>
+<td><code>kernel.focus_pane</code></td>
+<td><code>P</code></td>
+<td><code>P</code></td>
+<td><code>P</code></td>
+</tr>
+<tr>
+<td><code>focus_next_pane</code></td>
+<td><code>kernel.focus_next_pane</code></td>
+<td><code>o</code></td>
+<td><code>n</code></td>
+<td><code>o</code></td>
+</tr>
+<tr>
+<td><code>focus_previous_pane</code></td>
+<td><code>kernel.focus_previous_pane</code></td>
+<td><code>;</code></td>
+<td><code>p</code></td>
+<td><code>;</code></td>
+</tr>
+<tr>
+<td><code>focus_pane_left</code></td>
+<td><code>kernel.focus_pane_left</code></td>
+<td><code>Left</code></td>
+<td><code>H</code></td>
+<td><code>Left</code></td>
+</tr>
+<tr>
+<td><code>focus_pane_right</code></td>
+<td><code>kernel.focus_pane_right</code></td>
+<td><code>Right</code></td>
+<td><code>L</code></td>
+<td><code>Right</code></td>
+</tr>
+<tr>
+<td><code>focus_pane_up</code></td>
+<td><code>kernel.focus_pane_up</code></td>
+<td><code>Up</code></td>
+<td><code>K</code></td>
+<td><code>Up</code></td>
+</tr>
+<tr>
+<td><code>focus_pane_down</code></td>
+<td><code>kernel.focus_pane_down</code></td>
+<td><code>Down</code></td>
+<td><code>J</code></td>
+<td><code>Down</code></td>
+</tr>
+<tr>
+<td><code>cycle_next_in_group</code></td>
+<td><code>kernel.cycle_next_in_group</code></td>
+<td><code>n</code></td>
+<td><code>Down</code></td>
+<td><code>n</code></td>
+</tr>
+<tr>
+<td><code>cycle_previous_in_group</code></td>
+<td><code>kernel.cycle_previous_in_group</code></td>
+<td><code>p</code></td>
+<td><code>Up</code></td>
+<td><code>p</code></td>
+</tr>
+<tr>
+<td><code>jump_next_group</code></td>
+<td><code>kernel.jump_next_group</code></td>
+<td><code>)</code></td>
+<td><code>PgDn</code></td>
+<td><code>)</code></td>
+</tr>
+<tr>
+<td><code>jump_previous_group</code></td>
+<td><code>kernel.jump_previous_group</code></td>
+<td><code>(</code></td>
+<td><code>PgUp</code></td>
+<td><code>(</code></td>
+</tr>
+<tr>
+<td><code>scrollback_up</code></td>
+<td><code>kernel.scrollback_up</code></td>
+<td><code>[</code></td>
+<td><code>[</code></td>
+<td><code>[</code></td>
+</tr>
+<tr>
+<td><code>scrollback_down</code></td>
+<td><code>kernel.scrollback_down</code></td>
+<td><code>]</code></td>
+<td><code>]</code></td>
+<td><code>]</code></td>
+</tr>
+<tr>
+<td><code>save</code></td>
+<td><code>kernel.save</code></td>
+<td><code>S</code></td>
+<td><code>s</code></td>
+<td><code>S</code></td>
+</tr>
+<tr>
+<td><code>run_command</code></td>
+<td><code>kernel.run_command</code></td>
+<td><code>!</code></td>
+<td><code>:</code></td>
+<td><code>!</code></td>
+</tr>
+<tr>
+<td><code>search</code></td>
+<td><code>kernel.search</code></td>
+<td><code>f</code></td>
+<td><code>/</code></td>
+<td><code>f</code></td>
+</tr>
+<tr>
+<td><code>Help</code></td>
+<td><code>kernel.Help</code></td>
+<td><code>?</code></td>
+<td><code>?</code></td>
+<td><code>?</code></td>
+</tr>
+<tr>
+<td><code>detach</code></td>
+<td><code>kernel.detach</code></td>
+<td><code>d</code></td>
+<td><code>d</code></td>
+<td><code>d</code></td>
+</tr>
+<tr>
+<td><code>quit</code></td>
+<td><code>kernel.quit</code></td>
+<td><code>&amp;</code></td>
+<td><code>\</code></td>
+<td><code>&amp;</code></td>
+</tr>
+<tr>
+<td><code>toggle_editor_view_mode</code></td>
+<td><code>kernel.toggle_editor_view_mode</code></td>
+<td><code>v</code></td>
+<td><code>v</code></td>
+<td><code>v</code></td>
+</tr>
+<tr>
+<td><code>toggle_line_numbers</code></td>
+<td><code>kernel.toggle_line_numbers</code></td>
+<td><code>N</code></td>
+<td><code>N</code></td>
+<td><code>N</code></td>
+</tr>
+<tr>
+<td><code>toggle_minimap</code></td>
+<td><code>kernel.toggle_minimap</code></td>
+<td><code>b</code></td>
+<td><code>b</code></td>
+<td><code>b</code></td>
+</tr>
+<tr>
+<td><code>toggle_autosave</code></td>
+<td><code>kernel.toggle_autosave</code></td>
+<td><code>a</code></td>
+<td><code>a</code></td>
+<td><code>a</code></td>
+</tr>
+<tr>
+<td><code>settings</code></td>
+<td><code>kernel.settings</code></td>
+<td><code>:</code></td>
+<td><code>o</code></td>
+<td><code>:</code></td>
+</tr>
+</tbody>
+</table>
+<p>Rules that hold for all rows:</p>
+<ul>
+<li>The general prefix is <code>shortcut_base</code>, a <code>Ctrl</code> letter from <code>Ctrl+A</code> to <code>Ctrl+Z</code>, default <code>Ctrl+B</code>. The four tree actions <code>cycle_next_in_group</code>, <code>cycle_previous_in_group</code>, <code>jump_next_group</code> and <code>jump_previous_group</code> use the separate <code>navigation_shortcut_base</code>, so moving the general prefix to <code>Ctrl+A</code> keeps <code>Ctrl+B n</code> for tree traversal.</li>
+<li>The two presets are complete. The GNU Screen preset sets the prefix to <code>Ctrl+A</code>, and the tmux preset sets it to <code>Ctrl+B</code>. Choosing a preset replaces every key in the table. Actions that a preset does not name keep their default key.</li>
+<li>A key is bindable only when it is in the fixed list of printable keys, arrow keys and Page keys, and no other action uses it. The collision check runs for the picker and for preset load.</li>
+<li>Pressing the prefix twice passes it through to the program in the pane, which is how tmux inside Ilium keeps working.</li>
+<li><code>rename</code> has no default key. It is in the table so a user can bind it.</li>
+<li>The plugin holds <code>settings.write-kernel:keyboard</code>. It is the only plugin that may write the <code>[keyboard]</code> and <code>[keybindings]</code> tables. Other plugins read the result with <code>keymap.read</code>. See <a href="/pages/api-kernel-settings-and-keymap/#writing-a-kernel-tab">kernel settings</a>.</li>
+</ul>
+<h3 id="kernel-tabs-this-plugin-owns">Kernel tabs this plugin owns</h3>
+<p>This plugin is the single owner of the following built-in Settings tabs. It holds <code>settings.write-kernel:&lt;tab&gt;</code> for each one (T1 only, one holder per tab, see <a href="/pages/api-kernel-settings-and-keymap/#writing-a-kernel-tab">kernel settings</a>). The values stay in the same <code>config.toml</code> tables as before, so no user setting moves. [COR-030] [COR-033]</p>
+<table>
+<thead>
+<tr>
+<th>Tab id</th>
+<th>Label</th>
+<th>Config table</th>
+<th>Readers</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>keyboard</code></td>
+<td>Keyboard</td>
+<td><code>[keyboard]</code>, <code>[keybindings]</code></td>
+<td>none</td>
+</tr>
+</tbody>
+</table>
+<p>If the plugin is disabled, the tab stays in the rail with its stored values shown read-only and the notice "Keys and help is disabled. Values are kept." The kernel keeps reading the keys it consumes itself (listed in the Consumer column of the key table in <a href="/pages/reference-config-and-data-migration/">config and data migration</a>). Behaviour that only this plugin provides is off. The exact result for this plugin is its row in <a href="/pages/reference-kernel-and-boot/">kernel and boot</a>. [COR-022]</p>
+<h3 id="samples">Samples</h3>
+<h4 id="1-key-reference">1. Key reference</h4>
+<p>A panel reads every binding with <code>keymap.bindings</code>, turns each chord into its display form with <code>chord_label</code>, and draws the pairs as <code>key-hints</code>. It rebuilds when <code>keymap-changed</code> arrives, so a remap appears at once. See the <a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap API</a>, the <a href="/pages/capability-keymap-read/">keymap.read grant</a>, the <a href="/pages/api-events/">event catalogue</a> and <a href="/pages/widgets-text/">text widgets</a>.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::host::{keymap, ui};
+use ilium_plugin_sdk::prelude::*;
+use ilium_plugin_sdk::types::ui::KeyHint;
+use ilium_plugin_sdk::ui::build::Tree;
+
+impl Handler for KeysPanel {
+    fn on_events(&amp;mut self, batch: Vec&lt;Event&gt;) -&gt; Vec&lt;Submission&gt; {
+        for event in batch {
+            if matches!(event, Event::KeymapChanged) {
+                ui::invalidate(ViewTarget::Panel(&quot;keys&quot;.into()));
+            }
+        }
+        Vec::new()
+    }
+}
+
+impl Views for KeysPanel {
+    fn render(&amp;mut self, _view: ViewTarget, _area: Area) -&gt; UiTree {
+        let hints: Vec&lt;KeyHint&gt; = keymap::bindings()
+            .into_iter()
+            .filter_map(|binding| {
+                let chord = binding.chords.first()?;
+                Some(KeyHint::new(&amp;keymap::chord_label(chord), &amp;binding.command))
+            })
+            .collect();
+        let mut tree = Tree::new();
+        let panel = tree.key_hints(hints).key(&quot;hints&quot;);
+        tree.finish(panel)
+    }
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { definePlugin, type Event, type Submission } from '@ilium/plugin-sdk';
+import { bindings, chordLabel } from '@ilium/plugin-sdk/host/keymap';
+import { invalidate } from '@ilium/plugin-sdk/host/ui';
+import { keyHints, tree } from '@ilium/plugin-sdk/ui/build';
+
+export const { lifecycle, handler, views } = definePlugin({
+  side: 'client',
+  activate() {},
+  onEvents(batch: Event[]): Submission[] {
+    for (const event of batch) {
+      if (event.tag === 'keymap-changed') invalidate({ tag: 'panel', val: 'keys' });
+    }
+    return [];
+  },
+  render() {
+    const hints = bindings()
+      .filter((binding) =&gt; binding.chords.length &gt; 0)
+      .map((binding) =&gt; ({ keys: chordLabel(binding.chords[0]), label: binding.command }));
+    return tree(keyHints(hints, { key: 'hints' }));
+  },
+});
+</code></pre>
+<h4 id="2-prefix-and-presets">2. Prefix and presets</h4>
+<p>The panel shows the prefix and the active preset by reading the Keyboard tab with <code>kernel-settings</code>, and refreshes on <code>kernel-settings-changed</code>. The plugin owns this tab and writes it with <code>settings.write-kernel:keyboard</code>; secrets would arrive as <code>&lt;redacted&gt;</code>. See the <a href="/pages/capability-settings-read-kernel/">settings.read-kernel grant</a>, the <a href="/pages/api-kernel-settings-and-keymap/">kernel settings API</a> and the <a href="/pages/api-events/">event catalogue</a>.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::host::kernel_settings;
+use ilium_plugin_sdk::host::log::{self, Level};
+
+// Needs &quot;settings.read-kernel:keyboard&quot;. Values are listed generically, so the
+// panel follows whatever the Keyboard tab holds.
+fn keyboard_lines() -&gt; Vec&lt;String&gt; {
+    let Ok(text) = kernel_settings::read(&quot;keyboard&quot;) else { return Vec::new() };
+    let values: serde_json::Value = serde_json::from_str(&amp;text).unwrap_or_default();
+    values.as_object().map_or_else(Vec::new, |object| {
+        object.iter().map(|(key, value)| format!(&quot;{key} = {value}&quot;)).collect()
+    })
+}
+
+fn on_kernel_settings_changed(tab: &amp;str, keys: &amp;[String]) {
+    if tab == &quot;keyboard&quot; {
+        log::log(Level::Info, &amp;format!(&quot;keyboard tab changed: {keys:?}&quot;));
+        // then invalidate the panel, as in sample 1
+    }
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { read } from '@ilium/plugin-sdk/host/kernel-settings';
+import { log } from '@ilium/plugin-sdk/host/log';
+
+// Needs &quot;settings.read-kernel:keyboard&quot;. Values are listed generically, so the
+// panel follows whatever the Keyboard tab holds.
+export function keyboardLines(): string[] {
+  try {
+    const values = JSON.parse(read('keyboard')) as Record&lt;string, unknown&gt;;
+    return Object.entries(values).map(([key, value]) =&gt; `${key} = ${JSON.stringify(value)}`);
+  } catch {
+    return [];
+  }
+}
+
+export function onKernelSettingsChanged(tab: string, keys: string[]): void {
+  if (tab !== 'keyboard') return;
+  log('info', `keyboard tab changed: ${keys.join(',')}`);
+  // then invalidate the panel, as in sample 1
+}
+</code></pre>
+<h4 id="3-remap-a-key">3. Remap a key</h4>
+<p>A <code>keybinding</code> row remaps one of the plugin's own commands. For a panel, a <code>key-capture</code> field records the next chord and, with the reserved-key check, warns when the kernel already binds it. See <a href="/pages/reference-settings-rows/">settings rows</a> and <a href="/pages/widgets-input/">input widgets</a>.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::prelude::*;
+use ilium_plugin_sdk::types::ui::{ActionKind, ActionValue};
+use ilium_plugin_sdk::ui::build::Tree;
+
+// Manifest row: { &quot;type&quot;: &quot;keybinding&quot;, &quot;key&quot;: &quot;show_keys&quot;, &quot;title&quot;: &quot;Key reference&quot;,
+//                 &quot;command&quot;: &quot;show-keys&quot;, &quot;default&quot;: &quot;?&quot; }
+impl Views for KeysPanel {
+    fn render(&amp;mut self, _view: ViewTarget, _area: Area) -&gt; UiTree {
+        let mut tree = Tree::new();
+        let chord = tree
+            .key_capture()
+            .chord(self.chord.clone())
+            .reserved_check(true)
+            .key(&quot;chord&quot;);
+        tree.finish(chord)
+    }
+}
+
+// In on_events:
+// (&quot;chord&quot;, ActionKind::Changed, ActionValue::Text(c)) =&gt; self.chord = Some(c).filter(|c| !c.is_empty()),
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { keyCapture, tree } from '@ilium/plugin-sdk/ui/build';
+
+// Manifest row: { &quot;type&quot;: &quot;keybinding&quot;, &quot;key&quot;: &quot;show_keys&quot;, &quot;title&quot;: &quot;Key reference&quot;,
+//                 &quot;command&quot;: &quot;show-keys&quot;, &quot;default&quot;: &quot;?&quot; }
+let chord: string | undefined;
+
+export function render() {
+  return tree(keyCapture({ key: 'chord', chord, reservedCheck: true }));
+}
+
+// In onEvents:
+// if (key === 'chord' &amp;&amp; value.tag === 'text') chord = value.val || undefined;
+</code></pre>
+<h4 id="4-help-topics">4. Help topics</h4>
+<p>The panel lists topic ids in a <code>tree-list</code> and renders the chosen topic as <code>markdown</code>. <code>help.topic</code> returns the Markdown of any installed topic by its global id, <code>&lt;plugin-id&gt;/&lt;local-id&gt;</code>; there is no call that lists topics, so the plugin keeps its own list of ids. See the <a href="/pages/api-help-and-plugins/">help and plugins API</a>, the <a href="/pages/capability-help-read/">help.read grant</a>, <a href="/pages/widgets-text/">text widgets</a> and <a href="/pages/widgets-collections/">collection widgets</a>. The topic ids shown are examples.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::host::help;
+use ilium_plugin_sdk::prelude::*;
+use ilium_plugin_sdk::types::ui::TreeItem;
+use ilium_plugin_sdk::ui::build::Tree;
+
+const TOPICS: [(&amp;str, &amp;str); 2] = [
+    (&quot;ilium.core.keys-and-help/keys-overview&quot;, &quot;Keys&quot;),
+    (&quot;ilium/getting-started&quot;, &quot;Getting started&quot;),
+];
+
+impl Views for HelpPanel {
+    fn render(&amp;mut self, _view: ViewTarget, _area: Area) -&gt; UiTree {
+        let items: Vec&lt;TreeItem&gt; = TOPICS
+            .iter()
+            .map(|(id, title)| TreeItem::new(id, title).depth(0))
+            .collect();
+        let source = help::topic(&amp;self.chosen).unwrap_or_else(|| &quot;No such topic.&quot;.into());
+        let mut tree = Tree::new();
+        let list = tree.tree_list(items).key(&quot;topics&quot;);
+        let page = tree.markdown(source).key(&quot;page&quot;);
+        let both = tree
+            .layout(Direction::Horizontal, [Constraint::Length(24), Constraint::Fill(1)])
+            .child(list)
+            .child(page);
+        tree.finish(both)
+    }
+}
+// In on_events: (&quot;topics&quot;, ActionKind::Selected, ActionValue::Text(id)) =&gt; self.chosen = id,
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { topic } from '@ilium/plugin-sdk/host/help';
+import { fill, layout, length, markdown, tree, treeList } from '@ilium/plugin-sdk/ui/build';
+
+const TOPICS = [
+  { id: 'ilium.core.keys-and-help/keys-overview', label: 'Keys', depth: 0 },
+  { id: 'ilium/getting-started', label: 'Getting started', depth: 0 },
+];
+let chosen = TOPICS[0].id;
+
+export function render() {
+  const source = topic(chosen) ?? 'No such topic.';
+  return tree(layout(
+    { direction: 'horizontal', constraints: [length(24), fill(1)] },
+    [treeList(TOPICS, { key: 'topics' }), markdown(source, { key: 'page' })],
+  ));
+}
+// In onEvents: if (key === 'topics' &amp;&amp; kind === 'selected' &amp;&amp; value.tag === 'text') chosen = value.val;
+</code></pre>
+<h4 id="5-palette-and-plugin-manager">5. Palette and plugin manager</h4>
+<p>Commands declared in the manifest appear in the palette under their <code>category</code>. When the user runs the manager command, the plugin reads every installed plugin with <code>plugins.list</code> and turns one on or off with <code>plugins.set_enabled</code>. See the <a href="/pages/api-command-palette/">command palette</a>, the <a href="/pages/capability-plugins-manage/">plugins.manage grant</a> and the <a href="/pages/api-events/">event catalogue</a>.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::host::plugins;
+use ilium_plugin_sdk::prelude::*;
+use ilium_plugin_sdk::types::events::CommandInvokedEvent;
+
+// Manifest: commands with &quot;category&quot;: &quot;Help&quot;, as in the manifest above.
+impl Handler for PluginManager {
+    fn on_events(&amp;mut self, batch: Vec&lt;Event&gt;) -&gt; Vec&lt;Submission&gt; {
+        for event in batch {
+            let Event::CommandInvoked(CommandInvokedEvent { command, .. }) = event else {
+                continue;
+            };
+            if command == &quot;ilium.core.keys-and-help/show-plugins&quot; {
+                self.rows = plugins::list()
+                    .into_iter()
+                    .map(|info| (info.id, info.name, info.enabled))
+                    .collect();
+            }
+        }
+        Vec::new()
+    }
+}
+
+fn toggle(plugin_id: &amp;str, enabled: bool) -&gt; Result&lt;(), PluginError&gt; {
+    plugins::set_enabled(plugin_id, enabled)
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { definePlugin, type Event, type Submission } from '@ilium/plugin-sdk';
+import { list, setEnabled } from '@ilium/plugin-sdk/host/plugins';
+
+// Manifest: commands with &quot;category&quot;: &quot;Help&quot;, as in the manifest above.
+let rows: Array&lt;{ id: string; name: string; enabled: boolean }&gt; = [];
+
+export const { lifecycle, handler } = definePlugin({
+  side: 'client',
+  activate() {},
+  onEvents(batch: Event[]): Submission[] {
+    for (const event of batch) {
+      if (event.tag === 'command-invoked'
+          &amp;&amp; event.val.command === 'ilium.core.keys-and-help/show-plugins') {
+        rows = list().map(({ id, name, enabled }) =&gt; ({ id, name, enabled }));
+      }
+    }
+    return [];
+  },
+});
+
+export function toggle(pluginId: string, enabled: boolean): void {
+  setEnabled(pluginId, enabled);
+}
+</code></pre>
+<h4 id="6-reload-hints-after-a-kernel-change">6. Reload hints after a kernel change</h4>
+<p>The kernel settings tab for keys sends <code>kernel-settings-changed</code> with the keys that changed. The plugin reloads only the hint strings for those keys, not the whole reference.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::prelude::*;
+
+impl Handler for HintCache {
+    fn on_events(&amp;mut self, batch: Vec&lt;Event&gt;) -&gt; Vec&lt;Submission&gt; {
+        for event in batch {
+            let Event::KernelSettingsChanged(change) = event else { continue };
+            if change.tab != &quot;keys&quot; { continue; }
+            for key in &amp;change.keys {
+                self.hints.insert(key.clone(), kernel_settings::read(&quot;keys&quot;, key));
+            }
+        }
+        Vec::new()
+    }
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">export function onEvents(events: Event[]): Submission[] {
+  for (const event of events) {
+    if (event.tag !== 'kernel-settings-changed' || event.val.tab !== 'keys') continue;
+    for (const key of event.val.keys) {
+      hints.set(key, settings.readKernel('keys', key));
+    }
+  }
+  return [];
+}
+</code></pre>
+<h3 id="extension-points">Extension points</h3>
+<p>Other plugins change what <code>ilium.core.keys-and-help</code> does through the points below. The plugin owns each point (grant <code>extensions.provide:ilium.core.keys-and-help/&lt;point&gt;</code>). Contributors need <code>extensions.contribute:ilium.core.keys-and-help/&lt;point&gt;</code>. See <a href="/pages/api-extension-points/">Extension points</a> for the mechanism and <a href="/pages/extending-core-plugins/">Extending core plugins</a> for the five ways to work with a core feature.</p>
+<table>
+<thead>
+<tr>
+<th>Point</th>
+<th>Kind</th>
+<th>What it does</th>
+<th>Payload</th>
+<th>Risk</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>key-hints</code></td>
+<td>collect</td>
+<td>Add a hint to the status bar in a context.</td>
+<td>entry: id, context, chord, label</td>
+<td>standard</td>
+</tr>
+<tr>
+<td><code>help-sources</code></td>
+<td>collect</td>
+<td>Add a help source, such as a remote documentation index.</td>
+<td>entry: id, title, service</td>
+<td>standard</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Services</strong> (grant <code>services.use:&lt;name&gt;</code>):</p>
+<ul>
+<li><code>ilium.core.keys-and-help/bindings</code>: list: current key bindings with labels</li>
+</ul>
+<p><strong>Topics</strong> (list under <code>contributes.topics.subscribes</code>):</p>
+<ul>
+<li><code>ilium.core.keys-and-help/changed</code>: { reason } after a remap</li>
+</ul>
+<p><code>contributes.help</code> topics and <code>contributes.keybindings</code> appear in the key reference.</p>
+<p><strong>Replaceable:</strong> yes. A replacement lists <code>"replaces": ["ilium.core.keys-and-help"]</code> and provides the whole surface (see <a href="/pages/extending-core-plugins/#replace">Extending core plugins</a>).</p>
+<h4 id="example-shows-a-hint-while-a-board-pane-has-focus">Example: Shows a hint while a board pane has focus</h4>
+<p>A package adds this entry in its manifest. It needs no code.</p>
+<pre><code class="language-json">{
+  &quot;api&quot;: &quot;ilium:plugin@0.1.0&quot;,
+  &quot;capabilities&quot;: { &quot;client&quot;: [&quot;extensions.contribute:ilium.core.keys-and-help/key-hints&quot;] },
+  &quot;contributes&quot;: {
+    &quot;extensions&quot;: [
+      {
+        &quot;point&quot;: &quot;ilium.core.keys-and-help/key-hints&quot;,
+        &quot;id&quot;: &quot;board-hints&quot;,
+        &quot;priority&quot;: 50,
+        &quot;entry&quot;: {
+          &quot;context&quot;: &quot;pane:board&quot;,
+          &quot;chord&quot;: &quot;n&quot;,
+          &quot;label&quot;: &quot;New card&quot;
+        }
+      }
+    ]
+  }
+}
+</code></pre>
+<h3 id="abi-used">ABI used</h3>
+<ul>
+<li><a href="/pages/api-kernel-settings-and-keymap/">Kernel settings and keymap</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a> and <a href="/pages/capability-settings-read-kernel/">settings.read-kernel</a></li>
+<li><a href="/pages/api-help-and-plugins/">Help and plugins</a>, <a href="/pages/capability-help-read/">help.read</a> and <a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/widgets-text/">Text widgets</a>, <a href="/pages/widgets-input/">input widgets</a> and <a href="/pages/widgets-collections/">collection widgets</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings rows</a></li>
+</ul>
+<h3 id="see-also">See also</h3>
+<ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings plugin</a></li>
+</ul>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/core-plugin-settings/"><small>Previous</small>Settings</a><a class="next" href="/pages/core-plugin-search/"><small>Next</small>Workspace search</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#what-it-covers">What it covers</a></li><li class="l2"><a href="#see-it">See it</a></li><li class="l2"><a href="#what-the-user-sees">What the user sees</a></li><li class="l2"><a href="#manifest">Manifest</a></li><li class="l2"><a href="#complete-manifest">Complete manifest</a></li><li class="l2"><a href="#action-names-command-ids-and-presets">Action names, command ids and presets</a></li><li class="l2"><a href="#kernel-tabs-this-plugin-owns">Kernel tabs this plugin owns</a></li><li class="l2"><a href="#samples">Samples</a></li><li class="l3"><a href="#1-key-reference">1. Key reference</a></li><li class="l3"><a href="#2-prefix-and-presets">2. Prefix and presets</a></li><li class="l3"><a href="#3-remap-a-key">3. Remap a key</a></li><li class="l3"><a href="#4-help-topics">4. Help topics</a></li><li class="l3"><a href="#5-palette-and-plugin-manager">5. Palette and plugin manager</a></li><li class="l3"><a href="#6-reload-hints-after-a-kernel-change">6. Reload hints after a kernel change</a></li><li class="l2"><a href="#extension-points">Extension points</a></li><li class="l3"><a href="#example-shows-a-hint-while-a-board-pane-has-focus">Example: Shows a hint while a board pane has focus</a></li><li class="l2"><a href="#abi-used">ABI used</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

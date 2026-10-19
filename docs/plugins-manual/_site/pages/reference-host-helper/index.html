@@ -1,0 +1,801 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Sandbox helper protocol | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details open><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/" aria-current="page">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Reference</b></p>
+<h1>Sandbox helper protocol</h1>
+
+<p>Plugins of tiers T2 and T3 run inside a helper process. This page defines how the host starts a helper, the messages between the host and the helper, how deadlines include the round trip, how helper memory is charged, what limits the helper count, and how a helper dies. The confinement of the helper (namespaces, seccomp, cgroup) is defined in the <a href="/pages/reference-sandbox/">Sandbox reference</a> and is not repeated. Requirement ids are <code>[HST-150]</code> to <code>[HST-171]</code>.</p>
+<h2 id="you-will-need">You will need</h2>
+<ul>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a> for confinement and the trust rules for messages.</li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a> for the Wasmtime configuration that the helper shares.</li>
+<li><a href="/pages/reference-health-and-watchdog/">Health and watchdog</a> for heartbeats and restart counting.</li>
+</ul>
+<h2 id="what-a-helper-is">What a helper is</h2>
+<p>The helper is the binary <code>ilium-plugin-helper</code>, installed beside <code>ilium</code>. It contains the same Engine configuration as the host (one <code>runtime_config()</code> function, see <a href="/pages/reference-host-runtime/">Host runtime</a>) and a small call loop.</p>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Rule</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Granularity</td>
+<td>One helper per plugin per side per hosting process, as in the <a href="/pages/reference-sandbox/">Sandbox reference</a>. The server hosts one helper per T2 or T3 plugin side. Each client that runs a client half starts its own</td>
+</tr>
+<tr>
+<td>Platform</td>
+<td>Linux only. On Windows and macOS the host refuses T2 and T3 with <code>sandbox.unavailable</code> (see <a href="/pages/reference-platform-support/">Platform support</a>)</td>
+</tr>
+<tr>
+<td>Start</td>
+<td>Lazy, at the first activation of the plugin side</td>
+</tr>
+<tr>
+<td>Stop</td>
+<td>At deactivation, at a trap, at shutdown, or when the host kills it</td>
+</tr>
+<tr>
+<td>Instances</td>
+<td>One Store at a time, one call at a time</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>[HST-150]</strong> The host MUST start one helper per T2 or T3 plugin side and per hosting process, and MUST NOT host two plugins in one helper.</li>
+<li><strong>[HST-151]</strong> The helper binary MUST be <code>ilium-plugin-helper</code> in the same directory as the <code>ilium</code> executable, MUST use the same <code>runtime_config()</code> as the host, and MUST refuse to start if the host passes a different Wasmtime fingerprint.</li>
+<li><strong>[HST-152]</strong> A helper MUST start only at the first activation of its plugin side.</li>
+</ul>
+<h2 id="starting-a-helper">Starting a helper</h2>
+<p>The host starts a helper in this order. Each step is checked, and a failure stops the start with <code>helper.spawn-failed</code> and the failing step.</p>
+<ol>
+<li>The host creates a <code>socketpair</code> (the dispatcher channel). It does not use a named socket or a path.</li>
+<li>The host forks. In the child, before <code>exec</code>, it sets up bubblewrap-style namespaces, the mount layout, <code>no_new_privs</code> and the cgroup (or <code>RLIMIT_AS</code> and <code>RLIMIT_NPROC</code> when no controller is delegated), as in the Sandbox reference.</li>
+<li>The child closes every file descriptor except the dispatcher channel and stdio on <code>/dev/null</code>, installs the seccomp filter, and executes <code>ilium-plugin-helper</code>.</li>
+<li>The helper sends <code>Hello</code> with its protocol version and Wasmtime fingerprint.</li>
+<li>The host checks the fingerprint and sends <code>Instantiate</code> with the component bytes (or their cache key), the grants, the limits and the <code>restored</code> bytes.</li>
+<li>The helper compiles or loads the component, instantiates it and answers <code>Ready</code>.</li>
+<li>The host then sends <code>CallExport</code> for <code>activate</code>.</li>
+</ol>
+<p>The component bytes are sent over the channel in chunks of at most 4 MiB. The helper holds the file in memory only and never gets a path into the package store.</p>
+<ul>
+<li><strong>[HST-153]</strong> The dispatcher channel MUST be an inherited <code>socketpair</code>. The helper MUST NOT create sockets or open any path outside its mounts to receive work.</li>
+<li><strong>[HST-154]</strong> The host MUST treat a missing <code>Hello</code>, a wrong fingerprint or a <code>Ready</code> later than 5,000 ms after <code>Instantiate</code> as <code>helper.spawn-failed</code>, kill the helper, and count one failure only when the plugin had already started once.</li>
+</ul>
+<figure>
+<svg viewBox="0 0 440 250" role="img" aria-label="Sequence of helper start and a guest call with a forwarded host call" width="660" height="375">
+<title>Helper start and call</title>
+<desc>The host spawns the helper, receives Hello, sends Instantiate, receives Ready. For a call the host sends CallExport. The guest makes a host call. The helper forwards HostCall. The host sends HostReply. The helper sends the call result.</desc>
+<defs>
+<marker id="hh-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+<path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+</marker>
+</defs>
+<text x="80" y="16" font-size="11" text-anchor="middle" fill="currentColor">Host</text>
+<text x="360" y="16" font-size="11" text-anchor="middle" fill="currentColor">Helper</text>
+<line x1="80" y1="24" x2="80" y2="240" stroke="currentColor" stroke-dasharray="4 4"/>
+<line x1="360" y1="24" x2="360" y2="240" stroke="currentColor" stroke-dasharray="4 4"/>
+<line x1="360" y1="42" x2="80" y2="42" stroke="currentColor" marker-end="url(#hh-arrow)"/>
+<text x="220" y="36" font-size="10" text-anchor="middle" fill="currentColor">Hello (protocol, fingerprint)</text>
+<line x1="80" y1="68" x2="360" y2="68" stroke="currentColor" marker-end="url(#hh-arrow)"/>
+<text x="220" y="62" font-size="10" text-anchor="middle" fill="currentColor">Instantiate (component, grants, limits)</text>
+<line x1="360" y1="94" x2="80" y2="94" stroke="currentColor" marker-end="url(#hh-arrow)"/>
+<text x="220" y="88" font-size="10" text-anchor="middle" fill="currentColor">Ready</text>
+<line x1="80" y1="130" x2="360" y2="130" stroke="currentColor" marker-end="url(#hh-arrow)"/>
+<text x="220" y="124" font-size="10" text-anchor="middle" fill="currentColor">CallExport (call id, deadline)</text>
+<line x1="360" y1="158" x2="80" y2="158" stroke="currentColor" marker-end="url(#hh-arrow)"/>
+<text x="220" y="152" font-size="10" text-anchor="middle" fill="currentColor">HostCall (import, args)</text>
+<line x1="80" y1="184" x2="360" y2="184" stroke="currentColor" marker-end="url(#hh-arrow)"/>
+<text x="220" y="178" font-size="10" text-anchor="middle" fill="currentColor">HostReply</text>
+<line x1="360" y1="212" x2="80" y2="212" stroke="currentColor" marker-end="url(#hh-arrow)"/>
+<text x="220" y="206" font-size="10" text-anchor="middle" fill="currentColor">CallResult</text>
+</svg>
+<figcaption>Every message of one call carries the call id. The time from CallExport to CallResult is one deadline.</figcaption>
+</figure>
+
+<h2 id="messages">Messages</h2>
+<p>The channel carries length-prefixed <code>bincode</code> messages. A message is at most 4 MiB (8 MiB for a <code>terminal-view</code> frame), at most 5,000 messages per second per helper, as in the Sandbox reference.</p>
+<table>
+<thead>
+<tr>
+<th>Message</th>
+<th>From</th>
+<th>Body</th>
+<th>Reply</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Hello</code></td>
+<td>Helper</td>
+<td>Protocol version, Wasmtime fingerprint, helper build</td>
+<td><code>Instantiate</code></td>
+</tr>
+<tr>
+<td><code>Instantiate</code></td>
+<td>Host</td>
+<td>Component bytes in chunks, grants, limits, restored bytes</td>
+<td><code>Ready</code> or <code>InstantiateFailed(code)</code></td>
+</tr>
+<tr>
+<td><code>Ready</code></td>
+<td>Helper</td>
+<td>Exports found, memory at start</td>
+<td>none</td>
+</tr>
+<tr>
+<td><code>CallExport</code></td>
+<td>Host</td>
+<td>Call id, export name, argument bytes, deadline in ms</td>
+<td><code>CallResult</code></td>
+</tr>
+<tr>
+<td><code>CallResult</code></td>
+<td>Helper</td>
+<td>Call id, result bytes, or a trap with its code</td>
+<td>none</td>
+</tr>
+<tr>
+<td><code>HostCall</code></td>
+<td>Helper</td>
+<td>Call id, import name, argument bytes</td>
+<td><code>HostReply</code></td>
+</tr>
+<tr>
+<td><code>HostReply</code></td>
+<td>Host</td>
+<td>Call id, result bytes or an error</td>
+<td>none</td>
+</tr>
+<tr>
+<td><code>Cancel</code></td>
+<td>Host</td>
+<td>Call id</td>
+<td>none (the call ends in <code>CallResult</code> with a trap or its normal result)</td>
+</tr>
+<tr>
+<td><code>Shutdown</code></td>
+<td>Host</td>
+<td>Reason</td>
+<td>helper exits with code 0</td>
+</tr>
+<tr>
+<td><code>Heartbeat</code></td>
+<td>Both</td>
+<td>Counter</td>
+<td><code>Heartbeat</code> echo, answered on the helper control thread</td>
+</tr>
+<tr>
+<td><code>Log</code></td>
+<td>Helper</td>
+<td>Level, line (max 16 KiB), call id</td>
+<td>none</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>[HST-155]</strong> Messages MUST be length-prefixed <code>bincode</code>, MUST NOT exceed the sizes above, and a message of an unknown kind, a bad length or a schema violation MUST end the helper and count as a failure.</li>
+<li><strong>[HST-156]</strong> The host MUST derive the plugin identity from the channel and MUST drop any message that names another plugin (see <a href="/pages/reference-sandbox/">Sandbox reference</a>).</li>
+<li><strong>[HST-157]</strong> A <code>CallResult</code>, <code>HostCall</code> or <code>HostReply</code> MUST carry a call id that the host issued. A message with an unknown or finished call id MUST be dropped and logged <code>helper.stale-call</code>.</li>
+</ul>
+<h2 id="data-that-is-large">Data that is large</h2>
+<p>A bulk argument (a <code>ui-tree</code>, a surface write, a file chunk, an HTTP body) is sent as a sequence of messages, each at most 4 MiB, tagged with the call id and a chunk index. The sender marks the last chunk. The receiver assembles the chunks and enforces the same caps as <a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a>. There is no shared memory between the host and the helper: the seccomp filter and the descriptor rule of the Sandbox reference leave only the dispatcher channel open.</p>
+<ul>
+<li><strong>[HST-158]</strong> Bulk data MUST travel in chunks of at most 4 MiB over the dispatcher channel. The host MUST NOT pass file descriptors or shared memory to a helper.</li>
+</ul>
+<h2 id="which-imports-run-where">Which imports run where</h2>
+<table>
+<thead>
+<tr>
+<th>Class</th>
+<th>Imports</th>
+<th>Where</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Pure compute</td>
+<td><code>codec</code>, <code>vector</code>, <code>clock.now</code> (coarsened), <code>random</code>, <code>log</code> (batched)</td>
+<td>In the helper. No round trip</td>
+</tr>
+<tr>
+<td>Host state or effect</td>
+<td>Everything else: <code>storage</code>, <code>fs</code>, <code>http</code>, <code>process</code>, <code>ui</code>, submissions, <code>messages</code>, <code>timers</code>, <code>jobs</code>, <code>inference</code>, <code>clipboard</code></td>
+<td>Forwarded to the host with <code>HostCall</code></td>
+</tr>
+</tbody>
+</table>
+<p>A forwarded import takes one round trip. The budget of a round trip is 0.2 ms median and 0.5 ms at the 99th percentile on an idle machine. A call with 20 forwarded imports therefore spends at most 10 ms in round trips at the 99th percentile. Authors keep this in mind for the 20 ms batch deadline (see <a href="/pages/performance/">Performance</a>).</p>
+<p>The host evaluates the grant check, the quota and the limits for a forwarded import exactly as for a T1 import. The helper never decides a grant.</p>
+<ul>
+<li><strong>[HST-159]</strong> Only the pure-compute imports MAY run in the helper without a round trip. Every other import MUST be forwarded and checked by the host.</li>
+<li><strong>[HST-160]</strong> A forwarded import round trip MUST take at most 0.2 ms median and 0.5 ms at the 99th percentile on an idle reference machine (benchmark B18).</li>
+</ul>
+<h2 id="deadlines-include-the-round-trip">Deadlines include the round trip</h2>
+<p>The deadline of a call is carried in <code>CallExport</code>. The helper sets its own epoch deadline from it, so a runaway guest traps in the helper at the first tick after <code>d</code> ms, exactly as in the host. The host also runs a timer.</p>
+<table>
+<thead>
+<tr>
+<th>Event</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>The call returns inside the deadline</td>
+<td><code>CallResult</code> is delivered normally</td>
+</tr>
+<tr>
+<td>The helper epoch deadline fires</td>
+<td>The helper traps the instance and sends <code>CallResult</code> with <code>host.deadline</code></td>
+</tr>
+<tr>
+<td>No <code>CallResult</code> arrives within 500 ms after the deadline</td>
+<td>The host sends SIGKILL (SIGTERM first is not used) and treats it as <code>helper.hung</code>. One failure is counted</td>
+</tr>
+<tr>
+<td>Three heartbeats in a row are missed</td>
+<td>Same as above</td>
+</tr>
+</tbody>
+</table>
+<p>The time spent in the host serving <code>HostCall</code> messages counts inside the call's deadline, because the guest is waiting. The time that the host spends before it sends <code>CallExport</code> (queue time) does not.</p>
+<ul>
+<li><strong>[HST-161]</strong> The deadline of a helper call MUST include the time of every <code>HostCall</code> round trip made during that call.</li>
+<li><strong>[HST-162]</strong> The helper MUST set its own epoch deadline from the <code>CallExport</code> deadline. The host MUST kill a helper that has not answered 500 ms after that deadline and MUST count one failure.</li>
+<li><strong>[HST-163]</strong> The host MUST kill a helper after three missed heartbeats (a ping every 1 s).</li>
+</ul>
+<h2 id="memory">Memory</h2>
+<p>The memory of the helper is charged to the session. The charge for one helper is its plugin's <code>memory_mib</code> plus a fixed overhead of 32 MiB, which is the same overhead that the cgroup limit uses.</p>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Charge</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Helper</td>
+<td><code>memory_mib + 32</code> MiB</td>
+</tr>
+<tr>
+<td>T1 instance in the host</td>
+<td><code>memory_mib</code></td>
+</tr>
+<tr>
+<td>Session total limit</td>
+<td><code>session_memory_mib</code> 1,024 (see <a href="/pages/reference-errors-and-limits/">Errors and limits</a>)</td>
+</tr>
+</tbody>
+</table>
+<p>When the charge for an activation would pass <code>session_memory_mib</code>, the activation is refused with <code>session.memory-exceeded</code>. This refusal does not count as a failure, because the plugin did nothing wrong. The side stays <code>inactive</code> with the reason <code>host-capacity</code> and activation is retried, as in <a href="/pages/reference-errors-and-limits/">Errors and limits</a>.</p>
+<p>With cgroup v2 delegated, the kernel enforces <code>memory.max</code>. Without it, the helper uses <code>RLIMIT_AS</code> and the host samples RSS once a second. An out-of-memory kill is reported as a trap <code>limit-exceeded(memory)</code> and counts as a failure.</p>
+<ul>
+<li><strong>[HST-164]</strong> The host MUST charge <code>memory_mib + 32</code> MiB per helper to <code>session_memory_mib</code> at spawn and release it at exit.</li>
+<li><strong>[HST-165]</strong> An activation that would exceed <code>session_memory_mib</code> MUST be refused with <code>session.memory-exceeded</code>, MUST NOT count as a failure, and MUST leave the side <code>inactive</code> with the reason <code>host-capacity</code>.</li>
+</ul>
+<h2 id="helper-count">Helper count</h2>
+<p>The number of helpers per session is capped by <code>session_helpers</code>: default 16, ceiling 32. A helper that is idle (the plugin has no calls and no work for 60 s) is shut down with <code>Shutdown</code> and restarted on demand; its Store is dropped after a <code>deactivate</code> with state saved.</p>
+<p>When the cap is reached, the host refuses a further activation with <code>helper.too-many</code>. This refusal does not count as a failure, because the plugin did nothing wrong. The plugin shows as <code>installed-not-running</code> with the reason, and it activates when a helper is free.</p>
+<ul>
+<li><strong>[HST-166]</strong> The host MUST cap live helpers at <code>session_helpers</code> and MUST refuse a further activation with <code>helper.too-many</code>, without counting a failure.</li>
+<li><strong>[HST-167]</strong> The host SHOULD shut down a helper that has been idle for 60 s, after <code>deactivate</code>, and start it again at the next need.</li>
+</ul>
+<h2 id="death-of-a-helper">Death of a helper</h2>
+<table>
+<thead>
+<tr>
+<th>Cause</th>
+<th>What the host sees</th>
+<th>Effect on this plugin</th>
+<th>Other plugins</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Crash during a call</td>
+<td>Channel closed</td>
+<td>One failure; pending requests complete as <code>cancelled</code></td>
+<td>None, because helpers are per plugin</td>
+</tr>
+<tr>
+<td>Crash while idle</td>
+<td>Channel closed</td>
+<td>No failure; the host restarts it at the next need</td>
+<td>None</td>
+</tr>
+<tr>
+<td>Hung (no answer)</td>
+<td>Missed answer or heartbeats</td>
+<td>One failure; the host kills it</td>
+<td>None</td>
+</tr>
+<tr>
+<td>Killed for memory</td>
+<td>Exit signal</td>
+<td>One failure</td>
+<td>None</td>
+</tr>
+<tr>
+<td>Protocol error</td>
+<td>Bad message</td>
+<td>One failure; the host kills it</td>
+<td>None</td>
+</tr>
+<tr>
+<td>Host asked it to stop</td>
+<td><code>Shutdown</code></td>
+<td>No failure</td>
+<td>None</td>
+</tr>
+</tbody>
+</table>
+<p>The host restarts a helper at most 5 times in 10 minutes. The sixth start moves the server side of the T2 and T3 plugins of the session to <code>stopped-by-failure</code> with the reason <code>helper.unstable</code> (see <a href="/pages/reference-health-and-watchdog/">Health and watchdog</a>). The restart rule for the plugin itself (1 s, 5 s, then disable) applies in addition.</p>
+<p>On termination the host sends SIGTERM and then SIGKILL after 2 s. On shutdown of the server, all helpers receive <code>Shutdown</code>, then SIGKILL after 2 s.</p>
+<ul>
+<li><strong>[HST-168]</strong> A helper that dies during a call MUST count one failure for its plugin, and a helper that dies while idle MUST NOT count one.</li>
+<li><strong>[HST-169]</strong> After a helper dies, every request pending on it MUST complete as <code>cancelled</code>, and no retained state in the helper MUST be assumed.</li>
+<li><strong>[HST-170]</strong> The host MUST allow at most 5 helper starts in 10 minutes for a session, and MUST then disable the T2 and T3 plugins of that session with <code>helper.unstable</code>.</li>
+<li><strong>[HST-171]</strong> Termination MUST be SIGTERM followed by SIGKILL after 2 s.</li>
+</ul>
+<h2 id="errors">Errors</h2>
+<table>
+<thead>
+<tr>
+<th>Id</th>
+<th>When</th>
+<th>Counts</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>helper.spawn-failed</code></td>
+<td>A start step failed, wrong fingerprint, <code>Ready</code> too late</td>
+<td>only after a first successful start</td>
+</tr>
+<tr>
+<td><code>helper.protocol-error</code></td>
+<td>Malformed or unknown message</td>
+<td>yes</td>
+</tr>
+<tr>
+<td><code>helper.hung</code></td>
+<td>No answer 500 ms after the deadline, or three missed heartbeats</td>
+<td>yes</td>
+</tr>
+<tr>
+<td><code>helper.stale-call</code></td>
+<td>Message for an unknown call id</td>
+<td>no</td>
+</tr>
+<tr>
+<td><code>helper.too-many</code></td>
+<td><code>session_helpers</code> reached</td>
+<td>no</td>
+</tr>
+<tr>
+<td><code>helper.unstable</code></td>
+<td>More than 5 starts in 10 minutes</td>
+<td>disables T2 and T3 of the session</td>
+</tr>
+<tr>
+<td><code>session.memory-exceeded</code></td>
+<td>Charge would pass <code>session_memory_mib</code></td>
+<td>no</td>
+</tr>
+<tr>
+<td><code>sandbox.unavailable</code></td>
+<td>Prerequisites missing, root user, or non-Linux platform</td>
+<td>no</td>
+</tr>
+</tbody>
+</table>
+<h2 id="see-also">See also</h2>
+<ul>
+<li><a href="/pages/reference-host-scheduling/">Host scheduling</a> for deadlines and cancellation.</li>
+<li><a href="/pages/reference-platform-support/">Platform support</a> for the platforms that can run a helper.</li>
+<li><a href="/pages/reference-resource-accounting/">Resource accounting</a> and <a href="/pages/reference-threat-model/">Threat model</a>.</li>
+</ul>
+<p>API version checked: <code>ilium:plugin@0.1.0</code>.</p>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/reference-host-budgets/"><small>Previous</small>Performance budgets and benchmarks</a><a class="next" href="/pages/reference-host-ipc/"><small>Next</small>Plugin traffic over IPC</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#you-will-need">You will need</a></li><li class="l2"><a href="#what-a-helper-is">What a helper is</a></li><li class="l2"><a href="#starting-a-helper">Starting a helper</a></li><li class="l2"><a href="#messages">Messages</a></li><li class="l2"><a href="#data-that-is-large">Data that is large</a></li><li class="l2"><a href="#which-imports-run-where">Which imports run where</a></li><li class="l2"><a href="#deadlines-include-the-round-trip">Deadlines include the round trip</a></li><li class="l2"><a href="#memory">Memory</a></li><li class="l2"><a href="#helper-count">Helper count</a></li><li class="l2"><a href="#death-of-a-helper">Death of a helper</a></li><li class="l2"><a href="#errors">Errors</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

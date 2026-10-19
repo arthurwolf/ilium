@@ -1,0 +1,1420 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Layout and containers | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details open><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/" aria-current="page">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Widgets</b></p>
+<h1>Layout and containers</h1>
+
+<p>Containers decide where their children go and draw the frames around them. This family has ten widgets. <code>layout</code> splits an area into segments, <code>block</code> frames one child, <code>tabs</code> shows one child per tab, <code>popup</code> and <code>dialog</code> float above the view, <code>clear</code> erases an area, <code>scrollbar</code> shows the offset of another widget, <code>split</code> divides an area with a draggable divider, <code>separator</code> draws a rule, and <code>scroll-view</code> scrolls one tall child.</p>
+<p>The plugin never sees screen rectangles. It declares the tree, and the host runs the constraint solver, draws the frames and paints them with the user's theme. <code>views.render</code> runs when a view opens, after <code>ui.invalidate</code>, when the view's area changes and when the theme changes. It does not run on every frame.</p>
+<h2 id="you-need">You need</h2>
+<ul>
+<li>The <code>ui.panels</code> grant (<a href="/pages/capability-ui-panels/">Panels</a>), or <code>panes.provide-kind</code> for a pane kind (<a href="/pages/capability-panes-provide-kind/">Basic panes</a>). Both are client-side (<code>side = "client"</code>).</li>
+<li>Rust with the <code>ilium-plugin-sdk</code> crate, or TypeScript with <code>@ilium/plugin-sdk</code>. The builders fill every default listed on this page.</li>
+<li>The layout types <code>Area</code>, <code>Constraint</code>, <code>Direction</code>, <code>Flex</code>, <code>Spacing</code> and <code>Margin</code>. <a href="/pages/layout/">Layout constraints</a> explains them.</li>
+<li>The <a href="/pages/widgets-index/">widget catalogue</a> for the rules that all widgets share: keys, host-owned state and <code>ui-action</code> events.</li>
+</ul>
+<p>Text values in the examples are plain strings. In WIT they are <code>styled-text</code>. Use <code>span()</code> in TypeScript or <code>Span::styled</code> in Rust for a fragment with its own colour.</p>
+<h2 id="the-shape-of-a-block">The shape of a block</h2>
+<figure>
+<svg viewBox="0 0 360 220" role="img" aria-label="A block has a border with titles, padding and one inner area" width="540" height="330">
+  <title>The parts of a block</title>
+  <desc>A rounded border with a title on its top line, then padding, then one inner area for the child.</desc>
+  <defs>
+    <marker id="arrow-block" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <rect x="20" y="50" width="240" height="150" rx="10" fill="none" stroke="currentColor"/>
+  <rect x="36" y="66" width="208" height="118" fill="none" stroke="currentColor" stroke-dasharray="4 3"/>
+  <rect x="52" y="82" width="176" height="86" fill="none" stroke="currentColor"/>
+  <text x="34" y="44" font-size="11" fill="currentColor">Build</text>
+  <text x="140" y="129" font-size="11" text-anchor="middle" fill="currentColor">inner area (one child)</text>
+  <line x1="284" y1="50" x2="258" y2="50" stroke="currentColor" marker-end="url(#arrow-block)"/>
+  <text x="290" y="54" font-size="11" fill="currentColor">Titles</text>
+  <line x1="284" y1="100" x2="262" y2="100" stroke="currentColor" marker-end="url(#arrow-block)"/>
+  <text x="290" y="104" font-size="11" fill="currentColor">Border</text>
+  <line x1="284" y1="130" x2="230" y2="130" stroke="currentColor" marker-end="url(#arrow-block)"/>
+  <text x="290" y="134" font-size="11" fill="currentColor">Inner area</text>
+  <line x1="284" y1="170" x2="246" y2="170" stroke="currentColor" marker-end="url(#arrow-block)"/>
+  <text x="290" y="174" font-size="11" fill="currentColor">Padding</text>
+</svg>
+<figcaption>Outside in: the border with its titles on the border line, the padding, then the one child in the inner area.</figcaption>
+</figure>
+
+<h2 id="the-ten-widgets">The ten widgets</h2>
+<table>
+<thead>
+<tr>
+<th>Widget</th>
+<th>Mirrors</th>
+<th>Children</th>
+<th>Sends</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>layout</code></td>
+<td><code>ratatui::layout::Layout</code></td>
+<td>one per constraint, in order</td>
+<td>nothing</td>
+</tr>
+<tr>
+<td><code>block</code></td>
+<td><code>ratatui::widgets::Block</code></td>
+<td>zero or one</td>
+<td>nothing</td>
+</tr>
+<tr>
+<td><code>tabs</code></td>
+<td><code>ratatui::widgets::Tabs</code></td>
+<td>one per title; only the selected one draws</td>
+<td><code>selected</code></td>
+</tr>
+<tr>
+<td><code>popup</code></td>
+<td><code>Clear</code> plus <code>Block</code></td>
+<td>one</td>
+<td><code>closed</code></td>
+</tr>
+<tr>
+<td><code>clear</code></td>
+<td><code>ratatui::widgets::Clear</code></td>
+<td>none</td>
+<td>nothing</td>
+</tr>
+<tr>
+<td><code>scrollbar</code></td>
+<td><code>ratatui::widgets::Scrollbar</code></td>
+<td>none</td>
+<td><code>scrolled</code></td>
+</tr>
+<tr>
+<td><code>split</code></td>
+<td>Ilium pane split geometry</td>
+<td>exactly two</td>
+<td><code>resized</code></td>
+</tr>
+<tr>
+<td><code>separator</code></td>
+<td>Ilium <code>─</code> rule</td>
+<td>none</td>
+<td>nothing</td>
+</tr>
+<tr>
+<td><code>dialog</code></td>
+<td>Ilium dialog frame and button row</td>
+<td>zero or one (the body)</td>
+<td><code>activated</code>, <code>closed</code></td>
+</tr>
+<tr>
+<td><code>scroll-view</code></td>
+<td>Ilium scroll regions</td>
+<td>one</td>
+<td><code>scrolled</code></td>
+</tr>
+</tbody>
+</table>
+<p>Keys, mouse input and theme roles follow the <a href="/pages/reference-widget-input-map/">widget input map</a>. Each widget below lists them again.</p>
+<h2 id="layout">layout</h2>
+<p><code>layout</code> runs the constraint solver. It takes one child per constraint, in order. <a href="/pages/layout/">Layout constraints</a> shows six renders and the rules of the solver.</p>
+<table>
+<thead>
+<tr>
+<th>Prop</th>
+<th>Type</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>direction</code></td>
+<td><code>horizontal</code> or <code>vertical</code></td>
+<td>The axis of the split.</td>
+</tr>
+<tr>
+<td><code>constraints</code></td>
+<td><code>list&lt;constraint&gt;</code></td>
+<td>One entry per child.</td>
+</tr>
+<tr>
+<td><code>flex</code></td>
+<td><code>legacy</code>, <code>start</code>, <code>end</code>, <code>center</code>, <code>space-between</code>, <code>space-around</code> or <code>space-evenly</code></td>
+<td>Where leftover cells go. Default <code>start</code>.</td>
+</tr>
+<tr>
+<td><code>spacing</code></td>
+<td><code>space(u16)</code> or <code>overlap(u16)</code></td>
+<td>The gap, or the overlap, between segments. Default <code>space(0)</code>.</td>
+</tr>
+<tr>
+<td><code>margin</code></td>
+<td><code>horizontal</code>, <code>vertical</code> (both <code>u16</code>)</td>
+<td>Cells removed from the area before the split. Default 0 by 0.</td>
+</tr>
+</tbody>
+</table>
+<p>Actions: none. Keys: none. Theme roles: none. It draws nothing itself. A <code>popup</code> or <code>dialog</code> child occupies its slot as empty space; give it <code>length(0)</code> to take none.</p>
+<figure>
+<pre class="term"><span class="t-dim">0         1         2         3         4         5
+012345678901234567890123456789012345678901234567890123456789</span>
+╭─ Sidebar ────────╮╭─ Body ───────────────────────────────╮
+│Agents            ││Select a session to read it.          │
+│Sessions          ││                                      │
+│                  ││                                      │
+╰──────────────────╯╰──────────────────────────────────────╯
+</pre>
+<figcaption>Rendered at 60 columns. A horizontal layout with <code>length(20)</code> and <code>fill(1)</code>. The sidebar keeps 20 cells and the body takes the other 40.</figcaption>
+</figure>
+
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">let root = tree
+    .layout(Direction::Horizontal, [Constraint::Length(20), Constraint::Fill(1)])
+    .child(sidebar)
+    .child(body);
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">const root = layout({
+  direction: 'horizontal',
+  constraints: [length(20), fill(1)],
+}, [sidebar, body]);
+</code></pre>
+<h2 id="block">block</h2>
+<p><code>block</code> draws its border and titles around one child. A title sits on the top or bottom line and aligns left, centre or right.</p>
+<table>
+<thead>
+<tr>
+<th>Prop</th>
+<th>Type</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>borders</code></td>
+<td>flags <code>top</code>, <code>right</code>, <code>bottom</code>, <code>left</code></td>
+<td>Edges that draw a line. Default: all four.</td>
+</tr>
+<tr>
+<td><code>border-type</code></td>
+<td><code>plain</code>, <code>rounded</code>, <code>double</code>, <code>thick</code>, <code>quadrant-inside</code> or <code>quadrant-outside</code></td>
+<td>The line set. Default <code>rounded</code>.</td>
+</tr>
+<tr>
+<td><code>titles</code></td>
+<td><code>list&lt;block-title&gt;</code></td>
+<td>Each title has <code>text</code>, <code>position</code> (<code>top</code> or <code>bottom</code>) and <code>alignment</code>. Default: none.</td>
+</tr>
+<tr>
+<td><code>padding</code></td>
+<td><code>left</code>, <code>right</code>, <code>top</code>, <code>bottom</code> (all <code>u16</code>)</td>
+<td>Cells between the border and the child. Default 0.</td>
+</tr>
+<tr>
+<td><code>style</code>, <code>border-style</code></td>
+<td><code>style</code> record</td>
+<td>Colours and modifiers. An empty style inherits the theme.</td>
+</tr>
+</tbody>
+</table>
+<p>The border uses the <code>border</code> role. The focused block is the innermost block whose area contains the focused node. Its border and title use the <code>accent</code> role, and its title is also bold. Actions: none.</p>
+<h3 id="block-titles">Block titles</h3>
+<ul>
+<li>A left-aligned title draws starting at x+1 as <code>─</code>, a space, the title, a space.</li>
+<li>A right-aligned title ends at the last cell before the corner, mirrored: the title, a space, then <code>─</code> against the corner.</li>
+<li>A centred title is centred on the inner width, with an odd remainder going right.</li>
+<li>A title wider than the inner width minus 4 is cut to that width minus 1, plus <code>…</code>.</li>
+<li>Several titles at the same position are joined by one <code>─</code>.</li>
+</ul>
+<h3 id="border-sets">Border sets</h3>
+<p>The host frame is always rounded. A plugin <code>block</code> defaults to rounded and may use any of the six <code>border-type</code> cases. Each case draws these corners and edges.</p>
+<table>
+<thead>
+<tr>
+<th><code>border-type</code></th>
+<th>Top left, top right, bottom left, bottom right</th>
+<th>Horizontal edge (top, bottom)</th>
+<th>Vertical edge (left, right)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>plain</code></td>
+<td><code>┌ ┐ └ ┘</code></td>
+<td><code>─</code> <code>─</code></td>
+<td><code>│</code> <code>│</code></td>
+</tr>
+<tr>
+<td><code>rounded</code></td>
+<td><code>╭ ╮ ╰ ╯</code></td>
+<td><code>─</code> <code>─</code></td>
+<td><code>│</code> <code>│</code></td>
+</tr>
+<tr>
+<td><code>double</code></td>
+<td><code>╔ ╗ ╚ ╝</code></td>
+<td><code>═</code> <code>═</code></td>
+<td><code>║</code> <code>║</code></td>
+</tr>
+<tr>
+<td><code>thick</code></td>
+<td><code>┏ ┓ ┗ ┛</code></td>
+<td><code>━</code> <code>━</code></td>
+<td><code>┃</code> <code>┃</code></td>
+</tr>
+<tr>
+<td><code>quadrant-inside</code></td>
+<td><code>▗ ▖ ▝ ▘</code></td>
+<td><code>▄</code> <code>▀</code></td>
+<td><code>▐</code> <code>▌</code></td>
+</tr>
+<tr>
+<td><code>quadrant-outside</code></td>
+<td><code>▛ ▜ ▙ ▟</code></td>
+<td><code>▀</code> <code>▄</code></td>
+<td><code>▌</code> <code>▐</code></td>
+</tr>
+</tbody>
+</table>
+<figure>
+<pre class="term">┌────┐ ╭────╮ ╔════╗
+│    │ │    │ ║    ║
+└────┘ ╰────╯ ╚════╝
+┏━━━━┓ ▗▄▄▄▄▖ ▛▀▀▀▀▜
+┃    ┃ ▐    ▌ ▌    ▐
+┗━━━━┛ ▝▀▀▀▀▘ ▙▄▄▄▄▟
+</pre>
+<figcaption>The six border types at 6 by 3 cells: plain, rounded, double, thick, quadrant-inside and quadrant-outside.</figcaption>
+</figure>
+
+<h3 id="host-frame">Host frame</h3>
+<p>The host draws a frame around every panel, popup and dialog. It is not a plugin <code>block</code>. The top edge is, from the left: <code>╭</code>, two spaces, <code>≡</code> (the frame menu, a click target, <code>accent</code> role), one space, <code>●</code> (the view state: <code>success</code> role when live, <code>warning</code> role when stale), one space, <code>·</code> (<code>muted</code>), one space, the title (<code>foreground</code>, bold when focused), then <code>─</code> up to the corner <code>╮</code>. In stable-glyph mode <code>≡</code> becomes <code>=</code>, <code>●</code> becomes <code>*</code> and <code>·</code> becomes <code>-</code>. The title is cut with <code>…</code> so the edge keeps at least one <code>─</code>. A plugin <code>block</code> title instead draws as <code>╭─ Title ─…╮</code>.</p>
+<figure>
+<pre class="term">╭─ Build ──────────────────────────────────────────────────╮
+│                                                          │
+│  Compiled 14 crates                                      │
+│  Warnings are listed below                               │
+│                                                          │
+╰───────────────────────────────────────────── 3 warnings ─╯
+</pre>
+<figcaption>Rendered at 60 columns. A rounded block with padding 1 by 2, a top title at the left and a bottom title at the right. The border uses the <code>border</code> role, or <code>accent</code> and bold while the block has focus.</figcaption>
+</figure>
+
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">let frame = tree
+    .block()
+    .title(&quot;Build&quot;)
+    .padding(Padding { left: 2, right: 2, top: 1, bottom: 1 })
+    .child(report);
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">const frame = block({
+  titles: [
+    { text: 'Build', position: 'top', alignment: 'left' },
+    { text: '3 warnings', position: 'bottom', alignment: 'right' },
+  ],
+  padding: { left: 2, right: 2, top: 1, bottom: 1 },
+}, [report]);
+</code></pre>
+<h2 id="tabs">tabs</h2>
+<p><code>tabs</code> shows every title in a strip. The host keeps the selected index as the widget state <code>tab(u32)</code>. Give each tab one child, in title order; only the selected child draws. The number of titles MUST equal the number of children, otherwise the instance traps with <code>ui.invalid-tree</code>. There is no action-id prop: the widget's <code>key</code> names the tabs in <code>ui-action</code> events.</p>
+<table>
+<thead>
+<tr>
+<th>Prop</th>
+<th>Type</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>titles</code></td>
+<td><code>list&lt;styled-text&gt;</code></td>
+<td>One title per tab.</td>
+</tr>
+<tr>
+<td><code>divider</code></td>
+<td>string</td>
+<td>The text between titles. Default <code>│</code>.</td>
+</tr>
+<tr>
+<td><code>padding-left</code>, <code>padding-right</code></td>
+<td><code>u16</code></td>
+<td>Cells around each title. Default 1 and 1.</td>
+</tr>
+<tr>
+<td><code>highlight-style</code></td>
+<td><code>style</code></td>
+<td>The style of the selected title. Default: the selection colours.</td>
+</tr>
+</tbody>
+</table>
+<p>The strip takes row 0 of the area, and the selected child gets rows 1 to the end. The strip draws, for each tab, the left padding, the title and the right padding, with the divider (<code>│</code>, <code>muted</code>) between tabs only. Titles that overflow are cut from the right, with <code>…</code> as the last cell. The selected title uses <code>highlight-style</code> (default: the <code>selection</code> role).</p>
+<p>Actions: <code>selected</code> with <code>index(u32)</code>, the newly selected tab. Keys: Left and Right step tabs without wrapping, Home and End, and Ctrl+PageUp and Ctrl+PageDown from inside a child. Mouse: a click on a title selects it. Roles: <code>muted</code> for other titles, <code>selection</code> for the selected one, <code>border</code> for the divider.</p>
+<figure>
+<pre class="term"> Agents <span class="t-dim">│</span><span class="t-hi"> Sessions </span><span class="t-dim">│</span> Costs
+╭──────────────────────────────────────────────────────────╮
+│  12 sessions in this project                             │
+│  Sorted by last activity                                 │
+│                                                          │
+╰──────────────────────────────────────────────────────────╯
+</pre>
+<figcaption>Rendered at 60 columns. The selected title is drawn with the selection colours (lavender background in the dark theme). Only the child of the selected tab is drawn.</figcaption>
+</figure>
+
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">let root = tree
+    .tabs([&quot;Agents&quot;, &quot;Sessions&quot;, &quot;Costs&quot;])
+    .key(&quot;views&quot;)
+    .child(agents)
+    .child(sessions)
+    .child(costs);
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">const root = tabs(['Agents', 'Sessions', 'Costs'], { key: 'views' }, [agents, sessions, costs]);
+</code></pre>
+<p>To pick the tab from code, call <code>ui.set-widget-state</code> with <code>tab(1)</code> on the key <code>views</code>. The tab count must match the child count.</p>
+<h2 id="popup">popup</h2>
+<p><code>popup</code> is drawn only while <code>ui.open-popup</code> has it open, and <code>ui.close-popup</code> hides it again. Open popups form a stack, and the topmost one takes input first. The <code>id</code> is the name both calls use. It is the <code>key</code> of the popup node and is unique across the open views of one plugin instance. A view may have at most 4 popups open.</p>
+<table>
+<thead>
+<tr>
+<th>Prop</th>
+<th>Type</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>id</code></td>
+<td>string</td>
+<td>Names the popup. It equals the node key. Unique across the open views of the plugin.</td>
+</tr>
+<tr>
+<td><code>title</code></td>
+<td><code>option&lt;styled-text&gt;</code></td>
+<td>Text on the top border. Default: none.</td>
+</tr>
+<tr>
+<td><code>modal</code></td>
+<td><code>bool</code></td>
+<td>When true, input stays in the popup. Default: true.</td>
+</tr>
+<tr>
+<td><code>width</code>, <code>height</code></td>
+<td><code>constraint</code></td>
+<td>The size, see <a href="#popup-size-and-placement">Popup size and placement</a>. Default: 60% each.</td>
+</tr>
+</tbody>
+</table>
+<p><code>open-popup-with</code> takes an anchor and options. The anchors are <code>centered((width, height))</code>, <code>at-cell((column, row))</code>, <code>below-key("key")</code>, <code>at-key("key")</code>, <code>at-tree-node(node)</code> and <code>at-pointer</code>. The options are <code>modal</code>, <code>pinnable</code>, <code>dismiss-on-leave</code> and <code>close-on-escape</code>. <a href="/pages/ui-model/">The UI model</a> explains each anchor.</p>
+<p>Actions: <code>closed</code> with <code>none</code> when the host closes the popup, for example after Escape. Escape follows the order in <a href="/pages/ui-model/#escape">Escape</a>, and a modal popup cannot refuse the close. A click outside closes a non-modal popup. <code>close-popup</code> sends nothing. Roles: <code>border</code>, and <code>accent</code> for the title.</p>
+<h3 id="popup-size-and-placement">Popup size and placement</h3>
+<ul>
+<li><strong>Size.</strong> <code>centered(w, h)</code> overrides the spec width and height. Every other anchor uses the spec width and height. A percentage is relative to the view area. The default is <code>percentage(60)</code> by <code>percentage(60)</code>. The result is clamped to [3, view width] by [3, view height] cells.</li>
+<li><strong>Placement.</strong> <code>below-key</code> places the popup at the row under the key's area, with the left edge aligned. <code>at-key</code>, <code>at-cell</code>, <code>at-tree-node</code> and <code>at-pointer</code> place its top-left corner at the anchor cell.</li>
+<li><strong>Fit.</strong> If the popup does not fit below, it flips to above. It then shifts left or up to stay inside the view.</li>
+<li><strong>Options.</strong> Options passed to <code>open-popup-with</code> override the spec fields <code>modal</code> and <code>close-on-escape</code>.</li>
+<li><strong>Layout.</strong> A popup or dialog child takes no space in its parent's layout. The slot still gets its constraint's cells and is drawn blank. The popup draws only while open, at its anchor, above all content.</li>
+</ul>
+<figure>
+<pre class="term">╭─ Build output ───────────────────────────────────────────────╮
+│compiling ilium-core                                          │
+│compiling ilium-detect                                        │
+│linking ilium╭  ≡ ● · Delete 3 files?───────────╮             │
+│running 14 te│                                  │             │
+│finished in 4│  <span class="t-dim">Esc Cancel</span>   <span class="t-err">Enter Delete</span>       │             │
+│             │                                  │             │
+│Build finishe╰──────────────────────────────────╯             │
+│                                                              │
+╰──────────────────────────────────────────────────────────────╯
+</pre>
+<figcaption>Rendered at 64 columns. A modal popup centred over a view. The popup clears its cells first, so no text of the view shows inside it. The danger button uses the <code>danger</code> role.</figcaption>
+</figure>
+
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">// Declare the popup in the tree, then open it from an event handler.
+let confirm = tree.popup(&quot;confirm-delete&quot;).title(&quot;Delete 3 files?&quot;).modal(true).child(buttons);
+ui::open_popup(&quot;confirm-delete&quot;, PopupAnchor::Centered((Constraint::Length(36), Constraint::Length(5))))?;
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">const confirm = popup('confirm-delete', { title: 'Delete 3 files?', modal: true }, [buttons]);
+openPopup('confirm-delete', { tag: 'centered', val: [length(36), length(5)] });
+</code></pre>
+<p>A non-modal popup anchored to a hovered row is the usual way to show details:</p>
+<figure>
+<pre class="term">▼ Ilium
+›   ⠋ Fix auth
+›     Shell
+    ╭─ Session stats ──────────────────╮
+    │ <span class="t-hi">Overview</span>  Tokens  Activity       │
+    │                                  │
+    │ Tokens today <span class="t-dim">………………</span> 41,200       │
+    │ Cost today <span class="t-dim">…………………</span> $4.20         │
+    ╰──────────────────────────────────╯
+</pre>
+<figcaption>Rendered below a tree row. A non-modal popup anchored <code>at-tree-node</code>. With <code>dismiss-on-leave</code> it closes when the pointer leaves both the popup and its anchor; with <code>pinnable</code> the user can pin it open, and Escape then closes it.</figcaption>
+</figure>
+
+<h2 id="clear">clear</h2>
+<p><code>clear</code> erases every cell of its area. It has no props and no children. Use it when a notice must hide content drawn earlier in the same view.</p>
+<figure>
+<pre class="term">╭──────────────────────────────────────────────────────────────╮
+│The quick brown fox jumps over the lazy dog 0123456789        │
+│Second row of bac╭─ Notice ─────────────────╮to the right     │
+│Third row of back│  Saved                   │o the right      │
+│Fourth row of bac╰──────────────────────────╯to the right     │
+│Fifth row of background text that continues to the right      │
+╰──────────────────────────────────────────────────────────────╯
+</pre>
+<figcaption>Rendered at 64 columns. The notice draws a <code>clear</code> first, so the text behind it is erased inside the frame and stays visible outside it.</figcaption>
+</figure>
+
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">let erase = tree.clear();
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">const erase = clear();
+</code></pre>
+<p>Actions: none. Keys and mouse: none.</p>
+<h2 id="scrollbar">scrollbar</h2>
+<p><code>scrollbar</code> has no content of its own. It draws the scroll offset of the widget named by <code>target-key</code>, so the thumb always shows where that widget is.</p>
+<table>
+<thead>
+<tr>
+<th>Prop</th>
+<th>Type</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>orientation</code></td>
+<td><code>vertical-right</code>, <code>vertical-left</code>, <code>horizontal-bottom</code> or <code>horizontal-top</code></td>
+<td>Where the bar draws. Default <code>vertical-right</code>.</td>
+</tr>
+<tr>
+<td><code>target-key</code></td>
+<td>string</td>
+<td>The key of a scrollable widget in the same view.</td>
+</tr>
+</tbody>
+</table>
+<p>The track is the last column of the scrolling node's own area (the first column with position left) and spans the node's full height. Let T be the track length, V the viewport rows and C the content rows. When C &lt;= V, no bar is drawn and the column belongs to the content. Otherwise <code>thumb_len = max(1, floor(T*V/C))</code> and <code>thumb_start = round((T-thumb_len)*offset/(C-V))</code>. The track draws <code>│</code> (<code>muted</code>) and the thumb draws <code>┃</code> (<code>accent</code> when the node is focused, else <code>foreground</code>). There are no arrows. In stable-glyph mode the track is <code>|</code> and the thumb is <code>#</code>. While the user drags the thumb it uses <code>accent</code>. A drag moves the target; a click on the track pages. The scrollable widget sends <code>scrolled</code> with <code>index(u32)</code>, the new top row offset. The host coalesces bursts of wheel events.</p>
+<figure>
+<pre class="term">╭─ Log ────────────────────────────────────────────────────╮
+│Line 03: compiling ilium-core                            <span class="t-dim">│</span>│
+│Line 04: compiling ilium-detect                          <span class="t-hi">┃</span>│
+│Line 05: compiling ilium-server                          <span class="t-hi">┃</span>│
+│Line 06: compiling ilium-client                          <span class="t-hi">┃</span>│
+│Line 07: compiling ilium-ipc                             <span class="t-dim">│</span>│
+│Line 08: compiling ilium-pty                             <span class="t-dim">│</span>│
+│Line 09: linking                                         <span class="t-dim">│</span>│
+│Line 10: done                                            <span class="t-dim">│</span>│
+╰──────────────────────────────────────────────────────────╯
+</pre>
+<figcaption>Rendered at 60 columns. A <code>vertical-right</code> scrollbar drawn inside the border. The thumb <code>┃</code> sits on the track <code>│</code>; the log holds 20 rows and 8 are visible, scrolled to offset 2. With T=8, V=8 and C=20, `thumb_len` is 3 and `thumb_start` is 1.</figcaption>
+</figure>
+
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">let bar = tree.scrollbar(ScrollbarOrientation::VerticalRight, &quot;log&quot;).key(&quot;log-bar&quot;);
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">const bar = scrollbar('log', { orientation: 'vertical-right', key: 'log-bar' });
+</code></pre>
+<h2 id="split">split</h2>
+<p><code>split</code> divides its area between exactly two children and lets the user move the divider. It mirrors the pane split of the Ilium tree. The divider position is host state <code>widget-state::split(u16)</code>, in per mille; the host keeps it under the key, so it survives a re-render.</p>
+<table>
+<thead>
+<tr>
+<th>Prop</th>
+<th>Type</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>direction</code></td>
+<td><code>horizontal</code> or <code>vertical</code></td>
+<td><code>horizontal</code> puts the children side by side.</td>
+</tr>
+<tr>
+<td><code>position</code></td>
+<td><code>u16</code></td>
+<td>The initial divider position in per mille, 50 to 950. Default 500.</td>
+</tr>
+<tr>
+<td><code>min-first</code>, <code>min-second</code></td>
+<td><code>u16</code></td>
+<td>Minimum size of each child, in cells.</td>
+</tr>
+<tr>
+<td><code>resizable</code></td>
+<td><code>bool</code></td>
+<td>Whether the user can move the divider. Default true.</td>
+</tr>
+</tbody>
+</table>
+<p>Let A be the area length along the split axis. <code>first = floor((A-1)*position/1000)</code>, the divider takes 1 cell, and <code>second = A-1-first</code>. Then <code>first</code> is clamped to [<code>min-first</code>, A-1-<code>min-second</code>]; if both minimums cannot fit, <code>first</code> gets <code>min-first</code> and <code>second</code> gets the rest. The divider draws <code>│</code> for a horizontal split and <code>─</code> for a vertical one (<code>muted</code>; <code>accent</code> when focused or dragged). It is focusable and draggable only when <code>resizable</code> is true. During a drag the grip <code>┃</code> or <code>━</code> shows.</p>
+<p>Actions: <code>resized</code> with <code>number(f64)</code>, the new position in per mille (the value is <code>split(position)</code> as host state), sent when a drag or a key press ends. Keys: with the divider focused, Left and Right (or Up and Down) move <code>position</code> by 50, and Home or End move it to the minimum bounds. Mouse: drag the divider.</p>
+<figure>
+<pre class="term">╭──────────────────────────────────┬───────────────────────╮
+│Explorer                          <span class="t-hi">┃</span>Preview                │
+│src/                              <span class="t-hi">┃</span>fn main() {            │
+│  main.rs                         <span class="t-hi">┃</span>  run();               │
+│  lib.rs                          <span class="t-hi">┃</span>}                      │
+│tests/                            <span class="t-hi">┃</span>                       │
+╰──────────────────────────────────┴───────────────────────╯
+</pre>
+<figcaption>Rendered at 60 columns. A horizontal <code>split</code> at position 600 per mille. The divider is <code>│</code> at rest; while it is hovered or dragged the host draws the grip <code>┃</code> in the accent colour (shown here). The two panels share the divider column.</figcaption>
+</figure>
+
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">let root = tree
+    .split(Direction::Horizontal)
+    .key(&quot;main-split&quot;)
+    .position(600)
+    .min_first(20)
+    .min_second(16)
+    .child(explorer)
+    .child(preview);
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">const root = split({
+  direction: 'horizontal',
+  key: 'main-split',
+  position: 600,
+  minFirst: 20,
+  minSecond: 16,
+}, [explorer, preview]);
+</code></pre>
+<h2 id="separator">separator</h2>
+<p><code>separator</code> draws a one-cell rule, with an optional label.</p>
+<table>
+<thead>
+<tr>
+<th>Prop</th>
+<th>Type</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>direction</code></td>
+<td><code>horizontal</code> or <code>vertical</code></td>
+<td>A horizontal rule is <code>─</code>, a vertical rule is <code>│</code>.</td>
+</tr>
+<tr>
+<td><code>label</code></td>
+<td><code>option&lt;styled-text&gt;</code></td>
+<td>Text centred on a horizontal rule.</td>
+</tr>
+<tr>
+<td><code>style</code></td>
+<td><code>style</code></td>
+<td>Overrides the <code>border</code> role.</td>
+</tr>
+</tbody>
+</table>
+<p>Actions, keys and mouse: none. It is allowed in settings views.</p>
+<figure>
+<pre class="term">  src/main.rs
+<span class="t-dim">── Selected file ─────────────────────────────────────────</span>
+  fn main() {}
+<span class="t-dim">──────────────────────────────────────────────────────────</span>
+</pre>
+<figcaption>Rendered at 58 columns. A horizontal <code>separator</code> with a label, and one without. A vertical separator is one column of <code>│</code>.</figcaption>
+</figure>
+
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">let rule = tree.separator(Direction::Horizontal).label(&quot;Selected file&quot;);
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">const rule = separator({ direction: 'horizontal', label: 'Selected file' });
+</code></pre>
+<h2 id="dialog">dialog</h2>
+<p><code>dialog</code> is a modal frame with a title, an optional body and a button row. It is opened like a popup, with <code>open-popup</code> and its key as popup id, and it is always modal.</p>
+<table>
+<thead>
+<tr>
+<th>Prop</th>
+<th>Type</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>title</code></td>
+<td><code>styled-text</code></td>
+<td>Text on the top border.</td>
+</tr>
+<tr>
+<td><code>kind</code></td>
+<td><code>plain</code>, <code>confirm</code> or <code>danger-confirm</code></td>
+<td><code>confirm</code> and <code>danger-confirm</code> add two buttons: <code>cancel</code> (<code>is-cancel</code>, label Cancel) and <code>ok</code> (primary, label OK, or Delete for <code>danger-confirm</code>). <code>danger-confirm</code> styles the frame and <code>ok</code> with the <code>danger</code> role and focuses Cancel first.</td>
+</tr>
+<tr>
+<td><code>buttons</code></td>
+<td><code>list&lt;dialog-button&gt;</code></td>
+<td>Each has <code>id</code>, <code>label</code>, <code>role</code> (<code>primary</code>, <code>secondary</code> or <code>danger</code>) and <code>is-cancel</code>.</td>
+</tr>
+<tr>
+<td><code>width</code>, <code>height</code></td>
+<td><code>constraint</code></td>
+<td>The size of the frame.</td>
+</tr>
+<tr>
+<td><code>message</code></td>
+<td><code>option&lt;styled-lines&gt;</code></td>
+<td>Text above the buttons.</td>
+</tr>
+</tbody>
+</table>
+<p>The body is zero or one child. The dialog's action key is its node key. Actions: <code>activated</code> with <code>text(button id)</code> when a button runs, and <code>closed</code> with <code>none</code> when the dialog closes without a button. Keys: Escape sends <code>activated</code> with <code>text(id of the is-cancel button)</code>, or <code>closed</code> when there is no <code>is-cancel</code> button. Enter on a focused button activates that button, and Enter while focus is in the body activates the primary button. Left and Right move between buttons. Mouse: click a button. Roles: <code>border</code>, <code>accent</code> for the primary button, and <code>danger</code> for a danger button and for a <code>danger-confirm</code> frame.</p>
+<p>The host draws the hint line <code>Esc cancel · Enter &lt;primary label&gt;</code> in the <code>muted</code> role on the last inner row. The buttons draw on the row above it, centred, as their labels separated by three spaces.</p>
+<figure>
+<pre class="term">╭  ≡ ● · Delete file?──────────────────────────────╮
+│  notes-2026-10.md will be removed.               │
+│  This cannot be undone.                          │
+│                                                  │
+│                 <span class="t-dim">Cancel</span>   <span class="t-err">Delete</span>                  │
+│<span class="t-dim"> Esc cancel · Enter Delete                        </span>│
+╰──────────────────────────────────────────────────╯
+</pre>
+<figcaption>Rendered at 52 columns. A <code>danger-confirm</code> dialog. The frame is drawn with the <code>danger</code> role, the Cancel button is neutral, the Delete button uses the <code>danger</code> role, and the dim hint line repeats the keys. Cancel has focus first.</figcaption>
+</figure>
+
+<p>A <code>plain</code> dialog can hold a body widget such as a <code>text-input</code>:</p>
+<figure>
+<pre class="term">╭  ≡ ● · New session───────────────────────────────╮
+│ ╭  ≡ ● · Name──────────────────────────────╮     │
+│ │Fix auth                                      │ │
+│ ╰──────────────────────────────────────────────╯ │
+│                 <span class="t-dim">Cancel</span>   <span class="t-hi">Create</span>                  │
+│<span class="t-dim"> Esc cancel · Enter Create                        </span>│
+╰──────────────────────────────────────────────────╯
+</pre>
+<figcaption>Rendered at 52 columns. A <code>plain</code> dialog with a <code>text-input</code> as its body and two buttons. The primary button uses the <code>accent</code> role, and Enter in the text field activates it.</figcaption>
+</figure>
+
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">let dialog = tree
+    .dialog(&quot;delete-file&quot;, &quot;Delete file?&quot;)
+    .kind(DialogKind::DangerConfirm)
+    .message(&quot;notes-2026-10.md will be removed.\nThis cannot be undone.&quot;)
+    .width(Constraint::Length(52))
+    .height(Constraint::Length(7));
+ui::open_popup(&quot;delete-file&quot;, PopupAnchor::Centered((Constraint::Length(52), Constraint::Length(7))))?;
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">const dlg = dialog('delete-file', {
+  title: 'Delete file?',
+  kind: 'danger-confirm',
+  message: 'notes-2026-10.md will be removed.\nThis cannot be undone.',
+  width: length(52),
+  height: length(7),
+});
+openPopup('delete-file', { tag: 'centered', val: [length(52), length(7)] });
+</code></pre>
+<h2 id="scroll-view">scroll-view</h2>
+<p><code>scroll-view</code> lays out its one child at <code>content-rows</code> height and clips it to its area. The child can be taller than the view. The host keeps the first visible row as <code>widget-state::offset(u32)</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Prop</th>
+<th>Type</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>content-rows</code></td>
+<td><code>u32</code></td>
+<td>The height at which the child is laid out.</td>
+</tr>
+<tr>
+<td><code>show-scrollbar</code></td>
+<td><code>bool</code></td>
+<td>Draw the scrollbar. Default true.</td>
+</tr>
+<tr>
+<td><code>follow-tail</code></td>
+<td><code>bool</code></td>
+<td>Keep the last row visible while the user is at the bottom.</td>
+</tr>
+</tbody>
+</table>
+<p>Keys go to the focused node first. Up, Down, PageUp, PageDown, Home and End that the focused node does not consume bubble to the nearest ancestor <code>scroll-view</code>. Up and Down scroll 1 row, the Page keys scroll V-1 rows, and the mouse wheel scrolls 3 rows. When focus moves to a descendant, the <code>scroll-view</code> adjusts <code>offset</code> so that the descendant's area is fully visible, aligning to its top. The child is laid out at width A-1 when the scrollbar is visible and at width A otherwise; its height is <code>content-rows</code>. The scrollbar follows the <a href="#scrollbar">scrollbar drawing rule</a>.</p>
+<p>Actions: <code>scrolled</code> with <code>index(u32)</code>, the first visible row. Keys: Up and Down, PageUp and PageDown, Home and End. Mouse: the wheel, and a drag of the scrollbar. Roles: <code>border</code> and <code>muted</code>.</p>
+<figure>
+<pre class="term">╭─ Job log, following the tail ────────────────────────────╮
+│ 07 12:01:44 indexed 412 sessions                        <span class="t-dim">│</span>│
+│ 08 12:01:45 wrote cost table                            <span class="t-dim">│</span>│
+│ 09 12:01:45 wrote token table                           <span class="t-dim">│</span>│
+│ 10 12:01:46 checking quotas                             <span class="t-hi">┃</span>│
+│ 11 12:01:47 quota ok                                    <span class="t-hi">┃</span>│
+│ 12 12:01:47 done                                        <span class="t-hi">┃</span>│
+╰──────────────────────────────────────────────────────────╯
+</pre>
+<figcaption>Rendered at 60 columns. A <code>scroll-view</code> with <code>follow-tail</code>. With V=6 and C=12 the thumb has length 3 and sits at the bottom, so the newest rows are visible. If the user scrolls up, following stops until the thumb returns to the bottom.</figcaption>
+</figure>
+
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">let log = tree.scroll_view(240).key(&quot;job-log&quot;).follow_tail(true).child(log_lines);
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">const log = scrollView({ contentRows: 240, key: 'job-log', followTail: true }, [logLines]);
+</code></pre>
+<h2 id="hover-and-tooltips-on-containers">Hover and tooltips on containers</h2>
+<p>Any node can carry a <code>tooltip</code> of at most 200 Unicode scalar values, and the <code>hover-events</code> and <code>pointer-events</code> flags. Containers are no exception: a <code>block</code> with a tooltip shows it when the pointer rests on the block for 500 ms. The tooltip box, its size and its placement follow <a href="/pages/ui-model/#hover-and-tooltips">Hover and tooltips</a>.</p>
+<figure>
+<pre class="term">Threshold too low. <span class="t-hi">Apply 180k</span><span class="t-dim">  (hover)</span>
+            ╭──────────────────────────────╮
+            │ Writes the recommended       │
+            │ threshold                    │
+            ╰──────────────────────────────╯
+</pre>
+<figcaption>Rendered below the hovered span after 500 ms. A tooltip is a rounded block with one cell of horizontal padding. It is placed one row below the pointer cell, or above it when there is no room.</figcaption>
+</figure>
+
+<h2 id="paint-order-and-overlap">Paint order and overlap</h2>
+<p>Nodes paint in pre-order, so a later sibling overdraws an earlier one cell by cell. With <code>overlap(n)</code> between bordered blocks, shared cells use the box-drawing merge rule. In a horizontal layout the shared vertical edge becomes <code>┬</code> at the top and <code>┴</code> at the bottom. In a vertical layout the shared horizontal edge becomes <code>├</code> at the left and <code>┤</code> at the right. Rounded corners that become joints use the plain joints. When the two border types differ, the later sibling's glyph wins. Popups, then tooltips, paint after all content.</p>
+<h2 id="builder-defaults">Builder defaults</h2>
+<p>The WIT records have no defaults. The SDK builders fill these, so a plugin sets only what differs.</p>
+<table>
+<thead>
+<tr>
+<th>Widget</th>
+<th>Defaults</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>layout</code></td>
+<td><code>flex</code> start, <code>spacing</code> <code>space(0)</code>, <code>margin</code> 0 by 0</td>
+</tr>
+<tr>
+<td><code>block</code></td>
+<td>all four borders, <code>border-type</code> rounded, no titles, padding 0, empty styles</td>
+</tr>
+<tr>
+<td><code>tabs</code></td>
+<td>divider <code>│</code>, padding 1 and 1, highlight style = selection colours</td>
+</tr>
+<tr>
+<td><code>popup</code></td>
+<td>no title, <code>modal</code> true, width and height 60%</td>
+</tr>
+<tr>
+<td><code>scrollbar</code></td>
+<td><code>orientation</code> vertical-right</td>
+</tr>
+<tr>
+<td><code>split</code></td>
+<td><code>position</code> 500, <code>resizable</code> true</td>
+</tr>
+<tr>
+<td><code>dialog</code></td>
+<td><code>kind</code> plain, no message</td>
+</tr>
+<tr>
+<td><code>scroll-view</code></td>
+<td><code>show-scrollbar</code> true, <code>follow-tail</code> false</td>
+</tr>
+</tbody>
+</table>
+<h2 id="worked-example-in-rust">Worked example in Rust</h2>
+<p>A client view with a split between a list and a log, the log in a scroll view, under a two-tab strip. A Delete button opens a danger dialog.</p>
+<pre><code class="language-rust">use ilium_plugin_sdk::prelude::*;
+use ilium_plugin_sdk::types::layout::{Area, Constraint, Direction};
+use ilium_plugin_sdk::types::ui::{DialogKind, UiTree, ViewTarget};
+use ilium_plugin_sdk::host::log::{self, Level};
+use ilium_plugin_sdk::ui::build::Tree;
+
+#[ilium_plugin(side = &quot;client&quot;, exports = [&quot;views&quot;])]
+#[derive(Default)]
+struct BuildPanel;
+
+impl Lifecycle for BuildPanel {}
+
+impl Handler for BuildPanel {
+    fn on_events(&amp;mut self, batch: Vec&lt;Event&gt;) -&gt; Vec&lt;Submission&gt; {
+        for event in batch {
+            let Event::UiAction(action) = event else { continue };
+            if action.key == &quot;delete&quot; {
+                let anchor = PopupAnchor::Centered((Constraint::Length(52), Constraint::Length(7)));
+                if let Err(error) = ui::open_popup(&quot;delete-file&quot;, anchor) {
+                    log::log(Level::Warn, &amp;format!(&quot;open_popup failed: {error:?}&quot;));
+                }
+            }
+        }
+        Vec::new()
+    }
+}
+
+impl Views for BuildPanel {
+    fn render(&amp;mut self, _view: ViewTarget, _area: Area) -&gt; UiTree {
+        let mut tree = Tree::new();
+        let files = tree.paragraph(vec![vec![Span::plain(&quot;src/&quot;)]]).key(&quot;files&quot;);
+        let log_text = tree.paragraph(vec![vec![Span::plain(&quot;Line 01: starting the build&quot;)]]);
+        let log = tree.scroll_view(240).key(&quot;log&quot;).follow_tail(true).child(log_text);
+        let split = tree.split(Direction::Horizontal).key(&quot;main-split&quot;).position(400).child(files).child(log);
+        let costs = tree.paragraph(vec![vec![Span::plain(&quot;Costs this week&quot;)]]);
+        let tabs = tree.tabs([&quot;Log&quot;, &quot;Costs&quot;]).key(&quot;views&quot;).child(split).child(costs);
+        let delete = tree.button(&quot;Delete&quot;).key(&quot;delete&quot;);
+        let dialog = tree
+            .dialog(&quot;delete-file&quot;, &quot;Delete file?&quot;)
+            .kind(DialogKind::DangerConfirm)
+            .message(&quot;This cannot be undone.&quot;);
+        let root = tree
+            .layout(Direction::Vertical, [Constraint::Length(1), Constraint::Fill(1), Constraint::Length(0)])
+            .child(delete)
+            .child(tabs)
+            .child(dialog);
+        tree.finish(root)
+    }
+}
+</code></pre>
+<p>The dialog sits in a <code>length(0)</code> slot, so it takes no space until <code>open-popup</code> shows it.</p>
+<h2 id="worked-example-in-typescript">Worked example in TypeScript</h2>
+<p>The same view.</p>
+<pre><code class="language-ts">import { definePlugin } from '@ilium/plugin-sdk';
+import type { Event, Submission } from '@ilium/plugin-sdk/types';
+import { log } from '@ilium/plugin-sdk/host/log';
+import { openPopup } from '@ilium/plugin-sdk/host/ui';
+import {
+  button, dialog, fill, layout, length, paragraph, scrollView, span, split, tabs, tree,
+} from '@ilium/plugin-sdk/ui/build';
+
+export const { lifecycle, handler, views } = definePlugin({
+  side: 'client',
+  onEvents(batch: Event[]): Submission[] {
+    for (const event of batch) {
+      if (event.tag !== 'ui-action' || event.val.key !== 'delete') continue;
+      try {
+        openPopup('delete-file', { tag: 'centered', val: [length(52), length(7)] });
+      } catch (error) {
+        log('warn', String(error));
+      }
+    }
+    return [];
+  },
+  render() {
+    const files = paragraph([[span('src/')]], { key: 'files' });
+    const logText = paragraph([[span('Line 01: starting the build')]]);
+    const logView = scrollView({ contentRows: 240, key: 'log', followTail: true }, [logText]);
+    const main = split({ direction: 'horizontal', key: 'main-split', position: 400 }, [files, logView]);
+    const costs = paragraph([[span('Costs this week')]]);
+    const views = tabs(['Log', 'Costs'], { key: 'views' }, [main, costs]);
+    const confirm = dialog('delete-file', {
+      title: 'Delete file?',
+      kind: 'danger-confirm',
+      message: 'This cannot be undone.',
+    });
+    return tree(layout({
+      direction: 'vertical',
+      constraints: [length(1), fill(1), length(0)],
+    }, [button('Delete', { key: 'delete' }), views, confirm]));
+  },
+});
+</code></pre>
+<h2 id="edge-cases-and-errors">Edge cases and errors</h2>
+<table>
+<thead>
+<tr>
+<th>Situation</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A <code>layout</code> has a different number of children from constraints</td>
+<td><code>ui.invalid-tree</code>. The instance traps. The builders stop the render first and name the layout key.</td>
+</tr>
+<tr>
+<td>A <code>ratio</code> has denominator 0</td>
+<td><code>ui.invalid-tree</code>. The instance traps.</td>
+</tr>
+<tr>
+<td>The tree has more than 4,096 nodes or 1 MiB</td>
+<td><code>ui.too-large</code>. The instance traps.</td>
+</tr>
+<tr>
+<td>Two nodes anywhere in one tree share a <code>key</code></td>
+<td><code>ui.duplicate-key</code>. The instance traps.</td>
+</tr>
+<tr>
+<td>A <code>split</code> has a number of children other than two</td>
+<td><code>ui.invalid-tree</code>. The instance traps.</td>
+</tr>
+<tr>
+<td>A <code>tabs</code> has a different number of titles and children</td>
+<td><code>ui.invalid-tree</code>. The instance traps.</td>
+</tr>
+<tr>
+<td>A <code>split</code> position outside 50 to 950</td>
+<td>The host clamps it.</td>
+</tr>
+<tr>
+<td><code>min-first</code> and <code>min-second</code> need more cells than the area has</td>
+<td>The host shrinks both, and the divider cannot move.</td>
+</tr>
+<tr>
+<td>A constraint asks for more cells than the area has, or the area has zero columns or rows</td>
+<td>The solver clips it, or nothing is drawn. No error.</td>
+</tr>
+<tr>
+<td><code>ui.open-popup</code> names an id missing from the view's last tree</td>
+<td><code>not-found</code>.</td>
+</tr>
+<tr>
+<td>A fifth popup is opened in one view</td>
+<td><code>quota-exceeded</code>. The limit is 4 popups per view.</td>
+</tr>
+<tr>
+<td>Two open views of the plugin hold a popup with the same key</td>
+<td><code>invalid-argument</code> from <code>open-popup</code>.</td>
+</tr>
+<tr>
+<td><code>ui.close-popup</code> names a popup that is not open</td>
+<td>Nothing happens. No error.</td>
+</tr>
+<tr>
+<td><code>ui.set-widget-state</code> names an unknown key</td>
+<td><code>not-found</code>.</td>
+</tr>
+<tr>
+<td><code>ui.set-widget-state</code> gives a state the widget does not take, such as <code>tab(1)</code> on a <code>paragraph</code></td>
+<td><code>invalid-argument</code>.</td>
+</tr>
+<tr>
+<td>A <code>scrollbar</code> names a <code>target-key</code> that is not in the view</td>
+<td>Nothing is drawn. No error.</td>
+</tr>
+<tr>
+<td>A <code>popup</code> or <code>dialog</code> sits in a <code>layout</code></td>
+<td>The slot gets its constraint's cells and is drawn blank. Use <code>length(0)</code> to take none.</td>
+</tr>
+<tr>
+<td>A <code>popup</code> or <code>dialog</code> in a settings page</td>
+<td><code>ui.widget-not-allowed</code>. The instance traps and the previous tree stays.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="what-the-user-sees">What the user sees</h2>
+<ul>
+<li>Host frames are always rounded. A plugin <code>block</code> is rounded unless <code>border-type</code> says otherwise. The focused frame is cyan and bold in the default theme.</li>
+<li>A popup draws over the view, which stays visible behind it. A modal popup blocks input to that view.</li>
+<li>A resize triggers one new <code>render</code> with the new area, at most one per 16 ms. Until it returns, the host lays out the previous tree in the new area, so the screen never shows a stale size. The scrollbar thumb follows the target's offset.</li>
+<li>The divider of a <code>split</code> highlights when the pointer is on it, and keeps its position when the plugin redraws.</li>
+</ul>
+<h2 id="see-also">See also</h2>
+<ul>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/api-ui/">Views and the ui import</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/tutorial-03-panel/">Tutorial: a panel with a table and a layout</a></li>
+</ul>
+<p>API version: <code>ilium:plugin@0.1.0</code>.</p>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/widgets-input/"><small>Previous</small>Input</a><a class="next" href="/pages/widgets-media-and-embedded/"><small>Next</small>Media and embedded views</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#you-need">You need</a></li><li class="l2"><a href="#the-shape-of-a-block">The shape of a block</a></li><li class="l2"><a href="#the-ten-widgets">The ten widgets</a></li><li class="l2"><a href="#layout">layout</a></li><li class="l2"><a href="#block">block</a></li><li class="l3"><a href="#block-titles">Block titles</a></li><li class="l3"><a href="#border-sets">Border sets</a></li><li class="l3"><a href="#host-frame">Host frame</a></li><li class="l2"><a href="#tabs">tabs</a></li><li class="l2"><a href="#popup">popup</a></li><li class="l3"><a href="#popup-size-and-placement">Popup size and placement</a></li><li class="l2"><a href="#clear">clear</a></li><li class="l2"><a href="#scrollbar">scrollbar</a></li><li class="l2"><a href="#split">split</a></li><li class="l2"><a href="#separator">separator</a></li><li class="l2"><a href="#dialog">dialog</a></li><li class="l2"><a href="#scroll-view">scroll-view</a></li><li class="l2"><a href="#hover-and-tooltips-on-containers">Hover and tooltips on containers</a></li><li class="l2"><a href="#paint-order-and-overlap">Paint order and overlap</a></li><li class="l2"><a href="#builder-defaults">Builder defaults</a></li><li class="l2"><a href="#worked-example-in-rust">Worked example in Rust</a></li><li class="l2"><a href="#worked-example-in-typescript">Worked example in TypeScript</a></li><li class="l2"><a href="#edge-cases-and-errors">Edge cases and errors</a></li><li class="l2"><a href="#what-the-user-sees">What the user sees</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,1511 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Settings schema reference | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details open><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/" aria-current="page">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Reference</b></p>
+<h1>Settings schema reference</h1>
+
+<p>This page lists every key of <code>contributes.settings</code>: tab and section entries, the eighteen row types, save rules, events, limits and error codes. For the model, read <a href="/pages/settings-extension/">Plugin settings extension</a>. Every row is shown in every state on the <a href="/pages/reference-settings-rows/">row gallery</a>.</p>
+<h3 id="you-will-need">You will need</h3>
+<ul>
+<li>The manifest layout: <a href="/pages/reference-manifest/">Manifest reference</a>.</li>
+<li>The runtime calls: <a href="/pages/api-settings/">Settings API</a>.</li>
+<li>A worked build: <a href="/pages/tutorial-10-settings-new-tab/">Tutorial 10</a> adds a tab, and <a href="/pages/tutorial-11-settings-extend-tab/">Tutorial 11</a> adds a section to a built-in tab.</li>
+</ul>
+<figure>
+<svg viewBox="0 0 420 230" role="img" aria-label="Schema structure: a tab entry holds sections, and each section holds rows" width="630" height="345">
+  <defs>
+    <marker id="schema-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <rect x="6" y="92" width="108" height="60" rx="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
+  <text x="60" y="116" font-size="11" text-anchor="middle" fill="currentColor">Tab entry</text>
+  <text x="60" y="134" font-size="10" text-anchor="middle" fill="currentColor">id, title, render</text>
+  <rect x="146" y="12" width="116" height="50" rx="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
+  <text x="204" y="32" font-size="11" text-anchor="middle" fill="currentColor">Section</text>
+  <text x="204" y="50" font-size="10" text-anchor="middle" fill="currentColor">id, title, scope</text>
+  <rect x="146" y="88" width="116" height="50" rx="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
+  <text x="204" y="108" font-size="11" text-anchor="middle" fill="currentColor">Section</text>
+  <text x="204" y="126" font-size="10" text-anchor="middle" fill="currentColor">id, title, scope</text>
+  <rect x="146" y="164" width="116" height="50" rx="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
+  <text x="204" y="184" font-size="11" text-anchor="middle" fill="currentColor">Section</text>
+  <text x="204" y="202" font-size="10" text-anchor="middle" fill="currentColor">id, title, scope</text>
+  <rect x="296" y="12" width="118" height="202" rx="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
+  <text x="355" y="32" font-size="11" text-anchor="middle" fill="currentColor">Rows, 1 to 24</text>
+  <text x="304" y="52" font-size="10" fill="currentColor">Value rows</text>
+  <text x="304" y="68" font-size="10" fill="currentColor">toggle, choice, number</text>
+  <text x="304" y="84" font-size="10" fill="currentColor">text, text-area, path</text>
+  <text x="304" y="100" font-size="10" fill="currentColor">color, keybinding, list</text>
+  <text x="304" y="116" font-size="10" fill="currentColor">location, map, multi-choice</text>
+  <text x="304" y="148" font-size="10" fill="currentColor">Rows with no value</text>
+  <text x="304" y="164" font-size="10" fill="currentColor">button, info, group</text>
+  <text x="304" y="180" font-size="10" fill="currentColor">preview, notice, meter</text>
+  <line x1="114" y1="122" x2="145" y2="37" stroke="currentColor" stroke-width="1.5" marker-end="url(#schema-arrow)"/>
+  <line x1="114" y1="122" x2="145" y2="113" stroke="currentColor" stroke-width="1.5" marker-end="url(#schema-arrow)"/>
+  <line x1="114" y1="122" x2="145" y2="189" stroke="currentColor" stroke-width="1.5" marker-end="url(#schema-arrow)"/>
+  <line x1="262" y1="37" x2="295" y2="37" stroke="currentColor" stroke-width="1.5" marker-end="url(#schema-arrow)"/>
+  <line x1="262" y1="113" x2="295" y2="113" stroke="currentColor" stroke-width="1.5" marker-end="url(#schema-arrow)"/>
+  <line x1="262" y1="189" x2="295" y2="189" stroke="currentColor" stroke-width="1.5" marker-end="url(#schema-arrow)"/>
+</svg>
+<figcaption>A tab entry holds sections, and each section holds rows.</figcaption>
+</figure>
+
+<h3 id="tab-and-section-entries">Tab and section entries</h3>
+<p>Each entry in <code>contributes.settings</code> has a <code>kind</code>: <code>"tab"</code> adds a rail tab, and <code>"section"</code> adds rows to a built-in tab or to one of the plugin's own tabs.</p>
+<h4 id="tab-entries-kind-tab">Tab entries (kind "tab")</h4>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Required</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>kind</code></td>
+<td>string</td>
+<td>yes</td>
+<td>none</td>
+<td><code>"tab"</code></td>
+</tr>
+<tr>
+<td><code>id</code></td>
+<td>string</td>
+<td>yes</td>
+<td>none</td>
+<td><code>[a-z][a-z0-9-]{0,31}</code>. Global id <code>&lt;plugin-id&gt;/&lt;id&gt;</code></td>
+</tr>
+<tr>
+<td><code>title</code></td>
+<td>string</td>
+<td>yes</td>
+<td>none</td>
+<td>1 to 32 characters. Not a built-in tab label</td>
+</tr>
+<tr>
+<td><code>short_title</code></td>
+<td>string</td>
+<td>no</td>
+<td><code>title</code>, cut with <code>…</code></td>
+<td>At most 12 cells, for a narrow rail</td>
+</tr>
+<tr>
+<td><code>icon</code></td>
+<td>string</td>
+<td>no</td>
+<td>none</td>
+<td>Tabler icon name</td>
+</tr>
+<tr>
+<td><code>glyph</code></td>
+<td>string</td>
+<td>no</td>
+<td><code>⧉</code></td>
+<td>One grapheme, one or two cells wide</td>
+</tr>
+<tr>
+<td><code>after</code></td>
+<td>string</td>
+<td>no</td>
+<td><code>text-triggers</code></td>
+<td>Tab id. Never <code>debug</code>, <code>api</code>, <code>about</code> or <code>setup</code></td>
+</tr>
+<tr>
+<td><code>order</code></td>
+<td>integer</td>
+<td>no</td>
+<td>500</td>
+<td>0 to 1000. Breaks ties among tabs with the same <code>after</code></td>
+</tr>
+<tr>
+<td><code>render</code></td>
+<td>string</td>
+<td>no</td>
+<td><code>"rows"</code></td>
+<td><code>"rows"</code> or <code>"view"</code> (drawn by the <code>views</code> export)</td>
+</tr>
+<tr>
+<td><code>keywords</code></td>
+<td>list</td>
+<td>no</td>
+<td>none</td>
+<td>At most 8 terms, each at most 24 characters</td>
+</tr>
+<tr>
+<td><code>sections</code></td>
+<td>list</td>
+<td>for <code>"rows"</code></td>
+<td>none</td>
+<td>1 to 8 sections, with keys <code>id</code>, <code>title</code>, <code>scope</code>, <code>rows</code> and <code>collapsed</code></td>
+</tr>
+</tbody>
+</table>
+<p>Inline sections are drawn in declaration order. <code>collapsed: true</code> starts a section folded.</p>
+<h4 id="section-entries-kind-section">Section entries (kind "section")</h4>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Required</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>kind</code></td>
+<td>string</td>
+<td>yes</td>
+<td>none</td>
+<td><code>"section"</code></td>
+</tr>
+<tr>
+<td><code>id</code></td>
+<td>string</td>
+<td>yes</td>
+<td>none</td>
+<td><code>[a-z][a-z0-9-]{0,31}</code>, unique in the plugin</td>
+</tr>
+<tr>
+<td><code>tab</code></td>
+<td>string</td>
+<td>yes</td>
+<td>none</td>
+<td>Built-in tab id (needs <code>settings.contribute:&lt;tab-id&gt;</code>), or <code>self:&lt;tab-id&gt;</code></td>
+</tr>
+<tr>
+<td><code>placement</code></td>
+<td>string</td>
+<td>no</td>
+<td><code>"end"</code></td>
+<td><code>"end"</code>, <code>before:&lt;anchor&gt;</code> or <code>after:&lt;anchor&gt;</code></td>
+</tr>
+<tr>
+<td><code>order</code></td>
+<td>integer</td>
+<td>no</td>
+<td>500</td>
+<td>0 to 1000. Orders sections at one anchor</td>
+</tr>
+<tr>
+<td><code>title</code></td>
+<td>string</td>
+<td>no</td>
+<td>none</td>
+<td>At most 40 characters</td>
+</tr>
+<tr>
+<td><code>scope</code></td>
+<td>string</td>
+<td>no</td>
+<td><code>"client"</code></td>
+<td><code>"client"</code> or <code>"server"</code>. Applies to every key in the section</td>
+</tr>
+<tr>
+<td><code>rows</code></td>
+<td>list</td>
+<td>yes</td>
+<td>none</td>
+<td>1 to 24 rows. A group counts its children</td>
+</tr>
+<tr>
+<td><code>collapsed</code></td>
+<td>boolean</td>
+<td>no</td>
+<td><code>false</code></td>
+<td>Plugin tabs only</td>
+</tr>
+</tbody>
+</table>
+<h3 id="built-in-tab-ids">Built-in tab ids</h3>
+<p>Ids are frozen. Anchors are the section ids a plugin can place blocks before or after.</p>
+<table>
+<thead>
+<tr>
+<th>Rail order</th>
+<th>Id</th>
+<th>Rail label</th>
+<th>Accepts sections, anchors</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><code>user-interface</code></td>
+<td>User Interface</td>
+<td>yes, <code>main</code></td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>icons</code></td>
+<td>Icons</td>
+<td>yes, <code>main</code></td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>agent-monitoring</code></td>
+<td>Agents</td>
+<td>yes, <code>main</code></td>
+</tr>
+<tr>
+<td>4</td>
+<td><code>agent-cost</code></td>
+<td>Agent Cost</td>
+<td>yes, <code>main</code></td>
+</tr>
+<tr>
+<td>5</td>
+<td><code>optimization</code></td>
+<td>Optimization</td>
+<td>yes, <code>main</code></td>
+</tr>
+<tr>
+<td>6</td>
+<td><code>remote-compaction</code></td>
+<td>Remote</td>
+<td>yes, five named anchors</td>
+</tr>
+<tr>
+<td>7</td>
+<td><code>keyboard</code></td>
+<td>Keyboard</td>
+<td>yes, <code>main</code></td>
+</tr>
+<tr>
+<td>8</td>
+<td><code>terminal</code></td>
+<td>Terminal</td>
+<td>yes, <code>main</code></td>
+</tr>
+<tr>
+<td>9</td>
+<td><code>editor</code></td>
+<td>Editor</td>
+<td>yes, <code>main</code></td>
+</tr>
+<tr>
+<td>10</td>
+<td><code>session</code></td>
+<td>Session</td>
+<td>yes, <code>main</code></td>
+</tr>
+<tr>
+<td>11</td>
+<td><code>git</code></td>
+<td>Git</td>
+<td>yes, <code>main</code></td>
+</tr>
+<tr>
+<td>12</td>
+<td><code>kanban-board</code></td>
+<td>Kanban Board</td>
+<td>yes, <code>main</code></td>
+</tr>
+<tr>
+<td>13</td>
+<td><code>animations</code></td>
+<td>Animations</td>
+<td>no</td>
+</tr>
+<tr>
+<td>14</td>
+<td><code>sound</code></td>
+<td>Sound</td>
+<td>yes, <code>main</code></td>
+</tr>
+<tr>
+<td>15</td>
+<td><code>voice-control</code></td>
+<td>Voice control</td>
+<td>yes, <code>main</code></td>
+</tr>
+<tr>
+<td>16</td>
+<td><code>reset-planning</code></td>
+<td>Reset planning</td>
+<td>yes, <code>main</code></td>
+</tr>
+<tr>
+<td>17</td>
+<td><code>inference</code></td>
+<td>Inference</td>
+<td>yes, <code>main</code></td>
+</tr>
+<tr>
+<td>18</td>
+<td><code>llm-instructions</code></td>
+<td>LLM text</td>
+<td>yes, <code>main</code></td>
+</tr>
+<tr>
+<td>19</td>
+<td><code>titles</code></td>
+<td>Titles</td>
+<td>yes, <code>main</code></td>
+</tr>
+<tr>
+<td>20</td>
+<td><code>triggers</code></td>
+<td>Triggers</td>
+<td>yes, <code>main</code></td>
+</tr>
+<tr>
+<td>21</td>
+<td><code>text-triggers</code></td>
+<td>Text Triggers</td>
+<td>yes, <code>main</code></td>
+</tr>
+<tr>
+<td>22</td>
+<td><code>debug</code></td>
+<td>Debug</td>
+<td>no</td>
+</tr>
+<tr>
+<td>23</td>
+<td><code>api</code></td>
+<td>API</td>
+<td>no</td>
+</tr>
+<tr>
+<td>24</td>
+<td><code>about</code></td>
+<td>About</td>
+<td>no</td>
+</tr>
+<tr>
+<td>25</td>
+<td><code>setup</code></td>
+<td>Setup</td>
+<td>no</td>
+</tr>
+</tbody>
+</table>
+<p>The rail shows the compact label when the full one does not fit.</p>
+<h3 id="row-types">Row types</h3>
+<p>Every row has a <code>type</code>. A value row also has a <code>key</code>, and the host compiles it into one schema property that is checked like the rest of the manifest. There are 18 types: they are listed below in order.</p>
+<table>
+<thead>
+<tr>
+<th>Type</th>
+<th>Value</th>
+<th>Compiles to</th>
+<th>Writes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>toggle</code></td>
+<td>boolean</td>
+<td><code>boolean</code></td>
+<td>at once</td>
+</tr>
+<tr>
+<td><code>choice</code></td>
+<td>string or integer</td>
+<td><code>enum</code>, <code>enum_titles</code></td>
+<td>at once</td>
+</tr>
+<tr>
+<td><code>number</code></td>
+<td>integer or number</td>
+<td><code>minimum</code>, <code>maximum</code>, <code>step</code>, <code>unit</code>, <code>x-steps</code>, <code>x-special-values</code></td>
+<td>600 ms after the last step</td>
+</tr>
+<tr>
+<td><code>text</code></td>
+<td>string</td>
+<td><code>maxLength</code>, <code>pattern</code>, <code>secret</code></td>
+<td>600 ms after the last keystroke</td>
+</tr>
+<tr>
+<td><code>text-area</code></td>
+<td>string</td>
+<td><code>maxLength</code>, <code>multiline</code></td>
+<td>1 s after the last keystroke</td>
+</tr>
+<tr>
+<td><code>path</code></td>
+<td>string</td>
+<td><code>picker</code>, <code>extensions</code></td>
+<td>at once on confirm</td>
+</tr>
+<tr>
+<td><code>color</code></td>
+<td><code>#rrggbb</code> string</td>
+<td><code>pattern</code></td>
+<td>at once on confirm</td>
+</tr>
+<tr>
+<td><code>keybinding</code></td>
+<td>chord string</td>
+<td>chord grammar</td>
+<td>at once on confirm</td>
+</tr>
+<tr>
+<td><code>button</code></td>
+<td>none</td>
+<td>none</td>
+<td>invokes a command</td>
+</tr>
+<tr>
+<td><code>info</code></td>
+<td>none</td>
+<td>none</td>
+<td>none, or live text</td>
+</tr>
+<tr>
+<td><code>group</code></td>
+<td>none</td>
+<td>none</td>
+<td>none, folds children</td>
+</tr>
+<tr>
+<td><code>list</code></td>
+<td>array</td>
+<td><code>items</code>, <code>maxItems</code></td>
+<td>per committed item</td>
+</tr>
+<tr>
+<td><code>location</code></td>
+<td>object <code>{ lat, lon, label? }</code></td>
+<td><code>object</code>, <code>properties</code>, <code>required</code>, <code>x-widget: location</code></td>
+<td>on <code>Use location</code></td>
+</tr>
+<tr>
+<td><code>preview</code></td>
+<td>none</td>
+<td>none</td>
+<td>none, own tabs only</td>
+</tr>
+<tr>
+<td><code>notice</code></td>
+<td>none</td>
+<td>none</td>
+<td>none, a dismissal is stored per <code>id</code></td>
+</tr>
+<tr>
+<td><code>map</code></td>
+<td>object of string keys</td>
+<td><code>additionalProperties</code>, <code>propertyNames</code>, <code>maxProperties</code></td>
+<td>per committed entry</td>
+</tr>
+<tr>
+<td><code>multi-choice</code></td>
+<td>array</td>
+<td><code>items: { enum }</code>, <code>uniqueItems</code>, <code>minItems</code>, <code>maxItems</code></td>
+<td>at once on each toggle</td>
+</tr>
+<tr>
+<td><code>meter</code></td>
+<td>none</td>
+<td>none</td>
+<td>none, updated with <code>set-meter</code></td>
+</tr>
+</tbody>
+</table>
+<p>Compilation of the fields common to all value rows: <code>visible_when</code>, <code>scope</code> and <code>applies</code> compile to the annotations <code>x-visible-when</code>, <code>x-scope</code> and <code>x-applies</code>. They are UI annotations and never take part in validation. <code>steps</code> compiles to <code>x-steps</code> plus the <code>minimum</code> and <code>maximum</code> of the ladder, and <code>special_values</code> compiles to <code>x-special-values</code>.</p>
+<p>The renders below show the row at rest in a plugin tab, 57 columns wide, with the real glyphs. The <a href="/pages/reference-settings-rows/">row gallery</a> shows selected, pending, read-only, restart and error states for each type, with the declaration in Rust and TypeScript.</p>
+<h4 id="toggle">toggle</h4>
+<p>Keys: <code>on_label</code>, <code>off_label</code> (default <code>On</code> and <code>Off</code>), <code>style</code>: <code>"switch"</code> (default, <code>‹ On ›</code>) or <code>"checkbox"</code> (<code>[x]</code> and <code>[ ]</code>, for lists of related flags). The default is a boolean.</p>
+<pre><code class="language-json">{ &quot;type&quot;: &quot;toggle&quot;, &quot;key&quot;: &quot;enabled&quot;, &quot;title&quot;: &quot;Keep history&quot;, &quot;default&quot;: true }
+</code></pre>
+<figure>
+<pre class="term">  Keep history ……………………………………………………………………………………… ‹ On ›  </pre>
+<figcaption>Toggle row, switch style.</figcaption>
+</figure>
+
+<h4 id="choice">choice</h4>
+<p>Keys: <code>options</code> (2 to 64 objects with <code>value</code> and <code>title</code>, required unless <code>source</code> is set), <code>style</code> (<code>"list"</code>, <code>"stepper"</code> or <code>"dialog"</code>), <code>dynamic</code> (boolean). The default must be one option value.</p>
+<p>Further keys: the option fields <code>description</code> (at most 120), <code>disabled_reason</code> (at most 40, the option is drawn muted and cannot be chosen), <code>preview</code> (<code>{ "glyph" }</code>, <code>{ "swatch": [...] }</code> with at most 16 colours, or <code>{ "pattern": [...] }</code> with at most 4 lines of 8 cells) and <code>help</code>; and the row fields <code>source</code> (<code>{ "catalog": "&lt;id&gt;" }</code>, replaces <code>options</code>; <code>source</code> with <code>options</code> is <code>manifest.settings-source</code>, an unknown catalogue is <code>manifest.catalog-unknown</code>), <code>filter</code> (default true for a catalogue or more than 12 options), <code>allow_custom</code> with <code>custom_pattern</code>, and <code>view_modes</code> (<code>["list"]</code> or <code>["list", "grid"]</code>).</p>
+<pre><code class="language-json">{ &quot;type&quot;: &quot;choice&quot;, &quot;key&quot;: &quot;store&quot;, &quot;title&quot;: &quot;Store&quot;, &quot;default&quot;: &quot;text&quot;,
+  &quot;options&quot;: [ { &quot;value&quot;: &quot;text&quot;, &quot;title&quot;: &quot;Text only&quot; }, { &quot;value&quot;: &quot;rich&quot;, &quot;title&quot;: &quot;Text and HTML&quot; } ] }
+</code></pre>
+<figure>
+<pre class="term">  Store ……………………………………………………………………………………… ‹ Text only ›  </pre>
+<figcaption>Choice row, list style.</figcaption>
+</figure>
+
+<h4 id="number">number</h4>
+<p>Keys: <code>minimum</code> and <code>maximum</code> (required), <code>step</code> (default 1), <code>unit</code> (at most 8 characters), <code>integer</code> (default <code>true</code>). Left and Right step; <code>*</code> types a value.</p>
+<p>Further keys: <code>style</code> (<code>"stepper"</code> or <code>"slider"</code>), <code>steps</code> (an ascending ladder of 2 to 64 numbers inside the range, replaces <code>step</code>), <code>special_values</code> (at most 8 <code>{ value, title }</code> pairs drawn instead of the number, for example <code>0</code> as <code>Off</code>) and <code>debounce_ms</code> (300 to 2,000, replaces the 600 ms write delay).</p>
+<pre><code class="language-json">{ &quot;type&quot;: &quot;number&quot;, &quot;key&quot;: &quot;max_entries&quot;, &quot;title&quot;: &quot;Maximum entries&quot;, &quot;minimum&quot;: 10, &quot;maximum&quot;: 5000, &quot;step&quot;: 10, &quot;default&quot;: 500 }
+</code></pre>
+<figure>
+<pre class="term">  Maximum entries ………………………………………………………………… -  500  + *  </pre>
+<figcaption>Number row, stepper style.</figcaption>
+</figure>
+
+<h4 id="text">text</h4>
+<p>Keys: <code>max_length</code> (default 256, at most 4,096), <code>pattern</code>, <code>placeholder</code>, <code>secret</code> (masked with <code>••••</code>). Further keys: <code>reveal_last</code> (0 to 8, only with <code>secret</code>; <code>••••a1b2</code> shows the last characters) and <code>debounce_ms</code> (300 to 2,000).</p>
+<pre><code class="language-json">{ &quot;type&quot;: &quot;text&quot;, &quot;key&quot;: &quot;label&quot;, &quot;title&quot;: &quot;Label&quot;, &quot;max_length&quot;: 40, &quot;default&quot;: &quot;work&quot; }
+</code></pre>
+<figure>
+<pre class="term">  Label …………………………………………………………………………………………………… ‹ work ›  </pre>
+<figcaption>Text row.</figcaption>
+</figure>
+
+<h4 id="text-area">text-area</h4>
+<p>Keys: <code>max_length</code> (default 16,384, at most 65,536), <code>language</code> (syntax hint), and <code>debounce_ms</code> (300 to 2,000). Enter opens the editor modal.</p>
+<pre><code class="language-json">{ &quot;type&quot;: &quot;text-area&quot;, &quot;key&quot;: &quot;paste_template&quot;, &quot;title&quot;: &quot;Paste template&quot;, &quot;max_length&quot;: 4096, &quot;default&quot;: &quot;{text}&quot; }
+</code></pre>
+<figure>
+<pre class="term">  Paste template ……………………………………………………………………… ‹ 1 line ›  </pre>
+<figcaption>Text-area row.</figcaption>
+</figure>
+
+<h4 id="path">path</h4>
+<p>Keys: <code>picker</code> (<code>"file"</code> or <code>"directory"</code>, required), <code>extensions</code>. The row stores text only and grants no file access.</p>
+<pre><code class="language-json">{ &quot;type&quot;: &quot;path&quot;, &quot;key&quot;: &quot;history_file&quot;, &quot;title&quot;: &quot;History file&quot;, &quot;picker&quot;: &quot;file&quot;, &quot;extensions&quot;: [&quot;db&quot;], &quot;default&quot;: &quot;&quot; }
+</code></pre>
+<figure>
+<pre class="term">  History file ………………………………………………………………… ‹ ~/clips.db ›  </pre>
+<figcaption>Path row.</figcaption>
+</figure>
+
+<h4 id="color">color</h4>
+<p>Keys: <code>swatches</code> (<code>"theme"</code> or up to 16 colours). The value must match <code>^#[0-9a-fA-F]{6}$</code>.</p>
+<pre><code class="language-json">{ &quot;type&quot;: &quot;color&quot;, &quot;key&quot;: &quot;highlight&quot;, &quot;title&quot;: &quot;Highlight colour&quot;, &quot;swatches&quot;: &quot;theme&quot;, &quot;default&quot;: &quot;#4a9eff&quot; }
+</code></pre>
+<figure>
+<pre class="term">  Highlight colour ……………………………………………………… ‹ ██ #4a9eff ›  </pre>
+<figcaption>Colour row.</figcaption>
+</figure>
+
+<h4 id="keybinding">keybinding</h4>
+<p>Keys: <code>command</code>, one of the plugin's own <code>keybindings</code> contributions (required; otherwise <code>manifest.settings-command</code>). Enter captures a chord and Delete clears it.</p>
+<pre><code class="language-json">{ &quot;type&quot;: &quot;keybinding&quot;, &quot;key&quot;: &quot;picker_key&quot;, &quot;title&quot;: &quot;Picker key&quot;, &quot;command&quot;: &quot;open-picker&quot;, &quot;default&quot;: &quot;ctrl+alt+v&quot; }
+</code></pre>
+<figure>
+<pre class="term">  Picker key ……………………………………………………………………… ‹ Ctrl+Alt+V ›  </pre>
+<figcaption>Keybinding row.</figcaption>
+</figure>
+
+<h4 id="button">button</h4>
+<p>Keys: <code>id</code> (required, not <code>key</code>), <code>label</code> (at most 20 characters), <code>command</code> (required), <code>confirm</code> (optional question). A button stores no value.</p>
+<pre><code class="language-json">{ &quot;type&quot;: &quot;button&quot;, &quot;id&quot;: &quot;clear_now&quot;, &quot;title&quot;: &quot;Clear history&quot;, &quot;label&quot;: &quot;Clear now&quot;, &quot;command&quot;: &quot;clear&quot;, &quot;confirm&quot;: &quot;Delete every stored entry?&quot; }
+</code></pre>
+<figure>
+<pre class="term">  Clear history ………………………………………………………………… [ Clear now ]  </pre>
+<figcaption>Button row.</figcaption>
+</figure>
+
+<h4 id="info">info</h4>
+<p>Keys: <code>id</code> (required when <code>live</code> is true), <code>text</code> (at most 120 characters), <code>live</code> (boolean). The plugin updates a live row with <code>set-info</code>. <code>rich</code> is a list of spans <code>{ text, tone?, bold?, command? }</code> (at most 120 characters in total) that replaces <code>text</code>. A span with <code>command</code>, an own command id, is clickable. <code>set-info-rich</code> updates a live row with rich text.</p>
+<pre><code class="language-json">{ &quot;type&quot;: &quot;info&quot;, &quot;id&quot;: &quot;stored&quot;, &quot;title&quot;: &quot;Stored entries&quot;, &quot;text&quot;: &quot;none yet&quot;, &quot;live&quot;: true }
+</code></pre>
+<figure>
+<pre class="term">  Stored entries …………………………………………………………………… 312 entries  </pre>
+<figcaption>Live info row.</figcaption>
+</figure>
+
+<h4 id="group">group</h4>
+<p>Keys: <code>title</code> (required), <code>rows</code> (1 to 12, no nested group), <code>collapsed</code>. Enter folds the group.</p>
+<pre><code class="language-json">{ &quot;type&quot;: &quot;group&quot;, &quot;title&quot;: &quot;Advanced&quot;, &quot;collapsed&quot;: false, &quot;rows&quot;: [ { &quot;type&quot;: &quot;toggle&quot;, &quot;key&quot;: &quot;sync&quot;, &quot;title&quot;: &quot;Sync&quot;, &quot;default&quot;: false } ] }
+</code></pre>
+<figure>
+<pre class="term">  ▾ Advanced
+    Sync between panes ……………………………………………………………… ‹ Off ›  </pre>
+<figcaption>Group row.</figcaption>
+</figure>
+
+<h4 id="list">list</h4>
+<p>Keys: <code>item</code> (one primitive type, or an object of at most eight primitive fields), <code>max_items</code> (at most 64), <code>default</code> (array). Enter opens the list editor.</p>
+<p>Further keys: <code>item_format</code> for string items (<code>glob</code>, <code>url</code>, <code>host</code>, <code>path</code>, <code>regex</code> or <code>chord</code>; checked on commit, and an invalid item is shown with <code>✗</code> and the reason and is not written), <code>style</code> (<code>"rows"</code>, the <code>list-editor</code> widget, or <code>"inline"</code>, one text field), <code>separator</code> (inline style, default <code>;</code>), <code>reorderable</code> (default true), <code>remote</code> (each committed item shows as pending until the plugin confirms it with <code>set-item-states</code>), <code>item_status</code> (reserves a status cell per item). Object items have four fields.</p>
+<pre><code class="language-json">{ &quot;type&quot;: &quot;list&quot;, &quot;key&quot;: &quot;ignore_patterns&quot;, &quot;title&quot;: &quot;Ignore patterns&quot;, &quot;item&quot;: { &quot;type&quot;: &quot;string&quot;, &quot;max_length&quot;: 200 }, &quot;max_items&quot;: 32, &quot;default&quot;: [] }
+</code></pre>
+<figure>
+<pre class="term">  Ignore patterns ………………………………………………………………… ‹ 2 items ›  </pre>
+<figcaption>List row.</figcaption>
+</figure>
+
+<h4 id="location">location</h4>
+<p>Keys: <code>search</code> (default true), <code>allow_current</code> (default false, needs <code>location.observer</code> on the client side), <code>precision</code> (decimals 0 to 6, default 4). The value is <code>{ lat, lon, label? }</code>. Both <code>lat</code> and <code>lon</code> are required, <code>lat</code> is from -90 to 90 and <code>lon</code> from -180 to 180. Enter opens the world-map picker, and the value is written when the user confirms <code>Use location</code>.</p>
+<pre><code class="language-json">{ &quot;type&quot;: &quot;location&quot;, &quot;key&quot;: &quot;observer&quot;, &quot;title&quot;: &quot;Observer location&quot;, &quot;search&quot;: true, &quot;precision&quot;: 4, &quot;default&quot;: { &quot;lat&quot;: 48.8566, &quot;lon&quot;: 2.3522, &quot;label&quot;: &quot;Paris&quot; } }
+</code></pre>
+<figure>
+<pre class="term">  Observer location ……………………… ‹ Paris 48.8566, 2.3522 ›  </pre>
+<figcaption>Location row.</figcaption>
+</figure>
+
+<h4 id="preview">preview</h4>
+<p>Keys: <code>view</code> (an own <code>panels</code> id, required), <code>height</code> (4 to 24 rows, default 8), <code>live</code> (default false; true lets the plugin call <code>ui.invalidate</code> on the view while Settings is open). The row holds no value and exists in the plugin's own tabs only.</p>
+<pre><code class="language-json">{ &quot;type&quot;: &quot;preview&quot;, &quot;view&quot;: &quot;colour-preview&quot;, &quot;height&quot;: 4, &quot;live&quot;: true }
+</code></pre>
+<figure>
+<pre class="term">  Preview
+  ╭────────────────────────────────────────╮
+  │  Newest entry   ██ #4a9eff             │
+  ╰────────────────────────────────────────╯</pre>
+<figcaption>Preview row of height 4. The plugin draws inside the frame.</figcaption>
+</figure>
+
+<h4 id="notice">notice</h4>
+<p>Keys: <code>id</code> (required), <code>text</code> (at most 200 characters, rich spans allowed), <code>tone</code> (<code>info</code>, <code>success</code>, <code>warning</code>, <code>danger</code>; default <code>info</code>), <code>dismissible</code> (default false). A dismissal is stored per <code>id</code> and survives restarts.</p>
+<pre><code class="language-json">{ &quot;type&quot;: &quot;notice&quot;, &quot;id&quot;: &quot;privacy&quot;, &quot;tone&quot;: &quot;warning&quot;, &quot;dismissible&quot;: true, &quot;text&quot;: &quot;Place names are sent to the geocoding provider.&quot; }
+</code></pre>
+<figure>
+<pre class="term">╭─ ! ───────────────────────────────────────── [x] ─╮
+│ Place names are sent to the geocoding provider.   │
+╰───────────────────────────────────────────────────╯</pre>
+<figcaption>Notice row, warning tone, dismissible.</figcaption>
+</figure>
+
+<h4 id="map">map</h4>
+<p>Keys: <code>value_type</code> (<code>string</code>, <code>integer</code>, <code>number</code> or <code>boolean</code>), <code>key_pattern</code> (regex, default <code>^[^\\s]{1,64}$</code>), <code>max_entries</code> (1 to 64, default 16), <code>key_title</code> and <code>value_title</code> (at most 24 characters each).</p>
+<pre><code class="language-json">{ &quot;type&quot;: &quot;map&quot;, &quot;key&quot;: &quot;environment&quot;, &quot;title&quot;: &quot;Environment&quot;, &quot;value_type&quot;: &quot;string&quot;, &quot;max_entries&quot;: 16, &quot;key_title&quot;: &quot;Name&quot;, &quot;value_title&quot;: &quot;Value&quot;, &quot;default&quot;: {} }
+</code></pre>
+<figure>
+<pre class="term">  Environment ……………………………………………………………………… ‹ 2 entries ›  </pre>
+<figcaption>Map row.</figcaption>
+</figure>
+
+<h4 id="multi-choice">multi-choice</h4>
+<p>Keys: <code>options</code> (2 to 64, the <code>choice</code> option shape) or <code>source</code>, <code>min_items</code> (default 0), <code>max_items</code> (default the option count), <code>style</code> (<code>"checklist"</code> inline, default, or <code>"dialog"</code>). The value is an array of option values without duplicates.</p>
+<pre><code class="language-json">{ &quot;type&quot;: &quot;multi-choice&quot;, &quot;key&quot;: &quot;kinds&quot;, &quot;title&quot;: &quot;Capture kinds&quot;, &quot;min_items&quot;: 1, &quot;default&quot;: [&quot;text&quot;], &quot;options&quot;: [ { &quot;value&quot;: &quot;text&quot;, &quot;title&quot;: &quot;Text&quot; }, { &quot;value&quot;: &quot;images&quot;, &quot;title&quot;: &quot;Images&quot; } ] }
+</code></pre>
+<figure>
+<pre class="term">  Capture kinds
+    [x] Text
+    [ ] Images</pre>
+<figcaption>Multi-choice row, checklist style.</figcaption>
+</figure>
+
+<h4 id="meter">meter</h4>
+<p>Keys: <code>id</code> (required), <code>segments</code> (initial, at most 8 of <code>{ label, value, tone }</code>), <code>max</code> (default 1), <code>show_values</code> (default false). The plugin updates it with <code>set-meter</code>.</p>
+<pre><code class="language-json">{ &quot;type&quot;: &quot;meter&quot;, &quot;id&quot;: &quot;budget&quot;, &quot;title&quot;: &quot;Budget used&quot;, &quot;max&quot;: 5, &quot;show_values&quot;: true }
+</code></pre>
+<figure>
+<pre class="term">  Budget used ………………………………………………………… ██████░░░░ 3.1 / 5  </pre>
+<figcaption>Meter row.</figcaption>
+</figure>
+
+<h3 id="common-row-keys">Common row keys</h3>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Rows</th>
+<th>Rule</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>key</code></td>
+<td>value rows</td>
+<td><code>[a-z][a-z0-9_]{0,63}</code>, unique in the plugin</td>
+</tr>
+<tr>
+<td><code>id</code></td>
+<td>button, info, group</td>
+<td>Same grammar and namespace as <code>key</code></td>
+</tr>
+<tr>
+<td><code>title</code></td>
+<td>all but unlabelled info</td>
+<td>1 to 48 characters. The label column</td>
+</tr>
+<tr>
+<td><code>description</code></td>
+<td>all</td>
+<td>At most 200 characters</td>
+</tr>
+<tr>
+<td><code>default</code></td>
+<td>value rows</td>
+<td>Required. Must pass the compiled schema</td>
+</tr>
+<tr>
+<td><code>help</code></td>
+<td>all</td>
+<td>An id from <code>contributes.help</code>. Adds a <code>?</code></td>
+</tr>
+<tr>
+<td><code>depends_on</code></td>
+<td>all</td>
+<td><code>{ "key", "equals" }</code>, <code>{ "key", "in" }</code> or <code>{ "key", "not" }</code>. Own keys only</td>
+</tr>
+<tr>
+<td><code>keywords</code></td>
+<td>all</td>
+<td>At most 4 terms</td>
+</tr>
+<tr>
+<td><code>reset</code></td>
+<td>value rows</td>
+<td>Default <code>true</code>. <code>false</code> keeps the row out of a section reset</td>
+</tr>
+<tr>
+<td><code>visible_when</code></td>
+<td>value rows</td>
+<td>The <code>depends_on</code> shape on one own key. A false condition hides the row</td>
+</tr>
+<tr>
+<td><code>scope</code></td>
+<td>value rows</td>
+<td><code>"project"</code> stores the value in the project's <code>.ilium/</code> settings under <code>[plugins."&lt;plugin-id&gt;"]</code>. The project value wins while that project is open</td>
+</tr>
+<tr>
+<td><code>applies</code></td>
+<td>value rows</td>
+<td><code>"restart"</code> draws <code>↻</code> after the value and the note <code>Applies after restart.</code></td>
+</tr>
+</tbody>
+</table>
+<p>A false <code>depends_on</code> leaves the row on the screen, read-only, with the description <code>Unavailable: &lt;title&gt; is &lt;value&gt;.</code> A false <code>visible_when</code> hides the row instead: it keeps its value and search skips it. The <code>label</code> key belongs to <code>button</code> only. The row <code>preview</code>, <code>notice</code> and <code>meter</code> take only the common keys that apply to a row with no value.</p>
+<h3 id="validation-and-saving">Validation and saving</h3>
+<ul>
+<li><strong>Install.</strong> Every default and option is checked.</li>
+<li><strong>Load.</strong> A stored value that no longer matches its row is ignored, and the default applies. The host never clamps a stored value. A number typed in the editor that is outside <code>min</code> and <code>max</code> is refused with the row note, and the stored value stays; the number stepper stops at the bounds [SET-020].</li>
+<li><strong>Save.</strong> Schema check, then <code>settings-validate</code>, then the write, then <code>settings-changed</code>.</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Change</th>
+<th>Shown</th>
+<th>Written</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Toggle, choice, dialog confirm</td>
+<td>at once</td>
+<td>at once</td>
+</tr>
+<tr>
+<td>Number step</td>
+<td>at once</td>
+<td>600 ms after the last step</td>
+</tr>
+<tr>
+<td>Number or text typed</td>
+<td>as typed</td>
+<td>600 ms after the last keystroke, or <code>debounce_ms</code></td>
+</tr>
+<tr>
+<td>Text-area</td>
+<td>as typed</td>
+<td>1 s after the last keystroke</td>
+</tr>
+<tr>
+<td><code>set-json</code> from the plugin</td>
+<td>at once</td>
+<td>at once</td>
+</tr>
+</tbody>
+</table>
+<p>While a write is pending, the control shows a dim <code>◌</code> after the value. A failed change keeps the old value, and the message replaces the description line in the warning style. Closing Settings writes every pending change first.</p>
+<h3 id="keys-on-a-plugin-row">Keys on a plugin row</h3>
+<p>The kernel handles these keys before any plugin row sees them.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Up, Down</td>
+<td>Move between rows</td>
+</tr>
+<tr>
+<td>Left, Right</td>
+<td>Step a number or choice, or flip a toggle</td>
+</tr>
+<tr>
+<td>Enter, Space</td>
+<td>Open the row's editor, or invoke a button</td>
+</tr>
+<tr>
+<td><code>*</code></td>
+<td>Type a value into a number row</td>
+</tr>
+<tr>
+<td><code>r</code></td>
+<td>Reset the focused value row</td>
+</tr>
+<tr>
+<td><code>?</code></td>
+<td>Open the row's help topic</td>
+</tr>
+<tr>
+<td><code>/</code> or Ctrl+F</td>
+<td>Open the search filter. Esc clears it</td>
+</tr>
+<tr>
+<td>Esc, <code>q</code></td>
+<td>Close Settings</td>
+</tr>
+</tbody>
+</table>
+<h3 id="events-and-callbacks">Events and callbacks</h3>
+<p><strong><code>settings-changed</code></strong> receives one record.</p>
+<pre><code class="language-wit">// Excerpt of ilium:types/events in reference-wit
+enum settings-origin { user, plugin, reset, other-plugin, file }
+record settings-change { keys: list&lt;string&gt;, origin: settings-origin, side: string }
+</code></pre>
+<ul>
+<li><code>keys</code>: changed keys, sorted, without duplicates.</li>
+<li><code>origin</code>: <code>user</code>, <code>plugin</code>, <code>reset</code>, <code>other-plugin</code> or <code>file</code>.</li>
+<li><code>side</code>: <code>"client"</code> or <code>"server"</code>, the receiving side. The field is named <code>side</code> so it is not confused with a row's <code>scope</code>, which is a storage scope (<code>"project"</code>). A section's <code>scope</code> key (<code>"client"</code> or <code>"server"</code>) names the side that hosts the section.</li>
+</ul>
+<p>Coalesced writes send one event with the last origin and the union of keys.</p>
+<p><strong><code>settings-validate</code></strong> is an optional export on the side that owns the scope.</p>
+<pre><code class="language-wit">record field-error { key: string, message: string }
+settings-validate: func(patch: string, merged: string) -&gt; result&lt;_, list&lt;field-error&gt;&gt;;
+</code></pre>
+<p>It runs only for <code>user</code> and <code>reset</code> origins, after the schema check. Its deadline is 100 ms. A timeout, trap or stopped plugin refuses the save with <code>Could not check this value: &lt;plugin name&gt; did not answer.</code></p>
+<h3 id="limits">Limits</h3>
+<p>An excess is refused with <code>manifest.settings-limit</code> unless the row says otherwise.</p>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Limit</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Tabs per plugin</td>
+<td>2</td>
+</tr>
+<tr>
+<td>Sections per plugin tab</td>
+<td>8</td>
+</tr>
+<tr>
+<td>Sections per plugin, per built-in tab</td>
+<td>2</td>
+</tr>
+<tr>
+<td>Plugin sections in one built-in tab</td>
+<td>6, extra ones are dropped with <code>settings.section-dropped</code></td>
+</tr>
+<tr>
+<td>Plugin tabs in the rail</td>
+<td>16, extra ones are dropped with <code>settings.tab-dropped</code></td>
+</tr>
+<tr>
+<td>Rows per section, children per group</td>
+<td>24 (a <code>group</code> counts as one row plus its children), and 12</td>
+</tr>
+<tr>
+<td>Value keys per plugin</td>
+<td>128</td>
+</tr>
+<tr>
+<td>Object item fields in a list</td>
+<td>8</td>
+</tr>
+<tr>
+<td>Segments in a meter</td>
+<td>8</td>
+</tr>
+<tr>
+<td>Notice text</td>
+<td>200 characters</td>
+</tr>
+<tr>
+<td>Map entries</td>
+<td>64</td>
+</tr>
+<tr>
+<td>Choice options, list items</td>
+<td>64</td>
+</tr>
+<tr>
+<td>Tab, section and row titles</td>
+<td>32, 40 and 48 characters</td>
+</tr>
+<tr>
+<td>Description, info text, button label</td>
+<td>200, 120 and 20 characters</td>
+</tr>
+<tr>
+<td>Text value, text-area value</td>
+<td>4,096 and 65,536 characters, <code>invalid-argument</code> on save</td>
+</tr>
+<tr>
+<td>All values of one plugin</td>
+<td>256 KiB, <code>invalid-argument</code> on save</td>
+</tr>
+<tr>
+<td><code>set-info</code>, <code>set-row-note</code> text</td>
+<td>120 characters, <code>invalid-argument</code></td>
+</tr>
+<tr>
+<td><code>set-info</code>, <code>set-choices</code>, <code>set-row-note</code>, <code>set-row-state</code>, <code>set-item-states</code>, <code>set-choice-items</code>, <code>set-info-rich</code> and <code>set-meter</code> calls</td>
+<td>10 per second per plugin, all these calls together. A call over the rate is refused with <code>rate-limited</code> and the previous state stays [SET-050]</td>
+</tr>
+<tr>
+<td><code>settings-validate</code> answer</td>
+<td>100 ms, save refused on timeout</td>
+</tr>
+</tbody>
+</table>
+<h3 id="error-codes">Error codes</h3>
+<p>Install errors refuse the package and name the JSON path of the entry.</p>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Cause</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>manifest.settings-kind</code></td>
+<td>Unknown <code>kind</code></td>
+</tr>
+<tr>
+<td><code>manifest.settings-id</code></td>
+<td>Bad tab, section or row id</td>
+</tr>
+<tr>
+<td><code>manifest.settings-key</code></td>
+<td>Bad value key</td>
+</tr>
+<tr>
+<td><code>manifest.settings-key-clash</code></td>
+<td>Duplicate key</td>
+</tr>
+<tr>
+<td><code>manifest.settings-id-clash</code></td>
+<td>Duplicate tab or section id</td>
+</tr>
+<tr>
+<td><code>manifest.settings-title-clash</code></td>
+<td>Tab title is a built-in label</td>
+</tr>
+<tr>
+<td><code>manifest.settings-target-unknown</code></td>
+<td>Missing target tab</td>
+</tr>
+<tr>
+<td><code>manifest.settings-target-closed</code></td>
+<td>Target tab takes no sections</td>
+</tr>
+<tr>
+<td><code>manifest.settings-target-grant</code></td>
+<td>Grant missing</td>
+</tr>
+<tr>
+<td><code>manifest.settings-anchor</code></td>
+<td>Unknown anchor, or <code>before:main</code></td>
+</tr>
+<tr>
+<td><code>manifest.settings-tab-anchor</code></td>
+<td>Bad <code>after</code></td>
+</tr>
+<tr>
+<td><code>manifest.settings-row-type</code></td>
+<td>Unknown row type</td>
+</tr>
+<tr>
+<td><code>manifest.settings-row-field</code></td>
+<td>Field not allowed for type</td>
+</tr>
+<tr>
+<td><code>manifest.settings-default</code></td>
+<td>Default fails its row</td>
+</tr>
+<tr>
+<td><code>manifest.settings-depends</code></td>
+<td>Unknown key or cycle</td>
+</tr>
+<tr>
+<td><code>manifest.settings-help</code></td>
+<td>Help id not in <code>contributes.help</code></td>
+</tr>
+<tr>
+<td><code>manifest.settings-command</code></td>
+<td>Command not contributed</td>
+</tr>
+<tr>
+<td><code>manifest.settings-glyph</code></td>
+<td>Glyph not one 1 or 2 cell grapheme</td>
+</tr>
+<tr>
+<td><code>manifest.settings-limit</code></td>
+<td>Limit exceeded</td>
+</tr>
+<tr>
+<td><code>manifest.catalog-unknown</code></td>
+<td>A <code>source</code> names an unknown catalogue</td>
+</tr>
+<tr>
+<td><code>manifest.settings-source</code></td>
+<td><code>source</code> together with <code>options</code></td>
+</tr>
+<tr>
+<td><code>manifest.schema-keyword</code></td>
+<td>Keyword outside the subset</td>
+</tr>
+</tbody>
+</table>
+<p>Runtime and load codes:</p>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Cause</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>invalid-argument</code></td>
+<td>A value is over its length limit, or <code>settings.open</code> names another plugin's target</td>
+</tr>
+<tr>
+<td><code>invalid-argument</code></td>
+<td>A <code>set-info</code>, <code>set-choices</code> or <code>set-row-note</code> call breaks a rule the plugin can check, such as text over 120 characters</td>
+</tr>
+<tr>
+<td><code>not-found</code></td>
+<td>A row-update call names an unknown key or id</td>
+</tr>
+<tr>
+<td><code>rate-limited</code></td>
+<td>More than 10 row-update calls per second per plugin, all kinds together</td>
+</tr>
+<tr>
+<td><code>settings.value-ignored</code></td>
+<td>A stored value no longer matches its row (warning)</td>
+</tr>
+<tr>
+<td><code>settings.anchor-missing</code></td>
+<td>An own-section anchor is gone, so the section moves to <code>end</code> (warning)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="reading-the-values-in-both-languages">Reading the values in both languages</h3>
+<p>The rows of every type are read with one call and written with a merge patch. The plugin needs no grant for its own values.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::host::settings;
+
+let values: serde_json::Value =
+    serde_json::from_str(&amp;settings::get_json()).unwrap_or_default();
+let keep = values[&quot;enabled&quot;].as_bool().unwrap_or(true);
+settings::set_json(r#&quot;{&quot;max_entries&quot;: 800, &quot;label&quot;: null}&quot;#)?;
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { getJson, setJson } from '@ilium/plugin-sdk/host/settings';
+
+const values = JSON.parse(getJson()) as Record&lt;string, unknown&gt;;
+const keep = typeof values['enabled'] === 'boolean' ? values['enabled'] : true;
+setJson(JSON.stringify({ max_entries: 800, label: null }));
+</code></pre>
+<p>A <code>null</code> resets the key to its default. Per-type declarations are on the <a href="/pages/reference-settings-rows/">row gallery</a>.</p>
+<h3 id="versioning">Versioning</h3>
+<ul>
+<li>The <code>page</code> entries and <code>settings_pages</code> are removed, and <code>settings-changed</code> sends the record above.</li>
+<li>Built-in tab ids and anchors are frozen. Rows are closed, so an unknown row type or field refuses the package.</li>
+</ul>
+<p>Requirement ids for this page: [SET-001], [SET-002], [SET-003], [SET-004], [SET-005], [SET-010], [SET-011], [SET-020], [SET-021], [SET-022], [SET-023], [SET-024], [SET-031], [SET-050], [SET-051], [SET-060], [SET-061], [SET-062], [SET-063], [SET-064]. See the <a href="/pages/reference-requirements/">requirements index</a>.</p>
+<h3 id="security">Security</h3>
+<p>Regex <code>pattern</code> values are limited per [SEC-046]; <code>secret</code> rows follow [SEC-242]. See <a href="/pages/reference-secrets/">Secrets</a>.</p>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/reference-core-extension-points/"><small>Previous</small>Core extension points</a><a class="next" href="/pages/reference-settings-rows/"><small>Next</small>Settings row gallery</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#you-will-need">You will need</a></li><li class="l2"><a href="#tab-and-section-entries">Tab and section entries</a></li><li class="l3"><a href="#tab-entries-kind-tab">Tab entries (kind &quot;tab&quot;)</a></li><li class="l3"><a href="#section-entries-kind-section">Section entries (kind &quot;section&quot;)</a></li><li class="l2"><a href="#built-in-tab-ids">Built-in tab ids</a></li><li class="l2"><a href="#row-types">Row types</a></li><li class="l3"><a href="#toggle">toggle</a></li><li class="l3"><a href="#choice">choice</a></li><li class="l3"><a href="#number">number</a></li><li class="l3"><a href="#text">text</a></li><li class="l3"><a href="#text-area">text-area</a></li><li class="l3"><a href="#path">path</a></li><li class="l3"><a href="#color">color</a></li><li class="l3"><a href="#keybinding">keybinding</a></li><li class="l3"><a href="#button">button</a></li><li class="l3"><a href="#info">info</a></li><li class="l3"><a href="#group">group</a></li><li class="l3"><a href="#list">list</a></li><li class="l3"><a href="#location">location</a></li><li class="l3"><a href="#preview">preview</a></li><li class="l3"><a href="#notice">notice</a></li><li class="l3"><a href="#map">map</a></li><li class="l3"><a href="#multi-choice">multi-choice</a></li><li class="l3"><a href="#meter">meter</a></li><li class="l2"><a href="#common-row-keys">Common row keys</a></li><li class="l2"><a href="#validation-and-saving">Validation and saving</a></li><li class="l2"><a href="#keys-on-a-plugin-row">Keys on a plugin row</a></li><li class="l2"><a href="#events-and-callbacks">Events and callbacks</a></li><li class="l2"><a href="#limits">Limits</a></li><li class="l2"><a href="#error-codes">Error codes</a></li><li class="l2"><a href="#reading-the-values-in-both-languages">Reading the values in both languages</a></li><li class="l2"><a href="#versioning">Versioning</a></li><li class="l2"><a href="#security">Security</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,779 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Troubleshooting plugins | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details open><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/" aria-current="page">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>For users</b></p>
+<h1>Troubleshooting plugins</h1>
+
+<p>This page helps you when a plugin does not install, does not start, keeps stopping, slows Ilium down, floods the screen, or stops Ilium from starting. It starts with a table of symptoms, then explains safe mode, the recovery page, how to find the plugin that causes a problem, how to read a plugin's log, and how to report a problem.</p>
+<p>Contract version: <code>ilium:plugin@0.1.0</code>. Requirement ids have the form <code>[USR-nnn]</code>, collected in <a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a>.</p>
+<div class="note">
+<p>Decision status. The platform is not implemented. The name of the safe mode start flag, <code>--safe-mode</code>, is a working name that the platform owner confirms. The behaviour is specified in <a href="/pages/reference-plugin-lifecycle-states/">Plugin lifecycle states</a>.</p>
+</div>
+
+<h3 id="contents">Contents</h3>
+<ul>
+<li>Find your symptom</li>
+<li>Safe mode</li>
+<li>The recovery page</li>
+<li>Find the plugin that causes a problem</li>
+<li>Read the plugin log</li>
+<li>Restart rules you will see</li>
+<li>Protective limits you will see</li>
+<li>Roll back and repair</li>
+<li>Report a problem</li>
+<li>Errors and edge cases</li>
+<li>Requirements</li>
+</ul>
+<h3 id="find-your-symptom">Find your symptom</h3>
+<table>
+<thead>
+<tr>
+<th>What you see</th>
+<th>Likely cause</th>
+<th>What to do</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>"Cannot install <name> <version>."</td>
+<td>You are on Windows or macOS, and the plugin is third-party</td>
+<td>Use Linux, or use only bundled plugins</td>
+</tr>
+<tr>
+<td>Install fails with a code such as <code>manifest.file-hash</code></td>
+<td>The file is damaged or was changed</td>
+<td>Get the file again and compare its checksum with the publisher's</td>
+</tr>
+<tr>
+<td>Install fails with <code>policy.blocked</code></td>
+<td>Your administrator limits plugins</td>
+<td>Ask your administrator. See <a href="/pages/guide-administration/">Administration guide</a></td>
+</tr>
+<tr>
+<td>A plugin shows <strong>Failed</strong></td>
+<td>It failed 3 times within 10 minutes</td>
+<td>Read its log, then turn it on again (see below, and <a href="/pages/user-plugin-health/">Plugin health for users</a>)</td>
+</tr>
+<tr>
+<td>A plugin shows <strong>Refused</strong></td>
+<td>Ilium checked it at start and refused to run it</td>
+<td>Read the code in the row. Reinstall the package or get a new version</td>
+</tr>
+<tr>
+<td>A plugin shows <strong>Blocked by policy</strong></td>
+<td>Your administrator forbids it</td>
+<td>Ask your administrator</td>
+</tr>
+<tr>
+<td>A plugin shows <strong>Waiting for <owner></strong></td>
+<td>It depends on a plugin that is off or removed</td>
+<td>Turn on or install the owner</td>
+</tr>
+<tr>
+<td>A panel or pane is empty</td>
+<td>A permission was declined, or the plugin is off</td>
+<td>Check the Capabilities tab and the log</td>
+</tr>
+<tr>
+<td>A pane says "Plugin <name> is not installed"</td>
+<td>The plugin that made the pane was removed</td>
+<td>Install it again, or close the pane</td>
+</tr>
+<tr>
+<td>A key does nothing</td>
+<td>Another binding wins, or the plugin is off</td>
+<td>See Settings &gt; Keys. Your own remap wins over plugins</td>
+</tr>
+<tr>
+<td>Lines of toasts appear</td>
+<td>A plugin shows many messages</td>
+<td>Ilium shows at most 3 per 10 s per plugin. Turn the plugin off</td>
+</tr>
+<tr>
+<td>Your keyboard is unresponsive for a moment</td>
+<td>A plugin locks input</td>
+<td>The lock ends after 2 s. Revoke <code>terminal.input-lock</code></td>
+</tr>
+<tr>
+<td>Ilium is slow</td>
+<td>A plugin uses much processor or memory</td>
+<td>Run <code>ilium plugin stats &lt;id&gt;</code>. Turn it off</td>
+</tr>
+<tr>
+<td>Settings does not open</td>
+<td>The settings plugin failed</td>
+<td>Use the recovery page</td>
+</tr>
+<tr>
+<td>Ilium does not start well after you installed a plugin</td>
+<td>A plugin breaks startup</td>
+<td>Start in safe mode</td>
+</tr>
+<tr>
+<td>An update shows "Update failed, rolled back"</td>
+<td>The new version failed to start</td>
+<td>The old version is back. Read the log of the new package's id</td>
+</tr>
+</tbody>
+</table>
+<h3 id="safe-mode">Safe mode</h3>
+<p>Safe mode starts Ilium with every third-party plugin (T2 and T3) switched off for this run. Core and bundled plugins run. Nothing is deleted, nothing is written to the registry, and the next normal start has every plugin as before.</p>
+<p>Start it in one of three ways:</p>
+<ol>
+<li>From a terminal: <code>ilium --safe-mode</code>.</li>
+<li>From the recovery page, press the Safe mode action. Ilium restarts the client with third-party plugins off.</li>
+<li>If Ilium fails to start twice in a row while a plugin starts, Ilium offers safe mode at the next start. (Pending decision: the offer after two failed starts is proposed.)</li>
+</ol>
+<p>In safe mode, a banner stays at the top of the screen: "Safe mode: third-party plugins are off." The Plugins tab still works. Every third-party row shows <strong>Off</strong> with the reason <code>safe-mode</code>. You can read logs, uninstall plugins and use the bisect tool. You cannot turn a third-party plugin on until you leave safe mode.</p>
+<figure>
+<pre class="term"><span class="t-hi">╭─ Plugins (safe mode) ────────────────────────╮</span>
+│ <span class="t-warn">Safe mode: third-party plugins are off.</span>      │
+│                                              │
+│ ilium.core.tree <span class="t-dim">…………………………………………………………………</span> <span class="t-ok">On</span> │
+│ ilium.core.layout <span class="t-dim">……………………………………………………………</span> <span class="t-ok">On</span> │
+│ com.example.notes (T2) <span class="t-dim">………………</span> <span class="t-dim">Off, safe mode</span> │
+│ com.example.old (T3) <span class="t-dim">……………………</span> <span class="t-dim">Off, safe mode</span> │
+│                                              │
+│ Restart Ilium without --safe-mode to leave.  │
+╰──────────────────────────────────────────────╯
+</pre>
+<figcaption>Rendered at 48 columns. Illustrative. The Plugins tab in safe mode.</figcaption>
+</figure>
+
+<ul>
+<li>[USR-030] Safe mode MUST switch off every T2 and T3 plugin for the run, MUST leave core and bundled plugins on, and MUST NOT write the state to the registry. Test: start in safe mode, stop, start normally and assert every plugin is as before.</li>
+<li>[USR-031] Safe mode MUST show a banner on every screen and MUST label every third-party row as off with the reason <code>safe-mode</code>. Test: render the tree and the Plugins tab in safe mode.</li>
+</ul>
+<h3 id="the-recovery-page">The recovery page</h3>
+<p>The recovery page is a screen that belongs to Ilium itself, not to any plugin. No plugin can replace it, hide it or change it. It works even if the Settings plugin has failed. It lists plugins that failed or are off first, and offers these actions: enable, disable, open the raw configuration file, uninstall, reset failures, forget settings and safe mode.</p>
+<figure>
+<pre class="term"><span class="t-hi">╭─ Recovery ───────────────────────────────────╮</span>
+│ Failed or disabled plugins come first.       │
+│                                              │
+│ failed   example.demo 0.1.0 3 in 10 min      │
+│ enabled  ilium.cost-view 0.1.0               │
+│ enabled  ilium.animations 0.1.0              │
+│                                              │
+│ e enable   d disable   o open config file    │
+│ u uninstall   r reset failures               │
+│ f forget settings   s safe mode   q close    │
+╰──────────────────────────────────────────────╯
+</pre>
+<figcaption>Rendered at 48 columns. Illustrative. The recovery page.</figcaption>
+</figure>
+
+<p>Open the recovery page from the <strong>Open Plugins page</strong> link on any disabled plugin's rows, or from a failed-start notice, or with <code>Ctrl+B</code> then <code>:</code> and the Recovery entry when Settings is not available. (Pending decision: the direct key for the recovery page is not set.)</p>
+<table>
+<thead>
+<tr>
+<th>Action</th>
+<th>Effect</th>
+<th>Changes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Enable</td>
+<td>Turns the plugin on and clears its failure count</td>
+<td>the on or off flag, the failure window</td>
+</tr>
+<tr>
+<td>Disable</td>
+<td>Turns the plugin off</td>
+<td>the on or off flag</td>
+</tr>
+<tr>
+<td>Reset failures</td>
+<td>Clears the failure count without starting the plugin</td>
+<td>the failure window</td>
+</tr>
+<tr>
+<td>Forget settings</td>
+<td>Deletes this plugin's saved settings for you and starts it with defaults</td>
+<td>settings values only</td>
+</tr>
+<tr>
+<td>Uninstall</td>
+<td>Removes the plugin as in <a href="/pages/user-install-and-manage/">Install and manage plugins</a></td>
+<td>the plugin</td>
+</tr>
+<tr>
+<td>Open config file</td>
+<td>Opens <code>config.toml</code> in an editor</td>
+<td>nothing by itself</td>
+</tr>
+<tr>
+<td>Safe mode</td>
+<td>Restarts with third-party plugins off</td>
+<td>nothing stored</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>[USR-032] The recovery page MUST stay reachable when the Settings plugin is off or failed, and MUST NOT be replaceable by a plugin. Test: turn off <code>ilium.core.settings</code>, open the recovery page, and re-enable it.</li>
+<li>[USR-033] Forget settings MUST delete only that plugin's settings values and MUST NOT delete permissions or data. Test: set a value, forget, and compare the grant file and data folder.</li>
+</ul>
+<h3 id="find-the-plugin-that-causes-a-problem">Find the plugin that causes a problem</h3>
+<p>If you do not know which plugin is at fault, use the bisect tool. It turns half of your third-party plugins off, asks you whether the problem is still there, and narrows down until one plugin is left.</p>
+<pre><code class="language-sh">ilium plugin bisect start
+# check the problem, then answer
+ilium plugin bisect good     # the problem is gone with the current set off
+ilium plugin bisect bad      # the problem is still there
+ilium plugin bisect reset    # stop and put everything back
+</code></pre>
+<p>Bisect changes nothing on disk. The plugins it turns off are off for this run, as in safe mode, and <code>reset</code> or a restart brings them back. When bisect has found the plugin, it names it and offers to turn it off for good or to open its log.</p>
+<ol>
+<li>Run <code>ilium plugin bisect start</code>.</li>
+<li>Look at whether the problem is still there. Answer <code>good</code> when it is gone, <code>bad</code> when it is still there.</li>
+<li>Repeat until Ilium names one plugin. With 16 plugins this takes at most 4 rounds.</li>
+<li>Run <code>ilium plugin bisect reset</code>.</li>
+</ol>
+<h3 id="read-the-plugin-log">Read the plugin log</h3>
+<p>Every plugin has a log that holds its own lines and the lines that Ilium writes about it: refused calls, failures, restarts and process runs. The log has four columns: time, level, plugin id and message.</p>
+<pre><code class="language-sh">ilium plugin logs com.example.notes --tail 50
+ilium plugin logs com.example.notes --level warn --since &quot;2026-10-12 08:00:00&quot;
+ilium plugin logs com.example.notes --follow
+</code></pre>
+<p>Lines you will often see:</p>
+<table>
+<thead>
+<tr>
+<th>Line</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>refused &lt;grant&gt; by &lt;function&gt; (declined)</code></td>
+<td>You said no to that permission. Grant it in the Capabilities tab if you want the feature</td>
+</tr>
+<tr>
+<td><code>refused &lt;grant&gt; by &lt;function&gt; (revoked)</code></td>
+<td>You turned the permission off</td>
+</tr>
+<tr>
+<td><code>refused &lt;grant&gt; by &lt;function&gt; (not-granted)</code></td>
+<td>The plugin used a value outside what you granted, such as a host or folder you did not allow</td>
+</tr>
+<tr>
+<td><code>restart in 1 s</code> or <code>restart in 5 s</code></td>
+<td>The plugin stopped and Ilium will start it again</td>
+</tr>
+<tr>
+<td><code>disabled after 3 failures in 10 minutes</code></td>
+<td>The plugin is off and stays off until you turn it on</td>
+</tr>
+<tr>
+<td><code>dropped N log lines</code></td>
+<td>The plugin wrote more than 200 lines per second</td>
+</tr>
+</tbody>
+</table>
+<p>The log is plain text. Before you paste it into a bug report, read it. A plugin should not write secrets there, but check.</p>
+<h3 id="restart-rules-you-will-see">Restart rules you will see</h3>
+<p>When a plugin stops with an error, Ilium starts it again after a delay: 1 s after the first failure, 5 s after the second. At the third failure within 10 minutes it stays off, the row shows <strong>Failed</strong>, and a notice names the plugin. Turning it on again, from the Plugins tab, the recovery page or <code>ilium plugin enable &lt;id&gt;</code>, starts counting from zero. <code>ilium plugin reset-failures &lt;id&gt;</code> clears the count without starting the plugin. See <a href="/pages/lifecycle/">Lifecycle</a>.</p>
+<p>If you changed the plugin in the meantime, for example by updating it, the count also starts from zero.</p>
+<ul>
+<li>[USR-100] The plugin MUST restart after 1 s, then after 5 s, and MUST stay off at the third failure within 10 minutes. Test: make a test plugin fail on start and measure.</li>
+<li>[USR-101] Turning a plugin on MUST clear its failure count. Test: reach the stop, turn on, fail once, and assert a restart after 1 s.</li>
+</ul>
+<h3 id="protective-limits-you-will-see">Protective limits you will see</h3>
+<p>Ilium limits what a plugin can do to your screen, whatever you granted. If you see these effects, a plugin is probably very active:</p>
+<ul>
+<li><strong>Toasts:</strong> at most 3 per 10 s per plugin. More are dropped. One summary line goes to the log.</li>
+<li><strong>Input lock:</strong> a plugin can block your keyboard for 2 s at most.</li>
+<li><strong>Clipboard:</strong> after a plugin reads or writes the clipboard, the footer shows an indicator for 3 s.</li>
+<li><strong>Log lines:</strong> 200 per second.</li>
+</ul>
+<h3 id="roll-back-and-repair">Roll back and repair</h3>
+<table>
+<thead>
+<tr>
+<th>Problem</th>
+<th>Command</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>The new version is worse</td>
+<td><code>ilium plugin rollback &lt;id&gt;</code></td>
+<td>Activates the previous version</td>
+</tr>
+<tr>
+<td>The new version cannot read old data</td>
+<td><code>ilium plugin rollback &lt;id&gt; --restore-backup</code></td>
+<td>Restores the data copy made before the update. What was written since is lost</td>
+</tr>
+<tr>
+<td>Store files are damaged</td>
+<td><code>ilium plugin reinstall &lt;id&gt;</code></td>
+<td>Rebuilds the store entry from the cached package</td>
+</tr>
+<tr>
+<td>You want a clean start for one plugin</td>
+<td><code>ilium plugin uninstall &lt;id&gt; --purge</code>, then install</td>
+<td>Deletes its data, settings and log</td>
+</tr>
+<tr>
+<td>Many checks at once</td>
+<td><code>ilium plugin doctor</code></td>
+<td>Checks the tools, trust store and free disk space</td>
+</tr>
+</tbody>
+</table>
+<p><code>ilium plugin doctor</code> also checks whether the machine allows T2 and T3 plugins and whether the trust store file is readable.</p>
+<h3 id="report-a-problem">Report a problem</h3>
+<p>Give the maintainer of the plugin, not the Ilium project, the report first. Include:</p>
+<ol>
+<li>The plugin id and version (<code>ilium plugin list</code>).</li>
+<li>Your Ilium version and your system.</li>
+<li>The last lines of the log, after you read them for secrets.</li>
+<li>What you did and what you expected.</li>
+</ol>
+<p>If you think Ilium itself is at fault, for example a plugin could do something it was not granted, report it to the Ilium project as a security issue and include the log lines.</p>
+<h3 id="errors-and-edge-cases">Errors and edge cases</h3>
+<table>
+<thead>
+<tr>
+<th>Situation</th>
+<th>What happens</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Safe mode and a policy that blocks plugins</td>
+<td>Both apply. The row shows the policy reason first</td>
+</tr>
+<tr>
+<td>Bisect with one third-party plugin</td>
+<td>It names that plugin after the first answer</td>
+</tr>
+<tr>
+<td>You leave safe mode</td>
+<td>Plugins are back as they were. Failed plugins stay failed until you turn them on</td>
+</tr>
+<tr>
+<td>The log file is missing</td>
+<td>The log tab is empty. A new file starts at the next line</td>
+</tr>
+<tr>
+<td>Two problems at once</td>
+<td>Fix one, restart, then check again. Bisect finds one plugin at a time</td>
+</tr>
+<tr>
+<td>The registry cannot be written</td>
+<td>The action fails with <code>io</code>, and the state stays as it was</td>
+</tr>
+</tbody>
+</table>
+<h3 id="see-also">See also</h3>
+<ul>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Plugin lifecycle states</a></li>
+<li><a href="/pages/settings-screens/">Settings screens</a></li>
+<li><a href="/pages/reference-plugin-cli/">CLI reference</a></li>
+</ul>
+<p>API version checked: <code>ilium:plugin@0.1.0</code>.</p>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/user-safe-mode-and-troubleshooting/"><small>Previous</small>Safe mode and recovery</a><a class="next" href="/pages/design-decisions/"><small>Next</small>Design decisions</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#contents">Contents</a></li><li class="l2"><a href="#find-your-symptom">Find your symptom</a></li><li class="l2"><a href="#safe-mode">Safe mode</a></li><li class="l2"><a href="#the-recovery-page">The recovery page</a></li><li class="l2"><a href="#find-the-plugin-that-causes-a-problem">Find the plugin that causes a problem</a></li><li class="l2"><a href="#read-the-plugin-log">Read the plugin log</a></li><li class="l2"><a href="#restart-rules-you-will-see">Restart rules you will see</a></li><li class="l2"><a href="#protective-limits-you-will-see">Protective limits you will see</a></li><li class="l2"><a href="#roll-back-and-repair">Roll back and repair</a></li><li class="l2"><a href="#report-a-problem">Report a problem</a></li><li class="l2"><a href="#errors-and-edge-cases">Errors and edge cases</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

@@ -1973,6 +1973,9 @@ async fn admitted_state_synchronization_events(
     ),
     String,
 > {
+    // Why each discarded attempt was discarded, so a final failure can say
+    // whether pane output, the pane set or the tree kept moving.
+    let mut discarded_attempts: Vec<(&'static str, Option<NodeId>)> = Vec::new();
     for _attempt in 0..8 {
         let (estimates, snapshot_bytes) = {
             let tree = state.tree.read().await;
@@ -2030,6 +2033,7 @@ async fn admitted_state_synchronization_events(
             if current_tree_bytes > snapshot_bytes / 2 {
                 drop(tree);
                 drop(producer_storage);
+                discarded_attempts.push(("tree grew while admission waited", None));
                 continue;
             }
             tree.clone()
@@ -2038,6 +2042,7 @@ async fn admitted_state_synchronization_events(
         let built = {
             let tree = state.tree.read().await;
             if *tree != expected_tree {
+                discarded_attempts.push(("tree changed before the snapshot", None));
                 None
             } else {
                 let panes = state.panes.read().await;
@@ -2055,6 +2060,7 @@ async fn admitted_state_synchronization_events(
                 let mut matched_estimates = HashSet::new();
                 let mut replay_events = Vec::new();
                 let mut stale = false;
+                let mut stale_reason: Option<(&'static str, Option<NodeId>)> = None;
                 for (pane_id, resource) in panes.iter() {
                     match resource {
                         PaneResource::Terminal(runtime) => {
@@ -2067,6 +2073,8 @@ async fn admitted_state_synchronization_events(
                             if let Some(estimate) = estimates.get(pane_id) {
                                 if !estimate.input.same_session(&runtime.session.input_handle()) {
                                     stale = true;
+                                    stale_reason =
+                                        Some(("pane session was replaced", Some(*pane_id)));
                                     break;
                                 }
                                 matched_estimates.insert(*pane_id);
@@ -2078,6 +2086,10 @@ async fn admitted_state_synchronization_events(
                                     Some(event) => replay_events.push(event),
                                     None => {
                                         stale = true;
+                                        stale_reason = Some((
+                                            "pane output moved after the estimate",
+                                            Some(*pane_id),
+                                        ));
                                         break;
                                     }
                                 }
@@ -2102,6 +2114,9 @@ async fn admitted_state_synchronization_events(
                     }
                 }
                 if stale || matched_estimates.len() != estimates.len() {
+                    discarded_attempts.push(
+                        stale_reason.unwrap_or(("a pane with an estimate left the pane set", None)),
+                    );
                     None
                 } else {
                     let mut events = vec![ServerEvent::PaneStateSnapshot {
@@ -2163,6 +2178,10 @@ async fn admitted_state_synchronization_events(
         }
         drop(producer_storage);
     }
+    tracing::warn!(
+        discarded_attempts = ?discarded_attempts,
+        "state synchronization gave up: every attempt was invalidated by concurrent changes"
+    );
     Err("state synchronization changed repeatedly; retry attach".to_owned())
 }
 
