@@ -1,7 +1,9 @@
 //! Compare the native Carpet scene with its packaged V8 implementation.
 //! Measures render/pack wall time and Braille differences for every mode whose
-//! inputs can be held locally. Lichess TV is reported as unmeasured because the
-//! native and guest implementations need an authenticated live game source.
+//! inputs can be held locally. Lichess TV is reported as unmeasured: it needs a
+//! recorded feed replayed into both renderers, and no such replay seam exists yet.
+//! The public Lichess TV feed needs no token; the gap is the replay seam, not auth.
+use ilium_ambient::resources::AmbientResources;
 use ilium_ambient::CarpetSettings;
 use ilium_animation_js::{
     engine::{
@@ -20,7 +22,9 @@ use ilium_animation_js::{
 use ilium_client::background_animation::{
     AnimationFrame, AnimationKind, AnimationSettings, DitherMode,
 };
-use ilium_execution::{QuotaGroup, QuotaLimits};
+use ilium_execution::{
+    ClientLimits, Execution, ExecutionConfig, LaneConfig, QuotaGroup, QuotaLimits,
+};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{
@@ -142,6 +146,16 @@ const V8_RUNTIME_SOURCES: [(&str, &[u8]); 5] = [
     ),
 ];
 
+/// One worker thread for each native CPU or IO lane; the hosted scene admits
+/// its own jobs through the client, so no extra threads are reserved here.
+fn native_lane() -> LaneConfig {
+    LaneConfig {
+        threads: 1,
+        queue_slots: 4,
+        priority: None,
+        resident_bytes_per_thread: 1024 * 1024,
+    }
+}
 fn invalid(message: &str) -> Box<dyn Error> {
     std::io::Error::other(message.to_owned()).into()
 }
@@ -167,12 +181,14 @@ struct Options {
     fps: u32,
     warmup: usize,
     frames: usize,
+    /// Non-qualifying diagnostic budget; absent for production runs.
+    diagnostic_render_ms: Option<u64>,
 }
 fn options() -> Result<Option<Options>> {
     let args: Vec<_> = std::env::args().skip(1).collect();
     if args == ["--help"] {
         emit(
-            json!({"type":"result","usage":"v8_carpet_performance --package PATH --sha256 HEX --width CELLS --height CELLS --fps INTEGER --warmup COUNT --frames COUNT","measured_modes":MEASURED_MODES,"unmeasured_modes":{"4":"Lichess TV requires an authenticated native game-source snapshot"},"bounds":{"width":[1,320],"height":[1,120],"fps":[1,30],"warmup":[0,1000],"frames":[1,10000]}}),
+            json!({"type":"result","usage":"v8_carpet_performance --package PATH --sha256 HEX --width CELLS --height CELLS --fps INTEGER --warmup COUNT --frames COUNT [--diagnostic-render-ms INTEGER]","measured_modes":MEASURED_MODES,"unmeasured_modes":{"4":"Lichess TV needs a recorded feed replayed into both renderers; no replay seam exists yet (the public feed needs no token)"},"bounds":{"width":[1,320],"height":[1,120],"fps":[1,30],"warmup":[0,1000],"frames":[1,10000],"diagnostic_render_ms":[1,10000]},"diagnostic_warning":"An explicit diagnostic budget does not qualify production deadlines"}),
         );
         return Ok(None);
     }
@@ -185,12 +201,14 @@ fn options() -> Result<Option<Options>> {
         "--warmup",
         "--frames",
     ];
-    if args.len() != names.len() * 2 {
+    let optional_diagnostic = "--diagnostic-render-ms";
+    let has_diagnostic = args.len() == names.len() * 2 + 2;
+    if args.len() != names.len() * 2 && !has_diagnostic {
         return Err(invalid("all documented flags are required exactly once"));
     }
     let mut flags = BTreeMap::new();
     for pair in args.chunks_exact(2) {
-        if !names.contains(&pair[0].as_str())
+        if (!names.contains(&pair[0].as_str()) && pair[0] != optional_diagnostic)
             || flags.insert(pair[0].as_str(), pair[1].as_str()).is_some()
         {
             return Err(invalid("unknown or duplicate flag"));
@@ -226,6 +244,11 @@ fn options() -> Result<Option<Options>> {
         fps: number("--fps", 1, 30)? as u32,
         warmup: number("--warmup", 0, 1000)? as usize,
         frames: number("--frames", 1, 10000)? as usize,
+        diagnostic_render_ms: if flags.contains_key(optional_diagnostic) {
+            Some(number(optional_diagnostic, 1, 10000)?)
+        } else {
+            None
+        },
     }))
 }
 fn spec(name: &str, kind: TypedArrayKind, elements: usize) -> ArraySpec {
@@ -327,6 +350,9 @@ fn measure(options: &Options, package: &Arc<Package>, quota: &QuotaGroup, mode: 
     let layout = shape.layout()?;
     let mut limits = EngineLimits::default();
     limits.render_ms = limits.render_ms.min(package.manifest().limits.render_ms);
+    if let Some(milliseconds) = options.diagnostic_render_ms {
+        limits.render_ms = milliseconds;
+    }
     let mut engine = Engine::new(Arc::clone(package), limits, quota.clone())?;
     engine.install_bootstrap(TRUSTED_BOOTSTRAP)?;
     // Match the offline Beach harness without granting external service rights.
@@ -353,7 +379,32 @@ fn measure(options: &Options, package: &Arc<Package>, quota: &QuotaGroup, mode: 
         ));
     }
     let mut surface = Surface::new(1, 1, shape)?;
+    // Without admitted resources the hosted scene is a MissingResources text
+    // placeholder, which made the native side ~0.2 ms and mismatched the V8 side.
+    let native_execution = Execution::start(
+        quota.clone(),
+        ExecutionConfig {
+            cpu: native_lane(),
+            io: native_lane(),
+            service: LaneConfig {
+                threads: 0,
+                queue_slots: 0,
+                priority: None,
+                resident_bytes_per_thread: 0,
+            },
+        },
+    )
+    .map_err(|error| invalid(&format!("native execution start: {error:?}")))?;
+    let native_client = native_execution
+        .client(ClientLimits {
+            jobs: 8,
+            service_jobs: 0,
+            input_bytes: 512 * 1024 * 1024,
+            result_bytes: 512 * 1024 * 1024,
+        })
+        .map_err(|reason| invalid(&format!("native client admission: {reason:?}")))?;
     let mut native = AnimationFrame::default();
+    native.configure_resources(AmbientResources::new(native_client));
     let pointer = (mode == 0).then_some([0.7, 0.4]);
     native.pointer(pointer);
     let returned = [
@@ -368,6 +419,7 @@ fn measure(options: &Options, package: &Arc<Package>, quota: &QuotaGroup, mode: 
     let mut native_times = Vec::with_capacity(options.frames);
     let mut js_times = Vec::with_capacity(options.frames);
     let mut js_render_times = Vec::with_capacity(options.frames);
+    let mut all_render_ms = Vec::with_capacity(options.warmup + options.frames);
     let mut changed_bits = 0_u64;
     let mut compared_bits = 0_u64;
     let mut changed_cells = 0_u64;
@@ -390,7 +442,9 @@ fn measure(options: &Options, package: &Arc<Package>, quota: &QuotaGroup, mode: 
             "work_data".into(),
             data.iter().flat_map(|v| v.to_ne_bytes()).collect(),
         )]);
-        engine.seed_frame(&json!({"frame":{"key":seed.key,"shape":seed.shape,"reset":seed.reset,"invalid_rects":seed.invalid_rects,"input_specs":[]}}), &seeded, &binary)?;
+        engine
+            .seed_frame(&json!({"frame":{"key":seed.key,"shape":seed.shape,"reset":seed.reset,"invalid_rects":seed.invalid_rects,"input_specs":[]}}), &seeded, &binary)
+            .map_err(|error| invalid(&format!("mode {mode} frame {index} seed: {error}")))?;
         let pointer_input = if mode == 0 {
             json!({"revision":1,"available":true,"x":0.7,"y":0.4,"inside":true,"captured_at_ms":0})
         } else {
@@ -412,7 +466,9 @@ fn measure(options: &Options, package: &Arc<Package>, quota: &QuotaGroup, mode: 
             "settings":settings,"visible":true,"inputs":inputs,"render_policy":{"can_skip_occluded":false},
             "_ilium_frame":{"key":seed.key,"shape":seed.shape}});
         let render_begin = Instant::now();
-        let output = engine.render(&context, &returned)?;
+        let output = engine
+            .render(&context, &returned)
+            .map_err(|error| invalid(&format!("mode {mode} frame {index} render: {error}")))?;
         let render_ns = render_begin.elapsed().as_nanos() as f64;
         let metadata = FrameMeta::parse(&serde_json::to_vec(&output.metadata)?)?;
         let sealed = planes(&output, layout.samples)?;
@@ -443,6 +499,7 @@ fn measure(options: &Options, package: &Arc<Package>, quota: &QuotaGroup, mode: 
         if native_masks.len() != js_masks.len() {
             return Err(invalid("native/V8 Carpet mask lengths differ"));
         }
+        all_render_ms.push(json!(render_ns / 1e6));
         if index >= options.warmup {
             native_times.push(native_ns);
             js_times.push(js_ns);
@@ -460,9 +517,10 @@ fn measure(options: &Options, package: &Arc<Package>, quota: &QuotaGroup, mode: 
         json!({"type":"result","case":format!("carpet-{mode}"),"mode":mode,"status":"measured_pending_fidelity_review",
         "package_sha256":package.digest(),"native_render_pack_collect":native_stats,
         "v8_seed_render_accept_pack_collect":js_stats,"v8_render_only":stats(&mut js_render_times),
+        "v8_render_ms_per_frame_including_warmup":all_render_ms,
         "raw_median_pipeline_ratio":js_stats["median_ns"].as_f64().zip(native_stats["median_ns"].as_f64()).map(|(j,n)|j/n),
         "changed_braille_bits":changed_bits,"compared_braille_bits":compared_bits,"changed_cells":changed_cells,
-        "input_fixture":{"pointer":"normalized (0.7, 0.4) for mode 0","clock":"current UTC snapshot for modes 7 and 8","remote_source":"none; mode 4 excluded"},
+        "input_fixture":{"pointer":"normalized (0.7, 0.4) for mode 0","clock":"current UTC snapshot for modes 7 and 8","remote_source":"none; mode 4 not measured (no replay seam)"},
         "excludes":["protected helper IPC","permission broker","UI composition","terminal emission"]}),
     );
     engine.dispose()?;
@@ -474,11 +532,11 @@ fn run() -> Result<()> {
         return Ok(());
     };
     let quota = QuotaGroup::new(QuotaLimits {
-        clients: 0,
-        jobs: 0,
+        clients: 4,
+        jobs: 8,
         service_jobs: 0,
-        input_bytes: 0,
-        result_bytes: 0,
+        input_bytes: 512 * 1024 * 1024,
+        result_bytes: 512 * 1024 * 1024,
         worker_threads: 16,
         worker_bytes: 2304 * MIB,
     });
@@ -518,9 +576,10 @@ fn run() -> Result<()> {
         "native_source_sha256":native_source_sha256,"v8_runtime_source_sha256":v8_runtime_source_sha256,
         "package_sha256":package.digest(),"width_cells":options.width,"height_cells":options.height,
         "fps":options.fps,"warmup":options.warmup,"frames":options.frames,
+        "diagnostic_render_ms":options.diagnostic_render_ms,"production_deadline_qualified":options.diagnostic_render_ms.is_none(),
         "native_boundary":"public AnimationFrame::render plus glyph collection",
         "v8_boundary":"trusted bootstrap, seeded binary views, Surface acceptance and native pack",
-        "excluded_mode":{"4":"Lichess TV requires a matching live game-source snapshot; no network source is fabricated"},
+        "excluded_mode":{"4":"Lichess TV needs the same recorded feed replayed into both renderers; no replay seam exists yet, and no network source is fabricated"},
         "clock":"modes 7 and 8 receive live UTC snapshots; exact native/V8 wall-clock identity is not guaranteed",
         "excludes":["helper IPC","permission acquisition","UI composition","terminal emission"],"cpu_time_ns":null}),
     );
