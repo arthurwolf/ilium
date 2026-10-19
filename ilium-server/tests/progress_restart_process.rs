@@ -103,6 +103,7 @@ async fn connect_and_attach(socket_path: &Path) -> SessionStream {
         &mut client,
         &ClientRequest::Attach {
             session: "progress-restart-process".to_owned(),
+            hello: Default::default(),
         },
     )
     .await
@@ -216,6 +217,7 @@ async fn monitor_survives_a_killed_server_process_and_keeps_observing() {
     write_frame(
         &mut client,
         &ClientRequest::NewPane {
+            request_id: 1,
             parent_group: ROOT_ID,
             kind: NewPaneKind::PlainShell,
             working_directory: NewPaneWorkingDirectory::ProjectRoot,
