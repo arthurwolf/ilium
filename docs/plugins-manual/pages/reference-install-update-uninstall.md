@@ -32,7 +32,7 @@ All paths are relative to the plugin root, `<data dir>/plugins/`, where `<data d
   backups/<id>/<version>-<utc timestamp>/   pre-migration copy of data and buckets
   data/<id>/                the plugin data directory (fs data scope)
   storage/<id>/global.db    global bucket
-  logs/<id>.log             plugin log
+<state dir>/plugins/logs/<session-slug>/<id>.log   plugin log (not under the plugin root)
 <state dir>/trust.json      the user trust store, mode 0600 (not under the plugin root)
 <cache dir>/ilium/plugins/
   <id>/                     the plugin cache directory
@@ -178,7 +178,7 @@ The JSON Schema of the file:
 | 6 | Update `installed.json` atomically (see LIF-065). Write the plugin's entry in `grants.json`. | Delete the new store entry. | `install.io` |
 | 7 | Tell the running servers (see Propagation). Release the lock. | A failed notification is a warning only. | `install.notify-failed` |
 
-- [LIF-068] The host MUST NOT instantiate or run any code of the package before step 2 has finished. Test: install a package whose start function writes a file and decline the review; assert the file is absent.
+- [LIF-068] The host MUST NOT instantiate or run any code of the package before SEC-100 step 11 (commit) has finished. Test: install a package whose start function writes a file and decline the review; assert the file is absent.
 - [LIF-069] A failure at any step MUST leave the registry byte for byte unchanged and MUST delete the staging directory and any new store entry. Test: inject a failure at each step and compare the registry hash.
 - [LIF-070] An install MUST NOT require network access. Test: run the install in a network namespace with no interfaces.
 - [LIF-071] Validation MUST run in the stage order of PKG-149, so that the cheapest checks refuse first and no prompt appears for a package that would be refused later. Test: a package with an invalid manifest (stage 3) and an invalid signature (stage 7) reports `manifest.schema` and no signature code.

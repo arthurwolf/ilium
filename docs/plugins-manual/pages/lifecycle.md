@@ -385,11 +385,11 @@ When the host stops a side, the tree footer shows one notice, called N14 in this
 <figure>
 <pre class="term">$ ilium plugin logs com.example.cursor
 <span class="t-err">error</span> trap in activate: index out of bounds
-<span class="t-warn">warn</span>  restart in 1 s (failure 1 of 3, 10 min)
+<span class="t-warn">warn</span>  restarting in 1 s (failure 1 of 3 in 10 minutes)
 <span class="t-err">error</span> trap in activate: index out of bounds
-<span class="t-warn">warn</span>  restart in 5 s (failure 2 of 3, 10 min)
+<span class="t-warn">warn</span>  restarting in 5 s (failure 2 of 3 in 10 minutes)
 <span class="t-err">error</span> trap in activate: index out of bounds
-<span class="t-err">error</span> stopped: failure 3 of 3, 10 min
+<span class="t-err">error</span> disabled after 3 failures in 10 minutes
 </pre>
 <figcaption>Illustrative, not generated. Log lines of a plugin that traps three times while it activates.</figcaption>
 </figure>

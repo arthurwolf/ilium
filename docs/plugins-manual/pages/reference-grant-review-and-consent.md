@@ -34,9 +34,9 @@ A **grant** is a standing permission that the user gives a plugin at install, fo
 | 10 | Review dialog (see below) | user cancels: exit code 1, audit `install` with result `cancelled` |
 | 11 | Commit: unpack into the install directory, write the grants, bump the epoch, write the audit line | `install.write-failed` |
 
-**[SEC-123]** Declining to trust a key at step 7 refuses the install with `trust.declined`. The package is never downgraded to T3 silently. A user who wants it as a local package passes `--allow-unsigned` explicitly, which strips the signature view and gives a T3 install with the `dev` badge.
+**[SEC-123]** Declining to trust a key at SEC-100 step 7 refuses the install with `trust.declined`. The package is never downgraded to T3 silently. A user who wants it as a local package passes `--allow-unsigned` explicitly, which strips the signature view and gives a T3 install with the `dev` badge.
 
-**[SEC-124]** `sessions.cross` in a T3 package is refused at step 8 with `manifest.grant-tier`. `sessions.cross` is for T1 and T2 only.
+**[SEC-124]** `sessions.cross` in a T3 package is refused at SEC-100 step 8 (grants fit the tier; validation stage 9) with `manifest.grant-tier`. `sessions.cross` is for T1 and T2 only.
 
 ## The review dialog
 

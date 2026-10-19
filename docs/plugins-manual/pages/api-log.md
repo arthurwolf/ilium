@@ -202,7 +202,7 @@ Write the code in the error log, because the user sees only the log. The code te
 
 ### What the user sees
 
-Each line of the log has four columns: the local timestamp as `YYYY-MM-DD HH:mm:ss`, the level padded to five characters, the plugin id and the message. The command `ilium plugin logs <id>` prints the whole log. `--tail <n>` prints only the last `n` lines.
+Each line of the log has five columns: the local timestamp as `YYYY-MM-DD HH:mm:ss`, the level padded to five characters, the side padded to six characters, the plugin id and the message. The command `ilium plugin logs <id>` prints the whole log. `--tail <n>` prints only the last `n` lines.
 
 <figure>
 <pre class="term"><span class="t-prompt">$</span> ilium plugin logs example.notes --tail 5

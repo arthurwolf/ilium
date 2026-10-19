@@ -300,7 +300,7 @@ Additional per-plugin key:
 |---|---|---|---|---|
 | `detector_deadline_ms` | 20 | 50 | 20 | Previous classification kept; third breach in a row traps |
 
-Limits that apply to a whole session (all plugins of one hosting process together). They are not manifest keys, and a user can only lower them under `[plugins.limits]`; a higher user value is clamped to the current value with a logged warning [HST-406], so these keys have no ceiling column. There are five session keys.
+Limits that apply to a whole session (all plugins of one hosting process together). They are not manifest keys, and a user can only lower them under `[plugins.limits]`; a higher user value is clamped to the current value with a logged warning [HST-406], so these keys have no ceiling column. There are five session keys. Two further fixed session caps, 4,096 pending requests and 32 key grabs, are not keys; see [API-070] and "Fixed session caps" below.
 
 | Key | Default | Effect when reached |
 |---|---|---|

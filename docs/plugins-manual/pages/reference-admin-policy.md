@@ -126,7 +126,7 @@ keep_days = 365
 
 ## Evaluation
 
-**[SEC-184]** The install pipeline applies the policy at the steps marked in [Grant review and consent](/pages/reference-grant-review-and-consent/): `policy.tier-denied`, `policy.id-denied`, `policy.publisher-denied` and `policy.source-denied` at step 6; `policy.replacement` at step 9. A grant that matches `grants.deny` is not an install failure ([SEC-198]). At run time, a host call that the policy forbids returns `not-permitted` with reason `policy`. The user and the plugin see reason `policy`, never the policy text.
+**[SEC-184]** The install pipeline applies the policy at the steps marked in [Grant review and consent](/pages/reference-grant-review-and-consent/): `policy.tier-denied`, `policy.id-denied`, `policy.publisher-denied` and `policy.source-denied` at SEC-100 step 6; `policy.replacement` at SEC-100 step 9. A grant that matches `grants.deny` is not an install failure ([SEC-198]). At run time, a host call that the policy forbids returns `not-permitted` with reason `policy`. The user and the plugin see reason `policy`, never the policy text.
 
 **[SEC-185]** In the review dialog a policy-denied row is locked off and reads `Blocked by your administrator`:
 

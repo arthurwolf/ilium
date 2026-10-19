@@ -194,7 +194,7 @@ One Engine per process. One Store per plugin instance. The table assigns each re
 
 | Registry | Owner | Persisted where | How other processes see it |
 |---|---|---|---|
-| Package store (installed packages, content-addressed) | The package directory under the Ilium data directory, written by `ilium plugin install` | `<data dir>/plugins/packages/<id>/<version>/` | Every host reads it at start; the handshake carries id, version and content hash (see [Host IPC protocol](/pages/reference-host-ipc/)) |
+| Package store (installed packages, content-addressed) | The package directory under the Ilium data directory, written by `ilium plugin install` | `<data dir>/plugins/store/<id>/<version>/` | Every host reads it at start; the handshake carries id, version and content hash (see [Host IPC protocol](/pages/reference-host-ipc/)) |
 | Grant store | The server host (single writer, file lock from `ilium-platform`) | `$XDG_STATE_HOME/ilium/grants.json` (mode 0600), written atomically | The server pushes `grants-changed` control records to clients; a CLI-process host reads the file under a shared lock |
 | Contribution registry (commands, settings tabs, decoration slots, panes, toolbar items, keys, scenes) | Static part: each host for the sides it hosts. Retained part (decorations, virtual rows, status segments, frame slots, attention): the server host | Not persisted except what the plugin saves | Retained server contributions replicate to every client as `ContributionDelta` |
 | Extension-point registry | The host of the side that owns the point | Not persisted | A client-owned point exists only in that client; a server-owned point only on the server (see [Extension points](/pages/api-extension-points/)) |

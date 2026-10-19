@@ -120,9 +120,9 @@ Before any code runs, the loader checks the package. The normative order of the 
 | 2 manifest-parse, 3 schema, 4 semantic | UTF-8, JSON, keys, types, cross references; API version | `manifest.json-*`, `manifest.api-version`, `manifest.unknown-key`, `manifest.*` | 2 |
 | 5 inventory | Every file listed with length and hash; asset size | `manifest.file-*`, `manifest.asset-size` | 3 |
 | 6 components | Preamble, api-version section, exports | `package.*`, `manifest.exports-mismatch` | 2, 3 |
-| 7 signature | Signature (T2) and publisher match | `manifest.signature-invalid`, `manifest.publisher-mismatch` | 4 |
+| 7 signature | Signature (T2) | `manifest.signature-invalid` | 4 |
+| 8 trust | Key trust, publisher binding and key pinning | `trust.declined`, `manifest.publisher-mismatch`, `package.publisher-key-changed` | 7 |
 | 9 policy (blocklist, tier, id, publisher, source) | Blocklist and administrator policy | `package.blocked`, `policy.*` | 5, 6 |
-| 8 trust | Key trust and key pinning | `trust.declined`, `package.publisher-key-changed` | 7 |
 | 9 policy (grants) | Grant strings and tier rules. A grant denied by policy is not an install failure: it is locked off in the dialog | `manifest.grant-*`, `manifest.limits-tier` | 8 |
 | 9 policy (replacement), 10 dependencies | Replacement, then `requires.plugins`, `requires.services`, host version, cycles | `policy.replacement`, `dependency.*`, `manifest.service-cycle` | 9 |
 | 11 review | Review dialog | the user cancels | 10 |

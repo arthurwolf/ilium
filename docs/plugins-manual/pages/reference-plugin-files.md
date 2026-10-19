@@ -62,7 +62,7 @@ Paths start at `<config>`, `<data>`, `<cache>`, `<state>` or `<project>`. The pl
 | Plugin limits | `<config>/config.toml`, table `[plugins.limits]` | TOML | The user | The user |
 | Plugin cache | `<cache dir>/ilium/plugins/<id>/` | Whatever the plugin writes | The plugin, through `fs.write:cache` | The host may evict it at any time. Removed on every uninstall (USR-208) |
 | Compile cache | `<cache dir>/ilium/plugins/compile/` | Compiled components | Install of a T2 or T3 plugin | The host, when space is low |
-| Plugin log | `<state>/plugins/logs/<session-slug>/<id>.log` and rotated files | Text, four columns | The plugin and the host | Rotation. See below |
+| Plugin log | `<state>/plugins/logs/<session-slug>/<id>.log` and rotated files | Text, five columns | The plugin and the host | Rotation. See below |
 | User extension order and toggles | `<config>/config.toml`, table `[plugins.extensions]` | TOML | The Extensions tab | Every uninstall of the owner |
 | Replacement record | `<config>/config.toml`, table `[plugins.replaces]` | TOML | The replace confirmation | Undoing the replacement |
 | Administrator policy | See [Plugin policy](/pages/reference-plugin-policy/) | TOML | The administrator | The administrator |
@@ -110,7 +110,7 @@ Each plugin has one log, shared by all its sides. The host writes refusals, trap
 | After uninstall | Kept for 7 days, then deleted. `--purge` deletes it at once |
 
 - [USR-204] The host MUST rotate the log at 4 MiB, MUST keep at most four rotated files, and MUST delete rotated files older than 14 days at server start. Test: write 5 MiB of log lines through a test plugin and list the folder; then age `<id>.log.2` by 15 days, restart, and assert it is gone.
-- [USR-205] Each log line MUST have the four columns timestamp, level, plugin id and message, with the timestamp in the form `YYYY-MM-DD HH:mm:ss`. Test: read the log and match every line against the pattern.
+- [USR-205] Each log line MUST have the five columns timestamp, level, side, plugin id and message, with the timestamp in the form `YYYY-MM-DD HH:mm:ss`. Test: read the log and match every line against the pattern.
 
 ### File permissions
 

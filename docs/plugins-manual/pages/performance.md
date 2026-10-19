@@ -66,7 +66,7 @@ The manifest `limits` block sets a value per plugin and side. The host clamps a 
 | `concurrent_jobs` | 2 | 8 | 2 | Further jobs queue |
 | `job_queue` | 16 | 64 | 16 | `busy` |
 
-The contract also has nine requestable limits in the same form. They bound the host services that cost the most.
+The contract also has thirteen requestable limits in the same form. They bound the host services that cost the most.
 
 | Key | Default | Ceiling, T1 | Ceiling, T2 and T3 | Effect when breached |
 |---|---|---|---|---|
