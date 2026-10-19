@@ -117,6 +117,7 @@ pub mod padding_dialog;
 pub mod padding_ui;
 pub mod pane_title;
 pub mod paths;
+pub mod plugin_host;
 pub mod popover;
 pub mod presentation;
 pub mod progress_bar;
@@ -2167,8 +2168,9 @@ async fn run_inner(
                 _ = tokio::time::sleep(Duration::from_millis(1)), if owner.is_none() || app.has_pending_exact_prompt_reports() || app.terminal_baselines.as_ref().is_some_and(|files| files.needs_retry()) => {},
             }
         }
-        connection.finish_read_shutdown().await.map_err(|error|
-            ClientError::TerminalSetup(std::io::Error::other(error)))
+        // The reader task ends with the error that closed the connection; it
+        // is a lost server connection, not a terminal setup failure.
+        connection.finish_read_shutdown().await.map_err(ClientError::ServerConnectionLost)
     };
     tokio::time::timeout(Duration::from_secs(5), terminal_drain).await
         .map_err(|_| {

@@ -1,0 +1,12 @@
+package ilium:host@0.1.0;
+
+interface sessions {
+  use ilium:types/ids@0.1.0.{request-id};
+  use ilium:types/errors@0.1.0.{plugin-error};
+  record live-session { name: string, project: string, socket-id: string, panes: u32, attached-clients: u32, is-self: bool }
+  record cross-request { session: string, command: string, arguments-json: string }
+  list-live: func() -> list<live-session>;
+  /// Async, take-reply.
+  send: func(request: cross-request) -> result<request-id, plugin-error>;
+  take-reply: func(request: request-id) -> option<string>;
+}

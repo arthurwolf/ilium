@@ -202,6 +202,11 @@ async fn handle_scoped_request(
     direct_tx: &DirectEventSender,
 ) -> bool {
     match request {
+        // Plugin envelopes are routed by the plugin kernel once it exists (skeleton: ignored).
+        ClientRequest::Plugin(_) => {
+            tracing::debug!("plugin envelope ignored: plugin kernel not implemented");
+            false
+        }
         ClientRequest::GetPaneRecapScreen { pane_id } => {
             let captured = {
                 let panes = state.panes.read().await;
@@ -230,11 +235,11 @@ async fn handle_scoped_request(
             send_direct(direct_tx, ServerEvent::PaneRecapScreen { pane_id, result }).await;
             false
         }
-        ClientRequest::Attach { session } => {
+        ClientRequest::Attach { session, .. } => {
             handle_attach(state, &session, direct_tx, true).await;
             false
         }
-        ClientRequest::AttachInteractive { session } => {
+        ClientRequest::AttachInteractive { session, .. } => {
             handle_attach(state, &session, direct_tx, false).await;
             false
         }
@@ -1968,6 +1973,9 @@ async fn admitted_state_synchronization_events(
     ),
     String,
 > {
+    // Why each discarded attempt was discarded, so a final failure can say
+    // whether pane output, the pane set or the tree kept moving.
+    let mut discarded_attempts: Vec<(&'static str, Option<NodeId>)> = Vec::new();
     for _attempt in 0..8 {
         let (estimates, snapshot_bytes) = {
             let tree = state.tree.read().await;
@@ -2025,6 +2033,7 @@ async fn admitted_state_synchronization_events(
             if current_tree_bytes > snapshot_bytes / 2 {
                 drop(tree);
                 drop(producer_storage);
+                discarded_attempts.push(("tree grew while admission waited", None));
                 continue;
             }
             tree.clone()
@@ -2033,6 +2042,7 @@ async fn admitted_state_synchronization_events(
         let built = {
             let tree = state.tree.read().await;
             if *tree != expected_tree {
+                discarded_attempts.push(("tree changed before the snapshot", None));
                 None
             } else {
                 let panes = state.panes.read().await;
@@ -2050,6 +2060,7 @@ async fn admitted_state_synchronization_events(
                 let mut matched_estimates = HashSet::new();
                 let mut replay_events = Vec::new();
                 let mut stale = false;
+                let mut stale_reason: Option<(&'static str, Option<NodeId>)> = None;
                 for (pane_id, resource) in panes.iter() {
                     match resource {
                         PaneResource::Terminal(runtime) => {
@@ -2062,6 +2073,8 @@ async fn admitted_state_synchronization_events(
                             if let Some(estimate) = estimates.get(pane_id) {
                                 if !estimate.input.same_session(&runtime.session.input_handle()) {
                                     stale = true;
+                                    stale_reason =
+                                        Some(("pane session was replaced", Some(*pane_id)));
                                     break;
                                 }
                                 matched_estimates.insert(*pane_id);
@@ -2073,6 +2086,10 @@ async fn admitted_state_synchronization_events(
                                     Some(event) => replay_events.push(event),
                                     None => {
                                         stale = true;
+                                        stale_reason = Some((
+                                            "pane output moved after the estimate",
+                                            Some(*pane_id),
+                                        ));
                                         break;
                                     }
                                 }
@@ -2097,6 +2114,9 @@ async fn admitted_state_synchronization_events(
                     }
                 }
                 if stale || matched_estimates.len() != estimates.len() {
+                    discarded_attempts.push(
+                        stale_reason.unwrap_or(("a pane with an estimate left the pane set", None)),
+                    );
                     None
                 } else {
                     let mut events = vec![ServerEvent::PaneStateSnapshot {
@@ -2158,6 +2178,10 @@ async fn admitted_state_synchronization_events(
         }
         drop(producer_storage);
     }
+    tracing::warn!(
+        discarded_attempts = ?discarded_attempts,
+        "state synchronization gave up: every attempt was invalidated by concurrent changes"
+    );
     Err("state synchronization changed repeatedly; retry attach".to_owned())
 }
 
@@ -8326,6 +8350,37 @@ async fn handle_kill_session(state: &Arc<ServerState>) -> crate::recovery::Resol
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn request_future_stack_budget() {
+        fn future_bytes<F: std::future::Future>(_: impl FnOnce() -> F) -> usize {
+            std::mem::size_of::<F>()
+        }
+        let state: Option<&std::sync::Arc<crate::state::ServerState>> = None;
+        let sender: Option<&super::DirectEventSender> = None;
+        let outer = future_bytes(|| {
+            super::handle_request(
+                state.unwrap(),
+                ilium_ipc::ClientRequest::Detach,
+                sender.unwrap(),
+            )
+        });
+        let scoped = future_bytes(|| {
+            super::handle_scoped_request(
+                state.unwrap(),
+                ilium_ipc::ClientRequest::Detach,
+                sender.unwrap(),
+            )
+        });
+        eprintln!("request future bytes: outer={outer}, scoped={scoped}");
+        assert!(
+            outer < 65536,
+            "request frame retains oversized child: {outer}"
+        );
+        assert!(
+            scoped < 65536,
+            "dispatch frame retains oversized child: {scoped}"
+        );
+    }
     fn snapshot_io_handler_state(directory: &tempfile::TempDir) -> Arc<ServerState> {
         let (sound_requests, _sound_receiver) = crate::sounds::test_channel(1);
         Arc::new(ServerState::new(crate::state::ServerStateOptions {
@@ -12123,8 +12178,14 @@ mod tests {
         );
         assert_eq!(progress.report.job_id, "persisted-job");
         assert_eq!(progress.timing.checks.len(), 2);
-        assert_eq!(progress.timing.checks[1].outcome, ilium_core::ProgressCheckOutcome::Failed);
-        assert_eq!(progress.last_observed_unix_millis, progress.timing.checks[0].unix_millis);
+        assert_eq!(
+            progress.timing.checks[1].outcome,
+            ilium_core::ProgressCheckOutcome::Failed
+        );
+        assert_eq!(
+            progress.last_observed_unix_millis,
+            progress.timing.checks[0].unix_millis
+        );
 
         assert!(matches!(
             delivery,
@@ -12152,7 +12213,9 @@ mod tests {
             crate::progress_monitor::test_probes::stderr_then_exit_seven(),
         );
         let original_checks = persisted.latest_progress.timing.checks.clone();
-        restore_persisted_progress_monitor(&state, persisted).await.unwrap();
+        restore_persisted_progress_monitor(&state, persisted)
+            .await
+            .unwrap();
         let tree = state.tree.read().await;
         let progress = &tree.pane_progress(pane_id)[0];
         assert!(progress.monitor_health.is_failed());

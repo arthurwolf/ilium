@@ -1,0 +1,1157 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Reference, install, update and uninstall | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details open><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/" aria-current="page">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Reference</b></p>
+<h1>Reference, install, update and uninstall</h1>
+
+<p>This page specifies how a plugin package gets onto a machine, how it is replaced by a newer version, how an update is undone, and what is kept or deleted when it is removed. It also lists every <code>ilium plugin</code> command that manages installed plugins, with arguments, JSON line output, exit codes and error codes. The build and signing commands (<code>new</code>, <code>build</code>, <code>pack</code>, <code>keygen</code>, <code>sign</code>, <code>trust</code>) are in <a href="/pages/packages/">Packages and manifests</a>.</p>
+<p>Contract version: <code>ilium:plugin@0.1.0</code>. A registry is optional (decision D27); see <a href="/pages/reference-install-and-update/">Install and update</a> for the registry path. A package is a file, and every step on this page works offline (<a href="/pages/reference-offline-and-low-disk/">offline and low disk</a>).</p>
+<h3 id="terms">Terms</h3>
+<ul>
+<li>Package store: the directory that holds unpacked, verified packages. It is immutable after install.</li>
+<li>Registry: the file <code>installed.json</code>. It says which version of each plugin is active.</li>
+<li>Active version: the version the registry points to. Instances run from it.</li>
+<li>Staging: a private directory where a package is unpacked and checked before it enters the store.</li>
+<li>Data version: the number <code>data_version</code> in the manifest. It describes the layout of the data a plugin stores. See <a href="/pages/guide-data-migration/">Data migration</a>.</li>
+</ul>
+<h3 id="on-disk-layout">On-disk layout</h3>
+<p>All paths are relative to the plugin root, <code>&lt;data dir&gt;/plugins/</code>, where <code>&lt;data dir&gt;</code> comes from the <code>directories</code> crate (<code>~/.local/share/ilium</code> on Linux). The cache directory is <code>&lt;cache dir&gt;/ilium/plugins/</code>.</p>
+<pre><code class="language-text">&lt;data dir&gt;/plugins/
+  installed.json            registry, versioned format
+  installed.lock            exclusive OS advisory lock; holder pid and boot id for messages
+  store/&lt;id&gt;/&lt;version&gt;/     immutable package: manifest.json, manifest.sha256, components, files
+  staging/&lt;uuid&gt;/           uncommitted unpack of one operation
+  locks/&lt;id&gt;.migrate.lock   cross-process lock of one data migration
+  backups/&lt;id&gt;/&lt;version&gt;-&lt;utc timestamp&gt;/   pre-migration copy of data and buckets
+  data/&lt;id&gt;/                the plugin data directory (fs data scope)
+  storage/&lt;id&gt;/global.db    global bucket
+  logs/&lt;id&gt;.log             plugin log
+&lt;state dir&gt;/trust.json      the user trust store, mode 0600 (not under the plugin root)
+&lt;cache dir&gt;/ilium/plugins/
+  &lt;id&gt;/                     the plugin cache directory
+  compile/                  compiled components for T2 and T3, see offline and low disk
+</code></pre>
+<p>The user trust store is <code>$XDG_STATE_HOME/ilium/trust.json</code> (Linux <code>~/.local/state/ilium/trust.json</code> when <code>XDG_STATE_HOME</code> is unset), mode 0600, written atomically. Its format is in <a href="/pages/reference-signing-and-trust/#the-trust-store">Signing and trust</a>. The variable <code>ILIUM_TRUST_STORE</code> replaces the path with an absolute file path. In <code>backups/</code>, <code>&lt;version&gt;</code> is the version that was active before the update, and the timestamp is <code>YYYYMMDDTHHMMSSZ</code> in UTC, for example <code>backups/com.example.notes/0.3.0-20261012T091404Z/</code>.</p>
+<p>The project and session buckets live with the project, under <code>&lt;project&gt;/.ilium/</code>. See <a href="/pages/reference-plugin-scope-and-sessions/">scope and sessions</a>.</p>
+<h3 id="the-registry-file">The registry file</h3>
+<p><code>installed.json</code> is a JSON object that carries its own format string, so that a future host can read an old file. It is serialised with 2-space indentation, LF line endings and one final LF. The array <code>plugins</code> is sorted by <code>id</code> in byte order. This page owns the schema; every other page links here.</p>
+<pre><code class="language-json">{
+  &quot;format&quot;: &quot;ilium-installed/1&quot;,
+  &quot;plugins&quot;: [
+    {
+      &quot;id&quot;: &quot;com.example.notes&quot;,
+      &quot;active_version&quot;: &quot;0.3.1&quot;,
+      &quot;previous_version&quot;: &quot;0.3.0&quot;,
+      &quot;state&quot;: &quot;installed-enabled&quot;,
+      &quot;source&quot;: &quot;registry&quot;,
+      &quot;source_url&quot;: &quot;https://registry.example.org/&quot;,
+      &quot;channel&quot;: &quot;stable&quot;,
+      &quot;publisher_id&quot;: &quot;com.example&quot;,
+      &quot;key_id&quot;: &quot;46ef773ed515997e3f107ae73619e6a31921c98f96d468eb858a02b48d5ae011&quot;,
+      &quot;package_sha256&quot;: &quot;807e3b71e81cd569717e02318607832667fac642717e8b0e0eeb2426e030a34c&quot;,
+      &quot;manifest_sha256&quot;: &quot;7ff76366f824af4ec0b54fdee14ff3661b38567668e38f90c13920662f05deea&quot;,
+      &quot;pinned&quot;: false,
+      &quot;skip&quot;: [],
+      &quot;declined&quot;: [],
+      &quot;failure_stopped&quot;: [],
+      &quot;installed_at&quot;: &quot;2026-10-12T09:14:04Z&quot;,
+      &quot;update&quot;: null
+    }
+  ],
+  &quot;purge_tombstones&quot;: []
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>id</code></td>
+<td>string</td>
+<td>The plugin id.</td>
+</tr>
+<tr>
+<td><code>active_version</code></td>
+<td>string</td>
+<td>The version the host runs.</td>
+</tr>
+<tr>
+<td><code>previous_version</code></td>
+<td>string or null</td>
+<td>The one version that rollback returns to.</td>
+</tr>
+<tr>
+<td><code>state</code></td>
+<td>string</td>
+<td>The stored package state: <code>installed-enabled</code>, <code>installed-disabled-by-user</code>, <code>disabled-untrusted</code>, <code>disabled-blocked</code> or <code>uninstall-pending</code>. The other package states are derived at load. See <a href="/pages/reference-plugin-lifecycle-states/#package-states">plugin lifecycle states</a>.</td>
+</tr>
+<tr>
+<td><code>source</code></td>
+<td>string</td>
+<td><code>bundled</code>, <code>file</code>, <code>url</code>, <code>registry</code> or <code>dev</code>. An install from an offline bundle records <code>file</code>.</td>
+</tr>
+<tr>
+<td><code>source_url</code></td>
+<td>string or null</td>
+<td>The URL or registry address the package came from.</td>
+</tr>
+<tr>
+<td><code>channel</code></td>
+<td>string</td>
+<td><code>stable</code>, <code>beta</code>, <code>dev</code> or <code>file</code>.</td>
+</tr>
+<tr>
+<td><code>publisher_id</code></td>
+<td>string or null</td>
+<td>The publisher id bound to the signing key; null for T1 and T3.</td>
+</tr>
+<tr>
+<td><code>key_id</code></td>
+<td>string or null</td>
+<td>The key id of the signer: 64 lowercase hexadecimal characters; null for T1 and T3.</td>
+</tr>
+<tr>
+<td><code>package_sha256</code></td>
+<td>string</td>
+<td>SHA-256 of the package file, 64 lowercase hexadecimal characters.</td>
+</tr>
+<tr>
+<td><code>manifest_sha256</code></td>
+<td>string</td>
+<td>SHA-256 of the packed <code>manifest.json</code>, 64 lowercase hexadecimal characters. The host compares it at every load.</td>
+</tr>
+<tr>
+<td><code>pinned</code></td>
+<td>bool</td>
+<td>The user pinned the version; update does not offer a newer one.</td>
+</tr>
+<tr>
+<td><code>skip</code></td>
+<td>list of strings</td>
+<td>Versions that update does not offer.</td>
+</tr>
+<tr>
+<td><code>declined</code></td>
+<td>list of strings</td>
+<td>Versions whose review the user declined. The declined grants themselves are in its entry in <code>grants.json</code>.</td>
+</tr>
+<tr>
+<td><code>failure_stopped</code></td>
+<td>list of strings</td>
+<td>The sides stopped by the third counted failure. The only value in 0.1.0 is <code>server</code>.</td>
+</tr>
+<tr>
+<td><code>installed_at</code></td>
+<td>string</td>
+<td>RFC 3339 in UTC with seconds precision and the suffix <code>Z</code>.</td>
+</tr>
+<tr>
+<td><code>update</code></td>
+<td>object or null</td>
+<td>An update in progress: <code>{ "candidate", "state", "attempts", "started_at" }</code>. <code>state</code> is <code>staged</code>, <code>migrating</code> or <code>trial</code>. <code>attempts</code> is an integer from 0 to 2. <code>started_at</code> has the form of <code>installed_at</code>.</td>
+</tr>
+<tr>
+<td><code>purge_tombstones</code></td>
+<td>list (top level)</td>
+<td>Plugin ids whose project and session data must still be deleted.</td>
+</tr>
+</tbody>
+</table>
+<p>The data version of each bucket is stamped with the bucket, not in this file; see <a href="/pages/guide-data-migration/">Data migration</a>. The tier is not stored; the host computes it again at every load from <code>key_id</code> and the trust store.</p>
+<p>The JSON Schema of the file:</p>
+<pre><code class="language-json">{
+  &quot;$schema&quot;: &quot;https://json-schema.org/draft/2020-12/schema&quot;,
+  &quot;title&quot;: &quot;ilium-installed/1&quot;,
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;additionalProperties&quot;: false,
+  &quot;required&quot;: [&quot;format&quot;, &quot;plugins&quot;, &quot;purge_tombstones&quot;],
+  &quot;properties&quot;: {
+    &quot;format&quot;: { &quot;const&quot;: &quot;ilium-installed/1&quot; },
+    &quot;plugins&quot;: { &quot;type&quot;: &quot;array&quot;, &quot;items&quot;: { &quot;$ref&quot;: &quot;#/$defs/plugin&quot; } },
+    &quot;purge_tombstones&quot;: { &quot;type&quot;: &quot;array&quot;, &quot;items&quot;: { &quot;type&quot;: &quot;string&quot; } }
+  },
+  &quot;$defs&quot;: {
+    &quot;sha256&quot;: { &quot;type&quot;: &quot;string&quot;, &quot;pattern&quot;: &quot;^[0-9a-f]{64}$&quot; },
+    &quot;utc&quot;: { &quot;type&quot;: &quot;string&quot;, &quot;pattern&quot;: &quot;^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$&quot; },
+    &quot;plugin&quot;: {
+      &quot;type&quot;: &quot;object&quot;,
+      &quot;additionalProperties&quot;: false,
+      &quot;required&quot;: [&quot;id&quot;, &quot;active_version&quot;, &quot;previous_version&quot;, &quot;state&quot;, &quot;source&quot;,
+                   &quot;source_url&quot;, &quot;channel&quot;, &quot;publisher_id&quot;, &quot;key_id&quot;, &quot;package_sha256&quot;,
+                   &quot;manifest_sha256&quot;, &quot;pinned&quot;, &quot;skip&quot;, &quot;declined&quot;, &quot;failure_stopped&quot;,
+                   &quot;installed_at&quot;, &quot;update&quot;],
+      &quot;properties&quot;: {
+        &quot;id&quot;: { &quot;type&quot;: &quot;string&quot; },
+        &quot;active_version&quot;: { &quot;type&quot;: &quot;string&quot; },
+        &quot;previous_version&quot;: { &quot;type&quot;: [&quot;string&quot;, &quot;null&quot;] },
+        &quot;state&quot;: { &quot;enum&quot;: [&quot;installed-enabled&quot;, &quot;installed-disabled-by-user&quot;,
+                            &quot;disabled-untrusted&quot;, &quot;disabled-blocked&quot;, &quot;uninstall-pending&quot;] },
+        &quot;source&quot;: { &quot;enum&quot;: [&quot;bundled&quot;, &quot;file&quot;, &quot;url&quot;, &quot;registry&quot;, &quot;dev&quot;] },
+        &quot;source_url&quot;: { &quot;type&quot;: [&quot;string&quot;, &quot;null&quot;] },
+        &quot;channel&quot;: { &quot;enum&quot;: [&quot;stable&quot;, &quot;beta&quot;, &quot;dev&quot;, &quot;file&quot;] },
+        &quot;publisher_id&quot;: { &quot;type&quot;: [&quot;string&quot;, &quot;null&quot;] },
+        &quot;key_id&quot;: { &quot;oneOf&quot;: [{ &quot;$ref&quot;: &quot;#/$defs/sha256&quot; }, { &quot;type&quot;: &quot;null&quot; }] },
+        &quot;package_sha256&quot;: { &quot;$ref&quot;: &quot;#/$defs/sha256&quot; },
+        &quot;manifest_sha256&quot;: { &quot;$ref&quot;: &quot;#/$defs/sha256&quot; },
+        &quot;pinned&quot;: { &quot;type&quot;: &quot;boolean&quot; },
+        &quot;skip&quot;: { &quot;type&quot;: &quot;array&quot;, &quot;items&quot;: { &quot;type&quot;: &quot;string&quot; } },
+        &quot;declined&quot;: { &quot;type&quot;: &quot;array&quot;, &quot;items&quot;: { &quot;type&quot;: &quot;string&quot; } },
+        &quot;failure_stopped&quot;: { &quot;type&quot;: &quot;array&quot;, &quot;items&quot;: { &quot;enum&quot;: [&quot;server&quot;] } },
+        &quot;installed_at&quot;: { &quot;$ref&quot;: &quot;#/$defs/utc&quot; },
+        &quot;update&quot;: {
+          &quot;oneOf&quot;: [
+            { &quot;type&quot;: &quot;null&quot; },
+            { &quot;type&quot;: &quot;object&quot;, &quot;additionalProperties&quot;: false,
+              &quot;required&quot;: [&quot;candidate&quot;, &quot;state&quot;, &quot;attempts&quot;, &quot;started_at&quot;],
+              &quot;properties&quot;: {
+                &quot;candidate&quot;: { &quot;type&quot;: &quot;string&quot; },
+                &quot;state&quot;: { &quot;enum&quot;: [&quot;staged&quot;, &quot;migrating&quot;, &quot;trial&quot;] },
+                &quot;attempts&quot;: { &quot;type&quot;: &quot;integer&quot;, &quot;minimum&quot;: 0, &quot;maximum&quot;: 2 },
+                &quot;started_at&quot;: { &quot;$ref&quot;: &quot;#/$defs/utc&quot; }
+              } }
+          ]
+        }
+      }
+    }
+  }
+}
+</code></pre>
+<ul>
+<li>[LIF-065] The host MUST write <code>installed.json</code> atomically: write a temporary file in the same directory, fsync it, rename it over the old file, then fsync the directory. Test: kill the writer at each step (fault injection) and assert that a reader sees the old or the new file, never a partial one.</li>
+<li>[LIF-066] <code>installed.lock</code> is an exclusive OS advisory lock (flock on Unix, LockFileEx on Windows, through the <code>file_lock</code> module of <code>ilium-platform</code>) on <code>&lt;data dir&gt;/plugins/installed.lock</code>. The file also holds the holder's process id and boot id, for messages only. The host MUST hold the lock while it changes the store or the registry. A crashed holder releases the lock by process exit, so no takeover rule exists. A second writer MUST poll every 100 ms for up to 30 s, then fail with <code>install.locked</code> and exit code 4. Test: hold the lock and start an install; kill the holder with SIGKILL and assert that the next install gets the lock at once.</li>
+<li>[LIF-067] The host MUST refuse a registry whose <code>format</code> is a higher number than it knows (for example <code>ilium-installed/99</code>), with <code>install.registry-format</code>, and MUST NOT rewrite it. Test: set <code>format</code> to <code>ilium-installed/99</code>.</li>
+<li>[LIF-282] The host MUST validate <code>installed.json</code> against the schema above at start and refuse a file that does not match it with <code>install.state-corrupt</code>, without rewriting it. Test: write one file per property with a wrong type, an extra key, a short <code>key_id</code> and a local-time <code>installed_at</code>, and assert <code>install.state-corrupt</code> for each.</li>
+</ul>
+<h3 id="the-install-pipeline">The install pipeline</h3>
+<p><code>ilium plugin install &lt;file.iliumpkg&gt;</code> runs these steps in order. A failure at any step stops the pipeline, removes what the pipeline created and leaves the registry unchanged. Step 2 is the validation order of <a href="/pages/reference-package-format/#the-validation-order">Package format</a> (PKG-149); this page does not define a second order.</p>
+<table>
+<thead>
+<tr>
+<th>Step</th>
+<th>Action</th>
+<th>On failure</th>
+<th>Code</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>Take <code>installed.lock</code>.</td>
+<td>Wait, then give up.</td>
+<td><code>install.locked</code></td>
+</tr>
+<tr>
+<td>2</td>
+<td>Run validation stages 1 to 11: archive, manifest-parse, schema, semantic, inventory, components, signature, trust, policy, dependencies, review. Stage 11 shows the grant review and records the answers.</td>
+<td>Nothing is written yet.</td>
+<td>the codes of the failing stage in the <a href="/pages/reference-manifest-schema/#error-catalogue">catalogue</a></td>
+</tr>
+<tr>
+<td>3</td>
+<td>Unpack to <code>staging/&lt;uuid&gt;/</code>.</td>
+<td>Delete the staging directory.</td>
+<td><code>install.io</code>, <code>install.no-space</code></td>
+</tr>
+<tr>
+<td>4</td>
+<td>Prepare the components: T1 ships precompiled code; T2 and T3 are compiled into the compile cache.</td>
+<td>Delete the staging directory.</td>
+<td><code>install.compile-failed</code></td>
+</tr>
+<tr>
+<td>5</td>
+<td>Rename the staging directory to <code>store/&lt;id&gt;/&lt;version&gt;/</code>. Write <code>manifest.sha256</code>.</td>
+<td>Delete the staging directory.</td>
+<td><code>install.io</code></td>
+</tr>
+<tr>
+<td>6</td>
+<td>Update <code>installed.json</code> atomically (see LIF-065). Write the plugin's entry in <code>grants.json</code>.</td>
+<td>Delete the new store entry.</td>
+<td><code>install.io</code></td>
+</tr>
+<tr>
+<td>7</td>
+<td>Tell the running servers (see Propagation). Release the lock.</td>
+<td>A failed notification is a warning only.</td>
+<td><code>install.notify-failed</code></td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>[LIF-068] The host MUST NOT instantiate or run any code of the package before step 2 has finished. Test: install a package whose start function writes a file and decline the review; assert the file is absent.</li>
+<li>[LIF-069] A failure at any step MUST leave the registry byte for byte unchanged and MUST delete the staging directory and any new store entry. Test: inject a failure at each step and compare the registry hash.</li>
+<li>[LIF-070] An install MUST NOT require network access. Test: run the install in a network namespace with no interfaces.</li>
+<li>[LIF-071] Validation MUST run in the stage order of PKG-149, so that the cheapest checks refuse first and no prompt appears for a package that would be refused later. Test: a package with an invalid manifest (stage 3) and an invalid signature (stage 7) reports <code>manifest.schema</code> and no signature code.</li>
+<li>[LIF-072] Installing the same id and version with the same manifest SHA-256 MUST be a no-op that exits 0 and prints <code>install.already-installed</code> as a <code>warning</code> line; with <code>--reinstall</code> it rewrites <code>store/&lt;id&gt;/&lt;version&gt;/</code> from the package. A different manifest SHA-256 for the same id and version MUST be refused at stage 9 with <code>package.version-reused</code> (exit 1). The host compares the manifest hash and not the package hash, because the signature document changes the package bytes. Test: install a package twice, then a modified copy with the same version, then the same manifest signed again.</li>
+</ul>
+<p>Grant review in a non-interactive run (no TTY): normal grants are accepted only with <code>--yes</code>; a high-risk grant is accepted only when named with <code>--grant &lt;name&gt;</code>. Without them the install ends with <code>install.needs-input</code> and exit code 1 (PKG-430).</p>
+<h3 id="update">Update</h3>
+<p>A higher version of an installed id is an update. It is the same pipeline, committed beside the old version, followed by a swap. The candidate lives in <code>store/&lt;id&gt;/&lt;version&gt;/</code> from step 5 on, so the waiting period never depends on <code>staging/</code>.</p>
+<ol>
+<li>Steps 1 to 5 run as for an install. The dialog shows only the new capabilities. The package state is <code>update-staged</code>.</li>
+<li>Step 6 writes <code>previous_version</code> and <code>update: { candidate, state: "staged", attempts: 0, started_at }</code>, and leaves <code>active_version</code> unchanged.</li>
+<li>Each running server receives the change. At the next safe point (<a href="/pages/reference-install-and-update/">Install and update</a>, PKG-278) each live instance receives <code>deactivate(upgrade)</code> and returns its restore bytes (<a href="/pages/lifecycle/">LIF-044</a>).</li>
+<li>Before the host calls <code>migrate</code>, it writes <code>update.state: "migrating"</code> to <code>installed.json</code> with fsync. The data migration runs (<a href="/pages/guide-data-migration/">Data migration</a>). If the host stops while the state is <code>migrating</code>, the next start restores the backup, increments <code>attempts</code> and runs the migration again; when <code>attempts</code> reaches 2 the host rolls back with <code>migration.interrupted</code> and marks the candidate <code>skip</code>.</li>
+<li>The host sets <code>update.state</code> to <code>trial</code> and the server activates the candidate. The context carries <code>restored</code>, unless the data version changed, in which case the bytes are dropped.</li>
+<li>The candidate becomes <code>active_version</code> only after its first <code>activate</code> returns <code>ok</code> on the server side. Then the host sets <code>active_version</code> to the candidate, sets <code>previous_version</code>, sets <code>update</code> to <code>null</code> and logs <code>update.ok</code>. The update is committed.</li>
+<li>If that first <code>activate</code> fails, traps or misses its deadline, the host rolls back at once: it restores the data snapshot if a migration ran, reactivates the previous version and sets <code>update</code> to <code>null</code>. It marks the candidate <code>skip</code>, logs <code>update.rolled-back</code>, shows the toast <code>Update failed, rolled back</code>, and does not count this failure in the failure window.</li>
+</ol>
+<p>Failures after a successful first activation follow the normal failure window (<a href="/pages/lifecycle/#failure-counting-and-restart">Lifecycle</a>) and never roll back by themselves.</p>
+<ul>
+<li>[LIF-073] The first server to apply an update MUST decide it. After step 6, a failure on another server MUST follow the normal failure rule and MUST NOT roll back. Test: update with two servers running, fail the second server's activation and assert the version stays.</li>
+<li>[LIF-074] An update MUST be atomic: after any interruption, either the old or the new version is active, never neither. Test: kill the installer or the server at each step and assert that a plugin version is active after restart.</li>
+<li>[LIF-075] The candidate becomes <code>active_version</code> only after its first <code>activate</code> returns <code>ok</code> on the server side. If that first <code>activate</code> fails, traps or misses its deadline, the host MUST roll back at once to the previous version and its pre-update data snapshot, mark the candidate <code>skip</code>, log <code>update.rolled-back</code>, and not count the failure in the failure window. A failure after a successful first activation MUST follow the normal failure window and MUST NOT roll back. Test: install a candidate whose <code>activate</code> returns an error and assert the failure window of the plugin is empty; then fail a later call and assert no rollback.</li>
+<li>[LIF-076] The host MUST keep exactly one previous version in <code>store/</code> and delete older ones after a committed update. Test: update three times and list <code>store/&lt;id&gt;/</code>.</li>
+<li>[LIF-077] A blocked candidate MUST NOT be tried again unless the user installs it again explicitly. Test: roll back, restart the server and assert that no activation of the candidate occurs.</li>
+<li>[LIF-078] An update MUST NOT send grants to the new version beyond those the user accepted. A new version that asks for more is <code>update-staged</code> until the review is answered. Test: update with an extra grant and decline.</li>
+</ul>
+<p>Disk cost: the store holds the active and the previous version, so a plugin uses about twice its package size, plus the newest pre-migration backup, which lasts until the next committed update.</p>
+<p>If activation of the new version is deferred (a lazy plugin has no trigger yet), the update stays in <code>trial</code> until the first activation. The previous version is not removed in that time.</p>
+<h3 id="rollback-and-downgrade">Rollback and downgrade</h3>
+<p><code>ilium plugin rollback &lt;id&gt;</code> makes the previous version active. <code>ilium plugin install --allow-downgrade &lt;file&gt;</code> installs a lower version than the active one. Both follow the same data rule.</p>
+<ul>
+<li>[LIF-079] Activating a version whose <code>data_version</code> is lower than the stamp of any bucket in scope MUST be refused with <code>migration.data-newer</code> (stage I, exit 1), unless <code>--restore-backup</code> or <code>--discard-data</code> is given. This applies to downgrade and rollback. The user can pass <code>--restore-backup</code>, which restores the data snapshot taken before the update and loses what was written since, or <code>--discard-data</code>, which deletes the plugin's buckets and data directory. Test: update to a version that migrates data, write data, roll back without a flag and assert <code>migration.data-newer</code>; repeat with each flag.</li>
+<li>[LIF-080] <code>--restore-backup</code> MUST fail with <code>rollback.no-backup</code> when the snapshot is gone. Test: delete the backup and roll back with the flag.</li>
+<li>[LIF-081] Rollback MUST send <code>deactivate(upgrade)</code> to the running instances and activate the previous version with the same rules as an update. Test: read the reasons in the log.</li>
+</ul>
+<h3 id="uninstall">Uninstall</h3>
+<p><code>ilium plugin uninstall &lt;id&gt;</code> removes a plugin. The table says what is kept and what is deleted.</p>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Default uninstall</th>
+<th>With <code>--purge</code></th>
+<th>With <code>--keep-data</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Store entries (all versions)</td>
+<td>deleted</td>
+<td>deleted</td>
+<td>deleted</td>
+</tr>
+<tr>
+<td>Data directory</td>
+<td>kept</td>
+<td>deleted</td>
+<td>kept</td>
+</tr>
+<tr>
+<td>Cache directory and compile cache</td>
+<td>deleted</td>
+<td>deleted</td>
+<td>deleted</td>
+</tr>
+<tr>
+<td>Global bucket</td>
+<td>kept with the data directory</td>
+<td>deleted</td>
+<td>kept</td>
+</tr>
+<tr>
+<td>Project bucket</td>
+<td>kept</td>
+<td>deleted for this project, tombstone for others</td>
+<td>kept</td>
+</tr>
+<tr>
+<td>Session bucket</td>
+<td>kept until its session is deleted</td>
+<td>deleted for this session, tombstone for others</td>
+<td>kept</td>
+</tr>
+<tr>
+<td>Shared bucket</td>
+<td>deleted</td>
+<td>deleted</td>
+<td>deleted</td>
+</tr>
+<tr>
+<td>Settings values</td>
+<td>kept</td>
+<td>deleted</td>
+<td>kept</td>
+</tr>
+<tr>
+<td>Grants and first-use answers</td>
+<td>deleted</td>
+<td>deleted</td>
+<td>deleted</td>
+</tr>
+<tr>
+<td>Node metadata in snapshots</td>
+<td>kept, inert</td>
+<td>deleted for the live session, tombstone for others</td>
+<td>kept, inert</td>
+</tr>
+<tr>
+<td>Persistent decorations</td>
+<td>removed</td>
+<td>removed</td>
+<td>removed</td>
+</tr>
+<tr>
+<td>Durable timers</td>
+<td>deleted</td>
+<td>deleted</td>
+<td>deleted</td>
+</tr>
+<tr>
+<td>Backups <code>backups/&lt;id&gt;/</code></td>
+<td>kept</td>
+<td>deleted</td>
+<td>kept</td>
+</tr>
+<tr>
+<td>Migration locks <code>locks/&lt;id&gt;.*</code></td>
+<td>kept</td>
+<td>deleted</td>
+<td>kept</td>
+</tr>
+<tr>
+<td>Journal entries of the plugin</td>
+<td>kept until normal expiry</td>
+<td>kept until normal expiry</td>
+<td>kept until normal expiry</td>
+</tr>
+<tr>
+<td>Trusted publisher keys</td>
+<td>kept</td>
+<td>kept</td>
+<td>kept</td>
+</tr>
+<tr>
+<td>User extension order entries</td>
+<td>deleted</td>
+<td>deleted</td>
+<td>deleted</td>
+</tr>
+<tr>
+<td>Failure counters</td>
+<td>deleted</td>
+<td>deleted</td>
+<td>deleted</td>
+</tr>
+<tr>
+<td>Log files</td>
+<td>kept 7 days, then deleted</td>
+<td>deleted</td>
+<td>kept 7 days</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>[LIF-082] An uninstall without <code>--purge</code> MUST keep the data directory, the buckets, the settings values and <code>backups/&lt;id&gt;/</code>, with or without a TTY, and MUST NOT ask a question. It prints the kept paths as <code>warning</code> lines. <code>--keep-data</code> is accepted and means the same as the default. Test: run it with standard input closed and again on a TTY, and assert no prompt and the warning lines.</li>
+<li>[LIF-083] The host MUST delete grants (its entry in <code>grants.json</code>), first-use answers, durable timers, failure counters and persistent decorations on every uninstall, with or without <code>--purge</code>. Data, storage and settings are kept unless <code>--purge</code> is given. A reinstall MUST ask for grants again. Test: install, grant, uninstall, install and assert the review dialog appears.</li>
+<li>[LIF-084] Node metadata and session data of an uninstalled plugin MUST stay inert: the host never passes them to another plugin, and keeps them in the snapshot. A reinstall of the same id MAY read them again. With <code>--purge</code> the host MUST delete them in the live session and add a tombstone, so that other projects delete theirs when they next open. Test: purge, reopen another project and assert the keys are gone.</li>
+<li>[LIF-085] Uninstall MUST first set <code>uninstall-pending</code>, then stop all instances, then delete files. After a crash, the next start MUST finish it. Test: kill the host after the state is written.</li>
+<li>[LIF-086] Uninstall MUST NOT delete data of other plugins, and MUST NOT remove a publisher key. Test: compare the other plugins' directories before and after.</li>
+</ul>
+<h3 id="command-reference">Command reference</h3>
+<p>All commands print JSON lines when output is not a terminal, or when <code>--json</code> is given. Every line has a <code>type</code>: <code>progress</code>, <code>result</code>, <code>warning</code>, <code>error</code> or <code>summary</code>. Paths are explicit fields.</p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ilium plugin install &lt;file&gt; [--allow-unsigned] [--allow-downgrade] [--yes] [--grant &lt;name&gt;]...</code></td>
+<td>Install or update from a package file.</td>
+</tr>
+<tr>
+<td><code>ilium plugin update &lt;file&gt;</code></td>
+<td>Same as install, but fails with <code>install.not-installed</code> when the id is not installed.</td>
+</tr>
+<tr>
+<td><code>ilium plugin uninstall &lt;id&gt; [--purge] [--keep-data]</code></td>
+<td>Remove a plugin. The two flags exclude each other.</td>
+</tr>
+<tr>
+<td><code>ilium plugin enable &lt;id&gt; [--scope &lt;scope&gt;] [--session &lt;name&gt;]</code></td>
+<td>Turn a plugin on.</td>
+</tr>
+<tr>
+<td><code>ilium plugin disable &lt;id&gt; [--scope &lt;scope&gt;] [--session &lt;name&gt;]</code></td>
+<td>Turn a plugin off.</td>
+</tr>
+<tr>
+<td><code>ilium plugin list [--json]</code></td>
+<td>List plugins and states.</td>
+</tr>
+<tr>
+<td><code>ilium plugin info &lt;id&gt; [--json]</code></td>
+<td>Show one plugin: manifest summary, grants, state, health.</td>
+</tr>
+<tr>
+<td><code>ilium plugin rollback &lt;id&gt; [--restore-backup] [--discard-data]</code></td>
+<td>Activate the previous version.</td>
+</tr>
+<tr>
+<td><code>ilium plugin reinstall &lt;id&gt;</code></td>
+<td>Repair the store entry from the cached package.</td>
+</tr>
+<tr>
+<td><code>ilium plugin logs &lt;id&gt; [--tail &lt;n&gt;]</code></td>
+<td>Print the plugin log.</td>
+</tr>
+<tr>
+<td><code>ilium plugin reset-failures &lt;id&gt; [--session &lt;name&gt;]</code></td>
+<td>Clear the failure window and the failure stop.</td>
+</tr>
+<tr>
+<td><code>ilium plugin status [&lt;id&gt;] [--json]</code></td>
+<td>Print health and metrics. See <a href="/pages/reference-health-and-watchdog/">health and watchdog</a>.</td>
+</tr>
+<tr>
+<td><code>ilium plugin stats &lt;id&gt; [--json]</code></td>
+<td>Print resource usage. See <a href="/pages/reference-resource-accounting/">resource accounting</a>.</td>
+</tr>
+<tr>
+<td><code>ilium plugin bisect start\|good\|bad\|reset</code></td>
+<td>Find a bad plugin. See <a href="/pages/user-safe-mode-and-troubleshooting/">safe mode</a>.</td>
+</tr>
+</tbody>
+</table>
+<p>Exit codes are those of the one table in <a href="/pages/reference-plugin-distribution-cli/#exit-codes">Distribution commands</a>: 0 ok, 1 failed, 2 usage, 3 findings, 4 environment or locked, 5 not found, 6 no session, 7 policy, 8 network, 130 interrupted. This page keeps no table of its own. A declined review exits 1 with <code>install.review-declined</code>.</p>
+<p>JSON line examples:</p>
+<pre><code class="language-text">{&quot;type&quot;:&quot;progress&quot;,&quot;step&quot;:2,&quot;of&quot;:7,&quot;message&quot;:&quot;validating package&quot;}
+{&quot;type&quot;:&quot;warning&quot;,&quot;code&quot;:&quot;install.notify-failed&quot;,&quot;message&quot;:&quot;session /home/u/proj not reached&quot;,&quot;session&quot;:&quot;default&quot;}
+{&quot;type&quot;:&quot;result&quot;,&quot;id&quot;:&quot;com.example.notes&quot;,&quot;version&quot;:&quot;0.3.1&quot;,&quot;previous&quot;:&quot;0.3.0&quot;,&quot;state&quot;:&quot;installed-enabled&quot;}
+{&quot;type&quot;:&quot;error&quot;,&quot;code&quot;:&quot;manifest.file-hash&quot;,&quot;message&quot;:&quot;files/panel.wasm hash differs&quot;,&quot;path&quot;:&quot;files/panel.wasm&quot;}
+{&quot;type&quot;:&quot;summary&quot;,&quot;ok&quot;:false,&quot;errors&quot;:1,&quot;warnings&quot;:0}
+</code></pre>
+<ul>
+<li>[LIF-087] Every command MUST print only JSON lines on standard output when output is not a terminal, MUST use the exit codes of the table in <a href="/pages/reference-plugin-distribution-cli/#exit-codes">Distribution commands</a> and MUST give each error line a <code>code</code> from the <a href="/pages/reference-manifest-schema/#error-catalogue">error catalogue</a>. Test: run each command in a pipe and parse every line.</li>
+<li>[LIF-088] <code>enable</code> and <code>disable</code> MUST be idempotent: they exit 0 and print a <code>result</code> line with <code>changed: false</code> when nothing changes. Test: disable twice.</li>
+</ul>
+<h3 id="propagation-to-running-servers">Propagation to running servers</h3>
+<p>Ilium runs one server per project session, so one install can reach many servers.</p>
+<ul>
+<li>[LIF-089] A running server MUST apply an <code>installed.json</code> change within 2 s with a file watcher, and within 6 s when watching is unavailable (polling every 5 s). The installing CLI MUST also send a <code>plugins-changed</code> message to every server it can find in the runtime directory; a server it cannot reach is reported as a <code>warning</code> line with <code>install.notify-failed</code> and picks the change up at its watch or at its next start. Test: install with two servers, assert both log <code>registry.changed</code> within 2 s with the watcher on and within 6 s with the watcher off.</li>
+<li>[LIF-090] A server that is not running MUST use the registry as it finds it at start. Test: install, then start a server and assert the new version is active.</li>
+<li>[LIF-091] A change MUST be applied to a server under the per-plugin serialisation of <a href="/pages/reference-plugin-lifecycle-states/">lifecycle states</a>. Test: install an update during a disable.</li>
+</ul>
+<h3 id="install-or-update-while-the-plugin-is-active-in-many-sessions">Install or update while the plugin is active in many sessions</h3>
+<p>Every server swaps its own instances, as in the update steps. Their order is not defined, and the first to finish decides (LIF-073). A session that cannot swap yet because the plugin is busy in a call waits at most the deactivate deadline, then drops the instance. A session on another project whose plugin data is shared (the global bucket) takes the migration lock, as <a href="/pages/guide-data-migration/">Data migration</a> describes.</p>
+<h3 id="interrupted-install-and-recovery">Interrupted install and recovery</h3>
+<ul>
+<li>[LIF-092] At start, and at the start of every <code>ilium plugin</code> command that takes the lock, the host MUST delete <code>staging/</code> directories whose creating process is gone or that are older than 1 hour. <code>installed.json</code> never references <code>staging/</code>: a staged update lives in <code>store/&lt;id&gt;/&lt;version&gt;/</code> (step 5) and is never touched by this rule. Test: create an orphan staging directory and start a server; stage an update, wait past 1 hour and assert the candidate is still in <code>store/</code>.</li>
+<li>[LIF-093] A store entry that no field of <code>installed.json</code> references (<code>active_version</code>, <code>previous_version</code> or <code>update.candidate</code>) and that is older than 1 hour MUST be deleted at start. A registry entry whose store entry is missing or fails its hash check MUST put the plugin in <code>refused-at-load</code> with <code>package.corrupt</code>. <code>ilium plugin reinstall &lt;id&gt;</code> MUST repair it from the cached package or fail with <code>package.cache-missing</code>. Test: truncate a file in the store.</li>
+<li>[LIF-094] After a power loss the host MUST find either the old or the new registry, because of LIF-065, and MUST finish or undo an <code>update</code> in <code>staged</code>, <code>migrating</code> or <code>trial</code> by the rules above at the next activation. Test: kill the machine at step 6 (simulated) and restart.</li>
+</ul>
+<h3 id="error-codes">Error codes</h3>
+<p>The catalogue in <a href="/pages/reference-manifest-schema/#error-catalogue">Manifest schema and error catalogue</a> is the only list of codes. This table names the codes that this page raises and the check that provokes each.</p>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Meaning</th>
+<th>Test hint</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>package.manifest-missing</code></td>
+<td>The archive has no <code>manifest.json</code>.</td>
+<td>Remove <code>manifest.json</code> from a package.</td>
+</tr>
+<tr>
+<td><code>package.entry-unexpected</code></td>
+<td>An entry is outside the allowed layout.</td>
+<td>Add <code>extra.txt</code> at the root.</td>
+</tr>
+<tr>
+<td><code>manifest.file-hash</code></td>
+<td>A file hash differs from the inventory.</td>
+<td>Flip a byte in a component.</td>
+</tr>
+<tr>
+<td><code>package.corrupt</code></td>
+<td>The store entry fails its hash check at load.</td>
+<td>Truncate a stored component.</td>
+</tr>
+<tr>
+<td><code>package.cache-missing</code></td>
+<td>Reinstall has no cached package.</td>
+<td>Delete the cache, run reinstall.</td>
+</tr>
+<tr>
+<td><code>manifest.signature-invalid</code></td>
+<td>The signature does not match.</td>
+<td>Edit the manifest after signing.</td>
+</tr>
+<tr>
+<td><code>trust.key-unknown</code></td>
+<td>The signer is not trusted and the user declined or could not answer.</td>
+<td>Install a package of a new key without <code>trust add</code>.</td>
+</tr>
+<tr>
+<td><code>trust.key-revoked</code></td>
+<td>The signer key is on the revoked list.</td>
+<td>Add the key to the revoked list.</td>
+</tr>
+<tr>
+<td><code>policy.tier-denied</code></td>
+<td>The tier is not allowed on this machine by policy.</td>
+<td>Deny T3 in the policy file.</td>
+</tr>
+<tr>
+<td><code>package.api-unsupported</code></td>
+<td>The package API window does not include this host.</td>
+<td>Set <code>api</code> to a window above the host.</td>
+</tr>
+<tr>
+<td><code>manifest.service-cycle</code></td>
+<td>The non-optional <code>requires.services</code> entries form a cycle.</td>
+<td>Install a cycle.</td>
+</tr>
+<tr>
+<td><code>policy.blocked</code></td>
+<td>The administrator policy forbids the plugin.</td>
+<td>Block the id in the policy file.</td>
+</tr>
+<tr>
+<td><code>install.review-declined</code></td>
+<td>The review was declined.</td>
+<td>Answer No in the review dialog.</td>
+</tr>
+<tr>
+<td><code>install.needs-input</code></td>
+<td>A decision is needed and no person can answer.</td>
+<td>Run with no TTY and no <code>--yes</code>.</td>
+</tr>
+<tr>
+<td><code>install.locked</code></td>
+<td>The install lock is held for more than 30 s.</td>
+<td>Hold the lock.</td>
+</tr>
+<tr>
+<td><code>install.io</code></td>
+<td>A file operation failed.</td>
+<td>Make the store read-only.</td>
+</tr>
+<tr>
+<td><code>install.no-space</code></td>
+<td>Too little free space before writing.</td>
+<td>Fill the volume.</td>
+</tr>
+<tr>
+<td><code>install.compile-failed</code></td>
+<td>The component could not be compiled.</td>
+<td>Install a component with invalid code.</td>
+</tr>
+<tr>
+<td><code>install.not-installed</code></td>
+<td><code>update</code> was used for an id that is not installed.</td>
+<td>Update an unknown id.</td>
+</tr>
+<tr>
+<td><code>install.already-installed</code></td>
+<td>Warning: same id, version and manifest hash.</td>
+<td>See LIF-072.</td>
+</tr>
+<tr>
+<td><code>package.version-reused</code></td>
+<td>Same id and version, different manifest hash.</td>
+<td>See LIF-072.</td>
+</tr>
+<tr>
+<td><code>install.registry-format</code></td>
+<td>The registry format is newer than the host.</td>
+<td>See LIF-067.</td>
+</tr>
+<tr>
+<td><code>install.state-corrupt</code></td>
+<td><code>installed.json</code> does not match its schema.</td>
+<td>See LIF-282.</td>
+</tr>
+<tr>
+<td><code>install.notify-failed</code></td>
+<td>A running server could not be told.</td>
+<td>Remove the socket of a server.</td>
+</tr>
+<tr>
+<td><code>install.no-previous</code></td>
+<td>There is no earlier version for a rollback.</td>
+<td>Roll back a first install.</td>
+</tr>
+<tr>
+<td><code>migration.data-newer</code></td>
+<td>The data is newer than the target supports.</td>
+<td>See LIF-079.</td>
+</tr>
+<tr>
+<td><code>migration.interrupted</code></td>
+<td>The migration was interrupted twice.</td>
+<td>See LIF-110.</td>
+</tr>
+<tr>
+<td><code>rollback.no-backup</code></td>
+<td>The pre-update snapshot is gone.</td>
+<td>See LIF-080.</td>
+</tr>
+<tr>
+<td><code>update.rolled-back</code></td>
+<td>Warning: the candidate failed and the host returned.</td>
+<td>See LIF-075.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="edge-cases">Edge cases</h3>
+<table>
+<thead>
+<tr>
+<th>Situation</th>
+<th>What happens</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Install of a package while the user edits grants in Settings</td>
+<td>The install waits on the lock for the registry, up to 30 s.</td>
+</tr>
+<tr>
+<td>Install of an id that exists in the store but not in the registry</td>
+<td>Treated as a new install; the old store entry is replaced.</td>
+</tr>
+<tr>
+<td>Update to a version that the policy blocks</td>
+<td><code>policy.blocked</code>, nothing changes.</td>
+</tr>
+<tr>
+<td>Rollback with no previous version</td>
+<td><code>install.no-previous</code>, exit code 5.</td>
+</tr>
+<tr>
+<td>Uninstall of the plugin that provides a service others require</td>
+<td>The consumers stay active and get <code>not-found</code>. The CLI prints a <code>warning</code> per dependant.</td>
+</tr>
+<tr>
+<td>Disk full during step 3 or step 5</td>
+<td><code>install.no-space</code> before writing, or <code>install.io</code> during it. The staging directory is removed. See <a href="/pages/reference-offline-and-low-disk/">offline and low disk</a>.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="what-the-user-sees">What the user sees</h3>
+<p>A successful install adds the plugin to Settings &gt; Plugins. A failed install prints its errors and runs no plugin code. A rolled-back update shows the toast <code>Update failed, rolled back</code> and keeps the old version. The screens are described in <a href="/pages/user-managing-plugins/">Managing plugins</a>.</p>
+<h3 id="see-also">See also</h3>
+<ul>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Plugin lifecycle states</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/guide-data-migration/">Data migration</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Plugin scope and sessions</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+</ul>
+<p>API version checked: <code>ilium:plugin@0.1.0</code>.</p>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/reference-install-and-update/"><small>Previous</small>Install, update and uninstall reference</a><a class="next" href="/pages/reference-kernel-and-boot/"><small>Next</small>Kernel and boot reference</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#terms">Terms</a></li><li class="l2"><a href="#on-disk-layout">On-disk layout</a></li><li class="l2"><a href="#the-registry-file">The registry file</a></li><li class="l2"><a href="#the-install-pipeline">The install pipeline</a></li><li class="l2"><a href="#update">Update</a></li><li class="l2"><a href="#rollback-and-downgrade">Rollback and downgrade</a></li><li class="l2"><a href="#uninstall">Uninstall</a></li><li class="l2"><a href="#command-reference">Command reference</a></li><li class="l2"><a href="#propagation-to-running-servers">Propagation to running servers</a></li><li class="l2"><a href="#install-or-update-while-the-plugin-is-active-in-many-sessions">Install or update while the plugin is active in many sessions</a></li><li class="l2"><a href="#interrupted-install-and-recovery">Interrupted install and recovery</a></li><li class="l2"><a href="#error-codes">Error codes</a></li><li class="l2"><a href="#edge-cases">Edge cases</a></li><li class="l2"><a href="#what-the-user-sees">What the user sees</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

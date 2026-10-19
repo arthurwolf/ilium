@@ -1,0 +1,9 @@
+╭─ Queue prompt after agent finishes ──────────╮
+│ Run the full test suite and report           │
+│                                              │
+│                                              │
+│ Delivery ………………………………………………… ‹ Run X times › │
+│ Times ……………………………………………………………………………………………… 2 │
+│                                              │
+│ Ctrl+Enter enqueue · Esc cancel              │
+╰──────────────────────────────────────────────╯

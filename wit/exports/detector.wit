@@ -1,0 +1,10 @@
+package ilium:exports@0.1.0;
+
+interface detector {
+  use ilium:types/tree@0.1.0.{agent-activity};
+  record detector-screen { columns: u16, rows: list<string>, cursor-row: u16, title: option<string>, revision: u64 }
+  record detector-process { name: string, argv: list<string> }
+  record classification { activity: agent-activity, objective: option<string>, goal: option<string> }
+  identify: func(processes: list<detector-process>) -> option<string>;
+  classify: func(signature: string, screen: detector-screen) -> classification;
+}

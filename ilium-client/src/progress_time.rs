@@ -139,7 +139,10 @@ pub fn time_box_variants(progress: &PaneProgress, now_unix_millis: u64) -> Vec<V
     // Next to drop is the ETA; a stall marker outranks the start time.
     if let Some(stalled) = stalled {
         variants.push(vec![stalled]);
-        variants.push(vec![TimeSegment { text: "⚠ no progress reported".into(), warn: true }]);
+        variants.push(vec![TimeSegment {
+            text: "⚠ no progress reported".into(),
+            warn: true,
+        }]);
     } else if let Some(started) = started {
         variants.push(vec![started]);
     }
@@ -242,7 +245,11 @@ pub fn popover_lines(
             None => lines.push("ETA: unknown".into()),
         }
     }
-    lines.push(format!("Last successful check: {} ({})", timestamp_text(progress.last_observed_unix_millis), human_ago(now_unix_millis.saturating_sub(progress.last_observed_unix_millis))));
+    lines.push(format!(
+        "Last successful check: {} ({})",
+        timestamp_text(progress.last_observed_unix_millis),
+        human_ago(now_unix_millis.saturating_sub(progress.last_observed_unix_millis))
+    ));
     let interval = timing
         .probe_interval_millis
         .map(|millis| format!("every {}", human_duration(millis)))
@@ -348,9 +355,15 @@ mod tests {
         let now = 10 * MINUTE + 11 * MINUTE;
         assert!(is_stalled(&progress, now));
         let variants = time_box_variants(&progress, now);
-        assert_eq!(variants[0][1].text, "\u{26a0} no progress reported 11 minutes");
+        assert_eq!(
+            variants[0][1].text,
+            "\u{26a0} no progress reported 11 minutes"
+        );
         assert!(variants[0][1].warn);
-        assert_eq!(texts(&variants[1]), ["\u{26a0} no progress reported 11 minutes"]);
+        assert_eq!(
+            texts(&variants[1]),
+            ["\u{26a0} no progress reported 11 minutes"]
+        );
     }
 
     #[test]
@@ -414,7 +427,10 @@ mod tests {
 
         let stuck = running(50.0, steady_timing(), 10 * MINUTE);
         let text = popover_lines(&stuck, 25 * MINUTE, None).join("\n");
-        assert!(text.contains("no reported progress: threshold 10 minutes"), "{text}");
+        assert!(
+            text.contains("no reported progress: threshold 10 minutes"),
+            "{text}"
+        );
     }
 
     #[test]

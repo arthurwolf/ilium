@@ -791,9 +791,14 @@ mod tests {
     #[test]
     fn restored_progress_preserves_checks_and_last_successful_data() {
         let report = ProgressTaskReport::new(
-            "restore-checks".into(), ProgressTaskStatus::Running, 20.0,
-            "Compiling".into(), "step: linking".into(), None,
-        ).unwrap();
+            "restore-checks".into(),
+            ProgressTaskStatus::Running,
+            20.0,
+            "Compiling".into(),
+            "step: linking".into(),
+            None,
+        )
+        .unwrap();
         let mut previous = PaneProgress::new(1, report.clone(), 100).unwrap();
         previous.timing.record_failed_check(200);
         let encoded = serde_json::to_string(&previous).unwrap();
@@ -804,7 +809,10 @@ mod tests {
         let mut next = PaneProgress::new(1, report, 300).unwrap();
         next.carry_timing_from(&restored);
         assert_eq!(next.timing.checks.len(), 3);
-        assert_eq!(next.timing.checks[1].outcome, ilium_core::ProgressCheckOutcome::Failed);
+        assert_eq!(
+            next.timing.checks[1].outcome,
+            ilium_core::ProgressCheckOutcome::Failed
+        );
         assert_eq!(next.timing.last_progress_unix_millis, Some(100));
 
         let mut legacy = serde_json::to_value(&previous).unwrap();

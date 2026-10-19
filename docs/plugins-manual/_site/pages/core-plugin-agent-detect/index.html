@@ -1,0 +1,1037 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Agent detection | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details open><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/" aria-current="page">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Core plugins</b></p>
+<h1>Agent detection</h1>
+
+<p>The Agent detection plugin has the id <code>ilium.core.agent-detect</code> and runs on both sides. The server side owns agent identity and activity: it identifies agent CLIs from the process tree, classifies what each agent is doing, tracks <code>/goal</code> state and puts icons, spinners and badges in the tree. The client side draws the Agents panel and follows the display mode.</p>
+<p>Walking the process tree and scraping the vt100 screen are kernel-native. The kernel runs the detection loop and hands the plugin process lists and screen snapshots through the <code>detector</code> export. The plugin is the pure classification step, which is why a new agent CLI is one signature entry and not a new branch of code.</p>
+<h3 id="what-it-covers">What it covers</h3>
+<ul>
+<li>Agent identity from the process tree and the list of supported agent CLIs (see Agent monitoring, "How detection works" and "Supported agent CLIs").</li>
+<li>Activity classification and status indicators (see Agent monitoring, "Status indicators and their defaults").</li>
+<li>Pane status signals and the three icon slots in the tree (see Agent monitoring, "The three icon slots in the tree").</li>
+<li>Goal tracking and the <code>/goal</code> badge (see Agent monitoring, "The /goal badge").</li>
+<li>The Normal and Attention display modes, and custom signatures (see Agent monitoring, "Normal mode and Attention mode" and "The Agent Monitoring settings tab").</li>
+<li>Agent icons and identifiers in the tree.</li>
+</ul>
+<h3 id="see-it">See it</h3>
+<figure><img src="/assets/demos/01-agent-activity.gif" alt="Tree rows whose agent icons change between working, idle and waiting" loading="lazy"><figcaption>Agent icons follow the activity of each pane: working, idle, awaiting approval, done.</figcaption></figure>
+
+<figure><img src="/assets/demos/17-goal-indicators.gif" alt="A goal badge appears on a tree row while an agent pursues a goal" loading="lazy"><figcaption>The goal badge shows while an agent pursues a /goal and clears when the goal ends.</figcaption></figure>
+
+<h3 id="what-the-user-sees">What the user sees</h3>
+<figure>
+<pre class="term"><span class="t-dim">╭ Tree ───────────────────────────────────────╮</span>
+<span class="t-dim">│</span> <span class="t-ok">⠹</span> claude  refactor parser      <span class="t-hi">◎ goal 12m</span>   <span class="t-dim">│</span>
+<span class="t-dim">│</span> <span class="t-dim">●</span> codex   write tests                       <span class="t-dim">│</span>
+<span class="t-dim">│</span> <span class="t-warn">?</span> gemini  needs approval                   <span class="t-dim"> │</span>
+<span class="t-dim">│</span> <span class="t-ok"><span class="w2">✓</span></span> claude  docs                  <span class="t-dim">done</span>       <span class="t-dim"> │</span>
+<span class="t-dim">│</span> <span class="t-dim">$</span> shell                                     <span class="t-dim">│</span>
+<span class="t-dim">╰─────────────────────────────────────────────╯</span></pre>
+<figcaption>Rendered at 48 columns. Illustrative: the icons depend on the icon set. The spinner on the first row is one animation that the host steps itself.</figcaption>
+</figure>
+
+<figure>
+<pre class="term"><span class="t-dim">╭ Agents ─────────────────────────────────────╮</span>
+<span class="t-dim">│</span> <span class="t-hi">Agent</span>    <span class="t-hi">State</span>      <span class="t-hi">Goal</span>                    <span class="t-dim">│</span>
+<span class="t-dim">│</span> claude   <span class="t-ok">⠹ working</span>  ship the parser port    <span class="t-dim">│</span>
+<span class="t-dim">│</span> codex    <span class="t-dim">idle</span>       …………………………………………  <span class="t-dim">      │</span>
+<span class="t-dim">│</span> gemini   <span class="t-warn">approval</span>   …………………………………………  <span class="t-dim">      │</span>
+<span class="t-dim">╰─────────────────────────────────────────────╯</span></pre>
+<figcaption>Rendered at 48 columns. Illustrative. One row per agent with a badge, a spinner while working and the goal text.</figcaption>
+</figure>
+
+<h3 id="manifest">Manifest</h3>
+<p>This block is a fragment. It lists the contributions. The whole manifest is in <a href="#complete-manifest">Complete manifest</a>.</p>
+<pre><code class="language-json">{
+  &quot;api&quot;: &quot;ilium:plugin@0.1.0&quot;,
+  &quot;id&quot;: &quot;ilium.core.agent-detect&quot;,
+  &quot;server&quot;: { &quot;entry&quot;: &quot;server.wasm&quot;, &quot;world&quot;: &quot;ilium:server/base@0.1.0&quot;,
+              &quot;exports&quot;: [&quot;detector&quot;] },
+  &quot;client&quot;: { &quot;entry&quot;: &quot;client.wasm&quot;, &quot;world&quot;: &quot;ilium:client/base@0.1.0&quot; },
+  &quot;contributes&quot;: {
+    &quot;signatures&quot;: [
+      { &quot;id&quot;: &quot;example-agent&quot;, &quot;process_names&quot;: [&quot;example-agent&quot;],
+        &quot;aliases&quot;: [&quot;example&quot;], &quot;icon&quot;: &quot;robot&quot; }
+    ],
+    &quot;decoration_slots&quot;: [
+      { &quot;id&quot;: &quot;activity&quot;, &quot;placement&quot;: &quot;icon&quot;, &quot;priority&quot;: 90 },
+      { &quot;id&quot;: &quot;goal&quot;, &quot;placement&quot;: &quot;badge&quot;, &quot;priority&quot;: 80 }
+    ],
+    &quot;display_modes&quot;: [
+      { &quot;id&quot;: &quot;attention&quot;, &quot;title&quot;: &quot;Attention&quot;, &quot;icon&quot;: &quot;bell&quot;, &quot;slot&quot;: &quot;activity&quot;,
+        &quot;hide_unmarked&quot;: true }
+    ]
+  },
+  &quot;capabilities&quot;: {
+    &quot;server&quot;: [&quot;agent.read&quot;, &quot;agent.signatures&quot;, &quot;tree.decorate&quot;, &quot;panes.read&quot;],
+    &quot;client&quot;: [&quot;agent.read&quot;, &quot;ui.panels&quot;]
+  }
+}
+</code></pre>
+<h3 id="complete-manifest">Complete manifest</h3>
+<p>This is the whole manifest of the plugin at <code>ilium:plugin@0.1.0</code>. The Manifest section above shows the contributions in detail; here the required keys, the sides, the <code>capabilities</code> per side and the <code>activation</code> triggers are all present. Activation follows <a href="/pages/reference-kernel-and-boot/#startup-and-lazy-activation-of-the-30-core-plugins">startup and lazy activation</a>. [COR-050]</p>
+<pre><code class="language-json">{
+  &quot;api&quot;: &quot;ilium:plugin@0.1.0&quot;,
+  &quot;id&quot;: &quot;ilium.core.agent-detect&quot;,
+  &quot;name&quot;: &quot;Agent detect&quot;,
+  &quot;version&quot;: &quot;0.1.0&quot;,
+  &quot;publisher&quot;: &quot;Ilium&quot;,
+  &quot;description&quot;: &quot;The Agent detection plugin has the id ilium.core.agent-detect and runs on both sides.&quot;,
+  &quot;license&quot;: &quot;MIT&quot;,
+  &quot;server&quot;: {
+    &quot;entry&quot;: &quot;server.wasm&quot;,
+    &quot;world&quot;: &quot;ilium:server/base@0.1.0&quot;,
+    &quot;exports&quot;: [
+      &quot;detector&quot;
+    ]
+  },
+  &quot;client&quot;: {
+    &quot;entry&quot;: &quot;client.wasm&quot;,
+    &quot;world&quot;: &quot;ilium:client/base@0.1.0&quot;
+  },
+  &quot;capabilities&quot;: {
+    &quot;server&quot;: [
+      &quot;agent.read&quot;,
+      &quot;agent.signatures&quot;,
+      &quot;tree.decorate&quot;,
+      &quot;panes.read&quot;
+    ],
+    &quot;client&quot;: [
+      &quot;agent.read&quot;,
+      &quot;ui.panels&quot;,
+      &quot;settings.write-kernel:agent-monitoring&quot;
+    ]
+  },
+  &quot;activation&quot;: [
+    &quot;startup&quot;,
+    &quot;view:agent-detect.panel&quot;
+  ],
+  &quot;contributes&quot;: {
+    &quot;signatures&quot;: [
+      {
+        &quot;id&quot;: &quot;example-agent&quot;,
+        &quot;process_names&quot;: [
+          &quot;example-agent&quot;
+        ],
+        &quot;aliases&quot;: [
+          &quot;example&quot;
+        ],
+        &quot;icon&quot;: &quot;robot&quot;
+      }
+    ],
+    &quot;decoration_slots&quot;: [
+      {
+        &quot;id&quot;: &quot;activity&quot;,
+        &quot;placement&quot;: &quot;icon&quot;,
+        &quot;priority&quot;: 90
+      },
+      {
+        &quot;id&quot;: &quot;goal&quot;,
+        &quot;placement&quot;: &quot;badge&quot;,
+        &quot;priority&quot;: 80
+      }
+    ],
+    &quot;display_modes&quot;: [
+      {
+        &quot;id&quot;: &quot;attention&quot;,
+        &quot;title&quot;: &quot;Attention&quot;,
+        &quot;icon&quot;: &quot;bell&quot;,
+        &quot;slot&quot;: &quot;activity&quot;,
+        &quot;hide_unmarked&quot;: true
+      }
+    ]
+  },
+  &quot;limits_tier&quot;: &quot;first-party&quot;
+}
+</code></pre>
+<h3 id="interstitial-prompts-signatures-states-and-status-line">Interstitial prompts, signatures, states and status line</h3>
+<p><strong>Auto-answering interstitial prompts.</strong> Ilium answers known one-time dialogs for the user. Today this is Claude Code's "resume full session" prompt, answered with one keystroke per agent process. The behaviour is on by default and is the key <code>auto_answer_interstitial_prompts</code> in the <code>[detection]</code> table. The plugin owns the rule and the toggle on the Agent Monitoring tab. The keystroke goes through <code>terminal.write</code>, once per process, and the plugin records the process so it never answers twice. [COR-011]</p>
+<p><strong>Custom signatures.</strong> A user adds an agent CLI in <code>config.toml</code>, and the plugin loads the entries into the signature registry.</p>
+<pre><code class="language-toml">[[detection.custom_signatures]]
+process_name = &quot;myagent&quot;
+agent_class  = &quot;other&quot;
+</code></pre>
+<p>A custom signature has the class <code>other</code>. It gets an identity and an icon, but no launch, resume or transcript contract, because Ilium has no verified contract for it. A plugin package can add a signature with <a href="/pages/capability-agent-signatures/">agent.signatures</a> instead.</p>
+<p><strong>Enums the plugin reports.</strong> Do not invent values; use these.</p>
+<table>
+<thead>
+<tr>
+<th>Enum</th>
+<th>Values</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Agent class</td>
+<td><code>claude</code>, <code>codex</code>, <code>antigravity</code>, <code>other(name)</code>. <code>antimatter</code> is accepted as a process-name alias of <code>antigravity</code></td>
+</tr>
+<tr>
+<td>Activity</td>
+<td><code>working</code>, <code>waiting-background</code>, <code>background-task-still-running</code>, <code>waiting-approval</code>, <code>done</code>, <code>idle</code></td>
+</tr>
+<tr>
+<td>Turn</td>
+<td><code>working</code>, <code>waiting-approval</code>, <code>waiting-subagents</code>, <code>settling</code>, <code>idle</code></td>
+</tr>
+<tr>
+<td>Goal state</td>
+<td><code>active</code>, <code>paused</code>, <code>blocked</code>, <code>usage-limited</code>, <code>reached</code></td>
+</tr>
+<tr>
+<td>Pane kind</td>
+<td><code>plain-shell</code>, <code>agent</code>, <code>editor</code>, <code>board</code>, <code>agent-unavailable</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Status line capture.</strong> Claude Code and Antigravity can report a status line (model, context use). The kernel keeps the hidden helper commands that capture it, because they run inside the agent process and need no plugin. The plugin reads the captured values through <code>agent.read</code>. See <a href="/pages/reference-feature-traceability/">feature traceability</a> (F-111).</p>
+<p><strong>Polling.</strong> <code>working_poll_seconds</code> (default 10) and <code>idle_poll_seconds</code> (default 45) in <code>[detection]</code> set the adaptive loop. The loop itself stays in the kernel.</p>
+<h3 id="kernel-tabs-this-plugin-owns">Kernel tabs this plugin owns</h3>
+<p>This plugin is the single owner of the following built-in Settings tabs. It holds <code>settings.write-kernel:&lt;tab&gt;</code> for each one (T1 only, one holder per tab, see <a href="/pages/api-kernel-settings-and-keymap/#writing-a-kernel-tab">kernel settings</a>). The values stay in the same <code>config.toml</code> tables as before, so no user setting moves. [COR-030] [COR-033]</p>
+<table>
+<thead>
+<tr>
+<th>Tab id</th>
+<th>Label</th>
+<th>Config table</th>
+<th>Readers</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>agent-monitoring</code></td>
+<td>Agent Monitoring</td>
+<td><code>[ui]</code>, <code>[detection]</code></td>
+<td>Progress, Agent toolbar, Notifications</td>
+</tr>
+</tbody>
+</table>
+<p>If the plugin is disabled, the tab stays in the rail with its stored values shown read-only and the notice "Agent detection is disabled. Values are kept." The kernel keeps reading the keys it consumes itself (listed in the Consumer column of the key table in <a href="/pages/reference-config-and-data-migration/">config and data migration</a>). Behaviour that only this plugin provides is off. The exact result for this plugin is its row in <a href="/pages/reference-kernel-and-boot/">kernel and boot</a>. [COR-022]</p>
+<h3 id="samples">Samples</h3>
+<h4 id="identify-an-agent-cli">Identify an agent CLI</h4>
+<p>A custom signature recognises a new agent CLI. The plugin declares it under <a href="/pages/capability-agent-signatures/">agent.signatures</a> and implements the <code>detector</code> export from the <a href="/pages/primitives-agent/">agent primitive</a>. When the kernel accepts a match it emits <code>agent-identified</code> (<a href="/pages/api-events/">events</a>), and the plugin logs the signature id.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::exports::{Classification, Detector, DetectorProcess, DetectorScreen};
+use ilium_plugin_sdk::host::log::{self, Level};
+use ilium_plugin_sdk::prelude::*;
+use ilium_plugin_sdk::types::events::AgentIdentifiedEvent;
+use ilium_plugin_sdk::types::tree::AgentActivity;
+
+#[ilium_plugin(side = &quot;server&quot;, exports = [&quot;detector&quot;])]
+#[derive(Default)]
+struct AgentDetect;
+
+impl Lifecycle for AgentDetect {}
+
+impl Handler for AgentDetect {
+    fn on_events(&amp;mut self, batch: Vec&lt;Event&gt;) -&gt; Vec&lt;Submission&gt; {
+        for event in batch {
+            if let Event::AgentIdentified(AgentIdentifiedEvent { node, signature }) = event {
+                log::log(Level::Info, &amp;format!(&quot;node {node} runs {signature}&quot;));
+            }
+        }
+        Vec::new()
+    }
+}
+
+impl Detector for AgentDetect {
+    fn identify(&amp;mut self, processes: Vec&lt;DetectorProcess&gt;) -&gt; Option&lt;String&gt; {
+        let found = processes.iter().any(|process| process.name == &quot;example-agent&quot;);
+        found.then(|| &quot;example-agent&quot;.to_string())
+    }
+
+    fn classify(&amp;mut self, _signature: String, screen: DetectorScreen) -&gt; Classification {
+        let shows = |text: &amp;str| screen.rows.iter().any(|row| row.contains(text));
+        let activity = if shows(&quot;Allow this command?&quot;) {
+            AgentActivity::AwaitingApproval
+        } else if shows(&quot;esc to interrupt&quot;) {
+            AgentActivity::Working
+        } else {
+            AgentActivity::Idle
+        };
+        Classification { activity, objective: None, goal: None }
+    }
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { definePlugin, type Event, type Submission } from '@ilium/plugin-sdk';
+import { log } from '@ilium/plugin-sdk/host/log';
+
+export const { lifecycle, handler, detector } = definePlugin({
+  side: 'server',
+  onEvents(batch: Event[]): Submission[] {
+    for (const event of batch) {
+      if (event.tag === 'agent-identified') {
+        log('info', `node ${event.val.node} runs ${event.val.signature}`);
+      }
+    }
+    return [];
+  },
+  identify(processes) {
+    return processes.some((process) =&gt; process.name === 'example-agent') ? 'example-agent' : undefined;
+  },
+  classify(_signature, screen) {
+    const shows = (text: string) =&gt; screen.rows.some((row) =&gt; row.includes(text));
+    const activity = shows('Allow this command?')
+      ? 'awaiting-approval'
+      : shows('esc to interrupt')
+        ? 'working'
+        : 'idle';
+    return { activity, objective: undefined, goal: undefined };
+  },
+});
+</code></pre>
+<h4 id="activity-icons-in-the-tree">Activity icons in the tree</h4>
+<p>Working agents get an animated icon and idle ones a still icon. The plugin reads agents under <a href="/pages/capability-agent-read/">agent.read</a> and decorates rows under <a href="/pages/capability-tree-decorate/">tree.decorate</a>. On <code>agent-activity-changed</code> it submits <code>set-decoration</code>; the host steps the <code>frames</code> itself (see <a href="/pages/api-tree-chrome/">tree and window chrome</a>). The event shape is on <a href="/pages/api-events/">events</a>, the agent types on the <a href="/pages/primitives-agent/">agent primitive</a>.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::prelude::*;
+use ilium_plugin_sdk::types::events::AgentActivityEvent;
+use ilium_plugin_sdk::types::intents::{Intent, SetDecorationSpec, DecorationVisibility};
+use ilium_plugin_sdk::types::tree::AgentActivity;
+
+fn activity_decoration(node: NodeId, current: AgentActivity) -&gt; Submission {
+    let (frames, glyph) = match current {
+        AgentActivity::Working =&gt; (
+            [&quot;⠋&quot;, &quot;⠙&quot;, &quot;⠹&quot;, &quot;⠸&quot;, &quot;⠼&quot;, &quot;⠴&quot;, &quot;⠦&quot;, &quot;⠧&quot;, &quot;⠇&quot;, &quot;⠏&quot;]
+                .iter().map(|frame| StyledText::plain(frame)).collect(),
+            &quot;⠋&quot;,
+        ),
+        AgentActivity::AwaitingApproval =&gt; (Vec::new(), &quot;?&quot;),
+        _ =&gt; (Vec::new(), &quot;●&quot;),
+    };
+    Submission::keyed(
+        Intent::SetDecoration(SetDecorationSpec {
+            frames,
+            frame_ms: 100,
+            icon: Some(glyph.into()),
+            ..SetDecorationSpec::text(node, &quot;activity&quot;, &quot;&quot;)
+        }),
+        format!(&quot;activity-{node}&quot;),
+    )
+}
+
+fn on_events(batch: Vec&lt;Event&gt;) -&gt; Vec&lt;Submission&gt; {
+    batch
+        .into_iter()
+        .filter_map(|event| match event {
+            Event::AgentActivityChanged(AgentActivityEvent { node, current, .. }) =&gt; {
+                Some(activity_decoration(node, current))
+            }
+            _ =&gt; None,
+        })
+        .collect()
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import type { Event, Submission } from '@ilium/plugin-sdk';
+
+const SPINNER = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+
+function activityDecoration(node: bigint, current: string): Submission {
+  const working = current === 'working';
+  return {
+    intent: {
+      tag: 'set-decoration',
+      val: {
+        ...baseDecoration(node, 'activity', ''),
+        icon: working ? SPINNER[0] : current === 'awaiting-approval' ? '?' : '●',
+        frames: working ? SPINNER.map((frame) =&gt; ({ spans: [{ text: frame }] })) : [],
+        frameMs: 100,
+      },
+    },
+    correlation: 1n,
+    dedupKey: `activity-${node}`,
+  };
+}
+
+export function onEvents(batch: Event[]): Submission[] {
+  const out: Submission[] = [];
+  for (const event of batch) {
+    if (event.tag === 'agent-activity-changed') {
+      out.push(activityDecoration(event.val.node, event.val.current));
+    }
+  }
+  return out;
+}
+</code></pre>
+<h4 id="status-signals-and-goals">Status signals and goals</h4>
+<p>The goal badge and the signal slots follow the agent. On <code>agent-goal-changed</code> the plugin shows the goal in the <code>goal</code> slot. When the goal ends it submits <code>clear-decoration</code>, as described on <a href="/pages/api-tree-chrome/">tree and window chrome</a>. The plugin mirrors <code>signal-changed</code> into a second slot. Event fields are in <a href="/pages/api-events/">events</a> and the agent view is on the <a href="/pages/primitives-agent/">agent primitive</a>.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::prelude::*;
+use ilium_plugin_sdk::types::events::{AgentGoalEvent, SignalChangedEvent};
+use ilium_plugin_sdk::types::intents::{DecorationKey, Intent, SetDecorationSpec};
+
+fn goal_submission(event: AgentGoalEvent) -&gt; Submission {
+    let AgentGoalEvent { node, goal } = event;
+    match goal {
+        Some(text) =&gt; Submission::keyed(
+            Intent::SetDecoration(SetDecorationSpec::text(node, &quot;goal&quot;, format!(&quot;goal {text}&quot;))),
+            format!(&quot;goal-{node}&quot;),
+        ),
+        None =&gt; Submission::keyed(
+            Intent::ClearDecoration(DecorationKey { node, slot: &quot;goal&quot;.into() }),
+            format!(&quot;goal-clear-{node}&quot;),
+        ),
+    }
+}
+
+fn signal_submission(event: SignalChangedEvent) -&gt; Submission {
+    let text = format!(&quot;{}: {}&quot;, event.signal, event.value);
+    Submission::new(Intent::SetDecoration(SetDecorationSpec::text(event.pane, &quot;activity&quot;, text)))
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import type { Event, Submission } from '@ilium/plugin-sdk';
+
+export function goalSubmission(event: Extract&lt;Event, { tag: 'agent-goal-changed' }&gt;): Submission {
+  const { node, goal } = event.val;
+  if (goal === undefined) {
+    return {
+      intent: { tag: 'clear-decoration', val: { node, slot: 'goal' } },
+      correlation: 1n,
+      dedupKey: `goal-clear-${node}`,
+    };
+  }
+  return {
+    intent: { tag: 'set-decoration', val: baseDecoration(node, 'goal', `goal ${goal}`) },
+    correlation: 1n,
+    dedupKey: `goal-${node}`,
+  };
+}
+
+export function signalSubmission(event: Extract&lt;Event, { tag: 'signal-changed' }&gt;): Submission {
+  const { pane, signal, value } = event.val;
+  return {
+    intent: { tag: 'set-decoration', val: baseDecoration(pane, 'activity', `${signal}: ${value}`) },
+    correlation: 1n,
+    dedupKey: undefined,
+  };
+}
+</code></pre>
+<h4 id="agents-panel">Agents panel</h4>
+<p>A panel lists agents with a status badge and a spinner. The client side draws a <code>table</code> (<a href="/pages/widgets-collections/">collections</a>), a <code>badge</code> per state and a <code>spinner</code> for working agents (<a href="/pages/widgets-status-and-feedback/">status and feedback</a>), as a panel under <a href="/pages/capability-ui-panels/">ui.panels</a>. The server side feeds it over the <code>message</code> channel.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::prelude::*;
+use ilium_plugin_sdk::types::layout::Area;
+use ilium_plugin_sdk::types::ui::{TableColumn, TableRow, UiTree, ViewTarget};
+use ilium_plugin_sdk::types::text::Tone;
+use ilium_plugin_sdk::ui::build::Tree;
+
+impl Views for AgentsPanel {
+    fn render(&amp;mut self, _view: ViewTarget, _area: Area) -&gt; UiTree {
+        let mut tree = Tree::new();
+        let columns = vec![
+            TableColumn::new(&quot;agent&quot;, &quot;Agent&quot;).priority(9),
+            TableColumn::new(&quot;state&quot;, &quot;State&quot;).priority(5),
+            TableColumn::new(&quot;goal&quot;, &quot;Goal&quot;).priority(1),
+        ];
+        let rows = self.agents.iter().map(|agent| {
+            let state = match agent.activity.as_str() {
+                &quot;working&quot; =&gt; &quot;⠹ working&quot;,
+                &quot;awaiting-approval&quot; =&gt; &quot;approval&quot;,
+                other =&gt; other,
+            };
+            TableRow::new(vec![agent.name.clone(), state.into(), agent.goal.clone()]).id(&amp;agent.id)
+        }).collect();
+        let table = tree.table(columns, rows).key(&quot;agents&quot;);
+        let waiting = self.agents.iter().filter(|agent| agent.activity == &quot;awaiting-approval&quot;).count();
+        let badge = tree.badge().count(waiting as u32).tone(Tone::Warning).key(&quot;waiting&quot;);
+        let busy = tree.spinner().label(&quot;Watching agents&quot;);
+        let root = tree.layout(Direction::Vertical, vec![Constraint::Length(1), Constraint::Fill(1), Constraint::Length(1)])
+            .child(badge).child(table).child(busy);
+        tree.finish(root)
+    }
+}
+
+// In the server side: Intent::Message with channel &quot;agents&quot; and the rows as JSON bytes.
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { badge, fill, layout, length, spinner, table, tree } from '@ilium/plugin-sdk/ui/build';
+
+const columns = [
+  { id: 'agent', title: 'Agent', width: { tag: 'length', val: 10 }, priority: 9 },
+  { id: 'state', title: 'State', width: { tag: 'length', val: 10 }, priority: 5 },
+  { id: 'goal', title: 'Goal', width: { tag: 'fill', val: 1 }, priority: 1 },
+];
+
+export function render() {
+  const rows = state.agents.map((agent) =&gt; ({
+    id: agent.id,
+    cells: [
+      agent.name,
+      agent.activity === 'working' ? '⠹ working' : agent.activity,
+      agent.goal,
+    ],
+  }));
+  const waiting = state.agents.filter((agent) =&gt; agent.activity === 'awaiting-approval').length;
+  return tree(layout(
+    { direction: 'vertical', constraints: [length(1), fill(1), length(1)] },
+    [
+      badge({ count: waiting, tone: 'warning', key: 'waiting' }),
+      table(columns, rows, { key: 'agents' }),
+      spinner({ label: 'Watching agents' }),
+    ],
+  ));
+}
+
+// The server side sends the rows with an intent of tag 'message' on channel 'agents'.
+</code></pre>
+<h4 id="normal-and-attention-modes">Normal and Attention modes</h4>
+<p>A display mode changes what the tree emphasises. The plugin declares <code>display_modes</code> in the manifest and listens for <code>display-mode-changed</code> (<a href="/pages/events-and-intents/">events and intents</a>, <a href="/pages/api-events/">events</a>). In Attention mode the panel lists only agents that need the user.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::prelude::*;
+
+#[derive(Default, PartialEq)]
+enum Mode {
+    #[default]
+    Normal,
+    Attention,
+}
+
+impl Handler for AgentsPanel {
+    fn on_events(&amp;mut self, batch: Vec&lt;Event&gt;) -&gt; Vec&lt;Submission&gt; {
+        for event in batch {
+            if let Event::DisplayModeChanged(mode) = event {
+                self.mode = match mode.as_deref() {
+                    Some(&quot;attention&quot;) =&gt; Mode::Attention,
+                    _ =&gt; Mode::Normal,
+                };
+            }
+        }
+        Vec::new()
+    }
+}
+
+impl AgentsPanel {
+    fn visible_agents(&amp;self) -&gt; impl Iterator&lt;Item = &amp;AgentRow&gt; {
+        self.agents.iter().filter(|agent| {
+            self.mode == Mode::Normal || agent.activity == &quot;awaiting-approval&quot; || agent.activity == &quot;done&quot;
+        })
+    }
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import type { Event, Submission } from '@ilium/plugin-sdk';
+
+let mode: 'normal' | 'attention' = 'normal';
+
+export function onEvents(batch: Event[]): Submission[] {
+  for (const event of batch) {
+    if (event.tag === 'display-mode-changed') {
+      mode = event.val.mode === 'attention' ? 'attention' : 'normal';
+    }
+  }
+  return [];
+}
+
+export const visibleAgents = (agents: AgentRow[]) =&gt;
+  agents.filter(
+    (agent) =&gt; mode === 'normal' || agent.activity === 'awaiting-approval' || agent.activity === 'done',
+  );
+</code></pre>
+<h4 id="6-signals-from-the-agent">6. Signals from the agent</h4>
+<p>A signal is a named value the agent reports, such as the branch it works on. <code>signal-changed</code> arrives coalesced per pane and signal, so the plugin stores only the latest value and updates the row for that pane.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::prelude::*;
+
+impl Handler for Signals {
+    fn on_events(&amp;mut self, batch: Vec&lt;Event&gt;) -&gt; Vec&lt;Submission&gt; {
+        for event in batch {
+            if let Event::SignalChanged(change) = event {
+                self.signals.entry(change.pane).or_default().insert(change.signal, change.value);
+            }
+        }
+        Vec::new()
+    }
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">export function onEvents(events: Event[]): Submission[] {
+  for (const event of events) {
+    if (event.tag !== 'signal-changed') continue;
+    const bySignal = signals.get(event.val.pane) ?? new Map&lt;string, string&gt;();
+    bySignal.set(event.val.signal, event.val.value);
+    signals.set(event.val.pane, bySignal);
+  }
+  return [];
+}
+</code></pre>
+<h3 id="detection-loop-and-budget">Detection loop and budget</h3>
+<p>The poll loop is native and runs in the server. This plugin's detector runs on the plugin executor, one call per pane, in parallel with other plugins' detectors. One poll cycle spends at most 50 ms on detector calls. A slow call keeps the previous activity and counts as a breach, and the third breach in a row restarts this plugin side. The full rules are in the <a href="/pages/capability-agent-signatures/#detection-loop">detection loop</a> section of the signatures page and in <a href="/pages/reference-host-scheduling/">Host scheduling</a>.</p>
+<h3 id="extension-points">Extension points</h3>
+<p>Other plugins change what <code>ilium.core.agent-detect</code> does through the points below. The plugin owns each point (grant <code>extensions.provide:ilium.core.agent-detect/&lt;point&gt;</code>). Contributors need <code>extensions.contribute:ilium.core.agent-detect/&lt;point&gt;</code>. See <a href="/pages/api-extension-points/">Extension points</a> for the mechanism and <a href="/pages/extending-core-plugins/">Extending core plugins</a> for the five ways to work with a core feature.</p>
+<table>
+<thead>
+<tr>
+<th>Point</th>
+<th>Kind</th>
+<th>What it does</th>
+<th>Payload</th>
+<th>Risk</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>activity-rules</code></td>
+<td>collect</td>
+<td>Add screen patterns that mean working, idle or awaiting approval for one signature.</td>
+<td>entry: id, signature, state, regex, region (last-lines, status-row, whole-screen)</td>
+<td>standard</td>
+</tr>
+<tr>
+<td><code>classify</code></td>
+<td>hook (transform)</td>
+<td>Adjust the detected activity before it is published.</td>
+<td>pane, signature, state, reason; reply: state</td>
+<td>standard</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Services</strong> (grant <code>services.use:&lt;name&gt;</code>):</p>
+<ul>
+<li><code>ilium.core.agent-detect/state</code>: get, list: current identity and activity of panes</li>
+</ul>
+<p><strong>Topics</strong> (list under <code>contributes.topics.subscribes</code>):</p>
+<ul>
+<li><code>ilium.core.agent-detect/state-changed</code>: { pane, signature, previous, current }</li>
+</ul>
+<p><code>contributes.signatures</code> entries register agent CLIs. This plugin turns them into identity.</p>
+<p><strong>Replaceable:</strong> yes. A replacement lists <code>"replaces": ["ilium.core.agent-detect"]</code> and provides the whole surface (see <a href="/pages/extending-core-plugins/#replace">Extending core plugins</a>).</p>
+<h4 id="example-marks-a-pane-as-awaiting-approval-when-the-last-lines-contain-the-question">Example: Marks a pane as awaiting approval when the last lines contain the question</h4>
+<p>A package adds this entry in its manifest. It needs no code.</p>
+<pre><code class="language-json">{
+  &quot;api&quot;: &quot;ilium:plugin@0.1.0&quot;,
+  &quot;capabilities&quot;: { &quot;server&quot;: [&quot;extensions.contribute:ilium.core.agent-detect/activity-rules&quot;] },
+  &quot;contributes&quot;: {
+    &quot;extensions&quot;: [
+      {
+        &quot;point&quot;: &quot;ilium.core.agent-detect/activity-rules&quot;,
+        &quot;id&quot;: &quot;build-waiting&quot;,
+        &quot;priority&quot;: 50,
+        &quot;entry&quot;: {
+          &quot;signature&quot;: &quot;claude&quot;,
+          &quot;state&quot;: &quot;awaiting-approval&quot;,
+          &quot;regex&quot;: &quot;Do you want to proceed\\?&quot;,
+          &quot;region&quot;: &quot;last-lines&quot;
+        }
+      }
+    ]
+  }
+}
+</code></pre>
+<h3 id="abi-used">ABI used</h3>
+<ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a> and <a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a> and <a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-events/">Events</a> and <a href="/pages/events-and-intents/">events and intents</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a>, <a href="/pages/widgets-status-and-feedback/">status and feedback</a> and <a href="/pages/widgets-collections/">collections</a></li>
+</ul>
+<h3 id="see-also">See also</h3>
+<ul>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a>, which acts on the agents this plugin identifies.</li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a>, which lists the same agents across sessions.</li>
+<li><a href="/pages/core-plugin-cost/">Cost</a>, which adds spend to the same rows.</li>
+</ul>
+<h3 id="security">Security</h3>
+<p>Risk marks of this plugin's extension points follow the corrected table in <a href="/pages/reference-extension-security/">Extension security</a> ([SEC-293]).</p>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/core-plugin-kanban/"><small>Previous</small>Kanban</a><a class="next" href="/pages/core-plugin-agent-toolbar/"><small>Next</small>Agent toolbar</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#what-it-covers">What it covers</a></li><li class="l2"><a href="#see-it">See it</a></li><li class="l2"><a href="#what-the-user-sees">What the user sees</a></li><li class="l2"><a href="#manifest">Manifest</a></li><li class="l2"><a href="#complete-manifest">Complete manifest</a></li><li class="l2"><a href="#interstitial-prompts-signatures-states-and-status-line">Interstitial prompts, signatures, states and status line</a></li><li class="l2"><a href="#kernel-tabs-this-plugin-owns">Kernel tabs this plugin owns</a></li><li class="l2"><a href="#samples">Samples</a></li><li class="l3"><a href="#identify-an-agent-cli">Identify an agent CLI</a></li><li class="l3"><a href="#activity-icons-in-the-tree">Activity icons in the tree</a></li><li class="l3"><a href="#status-signals-and-goals">Status signals and goals</a></li><li class="l3"><a href="#agents-panel">Agents panel</a></li><li class="l3"><a href="#normal-and-attention-modes">Normal and Attention modes</a></li><li class="l3"><a href="#6-signals-from-the-agent">6. Signals from the agent</a></li><li class="l2"><a href="#detection-loop-and-budget">Detection loop and budget</a></li><li class="l2"><a href="#extension-points">Extension points</a></li><li class="l3"><a href="#example-marks-a-pane-as-awaiting-approval-when-the-last-lines-contain-the-question">Example: Marks a pane as awaiting approval when the last lines contain the question</a></li><li class="l2"><a href="#abi-used">ABI used</a></li><li class="l2"><a href="#see-also">See also</a></li><li class="l2"><a href="#security">Security</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

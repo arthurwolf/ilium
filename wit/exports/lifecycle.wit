@@ -1,0 +1,10 @@
+package ilium:exports@0.1.0;
+
+interface lifecycle {
+  use ilium:types/errors@0.1.0.{plugin-error};
+  use ilium:types/lifecycle@0.1.0.{activation, deactivation-reason};
+  /// Called once per instance, before any event. An error stops the activation and counts as a failure.
+  activate: func(context: activation) -> result<_, plugin-error>;
+  /// Called with the reason. The returned bytes (at most 1 MiB) arrive in the next activation as restored.
+  deactivate: func(reason: deactivation-reason) -> option<list<u8>>;
+}

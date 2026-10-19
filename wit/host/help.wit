@@ -1,0 +1,6 @@
+package ilium:host@0.1.0;
+
+interface help {
+  /// Markdown. none for an unknown topic.
+  topic: func(id: string) -> option<string>;
+}

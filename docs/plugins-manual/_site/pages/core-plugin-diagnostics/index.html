@@ -1,0 +1,1007 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Diagnostics | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details open><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/" aria-current="page">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Core plugins</b></p>
+<h1>Diagnostics</h1>
+
+<p>Diagnostics helps when something goes wrong. It builds a report of facts about the install, it watches the warnings and errors that plugins write, and it helps the user attach the right log file to an issue. The plugin id is <code>ilium.core.diagnostics</code> and it runs on both sides. The server side reads the log file and builds the report. The client side shows the report and the warning list.</p>
+<p>The Debug and About tabs, and the file logging switch, belong to the Settings plugin. Diagnostics does not draw them again. It reads the Debug setting without writing it, and it adds the report to the Debug tab through the Settings plugin's own extension, as an ordinary contribution.</p>
+<h3 id="what-it-covers">What it covers</h3>
+<ul>
+<li>The log file: one file for each server lifetime, named <code>log-&lt;local date and time&gt;.txt</code>, under <code>/tmp/.ilium-&lt;uid&gt;/logs/&lt;session-id&gt;/</code> on Linux and macOS and <code>%LOCALAPPDATA%\ilium\logs</code> on Windows. <code>ILIUM_DEBUG_LOG_DIR</code> replaces the root. The five newest logs of a session are kept and older ones are removed when the server starts.</li>
+<li>File logging is off by default. It records actions, errors and complete model text exchanges. Credential headers and URL parameters are redacted, but other text is not. Treat a log as sensitive.</li>
+<li>Log levels: trace, debug, info, warn, error. A plugin writes its own diary at these levels with the host log. The user reads it with <code>ilium plugin logs &lt;id&gt;</code>.</li>
+<li>The <code>ilium-logging</code> service of the server, which opens the file, applies the switch live to client and server, flushes on request and shuts down in order.</li>
+<li>The report: a text block of facts, one section for each contributor, at most 64 KiB for each section.</li>
+<li>Attaching a log to an issue: choose a file, see what the report holds, and read a warning about private content before anything leaves the machine.</li>
+</ul>
+<h3 id="see-it">See it</h3>
+<p>There is no recording of this feature yet. The renders below are illustrative.</p>
+<h3 id="what-the-user-sees">What the user sees</h3>
+<figure>
+<pre class="term">╭─ Settings · Debug ───────────────────────────╮
+│ File logging ………………………………………………………………………… <span class="t-ok">on</span> │
+│ Log file ………………… log-2026-10-12 09-14-03.txt │
+│ Size ………………………………………………………………………………… 1.2 MiB │
+│                                              │
+│ <span class="t-dim">Logs hold prompts and replies. Remove</span>        │
+│ <span class="t-dim">private text before you share one.</span>           │
+│                                              │
+│ [ <span class="t-hi">Build report</span> ]   [ Open folder ]           │
+╰──────────────────────────────────────────────╯
+</pre>
+<figcaption>Rendered at 48 columns. Illustrative. The Debug tab is drawn by the Settings plugin. Diagnostics supplies the size and the report button.</figcaption>
+</figure>
+
+<figure>
+<pre class="term">╭─ Report preview ─────────────────────────────╮
+│ <span class="t-hi">Ilium</span>                                        │
+│ Version ……………………………………………………………………………… 0.9.4 │
+│ Platform ………………………………………………………… linux x86_64 │
+│ <span class="t-hi">Plugins</span>                                      │
+│ Loaded ………………………………………………………………………… 31 of 31 │
+│ Last warning ……………… 09:13:58 ilium.core.cost │
+│ <span class="t-hi">gpu</span>  <span class="t-dim">(from example.gpu)</span>                      │
+│ Renderer …………………………………………………………………… software │
+╰──────────────────────────────────────────────╯
+</pre>
+<figcaption>Rendered at 48 columns. Illustrative. The report shows one block for each section. A section from another plugin names its source.</figcaption>
+</figure>
+
+<figure>
+<pre class="term"><span class="t-dim">$</span> ilium plugin logs ilium.core.diagnostics
+2026-10-12 09:14:03 info  report built, 5 sections
+2026-10-12 09:14:03 warn  section gpu: no reply in 2000 ms
+2026-10-12 09:14:04 info  report written, 18 KiB
+</pre>
+<figcaption>Rendered at 80 columns or fewer. Illustrative. The plugin writes its own diary with the host log. This is not the Ilium log file.</figcaption>
+</figure>
+
+<h3 id="manifest">Manifest</h3>
+<p>This block is a fragment. It lists the contributions. The whole manifest is in <a href="#complete-manifest">Complete manifest</a>.</p>
+<p>The plugin is replaceable. A replacement must provide the report service and both points. The log folder lives outside the plugin scopes, so reading it needs a literal path grant. A literal absolute path is high risk and needs an explicit user grant. The example uses user id 1000, and the real grant is written at install from the user id.</p>
+<pre><code class="language-json">{
+  &quot;api&quot;: &quot;ilium:plugin@0.1.0&quot;,
+  &quot;id&quot;: &quot;ilium.core.diagnostics&quot;,
+  &quot;name&quot;: &quot;Diagnostics&quot;,
+  &quot;version&quot;: &quot;0.1.0&quot;,
+  &quot;publisher&quot;: &quot;Ilium&quot;,
+  &quot;limits_tier&quot;: &quot;first-party&quot;,
+  &quot;replaceable&quot;: true,
+  &quot;surface&quot;: [
+    &quot;services:report&quot;, &quot;points:log-sinks&quot;, &quot;points:report-sections&quot;, &quot;commands:build-report&quot;
+  ],
+  &quot;server&quot;: {
+    &quot;entry&quot;: &quot;server.wasm&quot;,
+    &quot;world&quot;: &quot;ilium:server/base@0.1.0&quot;,
+    &quot;exports&quot;: [&quot;service-provider&quot;]
+  },
+  &quot;client&quot;: {
+    &quot;entry&quot;: &quot;client.wasm&quot;,
+    &quot;world&quot;: &quot;ilium:client/base@0.1.0&quot;,
+    &quot;exports&quot;: [&quot;views&quot;]
+  },
+  &quot;capabilities&quot;: {
+    &quot;server&quot;: [
+      &quot;fs.read:path:/tmp/.ilium-1000/logs&quot;,
+      &quot;settings.read-kernel:debug&quot;, &quot;panes.read&quot;, &quot;journal.read&quot;,
+      &quot;services.use:ilium.core.settings/get&quot;,
+      &quot;services.provide:ilium.core.diagnostics/report&quot;,
+      &quot;extensions.provide:ilium.core.diagnostics/log-sinks&quot;,
+      &quot;extensions.provide:ilium.core.diagnostics/report-sections&quot;
+    ],
+    &quot;client&quot;: [&quot;ui.panels&quot;, &quot;fs.pick&quot;, &quot;notify.toast&quot;, &quot;help.read&quot;]
+  },
+  &quot;contributes&quot;: {
+    &quot;commands&quot;: [{ &quot;id&quot;: &quot;build-report&quot;, &quot;title&quot;: &quot;Build diagnostics report&quot;, &quot;category&quot;: &quot;Help&quot; }],
+    &quot;panels&quot;: [{ &quot;id&quot;: &quot;warnings&quot;, &quot;title&quot;: &quot;Warnings&quot;, &quot;icon&quot;: &quot;alert-triangle&quot; }],
+    &quot;help&quot;: [{ &quot;id&quot;: &quot;diagnostics&quot;, &quot;file&quot;: &quot;help/diagnostics.md&quot;, &quot;title&quot;: &quot;Logs and reports&quot; }],
+    &quot;services&quot;: {
+      &quot;ilium.core.diagnostics/report&quot;: {
+        &quot;build&quot;: {
+          &quot;params&quot;: { &quot;type&quot;: &quot;object&quot;, &quot;properties&quot;: { &quot;include_log_tail&quot;: { &quot;type&quot;: &quot;boolean&quot; } } },
+          &quot;result&quot;: { &quot;type&quot;: &quot;object&quot;, &quot;required&quot;: [&quot;text&quot;],
+            &quot;properties&quot;: { &quot;text&quot;: { &quot;type&quot;: &quot;string&quot;, &quot;maxLength&quot;: 262144 } } }
+        }
+      }
+    },
+    &quot;extension_points&quot;: [
+      { &quot;id&quot;: &quot;log-sinks&quot;, &quot;kind&quot;: &quot;hook&quot;, &quot;mode&quot;: &quot;observe&quot;, &quot;title&quot;: &quot;Log sinks&quot;,
+        &quot;payload_schema&quot;: { &quot;type&quot;: &quot;object&quot;, &quot;properties&quot;: {
+          &quot;level&quot;: { &quot;type&quot;: &quot;string&quot;, &quot;enum&quot;: [&quot;warn&quot;, &quot;error&quot;] }, &quot;plugin&quot;: { &quot;type&quot;: &quot;string&quot; },
+          &quot;target&quot;: { &quot;type&quot;: &quot;string&quot; }, &quot;message&quot;: { &quot;type&quot;: &quot;string&quot; }, &quot;time&quot;: { &quot;type&quot;: &quot;string&quot; } } },
+        &quot;risk&quot;: &quot;standard&quot;, &quot;deadline_ms&quot;: 20, &quot;max_handlers&quot;: 8, &quot;version&quot;: &quot;0.1.0&quot; },
+      { &quot;id&quot;: &quot;report-sections&quot;, &quot;kind&quot;: &quot;collect&quot;, &quot;title&quot;: &quot;Report sections&quot;,
+        &quot;entry_schema&quot;: { &quot;type&quot;: &quot;object&quot;, &quot;required&quot;: [&quot;id&quot;, &quot;title&quot;, &quot;service&quot;],
+          &quot;properties&quot;: { &quot;id&quot;: { &quot;type&quot;: &quot;string&quot; }, &quot;title&quot;: { &quot;type&quot;: &quot;string&quot; },
+                          &quot;service&quot;: { &quot;type&quot;: &quot;string&quot; } } },
+        &quot;max_entries&quot;: 32, &quot;dynamic&quot;: false, &quot;version&quot;: &quot;0.1.0&quot; }
+    ]
+  }
+}
+</code></pre>
+<h3 id="complete-manifest">Complete manifest</h3>
+<p>This is the whole manifest of the plugin at <code>ilium:plugin@0.1.0</code>. The Manifest section above shows the contributions in detail; here the required keys, the sides, the <code>capabilities</code> per side and the <code>activation</code> triggers are all present. Activation follows <a href="/pages/reference-kernel-and-boot/#startup-and-lazy-activation-of-the-30-core-plugins">startup and lazy activation</a>. [COR-050]</p>
+<pre><code class="language-json">{
+  &quot;api&quot;: &quot;ilium:plugin@0.1.0&quot;,
+  &quot;id&quot;: &quot;ilium.core.diagnostics&quot;,
+  &quot;name&quot;: &quot;Diagnostics&quot;,
+  &quot;version&quot;: &quot;0.1.0&quot;,
+  &quot;publisher&quot;: &quot;Ilium&quot;,
+  &quot;description&quot;: &quot;Diagnostics helps when something goes wrong.&quot;,
+  &quot;license&quot;: &quot;MIT&quot;,
+  &quot;server&quot;: {
+    &quot;entry&quot;: &quot;server.wasm&quot;,
+    &quot;world&quot;: &quot;ilium:server/base@0.1.0&quot;,
+    &quot;exports&quot;: [
+      &quot;service-provider&quot;
+    ]
+  },
+  &quot;client&quot;: {
+    &quot;entry&quot;: &quot;client.wasm&quot;,
+    &quot;world&quot;: &quot;ilium:client/base@0.1.0&quot;,
+    &quot;exports&quot;: [
+      &quot;views&quot;
+    ]
+  },
+  &quot;capabilities&quot;: {
+    &quot;server&quot;: [
+      &quot;fs.read:path:/tmp/.ilium-1000/logs&quot;,
+      &quot;settings.read-kernel:debug&quot;,
+      &quot;panes.read&quot;,
+      &quot;journal.read&quot;,
+      &quot;services.use:ilium.core.settings/get&quot;,
+      &quot;services.provide:ilium.core.diagnostics/report&quot;,
+      &quot;extensions.provide:ilium.core.diagnostics/log-sinks&quot;,
+      &quot;extensions.provide:ilium.core.diagnostics/report-sections&quot;
+    ],
+    &quot;client&quot;: [
+      &quot;ui.panels&quot;,
+      &quot;fs.pick&quot;,
+      &quot;notify.toast&quot;,
+      &quot;help.read&quot;
+    ]
+  },
+  &quot;activation&quot;: [
+    &quot;startup&quot;,
+    &quot;view:diagnostics.warnings&quot;
+  ],
+  &quot;replaceable&quot;: true,
+  &quot;surface&quot;: [
+    &quot;services:report&quot;,
+    &quot;points:log-sinks&quot;,
+    &quot;points:report-sections&quot;,
+    &quot;commands:build-report&quot;
+  ],
+  &quot;contributes&quot;: {
+    &quot;commands&quot;: [
+      {
+        &quot;id&quot;: &quot;build-report&quot;,
+        &quot;title&quot;: &quot;Build diagnostics report&quot;,
+        &quot;category&quot;: &quot;Help&quot;
+      }
+    ],
+    &quot;panels&quot;: [
+      {
+        &quot;id&quot;: &quot;warnings&quot;,
+        &quot;title&quot;: &quot;Warnings&quot;,
+        &quot;icon&quot;: &quot;alert-triangle&quot;
+      }
+    ],
+    &quot;help&quot;: [
+      {
+        &quot;id&quot;: &quot;diagnostics&quot;,
+        &quot;file&quot;: &quot;help/diagnostics.md&quot;,
+        &quot;title&quot;: &quot;Logs and reports&quot;
+      }
+    ],
+    &quot;services&quot;: {
+      &quot;ilium.core.diagnostics/report&quot;: {
+        &quot;build&quot;: {
+          &quot;params&quot;: {
+            &quot;type&quot;: &quot;object&quot;,
+            &quot;properties&quot;: {
+              &quot;include_log_tail&quot;: {
+                &quot;type&quot;: &quot;boolean&quot;
+              }
+            }
+          },
+          &quot;result&quot;: {
+            &quot;type&quot;: &quot;object&quot;,
+            &quot;required&quot;: [
+              &quot;text&quot;
+            ],
+            &quot;properties&quot;: {
+              &quot;text&quot;: {
+                &quot;type&quot;: &quot;string&quot;,
+                &quot;maxLength&quot;: 262144
+              }
+            }
+          }
+        }
+      }
+    },
+    &quot;extension_points&quot;: [
+      {
+        &quot;id&quot;: &quot;log-sinks&quot;,
+        &quot;kind&quot;: &quot;hook&quot;,
+        &quot;mode&quot;: &quot;observe&quot;,
+        &quot;title&quot;: &quot;Log sinks&quot;,
+        &quot;payload_schema&quot;: {
+          &quot;type&quot;: &quot;object&quot;,
+          &quot;properties&quot;: {
+            &quot;level&quot;: {
+              &quot;type&quot;: &quot;string&quot;,
+              &quot;enum&quot;: [
+                &quot;warn&quot;,
+                &quot;error&quot;
+              ]
+            },
+            &quot;plugin&quot;: {
+              &quot;type&quot;: &quot;string&quot;
+            },
+            &quot;target&quot;: {
+              &quot;type&quot;: &quot;string&quot;
+            },
+            &quot;message&quot;: {
+              &quot;type&quot;: &quot;string&quot;
+            },
+            &quot;time&quot;: {
+              &quot;type&quot;: &quot;string&quot;
+            }
+          }
+        },
+        &quot;risk&quot;: &quot;standard&quot;,
+        &quot;deadline_ms&quot;: 20,
+        &quot;max_handlers&quot;: 8,
+        &quot;version&quot;: &quot;0.1.0&quot;
+      },
+      {
+        &quot;id&quot;: &quot;report-sections&quot;,
+        &quot;kind&quot;: &quot;collect&quot;,
+        &quot;title&quot;: &quot;Report sections&quot;,
+        &quot;entry_schema&quot;: {
+          &quot;type&quot;: &quot;object&quot;,
+          &quot;required&quot;: [
+            &quot;id&quot;,
+            &quot;title&quot;,
+            &quot;service&quot;
+          ],
+          &quot;properties&quot;: {
+            &quot;id&quot;: {
+              &quot;type&quot;: &quot;string&quot;
+            },
+            &quot;title&quot;: {
+              &quot;type&quot;: &quot;string&quot;
+            },
+            &quot;service&quot;: {
+              &quot;type&quot;: &quot;string&quot;
+            }
+          }
+        },
+        &quot;max_entries&quot;: 32,
+        &quot;dynamic&quot;: false,
+        &quot;version&quot;: &quot;0.1.0&quot;
+      }
+    ]
+  },
+  &quot;limits_tier&quot;: &quot;first-party&quot;
+}
+</code></pre>
+<h3 id="samples">Samples</h3>
+<h4 id="read-the-debug-setting-without-writing-it">Read the Debug setting without writing it</h4>
+<p>The file logging switch is a kernel setting, and the Settings plugin owns the screen. Diagnostics only needs to know the state, so it reads the <code>debug</code> tab with the read-only grant and listens for <code>kernel-settings-changed</code>. No plugin writes kernel settings. See <a href="/pages/api-kernel-settings-and-keymap/">kernel settings</a> and <a href="/pages/capability-settings-read-kernel/">settings.read-kernel</a>.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::host::kernel_settings;
+
+fn file_logging_on() -&gt; bool {
+    kernel_settings::read(&quot;debug&quot;)
+        .ok()
+        .and_then(|json| serde_json::from_str::&lt;serde_json::Value&gt;(&amp;json).ok())
+        .and_then(|value| value[&quot;file_logging_enabled&quot;].as_bool())
+        .unwrap_or(false)
+}
+
+// Event::KernelSettingsChanged(change) if change.tab == &quot;debug&quot; &amp;&amp; change.keys.iter().any(|k| k == &quot;file_logging_enabled&quot;):
+//   self.logging_on = file_logging_on();
+//   self.tail_cursor = None; // a new server lifetime has a new file
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { read } from '@ilium/plugin-sdk/host/kernel-settings';
+
+export function fileLoggingOn(): boolean {
+  try {
+    return JSON.parse(read('debug')).file_logging_enabled === true;
+  } catch {
+    return false;
+  }
+}
+
+// case 'kernel-settings-changed': when event.val.tab === 'debug' and keys include 'file_logging_enabled':
+//   state.loggingOn = fileLoggingOn(); state.tailCursor = undefined;
+</code></pre>
+<h4 id="tail-the-log-file">Tail the log file</h4>
+<p>The log can grow large, so the plugin never reads it whole. It keeps a cursor and asks for a chunk. A chunk holds the bytes, a new cursor and a flag that says the start was cut. The newest warning lines go to the warnings panel, and the size goes to the Debug tab. See <a href="/pages/api-fs-atomic-and-tail/">tail</a> and <a href="/pages/capability-fs-read/">fs.read</a>.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::host::fs;
+use ilium_plugin_sdk::types::paths::FsPath;
+
+async fn poll_log(&amp;mut self, name: &amp;str) -&gt; Result&lt;(), PluginError&gt; {
+    let path = FsPath { scope: &quot;path:/tmp/.ilium-1000/logs&quot;.into(), path: name.into() };
+    let chunk = fs::tail(&amp;path, self.tail_cursor, 64 * 1024).await?;
+    self.tail_cursor = Some(chunk.cursor);
+    for line in String::from_utf8_lossy(&amp;chunk.bytes).lines() {
+        if line.contains(&quot; WARN &quot;) || line.contains(&quot; ERROR &quot;) {
+            self.warnings.push_back(line.to_string());
+            if self.warnings.len() &gt; 200 { self.warnings.pop_front(); }
+        }
+    }
+    if chunk.truncated { self.warnings.push_back(&quot;(earlier lines were skipped)&quot;.into()); }
+    Ok(())
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { tail } from '@ilium/plugin-sdk/host/fs';
+
+export async function pollLog(name: string): Promise&lt;void&gt; {
+  const chunk = await tail({ scope: 'path:/tmp/.ilium-1000/logs', path: name }, state.tailCursor, 64 * 1024);
+  state.tailCursor = chunk.cursor;
+  for (const line of new TextDecoder().decode(chunk.bytes).split('\n')) {
+    if (line.includes(' WARN ') || line.includes(' ERROR ')) {
+      state.warnings.push(line);
+      if (state.warnings.length &gt; 200) state.warnings.shift();
+    }
+  }
+  if (chunk.truncated) state.warnings.push('(earlier lines were skipped)');
+}
+</code></pre>
+<h4 id="write-the-plugins-own-diary">Write the plugin's own diary</h4>
+<p>Every plugin has a diary that the host keeps for it. It is separate from the Ilium log file. The plugin writes lines at five levels with the host log, at most 200 lines for each second. The user reads them with <code>ilium plugin logs ilium.core.diagnostics</code>. No import reads the diary back, so the plugin keeps what it needs itself. See <a href="/pages/api-log/">log</a>.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::host::log::{self, Level};
+
+fn note_report(&amp;self, sections: usize, bytes: usize, slow: &amp;[String]) {
+    log::log(Level::Info, &amp;format!(&quot;report built, {sections} sections&quot;));
+    for name in slow {
+        log::log(Level::Warn, &amp;format!(&quot;section {name}: no reply in 2000 ms&quot;));
+    }
+    if bytes &gt; 200 * 1024 {
+        log::log(Level::Debug, &amp;format!(&quot;report is {} KiB&quot;, bytes / 1024));
+    }
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { log } from '@ilium/plugin-sdk/host/log';
+
+export function noteReport(sections: number, bytes: number, slow: string[]): void {
+  log('info', `report built, ${sections} sections`);
+  for (const name of slow) log('warn', `section ${name}: no reply in 2000 ms`);
+  if (bytes &gt; 200 * 1024) log('debug', `report is ${Math.floor(bytes / 1024)} KiB`);
+}
+</code></pre>
+<h4 id="keep-a-journal-of-warnings">Keep a journal of warnings</h4>
+<p>Warnings that matter to a pane go to the journal, so the story of that pane has them. The journal is durable and each entry has a kind and a JSON payload. The report reads the newest entries back. Reading entries that other plugins wrote needs the <code>journal.read</code> grant. See <a href="/pages/api-durable-timers/">durable timers and the journal</a> and <a href="/pages/capability-journal-read/">journal.read</a>.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::host::journal;
+
+fn remember(&amp;self, pane: Option&lt;NodeId&gt;, line: &amp;str) -&gt; Result&lt;(), PluginError&gt; {
+    let payload = serde_json::json!({ &quot;line&quot;: line }).to_string();
+    journal::log_event(pane, &quot;diagnostics.warning&quot;, &amp;payload)
+}
+
+fn recent_for_report(&amp;self, pane: NodeId) -&gt; Vec&lt;String&gt; {
+    journal::read(pane, 0, 20)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|entry| entry.kind == &quot;diagnostics.warning&quot;)
+        .map(|entry| entry.payload_json)
+        .collect()
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import * as journal from '@ilium/plugin-sdk/host/journal';
+
+export const remember = (pane: bigint | undefined, line: string): void =&gt;
+  journal.logEvent(pane, 'diagnostics.warning', JSON.stringify({ line }));
+
+export const recentForReport = (pane: bigint): string[] =&gt;
+  journal.read(pane, 0n, 20)
+    .filter((entry) =&gt; entry.kind === 'diagnostics.warning')
+    .map((entry) =&gt; entry.payloadJson);
+</code></pre>
+<h4 id="build-the-report-in-a-service">Build the report in a service</h4>
+<p>The service <code>report/build</code> returns the text. It starts with its own facts, then asks each contributed section for text. A section that is slow or fails is named and skipped, so one bad contributor cannot stop the report. The result is cut at 256 KiB. The call is deferred, so the plugin answers when the sections are in. See <a href="/pages/api-services/">services</a> and <a href="/pages/api-client-requests/">client requests</a>.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::host::{extensions, services};
+
+async fn build_report(&amp;mut self) -&gt; String {
+    let mut text = self.core_facts();
+    for entry in extensions::list(&quot;ilium.core.diagnostics/report-sections&quot;).unwrap_or_default() {
+        let Ok(section) = serde_json::from_str::&lt;Section&gt;(&amp;entry.entry_json) else { continue };
+        match services::call(&amp;section.service, &quot;text&quot;, &quot;{}&quot;).await {
+            Ok(reply) =&gt; {
+                let body: String = reply.chars().take(64 * 1024).collect();
+                text.push_str(&amp;format!(&quot;\n## {} (from {})\n{}\n&quot;, section.title, entry.contributor, body));
+            }
+            Err(error) =&gt; {
+                log::log(Level::Warn, &amp;format!(&quot;section {}: {}&quot;, section.id, error.code));
+                text.push_str(&amp;format!(&quot;\n## {}\n(not available)\n&quot;, section.title));
+            }
+        }
+    }
+    text.chars().take(256 * 1024).collect()
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import * as extensions from '@ilium/plugin-sdk/host/extensions';
+import { call } from '@ilium/plugin-sdk/host/services';
+import { log } from '@ilium/plugin-sdk/host/log';
+
+export async function buildReport(): Promise&lt;string&gt; {
+  let text = coreFacts();
+  for (const entry of extensions.list('ilium.core.diagnostics/report-sections')) {
+    const section = JSON.parse(entry.entryJson) as { id: string; title: string; service: string };
+    try {
+      const reply = await call(section.service, 'text', '{}');
+      text += `\n## ${section.title} (from ${entry.contributor})\n${reply.slice(0, 64 * 1024)}\n`;
+    } catch (error) {
+      log('warn', `section ${section.id}: ${(error as { code: string }).code}`);
+      text += `\n## ${section.title}\n(not available)\n`;
+    }
+  }
+  return text.slice(0, 256 * 1024);
+}
+</code></pre>
+<h4 id="owner-side-run-the-log-sinks-hook">Owner side: run the <code>log-sinks</code> hook</h4>
+<p><code>log-sinks</code> is an observe hook. Warnings and errors that the plugin finds in the log are sent to it, one payload for each line. Handlers may forward them to a chat tool or a metrics tool. Replies are ignored, and a handler that fails does not matter. The plugin lists the current contributors only to show the count in the panel, and it lists again on <code>ilium.extensions/changed</code>. See <a href="/pages/api-events/">events</a> and <a href="/pages/requests-and-outcomes/">requests and outcomes</a>.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::host::extensions;
+use ilium_plugin_sdk::types::requests::{Outcome, RequestResult};
+
+fn publish_line(&amp;mut self, level: &amp;str, plugin: &amp;str, message: &amp;str, time: &amp;str) {
+    if self.sink_count == 0 { return; } // nobody listens
+    let payload = serde_json::json!({
+        &quot;level&quot;: level, &quot;plugin&quot;: plugin, &quot;target&quot;: &quot;plugin&quot;, &quot;message&quot;: message, &quot;time&quot;: time,
+    });
+    if let Ok(request) = extensions::run_hook(&quot;ilium.core.diagnostics/log-sinks&quot;, &amp;payload.to_string()) {
+        self.observed.insert(request);
+    }
+}
+
+fn on_completed(&amp;mut self, done: RequestResult) {
+    self.observed.remove(&amp;done.request); // an observe hook has no reply to take
+}
+
+// Event::TopicPublished(t) if t.topic == &quot;ilium.extensions/changed&quot;:
+//   self.sink_count = extensions::list(&quot;ilium.core.diagnostics/log-sinks&quot;).map_or(0, |list| list.len());
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import * as extensions from '@ilium/plugin-sdk/host/extensions';
+
+export function publishLine(level: string, plugin: string, message: string, time: string): void {
+  if (state.sinkCount === 0) return; // nobody listens
+  const request = extensions.runHook('ilium.core.diagnostics/log-sinks',
+    JSON.stringify({ level, plugin, target: 'plugin', message, time }));
+  state.observed.add(request);
+}
+
+export const onCompleted = (request: bigint): void =&gt; {
+  state.observed.delete(request); // an observe hook has no reply to take
+};
+
+// case 'topic-published': when event.val.topic === 'ilium.extensions/changed',
+// state.sinkCount = extensions.list('ilium.core.diagnostics/log-sinks').length.
+</code></pre>
+<h4 id="attach-a-log-to-an-issue">Attach a log to an issue</h4>
+<p>The user picks a file to attach. A dialog warns that logs hold private text and shows the size. Only after the user confirms does the plugin copy the log to the place the user chose. The default button is Cancel. The copy is a plain read and write, so it keeps the original. See <a href="/pages/widgets-layout-and-containers/">dialogs</a>, <a href="/pages/widgets-pickers/">pickers</a> and <a href="/pages/capability-fs-pick/">fs.pick</a>.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::types::ui::DialogKind;
+
+fn render_attach(&amp;self, tree: &amp;mut Tree) -&gt; NodeHandle {
+    let message = format!(
+        &quot;{} ({} KiB) can hold prompts, replies and file text. Remove private text before you share it.&quot;,
+        self.picked_name, self.picked_kib
+    );
+    tree.dialog(&quot;attach-log&quot;, &quot;Attach a log to an issue&quot;)
+        .kind(DialogKind::DangerConfirm)
+        .message(&amp;message)
+        .width(Constraint::Length(56))
+        .height(Constraint::Length(10))
+        .child(tree.path_field(PathKind::SaveFile).key(&quot;destination&quot;).value(&amp;self.destination))
+}
+
+// Event::UiAction(action) if action.key == &quot;attach-log&quot; &amp;&amp; action.kind == ActionKind::Activated
+//   and the button id is &quot;confirm&quot;: copy the file, then submit a Toast intent that names the destination.
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { dialog, length, pathField } from '@ilium/plugin-sdk/ui/build';
+
+export const renderAttach = (state: AttachState) =&gt;
+  dialog('attach-log', {
+    title: 'Attach a log to an issue',
+    kind: 'danger-confirm',
+    message: `${state.pickedName} (${state.pickedKib} KiB) can hold prompts, replies and file text. ` +
+      'Remove private text before you share it.',
+    width: length(56),
+    height: length(10),
+    buttons: [
+      { id: 'confirm', label: 'Copy log', role: 'primary', isCancel: false },
+      { id: 'cancel', label: 'Cancel', role: 'secondary', isCancel: true },
+    ],
+  }, [pathField('save-file', { key: 'destination', value: state.destination })]);
+
+// case 'ui-action': when key is 'attach-log', kind is 'activated' and the button is 'confirm':
+// copy the file, then submit a toast intent that names the destination.
+</code></pre>
+<h3 id="extension-points">Extension points</h3>
+<p>Other plugins change what <code>ilium.core.diagnostics</code> does through the points below. The plugin owns each point (grant <code>extensions.provide:ilium.core.diagnostics/&lt;point&gt;</code>). Contributors need <code>extensions.contribute:ilium.core.diagnostics/&lt;point&gt;</code>. See <a href="/pages/api-extension-points/">Extension points</a> for the mechanism and <a href="/pages/extending-core-plugins/">Extending core plugins</a> for the five ways to work with a core feature.</p>
+<table>
+<thead>
+<tr>
+<th>Point</th>
+<th>Kind</th>
+<th>What it does</th>
+<th>Payload</th>
+<th>Risk</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>log-sinks</code></td>
+<td>hook (observe)</td>
+<td>Receive log records, for example to forward them.</td>
+<td>level, plugin, target, message, time (records at warn and above only)</td>
+<td>standard</td>
+</tr>
+<tr>
+<td><code>report-sections</code></td>
+<td>collect</td>
+<td>Add a section to the diagnostics report.</td>
+<td>entry: id, title, service (returns text, at most 64 KiB)</td>
+<td>standard</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Services</strong> (grant <code>services.use:&lt;name&gt;</code>):</p>
+<ul>
+<li><code>ilium.core.diagnostics/report</code>: build: build the diagnostics report</li>
+</ul>
+<p><strong>Replaceable:</strong> yes. A replacement lists <code>"replaces": ["ilium.core.diagnostics"]</code> and provides the whole surface (see <a href="/pages/extending-core-plugins/#replace">Extending core plugins</a>).</p>
+<h4 id="example-adds-gpu-facts-to-the-report">Example: Adds GPU facts to the report</h4>
+<p>A package adds this entry in its manifest. It needs no code.</p>
+<pre><code class="language-json">{
+  &quot;api&quot;: &quot;ilium:plugin@0.1.0&quot;,
+  &quot;capabilities&quot;: { &quot;server&quot;: [&quot;extensions.contribute:ilium.core.diagnostics/report-sections&quot;] },
+  &quot;contributes&quot;: {
+    &quot;extensions&quot;: [
+      {
+        &quot;point&quot;: &quot;ilium.core.diagnostics/report-sections&quot;,
+        &quot;id&quot;: &quot;gpu&quot;,
+        &quot;priority&quot;: 50,
+        &quot;entry&quot;: {
+          &quot;title&quot;: &quot;GPU&quot;,
+          &quot;service&quot;: &quot;example.gpu/report&quot;
+        }
+      }
+    ]
+  }
+}
+</code></pre>
+<h3 id="abi-used">ABI used</h3>
+<ul>
+<li><a href="/pages/api-kernel-settings-and-keymap/">Kernel settings</a> and <a href="/pages/capability-settings-read-kernel/">settings.read-kernel</a></li>
+<li><a href="/pages/api-fs/">fs</a>, <a href="/pages/api-fs-atomic-and-tail/">tail</a>, <a href="/pages/capability-fs-read/">fs.read</a> and <a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/api-log/">Log</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and the journal</a> and <a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/api-services/">Services</a> and <a href="/pages/api-client-requests/">client requests</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a> and <a href="/pages/widgets-pickers/">pickers</a></li>
+<li><a href="/pages/api-events/">Events</a> and <a href="/pages/requests-and-outcomes/">requests and outcomes</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+</ul>
+<h3 id="see-also">See also</h3>
+<ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/settings-screens/">Settings screens</a></li>
+</ul>
+<h3 id="security">Security</h3>
+<p>Log sinks receive redacted records ([SEC-249]); see <a href="/pages/reference-secrets/">Secrets</a>.</p>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/core-plugin-agent-setup/"><small>Previous</small>Agent setup</a><a class="next" href="/pages/tutorial-01-agent-badge/"><small>Next</small>1. Agent badge</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#what-it-covers">What it covers</a></li><li class="l2"><a href="#see-it">See it</a></li><li class="l2"><a href="#what-the-user-sees">What the user sees</a></li><li class="l2"><a href="#manifest">Manifest</a></li><li class="l2"><a href="#complete-manifest">Complete manifest</a></li><li class="l2"><a href="#samples">Samples</a></li><li class="l3"><a href="#read-the-debug-setting-without-writing-it">Read the Debug setting without writing it</a></li><li class="l3"><a href="#tail-the-log-file">Tail the log file</a></li><li class="l3"><a href="#write-the-plugins-own-diary">Write the plugin&#x27;s own diary</a></li><li class="l3"><a href="#keep-a-journal-of-warnings">Keep a journal of warnings</a></li><li class="l3"><a href="#build-the-report-in-a-service">Build the report in a service</a></li><li class="l3"><a href="#owner-side-run-the-log-sinks-hook">Owner side: run the log-sinks hook</a></li><li class="l3"><a href="#attach-a-log-to-an-issue">Attach a log to an issue</a></li><li class="l2"><a href="#extension-points">Extension points</a></li><li class="l3"><a href="#example-adds-gpu-facts-to-the-report">Example: Adds GPU facts to the report</a></li><li class="l2"><a href="#abi-used">ABI used</a></li><li class="l2"><a href="#see-also">See also</a></li><li class="l2"><a href="#security">Security</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

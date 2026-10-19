@@ -1,0 +1,233 @@
+{
+  "api": "ilium:plugin@0.1.0",
+  "id": "ilium.core.agent-setup",
+  "name": "Agent setup",
+  "version": "0.1.0",
+  "publisher": "Ilium",
+  "description": "Agents work better in Ilium when their instruction files describe what Ilium offers.",
+  "license": "MIT",
+  "server": {
+    "entry": "server.wasm",
+    "world": "ilium:server/base@0.1.0",
+    "exports": [
+      "service-provider"
+    ]
+  },
+  "client": {
+    "entry": "client.wasm",
+    "world": "ilium:client/base@0.1.0",
+    "exports": [
+      "views"
+    ]
+  },
+  "capabilities": {
+    "server": [
+      "fs.read:agent-config:claude",
+      "fs.write:agent-config:claude",
+      "fs.read:agent-config:codex",
+      "fs.write:agent-config:codex",
+      "fs.read:project",
+      "fs.write:project",
+      "projects.read",
+      "settings.read-kernel:agent-setup",
+      "services.provide:ilium.core.agent-setup/install",
+      "extensions.provide:ilium.core.agent-setup/instruction-blocks",
+      "extensions.provide:ilium.core.agent-setup/targets",
+      "extensions.provide:ilium.core.agent-setup/before-install"
+    ],
+    "client": [
+      "ui.panels",
+      "help.read",
+      "settings.write-kernel:setup"
+    ]
+  },
+  "activation": [
+    "settings:setup",
+    "command:refresh",
+    "service:install"
+  ],
+  "replaceable": true,
+  "surface": [
+    "services:install",
+    "points:instruction-blocks",
+    "points:targets",
+    "points:before-install",
+    "commands:refresh"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "id": "refresh",
+        "title": "Refresh agent instructions",
+        "category": "Agents"
+      }
+    ],
+    "help": [
+      {
+        "id": "agent-setup",
+        "file": "help/agent-setup.md",
+        "title": "Agent setup"
+      }
+    ],
+    "services": {
+      "ilium.core.agent-setup/install": {
+        "install": {
+          "params": {
+            "type": "object",
+            "required": [
+              "block",
+              "target"
+            ],
+            "properties": {
+              "block": {
+                "type": "string"
+              },
+              "target": {
+                "type": "string"
+              }
+            }
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "remove": {
+          "params": {
+            "type": "object",
+            "required": [
+              "block",
+              "target"
+            ],
+            "properties": {
+              "block": {
+                "type": "string"
+              },
+              "target": {
+                "type": "string"
+              }
+            }
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "status": {
+          "params": {
+            "type": "object"
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "targets": {
+                "type": "array"
+              }
+            }
+          }
+        }
+      }
+    },
+    "extension_points": [
+      {
+        "id": "instruction-blocks",
+        "kind": "collect",
+        "title": "Instruction blocks",
+        "entry_schema": {
+          "type": "object",
+          "required": [
+            "id",
+            "title",
+            "marker",
+            "file"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "marker": {
+              "type": "string"
+            },
+            "file": {
+              "type": "string"
+            }
+          }
+        },
+        "max_entries": 8,
+        "dynamic": false,
+        "version": "0.1.0"
+      },
+      {
+        "id": "targets",
+        "kind": "collect",
+        "title": "Target files",
+        "entry_schema": {
+          "type": "object",
+          "required": [
+            "id",
+            "title",
+            "path_template",
+            "scope"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "path_template": {
+              "type": "string"
+            },
+            "scope": {
+              "type": "string",
+              "enum": [
+                "global",
+                "project"
+              ]
+            }
+          }
+        },
+        "max_entries": 16,
+        "dynamic": false,
+        "version": "0.1.0"
+      },
+      {
+        "id": "before-install",
+        "kind": "hook",
+        "mode": "veto",
+        "title": "Before install",
+        "payload_schema": {
+          "type": "object",
+          "properties": {
+            "target": {
+              "type": "string"
+            },
+            "block": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            }
+          }
+        },
+        "risk": "high",
+        "deadline_ms": 20,
+        "max_handlers": 4,
+        "version": "0.1.0"
+      }
+    ]
+  },
+  "limits_tier": "first-party"
+}

@@ -1,0 +1,1034 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>5. TODO scanner with files and jobs | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details open><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/" aria-current="page">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Tutorials</b></p>
+<h1>5. TODO scanner with files and jobs</h1>
+
+<p>This step scans the project's Rust source files for <code>TODO</code> lines and lists them in a panel. The file list comes from a scoped scan of the project. The text search runs in a background job, so a large project does not block the server. The panel shows the job's progress in a gauge, and Enter on a result opens the editor at that line.</p>
+<p>The step adds three parts: a pure search in the core crate, a server workflow that chains a scan into a job and publishes the result, and a client panel that subscribes to the result.</p>
+<h3 id="you-need">You need</h3>
+<ul>
+<li><a href="/pages/tutorial-04-finished-notice/">Tutorial step 4</a> finished.</li>
+<li>Server grants, new: <code>fs.read:project</code> (the scan and the reads; the scope is the session's project directory, and its <code>.ilium</code> folder is hidden, see <a href="/pages/capability-fs-read/">capability fs.read</a>) and <code>jobs.run</code> (see <a href="/pages/capability-jobs-run/">capability jobs.run</a>). Existing grants are unchanged.</li>
+<li>Client grants, new: <code>fs.read:project</code> (the editor needs it for the path it opens), <code>editor.edit</code> (see <a href="/pages/capability-editor-edit/">capability editor.edit</a>) and <code>topics.subscribe:example.agent-tools/*</code> (see <a href="/pages/capability-topics-subscribe/">capability topics.subscribe</a>).</li>
+<li>Rust with <code>ilium-plugin-sdk</code> and <code>serde_json</code>, or TypeScript with <code>@ilium/plugin-sdk</code> and Bun. Every listing has a <strong>Rust</strong> block and a <strong>TypeScript</strong> block. The TypeScript scan workflow follows the Rust one in the same section.</li>
+</ul>
+<h3 id="what-changed-from-step-4">What changed from step 4</h3>
+<ul>
+<li><code>core/src/todo.rs</code> is new. It finds <code>TODO</code> lines in a text and makes no host calls.</li>
+<li><code>server/src/scan.rs</code> is new. It starts the scan, starts the job and publishes the results.</li>
+<li><code>server/src/lib.rs</code> routes the scan command, request completions, job progress and topics to <code>scan.rs</code>.</li>
+<li><code>client/src/todos.rs</code> is new. It shows the results and opens the editor.</li>
+<li><code>manifest.json</code> adds the grants, the job, the topics, the command, the panel and the keybinding.</li>
+</ul>
+<h3 id="the-flow">The flow</h3>
+<p><code>fs.scan</code> returns a request id at once. When its <code>request-completed</code> event arrives, the plugin takes the file list with <code>take-entries</code> and starts a job with it. The job reads each file and returns the hits as JSON. When the job completes, the plugin publishes the hits to <code>example.agent-tools/todos</code>, and the panel redraws. Each <code>job-progress</code> event becomes a publish to <code>example.agent-tools/scan-progress</code>.</p>
+<figure>
+<svg viewBox="0 0 400 320" role="img" aria-label="Command, scan, job, publish and panel for the TODO scan" width="600" height="480">
+  <title>TODO scan request chain</title>
+  <desc>A command starts fs.scan. Its completion starts a job. The job reads files through the project scope, the server publishes the hits, and the client panel shows them.</desc>
+  <defs>
+    <marker id="todo-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,0 L8,4 L0,8 z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <rect x="20" y="8" width="240" height="34" rx="4" fill="none" stroke="currentColor"/>
+  <text x="140" y="29" font-size="11" text-anchor="middle" fill="currentColor">Command: scan-todos</text>
+  <line x1="140" y1="42" x2="140" y2="60" stroke="currentColor" marker-end="url(#todo-arrow)"/>
+  <rect x="20" y="62" width="240" height="34" rx="4" fill="none" stroke="currentColor"/>
+  <text x="140" y="83" font-size="11" text-anchor="middle" fill="currentColor">Server: fs.scan (async)</text>
+  <line x1="140" y1="96" x2="140" y2="114" stroke="currentColor" marker-end="url(#todo-arrow)"/>
+  <rect x="20" y="116" width="240" height="34" rx="4" fill="none" stroke="currentColor"/>
+  <text x="140" y="137" font-size="11" text-anchor="middle" fill="currentColor">Server: jobs.start (todo-scan)</text>
+  <line x1="140" y1="150" x2="140" y2="168" stroke="currentColor" marker-end="url(#todo-arrow)"/>
+  <rect x="20" y="170" width="240" height="34" rx="4" fill="none" stroke="currentColor"/>
+  <text x="140" y="191" font-size="11" text-anchor="middle" fill="currentColor">Job: job-runner.run on worker bank</text>
+  <line x1="140" y1="204" x2="140" y2="222" stroke="currentColor" marker-end="url(#todo-arrow)"/>
+  <rect x="20" y="224" width="240" height="34" rx="4" fill="none" stroke="currentColor"/>
+  <text x="140" y="245" font-size="11" text-anchor="middle" fill="currentColor">Server: topics.publish</text>
+  <line x1="140" y1="258" x2="140" y2="276" stroke="currentColor" marker-end="url(#todo-arrow)"/>
+  <rect x="20" y="278" width="240" height="34" rx="4" fill="none" stroke="currentColor"/>
+  <text x="140" y="299" font-size="11" text-anchor="middle" fill="currentColor">Client: TODO panel and editor</text>
+  <rect x="296" y="62" width="100" height="34" rx="4" fill="none" stroke="currentColor" stroke-dasharray="5 3"/>
+  <text x="346" y="83" font-size="11" text-anchor="middle" fill="currentColor">Scope: project</text>
+  <line x1="262" y1="79" x2="294" y2="79" stroke="currentColor" stroke-dasharray="5 3" marker-end="url(#todo-arrow)"/>
+  <rect x="296" y="170" width="100" height="34" rx="4" fill="none" stroke="currentColor" stroke-dasharray="5 3"/>
+  <text x="346" y="191" font-size="11" text-anchor="middle" fill="currentColor">Scope: project</text>
+  <line x1="262" y1="187" x2="294" y2="187" stroke="currentColor" stroke-dasharray="5 3" marker-end="url(#todo-arrow)"/>
+</svg>
+<figcaption>Command, scan, job, publish and panel. Dashed boxes are the project scope that the scan and the job read through.</figcaption>
+</figure>
+
+<h3 id="surface-used-by-this-step">Surface used by this step</h3>
+<table>
+<thead>
+<tr>
+<th>Call or event</th>
+<th>Side</th>
+<th>Kind</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>fs::scan(&amp;path, glob, max_entries)</code></td>
+<td>server</td>
+<td>async, <code>request-id</code></td>
+<td>Lists files that match a glob such as <code>**/*.rs</code>. <code>max_entries</code> is at most 65,536 (L3).</td>
+</tr>
+<tr>
+<td><code>fs::take_entries(request)</code></td>
+<td>server</td>
+<td>sync, <code>Option</code></td>
+<td>The matched paths and entries, once.</td>
+</tr>
+<tr>
+<td><code>fs::read(&amp;path, offset, max_bytes)</code></td>
+<td>server, job</td>
+<td>sync, <code>Result</code></td>
+<td>Reads up to 1 MiB. A job uses the plugin's own grants (U29).</td>
+</tr>
+<tr>
+<td><code>jobs::start(kind, input)</code></td>
+<td>server</td>
+<td>async, <code>request-id</code></td>
+<td>Starts a declared job kind with bytes as input.</td>
+</tr>
+<tr>
+<td><code>jobs::take_output(job)</code></td>
+<td>server</td>
+<td>sync, <code>Option</code></td>
+<td>The job's bytes, once.</td>
+</tr>
+<tr>
+<td><code>jobs::report_progress(percent)</code></td>
+<td>job</td>
+<td>sync</td>
+<td>Reports 0 to 100. Only the newest value per job arrives.</td>
+</tr>
+<tr>
+<td><code>jobs::is_cancelled()</code></td>
+<td>job</td>
+<td>sync, <code>bool</code></td>
+<td>True after a cancel.</td>
+</tr>
+<tr>
+<td><code>topics::publish(topic, payload_json)</code></td>
+<td>server</td>
+<td>sync, <code>Result</code></td>
+<td>Publishes JSON to a declared topic under the plugin's id.</td>
+</tr>
+<tr>
+<td>Event <code>command-invoked</code></td>
+<td>server</td>
+<td>event</td>
+<td>The scan command ran.</td>
+</tr>
+<tr>
+<td>Event <code>request-completed</code></td>
+<td>server</td>
+<td>event</td>
+<td>A scan or job finished, with its outcome.</td>
+</tr>
+<tr>
+<td>Event <code>job-progress</code></td>
+<td>server</td>
+<td>event</td>
+<td>The percent of a running job.</td>
+</tr>
+<tr>
+<td>Event <code>topic-published</code></td>
+<td>client</td>
+<td>event</td>
+<td>The payload of a subscribed topic.</td>
+</tr>
+<tr>
+<td>Intent <code>editor-open</code></td>
+<td>client</td>
+<td>intent</td>
+<td>Opens a file at a 0-based line, in a split pane.</td>
+</tr>
+<tr>
+<td>Widgets <code>gauge</code> and <code>list</code></td>
+<td>client</td>
+<td>UI tree</td>
+<td>The progress bar and the hit list.</td>
+</tr>
+</tbody>
+</table>
+<p>Widget defaults come from the SDK builder (W1). A list sends <code>activated</code> with the row index on Enter (W11).</p>
+<h3 id="manifest">Manifest</h3>
+<p>This step adds the entries below to the step 4 manifest. Keep every other entry from step 4. <code>exports</code> lists <code>job-runner</code>, so the host creates a job instance from the server component. The job's <code>deadline_ms</code> and <code>memory_mib</code> are requested limits. A value above the tier ceiling is clamped and logged, never refused. For a T1 plugin the ceilings are 60,000 ms of CPU and 512 MiB (L2).</p>
+<pre><code class="language-json">{
+  &quot;server&quot;: { &quot;entry&quot;: &quot;server.wasm&quot;, &quot;world&quot;: &quot;ilium:server/base@0.1.0&quot;, &quot;exports&quot;: [&quot;job-runner&quot;] },
+  &quot;capabilities&quot;: {
+    &quot;server&quot;: [&quot;fs.read:project&quot;, &quot;jobs.run&quot;],
+    &quot;client&quot;: [&quot;fs.read:project&quot;, &quot;editor.edit&quot;, &quot;topics.subscribe:example.agent-tools/*&quot;]
+  },
+  &quot;contributes&quot;: {
+    &quot;commands&quot;: [{ &quot;id&quot;: &quot;scan-todos&quot;, &quot;title&quot;: &quot;Scan the project for TODO lines&quot; },
+                 { &quot;id&quot;: &quot;show-todos&quot;, &quot;title&quot;: &quot;Show TODO results&quot; }],
+    &quot;keybindings&quot;: [
+      { &quot;command&quot;: &quot;example.agent-tools/scan-todos&quot;, &quot;chord&quot;: &quot;s&quot;, &quot;mode&quot;: &quot;prefix&quot; },
+      { &quot;command&quot;: &quot;example.agent-tools/show-todos&quot;, &quot;chord&quot;: &quot;t&quot;, &quot;mode&quot;: &quot;prefix&quot; }
+    ],
+    &quot;panels&quot;: [{ &quot;id&quot;: &quot;todos&quot;, &quot;title&quot;: &quot;TODO scan&quot;, &quot;modal&quot;: false }],
+    &quot;jobs&quot;: [{ &quot;kind&quot;: &quot;todo-scan&quot;, &quot;deadline_ms&quot;: 10000, &quot;memory_mib&quot;: 64 }],
+    &quot;topics&quot;: { &quot;publishes&quot;: [&quot;example.agent-tools/todos&quot;, &quot;example.agent-tools/scan-progress&quot;] }
+  }
+}
+</code></pre>
+<h3 id="the-pure-search">The pure search</h3>
+<p>The search makes no host calls, so <code>cargo test</code> runs it on the development machine.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">// core/src/todo.rs. Finds TODO lines in one file's text.
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TodoHit {
+    pub path: String,
+    pub line: u32,
+    pub text: String,
+}
+
+/// Returns every line that contains `TODO`, numbered from 1.
+pub fn find_todos(path: &amp;str, text: &amp;str) -&gt; Vec&lt;TodoHit&gt; {
+    text.lines()
+        .enumerate()
+        .filter(|(_, line)| line.contains(&quot;TODO&quot;))
+        .map(|(index, line)| TodoHit {
+            path: path.to_string(),
+            line: index as u32 + 1,
+            text: line.trim().to_string(),
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn numbers_lines_from_one() {
+        let hits = find_todos(&quot;src/a.rs&quot;, &quot;fn a() {}\n// TODO: fix\n&quot;);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].line, 2);
+    }
+}
+</code></pre>
+<h3 id="server-scan-job-and-publish">Server: scan, job and publish</h3>
+<p><code>scan.rs</code> keeps the request id of the scan and of the job in two thread-local slots. A completion for any other request matches neither slot and is ignored. <code>run_job</code> runs on the worker bank, in a second instance of the plugin, under the manifest's CPU deadline and memory limit.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">// server/src/scan.rs. TODO scan workflow on the server side.
+use std::cell::Cell;
+
+use agent_tools_core::todo::{find_todos, TodoHit};
+use ilium_plugin_sdk::host::{fs, jobs, log::{self, Level}, topics};
+use ilium_plugin_sdk::prelude::*;
+
+pub const SCAN_COMMAND: &amp;str = &quot;example.agent-tools/scan-todos&quot;;
+pub const JOB_KIND: &amp;str = &quot;todo-scan&quot;;
+pub const RESULTS_TOPIC: &amp;str = &quot;example.agent-tools/todos&quot;;
+pub const PROGRESS_TOPIC: &amp;str = &quot;example.agent-tools/scan-progress&quot;;
+const SCAN_GLOB: &amp;str = &quot;**/*.rs&quot;;
+const MAX_FILES: u32 = 4096;
+const MAX_READ_BYTES: u32 = 1024 * 1024;
+
+thread_local! {
+    static SCAN_REQUEST: Cell&lt;Option&lt;u64&gt;&gt; = Cell::new(None);
+    static JOB_REQUEST: Cell&lt;Option&lt;u64&gt;&gt; = Cell::new(None);
+}
+
+fn project_path(path: &amp;str) -&gt; FsPath {
+    FsPath { scope: &quot;project&quot;.to_string(), path: path.to_string() }
+}
+
+/// Starts the scan. Its completion arrives later as `request-completed`.
+pub fn start_scan() {
+    match fs::scan(&amp;project_path(&quot;&quot;), SCAN_GLOB, MAX_FILES) {
+        Ok(request) =&gt; SCAN_REQUEST.with(|slot| slot.set(Some(request))),
+        Err(error) =&gt; log::log(Level::Warn, &amp;format!(&quot;scan not started: {}&quot;, error.message)),
+    }
+}
+
+/// Returns true when the completed request belongs to this workflow.
+pub fn on_request_completed(request: u64) -&gt; bool {
+    if SCAN_REQUEST.with(|slot| slot.get()) == Some(request) {
+        SCAN_REQUEST.with(|slot| slot.set(None));
+        start_job(request);
+        return true;
+    }
+    if JOB_REQUEST.with(|slot| slot.get()) == Some(request) {
+        JOB_REQUEST.with(|slot| slot.set(None));
+        publish_results(request);
+        return true;
+    }
+    false
+}
+
+fn start_job(scan_request: u64) {
+    let Some(entries) = fs::take_entries(scan_request) else {
+        log::log(Level::Warn, &quot;scan finished without a result&quot;);
+        return;
+    };
+    let paths: Vec&lt;String&gt; = entries.into_iter().map(|(path, _)| path).collect();
+    let Ok(input) = serde_json::to_vec(&amp;paths) else {
+        log::log(Level::Warn, &quot;scan result could not be encoded&quot;);
+        return;
+    };
+    match jobs::start(JOB_KIND, &amp;input) {
+        Ok(job) =&gt; JOB_REQUEST.with(|slot| slot.set(Some(job))),
+        Err(error) =&gt; log::log(Level::Warn, &amp;format!(&quot;job not started: {}&quot;, error.message)),
+    }
+}
+
+fn publish_results(job: u64) {
+    let Some(output) = jobs::take_output(job) else {
+        log::log(Level::Warn, &quot;job finished without output&quot;);
+        return;
+    };
+    if let Err(error) = topics::publish(RESULTS_TOPIC, &amp;String::from_utf8_lossy(&amp;output)) {
+        log::log(Level::Warn, &amp;format!(&quot;results not published: {}&quot;, error.message));
+    }
+}
+
+/// Forwards job progress as a topic, so the panel can draw the gauge.
+pub fn on_job_progress(job: u64, percent: f32) {
+    if JOB_REQUEST.with(|slot| slot.get()) != Some(job) {
+        return;
+    }
+    let payload = serde_json::json!({ &quot;percent&quot;: percent }).to_string();
+    if let Err(error) = topics::publish(PROGRESS_TOPIC, &amp;payload) {
+        log::log(Level::Warn, &amp;format!(&quot;progress not published: {}&quot;, error.message));
+    }
+}
+
+/// The job body. Runs on the worker bank, not in the event handler.
+pub fn run_job(kind: &amp;str, input: &amp;[u8]) -&gt; Result&lt;Vec&lt;u8&gt;, PluginError&gt; {
+    if kind != JOB_KIND {
+        return Err(plugin_error(ErrorCode::InvalidArgument, &quot;unknown job kind&quot;));
+    }
+    let paths: Vec&lt;String&gt; = serde_json::from_slice(input)
+        .map_err(|error| plugin_error(ErrorCode::InvalidArgument, &amp;error.to_string()))?;
+    let total = paths.len().max(1);
+    let mut hits: Vec&lt;TodoHit&gt; = Vec::new();
+    for (index, path) in paths.iter().enumerate() {
+        if jobs::is_cancelled() {
+            return Err(plugin_error(ErrorCode::Cancelled, &quot;scan cancelled&quot;));
+        }
+        let bytes = fs::read(&amp;project_path(path), 0, MAX_READ_BYTES)?;
+        hits.extend(find_todos(path, &amp;String::from_utf8_lossy(&amp;bytes)));
+        jobs::report_progress(((index + 1) * 100 / total) as f32);
+    }
+    serde_json::to_vec(&amp;hits)
+        .map_err(|error| plugin_error(ErrorCode::Internal, &amp;error.to_string()))
+}
+
+fn plugin_error(code: ErrorCode, message: &amp;str) -&gt; PluginError {
+    PluginError { code, message: message.to_string(), retry_after_ms: None }
+}
+
+#[ilium_plugin(side = &quot;server&quot;, exports = [&quot;job-runner&quot;])]
+#[derive(Default)]
+pub struct AgentTools;
+
+impl JobRunner for AgentTools {
+    fn run(&amp;mut self, kind: String, input: Vec&lt;u8&gt;) -&gt; Result&lt;Vec&lt;u8&gt;, PluginError&gt; {
+        run_job(&amp;kind, &amp;input)
+    }
+}
+</code></pre>
+<p>The handler in <code>server/src/lib.rs</code> gets these new arms. The step 4 arms are unchanged.</p>
+<pre><code class="language-rust">// server/src/lib.rs, new arms of the handler body.
+Event::CommandInvoked(invocation) if invocation.command == scan::SCAN_COMMAND =&gt; {
+    scan::start_scan();
+}
+Event::RequestCompleted(result) =&gt; {
+    if let RequestRef::Call(request) = result.request {
+        scan::on_request_completed(request);
+    }
+}
+Event::JobProgress(progress) =&gt; scan::on_job_progress(progress.request_id, progress.percent),
+</code></pre>
+<p>Points to notice:</p>
+<ul>
+<li>A failed scan takes the same branch as a successful one. <code>take_entries</code> returns <code>None</code>, and the log says <code>scan finished without a result</code>.</li>
+<li>A second scan replaces the first id in its slot, so the first completion is ignored. The host holds that result for 30 seconds and then drops it (N16).</li>
+<li>A job failure never counts toward the plugin's restart rule (A22).</li>
+</ul>
+<h3 id="client-the-results-panel">Client: the results panel</h3>
+<p>The client keeps the last results and the last progress value. Enter on a row sends an <code>editor-open</code> intent.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">// client/src/todos.rs. Results panel and the editor jump.
+use std::cell::{Cell, RefCell};
+
+use agent_tools_core::todo::TodoHit;
+use ilium_plugin_sdk::host::ui;
+use ilium_plugin_sdk::prelude::*;
+use ilium_plugin_sdk::types::intents::{EditorOpenSpec, EditorPlacement};
+use ilium_plugin_sdk::types::layout::{Constraint, Direction};
+use ilium_plugin_sdk::types::ui::ViewTarget;
+use ilium_plugin_sdk::ui::build::Tree;
+
+pub const PANEL: &amp;str = &quot;todos&quot;;
+const RESULTS_TOPIC: &amp;str = &quot;example.agent-tools/todos&quot;;
+const PROGRESS_TOPIC: &amp;str = &quot;example.agent-tools/scan-progress&quot;;
+
+thread_local! {
+    static HITS: RefCell&lt;Vec&lt;TodoHit&gt;&gt; = RefCell::new(Vec::new());
+    static PERCENT: Cell&lt;f64&gt; = Cell::new(0.0);
+}
+
+/// Stores a topic payload. Returns true when the panel should redraw.
+pub fn on_topic(topic: &amp;str, payload_json: &amp;str) -&gt; bool {
+    if topic == RESULTS_TOPIC {
+        let hits: Vec&lt;TodoHit&gt; = serde_json::from_str(payload_json).unwrap_or_default();
+        HITS.with(|cell| *cell.borrow_mut() = hits);
+        PERCENT.with(|cell| cell.set(100.0));
+        return true;
+    }
+    if topic == PROGRESS_TOPIC {
+        let percent = serde_json::from_str::&lt;serde_json::Value&gt;(payload_json)
+            .ok()
+            .and_then(|value| value[&quot;percent&quot;].as_f64())
+            .unwrap_or(0.0);
+        PERCENT.with(|cell| cell.set(percent));
+        return true;
+    }
+    false
+}
+
+/// Opens the editor at the selected hit. Hit lines are 1-based, but the editor
+/// takes a 0-based line (U32), so the line is converted here.
+pub fn open_hit(index: u32) -&gt; Option&lt;Submission&gt; {
+    let hit = HITS.with(|cell| cell.borrow().get(index as usize).cloned())?;
+    Some(Submission {
+        intent: Intent::EditorOpen(EditorOpenSpec {
+            path: FsPath { scope: &quot;project&quot;.to_string(), path: hit.path },
+            line: Some(hit.line - 1),
+            placement: EditorPlacement::Split,
+        }),
+        correlation: u64::from(hit.line),
+        dedup_key: None,
+    })
+}
+
+/// A gauge for the scan progress above the list of hits.
+pub fn render_panel() -&gt; UiTree {
+    let percent = PERCENT.with(|cell| cell.get());
+    let rows: Vec&lt;String&gt; = HITS.with(|cell| {
+        cell.borrow()
+            .iter()
+            .map(|hit| format!(&quot;{}:{}  {}&quot;, hit.path, hit.line, hit.text))
+            .collect()
+    });
+    let mut tree = Tree::new();
+    let gauge = tree.gauge(percent / 100.0).key(&quot;progress&quot;);
+    let list = tree.list(rows).key(&quot;hits&quot;);
+    let body = tree.layout(
+        Direction::Vertical,
+        vec![Constraint::Length(1), Constraint::Fill(1)],
+        vec![gauge, list],
+    );
+    let root = tree.block().title(&quot;TODO scan&quot;).child(body);
+    tree.finish(root)
+}
+
+pub fn is_todos_panel(view: &amp;ViewTarget) -&gt; bool {
+    matches!(view, ViewTarget::Panel(name) if name == PANEL)
+}
+</code></pre>
+<pre><code class="language-rust">// client/src/lib.rs, new arms of the handler body.
+Event::TopicPublished(topic) =&gt; {
+    if todos::on_topic(&amp;topic.topic, &amp;topic.payload_json) {
+        ui::invalidate(ViewTarget::Panel(todos::PANEL.to_string()));
+    }
+}
+Event::UiAction(action) if todos::is_todos_panel(&amp;action.view) =&gt; {
+    if let (UiActionKind::Activated, UiValue::Index(index)) = (&amp;action.kind, &amp;action.value) {
+        submissions.extend(todos::open_hit(*index));
+    }
+}
+</code></pre>
+<p>Points to notice:</p>
+<ul>
+<li>The panel reads no files. It shows what the server published.</li>
+<li>Results arrive once, when the job completes. The list does not grow during a scan, and the gauge moves on each progress value.</li>
+<li>Without <code>fs.read</code> for the path, <code>editor-open</code> is refused with <code>not-permitted</code> (E4).</li>
+</ul>
+<h3 id="the-same-workflow-in-typescript">The same workflow in TypeScript</h3>
+<p>The TypeScript server uses the same commands, topics and manifest. <code>start</code> resolves with the job output and gives no job id (N5), so the scan sets a <code>scanning</code> flag and forwards each <code>job-progress</code> event while it is set. Errors are thrown as <code>PluginError</code>, and a <code>u64</code> such as the read offset is a <code>bigint</code> (S5).</p>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">// core/src/todo.ts. Finds TODO lines in one file's text. No host imports.
+export interface TodoHit {
+  path: string;
+  line: number;
+  text: string;
+}
+
+export function findTodos(path: string, text: string): TodoHit[] {
+  const hits: TodoHit[] = [];
+  text.split('\n').forEach((line, index) =&gt; {
+    if (line.includes('TODO')) {
+      hits.push({ path, line: index + 1, text: line.trim() });
+    }
+  });
+  return hits;
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">// server/src/scan.ts. TODO scan workflow in TypeScript.
+import { definePlugin, PluginError } from '@ilium/plugin-sdk';
+import { read, scan } from '@ilium/plugin-sdk/host/fs';
+import { isCancelled, reportProgress, start } from '@ilium/plugin-sdk/host/jobs';
+import { log } from '@ilium/plugin-sdk/host/log';
+import { publish } from '@ilium/plugin-sdk/host/topics';
+import type { Event, Submission } from '@ilium/plugin-sdk/types';
+import { lifecycle as baseLifecycle } from './lifecycle'; // the lifecycle of step 8
+import { findTodos, type TodoHit } from '../../core/src/todo';
+
+const SCAN_COMMAND = 'example.agent-tools/scan-todos';
+const JOB_KIND = 'todo-scan';
+const RESULTS_TOPIC = 'example.agent-tools/todos';
+const PROGRESS_TOPIC = 'example.agent-tools/scan-progress';
+const MAX_READ_BYTES = 1024 * 1024;
+let scanning = false;
+
+const projectPath = (path: string) =&gt; ({ scope: 'project', path });
+
+async function runScan(): Promise&lt;void&gt; {
+  scanning = true;
+  try {
+    const entries = await scan(projectPath(''), '**/*.rs', 4096);
+    const paths = entries.map(([path]) =&gt; path);
+    const output = await start(JOB_KIND, new TextEncoder().encode(JSON.stringify(paths)));
+    publish(RESULTS_TOPIC, new TextDecoder().decode(output));
+  } catch (error) {
+    const reason = error instanceof PluginError ? error.message : String(error);
+    log('warn', `scan failed: ${reason}`);
+  } finally {
+    scanning = false;
+  }
+}
+
+function onEvents(batch: Event[]): Submission[] {
+  for (const event of batch) {
+    if (event.tag === 'command-invoked' &amp;&amp; event.val.command === SCAN_COMMAND) {
+      void runScan(); // runScan handles its own errors
+    } else if (event.tag === 'job-progress' &amp;&amp; scanning) {
+      publish(PROGRESS_TOPIC, JSON.stringify({ percent: event.val.percent }));
+    }
+  }
+  return [];
+}
+
+function runJob(kind: string, input: Uint8Array): Uint8Array {
+  if (kind !== JOB_KIND) {
+    throw new PluginError('invalid-argument', `unknown job kind ${kind}`);
+  }
+  const paths: string[] = JSON.parse(new TextDecoder().decode(input));
+  const hits: TodoHit[] = [];
+  for (const [index, path] of paths.entries()) {
+    if (isCancelled()) {
+      throw new PluginError('cancelled', 'scan cancelled');
+    }
+    const bytes = read(projectPath(path), 0n, MAX_READ_BYTES);
+    hits.push(...findTodos(path, new TextDecoder().decode(bytes)));
+    reportProgress(((index + 1) * 100) / paths.length);
+  }
+  return new TextEncoder().encode(JSON.stringify(hits));
+}
+
+export const { lifecycle, handler, jobRunner } = definePlugin({
+  lifecycle: baseLifecycle,
+  handler: { onEvents },
+  jobRunner: { run: runJob },
+});
+</code></pre>
+<h3 id="test-it">Test it</h3>
+<p>Run the search tests without the host, then start the plugin and try the panel.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-bash">cargo test -p agent-tools-core todo
+ilium plugin dev
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-bash">bun test core/src/todo.test.ts
+ilium plugin dev
+</code></pre>
+<p>Press the prefix key and <code>s</code> to scan, then the prefix key and <code>t</code> to show the results. Press Enter on a row to open the editor at that line.</p>
+<h3 id="progress-row-in-the-panel">Progress row in the panel</h3>
+<p>The gauge shows progress as a bar. The <code>progress-row</code> widget shows one job with a state glyph, a title, a percent and a message, so the panel can name the running scan. A builder call replaces the gauge call: <code>progress_row(state, title, percent, message)</code> in Rust, <code>progressRow({ state, title, percent, message })</code> in TypeScript. The states are <code>waiting</code>, <code>running</code>, <code>done</code> and <code>error</code>, drawn <code>○</code>, <code>▶</code>, <code>✓</code> and <code>!</code>. The panel code of this step keeps the gauge.</p>
+<h3 id="edge-cases-and-errors">Edge cases and errors</h3>
+<table>
+<thead>
+<tr>
+<th>Situation</th>
+<th>What happens</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>No <code>TODO</code> lines</td>
+<td>The topic carries <code>[]</code>. The list is empty and the gauge reaches 100.</td>
+</tr>
+<tr>
+<td>A file cannot be read</td>
+<td>The job fails with the read's code, such as <code>not-found</code> or <code>io</code>. The panel keeps the last results.</td>
+</tr>
+<tr>
+<td><code>fs.scan</code> finds more than 4,096 <code>.rs</code> files</td>
+<td>The scan completes as <code>failed(quota-exceeded)</code> and no job starts. The result is never truncated (E5).</td>
+</tr>
+<tr>
+<td>A file is over 1 MiB</td>
+<td>Only the first MiB is read. For the rest, call <code>fs::read</code> again with a larger offset.</td>
+</tr>
+<tr>
+<td>16 jobs already queued</td>
+<td><code>jobs::start</code> returns <code>busy</code> (C42).</td>
+</tr>
+<tr>
+<td>Job runs past 10 seconds of CPU</td>
+<td>The job fails as <code>timed-out</code>, and its output is dropped (A22).</td>
+</tr>
+<tr>
+<td>Results over 64 KiB</td>
+<td><code>topics::publish</code> refuses the payload with <code>invalid-argument</code> (L3). A few hundred hits can reach that size.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="what-the-user-sees">What the user sees</h3>
+<p>The panel is one box with a gauge above a list. While the job runs, the list shows the hits of the last completed scan, and the gauge moves. When the job completes, the new hits replace the list.</p>
+<figure>
+<pre class="term">╭  ≡ ● · TODO scan ──────────────────────────────────────────────╮
+│ <span class="t-ok">▶</span> Scanning  ▰▰▰▰▰▰▱▱▱▱ 60%                                     │
+│                                                                │
+│ <span class="t-dim">File</span>               <span class="t-dim">Line  Text</span>                                  │
+│ ──────────────────────────────────────────────────────────     │
+│<span class="t-hi"> src/store.rs         42  // TODO: expire entries after toke</span>    │
+│ src/auth.rs          17  // TODO: rotate the signing key       │
+│ src/http.rs          88  // TODO: retry on 503                 │
+╰────────────────────────────────────────────────────────────────╯
+</pre>
+<figcaption>Illustrative. A rounded panel with a running-state glyph and a meter-style bar for the 60 percent of the scan. The table keeps the hits of the last completed scan. A 0.1 host draws the same row with the <code>gauge</code> widget.</figcaption>
+</figure>
+
+<p>Enter on a row opens the editor in a split pane, with the line marked. The gutter numbers are 1-based.</p>
+<figure>
+<pre class="term">╭  ≡ ● · src/store.rs ───────────────────────────────────────────╮
+│ 40 │     let entry = self.entries.get(&key)?;                  │
+│ 41 │     Some(entry.value.clone())                             │
+│ <span class="t-hi">42 │     // TODO: expire entries after the token lifetime</span>      │
+│ 43 │ }                                                         │
+╰────────────────────────────────────────────────────────────────╯
+</pre>
+<figcaption>Illustrative. The editor opens at line 42, which is highlighted. The gutter numbers are 1-based. The code around it is a stand-in.</figcaption>
+</figure>
+
+<h3 id="see-also">See also</h3>
+<ul>
+<li><a href="/pages/tutorial-04-finished-notice/">Tutorial step 4</a> explains the request outcomes used here.</li>
+<li><a href="/pages/background-jobs/">Background jobs</a> explains job deadlines, progress and cancel.</li>
+<li><a href="/pages/api-fs/">fs</a> and <a href="/pages/api-jobs/">jobs</a> list every call used in this step.</li>
+<li><a href="/pages/tutorial-06-notes-pane/">Tutorial step 6: a notes pane</a> adds a pane kind.</li>
+</ul>
+<p>API checked against <code>ilium:plugin@0.1.0</code>.</p>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/tutorial-04-finished-notice/"><small>Previous</small>4. Finished-agent notice and toolbar button</a><a class="next" href="/pages/tutorial-06-notes-pane/"><small>Next</small>6. Notes pane with drag and drop</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#you-need">You need</a></li><li class="l2"><a href="#what-changed-from-step-4">What changed from step 4</a></li><li class="l2"><a href="#the-flow">The flow</a></li><li class="l2"><a href="#surface-used-by-this-step">Surface used by this step</a></li><li class="l2"><a href="#manifest">Manifest</a></li><li class="l2"><a href="#the-pure-search">The pure search</a></li><li class="l2"><a href="#server-scan-job-and-publish">Server: scan, job and publish</a></li><li class="l2"><a href="#client-the-results-panel">Client: the results panel</a></li><li class="l2"><a href="#the-same-workflow-in-typescript">The same workflow in TypeScript</a></li><li class="l2"><a href="#test-it">Test it</a></li><li class="l2"><a href="#progress-row-in-the-panel">Progress row in the panel</a></li><li class="l2"><a href="#edge-cases-and-errors">Edge cases and errors</a></li><li class="l2"><a href="#what-the-user-sees">What the user sees</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,881 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Capability: audio | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details open><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/" aria-current="page">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Capabilities</b></p>
+<h1>Capability: audio</h1>
+<h2 id="audiocapture-audioloopback-and-audioplayback">audio.capture, audio.loopback and audio.playback</h2>
+<p>The three audio grants let a plugin record from a microphone, record the sound the computer is playing, and play samples through an output device. Each direction has its own grant. A plugin that only plays a sound never receives a recording path, and a plugin that only records never receives a playback path.</p>
+<p>Capture and loopback are high-risk (<strong>H</strong>) grants. Capture can record everything said in the room. Loopback can record everything the desktop plays, including audio from other applications. Playback is a normal grant.</p>
+<p><strong>You will need:</strong></p>
+<ul>
+<li>One grant per direction, declared in the manifest under the side that uses it. Client plugins use <code>capabilities.client</code>, and animation scenes use <code>capabilities.scene</code>.</li>
+<li>The client world (<code>ilium:client</code>) or the animation world (<code>ilium:anim</code>). Both accept the three grants (<code>C A</code> in section 3 of the API).</li>
+<li>A manifest with <code>"api": "ilium:plugin@0.1.0"</code>.</li>
+<li>The SDK import for the audio functions: <code>ilium_plugin_sdk::host::audio</code> in Rust, <code>@ilium/plugin-sdk/host/audio</code> in TypeScript. The <a href="/pages/api-audio/">audio API page</a> lists the full import surface.</li>
+</ul>
+<h3 id="grant-syntax">Grant syntax</h3>
+<table>
+<thead>
+<tr>
+<th>Grant</th>
+<th>Valid</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>audio.capture</code></td>
+<td>yes</td>
+<td>records from an input device (H)</td>
+</tr>
+<tr>
+<td><code>audio.loopback</code></td>
+<td>yes</td>
+<td>records the system output (H)</td>
+</tr>
+<tr>
+<td><code>audio.playback</code></td>
+<td>yes</td>
+<td>plays samples through an output device</td>
+</tr>
+<tr>
+<td><code>audio.microphone</code></td>
+<td>no</td>
+<td>the old name, replaced by <code>audio.capture</code></td>
+</tr>
+<tr>
+<td><code>audio</code></td>
+<td>no</td>
+<td>the direction is missing</td>
+</tr>
+<tr>
+<td><code>audio.capture:default</code></td>
+<td>no</td>
+<td>the grant takes no argument; choose the device in <code>open-capture</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="surface">Surface</h3>
+<p>Every function below is in the client world. A grant listed in the second column is needed for the call. Errors are described in the edge cases table.</p>
+<table>
+<thead>
+<tr>
+<th>Rust</th>
+<th>TypeScript</th>
+<th>Grant</th>
+<th>Returns</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>audio::devices()</code></td>
+<td><code>audio.devices()</code></td>
+<td>any audio grant</td>
+<td><code>Vec&lt;AudioDevice&gt;</code></td>
+<td>Lists the devices the grants allow.</td>
+</tr>
+<tr>
+<td><code>audio::open_capture(device, sample_rate, channels)</code></td>
+<td><code>audio.openCapture(...)</code></td>
+<td><code>audio.capture</code></td>
+<td><code>Result&lt;u64, PluginError&gt;</code></td>
+<td>Opens an input device and returns a capture id. <code>None</code> selects the default input.</td>
+</tr>
+<tr>
+<td><code>audio::open_loopback(sample_rate, channels)</code></td>
+<td><code>audio.openLoopback(...)</code></td>
+<td><code>audio.loopback</code></td>
+<td><code>Result&lt;u64, PluginError&gt;</code></td>
+<td>Opens a capture of the desktop output.</td>
+</tr>
+<tr>
+<td><code>audio::close_capture(capture)</code></td>
+<td><code>audio.closeCapture(id)</code></td>
+<td>the grant that opened it</td>
+<td>nothing</td>
+<td>Stops the stream and releases the device.</td>
+</tr>
+<tr>
+<td><code>audio::play(samples, sample_rate, channels).await</code></td>
+<td><code>await audio.play(...)</code></td>
+<td><code>audio.playback</code></td>
+<td><code>Result&lt;(), PluginError&gt;</code></td>
+<td>Plays samples. Completes when playback ends.</td>
+</tr>
+<tr>
+<td><code>Event::AudioFrames(AudioFramesEvent)</code></td>
+<td><code>{ tag: 'audio-frames', val }</code></td>
+<td>audio capture stream open</td>
+<td>event</td>
+<td>One chunk of 20 ms of captured audio.</td>
+</tr>
+</tbody>
+</table>
+<p>The records and the event as WIT declares them:</p>
+<pre><code class="language-wit">record audio-device { id: string, name: string, is-input: bool, is-default: bool }
+record audio-frames-event { capture: u64, samples: list&lt;s16&gt; }
+devices: func() -&gt; list&lt;audio-device&gt;;
+open-capture: func(device: option&lt;string&gt;, sample-rate: u32, channels: u8)
+  -&gt; result&lt;u64, plugin-error&gt;;
+open-loopback: func(sample-rate: u32, channels: u8) -&gt; result&lt;u64, plugin-error&gt;;
+close-capture: func(capture: u64);
+play: func(samples: list&lt;s16&gt;, sample-rate: u32, channels: u8)
+  -&gt; result&lt;request-id, plugin-error&gt;;
+</code></pre>
+<p>In Rust the device fields are <code>id</code>, <code>name</code>, <code>is_input</code> and <code>is_default</code>. In TypeScript they are <code>isInput</code> and <code>isDefault</code>. A capture id is a <code>u64</code>, which is a <code>bigint</code> in TypeScript.</p>
+<h3 id="stream-flow">Stream flow</h3>
+<p>Capture and loopback share one flow. The plugin opens a stream, receives <code>audio-frames</code> events until it closes the stream, and the host closes the stream when the plugin deactivates.</p>
+<figure>
+<svg viewBox="0 0 420 300" role="img" aria-label="Capture stream from grant to close" width="630" height="450">
+  <defs>
+    <marker id="aud-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+      <path d="M0,0 L8,4 L0,8 z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <rect x="20" y="8" width="380" height="34" rx="6" fill="none" stroke="currentColor"/>
+  <text x="210" y="29" text-anchor="middle" font-size="11" fill="currentColor">Manifest requests audio.capture (H)</text>
+  <line x1="210" y1="42" x2="210" y2="62" stroke="currentColor" marker-end="url(#aud-arrow)"/>
+  <rect x="20" y="62" width="380" height="34" rx="6" fill="none" stroke="currentColor"/>
+  <text x="210" y="83" text-anchor="middle" font-size="11" fill="currentColor">First activation: user ticks the HIGH row</text>
+  <line x1="210" y1="96" x2="210" y2="116" stroke="currentColor" marker-end="url(#aud-arrow)"/>
+  <rect x="20" y="116" width="380" height="34" rx="6" fill="none" stroke="currentColor"/>
+  <text x="210" y="137" text-anchor="middle" font-size="11" fill="currentColor">Grant stored per plugin and per side</text>
+  <line x1="210" y1="150" x2="210" y2="170" stroke="currentColor" marker-end="url(#aud-arrow)"/>
+  <rect x="20" y="170" width="380" height="34" rx="6" fill="none" stroke="currentColor"/>
+  <text x="210" y="191" text-anchor="middle" font-size="11" fill="currentColor">open-capture(device, 16000, 1) returns id 7</text>
+  <line x1="210" y1="204" x2="210" y2="224" stroke="currentColor" marker-end="url(#aud-arrow)"/>
+  <rect x="20" y="224" width="380" height="34" rx="6" fill="none" stroke="currentColor"/>
+  <text x="210" y="245" text-anchor="middle" font-size="11" fill="currentColor">audio-frames every 20 ms until close-capture</text>
+  <text x="210" y="284" text-anchor="middle" font-size="10" fill="currentColor">A declined grant makes open-capture return not-permitted.</text>
+</svg>
+<figcaption>The grant gates the call. Frames then arrive as events until the stream closes.</figcaption>
+</figure>
+
+<h3 id="sample-format-and-frame-size">Sample format and frame size</h3>
+<p>Samples are signed 16-bit integers (<code>s16</code>) from -32,768 to 32,767. Zero is silence. Samples are interleaved: each frame holds one sample per channel, left before right. Stereo at 48 kHz therefore alternates left and right values. The same layout applies to <code>audio-frames</code> events and to <code>play</code>.</p>
+<p>Each <code>audio-frames</code> event holds exactly 20 ms of audio. The sample count is <code>sample_rate / 50 * channels</code>: 320 samples at 16 kHz mono, and 1,920 samples at 48 kHz stereo.</p>
+<p>Any sample rate from 8,000 to 192,000 Hz is accepted. The host resamples to and from the device rate, so a plugin never needs a fallback rate. One or two channels are accepted.</p>
+<h3 id="device-rules">Device rules</h3>
+<ul>
+<li><code>devices()</code> filters the list by grant. Input devices appear with <code>audio.capture</code>, output devices with <code>audio.playback</code>, and the default monitor source with <code>audio.loopback</code>.</li>
+<li>With every audio grant declined, <code>devices()</code> returns an empty list.</li>
+<li>With no audio grant in the manifest at all, <code>devices()</code> traps and the plugin fails. Declare at least one audio grant, even one the user may decline.</li>
+<li><code>device</code> takes the <code>id</code> string from <code>devices()</code>. <code>None</code> or <code>undefined</code> selects the default input. An id that no longer exists is <code>not-found</code>.</li>
+<li>If the device of an open stream is removed, the host closes that stream at once. No further <code>audio-frames</code> events arrive for its id, and <code>close-capture</code> on that id does nothing. The plugin sees the change by calling <code>devices()</code> again and opens the replacement with a new call.</li>
+</ul>
+<h3 id="risk-and-tier-rules">Risk and tier rules</h3>
+<table>
+<thead>
+<tr>
+<th>Grant</th>
+<th>Risk</th>
+<th>T1 bundled plugin</th>
+<th>T2 and T3 install</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>audio.capture</code></td>
+<td>H</td>
+<td>asked once at first activation</td>
+<td>unchecked, marked HIGH</td>
+</tr>
+<tr>
+<td><code>audio.loopback</code></td>
+<td>H</td>
+<td>asked once at first activation</td>
+<td>unchecked, marked HIGH</td>
+</tr>
+<tr>
+<td><code>audio.playback</code></td>
+<td>normal</td>
+<td>granted up to the manifest ceiling</td>
+<td>checked by default</td>
+</tr>
+</tbody>
+</table>
+<p>A T1 bundled plugin with H capabilities starts without them. The first activation shows one prompt per plugin, listing each H capability with a checkbox. The user can decline and be asked again at the next server start, at most three times. Settings &gt; Plugins grants a capability at any time. There is no prompt per call. A grant stays until it is revoked.</p>
+<p>The install dialog for a T2 or T3 plugin lists every grant, one row each, with the wording from the review table:</p>
+<pre class="term">╭─<span class="t-hi"> Review permissions </span>───────────────────────────────────────────────────────╮
+│ com.example.audio 0.1.0 by Example Ltd                                     │
+│                                                                            │
+│ <span class="t-hi">Client side</span>                                                                │
+│ [x] Plays sound through the speakers <span class="t-dim">…………………………………………………………</span> audio.playback │
+│ <span class="t-warn">! [ ] Records from the microphone</span> <span class="t-dim">……………………………………………………………………</span> <span class="t-warn">audio.capture</span> │
+│                                                                            │
+│ <span class="t-warn">! marks a high-risk grant. It starts unchecked and is</span>                      │
+│ <span class="t-warn">always asked for, even for bundled plugins.</span>                                │
+│                                                                            │
+│ <span class="t-dim">Space toggle · Enter allow · Esc decline</span>                                   │
+╰────────────────────────────────────────────────────────────────────────────╯
+</pre>
+
+<p>Illustrative, not generated. The install dialog for a voice plugin from a signed T2 publisher. The publisher, fingerprint and plugin id are placeholders.</p>
+<h3 id="when-the-grant-is-declined-revoked-or-missing">When the grant is declined, revoked or missing</h3>
+<table>
+<thead>
+<tr>
+<th>Situation</th>
+<th>What the call returns</th>
+<th>What happens to streams</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>The user declined the grant</td>
+<td><code>not-permitted</code> from <code>open-capture</code>, <code>open-loopback</code> and <code>play</code></td>
+<td>none opened</td>
+</tr>
+<tr>
+<td>The grant was revoked while a stream was open</td>
+<td><code>revoked</code> for calls in flight</td>
+<td>the stream closes, the plugin gets <code>deactivate(revoked)</code> and activates again with the reduced grant set</td>
+</tr>
+<tr>
+<td>The manifest never requested the grant</td>
+<td>the call traps</td>
+<td>the plugin fails</td>
+</tr>
+</tbody>
+</table>
+<p>Handle a declined grant in <code>activate</code> and keep the plugin working without audio. The example below does this, and it is the pattern to copy for any optional grant.</p>
+<h3 id="worked-example-voice-input-that-survives-a-declined-grant-rust">Worked example: voice input that survives a declined grant (Rust)</h3>
+<p>The plugin opens the default microphone at 16 kHz mono on activation. If the user declined <code>audio.capture</code>, the plugin stays active and counts nothing. It counts chunks whose peak level passes a threshold, and it adds up the frames that the host dropped.</p>
+<p>Manifest excerpt:</p>
+<pre><code class="language-json">{
+  &quot;api&quot;: &quot;ilium:plugin@0.1.0&quot;,
+  &quot;id&quot;: &quot;com.example.voice&quot;,
+  &quot;capabilities&quot;: { &quot;client&quot;: [&quot;audio.capture&quot;] }
+}
+</code></pre>
+<p>Plugin source:</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::exports::{Handler, Lifecycle};
+use ilium_plugin_sdk::host::audio;
+use ilium_plugin_sdk::prelude::*;
+
+const CAPTURE_RATE: u32 = 16_000;
+const SPEECH_PEAK: u16 = 4_000;
+
+#[ilium_plugin(side = &quot;client&quot;)]
+#[derive(Default)]
+struct VoiceInput {
+    capture: Option&lt;u64&gt;,
+    speech_chunks: u32,
+    dropped_frames: u32,
+}
+
+impl Lifecycle for VoiceInput {
+    fn activate(&amp;mut self, _context: Activation) -&gt; Result&lt;(), PluginError&gt; {
+        match audio::open_capture(None, CAPTURE_RATE, 1) {
+            Ok(capture) =&gt; self.capture = Some(capture),
+            // The user declined audio.capture. Stay active without voice input.
+            Err(error) if error.code == ErrorCode::NotPermitted =&gt; {}
+            Err(error) =&gt; return Err(error),
+        }
+        Ok(())
+    }
+
+    fn deactivate(&amp;mut self, _reason: DeactivationReason) -&gt; Option&lt;Vec&lt;u8&gt;&gt; {
+        if let Some(capture) = self.capture.take() {
+            audio::close_capture(capture);
+        }
+        None
+    }
+}
+
+impl Handler for VoiceInput {
+    fn on_events(&amp;mut self, batch: Vec&lt;Event&gt;) -&gt; Vec&lt;Submission&gt; {
+        for event in batch {
+            match event {
+                Event::AudioFrames(frames) if Some(frames.capture) == self.capture =&gt; {
+                    let peak = frames.samples.iter().map(|sample| sample.unsigned_abs()).max();
+                    if peak.unwrap_or(0) &gt; SPEECH_PEAK {
+                        self.speech_chunks += 1;
+                    }
+                }
+                Event::EventsDropped(counts) =&gt; {
+                    self.dropped_frames += counts
+                        .iter()
+                        .filter(|count| count.event == &quot;audio-frames&quot;)
+                        .map(|count| count.count)
+                        .sum::&lt;u32&gt;();
+                }
+                _ =&gt; {}
+            }
+        }
+        Vec::new()
+    }
+}
+</code></pre>
+<p>Any other error is returned from <code>activate</code> unchanged. A <code>not-permitted</code> error is not a failure of the plugin, so the plugin does not return it.</p>
+<h3 id="worked-example-loopback-recorder-typescript">Worked example: loopback recorder (TypeScript)</h3>
+<p>The plugin records five seconds of desktop output when the user runs its command. It records 250 chunks of 20 ms, closes the stream, and logs the result. It also closes the stream if the plugin deactivates first. The manifest declares <code>audio.loopback</code> under <code>capabilities.client</code>, and a <code>contributes.commands</code> entry for the command id.</p>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { definePlugin, PluginError, type Event, type Submission } from '@ilium/plugin-sdk';
+import * as audio from '@ilium/plugin-sdk/host/audio';
+import { log } from '@ilium/plugin-sdk/host/log';
+
+const RECORD_COMMAND = 'com.example.clip/record-output';
+const SAMPLE_RATE = 48_000;
+const CHANNELS = 2;
+const CHUNKS_TO_RECORD = 250; // 250 chunks of 20 ms is five seconds
+
+let recording: bigint | undefined;
+let chunksSeen = 0;
+
+function startRecording(): void {
+  if (recording !== undefined) {
+    return;
+  }
+  try {
+    recording = audio.openLoopback(SAMPLE_RATE, CHANNELS);
+    chunksSeen = 0;
+    log('info', `loopback ${recording} opened`);
+  } catch (error) {
+    const code = error instanceof PluginError ? error.code : 'unknown';
+    log('warn', `loopback not opened: ${code}`);
+  }
+}
+
+function stopRecording(reason: string): void {
+  if (recording === undefined) {
+    return;
+  }
+  audio.closeCapture(recording);
+  log('info', `loopback closed (${reason}) after ${chunksSeen} chunks`);
+  recording = undefined;
+}
+
+function onFrames(capture: bigint): void {
+  if (capture !== recording) {
+    return;
+  }
+  chunksSeen += 1;
+  if (chunksSeen &gt;= CHUNKS_TO_RECORD) {
+    stopRecording('complete');
+  }
+}
+
+export const { lifecycle, handler } = definePlugin({
+  side: 'client',
+  activate() {},
+  deactivate() {
+    stopRecording('deactivate');
+    return undefined;
+  },
+  onEvents(batch: Event[]): Submission[] {
+    for (const event of batch) {
+      if (event.tag === 'command-invoked' &amp;&amp; event.val.command === RECORD_COMMAND) {
+        startRecording();
+      } else if (event.tag === 'audio-frames') {
+        onFrames(event.val.capture);
+      } else if (event.tag === 'events-dropped') {
+        for (const count of event.val) {
+          if (count.event === 'audio-frames') {
+            log('warn', `${count.count} loopback frames dropped`);
+          }
+        }
+      }
+    }
+    return [];
+  },
+});
+</code></pre>
+<p>The <code>openLoopback</code> call throws a <code>PluginError</code> when the grant is declined or the platform has no monitor source. The plugin catches it and logs the code, so it never traps. A real recorder would copy the samples of each <code>audio-frames</code> event into a buffer.</p>
+<h3 id="edge-cases-and-error-codes">Edge cases and error codes</h3>
+<table>
+<thead>
+<tr>
+<th>Call</th>
+<th>Code</th>
+<th>Cause and response</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>open-capture</code>, <code>open-loopback</code>, <code>play</code></td>
+<td><code>not-permitted</code></td>
+<td>grant declined or revoked; keep working without audio</td>
+</tr>
+<tr>
+<td><code>open-capture</code></td>
+<td><code>not-found</code></td>
+<td>the device id is not in <code>devices()</code>; list devices again</td>
+</tr>
+<tr>
+<td><code>open-capture</code>, <code>open-loopback</code></td>
+<td><code>invalid-argument</code></td>
+<td>rate outside 8,000 to 192,000 Hz, or zero channels</td>
+</tr>
+<tr>
+<td><code>open-capture</code>, <code>open-loopback</code></td>
+<td><code>unsupported</code></td>
+<td>more than two channels, or loopback with no monitor source</td>
+</tr>
+<tr>
+<td><code>open-capture</code></td>
+<td><code>busy</code></td>
+<td>the device is held exclusively by another application</td>
+</tr>
+<tr>
+<td><code>open-capture</code>, <code>open-loopback</code></td>
+<td><code>quota-exceeded</code></td>
+<td>too many open streams; the default is 2, and the ceiling is 4 for T1 and 2 for T2 and T3</td>
+</tr>
+<tr>
+<td><code>play</code></td>
+<td><code>invalid-argument</code></td>
+<td>longer than 30 s, larger than 16 MiB, or a sample count that is not a multiple of <code>channels</code></td>
+</tr>
+<tr>
+<td><code>play</code></td>
+<td><code>io</code> (completion)</td>
+<td>the output device failed during playback</td>
+</tr>
+<tr>
+<td><code>audio-frames</code></td>
+<td><code>events-dropped</code></td>
+<td>the handler was too slow; the event names <code>audio-frames</code> and the capture id</td>
+</tr>
+<tr>
+<td><code>close-capture</code></td>
+<td>none</td>
+<td>an unknown or already closed id does nothing</td>
+</tr>
+</tbody>
+</table>
+<p>Stream rules that the plugin can rely on:</p>
+<ul>
+<li>A stream closes when its plugin deactivates, is disabled or is uninstalled. No <code>audio-frames</code> event arrives after that.</li>
+<li>Frames that do not fit the queue are dropped oldest first. The loss is counted in <code>events-dropped</code>, and the drop never blocks the device.</li>
+<li>A <code>play</code> call completes when playback ends, not when it starts. The Rust function returns after playback, and the TypeScript <code>await</code> resolves to <code>undefined</code> at the same point.</li>
+</ul>
+<h3 id="what-the-user-sees">What the user sees</h3>
+<p>The host shows the install dialog for a T2 or T3 plugin and the first-activation prompt for a T1 plugin. The plugin's own log shows what it did with the streams. <code>ilium plugin logs</code> prints it:</p>
+<pre class="term"><span class="t-prompt">$</span> ilium plugin logs voice-input
+<span class="t-dim">2026-10-11 09:14:02</span> <span class="t-ok">info</span>  capture 4 opened: 16000 Hz, 1 channel
+<span class="t-dim">2026-10-11 09:14:07</span> <span class="t-warn">warn</span>  device usb-mic-2 is gone, reopening the default input
+<span class="t-dim">2026-10-11 09:14:07</span> <span class="t-ok">info</span>  capture 5 opened: 16000 Hz, 1 channel
+<span class="t-dim">2026-10-11 09:14:09</span> <span class="t-warn">warn</span>  2 audio-frames events dropped (capture 5)
+<span class="t-prompt">$</span> <span class="t-dim">4 lines shown, 0 dropped</span>
+</pre>
+
+<p>Illustrative, not generated. The log of a voice plugin that reopens its microphone after the device is removed. The plugin writes the reopen lines, and the device name is a placeholder.</p>
+<h3 id="who-requests-it">Who requests it</h3>
+<p>First-party plugins from <code>feature-mapping.md</code>:</p>
+<ul>
+<li>50 Voice session: <code>audio.capture</code>.</li>
+<li>53 Voice onboarding demo: <code>audio.capture</code> and <code>audio.playback</code>.</li>
+<li>54 Voice device selection and reconnect: <code>audio.capture</code>.</li>
+<li>101 Media scenes: <code>audio.loopback</code> and <code>audio.capture</code>.</li>
+</ul>
+<h3 id="see-also">See also</h3>
+<ul>
+<li><a href="/pages/api-audio/">audio</a> for the SDK import, the sample format and the level meter example.</li>
+<li><a href="/pages/capability-media-video/">media.video</a> for the other media decoder.</li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a> for the voice plugin's messages to its own client side.</li>
+<li><a href="/pages/capabilities/">capabilities</a> for the grant model, the H rule and the review dialog.</li>
+<li><a href="/pages/errors-and-limits/">errors and limits</a> for the error codes that every import uses.</li>
+</ul>
+<p>Checked against <code>ilium:plugin@0.1.0</code> (API draft of 2026-10-11).</p>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/capability-always-granted/"><small>Previous</small>Always-granted capabilities</a><a class="next" href="/pages/capability-cli-contribute/"><small>Next</small>Capability: cli.contribute</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#audiocapture-audioloopback-and-audioplayback">audio.capture, audio.loopback and audio.playback</a></li><li class="l3"><a href="#grant-syntax">Grant syntax</a></li><li class="l3"><a href="#surface">Surface</a></li><li class="l3"><a href="#stream-flow">Stream flow</a></li><li class="l3"><a href="#sample-format-and-frame-size">Sample format and frame size</a></li><li class="l3"><a href="#device-rules">Device rules</a></li><li class="l3"><a href="#risk-and-tier-rules">Risk and tier rules</a></li><li class="l3"><a href="#when-the-grant-is-declined-revoked-or-missing">When the grant is declined, revoked or missing</a></li><li class="l3"><a href="#worked-example-voice-input-that-survives-a-declined-grant-rust">Worked example: voice input that survives a declined grant (Rust)</a></li><li class="l3"><a href="#worked-example-loopback-recorder-typescript">Worked example: loopback recorder (TypeScript)</a></li><li class="l3"><a href="#edge-cases-and-error-codes">Edge cases and error codes</a></li><li class="l3"><a href="#what-the-user-sees">What the user sees</a></li><li class="l3"><a href="#who-requests-it">Who requests it</a></li><li class="l3"><a href="#see-also">See also</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

@@ -127,7 +127,9 @@ impl ProgressTiming {
             ));
         }
         if self.checks.len() > MAXIMUM_PROGRESS_CHECKS {
-            return Err(format!("progress history exceeds {MAXIMUM_PROGRESS_CHECKS} checks"));
+            return Err(format!(
+                "progress history exceeds {MAXIMUM_PROGRESS_CHECKS} checks"
+            ));
         }
         let finite = |value: f32| value.is_finite() && (0.0..=100.0).contains(&value);
         if !finite(self.started_percent) || !self.samples.iter().all(|s| finite(s.percent)) {
@@ -145,13 +147,18 @@ impl ProgressTiming {
     /// Records a failed actual probe, without refreshing successful-check or
     /// substantive-progress timestamps. Watchdog reconciliation is not a probe.
     pub fn record_failed_check(&mut self, now: u64) {
-        self.push_check(ProgressCheck { unix_millis: now, outcome: ProgressCheckOutcome::Failed, percent: None });
+        self.push_check(ProgressCheck {
+            unix_millis: now,
+            outcome: ProgressCheckOutcome::Failed,
+            percent: None,
+        });
     }
 
     fn push_check(&mut self, check: ProgressCheck) {
         self.checks.push(check);
         if self.checks.len() > MAXIMUM_PROGRESS_CHECKS {
-            self.checks.drain(..self.checks.len() - MAXIMUM_PROGRESS_CHECKS);
+            self.checks
+                .drain(..self.checks.len() - MAXIMUM_PROGRESS_CHECKS);
         }
     }
 
@@ -187,7 +194,11 @@ impl ProgressTiming {
         }
         self.push_check(ProgressCheck {
             unix_millis: now,
-            outcome: if made_progress { ProgressCheckOutcome::Progress } else { ProgressCheckOutcome::Heartbeat },
+            outcome: if made_progress {
+                ProgressCheckOutcome::Progress
+            } else {
+                ProgressCheckOutcome::Heartbeat
+            },
             percent: Some(percent),
         });
         if made_progress && self.started_at_unix_millis.is_some() {
@@ -453,12 +464,19 @@ mod tests {
         timing.observe(200, 20.0, false);
         timing.record_failed_check(300);
         timing.observe(400, 21.0, false);
-        assert_eq!(timing.checks.iter().map(|check| check.outcome).collect::<Vec<_>>(), vec![
-            ProgressCheckOutcome::Heartbeat,
-            ProgressCheckOutcome::Heartbeat,
-            ProgressCheckOutcome::Failed,
-            ProgressCheckOutcome::Progress,
-        ]);
+        assert_eq!(
+            timing
+                .checks
+                .iter()
+                .map(|check| check.outcome)
+                .collect::<Vec<_>>(),
+            vec![
+                ProgressCheckOutcome::Heartbeat,
+                ProgressCheckOutcome::Heartbeat,
+                ProgressCheckOutcome::Failed,
+                ProgressCheckOutcome::Progress,
+            ]
+        );
         assert_eq!(timing.checks[2].percent, None);
         assert_eq!(timing.last_progress_unix_millis, Some(400));
         timing.record_failed_check(500);
