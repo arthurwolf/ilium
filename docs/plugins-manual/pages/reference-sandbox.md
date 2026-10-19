@@ -150,10 +150,10 @@ The authoritative scope table. Other pages link here.
 
 | Scope | Read | Write | Watch | Tiers | Notes |
 |---|---|---|---|---|---|
-| `package` | always | never | always | all | Unpacked `assets/`, read only |
+| `package` | always | never | never | all | Unpacked `assets/`, read only |
 | `data` | always | always | always | all | Plugin's private folder, mounted `noexec,nosuid,nodev` |
 | `cache` | always | always | always | all | May be evicted |
-| `project` | normal | H | normal | all | The session's project folder; `.ilium/` stays visible but the stores of the deny set do not live there |
+| `project` | normal | H | normal | all | The session's project folder; `.ilium/` is excluded: it is missing from listings and every access returns `not-permitted` |
 | `picked` | per pick | per pick | per pick | all | A path the user chose |
 | `worktrees` | normal | H | normal | all | Setting `workspace.worktree_root` |
 | `agent-sessions:<agent>` | H | refused | H | all | Transcript folders, read only |

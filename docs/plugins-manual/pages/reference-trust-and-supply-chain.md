@@ -104,7 +104,7 @@ A `.iliumpkg` is a ZIP file. ZIP has many ambiguities that attackers use. The re
 
 ## Install location and integrity
 
-**[SEC-152]** Packages are unpacked into the install directory of the user (Linux `$XDG_DATA_HOME/ilium/plugins/<id>/<version>/`, macOS `~/Library/Application Support/Ilium/plugins/`, Windows `%LOCALAPPDATA%\Ilium\plugins\`). The directory is created 0700 and files are made read-only (0400) after the install. A system-wide package directory, if used, is root-owned and read-only for the user ([Enterprise deployment](/pages/guide-enterprise-deployment/)).
+**[SEC-152]** Packages are unpacked into the store of the user's data folder (`<data>/plugins/store/<id>/<version>/`; the data folder is `~/.local/share/ilium` on Linux, `~/Library/Application Support/ilium` on macOS and `%APPDATA%\ilium\data` on Windows, as in [Plugin files](/pages/reference-plugin-files/)). The directory is created 0700 and files get mode 0600, as in [Plugin files](/pages/reference-plugin-files/). A system-wide package directory, if used, is root-owned and read-only for the user ([Enterprise deployment](/pages/guide-enterprise-deployment/)).
 
 **[SEC-153]** At each load the host re-hashes every component and asset against the SHA-256 recorded in the manifest before it hands the bytes to Wasmtime. A mismatch refuses the load with `manifest.file-hash`, disables the plugin with a notice `Files changed after install`, and writes an audit line `integrity-failure`. The host does not repair the files. Assets are checked at first read, and a mismatch returns `io-error` with reason `integrity`.
 

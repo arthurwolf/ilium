@@ -257,7 +257,7 @@ Risk marks: `normal` grants are checked by default in the review dialog. High-ri
 
 ## Release information the manifest does not carry
 
-The manifest has no key for a home page, a repository, a support address, a changelog, a deprecation notice or a replacement name in `ilium:plugin@0.1.0`. The keys that describe a plugin to a person are `name`, `publisher`, `description` (one paragraph; the hard limit is 500 characters, and `lint.description-missing` warns above 280 characters), `license` and `icon`. An author MUST put the support contact, the home page and the changelog in `README.md` and in the `description`, and MUST NOT add other metadata keys, because an unknown key is refused with `manifest.unknown-key`. [AUT-321] Deprecation and a successor are properties of a registry entry, not of the manifest. See [Publishing and support](/pages/guide-publishing-and-support/).
+The manifest has no key for a changelog, a deprecation notice or a replacement name in `ilium:plugin@0.1.0`. The keys that describe a plugin to a person are `name`, `publisher`, `description` (one paragraph; the hard limit is 500 characters, and `lint.description-missing` warns above 280 characters), `license`, `icon`, `homepage`, `repository` and `security_contact`. An author MUST put the changelog in `README.md` and in the `description`, and MUST NOT add other metadata keys, because an unknown key is refused with `manifest.unknown-key`. [AUT-321] Deprecation and a successor are properties of a registry entry, not of the manifest. See [Publishing and support](/pages/guide-publishing-and-support/).
 
 ## Activation triggers
 

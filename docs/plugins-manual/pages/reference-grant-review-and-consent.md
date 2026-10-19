@@ -218,7 +218,7 @@ An answer the user gave to an unchanged grant is kept. New and widened grants st
 
 **[SEC-118]** The user can withdraw a decision at any time: one grant, one consent, one picked path, or all of a plugin's grants and consents (**Revoke all**). Effects are those in the [Security model](/pages/security/): in-flight calls return `revoked`, the epoch bumps, contributions are withdrawn.
 
-**[SEC-120]** CLI. `ilium plugin consents <id>` prints consents as JSONL. `ilium plugin consents <id> --withdraw <target>` withdraws one. `ilium plugin grants <id> --revoke <grant>` revokes one grant. Granting never happens from the CLI ([SEC-116]).
+**[SEC-120]** CLI. `ilium plugin consents <id>` prints consents as JSONL. `ilium plugin consents <id> --withdraw <target>` withdraws one. `ilium plugin grants <id> --revoke <grant>` revokes one grant. These two subcommands only revoke or withdraw and never grant; a grant from the command line comes only from the exact-item flags of [SEC-117] ([SEC-116]).
 
 **[SEC-119]** Uninstall forgets the plugin's grants, consents and picked paths. Its data is kept unless `--purge` is passed ([PKG-294]); the cache is always removed. A reinstall starts with a fresh review dialog.
 

@@ -174,13 +174,13 @@ When the cap is reached, the host refuses a further activation with `helper.too-
 | Protocol error | Bad message | One failure; the host kills it | None |
 | Host asked it to stop | `Shutdown` | No failure | None |
 
-The host restarts a helper at most 5 times in 10 minutes. The sixth start moves the server side of the T2 and T3 plugins of the session to `stopped-by-failure` with the reason `helper.unstable` (see [Health and watchdog](/pages/reference-health-and-watchdog/)). The restart rule for the plugin itself (1 s, 5 s, then disable) applies in addition.
+The host restarts a helper at most 5 times in 10 minutes. The sixth restart attempt moves the server side of the T2 and T3 plugins of the session to `stopped-by-failure` with the reason `helper.unstable` (see [Health and watchdog](/pages/reference-health-and-watchdog/)). The restart rule for the plugin itself (1 s, 5 s, then disable) applies in addition.
 
 On termination the host sends SIGTERM and then SIGKILL after 2 s. On shutdown of the server, all helpers receive `Shutdown`, then SIGKILL after 2 s.
 
 - **[HST-168]** A helper that dies during a call MUST count one failure for its plugin, and a helper that dies while idle MUST NOT count one.
 - **[HST-169]** After a helper dies, every request pending on it MUST complete as `cancelled`, and no retained state in the helper MUST be assumed.
-- **[HST-170]** The host MUST allow at most 5 helper starts in 10 minutes for a session, and MUST then disable the T2 and T3 plugins of that session with `helper.unstable`.
+- **[HST-170]** The host MUST allow at most 5 helper restarts in 10 minutes for a session, and MUST then disable the T2 and T3 plugins of that session with `helper.unstable`.
 - **[HST-171]** Termination MUST be SIGTERM followed by SIGKILL after 2 s.
 
 ## Errors

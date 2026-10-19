@@ -281,7 +281,7 @@ The schema describes a source manifest and a packed manifest. In a source manife
             "additionalProperties": false,
             "properties": {
               "kind": {"enum": ["tab", "section"]},
-              "id": {"type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"},
+              "id": {"type": "string", "minLength": 1, "maxLength": 32, "pattern": "^[a-z][a-z0-9-]{0,31}$"},
               "title": {"type": "string", "minLength": 1, "maxLength": 48},
               "short_title": {"type": "string", "minLength": 1, "maxLength": 16},
               "icon": {"type": "string", "minLength": 1, "maxLength": 64},

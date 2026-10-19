@@ -148,7 +148,7 @@ A plugin is a WebAssembly component that the host loads, checks and runs. It rea
 
 **Frame slot.** A place in a pane frame (header icon, header text, footer row or banner) that a plugin fills with `set-frame-slot`.
 
-**High-risk grant (H).** A grant that is off by default in every dialog and always needs an explicit user choice, even for a bundled plugin. Twelve grants are high risk in the contract; `settings.read-kernel` is high only for the `api` tab.
+**High-risk grant (H).** A grant that is off by default in every dialog and always needs an explicit user choice, even for a bundled plugin. Twelve of the 24 further grants are high risk, in addition to the other H rows of the grants table; `settings.read-kernel` is high only for the `api` tab.
 
 **Host catalogue.** A catalogue owned by the kernel, such as `ilium.palettes`, `ilium.dithers`, `ilium.filters`, `ilium.style-presets` or `ilium.icons`.
 

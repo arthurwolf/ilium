@@ -351,8 +351,8 @@ Illustrative, not generated. Each line is a plugin log entry. The retry in the s
 | `register` | `conflict` | The `path` is already registered. |
 | `register` | `invalid-argument` | The branch name is empty or not a valid Git branch name. |
 | `send` | `not-found` | The target session is not running. |
-| `send` | `not-permitted` | The target has not got the plugin installed and enabled with `sessions.cross` granted, or the command is a kernel command. |
-| `send` | `invalid-argument` | The command is not one that the plugin declares, or `arguments-json` is not valid JSON. |
+| `send` | `not-permitted` | The target has not got the plugin installed and enabled with `sessions.cross` granted, the command is a kernel command, or the command is not one that the plugin declares. |
+| `send` | `invalid-argument` | `arguments-json` is not valid JSON. |
 | `release` | `not-found` | The id is not registered. A second release of the same id gives this too. |
 | `release` | `conflict` | The worktree is in use (see `in_use`). Try again after the process ends. |
 

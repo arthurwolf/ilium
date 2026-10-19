@@ -755,7 +755,6 @@ fn doc_cap_011_page_lists_the_always_granted_capabilities() {
         "fs.write:data",
         "fs.read:cache",
         "fs.write:cache",
-        "fs.watch:package",
         "fs.watch:data",
         "fs.watch:cache",
         "messages",

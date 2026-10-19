@@ -48,7 +48,7 @@ Names follow the SDK naming rules. In Rust the functions are snake_case and the 
 | `deflate` | `format`, `data`, `level: u8` | bytes | Compresses data. `level` runs from 0 to 9. Higher levels are slower and produce smaller output. |
 | `image-info` | `data` | `image-info` | Reads the width, height and frame count from the header. It does not decode any pixels. |
 | `decode-image` | `data`, `frame: u32`, `max-pixels: u32` | `decoded-image` | Decodes one frame, counted from 0, to 8-bit RGBA. Refused if the image has more pixels than `max-pixels`. |
-| `sha256` | `data` | 32 bytes | Returns the SHA-256 digest. It fails with `invalid-argument` for input above 16 MiB. |
+| `sha256` | `data` | 32 bytes | Returns the SHA-256 digest. It cannot fail, so it has no error channel. |
 | `rasterize-text` | `request: raster-text` | `decoded-image` | Draws text as white pixels. The alpha channel holds the ink tone: 0 is background, 255 is full ink. Text wraps at word boundaries to `max-width-px`. |
 
 Records:
@@ -67,7 +67,7 @@ The native crates behind the import are flate2, the image decoders, sha2 and cos
 
 | Limit | Value | Refused with |
 |---|---|---|
-| Input of any function | 16 MiB | `invalid-argument` |
+| Input of any function except `sha256` | 16 MiB | `invalid-argument` |
 | `inflate` `max-output` | at most 64 MiB | `invalid-argument` |
 | Pixels in `decode-image` | `max-pixels`, and never more than 67,108,864 | `invalid-argument` |
 | `rasterize-text` text | 64 KiB | `invalid-argument` |
@@ -236,7 +236,7 @@ Illustrative, not generated. The numbers follow the 640 by 480 example above.
 
 | Code | Raised by | When |
 |---|---|---|
-| `invalid-argument` | every function | Input over 16 MiB. |
+| `invalid-argument` | every function except `sha256` | Input over 16 MiB. |
 | `invalid-argument` | `inflate` | `max-output` over 64 MiB, output longer than `max-output`, or corrupt data. |
 | `invalid-argument` | `deflate` | `level` over 9. |
 | `invalid-argument` | `image-info`, `decode-image` | Corrupt data, `frame` out of range, or more pixels than `max-pixels` or 67,108,864. |

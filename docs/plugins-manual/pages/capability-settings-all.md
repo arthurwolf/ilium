@@ -18,7 +18,7 @@ The two grants unlock three functions of the `settings` import: `list-settings` 
 |---|---|---|---|---|
 | `settings.read-all` | high, T1 only | none | Reading the values of other plugins and the list of tabs and sections | Changing any value |
 | `settings.write-all` | high, T1 only | none | Changing the values of other plugins (needs `settings.read-all`) | Reading kernel values |
-| `settings.contribute:<tab-id>` | low, all tiers | one built-in tab id, required | Drawing sections in that one built-in tab | Reading or writing any value, including kernel values |
+| `settings.contribute:<tab-id>` | normal, all tiers | one built-in tab id, required | Drawing sections in that one built-in tab | Reading or writing any value, including kernel values |
 
 The two groups are independent. `settings.read-all` and `settings.write-all` never imply `settings.contribute:<tab-id>`, and `settings.contribute:<tab-id>` never implies either of them. A plugin's own tabs need no grant at all, because the always-granted `settings` import covers their values. The review dialog lists each contribute grant as `Adds settings to the Terminal tab`. The argument must be one built-in tab id. A wildcard is refused, and an unknown or closed tab id fails at install (`manifest.settings-target-unknown`, `manifest.settings-target-closed`). See [Plugin settings extension](/pages/settings-extension/) for the tab ids.
 
