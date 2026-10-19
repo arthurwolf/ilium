@@ -14,6 +14,8 @@ development period. Dates are commit dates (`YYYY-MM-DD`).
 ## [Unreleased]
 
 ### Fixed
+- A window the server drops while it is running (for example after a failed lag resynchronization) is relaunched automatically when the session server is still live, at most five times per ten minutes, instead of leaving a dead terminal. The exit error now reads "lost the connection to the ilium server" rather than "failed to enter raw/alternate-screen terminal mode".
+- When a state resynchronization gives up, the server log lists why each of the eight attempts was discarded (tree changed, pane output moved, pane session replaced, tree grew).
 - Keep the terminal parser's bounded metadata buffer on the heap so pane startup does not exhaust debug worker stacks.
 - Scanner recommendations require at least one correctly solved agentic task that used a native tool call. Visual recommendations accept at least 80% correct image answers despite unavailable requests, while checking completion and score bounds.
 
