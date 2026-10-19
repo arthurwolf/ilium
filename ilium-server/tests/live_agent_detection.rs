@@ -2117,6 +2117,7 @@ async fn unopened_claude_with_truncated_custom_footer_stays_idle_and_refreshes_o
         &mut client,
         &ClientRequest::Attach {
             session: session.to_string(),
+            hello: Default::default(),
         },
     )
     .await
@@ -2216,6 +2217,7 @@ async fn unopened_claude_with_truncated_custom_footer_stays_idle_and_refreshes_o
         &mut reattached,
         &ClientRequest::Attach {
             session: session.to_string(),
+            hello: Default::default(),
         },
     )
     .await
