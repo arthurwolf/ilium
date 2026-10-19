@@ -42,7 +42,7 @@ Nothing to install or grant. This page explains design choices and asks nothing 
 | D19 | No `preview` rows in kernel tabs | Decided | Previews live in your own tab |
 | D20 | Toasts need a grant and a rate limit | Decided | 3 toasts per 10 s per plugin |
 | D21 | Durable timers fire late once; journaled input never replays | Decided | You may get `input-uncertain` after a crash |
-| D22 | Agent transcripts are typed turns from the host | Decided | No raw transcript files |
+| D22 | Agent transcripts are typed turns from the host | Decided | Typed turns, not raw files |
 | D23 | A host taken from a setting is confirmed by the user | Decided | The first request to a new host waits for the user |
 | D24 | Package assets: 64 MiB, 256 MiB for T1 | Decided | Video and font assets must fit |
 | D25 | `open-external` asks once per target origin | Decided | The first open of a site waits for the user |
@@ -453,7 +453,7 @@ function statusSubmissions(): Submission[] {
 
 ### D22 and D23: transcripts and hosts from a setting
 
-- **D22.** Agent transcripts are typed turns that the host parses, behind the high-risk grant `agent.transcript`. The alternative is raw file access through `fs.read:agent-sessions:*`, where every plugin parses every agent format and the kernel cannot redact.
+- **D22.** Agent transcripts are typed turns that the host parses, behind the high-risk grant `agent.transcript`. The rejected alternative is raw transcript access as the way to read sessions. The read-only scope `fs.read:agent-sessions:<agent>` still exists as a separate high-risk path beside `agent.transcript`, but it is not the transcript API: with it every plugin parses every agent format and the kernel cannot redact.
 - **D23.** A host taken from a setting (`http:setting:<key>`) is confirmed by the user before the first request to each new host. The alternative is to trust the setting, which silently opens a new host when the setting changes.
 
 ### D24: package asset size

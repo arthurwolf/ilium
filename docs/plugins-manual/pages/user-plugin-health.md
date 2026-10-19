@@ -72,7 +72,7 @@ The reasons you can see are:
 
 ## What happens to what the plugin showed
 
-When a plugin stops, the badges and rows that it added stay on screen for up to a minute, dimmed. This lets you keep working. If the plugin comes back, the items refresh. If it does not, they disappear. A dimmed item that you select shows "plugin is restarting".
+When a plugin stops, the badges and rows that it added stay on screen for up to 60 seconds, dimmed as stale (HST-254, see [Rendering pipeline for plugins](/pages/reference-host-rendering/)). This lets you keep working. If the plugin comes back, the items refresh. If it does not, they disappear. A dimmed item that you select shows "plugin is restarting".
 
 ## What Ilium never does
 

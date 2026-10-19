@@ -66,7 +66,7 @@ A third-party plugin runs in a sandbox with no network of its own. The only ways
 
 | Way out | What guards it |
 |---|---|
-| `http:<host>` | You granted that exact host or pattern. Only HTTPS, except for `localhost`. A redirect to another host needs its own grant |
+| `http:<host>` | You granted that exact host or pattern. Only HTTPS, except for the loopback hosts `localhost`, `127.0.0.1` and `[::1]` when the grant names them. A redirect to another host needs its own grant |
 | `http:setting:<key>` | The host comes from a setting. Ilium asks you the first time for each new host |
 | `inference` | The plugin uses the AI providers you set up. What it sends goes to the provider you chose, as described in [Inference providers](/pages/core-plugin-inference/) |
 | `location.geocode` | A place name goes to an online lookup service, Photon, with Nominatim as fallback. Ilium asks the first time |

@@ -381,7 +381,7 @@ const bar = scrollbar('log', { orientation: 'vertical-right', key: 'log-bar' });
 |---|---|---|
 | `direction` | `horizontal` or `vertical` | `horizontal` puts the children side by side. |
 | `position` | `u16` | The initial divider position in per mille, 50 to 950. Default 500. |
-| `min-first`, `min-second` | `u16` | Minimum size of each child, in cells. |
+| `min-first`, `min-second` | `u16` | Minimum size of each child, in cells. Default 0. |
 | `resizable` | `bool` | Whether the user can move the divider. Default true. |
 
 Let A be the area length along the split axis. `first = floor((A-1)*position/1000)`, the divider takes 1 cell, and `second = A-1-first`. Then `first` is clamped to [`min-first`, A-1-`min-second`]; if both minimums cannot fit, `first` gets `min-first` and `second` gets the rest. The divider draws `│` for a horizontal split and `─` for a vertical one (`muted`; `accent` when focused or dragged). It is focusable and draggable only when `resizable` is true. During a drag the grip `┃` or `━` shows.
@@ -593,7 +593,7 @@ The WIT records have no defaults. The SDK builders fill these, so a plugin sets 
 | `tabs` | divider `│`, padding 1 and 1, highlight style = selection colours |
 | `popup` | no title, `modal` true, width and height 60% |
 | `scrollbar` | `orientation` vertical-right |
-| `split` | `position` 500, `resizable` true |
+| `split` | `position` 500, `min-first` 0, `min-second` 0, `resizable` true |
 | `dialog` | `kind` plain, no message |
 | `scroll-view` | `show-scrollbar` true, `follow-tail` false |
 

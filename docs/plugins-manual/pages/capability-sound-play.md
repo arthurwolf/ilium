@@ -162,7 +162,7 @@ The host answers each submission with a `request-completed` event. The SDK passe
 | Outcome | When it happens | What the plugin does |
 |---|---|---|
 | `ok` | The id is in the catalogue and the sound is sent to the audio output. | Nothing. |
-| `refused(not-permitted)` | The grant is missing, declined or revoked during the call. Every later submission in the same batch completes as `refused(cancelled)`. | Do not retry. Tell the user the grant is needed. |
+| `refused(not-permitted)` | The grant is missing, declined or revoked during the call. Every other submission in the same batch completes as `refused(cancelled)`. | Do not retry. Tell the user the grant is needed. |
 | `refused(not-found)` | The id is not in `catalog()`. Only this submission is refused. | Check `catalog()` first. Do not retry the same id. |
 | `refused(rate-limited)` | More than 4 `play-sound` submissions per second from this plugin. The result carries `retry-after-ms`. | Wait for `retry-after-ms`, or drop the sound. The key is not reserved, so a retry with the same key is valid. |
 | `duplicate(original)` | The same key was reserved within the last 10 minutes. The `original` field names the earlier submission. | Nothing. The earlier sound was already accepted. |

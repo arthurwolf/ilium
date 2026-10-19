@@ -30,7 +30,7 @@ A **grant** is a standing permission that the user gives a plugin at install, fo
 | 6 | Policy: tier, id, publisher, source | `policy.tier-denied`, `policy.id-denied`, `policy.publisher-denied`, `policy.source-denied` |
 | 7 | Key trust and key pinning: an untrusted key is offered for trust; an installed id signed by another key is refused | `trust.declined`, `package.publisher-key-changed` |
 | 8 | Grant strings parse and fit the tier; dependencies between grants | `manifest.grant-tier`, `manifest.grant-argument`, `manifest.grant-argument-missing`, `manifest.grant-wildcard`, `manifest.grant-scope`, `manifest.grant-dependency`, `manifest.limits-tier`, `manifest.secret-scope`, `manifest.replaces-tier` |
-| 9 | Policy: replacement. A grant denied by `grants.deny` is not checked here and does not fail the install; step 10 shows it locked off | `policy.replacement` |
+| 9 | Policy: replacement, then dependency resolution (package-format stage 10: `requires.plugins`, `requires.services`, host version, cycles). A grant denied by `grants.deny` is not checked here and does not fail the install; step 10 shows it locked off | `policy.replacement`, `dependency.unresolved`, `dependency.conflict`, `dependency.cycle`, `dependency.host-version`, `manifest.service-cycle` |
 | 10 | Review dialog (see below) | user cancels: exit code 1, audit `install` with result `cancelled` |
 | 11 | Commit: unpack into the install directory, write the grants, bump the epoch, write the audit line | `install.write-failed` |
 

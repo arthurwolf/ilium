@@ -93,7 +93,7 @@ record cell-region {
 
 ## How a claim behaves
 
-- **Events.** While the claim is held, every mouse event for the pane goes to the plugin. Drag events are coalesced, so a fast drag produces fewer events than the mouse moved. Use the row of the latest event, not a sum of movements.
+- **Events.** While the claim is held, every mouse event for the pane goes to the plugin. Move and drag events are coalesced, so a fast drag produces fewer events than the mouse moved. Use the row of the latest event, not a sum of movements.
 - **Wheel.** A wheel event (`wheel-up`, `wheel-down`, `wheel-left` or `wheel-right`) goes to the plugin and does not scroll the scrollback. The plugin decides what the wheel means.
 - **Typing.** Keyboard input is not affected. Typing into the pane needs `terminal.write`, not a claim.
 - **One owner.** A pane has at most one claim. A second plugin gets `conflict`. Calling `claim-pointer` again from the plugin that already holds the claim returns `ok` and changes nothing.

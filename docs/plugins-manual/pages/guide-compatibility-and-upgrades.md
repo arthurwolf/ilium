@@ -169,7 +169,7 @@ A plugin that needs another plugin declares it in `requires` with a range. The r
 
 - Use `^MAJOR.MINOR` for a dependency that follows the rule above. It accepts later minors of the same major.
 - Declare a dependency as `optional` when the plugin can work without it, and test both cases.
-- A range that cannot be met blocks the install with `dependency.unresolved`. A cycle is refused with `manifest.requires-cycle` or `manifest.service-cycle`.
+- A range that cannot be met blocks the install with `dependency.unresolved`. A cycle is refused with `dependency.cycle` (plugins) or `manifest.service-cycle` (services).
 
 A plugin MUST declare a `requires` range no wider than the versions it was tested with. [AUT-212]
 

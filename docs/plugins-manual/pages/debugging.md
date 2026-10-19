@@ -102,7 +102,7 @@ A job that runs past its deadline does not trap the plugin. The job request fail
 
 ### Stuck plugins
 
-Each side has an event queue of 1,024 entries for events that are never dropped. When the queue overflows, the plugin is treated as stuck. The host writes `event queue full at 1,024 events; restarting` at level `error`, and restarts the plugin. The new instance gets a `tree-changed` event for every node and reads its state again. The restart counts as a failure.
+Each side has an event queue (1,024 entries by default; up to 4,096 for T1). When it is full, the oldest drop-oldest event is evicted and counted, and the host writes `event queue full: dropped N events` at level `error`. Only a never-dropped event that cannot fit makes the plugin stuck, and the host then restarts it. The new instance gets a `tree-changed` event for every node and reads its state again. The restart counts as a failure.
 
 ### Failures that do not count
 

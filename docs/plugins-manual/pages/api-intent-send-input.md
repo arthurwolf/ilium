@@ -195,7 +195,7 @@ const val = {
 
 ### Crash safety: journal and input-uncertain
 
-With `journal: true` the kernel writes a pane journal entry (kind `input-sent`, with the dedup key and the delivery result) before the PTY write. A `send-input` on an agent pane and `agent-action` always journal their keys, from Phase 5. If the server stops between the write and the recorded outcome, the restarted plugin receives `input-uncertain { pane, dedup-key }` once, and the kernel never resends silently. The plugin reads the screen, decides whether the text arrived, and resends under a new key if it did not. In the sketches below, `screen_shows` and `screenShows` stand for the plugin's own helper that reads cells and looks for the text.
+With `journal: true` the kernel writes a pane journal entry (kind `input-sent`, with the dedup key and the delivery result) before the PTY write. A `send-input` on an agent pane and `agent-action` always journal their keys. If the server stops between the write and the recorded outcome, the restarted plugin receives `input-uncertain { pane, dedup-key }` once, and the kernel never resends silently. The plugin reads the screen, decides whether the text arrived, and resends under a new key if it did not. In the sketches below, `screen_shows` and `screenShows` stand for the plugin's own helper that reads cells and looks for the text.
 
 **Rust**
 

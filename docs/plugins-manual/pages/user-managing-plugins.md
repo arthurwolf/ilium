@@ -37,7 +37,7 @@ Open Settings, then Plugins. Each row shows the name, the tier, the version, the
 
 ### When a plugin fails
 
-After a failure the plugin restarts after a short delay (see [Lifecycle](/pages/lifecycle/#failure-counting-and-restart)). After the third failure in a window it is turned off, and the row shows "failed". You see a notice with three buttons.
+After a failure the plugin restarts after a short delay (see [Lifecycle](/pages/lifecycle/#failure-counting-and-restart)). After the third failure within 10 minutes it is turned off, and the row shows "failed". You see a notice with three buttons.
 
 1. Enable again. This clears the failure count and starts the plugin.
 2. Open log. Shows the lines that explain the failure.
@@ -58,7 +58,7 @@ Select Update on a row, or run `ilium plugin update <id>`. If the new version fa
 
 ### Administrator policy
 
-An administrator controls plugins for all users with `/etc/ilium/policy.toml` on Linux. Keys are in [Plugin policy](/pages/reference-plugin-policy/). A plugin that the policy blocks shows "Blocked by policy" and its data stays. A policy may forbid third-party plugins, limit tiers, allow or deny publishers and ids, and forbid grants. On macOS the file is in `/Library/Application Support/ilium/` and on Windows in `%PROGRAMDATA%\ilium\`.
+An administrator controls plugins for all users with `/etc/ilium/policy.toml` on Linux. Keys are in [Plugin policy](/pages/reference-plugin-policy/). A plugin that the policy blocks shows "Blocked by policy" and its data stays. A policy may forbid third-party plugins, limit tiers, allow or deny publishers and ids, and forbid grants. On macOS the file is in `/Library/Application Support/Ilium/policy.toml` and on Windows in `%ProgramData%\Ilium\policy.toml`.
 
 The policy can also block exact versions, force safe mode, or pin a version. These per-version keys are planned and are not in the first policy format. A plugin blocked by id already shows the code of the specific rule as its disabled reason (for example `policy.id-denied` for `plugins.deny_ids`). Until the per-version keys exist, use `plugins.deny_ids` and `plugins.allow_ids`.
 

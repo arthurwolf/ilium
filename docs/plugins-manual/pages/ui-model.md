@@ -515,7 +515,7 @@ While a drag hovers a drop target, the host sends `drag-over` with `drag-over-va
 
 A `settings-page` tree uses a subset of the widgets. The subset is: `block`, `paragraph`, `tabs`, `separator`, `leader-row`, `%list`, `table`, `button` and `schema-form`, and also `layout`, `split`, `scroll-view`, `markdown`, `key-hints`, `diff-view`, `tree-list`, `check-list`, `gauge`, `line-gauge`, `sparkline`, `bar-chart`, `chart`, `canvas`, `progress-row`, `meter`, `minimap`, `badge`, `spinner`, `notice`, `icon`, `image`, `surface`, `location-picker` and `code-view` with `read-only: true`.
 
-These trap the instance in a settings page with `ui.widget-not-allowed`, and the host keeps the previous tree and logs one error: `popup`, `dialog`, `menu`, `video`, `terminal-view`, an editable `code-view`, and the input widgets other than `button`, `schema-form` and `location-picker`. Values are still edited through `schema-form`, and the host validates and saves them.
+These trap the instance in a settings page with `ui.widget-not-allowed`, and the host keeps the previous tree and logs one error: every widget outside the subset above. That includes `popup`, `dialog`, `menu`, `video`, `terminal-view`, `calendar`, `clear`, `scrollbar`, an editable `code-view`, and the input widgets other than `button`, `schema-form` and `location-picker`. This is the one list of record; [widgets-index](/pages/widgets-index/), [widgets-input](/pages/widgets-input/) and the other widget pages cite it. Values are still edited through `schema-form`, and the host validates and saves them.
 
 ## Theme extras
 

@@ -145,7 +145,7 @@ record style { fg: option<color>, bg: option<color>, add: modifiers, remove: mod
 record span { text: string, style: style }
 ```
 
-An empty style inherits the theme. A colour given as `rgb` or `indexed` is painted exactly as given. Use it only where a scene or an editor needs a natural colour. The host guarantees a contrast ratio of at least 4.5:1 between each of the nine foreground roles and the theme background, in every built-in theme; a theme test computes the ratio from the token values. This guarantee covers roles only. A plugin that picks its own colours is responsible for contrast on both backgrounds.
+An empty style inherits the theme. A colour given as `rgb` or `indexed` is painted exactly as given. Use it only where a scene or an editor needs a natural colour. The host guarantees a contrast ratio of at least 4.5:1 between each of the seven text roles (`foreground`, `muted`, `accent`, `success`, `warning`, `danger`, `info`) and the theme background, in every built-in theme; a theme test computes the ratio from the token values. `selection` and `border` are a background and a line, not text; this page states no ratio for them. This guarantee covers roles only. A plugin that picks its own colours is responsible for contrast on both backgrounds.
 
 ## The full surface
 
@@ -156,7 +156,7 @@ An empty style inherits the theme. A colour given as `rgb` or `indexed` is paint
 | `theme-extras()` | function in `host::ui` | Returns reduced motion, density, icon mode and the `info`, `selection` and `border` tokens. Rust `ui::theme_extras()`, TypeScript `themeExtras()`. |
 | `invalidate(view)` | function in `host::ui` | Draws the view again with the current tokens. |
 | `theme-changed` | client event, no payload | Sent once for a burst of theme changes. Always delivered on the client. |
-| `color-role` | enum | The nine roles of the table above. |
+| `color-role` | enum | The nine roles of the enum above (seven text roles, plus `selection` and `border`). |
 | `color` | variant | `role(color-role)`, `rgb(u32)` or `indexed(u8)`. |
 | `style`, `span`, `modifiers` | records and flags | The fields described above. |
 | `paragraph` | widget | `lines: styled-lines`, `wrap`, `alignment`, `style`, `scrollable`. |

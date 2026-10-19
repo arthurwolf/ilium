@@ -710,7 +710,7 @@ Older drafts used other spellings for these codes. The current names are `manife
 | `manifest.limits-tier` | A `limits` key is not allowed for the tier | [Manifest](/pages/reference-manifest/) |
 | `manifest.menu-depth` | A menu is nested deeper than the limit | [Manifest](/pages/reference-manifest/) |
 | `manifest.publisher-mismatch` | The signature publisher does not match the trusted key | [Signing and trust](/pages/reference-signing-and-trust/) |
-| `manifest.requires-cycle` | `requires` forms a cycle | [Dependency resolution](/pages/reference-dependency-resolution/) |
+| `dependency.cycle` | `requires.plugins` forms a cycle (install stage 10) | [Dependency resolution](/pages/reference-dependency-resolution/) |
 | `manifest.requires-invalid` | A `requires` version range is malformed | [Dependency resolution](/pages/reference-dependency-resolution/) |
 | `manifest.requires-self` | A plugin requires itself | [Dependency resolution](/pages/reference-dependency-resolution/) |
 | `manifest.service-cycle` | `requires.services` forms a cycle against the installed set | [Install, update, uninstall](/pages/reference-install-update-uninstall/) |

@@ -102,7 +102,7 @@ Choose **Details** to see the full fingerprint, 64 lowercase hexadecimal charact
 - [USR-121] Removing a trusted key MUST NOT uninstall any plugin or change its files, grants or data. The plugins it signed stop loading at the next activation (SEC-144), and every plugin whose signature came from the removed key MUST show the state `untrusted` in `ilium plugin list`. Test: remove the key and list.
 - [USR-122] An update of a T2 plugin MUST be signed by a trusted key. A key that signed the installed version MUST NOT be replaced by a different key unless the old key endorsed it with a rotation statement (SEC-142); otherwise the update is refused with `package.publisher-key-changed`. Test: install version 1 signed by key A, then offer version 2 signed by unendorsed key B, and assert that the update is refused with `package.publisher-key-changed`.
 
-Unsigned packages (T3) carry no signature. They need `--allow-unsigned`. They get a `dev` badge in the list and the permissions of a T2 plugin at most. Install one only if you built it or reviewed it yourself.
+Unsigned packages (T3) carry no signature. They need `--allow-unsigned`. They get a `dev` badge in the list and the same sandbox and resource ceilings as a T2 plugin. The grants are the ones you check in the review dialog. Install one only if you built it or reviewed it yourself.
 
 ### Review the permissions
 

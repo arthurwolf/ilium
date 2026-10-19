@@ -172,7 +172,7 @@ The host calls the `views` export when a view first opens, after the plugin call
 - **Common node props.** Any node can carry `tooltip`, `tab-index` and `disabled-reason`, and the flags `focusable`, `draggable`, `drop-target`, `hidden`, `hover-events` and `pointer-events`.
 - **Disabled widgets** use the `muted` role, and `disabled-reason` shows as a tooltip.
 - **Limits.** The default is 4,096 nodes and 1 MiB for every tier; a T1 plugin may request up to 16,384 nodes and 4 MiB in `limits`. A render has a default deadline of 10 ms and a ceiling of 20 ms.
-- **Settings views** accept a widened subset of widgets. `popup`, `dialog`, `menu`, `video`, `terminal-view`, an editable `code-view` and most input widgets are refused there. See [The UI model](/pages/ui-model/).
+- **Settings views** accept a widened subset of widgets. every widget outside the allowed subset is refused there, among them `popup`, `dialog`, `menu`, `video`, `terminal-view`, `calendar`, `clear`, `scrollbar`, an editable `code-view` and every input widget except `button`, `schema-form` and `location-picker`. See [The UI model](/pages/ui-model/).
 
 ### Host-owned state values
 
@@ -185,7 +185,7 @@ The host calls the `views` export when a view first opens, after the plugin call
 | `text(string)` | `text-input`, `text-area` | The current contents. |
 | `expanded(list<string>)` | `tree-list` | The ids of the expanded items. |
 | `checked(bool)` | `toggle` | The toggle state. |
-| `tri` | `toggle` in tri-state style | On, off or mixed. |
+| `tri(tri-state)` | `toggle` in tri-state style | On, off or mixed. |
 | `geo` | `location-picker` | The chosen place. |
 | `number(f64)` | `number` | The current value. |
 | `split` | `split` | The divider position. |
@@ -217,7 +217,7 @@ The host sends one `ui-action` event for each user action on a keyed widget. The
 | Kind | Value | Sent by |
 |---|---|---|
 | `activated` | `none`, `index`, `text` or `cell` | `button`, lists, `table`, `tree-list`, `menu`, `markdown`, `surface`, `progress-row`, `canvas`, `minimap`, `image`, `video`, `terminal-view` |
-| `changed` | `text`, `number`, `flag`, `index`, `geo` or `ids` | `text-input`, `text-area`, `number`, `toggle`, `choice`, pickers, `check-list` |
+| `changed` | `text`, `number`, `flag`, `index`, `geo` or `ids` | `text-input`, `text-area`, `number`, `toggle`, `choice`, pickers, `check-list`, `video` (on seek) |
 | `submitted` | `text` | `text-input` with `submit-on-enter` |
 | `selected` | `index` or `text` | `tabs`, lists, `table`, `tree-list`, charts and meters |
 | `toggled` | `text` | `tree-list` expand or collapse, `markdown` task click |

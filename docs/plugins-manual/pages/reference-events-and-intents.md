@@ -251,7 +251,7 @@ A batch is refused as a whole in two cases: a malformed submission (wrong shape,
 | `set-node-locked` | `node`, `locked: bool` | `tree.write` | `refused(not-found)` |
 | `create-pane` | `parent: option`, `title`, `content-kind`, `cwd`, `command`, `initial-input` | `panes.create`, plus `terminal.write` with `initial-input` | `ok-node`; `failed(io)` when spawning fails |
 | `signal-pane` | `pane`, `signal` (interrupt, terminate, kill, hangup) | `panes.signal` | `refused(pane-not-ready)` for a restored pane |
-| `send-input` | `pane`, `text`, `delivery` (typed, submitted, pasted), `prompt-epoch: option<u64>` | `terminal.write` | `refused(not-found)`; `refused(unsupported)`; `refused(pane-not-ready)`; `refused(rate-limited)` (20 per second per pane); `refused(conflict)` on a stale epoch |
+| `send-input` | `pane`, `text`, `delivery` (typed, submitted, pasted), `prompt-epoch: option<u64>` | `terminal.write` | `refused(not-found)`; `refused(unsupported)`; `refused(pane-not-ready)`; `refused(rate-limited)` (20 per second per pane per plugin); `refused(conflict)` on a stale epoch |
 | `agent-action` | `pane`, `action-id` | `agent.control` | `refused(not-found)`; `refused(pane-not-ready)`; `refused(unsupported)`; `refused(conflict)` when the activity is not allowed; `refused(rate-limited)` (20 per second per pane) |
 | `set-decoration` | `node`, `slot`, `content`, `icon`, `sort-key`, `persist` | `tree.decorate` | `refused(invalid-argument)` for an undeclared slot |
 | `clear-decoration` | `node`, `slot` | `tree.decorate` | none beyond the common codes |
@@ -432,7 +432,7 @@ The manifest grants `panes.read` and `notify.desktop` on the `client` side. Ever
 - **Retries.** A refused submission does not reserve its key, so retry it unchanged. A failed submission needs a new key.
 - **Prompt text.** Without `agent.read-prompts`, the plugin gets no `input-submitted` event and nothing derived from prompt text, neither length nor hash.
 - **Lost events.** Drop-oldest events that overflow are counted in `events-dropped`. A never-dropped event that overflows the queue restarts the plugin, and the restart counts as a failure.
-- **Restart rule.** The first failure in a 10-minute window restarts after 1 s and the second after 5 s. The third failure within the window disables the plugin on that side (see [API-040](/pages/reference-requirements-api-host/)). A manual re-enable resets the count.
+- **Restart rule.** The first failure in a 10-minute window restarts after 1 s and the second after 5 s. The third failure within the window disables the plugin on that side, except an essential core plugin, which restarts after 5 s on the third and later failures (LIF-042; see [API-040](/pages/reference-requirements-api-host/)). A manual re-enable resets the count.
 - **Batch size.** A `handler` call that returns more than 256 submissions traps. Split the work across batches.
 
 ## What the user sees

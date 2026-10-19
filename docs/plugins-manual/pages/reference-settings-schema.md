@@ -133,7 +133,7 @@ Every row has a `type`. A value row also has a `key`, and the host compiles it i
 | `choice` | string or integer | `enum`, `enum_titles` | at once |
 | `number` | integer or number | `minimum`, `maximum`, `step`, `unit`, `x-steps`, `x-special-values` | 600 ms after the last step |
 | `text` | string | `maxLength`, `pattern`, `secret` | 600 ms after the last keystroke |
-| `text-area` | string | `maxLength`, `multiline` | 1 s after the last keystroke |
+| `text-area` | string | `maxLength`, `multiline` | 600 ms after the last keystroke, or 1 s when the text is above 10,000 bytes (SET-023) |
 | `path` | string | `picker`, `extensions` | at once on confirm |
 | `color` | `#rrggbb` string | `pattern` | at once on confirm |
 | `keybinding` | chord string | chord grammar | at once on confirm |
@@ -431,7 +431,7 @@ A false `depends_on` leaves the row on the screen, read-only, with the descripti
 | Toggle, choice, dialog confirm | at once | at once |
 | Number step | at once | 600 ms after the last step |
 | Number or text typed | as typed | 600 ms after the last keystroke, or `debounce_ms` |
-| Text-area | as typed | 1 s after the last keystroke, or `debounce_ms` |
+| Text-area | as typed | 600 ms after the last keystroke, or 1 s when the text is above 10,000 bytes (SET-023), or `debounce_ms` |
 | `set-json` from the plugin | at once | at once |
 
 While a write is pending, the control shows a dim `◌` after the value. A failed change keeps the old value, and the message replaces the description line in the warning style. Closing Settings writes every pending change first.

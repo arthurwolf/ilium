@@ -23,7 +23,7 @@ In the tables below, S is the server side and C is the client side.
 
 | Primitive | Interface | Sides | The kernel owns | Plugins add | Grants |
 |---|---|---|---|---|---|
-| `terminal` | `ilium:primitives/terminal` | S and C (read), S (filters), C (pointer) | PTY, vt100 screen, scrollback, selection, paste, mouse | screen reads, output filters, highlight layers, input | `terminal.read-screen`, `terminal.output-filter`, `terminal.pointer`, `terminal.write` |
+| `terminal` | `ilium:primitives/terminal` | S and C (read, highlights), S (filters), C (pointer) | PTY, vt100 screen, scrollback, selection, paste, mouse | screen reads, output filters, highlight layers, input | `terminal.read-screen`, `terminal.output-filter`, `terminal.pointer`, `terminal.write` |
 | `agent` | `ilium:primitives/agent` | S and C (read), S (signatures) | process-tree walk, poll schedule, signatures, activity state, toolbar strip | agent and prompt reads, signatures, toolbar buttons, actions | `agent.read`, `agent.read-prompts`, `agent.signatures`, `agent.control` |
 | `editor` | `ilium:primitives/editor` | C | the native editor: buffers, undo, file custody, 1 s autosave, highlighting | buffer reads, decorations, gutter marks, edits, file loads and saves | `editor.read`, `editor.edit` |
 | `basic` | `ilium:primitives/basic` | C | the generic frame: focus, scrollbars, split geometry, key and mouse routing | title, footer, focus, size, and the body from `views.render` | `panes.provide-kind` |
@@ -153,8 +153,8 @@ impl NotesPanes {
 | `remove_output_filter(pane, id)` / `removeOutputFilter` | `terminal.output-filter` (S) | No result. |
 | `claim_pointer(pane)` / `claimPointer` | `terminal.pointer` (C) | `result`. `conflict` when another plugin holds the claim. |
 | `release_pointer(pane)` / `releasePointer` | `terminal.pointer` (C) | No result. |
-| `set_highlights(pane, layer, regions)` / `setHighlights` | `terminal.pointer` (C) | `result`. Layer names match `[a-z0-9-]{1,32}`. At most 4,096 regions per layer, 16 layers per pane. |
-| `clear_highlights(pane, layer)` / `clearHighlights` | `terminal.pointer` (C) | No result. |
+| `set_highlights(pane, layer, regions)` / `setHighlights` | `terminal.pointer` | `result`. Layer names match `[a-z0-9-]{1,32}`. At most 4,096 regions per layer, 16 layers per pane. |
+| `clear_highlights(pane, layer)` / `clearHighlights` | `terminal.pointer` | No result. |
 | `prompt_epoch(pane)` / `promptEpoch` | `terminal.write` | `option<u64>`: the count of submitted prompts. |
 
 A `Screen` holds `columns`, `rows` (one string per row), `cursor-row`, `cursor-column`, `title` and a `revision`. Filter matches arrive as `output-matched` events with `node`, `filter-id`, `line` and `row`. Surplus matches above a filter's rate are dropped and counted in one `events-dropped` event. A highlight region outside the screen is clipped silently. A region whose first position comes after its last is `invalid-argument`.
@@ -168,7 +168,10 @@ Input is the intent `send-input`: `pane`, `text` (at most 64 KiB), `delivery` (`
 5. The pane is restored. A restored pane still waiting for its process gives `pane-not-ready`.
 6. The rate. Failure is `rate-limited`.
 7. The prompt epoch, if given, matches the pane. Otherwise `conflict`.
-8. The key is reserved and the text is written.
+8. `mouse`: reporting is enabled. Otherwise `unsupported`.
+9. The `if-current` precondition, if given, matches the pane. Otherwise `conflict` with the message `precondition: <field>`.
+10. No other plugin holds the input lock of the pane. Otherwise `conflict` with the message `input-locked`.
+11. The key is reserved and the text is written.
 
 A refused submission does not reserve its key, so a retry with the same key after fixing the cause is valid.
 

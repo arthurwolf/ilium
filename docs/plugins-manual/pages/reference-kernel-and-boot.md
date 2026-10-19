@@ -330,7 +330,7 @@ Code that reads a restart-only value gets the value that was current at the star
 |---|---|---|
 | A command of an off core plugin runs | Kernel prints the owner error and exits 1 | `cli.owner-disabled` |
 | A client side activates with no server side of the same plugin | The client side runs with `unavailable` for server requests | `client-request.unavailable` |
-| Two startup plugins `require` each other | Both stay off | `manifest.requires-cycle` |
+| Two startup plugins require each other's services | Both stay off | `manifest.service-cycle` |
 | `snapshot-sections` entry has an unknown `schema_version` | Section kept unchanged | `section-unsupported` |
 | A route for `/create_agent` is registered twice | The second registration is refused | `http-api.route-taken` |
 | `config.toml` fails to parse at boot | Moved aside, defaults used, recovery page opens | `config.parse-error` |

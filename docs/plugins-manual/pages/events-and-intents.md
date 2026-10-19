@@ -64,7 +64,7 @@ An event reaches a plugin only when the plugin holds the listed grant. Lazily ac
 | `key-pressed`, `key-released` | `grab`, `pane`, `chord`, `repeat` | `keys.intercept` or `wants_keys` | Never dropped |
 | `view-visibility` | `view`, `visible: bool` | own views | Coalesced |
 | `fs-changed` | `watch`, `paths: list<string>` | `fs.watch` | Coalesced by watch |
-| `audio-frames` | `capture`, `samples: list<s16>` | audio grant | Drop oldest, counted |
+| `audio-frames` | `capture`, `samples: list<s16>` | `audio.capture` or `audio.loopback` (see [audio grants](/pages/capability-audio/)) | Drop oldest, counted |
 | `cli-invoked` | `invocation`, `name`, `argv`, `cwd` | `cli.contribute` | Never dropped |
 | `cli-cancelled` | `invocation` | `cli.contribute` | Never dropped |
 | `http-called` | `call`, `method`, `path`, `headers`, `body` | `http-api.route` | Never dropped |
@@ -177,6 +177,7 @@ Every submission completes exactly once, as a `request-completed` event whose `r
 |---|---|
 | `ok` | Applied. For calls, the typed result is ready to take with a `take-*` function. It is held for 30 s or until taken. |
 | `ok-node(node-id)` | Applied. Returns the node the intent created. |
+| `ok-epoch(u64)` | Applied. `send-input` on an agent pane returns it with the pane's new prompt epoch; a test for `ok` alone still passes through `is_ok()` or `isOk()`. |
 | `duplicate(request-ref)` | The dedup key was already reserved. Nothing happened. The ref names the submission that reserved it. |
 | `refused(plugin-error)` | An acceptance check failed. Nothing was applied, and the key was not reserved. |
 | `failed(plugin-error)` | The kernel accepted the submission but could not apply it. The key stays reserved. |

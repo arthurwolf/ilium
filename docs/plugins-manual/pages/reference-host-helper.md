@@ -139,11 +139,11 @@ The time spent in the host serving `HostCall` messages counts inside the call's 
 
 ## Memory
 
-The memory of the helper is charged to the session. The charge for one helper is its plugin's `memory_mib` plus a fixed overhead of 32 MiB, which is the same overhead that the cgroup limit uses.
+The memory of the helper is charged to the session. The charge for one helper is the sum of the hosted instances' `memory_mib` plus a fixed overhead of 32 MiB, which is the same overhead that the cgroup limit uses.
 
 | Item | Charge |
 |---|---|
-| Helper | `memory_mib + 32` MiB |
+| Helper | sum of the hosted instances' `memory_mib` + 32 MiB |
 | T1 instance in the host | `memory_mib` |
 | Session total limit | `session_memory_mib` 1,024 (see [Errors and limits](/pages/reference-errors-and-limits/)) |
 

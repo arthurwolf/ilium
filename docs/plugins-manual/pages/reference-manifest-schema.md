@@ -1141,7 +1141,6 @@ See [Versions and dependencies](/pages/reference-dependency-resolution/).
 | `dependency.in-use` | 10 | 1 | `{id} is required by {dependants}.` |
 | `dependency.lock-mismatch` | 10 | 1 | `The lock file says {expected}. The resolution gives {found}.` |
 | `dependency.unsatisfied` | 10 | 1 | `{id} needs {dependency}, which is not in the set.` |
-| `manifest.requires-cycle` | 10 | 1 | `The requires lists of {ids} form a cycle.` |
 | `manifest.service-name` | 4 | 1 | `{pointer}: "{name}" is not a service name of this plugin.` |
 | `manifest.service-version` | 4 | 1 | `{pointer}: "{value}" is not <name>@<major>.<minor>.<patch>.` |
 | `manifest.service-cycle` | 10 | 1 | `The services {services} form a cycle.` |

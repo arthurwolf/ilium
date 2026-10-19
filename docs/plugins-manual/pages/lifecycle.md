@@ -74,7 +74,7 @@ The reasons passed to `deactivate` are:
 The enum `deactivation-reason` has six cases in a fixed order: `shutdown`, `disabled`, `upgrade`, `crash-restart`, `revoked`, `granted`. Five are delivered. A client that disconnects has no case of its own: the host deactivates that instance with `shutdown` and the returned bytes are stored as restore state, see [persistence and restart](/pages/reference-persistence-and-restart/).
 
 - [LIF-043] The enum `deactivation-reason` MUST have the six values above, and the host MUST send `crash-restart` never. Test: enumerate the reasons seen across a full lifecycle test.
-- [LIF-044] A production update MUST send `upgrade` to every live instance of the old version before the swap. Test: update an active plugin and read the reason.
+- [LIF-044] A production update MUST send `upgrade` to every live instance of the old version at the next safe point (PKG-278); the swap waits for each instance's `deactivate(upgrade)` to return its restore bytes. Test: update an active plugin and read the reason.
 
 Revocations and grant changes re-activate the plugin with the new `granted` list, so read `granted` on every activation.
 
@@ -366,7 +366,7 @@ Failures older than 10 minutes drop out of the count on their own, so a plugin t
 
 ### Reset and persistence
 
-- [LIF-036] Enabling the plugin, the command `ilium plugin reset-failures <id>`, the Enable action of the recovery page and installing an update MUST clear the failure window of the affected sides. Test: two traps, then each action, then one trap restarts after 1 s.
+- [LIF-036] Enabling the plugin, the command `ilium plugin reset-failures <id>`, the Enable action of the recovery page and installing an update MUST clear the failure window of the affected sides. Test: two traps, then each action. After `reset-failures` the side is `inactive` and does not start; after Enable, the recovery page Enable action or an update, one trap restarts after 1 s.
 - [LIF-037] The instance state `stopped-by-failure` of the server side MUST be written to `failure_stopped` in `installed.json` and MUST survive a server restart. The failure window itself MUST NOT; it starts empty. The state of a client or scene side MUST be dropped when its client detaches. Test: stop the server after a stop-by-failure and assert the state after the restart; detach and reattach a client and assert the client side runs again.
 
 ### Restart timer and other events

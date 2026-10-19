@@ -217,7 +217,7 @@ One Engine per process. One Store per plugin instance. The table assigns each re
 2. The kernel restores the snapshot (`restore_snapshot`). No plugin exists yet, so no plugin sees the restore as a series of events.
 3. The host creates the Engine, starts the epoch ticker and the plugin executor (see [Host runtime](/pages/reference-host-runtime/)).
 4. The host loads the package store. For every installed and enabled package it verifies the manifest, the signature and the content hash, checks the API version, validates the component, and registers static contributions. These are the eager steps. Nothing is instantiated.
-5. The host builds the service graph. A cycle in `requires` is refused; the plugin stays disabled with `manifest.requires-cycle`.
+5. The host builds the service graph. A cycle in `requires.services` is refused with `manifest.service-cycle` (a `requires.plugins` cycle is refused at install with `dependency.cycle`); the plugins in the cycle stay disabled.
 6. The host activates every plugin whose `activation` list contains `startup`, in dependency order: a service provider before its consumers. Other plugins stay inactive until their trigger fires. These are the lazy steps.
 7. The dispatcher delivers exactly one `tree-changed` batch for the restored tree to each activated plugin that subscribes to it. The restore is never replayed.
 8. The server accepts client connections. (Clients that connect earlier than step 6 completes are refused with the retriable error `server.starting`; a client retries for 5 seconds.)
@@ -242,7 +242,7 @@ The CLI process creates an Engine, loads only the needed package, activates it, 
 
 - **[HST-026]** The server host MUST start after `restore_snapshot` and MUST deliver exactly one `tree-changed` batch for the restored tree to each plugin that subscribes to it, and no replay of restore steps.
 - **[HST-027]** Manifest verification, signature verification, component validation and static contribution registration MUST be completed eagerly before any plugin is activated. Instantiation MUST be lazy except for plugins with the `startup` trigger.
-- **[HST-028]** A service provider MUST be activated before the plugins that `requires` it, and a cycle in `requires` MUST leave the plugins in the cycle disabled with `manifest.requires-cycle`.
+- **[HST-028]** A service provider MUST be activated before the plugins that `requires` it, and a cycle in `requires.services` MUST leave the plugins in the cycle disabled with `manifest.service-cycle`.
 - **[HST-029]** On server shutdown the host MUST stop after the services stop and before `drain_session_work` and the final snapshot, and MUST refuse new submissions as `cancelled` before the first `deactivate`.
 - **[HST-030]** `deactivate(shutdown)` MUST be called in reverse activation order, and the total shutdown time spent in plugin calls MUST NOT exceed 5 seconds.
 - **[HST-031]** A client that connects before the server host finished step 6 MUST be refused with the retriable error `server.starting`.

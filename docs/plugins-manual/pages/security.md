@@ -112,17 +112,21 @@ Bundled plugins keep working.
 
 ## Verifying a package
 
-Before any code runs, the loader checks the package. The normative order of the install checks is the 11 validation stages of [Package format](/pages/reference-package-format/#the-validation-order), each with its error code. [Grant review and consent](/pages/reference-grant-review-and-consent/#the-install-pipeline) ([SEC-100]) numbers the same checks as 11 steps for the review dialog; the table below is the only translation between the two numberings. The first failing step stops the install, and each refusal is written as one JSONL `error` line that carries its code. The operational pipeline in [Install, update and uninstall](/pages/reference-install-update-uninstall/#the-install-pipeline) wraps the same checks with locking, staging and commit, and its step 2 runs the 11 validation stages of [Package format](/pages/reference-package-format/#the-validation-order). Those stages are numbered differently from SEC-100 (for example key trust is stage 8 there and step 7 here, and review is stage 11 there and step 10 here). The table below gives the SEC-100 step of each check.
+Before any code runs, the loader checks the package. The normative order of the install checks is the 11 validation stages of [Package format](/pages/reference-package-format/#the-validation-order), each with its error code. [Grant review and consent](/pages/reference-grant-review-and-consent/#the-install-pipeline) ([SEC-100]) numbers the same checks as 11 steps for the review dialog; the table below lists every package-format stage 1 to 11 once against its SEC-100 step and is the only translation between the two numberings. The first failing step stops the install, and each refusal is written as one JSONL `error` line that carries its code. The operational pipeline in [Install, update and uninstall](/pages/reference-install-update-uninstall/#the-install-pipeline) wraps the same checks with locking, staging and commit, and its step 2 runs the 11 validation stages of [Package format](/pages/reference-package-format/#the-validation-order). Those stages are numbered differently from SEC-100 (for example key trust is stage 8 there and step 7 here, and review is stage 11 there and step 10 here). The table below gives the SEC-100 step of each check.
 
-| Check order | What is checked | Error codes | SEC-100 step (of 11) |
+| Package-format stage | What is checked | Error codes | SEC-100 step (of 11) |
 |---|---|---|---|
-| 1 to 3 | Archive, layout, API version, file inventory | `package.zip-*`, `manifest.api-version`, `manifest.unknown-key`, `manifest.file-*`, `manifest.asset-size` | 1, 2, 3 |
-| 4 | Signature (T2) and publisher match | `manifest.signature-invalid`, `manifest.publisher-mismatch` | 4 |
-| 5 and 6 | Blocklist and administrator policy | `package.blocked`, `policy.*` | 5, 6, 9 |
-| 7 | Key trust and key pinning | `trust.declined`, `package.publisher-key-changed` | 7 |
-| 8 and 9 | Grant strings, tier rules. A grant denied by policy is not an install failure: it is locked off in the dialog | `manifest.grant-*`, `manifest.limits-tier` | 8 |
-| 10 | Review dialog | the user cancels | 10 |
-| 11 | Commit | `install.write-failed` | 11 |
+| 1 archive | Container, paths, caps | `package.*` | 1 |
+| 2 manifest-parse, 3 schema, 4 semantic | UTF-8, JSON, keys, types, cross references; API version | `manifest.json-*`, `manifest.api-version`, `manifest.unknown-key`, `manifest.*` | 2 |
+| 5 inventory | Every file listed with length and hash; asset size | `manifest.file-*`, `manifest.asset-size` | 3 |
+| 6 components | Preamble, api-version section, exports | `package.*`, `manifest.exports-mismatch` | 2, 3 |
+| 7 signature | Signature (T2) and publisher match | `manifest.signature-invalid`, `manifest.publisher-mismatch` | 4 |
+| 9 policy (blocklist, tier, id, publisher, source) | Blocklist and administrator policy | `package.blocked`, `policy.*` | 5, 6 |
+| 8 trust | Key trust and key pinning | `trust.declined`, `package.publisher-key-changed` | 7 |
+| 9 policy (grants) | Grant strings and tier rules. A grant denied by policy is not an install failure: it is locked off in the dialog | `manifest.grant-*`, `manifest.limits-tier` | 8 |
+| 9 policy (replacement), 10 dependencies | Replacement, then `requires.plugins`, `requires.services`, host version, cycles | `policy.replacement`, `dependency.*`, `manifest.service-cycle` | 9 |
+| 11 review | Review dialog | the user cancels | 10 |
+| (after 11) | Commit | `install.write-failed` | 11 |
 
 - [USR-170] Install, update and the Plugins screen MUST run the checks in the order of the table above, and MUST name the failing step's code in the error. Test: build one package for each failing check, install each, and assert the code and that nothing is written to the store.
 - [USR-171] The error text for a refused install MUST begin `Cannot install <name> <version>.` and MUST name the check in plain words after it. Test: assert the first line for a hash failure and for a tier failure.

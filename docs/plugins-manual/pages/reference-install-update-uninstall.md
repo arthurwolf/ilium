@@ -166,7 +166,7 @@ The JSON Schema of the file:
 
 ### The install pipeline
 
-`ilium plugin install <file.iliumpkg>` runs these steps in order. A failure at any step stops the pipeline, removes what the pipeline created and leaves the registry unchanged. Step 2 is the validation order of [Package format](/pages/reference-package-format/#the-validation-order) (PKG-149); this page does not define a second order.
+`ilium plugin install <file.iliumpkg>` runs these steps in order. This table groups the 11 numbered steps of SEC-100 into 7 rows; other pages cite SEC-100 step numbers (policy is SEC-100 step 6, commit is step 11), so refer to steps by name. A failure at any step stops the pipeline, removes what the pipeline created and leaves the registry unchanged. Step 2 is the validation order of [Package format](/pages/reference-package-format/#the-validation-order) (PKG-149); this page does not define a second order.
 
 | Step | Action | On failure | Code |
 |---|---|---|---|
@@ -192,7 +192,7 @@ A higher version of an installed id is an update. It is the same pipeline, commi
 
 1. Steps 1 to 5 run as for an install. The dialog shows only the new capabilities. The package state is `update-staged` only when the new version asks for grants beyond those the user accepted, and stays so until the review is answered (LIF-078); otherwise the update goes on to step 2.
 2. Step 6 writes `previous_version` and `update: { candidate, state: "staged", attempts: 0, started_at }`, and leaves `active_version` unchanged.
-3. Each running server receives the change. At the next safe point ([Install and update](/pages/reference-install-and-update/), PKG-278) each live instance receives `deactivate(upgrade)` and returns its restore bytes ([LIF-044](/pages/lifecycle/)).
+3. Each running server receives the change. At the next safe point ([Install and update](/pages/reference-install-and-update/), PKG-278) each live instance receives `deactivate(upgrade)` and returns its restore bytes; the swap waits for every instance to return ([LIF-044](/pages/lifecycle/)).
 4. Before the host calls `migrate`, it writes `update.state: "migrating"` to `installed.json` with fsync. The data migration runs ([Data migration](/pages/guide-data-migration/)). If the host stops while the state is `migrating`, the next start restores the backup, increments `attempts` and runs the migration again; when `attempts` reaches 2 the host rolls back with `migration.interrupted` and marks the candidate `skip`.
 5. The host sets `update.state` to `trial` and the server activates the candidate. The context carries `restored`, unless the data version changed, in which case the bytes are dropped.
 6. The candidate becomes `active_version` only after its first `activate` returns `ok` on the server side. Then the host sets `active_version` to the candidate, sets `previous_version`, sets `update` to `null` and logs `update.ok`. The update is committed.
@@ -227,7 +227,7 @@ If activation of the new version is deferred (a lazy plugin has no trigger yet),
 |---|---|---|---|
 | Store entries (all versions) | deleted | deleted | deleted |
 | Data directory | kept | deleted | kept |
-| Cache directory and compile cache | kept | deleted | kept |
+| Cache directory and compile cache | deleted | deleted | kept |
 | Global bucket | kept with the data directory | deleted | kept |
 | Project bucket | kept | deleted for this project, tombstone for others | kept |
 | Session bucket | kept until its session is deleted | deleted for this session, tombstone for others | kept |

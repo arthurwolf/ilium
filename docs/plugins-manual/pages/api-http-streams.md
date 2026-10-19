@@ -314,7 +314,7 @@ The setting row itself looks like any text row, with leaders:
 |---|---|
 | `http_streams` per plugin | 4 default, 16 T1 ceiling, 4 T2 and T3 ceiling |
 | Streams per session | 64 (`quota-exceeded` over the cap) |
-| Chunk | at most 1 MiB; larger records are split |
+| Chunk | at most 64 KiB; larger records are split |
 
 <pre class="term"><span class="t-prompt">$</span> ilium plugin logs example.feed --tail 4
 <span class="t-dim">09:30:00</span> <span class="t-ok">info</span>  http.open-stream feed.example.com sse

@@ -100,7 +100,7 @@ A submission refused at steps 1 to 8 does not reserve its key. A retry with the 
 
 The key identifies one user request. It is reserved for 10 minutes per plugin, so a retry after a lost reply reuses the key and does nothing a second time. The SDK helper `dedup::key_for` joins its parts with `:` and replaces disallowed characters with `-`, and `Submission::keyed` sets the key. `dedup::key_for(&["compact", "42", "7"])` gives `compact:42:7`. TypeScript has no helper, so the plugin builds the string itself.
 
-From Phase 5 of the [roadmap](/pages/roadmap/) on, the kernel journals `send-input` and `agent-action` keys in the snapshot before the write. A server restart then does not repeat the keys. Keys reserved before Phase 5 ships do not survive a restart.
+The kernel journals `send-input` and `agent-action` keys in the snapshot before the write. A server restart then does not repeat the keys.
 
 ## Toolbar state
 

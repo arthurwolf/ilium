@@ -6,7 +6,7 @@ permalink: /pages/primitives-terminal/
 
 ## Terminal primitive
 
-A terminal pane shows the output of a program in a pseudo-terminal, usually a shell or an agent CLI. The terminal primitive lets a server-side plugin read the screen and selection, watch output for text, draw highlights, claim the mouse for one pane, and type input. The kernel parses every output byte. The plugin receives only matches of its output filters, and it reads the screen only when it asks.
+A terminal pane shows the output of a program in a pseudo-terminal, usually a shell or an agent CLI. The terminal primitive lets a server-side plugin read the screen and selection, watch output for text, draw highlights, and type input. Highlights work on both sides; claiming the mouse for one pane is client-side only (see [terminal pointer](/pages/primitives-terminal-pointer/)). The kernel parses every output byte. The plugin receives only matches of its output filters, and it reads the screen only when it asks.
 
 ### What you need
 
@@ -16,7 +16,7 @@ Declare the grants you use in `capabilities.server` of the manifest. Each grant 
 |---|---|
 | `terminal.read-screen` | `read_screen`, `selection` |
 | `terminal.output-filter` | `add_output_filter`, `remove_output_filter`, `output-matched` events, and manifest `output_filters` |
-| `terminal.pointer` | `claim_pointer`, `release_pointer`, `set_highlights`, `clear_highlights`, `pointer` events while a claim is held |
+| `terminal.pointer` | `set_highlights`, `clear_highlights` (server or client), and `claim_pointer`, `release_pointer` and `pointer` events while a claim is held (client only) |
 | `terminal.write` | the `send-input` intent and `prompt_epoch` |
 
 The primitive is available to both the server and the client sides, through the `ilium:server/base` and `ilium:client/base` worlds. Import it from `ilium_plugin_sdk::primitives::terminal` in Rust, or from `@ilium/plugin-sdk/primitives/terminal` in TypeScript. Agent identification is a separate contract, described in [primitives-agent](/pages/primitives-agent/).
@@ -104,7 +104,7 @@ Input is an intent, not a function. The plugin submits `send-input` with these f
 | `text` | At most 64 KiB. |
 | `delivery` | `typed` writes keystrokes. `submitted` writes the text, then the submit keys of the pane's signature (`"\r"` by default). `pasted` uses bracketed paste when the program enabled it (DEC mode 2004), and otherwise works like `typed`. |
 | `prompt_epoch` | Optional. Refuses with `conflict` when the pane's epoch has moved on. |
-| `dedup_key` | Mandatory, from 1 to 128 characters of `[A-Za-z0-9._:/-]`. The key is reserved for 10 minutes once the submission is accepted. |
+| `dedup_key` | Mandatory, from 1 to 128 characters of `[A-Za-z0-9._:/-]`. The dedup journal keeps the key for 24 hours or 4,096 entries per session, whichever is smaller, once the submission is accepted. |
 
 The rate is 20 submissions per second per pane per plugin. The checks run in this order: shape and key, grant, duplicate key, pane exists and is a terminal, pane restored, rate, prompt epoch, `if-current`, the input-lock check, then the write. A refusal does not reserve the key, so a retry with the same key is valid after the cause is fixed.
 
@@ -302,8 +302,8 @@ Store `epoch_at_idle` when the agent becomes idle, and return the submission fro
 | `set_highlights` | `quota-exceeded` | The plugin already has 16 layers on this pane. |
 | `send-input` | `refused(pane-not-ready)` | The pane is restored but its process has not started. Retry after `pane-created` or `tree-changed` for the pane. Check the pane's `is-restored` flag before each write. |
 | `send-input` | `refused(conflict)` | The prompt epoch is stale. Do not retry with the same epoch. |
-| `send-input` | `refused(rate-limited)` | More than 20 per second. Retry after `retry-after-ms`. |
-| `send-input` | `duplicate(original)` | The dedup key was reserved in the last 10 minutes. The input was not sent twice. |
+| `send-input` | `refused(rate-limited)` | More than 20 per second. Retry after `retry-after-ms`: the `u32` field of the error record, in milliseconds, set for `rate-limited` to the time until the oldest counted send leaves the 1 s window (see [errors and limits](/pages/reference-errors-and-limits/)). |
+| `send-input` | `duplicate(original)` | The dedup key was reserved in the last 24 hours. The input was not sent twice. |
 
 ### What the user sees
 

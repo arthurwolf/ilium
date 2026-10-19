@@ -843,7 +843,7 @@ export const { lifecycle, handler, views } = definePlugin({
 | `choice` with `selected-id` that is not in `items` | The first option is shown and nothing is sent. |
 | `set-widget-state` with a key the view does not have | `not-found` |
 | `set-widget-state` with a state the widget does not take | `invalid-argument` |
-| An input widget other than `button` in a settings page | `ui.widget-not-allowed`. The instance traps and the previous tree stays. Use `schema-form`, and `location-picker` with `bind`. |
+| An input widget other than `button`, `schema-form` and `location-picker` in a settings page (full list in [The UI model](/pages/ui-model/#settings-views)) | `ui.widget-not-allowed`. The instance traps and the previous tree stays. Use `schema-form`, and `location-picker` with `bind`. |
 | The `ui.panels` grant is declined | Every `ui` import returns `not-permitted`, and the panel is not registered. |
 | The grant changes during a call | `revoked`. The plugin is activated again. |
 
