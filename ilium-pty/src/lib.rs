@@ -31,6 +31,7 @@ mod owner_queue;
 mod query;
 mod replay_text;
 mod screen_reader;
+mod screen_snapshot;
 mod session;
 
 pub use admission::{PTY_WORKERS_PER_SESSION, PTY_WORKER_STACK_BYTES};

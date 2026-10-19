@@ -692,6 +692,27 @@ fn parser_reader_cannot_make_owner_cancellation_wait_forever() {
     ));
     drop(read_guard);
     assert!(harness.resizes().is_empty());
+    // Unparsed raw output is still journalled as final evidence, and the parser
+    // generation must not advance for bytes it never processed.
+    assert_eq!(
+        harness.published.lock().unwrap().as_slice(),
+        &[b"pending-output".to_vec()]
+    );
+    assert_eq!(harness.generation.load(Ordering::Acquire), 0);
+}
+
+#[test]
+fn published_output_is_parsed_under_the_same_lock_as_its_generation() {
+    let harness = Harness::new(OwnerLimits::default(), None, None);
+    harness.output(b"journal-and-parser");
+    harness.fence();
+    assert_eq!(
+        harness.published.lock().unwrap().as_slice(),
+        &[b"journal-and-parser".to_vec()]
+    );
+    assert_eq!(harness.generation.load(Ordering::Acquire), 1);
+    let parser = harness.parser.read().unwrap();
+    assert!(parser.screen().contents().contains("journal-and-parser"));
 }
 
 #[test]
