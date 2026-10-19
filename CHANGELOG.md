@@ -14,12 +14,14 @@ development period. Dates are commit dates (`YYYY-MM-DD`).
 ## [Unreleased]
 
 ### Fixed
+- Closing a pane that is already gone (a duplicate close racing a restructure) is now a quiet no-op, and a failed request aimed at a removed node no longer becomes a session-wide blocking error that put the yellow warning triangle on every agent until the server restarted.
 - A window the server drops while it is running (for example after a failed lag resynchronization) is relaunched automatically when the session server is still live, at most five times per ten minutes, instead of leaving a dead terminal. The exit error now reads "lost the connection to the ilium server" rather than "failed to enter raw/alternate-screen terminal mode".
 - When a state resynchronization gives up, the server log lists why each of the eight attempts was discarded (tree changed, pane output moved, pane session replaced, tree grew).
 - Keep the terminal parser's bounded metadata buffer on the heap so pane startup does not exhaust debug worker stacks.
 - Scanner recommendations require at least one correctly solved agentic task that used a native tool call. Visual recommendations accept at least 80% correct image answers despite unavailable requests, while checking completion and score bounds.
 
 ### Changed
+- Attaching to a terminal or agent pane shows its current screen at once. The server sends a snapshot of the visible screen instead of replaying the whole retained output, so long-idle panes no longer fast-forward through their history. Older output loads on demand when you scroll up, in bounded pages, and the server keeps the retained output as before.
 - Scanner readers accept the 50-question agentic benchmark and require 15 graded agentic answers, a positive measured score and consistent published totals before selecting a model. Previous benchmark publications remain readable during atomic rollout.
 - Progress diagnostics distinguish successful checks from reported task progress, retain a bounded check timeline, and show the latest successful report as a structured tree beside timing and health details. Quiet tasks say “no progress reported”; probe guidance requires actual local/remote job identity and final results.
 - Scanner readers accept the expanded versioned 20-text/10-image benchmark; large-context selection requires five completed questions with measured inputs of at least 200,000 tokens. Previous scanner publications remain readable during rollout.

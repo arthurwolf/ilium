@@ -521,6 +521,11 @@ mod tests {
                 monitor_id: 7,
             },
             ClientRequest::GetPaneRecapScreen { pane_id: NodeId(2) },
+            ClientRequest::TerminalHistory {
+                pane_id: NodeId(2),
+                before_sequence: 42,
+                max_bytes: 1024 * 1024,
+            },
             ClientRequest::PasteTerminalText {
                 pane_id: NodeId(2),
                 text: "first line\nsecond line".to_string(),
@@ -771,6 +776,19 @@ mod tests {
                 through_sequence: 7,
                 bytes: b"hello from the pty".to_vec(),
                 is_complete: true,
+            },
+            ServerEvent::TerminalSnapshot {
+                pane_id: NodeId(2),
+                through_sequence: 7,
+                bytes: b"\x1b[H\x1b[Jhello from the pty".to_vec(),
+                is_complete: false,
+            },
+            ServerEvent::TerminalHistory {
+                pane_id: NodeId(2),
+                before_sequence: 7,
+                first_sequence: 3,
+                bytes: b"older output".to_vec(),
+                reaches_journal_start: true,
             },
             ServerEvent::PaneStatusChanged {
                 pane_id: NodeId(2),

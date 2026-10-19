@@ -962,7 +962,9 @@ where
         }
         let result = if matches!(
             event,
-            ServerEvent::ScreenUpdate { .. } | ServerEvent::TerminalReplay { .. }
+            ServerEvent::ScreenUpdate { .. }
+                | ServerEvent::TerminalReplay { .. }
+                | ServerEvent::TerminalSnapshot { .. }
         ) {
             write_server_event_with_storage(
                 frame_writer,
@@ -1163,7 +1165,9 @@ fn should_forward_terminal_event(
     terminal_stream_selection: &TerminalStreamSelection,
 ) -> bool {
     match event {
-        ServerEvent::ScreenUpdate { pane_id, .. } | ServerEvent::TerminalReplay { pane_id, .. } => {
+        ServerEvent::ScreenUpdate { pane_id, .. }
+        | ServerEvent::TerminalReplay { pane_id, .. }
+        | ServerEvent::TerminalSnapshot { pane_id, .. } => {
             terminal_stream_selection.includes(*pane_id)
         }
         _ => true,
@@ -1462,6 +1466,11 @@ fn record_delivered_terminal_sequence(
             pane_id,
             through_sequence,
             ..
+        }
+        | ServerEvent::TerminalSnapshot {
+            pane_id,
+            through_sequence,
+            ..
         } => (*pane_id, *through_sequence),
         _ => return,
     };
@@ -1482,6 +1491,11 @@ fn is_redundant_terminal_event(
             pane_id, sequence, ..
         } => (*pane_id, *sequence),
         ServerEvent::TerminalReplay {
+            pane_id,
+            through_sequence,
+            ..
+        }
+        | ServerEvent::TerminalSnapshot {
             pane_id,
             through_sequence,
             ..
@@ -2082,18 +2096,24 @@ mod tests {
         };
         let (prefix_sequence, prefix_bytes) = timeout(Duration::from_secs(5), async {
             loop {
-                let replay = handlers::initial_state_events(&state, false, true)
-                    .await
-                    .into_iter()
-                    .find(|event| matches!(event, ServerEvent::TerminalReplay { pane_id: id, .. } if *id == pane_id));
-                if let Some(ServerEvent::TerminalReplay {
-                    through_sequence,
-                    bytes,
-                    is_complete: true,
-                    ..
-                }) = replay
-                {
-                    if bytes.windows(b"writer-prefix".len()).any(|window| window == b"writer-prefix") {
+                // Attach now sends a screen snapshot, so the full raw journal
+                // this test frames by hand comes from recovery after zero.
+                let replay = match handlers::terminal_recovery_event(&state, pane_id, 0).await {
+                    Some(ServerEvent::ScreenUpdate {
+                        sequence, bytes, ..
+                    }) => Some((sequence, bytes)),
+                    Some(ServerEvent::TerminalReplay {
+                        through_sequence,
+                        bytes,
+                        ..
+                    }) => Some((through_sequence, bytes)),
+                    _ => None,
+                };
+                if let Some((through_sequence, bytes)) = replay {
+                    if bytes
+                        .windows(b"writer-prefix".len())
+                        .any(|window| window == b"writer-prefix")
+                    {
                         break (through_sequence, bytes);
                     }
                 }
@@ -2118,26 +2138,32 @@ mod tests {
         );
         let (full_sequence, full_bytes, missing_tail) = timeout(Duration::from_secs(5), async {
             loop {
-                let replay = handlers::initial_state_events(&state, false, true)
-                    .await
-                    .into_iter()
-                    .find(|event| matches!(event, ServerEvent::TerminalReplay { pane_id: id, .. } if *id == pane_id));
-                if let Some(ServerEvent::TerminalReplay {
-                    through_sequence,
-                    bytes,
-                    is_complete: true,
-                    ..
-                }) = replay
-                {
+                // Attach now sends a screen snapshot, so the full raw journal
+                // this test frames by hand comes from recovery after zero.
+                let replay = match handlers::terminal_recovery_event(&state, pane_id, 0).await {
+                    Some(ServerEvent::ScreenUpdate {
+                        sequence, bytes, ..
+                    }) => Some((sequence, bytes)),
+                    Some(ServerEvent::TerminalReplay {
+                        through_sequence,
+                        bytes,
+                        ..
+                    }) => Some((through_sequence, bytes)),
+                    _ => None,
+                };
+                if let Some((through_sequence, bytes)) = replay {
                     if through_sequence > prefix_sequence
-                        && bytes.windows(b"writer-tail".len()).any(|window| window == b"writer-tail")
+                        && bytes
+                            .windows(b"writer-tail".len())
+                            .any(|window| window == b"writer-tail")
                     {
                         if let Some(ServerEvent::ScreenUpdate {
                             first_sequence,
                             sequence,
                             bytes: tail,
                             ..
-                        }) = handlers::terminal_recovery_event(&state, pane_id, prefix_sequence).await
+                        }) = handlers::terminal_recovery_event(&state, pane_id, prefix_sequence)
+                            .await
                         {
                             let mut joined = prefix_bytes.clone();
                             joined.extend_from_slice(&tail);

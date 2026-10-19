@@ -405,7 +405,8 @@ mod unix_only {
         // The orphan records its pid so the test can kill it afterwards: a
         // sleeper left running past the test is flagged by ni-build as an
         // unretired compiler descendant and fails the whole remote job.
-        let pid_file = std::env::temp_dir().join(format!("ilium-pty-orphan-{}", std::process::id()));
+        let pid_file =
+            std::env::temp_dir().join(format!("ilium-pty-orphan-{}", std::process::id()));
         let command = PtyCommand::new("sh", std::env::temp_dir(), 24, 80)
             .arg("-c")
             .arg(format!(
