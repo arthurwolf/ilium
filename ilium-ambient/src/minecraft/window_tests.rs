@@ -176,7 +176,7 @@ fn cancelled_candidate_search_does_not_report_budget_completion() {
 fn invalid_limits_and_unaddressable_candidates_never_overflow() {
     for limits in [
         Limits {
-            radius_chunks: 6,
+            radius_chunks: 10,
             ..Limits::default()
         },
         Limits {
@@ -280,4 +280,22 @@ fn excludes_overlapping_recent_footprint_but_allows_adjacent_window() {
     let result = search(&allocated, [0, 0], &[[0, 0]], Limits::default(), &|| false).unwrap();
     assert_eq!(result.candidates.len(), 1);
     assert_eq!(result.candidates[0].center, [11, 0]);
+}
+
+#[test]
+fn sparse_save_without_large_square_falls_back_to_smaller_window() {
+    // Only an 11-by-11 fully allocated square exists, so no 15-by-15 window fits.
+    let allocated: BTreeSet<[i32; 2]> = (-5..=5)
+        .flat_map(|z| (-5..=5).map(move |x| [x, z]))
+        .collect();
+    let limits = Limits {
+        radius_chunks: 7,
+        ..Limits::default()
+    };
+    let result = search(&allocated, [0, 0], &[], limits, &|| false).unwrap();
+    assert!(!result.candidates.is_empty());
+    assert!(result
+        .candidates
+        .iter()
+        .all(|candidate| candidate.requested.len() == 11 * 11));
 }

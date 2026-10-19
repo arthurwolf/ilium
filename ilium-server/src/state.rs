@@ -176,6 +176,12 @@ pub(crate) struct ProgressSetRequestIdentity {
 }
 
 #[derive(Debug, Clone)]
+// Cold path, one value per progress registration: boxing would only add
+// indirection at every match site.
+#[allow(clippy::large_enum_variant)]
+// Cold path, one value per progress registration: boxing would only add
+// indirection at every match site.
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum ProgressSetRequestOutcome {
     Pending(tokio::sync::watch::Sender<Option<ProgressSetResult>>),
     Complete(ProgressSetResult),

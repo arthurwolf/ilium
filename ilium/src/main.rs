@@ -1501,20 +1501,85 @@ async fn attach_or_create(
         should_reset_session,
         "interactive session attach started"
     );
-    let exit_reason = ilium_client::run(ilium_client::RunOptions {
+    let run_result = ilium_client::run(ilium_client::RunOptions {
         session_name: project_session.name.clone(),
         session_cwd: project_session.project_root.clone(),
         socket_path: project_session.socket_path.clone(),
         log_path,
         onboarding,
     })
-    .await?;
+    .await;
+    let exit_reason = match run_result {
+        Ok(exit_reason) => exit_reason,
+        Err(ilium_client::error::ClientError::ServerConnectionLost(error)) => {
+            return recover_lost_server_connection(&client_executable, &project_session, error)
+                .await;
+        }
+        Err(error) => return Err(error.into()),
+    };
     match exit_reason {
         ilium_client::ClientExitReason::Quit => Ok(()),
         ilium_client::ClientExitReason::RestartRequested => {
-            restart_client_process(&client_executable, &project_session).await
+            restart_client_process(&client_executable, &project_session, None).await
         }
     }
+}
+
+/// Environment variable carrying `<attempts>:<first unix second>` across the
+/// client relaunches this module performs after a lost server connection.
+const CONNECTION_RECOVERY_ENV: &str = "ILIUM_CONNECTION_RECOVERY";
+/// A server that keeps dropping the window must not trap it in a relaunch
+/// loop: after this many relaunches inside the window the error is reported.
+const MAX_CONNECTION_RECOVERIES: u64 = 5;
+const CONNECTION_RECOVERY_WINDOW_SECONDS: u64 = 600;
+const CONNECTION_RECOVERY_DELAY: Duration = Duration::from_millis(500);
+
+/// Computes the recovery state for the next relaunch, or `None` when the
+/// relaunch budget of the current window is spent. Pure so the budget is
+/// testable without a process or a clock.
+fn next_connection_recovery_state(previous: Option<&str>, now_seconds: u64) -> Option<String> {
+    let (attempts, window_start) = previous
+        .and_then(|state| state.split_once(':'))
+        .and_then(|(attempts, start)| {
+            Some((attempts.parse::<u64>().ok()?, start.parse::<u64>().ok()?))
+        })
+        .filter(|(_, start)| {
+            now_seconds.saturating_sub(*start) < CONNECTION_RECOVERY_WINDOW_SECONDS
+        })
+        .unwrap_or((0, now_seconds));
+    let attempts = attempts.checked_add(1)?;
+    (attempts <= MAX_CONNECTION_RECOVERIES).then(|| format!("{attempts}:{window_start}"))
+}
+
+/// The server dropped this window while it was running (for example after a
+/// failed lag resynchronization) but is still serving its session: relaunch
+/// the window so it reattaches instead of leaving the user with a dead
+/// terminal. A server that is gone (killed session, crash) or a spent
+/// relaunch budget reports the original error unchanged, so a deliberate
+/// shutdown never resurrects the server.
+async fn recover_lost_server_connection(
+    executable_path: &Path,
+    project_session: &session::ProjectSession,
+    error: ilium_ipc::IpcError,
+) -> Result<(), CliError> {
+    tracing::warn!(%error, "lost the server connection while the window was running");
+    let lost = ilium_client::error::ClientError::ServerConnectionLost(error);
+    if !session::is_session_live(&project_session.socket_path) {
+        tracing::warn!("the session server is no longer live; not relaunching the window");
+        return Err(lost.into());
+    }
+    let now_seconds = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs());
+    let Some(recovery_state) = next_connection_recovery_state(
+        std::env::var(CONNECTION_RECOVERY_ENV).ok().as_deref(),
+        now_seconds,
+    ) else {
+        tracing::error!("the window lost its server connection too often; not relaunching");
+        return Err(lost.into());
+    };
+    tokio::time::sleep(CONNECTION_RECOVERY_DELAY).await;
+    restart_client_process(executable_path, project_session, Some(recovery_state)).await
 }
 
 /// Replaces this client process with the executable captured before the TUI
@@ -1523,14 +1588,20 @@ async fn attach_or_create(
 async fn restart_client_process(
     executable_path: &Path,
     project_session: &session::ProjectSession,
+    connection_recovery_state: Option<String>,
 ) -> Result<(), CliError> {
     tracing::info!("client process replacement requested");
     process_logging_barrier(false).await?;
-    let source = ilium_platform::process_control::replace_current_process(
-        ProcessCommand::new(executable_path)
-            .args(client_restart_args(project_session))
-            .current_dir(&project_session.project_root),
-    );
+    let mut command = ProcessCommand::new(executable_path);
+    command
+        .args(client_restart_args(project_session))
+        .current_dir(&project_session.project_root);
+    match connection_recovery_state {
+        Some(state) => command.env(CONNECTION_RECOVERY_ENV, state),
+        // A deliberate restart starts a fresh relaunch budget.
+        None => command.env_remove(CONNECTION_RECOVERY_ENV),
+    };
+    let source = ilium_platform::process_control::replace_current_process(&mut command);
     Err(CliError::RestartClient {
         path: executable_path.to_path_buf(),
         source,
@@ -2161,6 +2232,31 @@ mod tests {
         assert!(named.onboarding);
         assert!(matches!(named.command, Some(Command::NewSession { .. })));
         assert!(!Cli::try_parse_from(["ilium"]).unwrap().onboarding);
+    }
+
+    #[test]
+    fn connection_recovery_budget_counts_relaunches_inside_one_window() {
+        use super::{next_connection_recovery_state as next, MAX_CONNECTION_RECOVERIES};
+        assert_eq!(next(None, 1_000).as_deref(), Some("1:1000"));
+        assert_eq!(next(Some("1:1000"), 1_030).as_deref(), Some("2:1000"));
+        let spent = format!("{MAX_CONNECTION_RECOVERIES}:1000");
+        assert_eq!(next(Some(&spent), 1_100), None);
+    }
+
+    #[test]
+    fn connection_recovery_budget_restarts_after_the_window_or_bad_state() {
+        use super::{
+            next_connection_recovery_state as next, CONNECTION_RECOVERY_WINDOW_SECONDS,
+            MAX_CONNECTION_RECOVERIES,
+        };
+        let spent = format!("{MAX_CONNECTION_RECOVERIES}:1000");
+        let later = 1_000 + CONNECTION_RECOVERY_WINDOW_SECONDS;
+        assert_eq!(
+            next(Some(&spent), later).as_deref(),
+            Some(&*format!("1:{later}"))
+        );
+        assert_eq!(next(Some("garbage"), 50).as_deref(), Some("1:50"));
+        assert_eq!(next(Some("x:y"), 50).as_deref(), Some("1:50"));
     }
 
     #[test]
