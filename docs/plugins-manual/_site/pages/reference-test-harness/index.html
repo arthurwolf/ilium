@@ -1,0 +1,1956 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Test harness reference | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details open><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/" aria-current="page">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Reference</b></p>
+<h1>Test harness reference</h1>
+
+<p>The test harness runs a plugin without Ilium. It stands in for the host: it delivers events, answers host calls, draws views into text and records everything the plugin sends. This page is the normative contract of the harness. The how-to is <a href="/pages/testing/">Testing plugins</a>. Unit tests for the harness itself are written from the rules on this page.</p>
+<p>Terms:</p>
+<ul>
+<li><strong>FakeHost</strong>: the harness object for one plugin on one side.</li>
+<li><strong>FakeSession</strong>: the harness object for several plugins and both sides in one fake session.</li>
+<li><strong>Native mode</strong>: the plugin is compiled for the host machine and called as plain Rust or TypeScript. Fast, no component.</li>
+<li><strong>Component mode</strong>: the built <code>.wasm</code> component is loaded in a real WebAssembly runtime and called through its exports. Slower, proves the artifact.</li>
+<li><strong>Fixture</strong>: a JSON file that sets the starting state of the fake host and lists events to deliver.</li>
+<li><strong>Expectation file</strong>: a JSON file next to a fixture that states what the plugin must submit.</li>
+<li><strong>Golden file</strong>: a text file that holds an expected render.</li>
+<li><strong>Replay file</strong>: a JSONL recording of a session, used to re-run it.</li>
+</ul>
+<h2 id="you-will-need">You will need</h2>
+<ul>
+<li>A project from <a href="/pages/reference-project-templates/">Project templates</a>, or a plugin with the SDK <code>testing</code> feature (Rust) or <code>@ilium/plugin-sdk/testing</code> (TypeScript).</li>
+<li>Rust 1.90 or later, or Bun 1.2 or later.</li>
+<li>For component mode: a built <code>dist/&lt;side&gt;.wasm</code> from <code>ilium plugin build</code>.</li>
+</ul>
+<h2 id="modes">Modes</h2>
+<table>
+<thead>
+<tr>
+<th>Mode</th>
+<th>What runs</th>
+<th>Selected by</th>
+<th>Speed</th>
+<th>Proves</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Native</td>
+<td>The plugin crate or module as a library</td>
+<td><code>cargo test</code>, <code>bun test</code></td>
+<td>milliseconds per test</td>
+<td>Logic, views, state</td>
+</tr>
+<tr>
+<td>Component</td>
+<td><code>dist/&lt;side&gt;.wasm</code> in a WebAssembly runtime</td>
+<td><code>ilium plugin test</code>, or <code>ILIUM_PLUGIN_TEST_MODE=component</code></td>
+<td>tens of milliseconds per test</td>
+<td>The artifact, the exports, the limits</td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr>
+<th>Rust</th>
+<th>TypeScript</th>
+<th>Returns</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>host.mode() -&gt; Mode</code></td>
+<td><code>host.mode(): 'native' \| 'component'</code></td>
+<td>The mode of this host. The default is native under <code>cargo test</code> and <code>bun test</code>, and component under <code>ilium plugin test --component</code>.</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>[DEV-400]</strong> Both modes MUST expose the same <code>FakeHost</code> API. A test written for native mode MUST run in component mode with no source change when it uses only the API on this page.</li>
+<li><strong>[DEV-401]</strong> In component mode the harness MUST enforce the deadlines and the memory ceiling of <a href="/pages/reference-errors-and-limits/">Errors and limits</a>. In native mode it MUST NOT, and it MUST say so in <code>host.mode()</code>, which returns <code>Mode::Native</code> (TypeScript <code>'native'</code>) or <code>Mode::Component</code> (<code>'component'</code>).</li>
+<li><strong>[DEV-402]</strong> The project's own tests run in native mode with <code>cargo test</code> or <code>bun test</code>. <code>ilium plugin test</code> runs the fixtures with expectation files in component mode, as <a href="/pages/reference-plugin-cli/">Plugin command-line reference</a> defines. A test written with <code>FakeHost</code> MAY be run in component mode by setting <code>ILIUM_PLUGIN_TEST_MODE=component</code>, which makes <code>FakeHost</code> load <code>dist/&lt;side&gt;.wasm</code> instead of the native type.</li>
+<li><strong>[DEV-403]</strong> In component mode a trap MUST be reported as a test failure with the trap code, unless the test calls <code>expect_trap</code>.</li>
+<li><strong>[DEV-404]</strong> <code>host.mode()</code> MUST return <code>native</code> under <code>cargo test</code> and <code>bun test</code>, and <code>component</code> under <code>ilium plugin test --component</code> or <code>ILIUM_PLUGIN_TEST_MODE=component</code>. <code>assert_within_budget</code> MUST be skipped with the reason <code>needs-component</code> when <code>host.mode()</code> is <code>native</code>.</li>
+</ul>
+<h2 id="setup-the-builder">Setup: the builder</h2>
+<p>A host is built in steps, then activated. Setup is complete at <code>activate</code>. Grants and tier cannot change the builder after that, except through the runtime calls below.</p>
+<table>
+<thead>
+<tr>
+<th>Rust</th>
+<th>TypeScript</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>FakeHost::new()</code></td>
+<td><code>createFakeHost()</code></td>
+<td>Empty host: no grants, tier T1, side server, empty tree</td>
+</tr>
+<tr>
+<td><code>FakeHost::for_manifest(path)</code></td>
+<td><code>createFakeHost().forManifest(path)</code></td>
+<td>Takes id, side, grants and tier from a manifest. Returns <code>Result</code> in Rust.</td>
+</tr>
+<tr>
+<td><code>.grant(name)</code></td>
+<td><code>.grant(name)</code></td>
+<td>Adds one grant</td>
+</tr>
+<tr>
+<td><code>.grants(&amp;[names])</code></td>
+<td><code>.grants([names])</code></td>
+<td>Adds several grants</td>
+</tr>
+<tr>
+<td><code>.tier(Tier::T2)</code></td>
+<td><code>.tier('T2')</code></td>
+<td>Sets the tier</td>
+</tr>
+<tr>
+<td><code>.side(Side::Client)</code></td>
+<td><code>.side('client')</code></td>
+<td>Sets the side</td>
+</tr>
+<tr>
+<td><code>.platform(Platform::Linux)</code></td>
+<td><code>.platform('linux')</code></td>
+<td>Sets the reported platform</td>
+</tr>
+<tr>
+<td><code>.with_fixture(path)</code></td>
+<td><code>.withFixture(path)</code></td>
+<td>Loads a fixture</td>
+</tr>
+<tr>
+<td><code>.seed(u64)</code></td>
+<td><code>.seed(bigint)</code></td>
+<td>Sets the random seed</td>
+</tr>
+<tr>
+<td><code>.build()</code></td>
+<td><code>.build()</code></td>
+<td>Optional. Ends the setup without activating.</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>[DEV-410]</strong> Every builder method MUST return the builder, so calls chain. Calling a builder method after <code>activate</code> MUST fail with <code>harness.setup-closed</code>.</li>
+<li><strong>[DEV-411]</strong> A host built with <code>for_manifest</code> MUST take its grants from the <code>capabilities</code> object of the manifest for the chosen side. A grant not in the manifest MUST be refused by <code>.grant</code> and by <code>host.grant_now</code> with <code>harness.grant-not-declared</code>, because a plugin can never hold a grant its manifest does not request. <code>FakeHost::new()</code> has no manifest and accepts any grant name that exists in the grant catalogue.</li>
+<li><strong>[DEV-412]</strong> An unknown grant name MUST fail with <code>harness.grant-unknown</code>.</li>
+<li><strong>[DEV-413]</strong> The default seed MUST be 1. <code>ILIUM_PLUGIN_TEST_SEED</code> overrides the default. An explicit <code>.seed</code> call wins.</li>
+<li><strong>[DEV-414]</strong> The default clock MUST be the fake clock at <code>2030-01-01 00:00:00</code> UTC. Wall time never leaks into a test.</li>
+</ul>
+<h3 id="grants">Grants</h3>
+<table>
+<thead>
+<tr>
+<th>Rust</th>
+<th>TypeScript</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>host.grant_now(name)</code></td>
+<td><code>host.grantNow(name)</code></td>
+<td>Grants at run time, as if the user approved. Re-activates an active plugin with the new <code>granted</code> list.</td>
+</tr>
+<tr>
+<td><code>host.revoke(name)</code></td>
+<td><code>host.revoke(name)</code></td>
+<td>Revokes at run time. Re-activates an active plugin with the smaller <code>granted</code> list. The next call that needs the grant is refused with <code>not-permitted</code>.</td>
+</tr>
+<tr>
+<td><code>host.grants_changed(&amp;[names])</code></td>
+<td><code>host.grantsChanged([names])</code></td>
+<td>Replaces the whole granted list in one step, as if the user changed several grants at once. Requests that need a removed grant complete as <code>failed(revoked)</code> before <code>deactivate(revoked)</code>; the plugin is then re-activated.</td>
+</tr>
+<tr>
+<td><code>host.breach_deadline(export)</code></td>
+<td><code>host.breachDeadline(export)</code></td>
+<td>Makes the next call of the export breach its deadline without waiting in fake time. It applies the effect of the call class in <a href="/pages/reference-host-scheduling/#call-classes">Scheduling, deadlines and cancellation</a>: a trap for hard classes, a discarded result for soft classes, a dropped instance without failure for <code>deactivate</code>.</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>[DEV-415]</strong> <code>host.grant_now(name)</code> on an active plugin MUST call <code>deactivate(granted)</code>, then <code>activate</code> with <code>instance</code> plus 1 and the new <code>granted</code> list. <code>host.revoke(name)</code> MUST do the same with <code>deactivate(revoked)</code>. No event is delivered.</li>
+<li><strong>[DEV-564]</strong> <code>host.grants_changed(list)</code> MUST follow the revocation rule of <a href="/pages/reference-runtime-model/#13-link-time-grant-enforcement">Runtime model</a>: requests that need a removed grant complete as <code>failed(revoked)</code> before <code>deactivate(revoked)</code>, then <code>activate</code> runs with the new list. A list that only adds grants MUST use <code>deactivate(granted)</code>.</li>
+<li><strong>[DEV-565]</strong> <code>host.breach_deadline(export)</code> MUST apply the effect of the call class in the scheduling table, and a <code>deactivate</code> breach MUST NOT count as a failure.</li>
+<li><strong>[DEV-416]</strong> After <code>revoke</code>, or for a capability the test declined, intents that need the grant MUST complete as <code>refused(plugin-error{code: not-permitted})</code>, and host imports that need it MUST return <code>Err(not-permitted)</code>. A call to a function of a capability the manifest never requested MUST trap with <code>trap.import-not-requested</code>.</li>
+<li><strong>[DEV-417]</strong> Runtime results MUST use the WIT <code>error-code</code> enum of <a href="/pages/reference-errors-and-limits/#the-plugin-error-record">Errors and limits</a> and no other value. Dotted codes such as <code>harness.setup-closed</code> or <code>trap.deadline</code> are harness, fixture, trap and command-line diagnostics only, and MUST NOT appear in <code>plugin-error.code</code>.</li>
+</ul>
+<p><strong>Error values.</strong> Runtime results always use the WIT error-code enum. Dotted codes are used only for harness, fixture, trap and CLI diagnostics, never inside <code>plugin-error.code</code>. The table maps the situations of this page to the values a test asserts.</p>
+<table>
+<thead>
+<tr>
+<th>Situation</th>
+<th>Value the test asserts</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Grant revoked or declined, intent</td>
+<td><code>refused(plugin-error{code: not-permitted})</code></td>
+</tr>
+<tr>
+<td>Grant revoked or declined, import</td>
+<td><code>Err(not-permitted)</code></td>
+</tr>
+<tr>
+<td>Function of a capability never requested</td>
+<td>trap <code>trap.import-not-requested</code></td>
+</tr>
+<tr>
+<td>Path out of the granted scope</td>
+<td><code>Err(not-permitted)</code></td>
+</tr>
+<tr>
+<td>Storage value or bucket over its quota</td>
+<td><code>Err(quota-exceeded)</code></td>
+</tr>
+<tr>
+<td>Setting value that fails validation</td>
+<td><code>Err(invalid-argument)</code></td>
+</tr>
+<tr>
+<td>Bad dedup key</td>
+<td><code>refused(plugin-error{code: invalid-argument, message starting "dedup-key-invalid:"})</code></td>
+</tr>
+<tr>
+<td>Unmatched fake process or network call</td>
+<td><code>Err(internal)</code> with the message prefix <code>harness.unexpected-call:</code>, and the test fails at teardown with <code>harness.unexpected-call</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="activation">Activation</h2>
+<table>
+<thead>
+<tr>
+<th>Rust</th>
+<th>TypeScript</th>
+<th>Returns</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>host.activate::&lt;P&gt;() -&gt; PluginHandle</code></td>
+<td><code>host.activate({ lifecycle, handler }): Promise&lt;PluginHandle&gt;</code></td>
+<td>A <code>PluginHandle</code>. Panics or throws on failure.</td>
+</tr>
+<tr>
+<td><code>host.try_activate::&lt;P&gt;() -&gt; Result&lt;PluginHandle, PluginError&gt;</code></td>
+<td><code>host.tryActivate({ lifecycle, handler }): Promise&lt;PluginHandle \| PluginError&gt;</code></td>
+<td>The handle, or the error the plugin returned</td>
+</tr>
+<tr>
+<td>none</td>
+<td><code>host.activateModule(path): Promise&lt;PluginHandle&gt;</code></td>
+<td>A <code>PluginHandle</code>. Imports a fresh copy of the module.</td>
+</tr>
+<tr>
+<td><code>host.deactivate(reason: DeactivationReason) -&gt; Option&lt;Vec&lt;u8&gt;&gt;</code></td>
+<td><code>host.deactivate(reason): Promise&lt;Uint8Array \| undefined&gt;</code></td>
+<td>The restore bytes the plugin returned</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>[DEV-420]</strong> <code>activate</code> MUST receive an <code>Activation</code> with these fields: <code>plugin</code> is the manifest id, or <code>"test.plugin"</code> for <code>FakeHost::new()</code>; <code>api</code> is <code>"ilium:plugin@0.1.0"</code>; <code>instance</code> is 1, then plus 1 on each re-activation; <code>side</code> is the fixture side, default <code>"server"</code>; <code>settings_json</code> is the fixture settings object serialized, or <code>"{}"</code>; <code>granted</code> is the current grants, sorted; <code>restored</code> is <code>None</code>, unless <code>restart_with(bytes)</code> supplied bytes.</li>
+<li><strong>[DEV-421]</strong> <code>activate</code> MUST panic (Rust) or throw (TypeScript) with the plugin error code and message when the plugin returns an error, so a failing activation fails the test with a clear message. <code>try_activate</code> MUST return the error instead.</li>
+<li><strong>[DEV-422]</strong> <code>activateModule</code> MUST import a fresh copy of the module on each call, so module state never leaks between tests. A module cached by the runtime MUST NOT be reused.</li>
+<li><strong>[DEV-423]</strong> A plugin that does not return from <code>activate</code> in 2,000 ms of fake time MUST fail with <code>trap.deadline</code> in component mode. In native mode the harness MUST advance the fake clock by the recorded host call time only, and no deadline applies.</li>
+<li><strong>[DEV-424]</strong> <code>deactivate(reason)</code> MUST run <code>deactivate</code> with a reason of the WIT <code>deactivation-reason</code> enum (<code>shutdown</code>, <code>disabled</code>, <code>upgrade</code>, <code>revoked</code> or <code>granted</code>; <code>crash-restart</code> is reserved and the harness refuses it with <code>harness.reason-reserved</code>). The default reason is <code>shutdown</code>.</li>
+</ul>
+<h3 id="isolation-between-tests">Isolation between tests</h3>
+<ul>
+<li><strong>[DEV-425]</strong> Each test MUST get its own host. Nothing a plugin stores in memory, in the fake storage or in the fake file system may be visible to another test.</li>
+<li><strong>[DEV-426]</strong> In Rust, one host per <code>#[test]</code> function is enough, because each test builds its own. A plugin type with static state is a bug in the plugin, and the harness cannot isolate it. Use no <code>static mut</code> and no <code>OnceLock</code> that holds state.</li>
+<li><strong>[DEV-427]</strong> In Bun, the preload file <code>@ilium/plugin-sdk/testing/setup</code> MUST reset the harness registry before each test. Import the plugin with <code>activateModule</code>, not with a top-level <code>import</code>, when the plugin keeps state at module level.</li>
+<li><strong>[DEV-428]</strong> Tests MAY run in parallel. The harness MUST hold no global mutable state between hosts.</li>
+<li><strong>[DEV-429]</strong> In TypeScript, <code>activate({ lifecycle, handler })</code>, <code>tryActivate</code>, <code>activateModule(path)</code>, <code>deactivate</code> and <code>settle()</code> MUST return promises. <code>deliver(events)</code> MUST be synchronous and return <code>Submission[]</code>. Tests <code>await</code> the promise-returning calls.</li>
+</ul>
+<h2 id="delivering-events-and-reading-submissions">Delivering events and reading submissions</h2>
+<table>
+<thead>
+<tr>
+<th>Rust</th>
+<th>TypeScript</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>host.deliver(events: Vec&lt;Event&gt;) -&gt; Vec&lt;Submission&gt;</code></td>
+<td><code>host.deliver(events: Event[]): Submission[]</code></td>
+<td>Runs <code>on-events</code> once</td>
+</tr>
+<tr>
+<td><code>host.deliver_one(event: Event) -&gt; Vec&lt;Submission&gt;</code></td>
+<td><code>host.deliverOne(event): Submission[]</code></td>
+<td>Same, for one event</td>
+</tr>
+<tr>
+<td><code>host.settle()</code></td>
+<td><code>host.settle(): Promise&lt;void&gt;</code></td>
+<td>Delivers queued completions as <code>request-completed</code> events and repeats until the queue is empty</td>
+</tr>
+<tr>
+<td><code>host.outcomes() -&gt; Vec&lt;Outcome&gt;</code></td>
+<td><code>host.outcomes(): Outcome[]</code></td>
+<td>Outcomes of all submissions so far, in submission order</td>
+</tr>
+<tr>
+<td><code>host.submitted() -&gt; Vec&lt;Submission&gt;</code></td>
+<td><code>host.submitted(): Submission[]</code></td>
+<td>All submissions so far, in order</td>
+</tr>
+<tr>
+<td><code>host.pending_requests() -&gt; Vec&lt;RequestRef&gt;</code></td>
+<td><code>host.pendingRequests(): RequestRef[]</code></td>
+<td>Requests not yet completed</td>
+</tr>
+<tr>
+<td><code>host.complete(request: RequestRef, outcome: Outcome)</code></td>
+<td><code>host.complete(request, outcome)</code></td>
+<td>Completes one request by hand</td>
+</tr>
+</tbody>
+</table>
+<p><code>Outcome</code> has the cases of the WIT <code>outcome</code> variant: <code>Ok</code>, <code>OkNode(u64)</code>, <code>Duplicate(RequestRef)</code>, <code>Refused(PluginError)</code>, <code>Failed(PluginError)</code>, <code>Cancelled</code> and <code>OkEpoch(u64)</code>. <code>Outcome::Ok</code> is a unit case and carries no payload; in TypeScript it is <code>{ tag: 'ok' }</code>.</p>
+<ul>
+<li><strong>[DEV-430]</strong> <code>deliver</code> MUST pass the events to the plugin in one batch, in the given order. It MUST fail with <code>harness.batch-too-large</code> when the list holds more than 256 events, because the real host splits batches at 256.</li>
+<li><strong>[DEV-431]</strong> <code>deliver</code> MUST return the submissions the plugin returned from <code>on-events</code>, without applying them. It MUST also record them in <code>submitted()</code>.</li>
+<li><strong>[DEV-432]</strong> <code>deliver</code> MUST NOT deliver outcomes by itself. Outcomes are queued as <code>request-completed</code> events. <code>settle()</code> delivers them and also delivers the submissions that those events produce, until the queue is empty or 100 rounds pass. After 100 rounds <code>settle</code> MUST fail with <code>harness.settle-limit</code>.</li>
+<li><strong>[DEV-433]</strong> More than 256 submissions from one batch MUST fail the test with <code>trap.submission-batch</code> in both modes, because the real host traps the instance.</li>
+<li><strong>[DEV-434]</strong> The harness MUST apply the batch refusal rule of <a href="/pages/reference-events-and-intents/">Events and intents</a>: a refused submission completes as <code>refused(error)</code> and all others complete as <code>refused(cancelled)</code> with the message <code>batch refused: submission &lt;index&gt;</code>.</li>
+<li><strong>[DEV-435]</strong> The harness MUST validate dedup keys: charset <code>[A-Za-z0-9._:/-]</code>, 1 to 128 characters, and a second submission with the same key inside 10 fake minutes MUST complete as <code>duplicate</code>. A bad key MUST complete as <code>refused(plugin-error{code: invalid-argument, message starting "dedup-key-invalid:"})</code>.</li>
+<li><strong>[DEV-436]</strong> <code>deliver</code> MUST NOT run timers. Time moves only through <code>advance_clock</code>.</li>
+</ul>
+<h3 id="worked-example">Worked example</h3>
+<pre><code class="language-rust">use ilium_plugin_sdk::prelude::*;
+use ilium_plugin_sdk::testing::{events, FakeHost};
+use ilium_plugin_sdk::types::tree::AgentActivity;
+
+#[test]
+fn badge_then_outcome() {
+    let mut host = FakeHost::for_manifest(&quot;manifest.json&quot;).unwrap();
+    host.activate::&lt;Plugin&gt;();
+    let submissions = host.deliver(vec![events::activity(42, AgentActivity::Idle, AgentActivity::Working)]);
+    assert_eq!(submissions.len(), 1);
+    host.settle();
+    assert_eq!(host.outcomes(), vec![Outcome::Ok]);
+}
+</code></pre>
+<pre><code class="language-ts">import { expect, test } from 'bun:test';
+import { createFakeHost, events } from '@ilium/plugin-sdk/testing';
+
+test('badge then outcome', async () =&gt; {
+  const host = createFakeHost().forManifest('manifest.json');
+  await host.activateModule('../src/server');
+  const submissions = host.deliver([events.activity(42n, 'idle', 'working')]);
+  expect(submissions.length).toBe(1);
+  await host.settle();
+  expect(host.outcomes()).toEqual([{ tag: 'ok' }]);
+});
+</code></pre>
+<h3 id="event-builders">Event builders</h3>
+<p>The <code>testing</code> module builds the events that most tests need, so a test does not spell a whole record.</p>
+<table>
+<thead>
+<tr>
+<th>Rust</th>
+<th>TypeScript</th>
+<th>Returns</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>events::activity(node: u64, previous: AgentActivity, current: AgentActivity) -&gt; Event</code></td>
+<td><code>events.activity(node: bigint, previous, current): Event</code></td>
+<td><code>agent-activity-changed</code> with <code>revision</code> 1</td>
+</tr>
+<tr>
+<td><code>events::command(name: &amp;str, arguments_json: &amp;str) -&gt; Event</code></td>
+<td><code>events.command(name, argumentsJson): Event</code></td>
+<td><code>command-invoked</code> with origin <code>palette</code> and an empty context</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>[DEV-447]</strong> The builders MUST produce valid events of the WIT <code>event</code> variant. <code>activity</code> MUST raise <code>revision</code> by 1 for each event built for the same node in one host.</li>
+</ul>
+<h2 id="views-and-rendering">Views and rendering</h2>
+<table>
+<thead>
+<tr>
+<th>Rust</th>
+<th>TypeScript</th>
+<th>Returns</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>host.render(target: ViewTarget, columns: u16, rows: u16) -&gt; Screen</code></td>
+<td><code>host.render(target, columns: number, rows: number): Screen</code></td>
+<td><code>Screen</code></td>
+</tr>
+<tr>
+<td><code>host.send_action(target: ViewTarget, key: &amp;str, kind: ActionKind, value: Option&lt;ActionValue&gt;)</code></td>
+<td><code>host.sendAction(target, key, kind, value)</code></td>
+<td>Delivers a <code>ui-action</code> event</td>
+</tr>
+<tr>
+<td><code>host.click(target: ViewTarget, column: u16, row: u16) -&gt; bool</code></td>
+<td><code>host.click(target, column, row): boolean</code></td>
+<td>Delivers a click on a cell</td>
+</tr>
+<tr>
+<td><code>host.key(target: ViewTarget, key: &amp;str)</code></td>
+<td><code>host.key(target, key)</code></td>
+<td>Delivers a key press</td>
+</tr>
+<tr>
+<td><code>screen.text() -&gt; String</code></td>
+<td><code>screen.text(): string</code></td>
+<td>Text of the screen, rows joined by <code>\n</code>, trailing spaces trimmed</td>
+</tr>
+<tr>
+<td><code>screen.cell(row: u16, column: u16) -&gt; Cell</code></td>
+<td><code>screen.cell(row, column): Cell</code></td>
+<td><code>Cell</code> with <code>symbol</code>, <code>foreground</code>, <code>background</code>, <code>bold</code>, <code>italic</code>, <code>underline</code></td>
+</tr>
+<tr>
+<td><code>screen.row(row: u16) -&gt; String</code></td>
+<td><code>screen.row(row): string</code></td>
+<td>One row as a string</td>
+</tr>
+<tr>
+<td><code>screen.find(text: &amp;str) -&gt; Option&lt;(u16, u16)&gt;</code></td>
+<td><code>screen.find(text): [number, number] \| undefined</code></td>
+<td>First <code>(row, column)</code> where the text starts, or none</td>
+</tr>
+</tbody>
+</table>
+<p><code>columns</code> and <code>rows</code> are <code>u16</code> in Rust and <code>number</code> in TypeScript. A view is named by its <code>view-target</code>; no default view exists. <code>ViewTarget</code> has the five cases of the WIT <code>view-target</code> variant:</p>
+<table>
+<thead>
+<tr>
+<th>WIT case</th>
+<th>Rust</th>
+<th>TypeScript</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>panel(string)</code></td>
+<td><code>ViewTarget::Panel(String)</code></td>
+<td><code>{ tag: 'panel', val: string }</code></td>
+</tr>
+<tr>
+<td><code>pane(node-id)</code></td>
+<td><code>ViewTarget::Pane(u64)</code></td>
+<td><code>{ tag: 'pane', val: bigint }</code></td>
+</tr>
+<tr>
+<td><code>popup(string)</code></td>
+<td><code>ViewTarget::Popup(String)</code></td>
+<td><code>{ tag: 'popup', val: string }</code></td>
+</tr>
+<tr>
+<td><code>settings-page(string)</code></td>
+<td><code>ViewTarget::SettingsPage(String)</code></td>
+<td><code>{ tag: 'settings-page', val: string }</code></td>
+</tr>
+<tr>
+<td><code>onboarding-step(string)</code></td>
+<td><code>ViewTarget::OnboardingStep(String)</code></td>
+<td><code>{ tag: 'onboarding-step', val: string }</code></td>
+</tr>
+</tbody>
+</table>
+<p>Scenes are not views. A scene is drawn with <code>FakeScene</code>, which the section <a href="#scenes">Scenes</a> defines.</p>
+<ul>
+<li>
+<p><strong>[DEV-446]</strong> <code>render</code> MUST accept exactly the five <code>ViewTarget</code> cases above. A scene id passed as a view target MUST fail with <code>harness.view-target-unknown</code>.</p>
+</li>
+<li>
+<p><strong>[DEV-440]</strong> <code>cell(row, column)</code> MUST take the row first, then the column, and both start at 0. Reading outside the screen MUST fail with <code>harness.cell-out-of-range</code>.</p>
+</li>
+<li><strong>[DEV-441]</strong> <code>render</code> MUST run the same code path as the client: view tree, layout, then cells. The width unit is terminal columns, and wide characters use two columns.</li>
+<li><strong>[DEV-442]</strong> A view that returns a node the client would refuse (for example a node limit breach) MUST fail the test with <code>trap.invalid-ui-tree</code>, the trap code the client raises.</li>
+<li><strong>[DEV-443]</strong> <code>render</code> MUST fail with <code>harness.render-size</code> when the width is below 10 or above 500, or the height is below 1 or above 200.</li>
+<li><strong>[DEV-444]</strong> <code>click</code> MUST find the action under the cell and deliver it as the client would. A click on a cell with no action MUST return <code>false</code>.</li>
+<li><strong>[DEV-445]</strong> A render MUST be pure. Rendering twice with no event between MUST give equal screens.</li>
+</ul>
+<h2 id="the-fakes">The fakes</h2>
+<p>Each fake is a property of the host. All of them are deterministic.</p>
+<h3 id="fake-clock">Fake clock</h3>
+<table>
+<thead>
+<tr>
+<th>Call</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>host.clock().now() -&gt; u64</code></td>
+<td>Current fake instant in milliseconds since the Unix epoch. TypeScript: <code>host.clock().now(): bigint</code>.</td>
+</tr>
+<tr>
+<td>Rust <code>host.advance_clock(ms: u64)</code></td>
+<td>Moves time forward by milliseconds and fires due timers in order</td>
+</tr>
+<tr>
+<td>TypeScript <code>host.advanceClock(ms: number \| bigint)</code></td>
+<td>The same. A number must be a non-negative safe integer.</td>
+</tr>
+<tr>
+<td><code>host.set_clock(instant_ms: u64)</code></td>
+<td>Sets time. TypeScript <code>host.setClock(ms: bigint)</code>. Moving back MUST fail with <code>harness.clock-backwards</code>.</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>[DEV-450]</strong> <code>advance_clock</code> MUST fire every <code>timer-fired</code> and <code>durable-timer-fired</code> event that falls due, in time order, in one batch per distinct due time. A timer that re-arms inside the advanced span MUST fire again inside it.</li>
+<li><strong>[DEV-452]</strong> A negative number, a fraction or an unsafe integer passed to <code>advanceClock</code> MUST fail with <code>harness.clock-argument</code>.</li>
+<li><strong>[DEV-451]</strong> Time zone MUST be UTC. The fake clock has no daylight saving.</li>
+</ul>
+<h3 id="fake-file-system">Fake file system</h3>
+<p>Backs <code>fs.read</code>, <code>fs.write</code> and <code>fs.watch</code>. The fixture key <code>files</code> fills it.</p>
+<table>
+<thead>
+<tr>
+<th>Rust</th>
+<th>TypeScript</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>host.fs().write(path: impl Into&lt;FsPath&gt;, bytes: &amp;[u8])</code></td>
+<td><code>host.fs().write(path: FsPath \| string, bytes: Uint8Array)</code></td>
+<td>Writes a file for test setup</td>
+</tr>
+<tr>
+<td><code>host.fs().read(path: impl Into&lt;FsPath&gt;) -&gt; Option&lt;Vec&lt;u8&gt;&gt;</code></td>
+<td><code>host.fs().read(path): Uint8Array \| undefined</code></td>
+<td>Reads a file for an assertion</td>
+</tr>
+</tbody>
+</table>
+<p>A path is an <code>FsPath</code> of a scope and a relative path, for example <code>FsPath{ scope: "project", path: "notes.md" }</code>. The shorthand string form is <code>"project:notes.md"</code>.</p>
+<ul>
+<li><strong>[DEV-455]</strong> The fake file system MUST enforce the scope of the grant: a read outside the granted scopes MUST return <code>Err(not-permitted)</code>.</li>
+<li><strong>[DEV-456]</strong> The harness MUST support <code>host.fs().write(path, bytes)</code> and <code>host.fs().read(path)</code> for test setup and for assertions. A write by the test to a watched path MUST deliver <code>fs-changed</code>.</li>
+<li><strong>[DEV-458]</strong> A path that is absolute or contains <code>..</code> MUST fail with <code>harness.fs-path-invalid</code>.</li>
+<li><strong>[DEV-457]</strong> The fake file system MUST be in memory. It MUST NOT touch the real disk.</li>
+</ul>
+<h3 id="fake-process">Fake process</h3>
+<p>Backs <code>process.run</code>. Register results before the call.</p>
+<table>
+<thead>
+<tr>
+<th>Rust</th>
+<th>TypeScript</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>host.process().expect(program: &amp;str, arguments: &amp;[&amp;str]) -&gt; ProcessExpectation</code></td>
+<td><code>host.process().expect(program, args): ProcessExpectation</code></td>
+<td>Registers one expected run</td>
+</tr>
+<tr>
+<td><code>.returns(exit: ProcessExit)</code></td>
+<td><code>.returns({ status, signal, stdout: Uint8Array, stderr: Uint8Array })</code></td>
+<td>The next matching run returns this. <code>ProcessExit{ status: Option&lt;i32&gt;, signal: Option&lt;i32&gt;, stdout: Vec&lt;u8&gt;, stderr: Vec&lt;u8&gt; }</code>.</td>
+</tr>
+<tr>
+<td><code>.fails(error: PluginError)</code></td>
+<td><code>.fails(error)</code></td>
+<td>The next matching run completes as <code>failed(error)</code></td>
+</tr>
+<tr>
+<td><code>host.process().calls() -&gt; Vec&lt;ProcessSpec&gt;</code></td>
+<td><code>host.process().calls(): ProcessSpec[]</code></td>
+<td>Every run requested, in order, with <code>cwd</code>, <code>stdin</code> and <code>environment</code></td>
+</tr>
+<tr>
+<td><code>host.process().allow_unexpected()</code></td>
+<td><code>host.process().allowUnexpected()</code></td>
+<td>Unmatched runs return <code>ProcessExit{ status: Some(0), signal: None, stdout: [], stderr: [] }</code> instead of failing the test</td>
+</tr>
+</tbody>
+</table>
+<p>Matching rule: <code>program</code> and <code>arguments</code> must be equal exactly. <code>cwd</code>, <code>stdin</code> and <code>environment</code> are recorded and are not matched. The grant checked is <code>process.run:&lt;program&gt;</code>.</p>
+<ul>
+<li><strong>[DEV-460]</strong> A run with no matching expectation MUST return <code>Err(internal)</code> with a message that starts with <code>harness.unexpected-call:</code>, and the test MUST fail at teardown with <code>harness.unexpected-call</code>, unless <code>allow_unexpected</code> is set. No real process ever starts.</li>
+<li><strong>[DEV-464]</strong> The fake process MUST match <code>program</code> and <code>arguments</code> exactly, MUST record <code>cwd</code>, <code>stdin</code> and <code>environment</code> for <code>calls()</code>, and MUST check the <code>process.run:&lt;program&gt;</code> grant before it looks for an expectation.</li>
+</ul>
+<h3 id="fake-network">Fake network</h3>
+<p>Backs <code>http.request</code>. The fixture key <code>http</code> fills it.</p>
+<ul>
+<li><strong>[DEV-462]</strong> A request with no matching entry MUST return <code>Err(internal)</code> with a message that starts with <code>harness.unexpected-call:</code>, and the test MUST fail at teardown with <code>harness.unexpected-call</code>. No real network call ever happens.</li>
+<li><strong>[DEV-463]</strong> The fake HTTP client MUST check the <code>http:&lt;host-pattern&gt;</code> grant against the request host.</li>
+</ul>
+<h3 id="fake-storage-and-settings">Fake storage and settings</h3>
+<table>
+<thead>
+<tr>
+<th>Rust</th>
+<th>TypeScript</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>host.storage().dump(bucket: Bucket) -&gt; BTreeMap&lt;String, Vec&lt;u8&gt;&gt;</code></td>
+<td><code>host.storage().dump(bucket): Map&lt;string, Uint8Array&gt;</code></td>
+<td>Every key and value of one bucket</td>
+</tr>
+<tr>
+<td><code>host.storage().get(bucket: Bucket, key: &amp;str) -&gt; Option&lt;Vec&lt;u8&gt;&gt;</code></td>
+<td><code>host.storage().get(bucket, key)</code></td>
+<td>One value</td>
+</tr>
+<tr>
+<td><code>host.settings().set(key: &amp;str, value: serde_json::Value) -&gt; Result&lt;(), PluginError&gt;</code></td>
+<td><code>host.settings().set(key, value: unknown)</code></td>
+<td>Changes a setting. TypeScript throws <code>PluginError</code>.</td>
+</tr>
+<tr>
+<td><code>host.settings().get(key: &amp;str) -&gt; Option&lt;serde_json::Value&gt;</code></td>
+<td><code>host.settings().get(key)</code></td>
+<td>Reads a setting</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>[DEV-465]</strong> <code>storage</code> MUST behave as the real store: a <code>put</code> is visible to <code>get</code> at once inside the same call batch, and values survive <code>deactivate</code> then <code>activate</code> on the same host.</li>
+<li><strong>[DEV-466]</strong> <code>storage.put</code> of a value over 1,048,576 bytes MUST return <code>Err(quota-exceeded)</code>. A put that makes the bucket sum of key and value bytes exceed <code>storage_bucket_mib</code> x 1,048,576 (default 16 MiB) MUST return <code>Err(quota-exceeded)</code>. <code>host.storage().dump(bucket)</code> returns that bucket as a map.</li>
+<li><strong>[DEV-467]</strong> <code>host.settings().set(key, value)</code> MUST validate the value against the settings schema and deliver <code>settings-changed</code> (Rust <code>Event::SettingsChanged</code>, TypeScript tag <code>settings-changed</code>) with the WIT <code>settings-change</code> payload. An invalid value MUST return <code>Err(invalid-argument)</code>.</li>
+</ul>
+<h3 id="fake-tree-panes-agents-and-jobs">Fake tree, panes, agents and jobs</h3>
+<p><code>host.tree()</code> returns a <code>FakeTree</code>. A tree node has this shape in Rust (<code>TreeNode</code>), in TypeScript and in a fixture: <code>{ "id": u64, "parent": u64 or null, "name": string, "class": "container" | "pane" | "folder", "content_kind": a WIT content-kind such as "ilium.terminal", "agent": optional { "signature", "activity", "objective", "goal" } }</code>. The cases of <code>class</code> are the WIT <code>node-class</code> cases.</p>
+<table>
+<thead>
+<tr>
+<th>Rust</th>
+<th>TypeScript</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>tree.add(node: TreeNode) -&gt; u64</code></td>
+<td><code>tree.add(node): bigint</code></td>
+<td>Adds a node and delivers <code>tree-changed</code></td>
+</tr>
+<tr>
+<td><code>tree.rename(id: u64, name: &amp;str)</code></td>
+<td><code>tree.rename(id, name)</code></td>
+<td>Renames a node and delivers <code>tree-changed</code></td>
+</tr>
+<tr>
+<td><code>tree.set_activity(id: u64, activity: AgentActivity)</code></td>
+<td><code>tree.setActivity(id, activity)</code></td>
+<td>Delivers <code>agent-activity-changed</code> with <code>revision</code> plus 1</td>
+</tr>
+<tr>
+<td><code>tree.remove(id: u64)</code></td>
+<td><code>tree.remove(id)</code></td>
+<td>Removes a node and its children and delivers <code>node-removed</code></td>
+</tr>
+<tr>
+<td><code>tree.get(id: u64) -&gt; Option&lt;TreeNode&gt;</code></td>
+<td><code>tree.get(id): TreeNode \| undefined</code></td>
+<td>Reads a node</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>[DEV-470]</strong> <code>host.tree()</code> MUST offer <code>add</code>, <code>rename</code>, <code>set_activity</code>, <code>remove</code> and <code>get</code> with the signatures above. Each call that changes the tree MUST queue the matching events for the next <code>deliver</code> or <code>settle</code>.</li>
+<li><strong>[DEV-471]</strong> Node ids MUST be assigned in increasing order from 1.</li>
+<li><strong>[DEV-472]</strong> <code>host.jobs().list() -&gt; Vec&lt;JobRecord&gt;</code> MUST list the jobs the plugin started, where <code>JobRecord{ request: u64, kind: String, input: Vec&lt;u8&gt; }</code>. <code>host.jobs().finish(request, Ok(bytes))</code> or <code>host.jobs().finish(request, Err(plugin-error))</code> MUST deliver one <code>request-completed</code> event whose <code>request-result</code> carries the job's correlation. <code>host.jobs().progress(request, percent, message)</code> MUST deliver <code>job-progress</code>.</li>
+<li><strong>[DEV-473]</strong> <code>host.cli().invoke(args: &amp;[&amp;str], stdin: &amp;[u8]) -&gt; Invocation</code> MUST deliver <code>cli-invoked</code>. The <code>Invocation</code> exposes <code>name</code>, <code>arguments</code>, <code>stdout()</code>, <code>stderr()</code> and <code>exit_code() -&gt; Option&lt;u8&gt;</code>.</li>
+</ul>
+<h2 id="fakesession">FakeSession</h2>
+<p><code>FakeSession</code> runs several plugins, both sides, core plugins and extension points in one fake session. <code>FakeHost</code> runs one plugin only.</p>
+<table>
+<thead>
+<tr>
+<th>Rust</th>
+<th>TypeScript</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>FakeSession::new()</code></td>
+<td><code>createFakeSession()</code></td>
+<td>Empty session</td>
+</tr>
+<tr>
+<td><code>.install(package_dir)</code></td>
+<td><code>.install(dir)</code></td>
+<td>Installs a plugin from a project folder</td>
+</tr>
+<tr>
+<td><code>.install_core(name)</code></td>
+<td><code>.installCore(name)</code></td>
+<td>Installs a stub of a bundled core plugin</td>
+</tr>
+<tr>
+<td><code>.start()</code></td>
+<td><code>await .start()</code></td>
+<td>Activates all plugins in dependency order</td>
+</tr>
+<tr>
+<td><code>session.server(id) -&gt; &amp;mut FakeHost</code></td>
+<td><code>session.server(id): FakeHost</code></td>
+<td>The server side <code>FakeHost</code> of one plugin</td>
+</tr>
+<tr>
+<td><code>session.client(id) -&gt; &amp;mut FakeHost</code></td>
+<td><code>session.client(id): FakeHost</code></td>
+<td>The client side <code>FakeHost</code> of one plugin</td>
+</tr>
+<tr>
+<td><code>host.run_hook(call: HookCall) -&gt; HookReply</code></td>
+<td><code>host.runHook(call): HookReply</code></td>
+<td>Runs the hook handler of the plugin with a <code>hook-call</code> and returns its <code>hook-reply</code></td>
+</tr>
+<tr>
+<td><code>session.call_service(caller_id, name, version_range, request_json) -&gt; Result&lt;ServiceReply, PluginError&gt;</code></td>
+<td><code>session.callService(callerId, name, versionRange, requestJson): ServiceReply</code></td>
+<td>Calls a service from the plugin <code>caller_id</code>, routed to the provider</td>
+</tr>
+<tr>
+<td><code>.pump()</code></td>
+<td><code>await .pump()</code></td>
+<td>Moves every queue until all are empty</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>[DEV-480]</strong> A session MUST resolve <code>services.use</code> against <code>services.provide</code> and route service calls between hosts.</li>
+<li><strong>[DEV-481]</strong> A session MUST route <code>messages</code> between the sides of one plugin.</li>
+<li><strong>[DEV-482]</strong> A session MUST run extension points: a hook point calls its contributors by <code>priority</code> and applies the reply rules in <a href="/pages/reference-core-extension-points/">Core extension points</a>.</li>
+<li><strong>[DEV-483]</strong> <code>install_core</code> MUST install the stub of the Core stubs table below. The stub exposes the extension points and services of that core plugin and nothing else. The real core plugin code is never loaded. An unknown core plugin name MUST fail with <code>harness.core-unknown</code>.</li>
+<li><strong>[DEV-484]</strong> <code>pump</code> MUST fail with <code>harness.settle-limit</code> after 100 rounds.</li>
+<li><strong>[DEV-485]</strong> The session MUST apply the restart rule when a plugin traps, using fake time.</li>
+<li><strong>[DEV-486]</strong> <code>session.server(id)</code> and <code>session.client(id)</code> MUST return the host of that side. An id that is not installed, or a side the plugin did not build, MUST fail with <code>harness.plugin-unknown</code>.</li>
+<li><strong>[DEV-487]</strong> <code>host.run_hook(call)</code> MUST call <code>handle-hook</code> of the plugin with the <code>HookCall</code> and return the <code>HookReply</code>: <code>pass</code>, <code>replace(string)</code>, <code>refuse(string)</code> or <code>answer(string)</code>. A plugin without the hook handler MUST make it fail with <code>harness.not-a-hook-handler</code>.</li>
+<li><strong>[DEV-488]</strong> <code>session.call_service(...)</code> MUST resolve the service against <code>services.provide</code> and the version range, call <code>handle</code> of the provider, and return its <code>ServiceReply</code>. A missing provider MUST return <code>Err(not-found)</code>.</li>
+<li><strong>[DEV-489]</strong> A core stub MUST reply as the Core stubs table says: a <code>collect</code> point yields an empty list, a hook yields <code>pass</code>, and a service yields <code>{"ok":true}</code> for every method.</li>
+</ul>
+<h4 id="core-stubs">Core stubs</h4>
+<p>Each stub exposes exactly the extension points of <a href="/pages/reference-core-extension-points/">Core extension points</a> for its core plugin and the services named below.</p>
+<table>
+<thead>
+<tr>
+<th>Core plugin</th>
+<th>Extension points (kind)</th>
+<th>Services</th>
+<th>Stub reply</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ilium.core.tree</code></td>
+<td><code>before-move</code> (veto), <code>before-close</code> (veto), <code>node-sorts</code> (collect)</td>
+<td>none</td>
+<td>collect: empty list; hooks: <code>pass</code></td>
+</tr>
+<tr>
+<td><code>ilium.core.layout</code></td>
+<td><code>layout-presets</code> (collect), <code>before-split</code> (veto)</td>
+<td>none</td>
+<td>collect: empty list; hooks: <code>pass</code></td>
+</tr>
+<tr>
+<td><code>ilium.core.terminal</code></td>
+<td><code>before-send-input</code> (veto), <code>open-link</code> (first), <code>link-actions</code> (collect)</td>
+<td>none</td>
+<td>collect: empty list; hooks: <code>pass</code></td>
+</tr>
+<tr>
+<td><code>ilium.core.smart-copy</code></td>
+<td><code>recognisers</code> (collect), <code>after-copy</code> (transform)</td>
+<td>none</td>
+<td>collect: empty list; hooks: <code>pass</code></td>
+</tr>
+<tr>
+<td><code>ilium.core.editor</code></td>
+<td><code>before-save</code> (transform), <code>file-openers</code> (collect), <code>line-badges</code> (collect)</td>
+<td>none</td>
+<td>collect: empty list; hooks: <code>pass</code></td>
+</tr>
+<tr>
+<td><code>ilium.core.kanban</code></td>
+<td><code>card-actions</code> (collect), <code>card-moved</code> (observe)</td>
+<td>none</td>
+<td>collect: empty list; hooks: <code>pass</code></td>
+</tr>
+<tr>
+<td><code>ilium.core.agent-detect</code></td>
+<td><code>activity-rules</code> (collect), <code>classify</code> (transform)</td>
+<td>none</td>
+<td>collect: empty list; hooks: <code>pass</code></td>
+</tr>
+<tr>
+<td><code>ilium.core.agent-toolbar</code></td>
+<td><code>toolbar-actions</code> (collect), <code>banner-segments</code> (collect)</td>
+<td>none</td>
+<td>collect: empty list</td>
+</tr>
+<tr>
+<td><code>ilium.core.fleet</code></td>
+<td><code>selectors</code> (collect), <code>before-broadcast</code> (transform)</td>
+<td>none</td>
+<td>collect: empty list; hooks: <code>pass</code></td>
+</tr>
+<tr>
+<td><code>ilium.core.cost</code></td>
+<td><code>price-sources</code> (collect), <code>quota-sources</code> (collect)</td>
+<td><code>usage</code></td>
+<td>collect: empty list; service: <code>{"ok":true}</code></td>
+</tr>
+<tr>
+<td><code>ilium.core.titles</code></td>
+<td><code>before-apply-title</code> (transform), <code>title-styles</code> (collect)</td>
+<td>none</td>
+<td>collect: empty list; hooks: <code>pass</code></td>
+</tr>
+<tr>
+<td><code>ilium.core.inference</code></td>
+<td><code>before-request</code> (transform), <code>after-response</code> (observe), <code>provider-profiles</code> (collect)</td>
+<td>none</td>
+<td>collect: empty list; hooks: <code>pass</code></td>
+</tr>
+<tr>
+<td><code>ilium.core.notifications</code></td>
+<td><code>before-notify</code> (veto), <code>channels</code> (collect)</td>
+<td>none</td>
+<td>collect: empty list; hooks: <code>pass</code></td>
+</tr>
+<tr>
+<td><code>ilium.core.voice</code></td>
+<td><code>transcript</code> (transform), <code>voice-intents</code> (collect)</td>
+<td>none</td>
+<td>collect: empty list; hooks: <code>pass</code></td>
+</tr>
+<tr>
+<td><code>ilium.core.scheduler</code></td>
+<td><code>schedule-sources</code> (collect), <code>before-send-scheduled</code> (veto)</td>
+<td>none</td>
+<td>collect: empty list; hooks: <code>pass</code></td>
+</tr>
+<tr>
+<td><code>ilium.core.text-triggers</code></td>
+<td><code>rule-packs</code> (collect), <code>before-fire</code> (veto)</td>
+<td>none</td>
+<td>collect: empty list; hooks: <code>pass</code></td>
+</tr>
+<tr>
+<td><code>ilium.core.progress</code></td>
+<td><code>footer-segments</code> (collect), <code>probe-kinds</code> (collect)</td>
+<td>none</td>
+<td>collect: empty list</td>
+</tr>
+<tr>
+<td><code>ilium.core.chatroom</code></td>
+<td><code>before-post</code> (transform), <code>message-renderers</code> (collect)</td>
+<td>none</td>
+<td>collect: empty list; hooks: <code>pass</code></td>
+</tr>
+<tr>
+<td><code>ilium.core.worktrees</code></td>
+<td><code>before-create</code> (transform), <code>post-create-steps</code> (collect), <code>before-remove</code> (veto)</td>
+<td>none</td>
+<td>collect: empty list; hooks: <code>pass</code></td>
+</tr>
+<tr>
+<td><code>ilium.core.sessions</code></td>
+<td><code>snapshot-sections</code> (collect), <code>before-restore</code> (observe)</td>
+<td>none</td>
+<td>collect: empty list; hooks: <code>pass</code></td>
+</tr>
+<tr>
+<td><code>ilium.core.compaction</code></td>
+<td><code>techniques</code> (collect), <code>before-compact</code> (veto)</td>
+<td>none</td>
+<td>collect: empty list; hooks: <code>pass</code></td>
+</tr>
+<tr>
+<td><code>ilium.core.settings</code></td>
+<td><code>config-importers</code> (collect), <code>onboarding-steps</code> (collect)</td>
+<td>none</td>
+<td>collect: empty list</td>
+</tr>
+<tr>
+<td><code>ilium.core.keys-and-help</code></td>
+<td><code>key-hints</code> (collect), <code>help-sources</code> (collect)</td>
+<td>none</td>
+<td>collect: empty list</td>
+</tr>
+<tr>
+<td><code>ilium.core.search</code></td>
+<td><code>sources</code> (collect), <code>rank</code> (transform)</td>
+<td>none</td>
+<td>collect: empty list; hooks: <code>pass</code></td>
+</tr>
+<tr>
+<td><code>ilium.core.ambient</code></td>
+<td><code>palettes</code> (collect), <code>style-presets</code> (collect)</td>
+<td>none</td>
+<td>collect: empty list</td>
+</tr>
+<tr>
+<td><code>ilium.core.scenes</code></td>
+<td><code>scene-packs</code> (collect), <code>scene-data-sources</code> (collect)</td>
+<td>none</td>
+<td>collect: empty list</td>
+</tr>
+<tr>
+<td><code>ilium.core.recap</code></td>
+<td><code>fact-sources</code> (collect), <code>before-recap</code> (transform)</td>
+<td><code>recap</code></td>
+<td>collect: empty list; hooks: <code>pass</code>; service: <code>{"ok":true}</code></td>
+</tr>
+<tr>
+<td><code>ilium.core.session-convert</code></td>
+<td><code>formats</code> (collect), <code>after-convert</code> (observe)</td>
+<td><code>convert</code></td>
+<td>collect: empty list; hooks: <code>pass</code>; service: <code>{"ok":true}</code></td>
+</tr>
+<tr>
+<td><code>ilium.core.agent-setup</code></td>
+<td><code>instruction-blocks</code> (collect), <code>targets</code> (collect), <code>before-install</code> (veto)</td>
+<td><code>install</code></td>
+<td>collect: empty list; hooks: <code>pass</code>; service: <code>{"ok":true}</code></td>
+</tr>
+<tr>
+<td><code>ilium.core.diagnostics</code></td>
+<td><code>log-sinks</code> (observe), <code>report-sections</code> (collect)</td>
+<td><code>report</code></td>
+<td>collect: empty list; hooks: <code>pass</code>; service: <code>{"ok":true}</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="traps-restarts-and-failure-injection">Traps, restarts and failure injection</h2>
+<table>
+<thead>
+<tr>
+<th>Rust</th>
+<th>TypeScript</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>host.expect_trap(code: &amp;str)</code></td>
+<td><code>host.expectTrap(code)</code></td>
+<td>The next trap must have this code. It is then consumed.</td>
+</tr>
+<tr>
+<td><code>host.inject_trap(code: &amp;str)</code></td>
+<td><code>host.injectTrap(code)</code></td>
+<td>The next call into the plugin traps with this code</td>
+</tr>
+<tr>
+<td><code>host.inject_failure(import: &amp;str, error: PluginError)</code></td>
+<td><code>host.injectFailure(import, error)</code></td>
+<td>The next call to the import returns the error</td>
+</tr>
+<tr>
+<td><code>host.restarts() -&gt; Vec&lt;Restart&gt;</code></td>
+<td><code>host.restarts(): Restart[]</code></td>
+<td>Restarts so far, where <code>Restart{ at_ms: u64, delay_ms: u32 }</code></td>
+</tr>
+<tr>
+<td><code>host.is_disabled() -&gt; bool</code></td>
+<td><code>host.isDisabled(): boolean</code></td>
+<td>True after the third failure inside 10 minutes</td>
+</tr>
+<tr>
+<td><code>host.diagnostics() -&gt; Vec&lt;Diagnostic&gt;</code></td>
+<td><code>host.diagnostics(): Diagnostic[]</code></td>
+<td>Harness diagnostics such as <code>events-not-granted</code></td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>[DEV-490]</strong> After a failure the harness MUST apply the restart rule of <a href="/pages/reference-errors-and-limits/#restart-and-disable-rule">Errors and limits</a> in fake time. Count the failures in the last 10 minutes, including this one. One means restart after 1 s, two means restart after 5 s, three means disable on that side. A failure expires 10 minutes after it happened.</li>
+<li><strong>[DEV-491]</strong> An instance that restarts MUST receive <code>tree-changed</code> for every node, and its in-memory state MUST be new.</li>
+<li><strong>[DEV-492]</strong> A disabled plugin MUST receive no events. <code>host.is_disabled()</code> MUST return true.</li>
+<li><strong>[DEV-493]</strong> <code>inject_failure</code> MUST accept only error codes in the catalogue of the import. Others fail with <code>harness.error-unknown</code>.</li>
+</ul>
+<h3 id="lifecycle-control">Lifecycle control</h3>
+<table>
+<thead>
+<tr>
+<th>Rust</th>
+<th>TypeScript</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>inject_trap(code: &amp;str)</code></td>
+<td><code>injectTrap(code)</code></td>
+<td>The next call traps with that trap code</td>
+</tr>
+<tr>
+<td><code>restart_with(bytes: Vec&lt;u8&gt;)</code></td>
+<td><code>restartWith(bytes: Uint8Array)</code></td>
+<td><code>deactivate(upgrade)</code>, then <code>activate</code> with <code>restored = Some(bytes)</code></td>
+</tr>
+<tr>
+<td><code>with_storage_snapshot(path)</code></td>
+<td><code>withStorageSnapshot(path)</code></td>
+<td>Builder. Loads storage from a JSON file of <code>{bucket:{key:base64}}</code>.</td>
+</tr>
+<tr>
+<td><code>with_data_version(u32)</code></td>
+<td><code>withDataVersion(n)</code></td>
+<td>Builder. Sets the stored data version before activation.</td>
+</tr>
+<tr>
+<td><code>crash_after_journal_write()</code></td>
+<td><code>crashAfterJournalWrite()</code></td>
+<td>Traps after the next journal append is committed</td>
+</tr>
+<tr>
+<td><code>failures() -&gt; Vec&lt;FailureRecord{ at_ms: u64, code: String }&gt;</code></td>
+<td><code>failures()</code></td>
+<td>The failure window of the side</td>
+</tr>
+<tr>
+<td><code>lifecycle_state() -&gt; LifecycleState</code></td>
+<td><code>lifecycleState()</code></td>
+<td>The instance state of the side</td>
+</tr>
+<tr>
+<td><code>restored() -&gt; Option&lt;Vec&lt;u8&gt;&gt;</code></td>
+<td><code>restored()</code></td>
+<td>The <code>restored</code> bytes of the current activation</td>
+</tr>
+<tr>
+<td><code>logs() -&gt; Vec&lt;LogLine{ level: Level, message: String }&gt;</code></td>
+<td><code>logs()</code></td>
+<td>Lines the plugin wrote with <code>log</code></td>
+</tr>
+<tr>
+<td><code>fixture_events() -&gt; Vec&lt;Event&gt;</code></td>
+<td><code>fixtureEvents()</code></td>
+<td>The decoded <code>events</code> list of the loaded fixture</td>
+</tr>
+</tbody>
+</table>
+<p><code>LifecycleState</code> is the <code>instance-state</code> enum of <a href="/pages/reference-plugin-lifecycle-states/">Plugin lifecycle states</a>: in Rust <code>LifecycleState::StoppedByFailure</code>, in TypeScript <code>'stopped-by-failure'</code>.</p>
+<ul>
+<li><strong>[DEV-494]</strong> <code>restart_with(bytes)</code> MUST call <code>deactivate(upgrade)</code> and discard its bytes, then <code>activate</code> with <code>instance</code> plus 1 and <code>restored</code> set to the given bytes. It MUST NOT count as a failure.</li>
+<li><strong>[DEV-495]</strong> <code>inject_trap(code)</code> MUST count as a failure and MUST apply the restart rule of DEV-490. The code MUST be in the trap code table of <a href="/pages/reference-errors-and-limits/#trap-codes">Errors and limits</a>, or the call MUST fail with <code>harness.error-unknown</code>.</li>
+<li><strong>[DEV-496]</strong> <code>crash_after_journal_write()</code> MUST trap after the next journal append is durable, so the next activation sees the entry.</li>
+<li><strong>[DEV-497]</strong> <code>with_storage_snapshot</code> and <code>with_data_version</code> MUST fail with <code>harness.setup-closed</code> after <code>activate</code>. A snapshot file with an unknown shape MUST fail with <code>harness.snapshot-invalid</code>.</li>
+<li><strong>[DEV-498]</strong> <code>failures()</code> MUST list the failures of the last 10 minutes of fake time, oldest first. <code>lifecycle_state()</code> MUST return <code>stopped-by-failure</code> after the third failure in the window, and otherwise the current instance state (<code>active</code>, <code>restart-scheduled</code> or <code>inactive</code>).</li>
+</ul>
+<h2 id="snapshot-and-golden-files">Snapshot and golden files</h2>
+<table>
+<thead>
+<tr>
+<th>Call</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>assert_golden(path: &amp;str, actual: &amp;str)</code></td>
+<td>Compares text to a golden file. TypeScript <code>assertGolden(path, actual)</code>.</td>
+</tr>
+<tr>
+<td><code>assert_snapshot(name: &amp;str, value: &amp;impl Serialize)</code></td>
+<td>Compares a value to the stored snapshot named <code>name</code> under <code>tests/snapshots/</code>. TypeScript <code>assertSnapshot(name, value)</code>.</td>
+</tr>
+<tr>
+<td><code>host.snapshot() -&gt; HostSnapshot</code></td>
+<td>Returns the state record for restore tests: <code>HostSnapshot{ instance: u64, state: LifecycleState, storage: BTreeMap&lt;String, BTreeMap&lt;String, Vec&lt;u8&gt;&gt;&gt;, restored: Option&lt;Vec&lt;u8&gt;&gt; }</code>. TypeScript <code>host.snapshot()</code>.</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>[DEV-500]</strong> <code>assert_golden</code> MUST compare bytes after converting <code>\r\n</code> to <code>\n</code>. It MUST fail with a unified diff that shows at most 40 changed lines.</li>
+<li><strong>[DEV-501]</strong> When <code>ILIUM_PLUGIN_UPDATE_GOLDEN=1</code> is set, <code>assert_golden</code> MUST write the actual text to the file and pass. It MUST print <code>golden updated: &lt;path&gt;</code> to standard error.</li>
+<li><strong>[DEV-502]</strong> A missing golden file MUST fail with <code>harness.golden-missing</code>, except when update mode is on. <code>ilium plugin test --update</code> sets the variable.</li>
+<li><strong>[DEV-503]</strong> The harness MUST NOT update golden files when the environment variable <code>CI</code> is set and non-empty, and MUST fail with <code>harness.golden-update-in-ci</code>.</li>
+<li><strong>[DEV-504]</strong> A snapshot file MUST be pretty JSON with sorted keys and a trailing newline.</li>
+</ul>
+<h2 id="fixtures-and-expectation-files">Fixtures and expectation files</h2>
+<p>A fixture is JSON with <code>"schema": 1</code>. An unknown key at any depth MUST be refused with <code>fixture.unknown-key</code> and its JSON path, for example <code>fixture.unknown-key: $.events[2].foo</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>schema</code></td>
+<td>integer</td>
+<td>Always 1</td>
+</tr>
+<tr>
+<td><code>grants</code></td>
+<td>string list</td>
+<td>Grants for the host</td>
+</tr>
+<tr>
+<td><code>tier</code></td>
+<td>string</td>
+<td><code>T1</code>, <code>T2</code> or <code>T3</code></td>
+</tr>
+<tr>
+<td><code>side</code></td>
+<td>string</td>
+<td><code>server</code>, <code>client</code> or <code>scene</code></td>
+</tr>
+<tr>
+<td><code>clock</code></td>
+<td>string</td>
+<td>Start time, <code>YYYY-MM-DD HH:mm:ss</code> UTC</td>
+</tr>
+<tr>
+<td><code>tree</code></td>
+<td>list</td>
+<td>Nodes of the tree node shape in <a href="#fake-tree-panes-agents-and-jobs">Fake tree, panes, agents and jobs</a>: <code>id</code>, <code>parent</code>, <code>name</code>, <code>class</code>, <code>content_kind</code>, optional <code>agent</code></td>
+</tr>
+<tr>
+<td><code>panes</code></td>
+<td>list</td>
+<td>Pane info for terminal and basic panes</td>
+</tr>
+<tr>
+<td><code>agents</code></td>
+<td>list</td>
+<td>Agent panes with <code>signature</code> and <code>activity</code></td>
+</tr>
+<tr>
+<td><code>settings</code></td>
+<td>object</td>
+<td>Current setting values</td>
+</tr>
+<tr>
+<td><code>storage</code></td>
+<td>object</td>
+<td>Starting storage keys and values</td>
+</tr>
+<tr>
+<td><code>files</code></td>
+<td>object</td>
+<td>Path to content, text or <code>{"base64": "..."}</code></td>
+</tr>
+<tr>
+<td><code>http</code></td>
+<td>list</td>
+<td>Fake network entries: <code>method</code>, <code>url</code>, <code>status</code>, <code>body</code></td>
+</tr>
+<tr>
+<td><code>processes</code></td>
+<td>list</td>
+<td>Fake process entries: <code>program</code>, <code>arguments</code>, <code>status</code>, <code>signal</code>, <code>stdout</code>, <code>stderr</code></td>
+</tr>
+<tr>
+<td><code>events</code></td>
+<td>list</td>
+<td>Events to deliver, <code>{"tag","val"}</code></td>
+</tr>
+<tr>
+<td><code>completions</code></td>
+<td>list</td>
+<td>Outcomes to deliver after the events</td>
+</tr>
+<tr>
+<td><code>lifecycle</code></td>
+<td>list</td>
+<td>Optional. Steps <code>{"step": "trap" \| "advance" \| "restart" \| "grant" \| "revoke", "value": string \| number}</code>, run in order after the events. <code>trap</code> takes a trap code, <code>advance</code> milliseconds, <code>restart</code> base64 restore bytes, <code>grant</code> and <code>revoke</code> a grant name.</td>
+</tr>
+<tr>
+<td><code>expect_state</code></td>
+<td>string</td>
+<td>Optional. One <code>LifecycleState</code> name in kebab-case that <code>lifecycle_state()</code> MUST return when the steps end</td>
+</tr>
+<tr>
+<td><code>frames</code></td>
+<td>list</td>
+<td>Only for <code>side</code> <code>scene</code>: <code>FrameInput</code> records to draw, see <a href="#scenes">Scenes</a></td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>[DEV-510]</strong> A fixture value MUST override the builder only when the builder did not set that value. The builder wins.</li>
+<li><strong>[DEV-511]</strong> Fixture parsing MUST report the JSON path of the first bad key, for example <code>fixture.bad-value: $.tree[2].parent</code>.</li>
+<li><strong>[DEV-512]</strong> Node ids in a fixture MUST be unique. A repeat MUST fail with <code>fixture.duplicate-id</code>.</li>
+<li><strong>[DEV-513]</strong> Integers above 2^53 MUST be written as strings in a fixture, and the loader MUST read them as 64-bit values.</li>
+</ul>
+<p>An expectation file has the same base name plus <code>.expect.json</code>.</p>
+<pre><code class="language-json">{
+  &quot;schema&quot;: 1,
+  &quot;submissions&quot;: { &quot;match&quot;: &quot;subset&quot;, &quot;items&quot;: [ { &quot;intent&quot;: &quot;set-decoration&quot;, &quot;slot&quot;: &quot;work&quot; } ] },
+  &quot;logs&quot;: { &quot;match&quot;: &quot;exact&quot;, &quot;items&quot;: [ { &quot;level&quot;: &quot;info&quot;, &quot;contains&quot;: &quot;activate&quot; } ] },
+  &quot;outcomes&quot;: { &quot;match&quot;: &quot;ordered&quot;, &quot;items&quot;: [ &quot;ok&quot; ] }
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Match mode</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>exact</code></td>
+<td>Same count and same order, every given field equal</td>
+</tr>
+<tr>
+<td><code>ordered</code></td>
+<td>The given items appear in this order, other items may sit between</td>
+</tr>
+<tr>
+<td><code>subset</code></td>
+<td>Each given item appears at least once, order ignored</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>[DEV-515]</strong> In an expectation item, only the given fields are compared. Fields absent from the item are ignored.</li>
+<li><strong>[DEV-514]</strong> A fixture with <code>side</code> <code>scene</code> MUST accept only the keys <code>schema</code>, <code>side</code>, <code>settings</code>, <code>clock</code> and <code>frames</code>. Any other key MUST fail with <code>fixture.unknown-key</code>. <code>lifecycle</code> steps MUST run after the events. <code>expect_state</code> MUST fail the fixture with <code>fixture.state-mismatch</code> when the state differs.</li>
+<li><strong>[DEV-516]</strong> <code>host.run_fixture(path)</code> MUST load the fixture, deliver the events, settle, and compare the expectation file when it exists. A missing expectation file means the run only asserts that nothing traps.</li>
+<li><strong>[DEV-517]</strong> <code>ilium plugin test</code> MUST run every <code>tests/fixtures/*.json</code> as a test case named <code>fixture:&lt;file&gt;</code> and MUST compare the expectation file when one exists.</li>
+</ul>
+<h2 id="property-tests-and-fuzz-hooks">Property tests and fuzz hooks</h2>
+<table>
+<thead>
+<tr>
+<th>Rust</th>
+<th>TypeScript</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>host.fuzz_events(seed: u64, count: u32) -&gt; Vec&lt;Event&gt;</code></td>
+<td><code>host.fuzzEvents(seed: bigint, count: number): Event[]</code></td>
+<td>A valid random event batch</td>
+</tr>
+<tr>
+<td><code>host.fuzz_run(seed: u64, rounds: u32) -&gt; Result&lt;(), FuzzFailure{ seed: u64, round: u32, code: String }&gt;</code></td>
+<td><code>host.fuzzRun(seed, rounds): void</code></td>
+<td>Delivers random batches. TypeScript throws on failure.</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>[DEV-520]</strong> The harness MUST offer <code>host.fuzz_events(seed, count)</code> which builds a valid random event batch from the event catalogue and grants. The same seed MUST give the same batch.</li>
+<li><strong>[DEV-521]</strong> <code>host.fuzz_run(seed, rounds)</code> MUST deliver <code>rounds</code> random batches and fail on any trap that is not an expected trap. The failing seed and round MUST be in the message, so the failure can be replayed.</li>
+<li><strong>[DEV-522]</strong> A property test MAY use <code>proptest</code> in Rust and <code>fast-check</code> in TypeScript. The SDK MUST export <code>arbitrary_event()</code> for Rust and <code>arbitraryEvent</code> for TypeScript, which generate valid events.</li>
+<li><strong>[DEV-523]</strong> <code>ILIUM_PLUGIN_TEST_SEED</code> MUST make fuzz runs reproducible across machines.</li>
+</ul>
+<h2 id="coverage">Coverage</h2>
+<ul>
+<li><strong>[DEV-530]</strong> <code>ilium plugin test --coverage</code> MUST write line coverage for the plugin source. In Rust it uses <code>cargo llvm-cov</code>, in TypeScript <code>bun test --coverage</code>. If the tool is missing the command MUST exit 4 with <code>toolchain.coverage-tool-missing</code>.</li>
+<li><strong>[DEV-531]</strong> Coverage output MUST go to <code>.ilium/coverage/</code> as <code>lcov.info</code> and <code>summary.json</code>. The summary MUST list <code>lines_total</code>, <code>lines_covered</code> and <code>percent</code>.</li>
+<li><strong>[DEV-532]</strong> <code>--min-coverage &lt;percent&gt;</code> MUST make the command exit 3 when coverage is lower, with the message <code>coverage 71.2 percent is below 80</code>.</li>
+</ul>
+<h2 id="replay-files">Replay files</h2>
+<p>A replay file records the inputs of one session so a bug can be reproduced.</p>
+<pre><code class="language-json">{&quot;type&quot;:&quot;header&quot;,&quot;version&quot;:1,&quot;api&quot;:&quot;ilium:plugin@0.1.0&quot;,&quot;plugin&quot;:&quot;example.agent-tools&quot;,&quot;side&quot;:&quot;server&quot;,&quot;seed&quot;:1,&quot;start&quot;:&quot;2030-01-01 00:00:00&quot;}
+{&quot;type&quot;:&quot;event-batch&quot;,&quot;at&quot;:0,&quot;events&quot;:[{&quot;tag&quot;:&quot;pane-created&quot;,&quot;val&quot;:{&quot;node&quot;:7,&quot;kind&quot;:&quot;terminal&quot;}}]}
+{&quot;type&quot;:&quot;completion&quot;,&quot;at&quot;:120,&quot;request&quot;:3,&quot;outcome&quot;:{&quot;tag&quot;:&quot;ok&quot;}}
+{&quot;type&quot;:&quot;tick&quot;,&quot;at&quot;:1000}
+{&quot;type&quot;:&quot;host-call&quot;,&quot;at&quot;:130,&quot;import&quot;:&quot;storage.get&quot;,&quot;key&quot;:&quot;count&quot;,&quot;result&quot;:{&quot;tag&quot;:&quot;some&quot;,&quot;val&quot;:&quot;3&quot;}}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Rust</th>
+<th>TypeScript</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>host.record_to(path: &amp;Path)</code></td>
+<td><code>host.recordTo(path)</code></td>
+</tr>
+<tr>
+<td><code>host.replay(path: &amp;Path) -&gt; Result&lt;(), ReplayMismatch{ line: u32, expected: String, actual: String }&gt;</code></td>
+<td><code>host.replay(path): Promise&lt;void&gt;</code>, rejects with <code>ReplayMismatch</code></td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>[DEV-540]</strong> <code>host.record_to(path)</code> MUST write a replay file. The header MUST be the first line.</li>
+<li><strong>[DEV-541]</strong> <code>host.replay(path)</code> MUST re-run the recorded inputs and compare the new host calls with the recorded <code>host-call</code> lines. A difference MUST fail with <code>replay.diverged</code> and the first differing line number.</li>
+<li><strong>[DEV-542]</strong> A replay file with a version other than 1 MUST be refused with <code>replay.version-unsupported</code>.</li>
+<li><strong>[DEV-543]</strong> Time values <code>at</code> are fake milliseconds from <code>start</code>.</li>
+<li><strong>[DEV-544]</strong> <code>ilium plugin test --replay &lt;file&gt;</code> MUST replay one file and exit 0 on a match, 3 on divergence.</li>
+</ul>
+<h2 id="test-report-records">Test report records</h2>
+<p><code>ilium plugin test</code> writes the records defined in <a href="/pages/reference-plugin-cli/">Plugin command-line reference</a>. The harness itself reports each native test through the test runner of the language, and the table below applies to the records of a fixture run.</p>
+<p><code>ilium plugin test</code> prints JSONL records when stdout is not a terminal or <code>--json</code> is given. Otherwise it prints one line per test and the final line <code>summary: &lt;passed&gt; passed, &lt;failed&gt; failed, &lt;skipped&gt; skipped (&lt;ms&gt; ms)</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Record <code>type</code></th>
+<th>Fields</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>test-case</code></td>
+<td><code>name</code>, <code>status</code> (<code>pass</code>, <code>fail</code>, <code>trap</code>), <code>duration_ms</code>, <code>reason</code> (not for a pass)</td>
+</tr>
+<tr>
+<td><code>summary</code></td>
+<td><code>passed</code>, <code>failed</code>, <code>skipped</code>, <code>duration_ms</code></td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>[DEV-550]</strong> The test names in records MUST be stable between runs.</li>
+<li><strong>[DEV-551]</strong> A fixture with no expectation file MUST count as passed and print the warning <code>test.no-expectation</code>.</li>
+<li><strong>[DEV-552]</strong> <code>ilium plugin test</code> MUST print JSONL records when stdout is not a terminal or <code>--json</code> is given. Otherwise it MUST print one line per test and the final line <code>summary: &lt;passed&gt; passed, &lt;failed&gt; failed, &lt;skipped&gt; skipped (&lt;ms&gt; ms)</code>.</li>
+</ul>
+<h2 id="scenes">Scenes</h2>
+<p>A scene is drawn by a renderer, not by a view. <code>FakeScene</code> drives one renderer of the <code>anim</code> world.</p>
+<table>
+<thead>
+<tr>
+<th>Rust</th>
+<th>TypeScript</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>FakeScene::new::&lt;R: SceneRenderer&gt;(scene_id: &amp;str, columns: u16, rows: u16) -&gt; FakeScene</code></td>
+<td><code>createFakeScene(renderer, sceneId, columns, rows): FakeScene</code></td>
+<td>A scene of the given size on the fake clock</td>
+</tr>
+<tr>
+<td><code>scene.frame(input: FrameInput) -&gt; Screen</code></td>
+<td><code>scene.frame(input): Screen</code></td>
+<td>Calls <code>render</code> once and reads the surface as a <code>Screen</code></td>
+</tr>
+<tr>
+<td><code>scene.set_palette(palette_rgb: Vec&lt;u32&gt;)</code></td>
+<td><code>scene.setPalette(paletteRgb)</code></td>
+<td>Calls <code>set-palette</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>FrameInput</code> is the <code>frame-input</code> record of <code>ilium:anim/renderer-types</code>: <code>time_millis</code>, <code>wall_millis</code>, <code>now_unix_millis</code>, <code>width</code>, <code>height</code> and <code>palette_rgb</code>. <code>FrameInput::default()</code> takes <code>width</code> and <code>height</code> from the scene size and the time values from the fake clock.</p>
+<ul>
+<li><strong>[DEV-560]</strong> <code>FakeScene::frame</code> MUST call <code>render</code> of the renderer once and return the surface cells as a <code>Screen</code> of the scene size.</li>
+<li><strong>[DEV-561]</strong> The fake clock MUST supply <code>time_millis</code> as the fake milliseconds since the scene was created, so equal inputs give equal screens.</li>
+<li><strong>[DEV-562]</strong> <code>set_palette</code> MUST pass the palette to the renderer before the next frame.</li>
+</ul>
+<h2 id="harness-types">Harness types</h2>
+<table>
+<thead>
+<tr>
+<th>Type</th>
+<th>Definition</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Mode</code></td>
+<td>enum <code>Native</code>, <code>Component</code> (TypeScript <code>'native'</code>, <code>'component'</code>)</td>
+</tr>
+<tr>
+<td><code>Screen</code></td>
+<td><code>columns: u16</code>, <code>rows: u16</code>, <code>cell(row, column) -&gt; Cell</code>, <code>text() -&gt; String</code> (rows joined by <code>\n</code>, trailing spaces trimmed)</td>
+</tr>
+<tr>
+<td><code>Cell</code></td>
+<td><code>symbol: String</code>, <code>foreground: Color</code>, <code>background: Color</code>, <code>bold: bool</code>, <code>italic: bool</code>, <code>underline: bool</code></td>
+</tr>
+<tr>
+<td><code>Submission</code></td>
+<td><code>intent: Intent</code>, <code>correlation: u64</code>, <code>dedup_key: Option&lt;String&gt;</code>, <code>delivery: Delivery</code></td>
+</tr>
+<tr>
+<td><code>PluginHandle</code></td>
+<td><code>side: String</code>, <code>instance: u64</code></td>
+</tr>
+<tr>
+<td><code>Invocation</code></td>
+<td><code>name: String</code>, <code>arguments: Vec&lt;String&gt;</code>, plus <code>stdout()</code>, <code>stderr()</code>, <code>exit_code()</code></td>
+</tr>
+<tr>
+<td><code>Diagnostic</code></td>
+<td><code>code: String</code>, <code>message: String</code></td>
+</tr>
+<tr>
+<td><code>Restart</code></td>
+<td><code>at_ms: u64</code>, <code>delay_ms: u32</code></td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>[DEV-563]</strong> Every type of this table MUST exist in both SDK <code>testing</code> modules with the field names above, camelCase in TypeScript.</li>
+</ul>
+<h2 id="edge-cases">Edge cases</h2>
+<ul>
+<li>A test that activates twice on one host MUST fail with <code>harness.already-active</code>.</li>
+<li><code>deliver</code> before <code>activate</code> MUST fail with <code>harness.not-active</code>.</li>
+<li>A fixture with <code>side: client</code> and a <code>deliver</code> of server-only events MUST fail with <code>harness.event-not-for-side</code>.</li>
+<li>A plugin that holds the wrong grant for an event still receives nothing, and <code>deliver</code> MUST NOT fail. It MUST record the diagnostic <code>events-not-granted</code> in <code>host.diagnostics()</code>.</li>
+<li>Two fakes asked for the same path in <code>files</code> and <code>fs().write</code> MUST give the write precedence.</li>
+</ul>
+<h2 id="complete-error-code-list">Complete error code list</h2>
+<p>Every dotted code named on this page and on the conformance page is in this table or in the trap code table of Errors and limits. <code>ilium plugin test</code> also reports the codes of the command-line reference.</p>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>harness.setup-closed</code></td>
+<td>Builder call after activation</td>
+</tr>
+<tr>
+<td><code>harness.grant-not-declared</code></td>
+<td>Grant not in the manifest</td>
+</tr>
+<tr>
+<td><code>harness.grant-unknown</code></td>
+<td>Grant name not in the catalogue</td>
+</tr>
+<tr>
+<td><code>harness.batch-too-large</code></td>
+<td>More than 256 events in one <code>deliver</code></td>
+</tr>
+<tr>
+<td><code>harness.settle-limit</code></td>
+<td>Queue not empty after 100 rounds</td>
+</tr>
+<tr>
+<td><code>harness.cell-out-of-range</code></td>
+<td><code>cell</code> outside the screen</td>
+</tr>
+<tr>
+<td><code>harness.render-size</code></td>
+<td>Render size outside 10 to 500 by 1 to 200</td>
+</tr>
+<tr>
+<td><code>harness.clock-backwards</code></td>
+<td><code>set_clock</code> moved time back</td>
+</tr>
+<tr>
+<td><code>harness.golden-missing</code></td>
+<td>Golden file absent</td>
+</tr>
+<tr>
+<td><code>harness.golden-update-in-ci</code></td>
+<td>Update requested when <code>CI</code> is set</td>
+</tr>
+<tr>
+<td><code>harness.already-active</code></td>
+<td>Second activation</td>
+</tr>
+<tr>
+<td><code>harness.not-active</code></td>
+<td>Call before activation</td>
+</tr>
+<tr>
+<td><code>harness.error-unknown</code></td>
+<td>Unknown code in <code>inject_failure</code></td>
+</tr>
+<tr>
+<td><code>harness.event-not-for-side</code></td>
+<td>Event does not belong to the side</td>
+</tr>
+<tr>
+<td><code>harness.unexpected-call</code></td>
+<td>A fake process or network call had no expectation. Reported at teardown.</td>
+</tr>
+<tr>
+<td><code>harness.fs-path-invalid</code></td>
+<td>Fake file system path is absolute or contains <code>..</code></td>
+</tr>
+<tr>
+<td><code>harness.view-target-unknown</code></td>
+<td><code>render</code> target is not one of the five <code>ViewTarget</code> cases</td>
+</tr>
+<tr>
+<td><code>harness.clock-argument</code></td>
+<td><code>advanceClock</code> argument is negative, fractional or not a safe integer</td>
+</tr>
+<tr>
+<td><code>harness.reason-reserved</code></td>
+<td><code>deactivate(crash-restart)</code> was requested</td>
+</tr>
+<tr>
+<td><code>harness.core-unknown</code></td>
+<td><code>install_core</code> name is not a core plugin</td>
+</tr>
+<tr>
+<td><code>harness.plugin-unknown</code></td>
+<td><code>session.server</code> or <code>session.client</code> names a plugin or side that is not installed</td>
+</tr>
+<tr>
+<td><code>harness.not-a-hook-handler</code></td>
+<td><code>run_hook</code> on a plugin without a hook handler</td>
+</tr>
+<tr>
+<td><code>harness.snapshot-invalid</code></td>
+<td>Storage snapshot file has an unknown shape</td>
+</tr>
+<tr>
+<td><code>harness.grant-unknown</code>, <code>harness.grant-not-declared</code></td>
+<td>See Setup</td>
+</tr>
+<tr>
+<td><code>fixture.unknown-key</code>, <code>fixture.bad-value</code>, <code>fixture.duplicate-id</code>, <code>fixture.state-mismatch</code></td>
+<td>Fixture errors</td>
+</tr>
+<tr>
+<td><code>replay.diverged</code>, <code>replay.version-unsupported</code></td>
+<td>Replay errors</td>
+</tr>
+<tr>
+<td><code>toolchain.coverage-tool-missing</code></td>
+<td><code>--coverage</code> needs <code>cargo llvm-cov</code> or <code>bun test --coverage</code></td>
+</tr>
+<tr>
+<td><code>test.no-expectation</code></td>
+<td>Warning: a fixture has no expectation file</td>
+</tr>
+<tr>
+<td><code>trap.deadline</code>, <code>trap.memory</code>, <code>trap.table</code>, <code>trap.submission-batch</code>, <code>trap.invalid-ui-tree</code>, <code>trap.import-not-requested</code>, <code>trap.abi</code>, <code>trap.panic</code></td>
+<td>Trap codes. The table in <a href="/pages/reference-errors-and-limits/#trap-codes">Errors and limits</a> owns them.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="see-also">See also</h2>
+<ul>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a></li>
+</ul>
+<p>API checked against <code>ilium:plugin@0.1.0</code>.</p>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/reference-signing-and-trust/"><small>Previous</small>Signing and trust reference</a><a class="next" href="/pages/reference-threat-model/"><small>Next</small>Threat model</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#you-will-need">You will need</a></li><li class="l2"><a href="#modes">Modes</a></li><li class="l2"><a href="#setup-the-builder">Setup: the builder</a></li><li class="l3"><a href="#grants">Grants</a></li><li class="l2"><a href="#activation">Activation</a></li><li class="l3"><a href="#isolation-between-tests">Isolation between tests</a></li><li class="l2"><a href="#delivering-events-and-reading-submissions">Delivering events and reading submissions</a></li><li class="l3"><a href="#worked-example">Worked example</a></li><li class="l3"><a href="#event-builders">Event builders</a></li><li class="l2"><a href="#views-and-rendering">Views and rendering</a></li><li class="l2"><a href="#the-fakes">The fakes</a></li><li class="l3"><a href="#fake-clock">Fake clock</a></li><li class="l3"><a href="#fake-file-system">Fake file system</a></li><li class="l3"><a href="#fake-process">Fake process</a></li><li class="l3"><a href="#fake-network">Fake network</a></li><li class="l3"><a href="#fake-storage-and-settings">Fake storage and settings</a></li><li class="l3"><a href="#fake-tree-panes-agents-and-jobs">Fake tree, panes, agents and jobs</a></li><li class="l2"><a href="#fakesession">FakeSession</a></li><li class="l3"><a href="#core-stubs">Core stubs</a></li><li class="l2"><a href="#traps-restarts-and-failure-injection">Traps, restarts and failure injection</a></li><li class="l3"><a href="#lifecycle-control">Lifecycle control</a></li><li class="l2"><a href="#snapshot-and-golden-files">Snapshot and golden files</a></li><li class="l2"><a href="#fixtures-and-expectation-files">Fixtures and expectation files</a></li><li class="l2"><a href="#property-tests-and-fuzz-hooks">Property tests and fuzz hooks</a></li><li class="l2"><a href="#coverage">Coverage</a></li><li class="l2"><a href="#replay-files">Replay files</a></li><li class="l2"><a href="#test-report-records">Test report records</a></li><li class="l2"><a href="#scenes">Scenes</a></li><li class="l2"><a href="#harness-types">Harness types</a></li><li class="l2"><a href="#edge-cases">Edge cases</a></li><li class="l2"><a href="#complete-error-code-list">Complete error code list</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

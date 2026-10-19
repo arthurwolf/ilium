@@ -1,0 +1,1146 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Recap | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details open><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/" aria-current="page">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Core plugins</b></p>
+<h1>Recap</h1>
+
+<p>A recap is a few factual sentences about what one pane is doing, written once in a short form (at most 40 words) and once in a long form (at most 250 words). <code>ilium recap</code> prints them for every selected agent and shell pane, as JSON lines or as Markdown. The plugin id is <code>ilium.core.recap</code> and it runs on both sides. The server side owns the command, reads the evidence, calls the model and writes the records. The client side holds the answer to one question the server cannot know: whether onboarding is finished.</p>
+<p>The recap text comes from the AI provider the user configured under Inference and privacy. One model call covers both lengths of one pane. When automatic AI is off or onboarding is not finished, nothing is read and nothing is sent: each selected pane gets a <code>denied</code> record.</p>
+<h3 id="what-it-covers">What it covers</h3>
+<ul>
+<li>The <code>ilium recap [selection]</code> command, with the same selection options as <code>ilium panes</code> and <code>ilium broadcast</code>, described in the CLI reference.</li>
+<li>Evidence for agent panes from the transcript of the pane's own verified session, never from the screen.</li>
+<li>Evidence for shell panes from the current screen, capped at 64 KiB.</li>
+<li>The six states of a record: <code>summarized</code>, <code>idle</code>, <code>denied</code>, <code>unavailable</code>, <code>stale</code> and <code>failed</code>.</li>
+<li>Goal lines read from the transcript, not written by the model.</li>
+<li>Redaction of secrets before any text leaves Ilium, and the rule that a pointer survives only when its path appears in the evidence, lies under the pane's project or folder, exists now and is not denied.</li>
+</ul>
+<h3 id="see-it">See it</h3>
+<p>There is no recording of this feature yet. The renders below are illustrative.</p>
+<h3 id="what-the-user-sees">What the user sees</h3>
+<figure>
+<pre class="term"><span class="t-dim">$</span> ilium recap --kind agent --length short
+{"type":"recap","pane_id":"12","state":"summarized",
+ "goals":["Goal active: Finish the parser refactor"],
+ "short":{"text":"The parser refactor is in progress. …"}, …}
+{"type":"recap","pane_id":"14","state":"unavailable", …}
+{"type":"warning","pane_id":"15","state":"failed",
+ "message":"provider timed out"}
+{"type":"summary","panes":3,"summarized":1,"unavailable":1,
+ "failed":1,"cancelled":false}
+</pre>
+<figcaption>Rendered at 80 columns or fewer. Illustrative: fields are shortened with <code>…</code>. One <code>recap</code> record per pane, then a <code>summary</code>. The exit status is 0 because the run finished.</figcaption>
+</figure>
+
+<figure>
+<pre class="term">╭─ Recap · Extensions ─────────────────────────╮
+│<span class="t-hi">fact-sources</span> (collect)                        │
+│  [x] Branch ticket                           │
+│  [ ] Build status                            │
+│                                              │
+│<span class="t-hi">before-recap</span> (transform)                      │
+│  [x] Redact customer names                   │
+│  stopped after 3 timeouts       [Reset]      │
+│  [x] Add ticket id                           │
+│  <span class="t-dim">Run order: lower priority number first.</span>     │
+╰──────────────────────────────────────────────╯
+</pre>
+<figcaption>Rendered at 48 columns. Illustrative. The Extensions tab of the Recap plugin lists the contributors of each point in run order, each with a toggle. A contributor that breached its deadline three times in a row shows the one stopped label, `stopped after 3 timeouts [Reset]`, as defined in <a href="/pages/api-extension-points/">Extension points</a>.</figcaption>
+</figure>
+
+<figure>
+<pre class="term">╭─ Recap ──────────────────────────────────────╮
+│ <span class="t-warn">! AI is off for recaps</span>                       │
+│ <span class="t-dim">  Every selected pane gets a denied record.</span>  │
+│ <span class="t-dim">  Turn on automatic AI in Settings.</span>          │
+│ Last run ……………………………………… 2026-10-12 09:14:03 │
+│ Panes recapped ………………………………………………………… 3 of 3 │
+╰──────────────────────────────────────────────╯
+</pre>
+<figcaption>Rendered at 48 columns. Illustrative. A <code>notice</code> and two <code>leader-row</code> rows on the plugin panel when the consent gate is closed.</figcaption>
+</figure>
+
+<h3 id="manifest">Manifest</h3>
+<p>This block is a fragment. It lists the contributions. The whole manifest is in <a href="#complete-manifest">Complete manifest</a>.</p>
+<p>The contract version is 0.1. The plugin declares two extension points, provides one service and one command line command, and is replaceable. A replacement must provide every item of <code>surface</code>.</p>
+<pre><code class="language-json">{
+  &quot;api&quot;: &quot;ilium:plugin@0.1.0&quot;,
+  &quot;id&quot;: &quot;ilium.core.recap&quot;,
+  &quot;name&quot;: &quot;Recap&quot;,
+  &quot;version&quot;: &quot;0.1.0&quot;,
+  &quot;publisher&quot;: &quot;Ilium&quot;,
+  &quot;limits_tier&quot;: &quot;first-party&quot;,
+  &quot;replaceable&quot;: true,
+  &quot;surface&quot;: [
+    &quot;services:recap&quot;, &quot;points:fact-sources&quot;, &quot;points:before-recap&quot;, &quot;cli:recap&quot;
+  ],
+  &quot;server&quot;: {
+    &quot;entry&quot;: &quot;server.wasm&quot;,
+    &quot;world&quot;: &quot;ilium:server/base@0.1.0&quot;,
+    &quot;exports&quot;: [&quot;job-runner&quot;, &quot;service-provider&quot;]
+  },
+  &quot;client&quot;: {
+    &quot;entry&quot;: &quot;client.wasm&quot;,
+    &quot;world&quot;: &quot;ilium:client/base@0.1.0&quot;,
+    &quot;exports&quot;: []
+  },
+  &quot;capabilities&quot;: {
+    &quot;server&quot;: [
+      &quot;cli.contribute&quot;, &quot;panes.read&quot;, &quot;agent.read&quot;, &quot;agent.transcript&quot;,
+      &quot;terminal.read-screen&quot;, &quot;inference&quot;, &quot;jobs.run&quot;,
+      &quot;settings.read-kernel:inference&quot;,
+      &quot;services.provide:ilium.core.recap/recap&quot;,
+      &quot;extensions.provide:ilium.core.recap/fact-sources&quot;,
+      &quot;extensions.provide:ilium.core.recap/before-recap&quot;
+    ],
+    &quot;client&quot;: [&quot;help.read&quot;]
+  },
+  &quot;contributes&quot;: {
+    &quot;cli&quot;: {
+      &quot;name&quot;: &quot;recap&quot;,
+      &quot;summary&quot;: &quot;Print short and long recaps of the selected panes&quot;,
+      &quot;output&quot;: &quot;jsonl&quot;,
+      &quot;stdin&quot;: &quot;none&quot;,
+      &quot;requires_server&quot;: true,
+      &quot;argument_groups&quot;: [&quot;pane-selector&quot;]
+    },
+    &quot;jobs&quot;: [{ &quot;kind&quot;: &quot;recap-pane&quot;, &quot;deadline_ms&quot;: 5000, &quot;memory_mib&quot;: 64 }],
+    &quot;client_requests&quot;: [{ &quot;kind&quot;: &quot;onboarding-state&quot; }],
+    &quot;help&quot;: [{ &quot;id&quot;: &quot;recap-privacy&quot;, &quot;file&quot;: &quot;help/recap-privacy.md&quot;, &quot;title&quot;: &quot;What a recap sends&quot; }],
+    &quot;services&quot;: {
+      &quot;ilium.core.recap/recap&quot;: {
+        &quot;get&quot;: {
+          &quot;params&quot;: { &quot;type&quot;: &quot;object&quot;, &quot;required&quot;: [&quot;panes&quot;],
+            &quot;properties&quot;: { &quot;panes&quot;: { &quot;type&quot;: &quot;array&quot;, &quot;items&quot;: { &quot;type&quot;: &quot;integer&quot; } },
+                            &quot;length&quot;: { &quot;type&quot;: &quot;string&quot;, &quot;enum&quot;: [&quot;short&quot;, &quot;long&quot;, &quot;both&quot;] } } },
+          &quot;result&quot;: { &quot;type&quot;: &quot;object&quot;, &quot;properties&quot;: { &quot;recaps&quot;: { &quot;type&quot;: &quot;array&quot; } },
+            &quot;required&quot;: [&quot;recaps&quot;] }
+        }
+      }
+    },
+    &quot;extension_points&quot;: [
+      { &quot;id&quot;: &quot;fact-sources&quot;, &quot;kind&quot;: &quot;collect&quot;, &quot;title&quot;: &quot;Fact sources&quot;,
+        &quot;entry_schema&quot;: { &quot;type&quot;: &quot;object&quot;, &quot;required&quot;: [&quot;id&quot;, &quot;title&quot;, &quot;service&quot;],
+          &quot;properties&quot;: { &quot;id&quot;: { &quot;type&quot;: &quot;string&quot; }, &quot;title&quot;: { &quot;type&quot;: &quot;string&quot; },
+                          &quot;service&quot;: { &quot;type&quot;: &quot;string&quot; } } },
+        &quot;max_entries&quot;: 16, &quot;dynamic&quot;: false, &quot;version&quot;: &quot;0.1.0&quot; },
+      { &quot;id&quot;: &quot;before-recap&quot;, &quot;kind&quot;: &quot;hook&quot;, &quot;mode&quot;: &quot;transform&quot;, &quot;title&quot;: &quot;Before recap&quot;,
+        &quot;payload_schema&quot;: { &quot;type&quot;: &quot;object&quot;, &quot;properties&quot;: {
+          &quot;pane&quot;: { &quot;type&quot;: &quot;integer&quot; }, &quot;kind&quot;: { &quot;type&quot;: &quot;string&quot;, &quot;enum&quot;: [&quot;short&quot;, &quot;long&quot;] },
+          &quot;text&quot;: { &quot;type&quot;: &quot;string&quot;, &quot;maxLength&quot;: 65536 } } },
+        &quot;reply_schema&quot;: { &quot;type&quot;: &quot;object&quot;, &quot;properties&quot;: { &quot;text&quot;: { &quot;type&quot;: &quot;string&quot;, &quot;maxLength&quot;: 65536 } } },
+        &quot;risk&quot;: &quot;standard&quot;, &quot;deadline_ms&quot;: 20, &quot;max_handlers&quot;: 8, &quot;version&quot;: &quot;0.1.0&quot; }
+    ]
+  }
+}
+</code></pre>
+<h3 id="complete-manifest">Complete manifest</h3>
+<p>This is the whole manifest of the plugin at <code>ilium:plugin@0.1.0</code>. The Manifest section above shows the contributions in detail; here the required keys, the sides, the <code>capabilities</code> per side and the <code>activation</code> triggers are all present. Activation follows <a href="/pages/reference-kernel-and-boot/#startup-and-lazy-activation-of-the-30-core-plugins">startup and lazy activation</a>. [COR-050]</p>
+<pre><code class="language-json">{
+  &quot;api&quot;: &quot;ilium:plugin@0.1.0&quot;,
+  &quot;id&quot;: &quot;ilium.core.recap&quot;,
+  &quot;name&quot;: &quot;Recap&quot;,
+  &quot;version&quot;: &quot;0.1.0&quot;,
+  &quot;publisher&quot;: &quot;Ilium&quot;,
+  &quot;description&quot;: &quot;A recap is a few factual sentences about what one pane is doing, written once in a short form (at most 40 words) and once in a long form (at most 250 words).&quot;,
+  &quot;license&quot;: &quot;MIT&quot;,
+  &quot;server&quot;: {
+    &quot;entry&quot;: &quot;server.wasm&quot;,
+    &quot;world&quot;: &quot;ilium:server/base@0.1.0&quot;,
+    &quot;exports&quot;: [
+      &quot;job-runner&quot;,
+      &quot;service-provider&quot;
+    ]
+  },
+  &quot;client&quot;: {
+    &quot;entry&quot;: &quot;client.wasm&quot;,
+    &quot;world&quot;: &quot;ilium:client/base@0.1.0&quot;,
+    &quot;exports&quot;: []
+  },
+  &quot;capabilities&quot;: {
+    &quot;server&quot;: [
+      &quot;cli.contribute&quot;,
+      &quot;panes.read&quot;,
+      &quot;agent.read&quot;,
+      &quot;agent.transcript&quot;,
+      &quot;terminal.read-screen&quot;,
+      &quot;inference&quot;,
+      &quot;jobs.run&quot;,
+      &quot;settings.read-kernel:inference&quot;,
+      &quot;services.provide:ilium.core.recap/recap&quot;,
+      &quot;extensions.provide:ilium.core.recap/fact-sources&quot;,
+      &quot;extensions.provide:ilium.core.recap/before-recap&quot;
+    ],
+    &quot;client&quot;: [
+      &quot;help.read&quot;
+    ]
+  },
+  &quot;activation&quot;: [
+    &quot;cli:recap&quot;,
+    &quot;command:recap&quot;
+  ],
+  &quot;replaceable&quot;: true,
+  &quot;surface&quot;: [
+    &quot;services:recap&quot;,
+    &quot;points:fact-sources&quot;,
+    &quot;points:before-recap&quot;,
+    &quot;cli:recap&quot;
+  ],
+  &quot;contributes&quot;: {
+    &quot;cli&quot;: {
+      &quot;name&quot;: &quot;recap&quot;,
+      &quot;summary&quot;: &quot;Print short and long recaps of the selected panes&quot;,
+      &quot;output&quot;: &quot;jsonl&quot;,
+      &quot;stdin&quot;: &quot;none&quot;,
+      &quot;requires_server&quot;: true,
+      &quot;argument_groups&quot;: [
+        &quot;pane-selector&quot;
+      ]
+    },
+    &quot;jobs&quot;: [
+      {
+        &quot;kind&quot;: &quot;recap-pane&quot;,
+        &quot;deadline_ms&quot;: 5000,
+        &quot;memory_mib&quot;: 64
+      }
+    ],
+    &quot;client_requests&quot;: [
+      {
+        &quot;kind&quot;: &quot;onboarding-state&quot;
+      }
+    ],
+    &quot;help&quot;: [
+      {
+        &quot;id&quot;: &quot;recap-privacy&quot;,
+        &quot;file&quot;: &quot;help/recap-privacy.md&quot;,
+        &quot;title&quot;: &quot;What a recap sends&quot;
+      }
+    ],
+    &quot;services&quot;: {
+      &quot;ilium.core.recap/recap&quot;: {
+        &quot;get&quot;: {
+          &quot;params&quot;: {
+            &quot;type&quot;: &quot;object&quot;,
+            &quot;required&quot;: [
+              &quot;panes&quot;
+            ],
+            &quot;properties&quot;: {
+              &quot;panes&quot;: {
+                &quot;type&quot;: &quot;array&quot;,
+                &quot;items&quot;: {
+                  &quot;type&quot;: &quot;integer&quot;
+                }
+              },
+              &quot;length&quot;: {
+                &quot;type&quot;: &quot;string&quot;,
+                &quot;enum&quot;: [
+                  &quot;short&quot;,
+                  &quot;long&quot;,
+                  &quot;both&quot;
+                ]
+              }
+            }
+          },
+          &quot;result&quot;: {
+            &quot;type&quot;: &quot;object&quot;,
+            &quot;properties&quot;: {
+              &quot;recaps&quot;: {
+                &quot;type&quot;: &quot;array&quot;
+              }
+            },
+            &quot;required&quot;: [
+              &quot;recaps&quot;
+            ]
+          }
+        }
+      }
+    },
+    &quot;extension_points&quot;: [
+      {
+        &quot;id&quot;: &quot;fact-sources&quot;,
+        &quot;kind&quot;: &quot;collect&quot;,
+        &quot;title&quot;: &quot;Fact sources&quot;,
+        &quot;entry_schema&quot;: {
+          &quot;type&quot;: &quot;object&quot;,
+          &quot;required&quot;: [
+            &quot;id&quot;,
+            &quot;title&quot;,
+            &quot;service&quot;
+          ],
+          &quot;properties&quot;: {
+            &quot;id&quot;: {
+              &quot;type&quot;: &quot;string&quot;
+            },
+            &quot;title&quot;: {
+              &quot;type&quot;: &quot;string&quot;
+            },
+            &quot;service&quot;: {
+              &quot;type&quot;: &quot;string&quot;
+            }
+          }
+        },
+        &quot;max_entries&quot;: 16,
+        &quot;dynamic&quot;: false,
+        &quot;version&quot;: &quot;0.1.0&quot;
+      },
+      {
+        &quot;id&quot;: &quot;before-recap&quot;,
+        &quot;kind&quot;: &quot;hook&quot;,
+        &quot;mode&quot;: &quot;transform&quot;,
+        &quot;title&quot;: &quot;Before recap&quot;,
+        &quot;payload_schema&quot;: {
+          &quot;type&quot;: &quot;object&quot;,
+          &quot;properties&quot;: {
+            &quot;pane&quot;: {
+              &quot;type&quot;: &quot;integer&quot;
+            },
+            &quot;kind&quot;: {
+              &quot;type&quot;: &quot;string&quot;,
+              &quot;enum&quot;: [
+                &quot;short&quot;,
+                &quot;long&quot;
+              ]
+            },
+            &quot;text&quot;: {
+              &quot;type&quot;: &quot;string&quot;,
+              &quot;maxLength&quot;: 65536
+            }
+          }
+        },
+        &quot;reply_schema&quot;: {
+          &quot;type&quot;: &quot;object&quot;,
+          &quot;properties&quot;: {
+            &quot;text&quot;: {
+              &quot;type&quot;: &quot;string&quot;,
+              &quot;maxLength&quot;: 65536
+            }
+          }
+        },
+        &quot;risk&quot;: &quot;standard&quot;,
+        &quot;deadline_ms&quot;: 20,
+        &quot;max_handlers&quot;: 8,
+        &quot;version&quot;: &quot;0.1.0&quot;
+      }
+    ]
+  },
+  &quot;limits_tier&quot;: &quot;first-party&quot;
+}
+</code></pre>
+<h3 id="samples">Samples</h3>
+<h4 id="the-recap-command-with-json-lines">The <code>recap</code> command with JSON lines</h4>
+<p>The command is declared with <code>output: "jsonl"</code>, <code>requires_server: true</code> and the <code>pane-selector</code> argument group, so the host resolves <code>--pane</code> and <code>--all-panes</code>. The richer selection options (<code>--match</code>, <code>--project</code>, <code>--state</code> and the rest) arrive in <code>argv</code> and the plugin resolves them against the pane list. One <code>recap</code> record is written per pane, then one <code>summary</code>. The exit code is 0 when the run finished, even if some panes failed. See <a href="/pages/api-cli/">cli</a> and <a href="/pages/capability-cli-contribute/">capability-cli-contribute</a>.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::host::cli;
+use ilium_plugin_sdk::prelude::*;
+use ilium_plugin_sdk::types::events::CliInvokedEvent;
+
+#[derive(Default)]
+struct Run { invocation: u64, length: String, waiting: usize, summarized: u32, failed: u32 }
+
+fn start(&amp;mut self, event: CliInvokedEvent) -&gt; Result&lt;(), PluginError&gt; {
+    let length = flag_value(&amp;event.argv, &quot;--length&quot;).unwrap_or_else(|| &quot;both&quot;.into());
+    if ![&quot;short&quot;, &quot;long&quot;, &quot;both&quot;].contains(&amp;length.as_str()) {
+        cli::write_stderr(event.invocation, &quot;recap: --length must be short, long or both&quot;)?;
+        cli::finish(event.invocation, 2);
+        return Ok(());
+    }
+    let panes = self.select_panes(&amp;event)?; // agent and shell panes, self skipped
+    for pane in panes.iter().take(MAX_PANES) {
+        self.start_job(event.invocation, *pane, &amp;length)?;
+    }
+    if panes.len() &gt; MAX_PANES {
+        let warning = r#&quot;{&quot;type&quot;:&quot;warning&quot;,&quot;message&quot;:&quot;extra panes skipped&quot;}&quot;#;
+        cli::write_line(event.invocation, warning)?;
+    }
+    self.runs.insert(event.invocation, Run { invocation: event.invocation, length, waiting: panes.len().min(MAX_PANES), ..Run::default() });
+    Ok(())
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import * as cli from '@ilium/plugin-sdk/host/cli';
+import type { CliInvokedEvent } from '@ilium/plugin-sdk/types';
+
+export function start(event: CliInvokedEvent): void {
+  const length = flagValue(event.argv, '--length') ?? 'both';
+  if (!['short', 'long', 'both'].includes(length)) {
+    cli.writeStderr(event.invocation, 'recap: --length must be short, long or both');
+    cli.finish(event.invocation, 2);
+    return;
+  }
+  const panes = selectPanes(event); // agent and shell panes, self skipped
+  for (const pane of panes.slice(0, MAX_PANES)) startJob(event.invocation, pane, length);
+  if (panes.length &gt; MAX_PANES) {
+    cli.writeLine(event.invocation, JSON.stringify({ type: 'warning', message: 'extra panes skipped' }));
+  }
+  runs.set(event.invocation, { length, waiting: Math.min(panes.length, MAX_PANES), summarized: 0, failed: 0 });
+}
+</code></pre>
+<h4 id="the-consent-gate">The consent gate</h4>
+<p>Before any pane is read, the plugin asks two questions. Is automatic AI on? That is a read-only look at a kernel settings tab. Is onboarding finished? That state lives in the client, so the server side sends a client request and the client side answers. A closed gate turns every pane into a <code>denied</code> record. See <a href="/pages/api-kernel-settings-and-keymap/">kernel settings</a>, <a href="/pages/capability-settings-read-kernel/">capability settings.read-kernel</a> and <a href="/pages/api-client-requests/">client requests</a>.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::host::{client_requests, kernel_settings};
+
+fn ai_is_on() -&gt; bool {
+    kernel_settings::read(&quot;inference&quot;)
+        .ok()
+        .and_then(|json| serde_json::from_str::&lt;serde_json::Value&gt;(&amp;json).ok())
+        .and_then(|value| value[&quot;automatic_ai&quot;].as_bool())
+        .unwrap_or(false)
+}
+
+fn ask_onboarding(&amp;mut self, client: ClientId) -&gt; Result&lt;(), PluginError&gt; {
+    let request = client_requests::request(client, &quot;onboarding-state&quot;, &quot;{}&quot;, 2_000)?;
+    self.gate_requests.insert(request);
+    Ok(())
+}
+
+// Client side, on Event::ClientRequest(call) with kind &quot;onboarding-state&quot;:
+//   client_requests::respond(call.call, Ok(format!(r#&quot;{{&quot;finished&quot;:{}}}&quot;#, self.onboarding_done)));
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import * as clientRequests from '@ilium/plugin-sdk/host/client-requests';
+import { read } from '@ilium/plugin-sdk/host/kernel-settings';
+
+export function aiIsOn(): boolean {
+  try {
+    return JSON.parse(read('inference')).automatic_ai === true;
+  } catch {
+    return false; // unreadable means closed
+  }
+}
+
+export function askOnboarding(client: bigint): void {
+  gateRequests.add(clientRequests.request(client, 'onboarding-state', '{}', 2_000));
+}
+
+// Client side, on event.tag === 'client-request' with kind 'onboarding-state':
+//   clientRequests.respond(event.val.call, { tag: 'ok', val: JSON.stringify({ finished: onboardingDone }) });
+</code></pre>
+<h4 id="evidence-from-an-agent-transcript">Evidence from an agent transcript</h4>
+<p>For an agent pane the plugin reads only the transcript of the pane's own session. If the host has no verified session for the pane, the record is <code>unavailable</code> and the plugin never falls back to the screen. The read is bounded, and secrets are replaced with <code>[redacted]</code> before the text goes to a job. See <a href="/pages/primitives-agent-transcript/">agent transcript</a>, <a href="/pages/capability-agent-transcript/">agent.transcript</a> and <a href="/pages/primitives-agent/">agent</a>.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::primitives::agent::{self, TranscriptQuery};
+
+fn agent_evidence(&amp;mut self, pane: NodeId) -&gt; Evidence {
+    if agent::session(pane).is_none() {
+        return Evidence::Unavailable; // no verified session id for this pane
+    }
+    match agent::transcript(TranscriptQuery { pane, last_turns: 40, max_bytes: 512 * 1024 }) {
+        Ok(request) =&gt; {
+            self.transcript_requests.insert(request, pane);
+            Evidence::Pending
+        }
+        Err(_) =&gt; Evidence::Unavailable,
+    }
+}
+
+fn redact(text: &amp;str) -&gt; String {
+    SECRET_KEY.replace_all(text, &quot;$1[redacted]&quot;).into_owned()
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { session, transcript } from '@ilium/plugin-sdk/primitives/agent';
+
+export function agentEvidence(pane: bigint): 'unavailable' | 'pending' {
+  if (session(pane) === undefined) return 'unavailable'; // no verified session id
+  try {
+    transcriptRequests.set(transcript({ pane, lastTurns: 40, maxBytes: 512 * 1024 }), pane);
+    return 'pending';
+  } catch {
+    return 'unavailable';
+  }
+}
+
+export const redact = (text: string): string =&gt; text.replace(SECRET_KEY, '$1[redacted]');
+</code></pre>
+<h4 id="evidence-from-a-shell-screen">Evidence from a shell screen</h4>
+<p>A shell pane has no transcript. The plugin reads the visible screen only, at most 40 rows, and stops at 64 KiB. An empty screen is <code>idle</code>, not <code>failed</code>. See <a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a> and <a href="/pages/primitives-terminal-reads/">terminal reads</a>.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::primitives::terminal::{self, ScreenPart};
+
+const SCREEN_BYTES: usize = 64 * 1024;
+
+fn shell_evidence(pane: NodeId) -&gt; Evidence {
+    let Some(screen) = terminal::read_screen(pane, ScreenPart::Visible, 40) else {
+        return Evidence::Unavailable; // not a terminal, or the pane was replaced
+    };
+    let mut text = screen.rows.join(&quot;\n&quot;);
+    text.truncate(text.floor_char_boundary(SCREEN_BYTES));
+    if text.trim().is_empty() { Evidence::Idle } else { Evidence::Text(redact(&amp;text)) }
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { readScreen } from '@ilium/plugin-sdk/primitives/terminal';
+
+const SCREEN_BYTES = 64 * 1024;
+
+export function shellEvidence(pane: bigint) {
+  const screen = readScreen(pane, 'visible', 40);
+  if (screen === undefined) return { tag: 'unavailable' } as const;
+  const text = new TextDecoder().decode(new TextEncoder().encode(screen.rows.join('\n')).slice(0, SCREEN_BYTES));
+  return text.trim() === '' ? ({ tag: 'idle' } as const) : ({ tag: 'text', text: redact(text) } as const);
+}
+</code></pre>
+<h4 id="one-job-per-pane">One job per pane</h4>
+<p>The model call can take seconds, far over the 20 ms event deadline, so each pane is one job of kind <code>recap-pane</code>. The job asks for both lengths in one call, reports its progress and stops when the run is cancelled (Ctrl-C or the timeout). The run limit <code>--max-concurrency</code> maps to the plugin's <code>concurrent_jobs</code>; extra jobs wait in the queue. See <a href="/pages/api-jobs/">jobs</a>, <a href="/pages/capability-jobs-run/">jobs.run</a> and <a href="/pages/api-inference/">inference</a>.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::host::{inference, jobs};
+use ilium_plugin_sdk::exports::JobRunner;
+use ilium_plugin_sdk::host::inference::{ChatMessage, CompletionRequest};
+
+impl JobRunner for Recap {
+    fn run(&amp;mut self, kind: String, input: Vec&lt;u8&gt;) -&gt; Result&lt;Vec&lt;u8&gt;, PluginError&gt; {
+        let job: RecapJob = serde_json::from_slice(&amp;input).map_err(PluginError::invalid_argument)?;
+        jobs::report_progress(10.0);
+        let request = inference::complete_request(CompletionRequest {
+            messages: vec![
+                ChatMessage { role: &quot;system&quot;.into(), content: RECAP_PROMPT.into() },
+                ChatMessage { role: &quot;user&quot;.into(), content: job.evidence },
+            ],
+            max_output_tokens: None,
+            json_schema: Some(RECAP_SCHEMA.into()),
+            purpose: &quot;recap&quot;.into(),
+        })?;
+        jobs::wait_request(request, 55_000)?;
+        if jobs::is_cancelled() { return Err(PluginError::cancelled()); }
+        let completion = inference::take_completion(request).ok_or_else(PluginError::internal)?;
+        jobs::report_progress(100.0);
+        Ok(completion.text.into_bytes())
+    }
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { completeRequest, takeCompletion } from '@ilium/plugin-sdk/host/inference';
+import { isCancelled, reportProgress, waitRequest } from '@ilium/plugin-sdk/host/jobs';
+
+export function run(kind: string, input: Uint8Array): Uint8Array {
+  const job = JSON.parse(new TextDecoder().decode(input)) as RecapJob;
+  reportProgress(10);
+  const request = completeRequest({
+    messages: [
+      { role: 'system', content: RECAP_PROMPT },
+      { role: 'user', content: job.evidence },
+    ],
+    maxOutputTokens: undefined,
+    jsonSchema: RECAP_SCHEMA,
+    purpose: 'recap',
+  });
+  waitRequest(request, 55_000);
+  if (isCancelled()) throw { code: 'cancelled', message: 'run cancelled' };
+  const completion = takeCompletion(request);
+  if (completion === undefined) throw { code: 'internal', message: 'no completion' };
+  reportProgress(100);
+  return new TextEncoder().encode(completion.text);
+}
+</code></pre>
+<h4 id="owner-side-collect-the-fact-sources">Owner side: collect the fact sources</h4>
+<p><code>fact-sources</code> is a collect point. Before it builds the evidence, the plugin lists the entries that other plugins contributed, in run order, and asks each entry's service for facts about the pane. Each fact is added to the evidence block. When contributions change, the kernel publishes the topic <code>ilium.extensions/changed</code> to the owner only, and the plugin lists again. See <a href="/pages/api-events/">events</a>, <a href="/pages/api-services/">services</a> and <a href="/pages/api-messages-and-topics/">messages and topics</a>.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::host::{extensions, services};
+
+const FACT_SOURCES: &amp;str = &quot;ilium.core.recap/fact-sources&quot;;
+
+fn reload_sources(&amp;mut self) {
+    self.sources = extensions::list(FACT_SOURCES).unwrap_or_default();
+}
+
+async fn gather_facts(&amp;self, pane: NodeId) -&gt; Vec&lt;String&gt; {
+    let mut facts = Vec::new();
+    for source in &amp;self.sources {
+        let entry: FactSource = match serde_json::from_str(&amp;source.entry_json) {
+            Ok(entry) =&gt; entry,
+            Err(_) =&gt; continue,
+        };
+        let payload = format!(r#&quot;{{&quot;pane&quot;:{}}}&quot;#, pane.0);
+        if let Ok(reply) = services::call(&amp;entry.service, &quot;facts&quot;, &amp;payload).await {
+            facts.push(format!(&quot;{}: {}&quot;, entry.title, redact(&amp;reply)));
+        }
+    }
+    facts
+}
+
+// In on_events: Event::TopicPublished(t) if t.topic == &quot;ilium.extensions/changed&quot; =&gt; self.reload_sources(),
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import * as extensions from '@ilium/plugin-sdk/host/extensions';
+import { call } from '@ilium/plugin-sdk/host/services';
+
+const FACT_SOURCES = 'ilium.core.recap/fact-sources';
+let sources: extensions.ExtensionEntry[] = [];
+
+export const reloadSources = (): void =&gt; {
+  try { sources = extensions.list(FACT_SOURCES); } catch { sources = []; }
+};
+
+export async function gatherFacts(pane: bigint): Promise&lt;string[]&gt; {
+  const facts: string[] = [];
+  for (const source of sources) {
+    const entry = JSON.parse(source.entryJson) as { title: string; service: string };
+    try {
+      const reply = await call(entry.service, 'facts', JSON.stringify({ pane: Number(pane) }));
+      facts.push(`${entry.title}: ${redact(reply)}`);
+    } catch { /* a failing source never stops the recap */ }
+  }
+  return facts;
+}
+
+// In onEvents: if (event.tag === 'topic-published' &amp;&amp; event.val.topic === 'ilium.extensions/changed') reloadSources();
+</code></pre>
+<h4 id="owner-side-run-the-before-recap-hook">Owner side: run the <code>before-recap</code> hook</h4>
+<p><code>before-recap</code> is a transform hook. The plugin runs it once per length, with the pane, the kind and the text. <code>run-hook</code> returns a request id. When the matching <code>request-completed</code> arrives with outcome <code>ok</code>, <code>take-reply</code> gives the final text, with every handler's change applied in priority order. No reply means nobody changed the text. A handler that fails counts as <code>pass</code>, so a broken contributor can never block a recap. See <a href="/pages/api-events/">events</a> and <a href="/pages/requests-and-outcomes/">requests and outcomes</a>.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::host::extensions;
+use ilium_plugin_sdk::types::requests::{Outcome, RequestResult};
+
+const BEFORE_RECAP: &amp;str = &quot;ilium.core.recap/before-recap&quot;;
+
+fn start_hook(&amp;mut self, pane: NodeId, kind: &amp;str, text: &amp;str) {
+    let payload = serde_json::json!({ &quot;pane&quot;: pane.0, &quot;kind&quot;: kind, &quot;text&quot;: text }).to_string();
+    match extensions::run_hook(BEFORE_RECAP, &amp;payload) {
+        Ok(request) =&gt; { self.hooks.insert(request, (pane, kind.to_string(), text.to_string())); }
+        Err(_) =&gt; self.finish_text(pane, kind, text.to_string()),
+    }
+}
+
+fn on_hook_done(&amp;mut self, done: RequestResult) {
+    let Some((pane, kind, original)) = self.hooks.remove(&amp;done.request) else { return };
+    let text = match done.outcome {
+        Outcome::Ok =&gt; extensions::take_reply(done.request)
+            .and_then(|json| serde_json::from_str::&lt;HookText&gt;(&amp;json).ok())
+            .map_or(original, |reply| reply.text),
+        _ =&gt; original, // the point is a transform: any other outcome keeps the text
+    };
+    self.finish_text(pane, &amp;kind, text);
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import * as extensions from '@ilium/plugin-sdk/host/extensions';
+
+const BEFORE_RECAP = 'ilium.core.recap/before-recap';
+
+export function startHook(pane: bigint, kind: string, text: string): void {
+  try {
+    const request = extensions.runHook(BEFORE_RECAP, JSON.stringify({ pane: Number(pane), kind, text }));
+    hooks.set(request, { pane, kind, original: text });
+  } catch {
+    finishText(pane, kind, text);
+  }
+}
+
+export function onHookDone(request: bigint, outcome: { tag: string }): void {
+  const pending = hooks.get(request);
+  if (pending === undefined) return;
+  hooks.delete(request);
+  let text = pending.original;
+  if (outcome.tag === 'ok') {
+    const reply = extensions.takeReply(request);
+    if (reply !== undefined) text = (JSON.parse(reply) as { text: string }).text;
+  }
+  finishText(pending.pane, pending.kind, text);
+}
+</code></pre>
+<h4 id="keep-only-real-pointers">Keep only real pointers</h4>
+<p>A pointer is a path the recap names. The plugin keeps it only when the path appears in the evidence, lies under the pane's project, exists now and is not in a denied area. It counts the rest in <code>rejected_pointers</code>. The existence check uses the project file scope. See <a href="/pages/api-fs/">fs</a>, <a href="/pages/capability-fs-read/">fs.read</a> and <a href="/pages/file-access/">file access</a>.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::host::fs;
+use ilium_plugin_sdk::types::paths::FsPath;
+
+async fn keep_pointers(evidence: &amp;str, project_relative: Vec&lt;(String, String)&gt;) -&gt; (Vec&lt;(String, String)&gt;, u32) {
+    let mut kept = Vec::new();
+    let mut rejected = 0;
+    for (path, note) in project_relative {
+        let named = evidence.contains(&amp;path);
+        let allowed = !DENIED_PREFIXES.iter().any(|prefix| path.starts_with(prefix));
+        let exists = fs::read(&amp;FsPath { scope: &quot;project&quot;.into(), path: path.clone() }).await.is_ok();
+        if named &amp;&amp; allowed &amp;&amp; exists { kept.push((path, note)); } else { rejected += 1; }
+    }
+    (kept, rejected)
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { read } from '@ilium/plugin-sdk/host/fs';
+
+export async function keepPointers(evidence: string, pointers: { path: string; note: string }[]) {
+  const kept: { path: string; note: string }[] = [];
+  let rejected = 0;
+  for (const pointer of pointers) {
+    const named = evidence.includes(pointer.path);
+    const allowed = !DENIED_PREFIXES.some((prefix) =&gt; pointer.path.startsWith(prefix));
+    const exists = await read({ scope: 'project', path: pointer.path }).then(() =&gt; true, () =&gt; false);
+    if (named &amp;&amp; allowed &amp;&amp; exists) kept.push(pointer); else rejected += 1;
+  }
+  return { kept, rejected };
+}
+</code></pre>
+<h3 id="extension-points">Extension points</h3>
+<p>Other plugins change what <code>ilium.core.recap</code> does through the points below. The plugin owns each point (grant <code>extensions.provide:ilium.core.recap/&lt;point&gt;</code>). Contributors need <code>extensions.contribute:ilium.core.recap/&lt;point&gt;</code>. See <a href="/pages/api-extension-points/">Extension points</a> for the mechanism and <a href="/pages/extending-core-plugins/">Extending core plugins</a> for the five ways to work with a core feature.</p>
+<table>
+<thead>
+<tr>
+<th>Point</th>
+<th>Kind</th>
+<th>What it does</th>
+<th>Payload</th>
+<th>Risk</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>fact-sources</code></td>
+<td>collect</td>
+<td>Add facts to a recap, such as the ticket of a branch.</td>
+<td>entry: id, title, service (returns facts for a pane)</td>
+<td>standard</td>
+</tr>
+<tr>
+<td><code>before-recap</code></td>
+<td>hook (transform)</td>
+<td>Change the recap text before it is shown or returned.</td>
+<td>pane, kind (short, long), text; reply: text</td>
+<td>standard</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Services</strong> (grant <code>services.use:&lt;name&gt;</code>):</p>
+<ul>
+<li><code>ilium.core.recap/recap</code>: get: short or long recap of panes</li>
+</ul>
+<p><strong>Replaceable:</strong> yes. A replacement lists <code>"replaces": ["ilium.core.recap"]</code> and provides the whole surface (see <a href="/pages/extending-core-plugins/#replace">Extending core plugins</a>).</p>
+<h4 id="example-adds-the-ticket-of-the-pane-branch-to-every-long-recap">Example: Adds the ticket of the pane branch to every long recap</h4>
+<p>A package adds this entry in its manifest. It needs no code.</p>
+<pre><code class="language-json">{
+  &quot;api&quot;: &quot;ilium:plugin@0.1.0&quot;,
+  &quot;capabilities&quot;: { &quot;server&quot;: [&quot;extensions.contribute:ilium.core.recap/fact-sources&quot;] },
+  &quot;contributes&quot;: {
+    &quot;extensions&quot;: [
+      {
+        &quot;point&quot;: &quot;ilium.core.recap/fact-sources&quot;,
+        &quot;id&quot;: &quot;branch-ticket&quot;,
+        &quot;priority&quot;: 50,
+        &quot;entry&quot;: {
+          &quot;title&quot;: &quot;Branch ticket&quot;,
+          &quot;service&quot;: &quot;example.tickets/for-pane&quot;
+        }
+      }
+    ]
+  }
+}
+</code></pre>
+<h3 id="abi-used">ABI used</h3>
+<ul>
+<li><a href="/pages/api-cli/">cli</a> and <a href="/pages/capability-cli-contribute/">capability-cli-contribute</a></li>
+<li><a href="/pages/api-jobs/">jobs</a> and <a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript</a> and <a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">Kernel settings</a> and <a href="/pages/capability-settings-read-kernel/">settings.read-kernel</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-services/">Services</a> and <a href="/pages/api-messages-and-topics/">messages and topics</a></li>
+<li><a href="/pages/api-fs/">fs</a> and <a href="/pages/file-access/">file access</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a> and <a href="/pages/api-events/">events</a></li>
+</ul>
+<h3 id="see-also">See also</h3>
+<ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+</ul>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/core-plugin-scenes/"><small>Previous</small>Scenes</a><a class="next" href="/pages/core-plugin-session-convert/"><small>Next</small>Session conversion</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#what-it-covers">What it covers</a></li><li class="l2"><a href="#see-it">See it</a></li><li class="l2"><a href="#what-the-user-sees">What the user sees</a></li><li class="l2"><a href="#manifest">Manifest</a></li><li class="l2"><a href="#complete-manifest">Complete manifest</a></li><li class="l2"><a href="#samples">Samples</a></li><li class="l3"><a href="#the-recap-command-with-json-lines">The recap command with JSON lines</a></li><li class="l3"><a href="#the-consent-gate">The consent gate</a></li><li class="l3"><a href="#evidence-from-an-agent-transcript">Evidence from an agent transcript</a></li><li class="l3"><a href="#evidence-from-a-shell-screen">Evidence from a shell screen</a></li><li class="l3"><a href="#one-job-per-pane">One job per pane</a></li><li class="l3"><a href="#owner-side-collect-the-fact-sources">Owner side: collect the fact sources</a></li><li class="l3"><a href="#owner-side-run-the-before-recap-hook">Owner side: run the before-recap hook</a></li><li class="l3"><a href="#keep-only-real-pointers">Keep only real pointers</a></li><li class="l2"><a href="#extension-points">Extension points</a></li><li class="l3"><a href="#example-adds-the-ticket-of-the-pane-branch-to-every-long-recap">Example: Adds the ticket of the pane branch to every long recap</a></li><li class="l2"><a href="#abi-used">ABI used</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,1140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Scheduling, deadlines and cancellation | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details open><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/" aria-current="page">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Reference</b></p>
+<h1>Scheduling, deadlines and cancellation</h1>
+
+<p>This page is the single normative source for how plugin calls are scheduled: which thread runs which call, how calls into one instance are ordered, the deadline of every call class and what happens when it is missed, what happens to work in flight when an instance traps, how host work is cancelled, and how queues push back. Other pages that mention a deadline or a limit repeat the numbers of this page and link here. A test author derives the timing and ordering tests from the requirement ids <code>[HST-180]</code> to <code>[HST-216]</code>, which are collected in <a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a>.</p>
+<h2 id="you-will-need">You will need</h2>
+<ul>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a> for the processes and hosts.</li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a> for the epoch ticker and the hard and soft deadline mechanism.</li>
+<li><a href="/pages/api-events/">Events</a> for the queue policy of each event kind, and <a href="/pages/requests-and-outcomes/">Requests and outcomes</a> for submissions.</li>
+</ul>
+<h2 id="thread-model">Thread model</h2>
+<p>Every plugin-hosting process has the same three kinds of thread besides its own main threads: the plugin executor, the epoch ticker and the job worker bank. The client has two more: the UI thread and the scene thread.</p>
+<table>
+<thead>
+<tr>
+<th>Thread or pool</th>
+<th>Process</th>
+<th>Name</th>
+<th>Count</th>
+<th>Runs</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Server main runtime</td>
+<td>Server</td>
+<td><code>ilium-server</code> runtime</td>
+<td>as today</td>
+<td>Kernel work, the IPC loop, the dispatcher task <code>plugin-dispatch</code>, helper I/O tasks. It never runs guest code</td>
+</tr>
+<tr>
+<td>Plugin executor</td>
+<td>Server and client</td>
+<td><code>ilium-plugin-N</code></td>
+<td>server <code>clamp(cores / 2, 2, 4)</code>, client <code>clamp(cores / 4, 1, 2)</code></td>
+<td>Every guest call except scene frames and job runs: <code>activate</code>, <code>deactivate</code>, <code>on-events</code>, <code>views.render</code>, annotator, detector, hook and provider exports, service and inference calls</td>
+</tr>
+<tr>
+<td>Epoch ticker</td>
+<td>Every process with an Engine</td>
+<td><code>ilium-plugin-epoch</code></td>
+<td>1</td>
+<td>Increases the Engine epoch every 10 ms</td>
+</tr>
+<tr>
+<td>Job worker bank</td>
+<td>Server and client</td>
+<td><code>ilium-job-N</code></td>
+<td><code>min(4, cores / 2)</code>, at least 1</td>
+<td>Job instances (<code>job-runner.run</code>)</td>
+</tr>
+<tr>
+<td>Client UI thread</td>
+<td>Client</td>
+<td>the client main thread</td>
+<td>1</td>
+<td>Input, layout, painting, hit testing. It never calls Wasmtime</td>
+</tr>
+<tr>
+<td>Scene thread</td>
+<td>Client</td>
+<td><code>ilium-plugin-scene</code></td>
+<td>1</td>
+<td>Scene <code>renderer</code> frame calls</td>
+</tr>
+<tr>
+<td>CLI main thread</td>
+<td>CLI process</td>
+<td>main</td>
+<td>1</td>
+<td>The single plugin executor of that process is a one-thread pool</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>[HST-180]</strong> Guest code MUST run only on the plugin executor, the scene thread, the job worker bank or (in a helper) the helper call loop. It MUST NOT run on the server main runtime, the client UI thread or the epoch ticker.</li>
+<li><strong>[HST-181]</strong> No plugin call MUST ever run on the client UI thread. The UI thread MUST send work to the plugin executor through a bounded channel and MUST apply results on a later frame.</li>
+<li><strong>[HST-182]</strong> The plugin executor MUST have <code>clamp(cores / 2, 2, 4)</code> threads in the server and <code>clamp(cores / 4, 1, 2)</code> threads in the client. The job worker bank MUST have <code>min(4, cores / 2)</code> threads, at least one.</li>
+<li><strong>[HST-183]</strong> The scene thread MUST be a single dedicated thread per client, and a scene frame MUST NOT occupy a plugin executor thread.</li>
+</ul>
+<p>A client UI frame therefore never waits for a plugin. The UI thread draws the last result that it holds: the last <code>ui-tree</code> of each view, the last complete scene frame, the retained decorations.</p>
+<figure>
+<svg viewBox="0 0 440 230" role="img" aria-label="Threads of the client: UI thread, plugin executor, scene thread, epoch ticker and job bank with the channels between them" width="660" height="345">
+<title>Client threads</title>
+<desc>The UI thread sends events and render requests to the plugin executor through a bounded channel and reads results. The scene thread produces frames into a double buffer that the UI thread reads. The epoch ticker acts on the executor, scene thread and job bank. The job bank runs job instances.</desc>
+<defs>
+<marker id="hs-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+<path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+</marker>
+</defs>
+<rect x="8" y="20" width="120" height="44" rx="6" fill="none" stroke="currentColor" stroke-width="2"/>
+<text x="68" y="40" font-size="11" text-anchor="middle" fill="currentColor">UI thread</text>
+<text x="68" y="54" font-size="9" text-anchor="middle" fill="currentColor">input, layout, paint</text>
+<rect x="170" y="20" width="130" height="44" rx="6" fill="none" stroke="currentColor" stroke-dasharray="6 4"/>
+<text x="235" y="40" font-size="11" text-anchor="middle" fill="currentColor">Plugin executor</text>
+<text x="235" y="54" font-size="9" text-anchor="middle" fill="currentColor">on-events, render, hooks</text>
+<rect x="170" y="100" width="130" height="44" rx="6" fill="none" stroke="currentColor" stroke-dasharray="6 4"/>
+<text x="235" y="120" font-size="11" text-anchor="middle" fill="currentColor">Scene thread</text>
+<text x="235" y="134" font-size="9" text-anchor="middle" fill="currentColor">renderer frames</text>
+<rect x="332" y="20" width="100" height="44" rx="6" fill="none" stroke="currentColor" stroke-dasharray="6 4"/>
+<text x="382" y="40" font-size="11" text-anchor="middle" fill="currentColor">Job bank</text>
+<text x="382" y="54" font-size="9" text-anchor="middle" fill="currentColor">job instances</text>
+<rect x="170" y="176" width="130" height="34" rx="6" fill="none" stroke="currentColor"/>
+<text x="235" y="197" font-size="10" text-anchor="middle" fill="currentColor">Epoch ticker, 10 ms</text>
+<line x1="128" y1="34" x2="170" y2="34" stroke="currentColor" marker-end="url(#hs-arrow)"/>
+<text x="132" y="28" font-size="9" fill="currentColor">events</text>
+<line x1="170" y1="52" x2="128" y2="52" stroke="currentColor" marker-end="url(#hs-arrow)"/>
+<text x="136" y="64" font-size="9" fill="currentColor">trees</text>
+<line x1="170" y1="122" x2="100" y2="64" stroke="currentColor" marker-end="url(#hs-arrow)"/>
+<text x="106" y="104" font-size="9" fill="currentColor">frames</text>
+<line x1="235" y1="176" x2="235" y2="144" stroke="currentColor" marker-end="url(#hs-arrow)"/>
+<line x1="300" y1="190" x2="382" y2="190" stroke="currentColor"/>
+<line x1="382" y1="190" x2="382" y2="64" stroke="currentColor" marker-end="url(#hs-arrow)"/>
+</svg>
+<figcaption>Dashed boxes run guest code. The UI thread only sends work and reads results. The ticker is the only thread that advances time for deadlines.</figcaption>
+</figure>
+
+<h2 id="per-instance-serialization-and-fairness">Per-instance serialization and fairness</h2>
+<p>A Store can run one call at a time. The host MUST NOT call into one instance from two threads, and MUST NOT interleave two calls.</p>
+<p>Each plugin side has an <strong>instance queue</strong> of pending calls. The dispatcher picks the next call by priority, then by arrival order.</p>
+<table>
+<thead>
+<tr>
+<th>Priority</th>
+<th>Calls</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1 (highest)</td>
+<td><code>activate</code>, <code>deactivate</code></td>
+</tr>
+<tr>
+<td>2</td>
+<td>Calls with a waiting caller: hook handlers, <code>collect</code>, <code>service-provider</code>, <code>inference-provider</code>, <code>menu-items</code>, <code>query-catalog</code>, <code>list-virtual-children</code>, <code>tokens</code>, <code>settings-validate</code>, <code>detector</code>, client-request answers</td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>on-events</code></td>
+</tr>
+<tr>
+<td>4</td>
+<td><code>views.render</code> (after <code>on-events</code>, so a render sees the state that the events produced)</td>
+</tr>
+<tr>
+<td>5 (lowest)</td>
+<td><code>annotate</code></td>
+</tr>
+</tbody>
+</table>
+<p>Scene frames and job runs are not in this queue, because they run in their own Stores.</p>
+<p>Between plugins the dispatcher is <strong>round robin</strong>: it keeps one ready list of plugin sides that have queued calls and gives each side one call per turn. A side gets at most 4 calls per 10 ms tick on one executor pass, so one busy plugin cannot starve the others.</p>
+<ul>
+<li><strong>[HST-184]</strong> The host MUST run at most one call at a time in one Store and MUST pick the next call by the priority table, then by arrival order.</li>
+<li><strong>[HST-185]</strong> The dispatcher MUST serve plugin sides round robin and MUST give a side at most 4 calls per 10 ms tick.</li>
+<li><strong>[HST-186]</strong> One plugin's slow call MUST NOT delay another plugin's call by more than the other plugins' calls ahead of it in the round robin, and MUST NOT delay a client frame at all.</li>
+</ul>
+<p>The cost of waiting in the instance queue is not part of the call's own deadline (the Store deadline starts when the call starts), but a call with a waiting caller has a second, <strong>caller deadline</strong> that starts when the call was queued. A call that cannot start within its caller deadline is abandoned and counted as a breach of the same class. The caller deadline equals the call's own deadline, except for <code>on-events</code> and <code>views.render</code>, which have none because nobody waits for them.</p>
+<ul>
+<li><strong>[HST-187]</strong> A queued call with a waiting caller MUST be abandoned, with the same effect as a soft breach, when it has not started within its own deadline measured from the time it was queued.</li>
+</ul>
+<h2 id="call-classes">Call classes</h2>
+<p>This is the single normative table of calls. <a href="/pages/reference-runtime-model/#2-calls-deadlines-and-interruption">Runtime model</a> and <a href="/pages/performance/">Performance</a> link to it and copy its values exactly. A <strong>hard</strong> deadline traps the instance when it fires. A <strong>soft</strong> deadline marks the call late, so the host discards its result and counts a breach. A late call that also passes a grace period of 100 ms past the soft deadline is trapped. A soft class has a <strong>streak limit</strong>: that many breaches in a row, without a timely call in between, trap the instance. "Counts" says whether the effect is a failure under the restart rule.</p>
+<p>All defaults are the same for every tier. The T1 column is the ceiling that a bundled plugin may ask for in its manifest <code>limits</code>, and the T2 and T3 column is the ceiling for third-party plugins. The values shown in brackets on earlier pages, for example <code>20 ms (50 ms)</code> in <a href="/pages/api-exports/">Exports</a>, are these T1 ceilings, not T1 defaults.</p>
+<table>
+<thead>
+<tr>
+<th>Call class</th>
+<th>Side</th>
+<th>Default</th>
+<th>T1 ceiling</th>
+<th>T2/T3 ceiling</th>
+<th>Kind</th>
+<th>Effect on breach</th>
+<th>Counts</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>activate</code></td>
+<td>all</td>
+<td>2,000 ms</td>
+<td>5,000 ms</td>
+<td>2,000 ms</td>
+<td>hard, yields</td>
+<td>Trap; activation fails</td>
+<td>yes</td>
+</tr>
+<tr>
+<td><code>deactivate</code></td>
+<td>all</td>
+<td>500 ms</td>
+<td>1,000 ms</td>
+<td>500 ms</td>
+<td>hard</td>
+<td>Instance dropped; no restore bytes kept; logged at warn</td>
+<td>no</td>
+</tr>
+<tr>
+<td><code>on-events</code>, batch without a command</td>
+<td>server, client</td>
+<td>20 ms</td>
+<td>50 ms</td>
+<td>20 ms</td>
+<td>hard</td>
+<td>Trap</td>
+<td>yes</td>
+</tr>
+<tr>
+<td><code>on-events</code>, batch with a <code>command-invoked</code> event</td>
+<td>server, client</td>
+<td>50 ms</td>
+<td>100 ms</td>
+<td>50 ms</td>
+<td>hard</td>
+<td>Trap</td>
+<td>yes</td>
+</tr>
+<tr>
+<td><code>views.render</code></td>
+<td>client</td>
+<td>10 ms</td>
+<td>20 ms</td>
+<td>10 ms</td>
+<td>hard</td>
+<td>Trap</td>
+<td>yes</td>
+</tr>
+<tr>
+<td><code>annotate</code></td>
+<td>client</td>
+<td>10 ms</td>
+<td>20 ms</td>
+<td>10 ms</td>
+<td>soft, streak 3</td>
+<td>The annotation is skipped (late result dropped); the third breach in a row traps</td>
+<td>trap only</td>
+</tr>
+<tr>
+<td><code>renderer</code> frame</td>
+<td>scene</td>
+<td>frame budget, at most 50 ms</td>
+<td>50 ms</td>
+<td>50 ms</td>
+<td>soft, streak 30</td>
+<td>Frame skipped; 30 in a row trap</td>
+<td>trap only</td>
+</tr>
+<tr>
+<td><code>detector</code> identify and classify</td>
+<td>server</td>
+<td>20 ms</td>
+<td>50 ms</td>
+<td>20 ms</td>
+<td>soft, streak 3</td>
+<td>Previous classification kept, no event; third in a row traps</td>
+<td>trap only</td>
+</tr>
+<tr>
+<td><code>migrate</code></td>
+<td>all</td>
+<td>30,000 ms</td>
+<td>60,000 ms</td>
+<td>30,000 ms</td>
+<td>hard</td>
+<td>Migration fails, backup restored, update rolled back</td>
+<td>no</td>
+</tr>
+<tr>
+<td><code>hook-handler</code></td>
+<td>owner side</td>
+<td>20 ms (5 to 50 ms by manifest)</td>
+<td>50 ms</td>
+<td>50 ms</td>
+<td>soft</td>
+<td>Counts as <code>pass</code>; third in a row disables the extension</td>
+<td>no</td>
+</tr>
+<tr>
+<td><code>menu-provider.menu-items</code></td>
+<td>client</td>
+<td>20 ms</td>
+<td>20 ms</td>
+<td>20 ms</td>
+<td>soft, streak 3</td>
+<td>Static entries only</td>
+<td>trap only</td>
+</tr>
+<tr>
+<td><code>catalog-provider.query-catalog</code></td>
+<td>client</td>
+<td>20 ms</td>
+<td>20 ms</td>
+<td>20 ms</td>
+<td>soft, streak 3</td>
+<td>Cached page used</td>
+<td>trap only</td>
+</tr>
+<tr>
+<td><code>virtual-rows-provider.list-virtual-children</code></td>
+<td>server</td>
+<td>20 ms</td>
+<td>20 ms</td>
+<td>20 ms</td>
+<td>soft, streak 3</td>
+<td>Spinner row stays</td>
+<td>trap only</td>
+</tr>
+<tr>
+<td><code>token-provider.tokens</code></td>
+<td>client</td>
+<td>10 ms</td>
+<td>10 ms</td>
+<td>10 ms</td>
+<td>soft, streak 3</td>
+<td>Lines stay plain; the host retries</td>
+<td>trap only</td>
+</tr>
+<tr>
+<td><code>settings-validate</code></td>
+<td>client</td>
+<td>100 ms</td>
+<td>100 ms</td>
+<td>100 ms</td>
+<td>soft, streak 3</td>
+<td>The save is refused, the previous value kept; the breach counts as a failure</td>
+<td>yes</td>
+</tr>
+<tr>
+<td><code>service-provider</code> call</td>
+<td>provider side</td>
+<td><code>command_deadline_ms</code> 50 ms</td>
+<td>100 ms</td>
+<td>50 ms</td>
+<td>hard</td>
+<td>Trap the provider; the caller's request completes <code>failed(timed-out)</code>; other deferred calls of the provider complete <code>failed(cancelled)</code></td>
+<td>yes</td>
+</tr>
+<tr>
+<td><code>inference-provider</code> <code>complete</code> and <code>models</code></td>
+<td>server</td>
+<td><code>command_deadline_ms</code> 50 ms</td>
+<td>100 ms</td>
+<td>50 ms</td>
+<td>hard</td>
+<td>Trap; the request is <code>failed(internal)</code></td>
+<td>yes</td>
+</tr>
+<tr>
+<td><code>job-runner.run</code>, CPU time</td>
+<td>job instance</td>
+<td>2,000 ms</td>
+<td>60,000 ms</td>
+<td>10,000 ms</td>
+<td>hard, own thread</td>
+<td><code>failed(timed-out)</code></td>
+<td>no</td>
+</tr>
+<tr>
+<td><code>job-runner.run</code>, wall time</td>
+<td>job instance</td>
+<td>20,000 ms</td>
+<td>600,000 ms</td>
+<td>100,000 ms</td>
+<td>hard, own thread</td>
+<td><code>failed(timed-out)</code></td>
+<td>no</td>
+</tr>
+<tr>
+<td>Client-request answer (round trip)</td>
+<td>client</td>
+<td>request timeout, 5,000 ms</td>
+<td>30,000 ms</td>
+<td>30,000 ms</td>
+<td>soft, request level</td>
+<td>The request completes <code>failed(timed-out)</code></td>
+<td>no</td>
+</tr>
+<tr>
+<td>Whole hook chain</td>
+<td>owner side</td>
+<td>100 ms</td>
+<td>100 ms</td>
+<td>100 ms</td>
+<td>soft</td>
+<td>Remaining handlers skipped and logged</td>
+<td>no</td>
+</tr>
+</tbody>
+</table>
+<p>Notes on the table:</p>
+<ul>
+<li>A <code>command-invoked</code> event in a batch selects <code>command_deadline_ms</code> for the whole call. A plugin that handles commands therefore gets 50 ms for the batch. This replaces the earlier wording that a command "shares" the 20 ms batch deadline.</li>
+<li>A hook handler's deadline is its <code>deadline_ms</code> from the manifest, clamped to 5 to 50 ms. The T2 and T3 ceiling of 50 ms is the same cap, because the manifest bound already applies to every tier.</li>
+<li>A late hook handler is not a plugin failure, because the contributor's plugin keeps running; the third breach in a row disables that one extension (see <a href="/pages/api-extension-points/">Extension points</a>). Dynamic collect points call no export: entries arrive through the <code>extensions.register</code> import, so they have no deadline of their own.</li>
+<li><code>detector</code> is the export of <code>agent.signatures</code>; its deadline is the new key <code>detector_deadline_ms</code>.</li>
+<li>
+<p>The <code>deactivate</code> breach is not a failure because the plugin is already being stopped. The restore bytes are lost and the host logs <code>deactivate.deadline</code> at warn. A trap inside <code>deactivate</code> is treated in the same way.</p>
+</li>
+<li>
+<p><strong>[HST-188]</strong> Every guest call MUST belong to exactly one row of the call-class table and MUST run under that row's default, or under the effective limit after clamping to the ceiling of the plugin's tier.</p>
+</li>
+<li><strong>[HST-189]</strong> A hard breach MUST trap the instance. A soft breach MUST discard the late result and count a breach, and a call that passes its soft deadline plus 100 ms MUST be trapped.</li>
+<li><strong>[HST-190]</strong> The streak limits MUST be 3 for <code>annotate</code>, <code>detector</code>, <code>menu-items</code>, <code>query-catalog</code>, <code>list-virtual-children</code>, <code>tokens</code> and <code>settings-validate</code>, and 30 for scene frames. A timely call MUST reset the streak.</li>
+<li><strong>[HST-191]</strong> A <code>deactivate</code> breach or trap MUST drop the instance, discard its restore bytes, log <code>deactivate.deadline</code>, and MUST NOT count as a failure.</li>
+<li><strong>[HST-192]</strong> A batch that contains a <code>command-invoked</code> event MUST run under <code>command_deadline_ms</code>, and every other batch under <code>event_deadline_ms</code>.</li>
+<li><strong>[HST-193]</strong> The effective deadline of a call MUST be clamped to the ceiling for the tier, and the clamp MUST be logged once per plugin and key.</li>
+</ul>
+<h2 id="deadline-measurement">Deadline measurement</h2>
+<p>The clock is the host monotonic clock. The epoch ticker period is 10 ms. The host sets the instance deadline to <code>ceil(d / 10) + 1</code> ticks after the call starts. A guest that spins without returning therefore traps no earlier than <code>d</code> and no later than <code>d + 20</code> ms of wall time on a host that is not overloaded. A call that returns at <code>d - 1</code> ms never traps. A test asserts the trap time in [d, d + 20] ms (see <a href="/pages/reference-host-runtime/">Host runtime</a>) [HST-081].</p>
+<ul>
+<li><strong>Synchronous host calls count.</strong> The deadline clock runs while the guest waits inside a host import. A deadline that expires during an import traps the instance when the import returns. A handler that makes five 5 ms synchronous calls has used 25 ms of its 20 ms budget.</li>
+<li><strong>Work after the call does not count.</strong> The kernel applying the returned submissions, the later delivery of a <code>request-completed</code> event, and the work of an asynchronous host service (an HTTP request, a child process, a job) are outside the call. Only the time between "call started" and "call returned" counts.</li>
+<li><strong>Suspend and clock jumps.</strong> The host uses a monotonic clock that does not advance during system suspend on Linux and macOS. The host MUST ignore a tick that follows a gap of more than one second.</li>
+</ul>
+<div class="note">
+<p>This is the precise form of the earlier sentence that "native host work never counts against a plugin deadline". Host work that finishes inside the import counts, because the guest is waiting for it. Host work that finishes after the call returns does not count. See <a href="/pages/performance/">Performance</a>.</p>
+</div>
+
+<ul>
+<li><strong>[HST-194]</strong> Time spent inside a synchronous host import MUST count toward the deadline of the call that made it, and time after the call returned MUST NOT.</li>
+<li><strong>[HST-195]</strong> The deadline clock MUST be monotonic, and a gap of more than one second between two ticks MUST NOT produce a deadline breach.</li>
+</ul>
+<figure>
+<svg viewBox="0 0 440 150" role="img" aria-label="Timeline of a soft deadline: late result dropped, grace period, trap" width="660" height="225">
+<title>Hard and soft deadline timelines</title>
+<desc>A hard deadline traps at the deadline. A soft deadline marks the call late, drops its result, and traps only after a grace period of 100 milliseconds.</desc>
+<defs>
+<marker id="hd-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+<path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+</marker>
+</defs>
+<text x="8" y="16" font-size="10" fill="currentColor">Hard: on-events, 20 ms</text>
+<line x1="20" y1="40" x2="420" y2="40" stroke="currentColor" marker-end="url(#hd-arrow)"/>
+<line x1="20" y1="34" x2="20" y2="46" stroke="currentColor"/>
+<text x="20" y="58" font-size="9" fill="currentColor">start</text>
+<line x1="120" y1="34" x2="120" y2="46" stroke="currentColor" stroke-width="2"/>
+<text x="120" y="58" font-size="9" text-anchor="middle" fill="currentColor">20 ms</text>
+<text x="124" y="30" font-size="9" fill="currentColor">trap at 20 to 40 ms</text>
+<text x="8" y="86" font-size="10" fill="currentColor">Soft: annotate, 10 ms</text>
+<line x1="20" y1="110" x2="420" y2="110" stroke="currentColor" marker-end="url(#hd-arrow)"/>
+<line x1="20" y1="104" x2="20" y2="116" stroke="currentColor"/>
+<text x="20" y="128" font-size="9" fill="currentColor">start</text>
+<line x1="70" y1="104" x2="70" y2="116" stroke="currentColor" stroke-width="2"/>
+<text x="70" y="128" font-size="9" text-anchor="middle" fill="currentColor">10 ms</text>
+<text x="74" y="100" font-size="9" fill="currentColor">late: result dropped, breach counted</text>
+<line x1="270" y1="104" x2="270" y2="116" stroke="currentColor" stroke-width="2"/>
+<text x="270" y="128" font-size="9" text-anchor="middle" fill="currentColor">110 ms</text>
+<text x="274" y="142" font-size="9" fill="currentColor">trap if still running</text>
+</svg>
+<figcaption>A hard deadline ends the call. A soft deadline lets the call finish but discards its result, and only a call that runs on past the 100 ms grace period is trapped.</figcaption>
+</figure>
+
+<h2 id="activation-and-yielding">Activation and yielding</h2>
+<p><code>activate</code> and long service calls may <strong>yield</strong>. A yield means that the call is suspended at an epoch tick and put at the back of the executor's ready list, so another plugin's call can run on that thread. The call resumes later. It is the only mechanism that lets a long call share a thread, and it applies only to the classes marked "yields" in the table.</p>
+<ul>
+<li>During the yield other calls to other plugins run. Calls to the same plugin wait in its instance queue, so the activating plugin sees no other call until <code>activate</code> returns.</li>
+<li>The yield time counts toward the 2,000 ms deadline, because the deadline is wall time.</li>
+<li>
+<p>A service caller that triggered the activation waits for <code>activate</code> and then for its own call. Its total wait is bounded by <code>activate_deadline_ms</code> plus the reply deadline of the call, and it fails with <code>timed-out</code> when the activation deadline passes first.</p>
+</li>
+<li>
+<p><strong>[HST-196]</strong> Only <code>activate</code>, job runs and service calls that wait for an activation MAY yield. All other classes MUST run on one thread without yielding until they return or fail.</p>
+</li>
+<li><strong>[HST-197]</strong> While a plugin side is activating, the host MUST queue its other calls and MUST NOT call into the instance until <code>activate</code> has returned successfully.</li>
+</ul>
+<h2 id="trap-aftermath">Trap aftermath</h2>
+<p>When an instance traps (a panic, a hard deadline, a streak limit, a stuck restart or a helper crash) the host does the following, in this order.</p>
+<ol>
+<li>The call that was running is abandoned. <strong>No submission from that call is applied</strong>, because a call that traps returns no value. Imports that act at once and were completed before the trap (<code>storage.set</code>, <code>log</code>, <code>ui.invalidate</code>, <code>timers</code>, <code>messages.send</code>) stay done; the host does not roll them back.</li>
+<li>The in-flight event batch is <strong>not redelivered</strong>, with one exception. Events of the kinds in the "survives" list below, which were in the batch, are put back at the head of the new instance's queue once. If the second delivery also traps, they are dropped and the host logs <code>events.poison</code> with the event kinds.</li>
+<li>Pending requests that the instance owned (jobs it started, HTTP streams, children, timers that are not durable) are cancelled. Durable timers and journal entries stay.</li>
+<li>Retained contributions of the plugin (decorations, virtual rows, status segments, frame slots, row actions) stay on screen and are marked <strong>stale</strong> (drawn dimmed, see <a href="/pages/retained-mode/">Retained mode</a>).</li>
+<li>The restart rule decides when the new instance starts (see <a href="/pages/reference-errors-and-limits/">Errors and limits</a>).</li>
+<li>The new instance is activated with <code>restored</code> bytes from its last <code>deactivate</code> (none after a trap) and then receives one <code>tree-changed</code> batch for every node, so it can read its state again.</li>
+</ol>
+<p>The events that <strong>survive</strong> a stuck-plugin restart or a trap, because they cannot be recovered from the tree, are: <code>request-completed</code> (for submissions of this plugin), <code>durable-timer-fired</code>, <code>input-uncertain</code> and <code>message</code>. The events <code>command-invoked</code>, <code>key-pressed</code>, <code>key-released</code>, <code>ui-action</code> and <code>pointer</code> are discarded with the queue (the user sees the plugin restart). The calls behind <code>cli-invoked</code>, <code>http-called</code> and <code>client-request</code> are completed as <code>cancelled</code> (the HTTP caller receives status 503). Every other kind is replaced by the <code>tree-changed</code> batch of step 6.</p>
+<ul>
+<li><strong>[HST-198]</strong> A trap MUST apply none of the call's returned submissions, MUST NOT roll back imports that already acted, and MUST NOT redeliver the in-flight batch except for the surviving event kinds.</li>
+<li><strong>[HST-199]</strong> The surviving event kinds (<code>request-completed</code>, <code>durable-timer-fired</code>, <code>input-uncertain</code>, <code>message</code>) MUST be redelivered at the head of the new instance's queue once, and dropped with the log id <code>events.poison</code> if the redelivery traps again.</li>
+<li><strong>[HST-200]</strong> A stuck-queue restart MUST discard the queue except the surviving kinds, MUST complete the calls behind <code>cli-invoked</code>, <code>http-called</code> and <code>client-request</code> as <code>cancelled</code>, and the new instance MUST receive one <code>tree-changed</code> batch for every node.</li>
+<li><strong>[HST-201]</strong> Retained contributions of a trapped instance MUST stay and be marked stale until the plugin replaces or clears them.</li>
+</ul>
+<h2 id="queues-and-backpressure">Queues and backpressure</h2>
+<p>Each plugin side has one event queue. Its size is <code>event_queue</code>: 1,024 by default, with a ceiling of 4,096 for T1 and 1,024 for T2 and T3.</p>
+<table>
+<thead>
+<tr>
+<th>Policy</th>
+<th>Events</th>
+<th>When the queue is full</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Coalesce</td>
+<td><code>tree-changed</code> (one merged list), <code>screen-changed</code>, <code>signal-changed</code>, <code>attention-changed</code> and the other events marked coalesced in <a href="/pages/api-events/">Events</a></td>
+<td>Always, whatever the queue fill: the newer event merges into the pending event with the same kind and key and takes its position, so a key never holds more than one slot</td>
+</tr>
+<tr>
+<td>Drop oldest</td>
+<td><code>output-matched</code> and other events marked drop-oldest</td>
+<td>The oldest pending drop-oldest event of any kind is removed and counted under its own event and source. With none pending, an incoming drop-oldest event is discarded and counted. The next batch carries one <code>events-dropped</code> with the counts</td>
+</tr>
+<tr>
+<td>Never dropped</td>
+<td>All others</td>
+<td>The plugin is <strong>stuck</strong>: it is restarted as a failure</td>
+</tr>
+</tbody>
+</table>
+<p>A plugin gets a <strong>batch</strong> of up to 256 events per <code>on-events</code> call. The dispatcher builds a batch when one of these is true: 256 events are pending; or 2 ms have passed since the first pending event; or the pending events include a latency-critical kind (<code>key-pressed</code>, <code>key-released</code>, <code>command-invoked</code>, <code>ui-action</code>, <code>pointer</code>, or a <code>request-completed</code> of a user action), which flushes at once. A <code>request-completed</code> of a user action is one whose submission came from an <code>on-events</code> call whose batch held a <code>key-pressed</code>, <code>command-invoked</code> or <code>ui-action</code> event. Such a completion is flushed at once instead of after the 2 ms window [HST-204]. The host splits a larger pending list into several calls in order.</p>
+<p>Streaming events add <strong>back-pressure</strong> before the queue can fill. For <code>http-stream-data</code> and <code>child-output</code> the host gives each stream a <strong>credit window</strong> of 256 KiB. The host counts bytes that it has enqueued for the plugin and the plugin has not yet consumed. When the count reaches the window, the host stops reading the network socket or the child pipe. It resumes reading when the count falls to half the window. A chunk is at most 64 KiB. A fast peer is therefore slowed by the operating system's own flow control and a plugin never receives more than the window.</p>
+<p>Rate limits are applied before enqueue: a source that produces events faster than its limit (for example more than 10 <code>set-meter</code> style updates per second) is refused at the source with <code>rate-limited</code>, so the queue never sees them.</p>
+<p>The <strong>execution quota group</strong> <code>ilium-execution</code> limits a plugin's total CPU use. There is one group for each plugin side in each process, and it is defined in <a href="/pages/reference-errors-and-limits/">Errors and limits</a> and <a href="/pages/reference-resource-accounting/">Resource accounting</a>. It is a token bucket of 2,000 ms of CPU time that refills at 500 ms per second. The host charges the thread CPU time of each call, and 1 ms for every 64 KiB of payload in a submission. When the bucket is empty, submissions and calls that return a request id fail with <code>quota-exceeded</code>. The bucket balance can go below zero, because a call is charged after it ends. The bucket is empty when the balance is 0 or less. <code>retry-after-ms</code> = max(100, ceil_10(-balance_ms * 2)), where <code>ceil_10</code> rounds up to the next 10 ms: the wall time until the balance refills to 0 at 500 ms per second, never below 100. A balance of -100 ms gives 200. Calls into the plugin are not held: <code>on-events</code>, <code>views.render</code>, <code>activate</code>, <code>deactivate</code> and provider calls still run, and the plugin simply cannot submit until the bucket refills. A trap still charges the time used.</p>
+<ul>
+<li><strong>[HST-202]</strong> Each plugin side MUST have one event queue of <code>event_queue</code> entries, and the policy of each event kind (coalesce, drop oldest, never dropped) MUST be the one in <a href="/pages/api-events/">Events</a>.</li>
+<li><strong>[HST-203]</strong> A full queue with a never-dropped event MUST restart the plugin side as a failure.</li>
+<li><strong>[HST-204]</strong> A batch MUST contain at most 256 events, MUST be flushed after 2 ms or at 256 events, and MUST be flushed at once when it contains a latency-critical kind.</li>
+<li><strong>[HST-205]</strong> Streams MUST use a credit window of 256 KiB, chunks of at most 64 KiB, and the host MUST stop reading the socket or pipe at a full window and resume at half.</li>
+<li><strong>[HST-206]</strong> Rate limits MUST be applied before an event is enqueued.</li>
+<li><strong>[HST-207]</strong> The host MUST maintain one <code>ilium-execution</code> bucket per plugin side with capacity 2,000 ms and refill 500 ms per second, MUST charge thread CPU time and payload bytes as above, and MUST refuse submissions with <code>quota-exceeded</code> and <code>retry-after-ms</code> of at least 100 when the bucket is empty.</li>
+<li><strong>[HST-208]</strong> An empty bucket MUST NOT hold <code>on-events</code>, <code>views.render</code>, <code>activate</code>, <code>deactivate</code> or provider calls.</li>
+</ul>
+<h2 id="cancellation">Cancellation</h2>
+<p>A request is cancelled by one of seven causes. The outcome tells the plugin which.</p>
+<table>
+<thead>
+<tr>
+<th>Cause</th>
+<th>Outcome</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>The plugin side stopped or trapped (instance dropped)</td>
+<td><code>cancelled</code></td>
+<td>Pending requests of that instance</td>
+</tr>
+<tr>
+<td>Grant revoked</td>
+<td>Synchronous calls that need the grant return <code>err(revoked)</code> from the moment of revocation. Pending requests that need it complete <code>failed(revoked)</code>, delivered before <code>deactivate(revoked)</code></td>
+<td>The plugin is re-activated with the reduced grants. Other pending <code>call(id)</code> requests are cancelled with the instance and their completions are not delivered; pending submissions follow the trap-aftermath rule</td>
+</tr>
+<tr>
+<td>The plugin asked for it (<code>cancel(request)</code>, <code>jobs.cancel</code>)</td>
+<td><code>cancelled</code></td>
+<td>A cancelled job completes with the outcome <code>cancelled</code>. <code>jobs.cancel</code> returns nothing: cancelling a completed, unknown or already cancelled id is a silent no-op and produces no further completion</td>
+</tr>
+<tr>
+<td>Server or client shutdown</td>
+<td><code>cancelled</code></td>
+<td>Submissions accepted but not yet applied at shutdown complete as <code>cancelled</code>. <code>refused(cancelled)</code> is used only for siblings of a refused batch</td>
+</tr>
+<tr>
+<td>The request deadline passed</td>
+<td><code>failed(timed-out)</code></td>
+<td>For example the 30 s command reply deadline, or a provider that does not reply to a deferred service call within 30 s. The earlier of the two events wins</td>
+</tr>
+<tr>
+<td>A service provider traps or restarts while callers wait</td>
+<td><code>failed(cancelled)</code> for every deferred call, at once</td>
+<td>A breach of the 50 ms provider deadline completes the breaching call as <code>failed(timed-out)</code> and the other deferred calls as <code>failed(cancelled)</code></td>
+</tr>
+</tbody>
+</table>
+<p>Cancelled host work is torn down within a bound.</p>
+<table>
+<thead>
+<tr>
+<th>Work</th>
+<th>Teardown</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>HTTP request or stream</td>
+<td>The connection is aborted within 100 ms</td>
+</tr>
+<tr>
+<td>File read, watch, scan</td>
+<td>Stopped at the next chunk, within 100 ms</td>
+</tr>
+<tr>
+<td>Child process</td>
+<td>SIGTERM, then SIGKILL after 2 s (POSIX); see <a href="/pages/reference-platform-support/">Platform support</a> for Windows</td>
+</tr>
+<tr>
+<td>Running job</td>
+<td>The cancel flag is set; <code>is-cancelled</code> returns true. If the job has not returned within 1,000 ms (<code>job_cancel_grace_ms</code>), the host traps the job instance at the next tick</td>
+</tr>
+<tr>
+<td>Helper call</td>
+<td>A <code>Cancel</code> message is sent; if the helper does not answer within the call's deadline plus 5 ms, it is killed</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>[HST-209]</strong> Each cancellation cause MUST produce the outcome in the table, and a completed request MUST NOT be changed by a later cancel. <code>jobs.cancel</code> of a completed, unknown or already cancelled id MUST be a silent no-op.</li>
+<li><strong>[HST-210]</strong> Cancelled HTTP and file work MUST stop within 100 ms, child processes MUST receive SIGTERM then SIGKILL after 2 s, and a job that ignores the cancel flag MUST be trapped 1,000 ms after the flag is set.</li>
+</ul>
+<h2 id="hook-chain-execution">Hook chain execution</h2>
+<p><code>run-hook</code> is asynchronous: it returns a request id at once, the chain runs on the host, and the result arrives as <code>request-completed</code> (the SDK <code>await</code> form hides this). The owner's current call is never blocked by the chain, so a 100 ms chain does not conflict with the owner's 20 ms <code>on-events</code> deadline.</p>
+<ul>
+<li>Handlers run <strong>strictly one after another</strong> in priority order, never in parallel, each in the contributor's own instance on the owner's side.</li>
+<li>A handler that cannot start within its own deadline measured from the moment it was due (the contributor's instance is busy) is skipped as <code>pass</code> with a breach counted.</li>
+<li>The 100 ms chain cap is measured from the start of the first handler call. Handlers not yet started when it expires are skipped and logged <code>extension.chain-cap</code>.</li>
+<li>A T2 or T3 handler's helper round trip (see <a href="/pages/reference-host-helper/">Sandbox helper</a>) is inside the handler deadline. Its budget is 0.5 ms at the 99th percentile, so the usable deadline of a 5 ms handler is 4.5 ms.</li>
+<li>
+<p>A hook on a client-owned point runs only handlers in that client. A hook on a server-owned point runs only handlers on the server. No hook crosses a process.</p>
+</li>
+<li>
+<p><strong>[HST-211]</strong> <code>run-hook</code> MUST NOT block the owner's call, handlers of one chain MUST run strictly sequentially, and the 100 ms chain cap MUST be measured from the first handler's start.</p>
+</li>
+<li><strong>[HST-212]</strong> A handler MUST be skipped as <code>pass</code> when it cannot start within its own deadline, and a skipped or late handler MUST count a breach.</li>
+<li><strong>[HST-213]</strong> A hook chain MUST run only handlers hosted by the process that owns the point.</li>
+</ul>
+<h2 id="latency-of-keys-and-input">Latency of keys and input</h2>
+<p>A key that a plugin has grabbed (see <a href="/pages/api-keys/">Keys</a>) travels like this: the UI thread decodes the key, finds the grab, and puts a <code>key-pressed</code> event on the client dispatcher channel. The dispatcher flushes it at once. An idle executor thread starts the <code>on-events</code> call. The plugin returns submissions. The host applies them, and a <code>send-input</code> submission reaches the pane.</p>
+<table>
+<thead>
+<tr>
+<th>Step</th>
+<th>Budget (99th percentile, idle machine)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Key decoded to the dispatcher channel</td>
+<td>0.1 ms</td>
+</tr>
+<tr>
+<td>Channel to the start of the plugin call (T1)</td>
+<td>1 ms</td>
+</tr>
+<tr>
+<td>Channel to the start of the plugin call (T2 or T3, helper round trip included)</td>
+<td>1.5 ms</td>
+</tr>
+<tr>
+<td>Plugin returns to the intent applied (client-side intent)</td>
+<td>0.5 ms</td>
+</tr>
+<tr>
+<td>Plugin returns to the intent applied on the server (forwarded over IPC)</td>
+<td>3 ms</td>
+</tr>
+<tr>
+<td>Whole path, key press to bytes at the PTY, with a plugin handler of 0.1 ms</td>
+<td>5 ms</td>
+</tr>
+</tbody>
+</table>
+<p>The benchmarks B16 and B17 of <a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a> measure these.</p>
+<ul>
+<li><strong>[HST-214]</strong> A grabbed key MUST flush its batch at once, and the 99th percentile from the dispatcher channel to the start of the plugin call MUST be at most 1 ms for T1 and 1.5 ms for T2 and T3 on an idle reference machine.</li>
+<li><strong>[HST-215]</strong> The 99th percentile from key press to bytes at the PTY through a plugin handler of 0.1 ms MUST be at most 5 ms on an idle reference machine.</li>
+</ul>
+<h2 id="errors-and-edge-cases">Errors and edge cases</h2>
+<table>
+<thead>
+<tr>
+<th>Situation</th>
+<th>Result</th>
+<th>Id</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Two calls to one instance arrive together</td>
+<td>They run one after the other by priority</td>
+<td>none</td>
+</tr>
+<tr>
+<td>Caller deadline passes while the call waits in the queue</td>
+<td>The call is abandoned, a breach is counted</td>
+<td><code>host.queue-timeout</code></td>
+</tr>
+<tr>
+<td>A call yields during <code>activate</code> and another plugin runs</td>
+<td>Allowed; the activating plugin gets no other call</td>
+<td>none</td>
+</tr>
+<tr>
+<td>Deadline expires inside a synchronous import</td>
+<td>Trap when the import returns</td>
+<td><code>host.deadline</code></td>
+</tr>
+<tr>
+<td>System suspend during a call</td>
+<td>The tick after the gap is ignored</td>
+<td>none</td>
+</tr>
+<tr>
+<td>Trap with a surviving event in the batch</td>
+<td>Redelivered once to the new instance</td>
+<td><code>events.poison</code> on a second trap</td>
+</tr>
+<tr>
+<td>Empty CPU bucket</td>
+<td>Plugin submissions return <code>quota-exceeded</code> with <code>retry-after-ms</code>; <code>on-events</code> and other calls into the plugin still run</td>
+<td><code>quota-exceeded</code></td>
+</tr>
+<tr>
+<td>Job ignores the cancel flag</td>
+<td>Trapped 1,000 ms later; the job completes <code>cancelled</code></td>
+<td><code>cancelled</code></td>
+</tr>
+<tr>
+<td>Soft call passes the soft deadline plus 100 ms</td>
+<td>Trap</td>
+<td><code>host.deadline</code></td>
+</tr>
+<tr>
+<td>Stream credit window full</td>
+<td>The host stops reading the socket or pipe</td>
+<td>none</td>
+</tr>
+<tr>
+<td>Hook chain exceeds 100 ms</td>
+<td>Remaining handlers are skipped</td>
+<td><code>extension.chain-cap</code></td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>[HST-216]</strong> A call that is abandoned in the queue MUST log <code>host.queue-timeout</code> and count a breach of its class.</li>
+</ul>
+<h2 id="see-also">See also</h2>
+<ul>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a> for how deadlines are enforced.</li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a> for the limit keys and the restart rule.</li>
+<li><a href="/pages/api-events/">Events</a>, <a href="/pages/api-intents/">Intents</a> and <a href="/pages/requests-and-outcomes/">Requests and outcomes</a>.</li>
+<li><a href="/pages/api-extension-points/">Extension points</a>, <a href="/pages/api-menu-provider/">Menu provider</a> and <a href="/pages/background-jobs/">Background jobs</a>.</li>
+<li><a href="/pages/performance/">Performance</a> for the plugin author's view.</li>
+</ul>
+<p>API version checked: <code>ilium:plugin@0.1.0</code>.</p>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/reference-host-runtime/"><small>Previous</small>Host runtime</a><a class="next" href="/pages/reference-host-telemetry/"><small>Next</small>Telemetry and plugin health</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#you-will-need">You will need</a></li><li class="l2"><a href="#thread-model">Thread model</a></li><li class="l2"><a href="#per-instance-serialization-and-fairness">Per-instance serialization and fairness</a></li><li class="l2"><a href="#call-classes">Call classes</a></li><li class="l2"><a href="#deadline-measurement">Deadline measurement</a></li><li class="l2"><a href="#activation-and-yielding">Activation and yielding</a></li><li class="l2"><a href="#trap-aftermath">Trap aftermath</a></li><li class="l2"><a href="#queues-and-backpressure">Queues and backpressure</a></li><li class="l2"><a href="#cancellation">Cancellation</a></li><li class="l2"><a href="#hook-chain-execution">Hook chain execution</a></li><li class="l2"><a href="#latency-of-keys-and-input">Latency of keys and input</a></li><li class="l2"><a href="#errors-and-edge-cases">Errors and edge cases</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

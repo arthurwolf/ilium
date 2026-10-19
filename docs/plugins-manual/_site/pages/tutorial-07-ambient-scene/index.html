@@ -1,0 +1,1055 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>7. Ambient scene | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details open><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/" aria-current="page">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Tutorials</b></p>
+<h1>7. Ambient scene</h1>
+
+<p>This step adds an animated background to the agent tools plugin. A scene is a third component. It runs in the animation world <code>ilium:anim/base@0.1.0</code>, apart from the server and client worlds. The host creates one renderer for the scene, reads its frame rate and calls <code>render</code> once per frame. The scene writes tone values into a surface and calls <code>present</code>. The host then applies the shared look, the palette and the dither mode. The scene has no colour, palette or dithering controls of its own.</p>
+<p>The scene draws rings that move outward from the centre of the panel. It has one setting, the ring count.</p>
+<h3 id="what-you-need">What you need</h3>
+<ul>
+<li><a href="/pages/tutorial-06-notes-pane/">Tutorial step 6</a> finished. The scene is a new component in the same project. The <code>server/</code> and <code>client/</code> components do not change.</li>
+<li>A <code>scene</code> component in a new crate <code>scene/</code>, built against <code>ilium:anim/base@0.1.0</code>.</li>
+<li>Rust stable 1.90 or later with the <code>wasm32-wasip2</code> target, using <code>ilium-plugin-sdk</code>. Or Bun 1.2 or later with <code>@ilium/plugin-sdk</code>, for the TypeScript version in this step.</li>
+<li>Grants: none. The scene side always has <code>log</code>, <code>clock</code>, its own <code>storage</code>, <code>codec</code>, and the <code>fs</code> scopes <code>package</code>, <code>data</code> and <code>cache</code>. This scene reads no file and makes no network call, so <code>capabilities.scene</code> is an empty list.</li>
+<li>Manifest values: <code>family</code> is <code>procedural</code> and <code>modes</code> is <code>["live"]</code>. The family names are <code>natural</code>, <code>procedural</code>, <code>geometry</code>, <code>simulation</code>, <code>live-data</code>, <code>maps-and-space</code>, <code>saved-world</code>, <code>media</code> and <code>other</code>. The mode names are <code>live</code> and <code>pre-rendered</code>. The first mode in the list is the default.</li>
+</ul>
+<h3 id="what-changed-from-step-6">What changed from step 6</h3>
+<ul>
+<li><code>core/src/rings.rs</code> is new. It holds the tone function and makes no host calls.</li>
+<li><code>scene/</code> is a new crate. Its <code>lib.rs</code> implements the <code>renderer</code> resource.</li>
+<li><code>manifest.json</code> adds the <code>scene</code> object and the <code>scenes</code> contribution.</li>
+<li><code>server/</code> and <code>client/</code> are unchanged.</li>
+</ul>
+<h3 id="the-frame-loop">The frame loop</h3>
+<figure>
+<svg viewBox="0 0 400 206" role="img" aria-label="Frame loop between the host and the scene renderer" width="600" height="309">
+  <defs>
+    <marker id="s7-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <rect x="10" y="10" width="120" height="34" rx="4" fill="none" stroke="currentColor"/>
+  <text x="70" y="31" font-size="11" text-anchor="middle" fill="currentColor">Host</text>
+  <rect x="270" y="10" width="120" height="34" rx="4" fill="none" stroke="currentColor" stroke-dasharray="5 3"/>
+  <text x="330" y="31" font-size="11" text-anchor="middle" fill="currentColor">Scene renderer</text>
+  <line x1="130" y1="70" x2="268" y2="70" stroke="currentColor" marker-end="url(#s7-arrow)"/>
+  <text x="200" y="64" font-size="11" text-anchor="middle" fill="currentColor">new(spec), once</text>
+  <line x1="268" y1="100" x2="132" y2="100" stroke="currentColor" marker-end="url(#s7-arrow)"/>
+  <text x="200" y="94" font-size="11" text-anchor="middle" fill="currentColor">frames-per-second, once</text>
+  <line x1="130" y1="130" x2="268" y2="130" stroke="currentColor" marker-end="url(#s7-arrow)"/>
+  <text x="200" y="124" font-size="11" text-anchor="middle" fill="currentColor">render(frame, surface)</text>
+  <line x1="268" y1="160" x2="132" y2="160" stroke="currentColor" marker-end="url(#s7-arrow)"/>
+  <text x="200" y="154" font-size="11" text-anchor="middle" fill="currentColor">tone values, then present()</text>
+  <rect x="80" y="178" width="240" height="26" rx="4" fill="none" stroke="currentColor"/>
+  <text x="200" y="195" font-size="11" text-anchor="middle" fill="currentColor">Host: look, dither, send to panel</text>
+</svg>
+<figcaption>The host owns the clock. The scene answers each frame with tone values, and the host adds the look and the dither.</figcaption>
+</figure>
+
+<p>The host reads <code>frames-per-second</code> once after the constructor returns, and again after each <code>reconfigure</code> that returns <code>true</code>. It never reads it per frame. A palette change reaches the scene through <code>set-palette</code>, between frames.</p>
+<h3 id="renderer-surface">Renderer surface</h3>
+<p>The scene implements the <code>renderer</code> resource. Rust names come from <code>ilium_plugin_sdk::anim::{surface, renderer}</code>, and TypeScript names from <code>@ilium/plugin-sdk/anim/surface</code> and <code>@ilium/plugin-sdk/anim/renderer</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Member</th>
+<th>Rust</th>
+<th>TypeScript</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>constructor</td>
+<td><code>fn new(spec: SceneSpec) -&gt; Self</code></td>
+<td><code>constructor(spec)</code></td>
+<td>none</td>
+<td>Called when the scene is shown and after a restart.</td>
+</tr>
+<tr>
+<td>readiness</td>
+<td><code>fn readiness(&amp;self) -&gt; Readiness</code></td>
+<td><code>readiness()</code></td>
+<td><code>Ready</code></td>
+<td><code>Ready</code>, <code>Preparing</code> or <code>Failed</code>.</td>
+</tr>
+<tr>
+<td>frames per second</td>
+<td><code>fn frames_per_second(&amp;self) -&gt; u32</code></td>
+<td><code>framesPerSecond()</code></td>
+<td>30</td>
+<td>Requested rate, capped by <code>frame_rate_cap</code>.</td>
+</tr>
+<tr>
+<td>pointer</td>
+<td><code>fn wants_pointer(&amp;self) -&gt; bool</code></td>
+<td><code>wantsPointer()</code></td>
+<td>false</td>
+<td>Enables <code>pointer</code> on the surface.</td>
+</tr>
+<tr>
+<td>occupancy</td>
+<td><code>fn wants_occupancy(&amp;self) -&gt; bool</code></td>
+<td><code>wantsOccupancy()</code></td>
+<td>false</td>
+<td>Enables <code>occupancy</code> on the surface.</td>
+</tr>
+<tr>
+<td>cell colours</td>
+<td><code>fn uses_cell_colors(&amp;self) -&gt; bool</code></td>
+<td><code>usesCellColors()</code></td>
+<td>false</td>
+<td>Enables <code>write_cell_colors</code>.</td>
+</tr>
+<tr>
+<td>render</td>
+<td><code>fn render(&amp;mut self, frame: FrameInput, surface: &amp;FrameSurface)</code></td>
+<td><code>render(frame, surface)</code></td>
+<td>required</td>
+<td>Draws one frame.</td>
+</tr>
+<tr>
+<td>palette</td>
+<td><code>fn set_palette(&amp;mut self, palette_rgb: Vec&lt;u32&gt;)</code></td>
+<td><code>setPalette(palette)</code></td>
+<td>ignored</td>
+<td>Called when the palette changes.</td>
+</tr>
+<tr>
+<td>settings</td>
+<td><code>fn reconfigure(&amp;mut self, settings_json: String) -&gt; bool</code></td>
+<td><code>reconfigure(settings)</code></td>
+<td><code>false</code></td>
+<td>Applies new settings. <code>false</code> makes the host restart the scene.</td>
+</tr>
+<tr>
+<td>status</td>
+<td><code>fn status(&amp;self) -&gt; Option&lt;String&gt;</code></td>
+<td><code>status()</code></td>
+<td>none</td>
+<td>Short text shown beside the scene title while set.</td>
+</tr>
+</tbody>
+</table>
+<p><code>FrameInput</code> holds the frame time and the surface size:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Rust</th>
+<th>TypeScript</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>time</td>
+<td><code>time_millis: u64</code></td>
+<td><code>timeMillis: bigint</code></td>
+<td>Milliseconds since the scene started.</td>
+</tr>
+<tr>
+<td>visible time</td>
+<td><code>wall_millis: u64</code></td>
+<td><code>wallMillis: bigint</code></td>
+<td>Milliseconds since the scene was last made visible.</td>
+</tr>
+<tr>
+<td>clock</td>
+<td><code>now_unix_millis: u64</code></td>
+<td><code>nowUnixMillis: bigint</code></td>
+<td>Wall-clock time in Unix milliseconds.</td>
+</tr>
+<tr>
+<td>size</td>
+<td><code>width: u32</code>, <code>height: u32</code></td>
+<td><code>width</code>, <code>height</code></td>
+<td>Surface size in pixels: cells times the dither sub-cell factor.</td>
+</tr>
+<tr>
+<td>palette</td>
+<td><code>palette_rgb: Vec&lt;u32&gt;</code></td>
+<td><code>paletteRgb: number[]</code></td>
+<td>Current palette as <code>0xRRGGBB</code> values. Empty in greyscale and monotone modes.</td>
+</tr>
+</tbody>
+</table>
+<p><code>FrameSurface</code> takes the tone rows. <code>write_tones(first_row, &amp;[u8])</code> (<code>writeTones</code>) writes <code>gray8</code> rows, one byte per pixel. The other methods are <code>write_rows</code>, <code>write_cell_colors</code>, <code>occupancy</code>, <code>pointer</code> and <code>present</code>. A <code>render</code> call that returns without <code>present</code> drops that frame, and a warning is logged once per second.</p>
+<p>The dither modes are <code>ordered</code>, <code>stippled</code>, <code>bayer2</code>, <code>bayer4</code>, <code>bayer16</code>, <code>blue-noise</code>, <code>gradient</code>, <code>halftone</code>, <code>lines</code>, <code>diagonal</code>, <code>crosshatch</code>, <code>white-noise</code>, <code>floyd-steinberg</code>, <code>atkinson</code> and <code>sierra-lite</code>. The user picks one in the shared Dither row. A scene never names a mode.</p>
+<h3 id="manifest">Manifest</h3>
+<p>The manifest adds a <code>scene</code> object next to <code>server</code> and <code>client</code>. Required exports such as <code>renderer</code> are never listed in <code>exports</code>, so the list is empty. The <code>scenes</code> contribution declares the scene. The host reads it before it loads the component.</p>
+<pre><code class="language-json">{
+  &quot;api&quot;: &quot;ilium:plugin@0.1.0&quot;,
+  &quot;id&quot;: &quot;example.agent-tools&quot;,
+  &quot;name&quot;: &quot;Agent tools&quot;,
+  &quot;version&quot;: &quot;0.1.0&quot;,
+  &quot;publisher&quot;: &quot;Example Developer&quot;,
+  &quot;server&quot;: {
+    &quot;entry&quot;: &quot;server.wasm&quot;,
+    &quot;world&quot;: &quot;ilium:server/base@0.1.0&quot;,
+    &quot;exports&quot;: [&quot;job-runner&quot;]
+  },
+  &quot;client&quot;: {
+    &quot;entry&quot;: &quot;client.wasm&quot;,
+    &quot;world&quot;: &quot;ilium:client/base@0.1.0&quot;,
+    &quot;exports&quot;: [&quot;views&quot;]
+  },
+  &quot;scene&quot;: {
+    &quot;entry&quot;: &quot;scene.wasm&quot;,
+    &quot;world&quot;: &quot;ilium:anim/base@0.1.0&quot;,
+    &quot;exports&quot;: []
+  },
+  &quot;capabilities&quot;: {
+    &quot;server&quot;: [
+      &quot;agent.read&quot;, &quot;agent.control&quot;, &quot;tree.read&quot;, &quot;tree.decorate&quot;,
+      &quot;notify.desktop&quot;, &quot;sound.play&quot;, &quot;fs.read:project&quot;, &quot;jobs.run&quot;
+    ],
+    &quot;client&quot;: [
+      &quot;agent.read&quot;, &quot;tree.read&quot;, &quot;tree.metadata&quot;, &quot;ui.panels&quot;, &quot;editor.edit&quot;,
+      &quot;topics.subscribe:example.agent-tools/*&quot;, &quot;panes.create&quot;, &quot;panes.provide-kind&quot;
+    ],
+    &quot;scene&quot;: []
+  },
+  &quot;contributes&quot;: {
+    &quot;scenes&quot;: [
+      {
+        &quot;id&quot;: &quot;rings&quot;,
+        &quot;title&quot;: &quot;Rings&quot;,
+        &quot;family&quot;: &quot;procedural&quot;,
+        &quot;modes&quot;: [&quot;live&quot;],
+        &quot;frame_rate_cap&quot;: 30,
+        &quot;settings_schema&quot;: {
+          &quot;type&quot;: &quot;object&quot;,
+          &quot;properties&quot;: {
+            &quot;ring_count&quot;: {
+              &quot;type&quot;: &quot;integer&quot;,
+              &quot;title&quot;: &quot;Rings&quot;,
+              &quot;default&quot;: 3,
+              &quot;minimum&quot;: 1,
+              &quot;maximum&quot;: 12,
+              &quot;step&quot;: 1
+            }
+          }
+        }
+      }
+    ]
+  }
+}
+</code></pre>
+<p>The other contributions from step 6 (commands, keybindings, panels, pane kinds, sounds, jobs, topics, settings) stay in the file. They are omitted here to keep the block short.</p>
+<ul>
+<li><code>id</code> is local to the plugin. The global scene id is <code>example.agent-tools:rings</code>.</li>
+<li><code>frame_rate_cap</code> is an integer from 1 to 60. The host caps the rate that the scene asks for at this value.</li>
+<li><code>settings_schema</code> uses the JSON-Schema subset of the settings pages. The host checks new settings against it before the scene sees them.</li>
+<li><code>clip_seconds</code> is used only in <code>pre-rendered</code> mode, which this step does not declare.</li>
+</ul>
+<h3 id="the-pure-tone-function">The pure tone function</h3>
+<p>The drawing rule is a pure function with no host calls. The TypeScript scene mirrors it below, because a TypeScript plugin has no Rust core crate. For each cell it returns a tone from 0 (dark) to 255 (bright). The rings are cosine waves of the distance from the centre. A terminal cell is about twice as tall as it is wide, so the vertical gap counts double. The frame number moves the rings outward.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">// core/src/rings.rs. Tone of one cell, no host calls.
+
+/// Returns the tone of the cell at (`x`, `y`) for a frame. Zero is dark and 255 is bright.
+/// Rings move outward as `frame` grows.
+pub fn ring_tone(x: u32, y: u32, width: u32, height: u32, frame: u32, ring_count: u32) -&gt; u8 {
+    if width == 0 || height == 0 {
+        return 0;
+    }
+    let centre_x = (width as f32 - 1.0) / 2.0;
+    let centre_y = (height as f32 - 1.0) / 2.0;
+    let delta_x = x as f32 - centre_x;
+    // A terminal cell is about twice as tall as it is wide, so vertical distance counts double.
+    let delta_y = (y as f32 - centre_y) * 2.0;
+    let distance = (delta_x * delta_x + delta_y * delta_y).sqrt();
+    let period = width.max(height) as f32 / ring_count.max(1) as f32;
+    let angle = std::f32::consts::TAU * (distance / period - frame as f32 * 0.05);
+    ((angle.cos() + 1.0) * 0.5 * 255.0) as u8
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn centre_is_brightest_at_frame_zero() {
+        assert_eq!(ring_tone(2, 2, 5, 5, 0, 3), 255);
+    }
+
+    #[test]
+    fn zero_size_is_dark() {
+        assert_eq!(ring_tone(0, 0, 0, 0, 0, 3), 0);
+    }
+
+    #[test]
+    fn rings_move_outward_between_frames() {
+        assert_ne!(ring_tone(0, 0, 22, 6, 0, 3), ring_tone(0, 0, 22, 6, 8, 3));
+    }
+}
+</code></pre>
+<p>The <code>as u8</code> cast is safe. The value of <code>(cos + 1) * 0.5 * 255</code> stays between 0 and 255, and Rust's float-to-integer cast saturates in any case.</p>
+<h3 id="the-scene-component-in-rust">The scene component in Rust</h3>
+<p>The scene implements the <code>renderer</code> resource. The constructor reads the spec: the settings arrive as JSON text, and the palette as a list of <code>0xRRGGBB</code> values. <code>render</code> writes one tone per cell and presents the frame. <code>reconfigure</code> takes new settings without a restart.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">// scene/src/lib.rs. The rings scene, step 7.
+use agent_tools_core::rings::ring_tone;
+use ilium_plugin_sdk::anim::renderer::{FrameInput, Renderer, SceneSpec};
+use ilium_plugin_sdk::anim::surface::FrameSurface;
+use ilium_plugin_sdk::prelude::*;
+use serde::Deserialize;
+
+/// The tone function counts frames at this rate. The frame number comes from the scene clock,
+/// so the ring speed does not change when the host runs the scene at a lower rate.
+const RING_FRAMES_PER_SECOND: u64 = 30;
+
+#[derive(Deserialize, Clone, Copy)]
+#[serde(default)]
+struct RingSettings {
+    ring_count: u32,
+}
+
+impl Default for RingSettings {
+    fn default() -&gt; Self {
+        Self { ring_count: 3 }
+    }
+}
+
+#[ilium_plugin(side = &quot;scene&quot;)]
+#[derive(Default)]
+struct RingRenderer {
+    settings: RingSettings,
+    palette_rgb: Vec&lt;u32&gt;,
+}
+
+impl Lifecycle for RingRenderer {}
+
+impl Renderer for RingRenderer {
+    fn new(spec: SceneSpec) -&gt; Self {
+        Self {
+            settings: serde_json::from_str(&amp;spec.settings).unwrap_or_default(),
+            palette_rgb: spec.palette,
+        }
+    }
+
+    fn frames_per_second(&amp;self) -&gt; u32 {
+        30
+    }
+
+    fn render(&amp;mut self, frame: FrameInput, surface: &amp;FrameSurface) {
+        let frame_number = (frame.time_millis * RING_FRAMES_PER_SECOND / 1000) as u32;
+        let mut tones = Vec::with_capacity((frame.width * frame.height) as usize);
+        for row in 0..frame.height {
+            for column in 0..frame.width {
+                tones.push(ring_tone(
+                    column,
+                    row,
+                    frame.width,
+                    frame.height,
+                    frame_number,
+                    self.settings.ring_count,
+                ));
+            }
+        }
+        surface.write_tones(0, &amp;tones);
+        surface.present();
+    }
+
+    fn set_palette(&amp;mut self, palette_rgb: Vec&lt;u32&gt;) {
+        self.palette_rgb = palette_rgb;
+    }
+
+    /// Returns `false` for settings it cannot read. The host then restarts the scene.
+    fn reconfigure(&amp;mut self, settings_json: String) -&gt; bool {
+        match serde_json::from_str::&lt;RingSettings&gt;(&amp;settings_json) {
+            Ok(settings) =&gt; {
+                self.settings = settings;
+                true
+            }
+            Err(_) =&gt; false,
+        }
+    }
+
+    fn status(&amp;self) -&gt; Option&lt;String&gt; {
+        Some(format!(&quot;{} rings&quot;, self.settings.ring_count))
+    }
+}
+</code></pre>
+<p>Notes on the code:</p>
+<ul>
+<li>The scene keeps <code>palette_rgb</code> for the palette contract. It does not draw colour, because the host maps tones to colour. Until a later change reads the field, the compiler reports it as never read. That is expected in this step.</li>
+<li><code>impl Lifecycle for RingRenderer {}</code> is required because the scene exports <code>lifecycle</code> as well as <code>renderer</code>. The default methods are enough.</li>
+<li><code>render</code> takes <code>&amp;mut self</code>, as the SDK trait does. It takes the surface by reference.</li>
+</ul>
+<h3 id="the-same-scene-in-typescript">The same scene in TypeScript</h3>
+<p>The TypeScript version has the same behaviour. <code>defineScene</code> takes the class, and the spec arrives already parsed. <code>timeMillis</code> is a <code>bigint</code>, so the code converts it with <code>Number</code>. The <code>ringTone</code> function mirrors the Rust one line for line, so both builds draw the same frame.</p>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">// scene/src/main.ts. The rings scene, step 7, in TypeScript.
+import { defineScene } from '@ilium/plugin-sdk';
+import type { FrameInput, SceneSpec } from '@ilium/plugin-sdk/anim/renderer';
+import type { FrameSurface } from '@ilium/plugin-sdk/anim/surface';
+
+const RING_FRAMES_PER_SECOND = 30;
+
+interface RingSettings {
+  ring_count: number;
+}
+
+function readRingSettings(value: unknown): RingSettings | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const ringCount = (value as { ring_count?: unknown }).ring_count;
+  return typeof ringCount === 'number' ? { ring_count: ringCount } : undefined;
+}
+
+// Mirrors ring_tone in core/src/rings.rs.
+function ringTone(
+  x: number, y: number, width: number, height: number, frame: number, ringCount: number,
+): number {
+  if (width === 0 || height === 0) return 0;
+  const deltaX = x - (width - 1) / 2;
+  const deltaY = (y - (height - 1) / 2) * 2;
+  const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+  const period = Math.max(width, height) / Math.max(ringCount, 1);
+  const angle = 2 * Math.PI * (distance / period - frame * 0.05);
+  return Math.floor(((Math.cos(angle) + 1) * 0.5) * 255);
+}
+
+class Rings {
+  private settings: RingSettings = { ring_count: 3 };
+
+  constructor(spec: SceneSpec) {
+    this.settings = readRingSettings(spec.settings) ?? this.settings;
+  }
+
+  framesPerSecond(): number {
+    return 30;
+  }
+
+  render(frame: FrameInput, surface: FrameSurface): void {
+    const frameNumber = Math.floor((Number(frame.timeMillis) * RING_FRAMES_PER_SECOND) / 1000);
+    const tones = new Uint8Array(frame.width * frame.height);
+    for (let row = 0; row &lt; frame.height; row++) {
+      for (let column = 0; column &lt; frame.width; column++) {
+        tones[row * frame.width + column] = ringTone(
+          column, row, frame.width, frame.height, frameNumber, this.settings.ring_count,
+        );
+      }
+    }
+    surface.writeTones(0, tones);
+    surface.present();
+  }
+
+  reconfigure(settings: unknown): boolean {
+    const next = readRingSettings(settings);
+    if (next === undefined) return false;
+    this.settings = next;
+    return true;
+  }
+
+  status(): string {
+    return `${this.settings.ring_count} rings`;
+  }
+}
+
+export const { lifecycle, renderer } = defineScene(Rings);
+</code></pre>
+<p>A scene test draws a frame through <code>FakeScene</code>, because a scene is not a view. In Rust, <code>FakeScene::new::&lt;RingRenderer&gt;("rings", 16, 4)</code> makes a scene of 16 columns and 4 rows, and <code>scene.frame(FrameInput::default())</code> returns a <code>Screen</code>. In TypeScript, <code>createFakeScene(renderer, 'rings', 16, 4)</code> does the same. Compare <code>screen.text()</code> with a golden file through <code>assert_golden</code>. See <a href="/pages/reference-test-harness/#scenes">Test harness reference</a>.</p>
+<h3 id="build-and-test">Build and test</h3>
+<p>Run the tone tests on the development machine, then build the package and start the dev loop:</p>
+<pre><code class="language-bash">cargo test -p agent-tools-core rings
+ilium plugin build
+ilium plugin dev
+</code></pre>
+<p><code>ilium plugin build</code> writes <code>dist/scene.wasm</code> and prints JSONL, one object per line. <code>ilium plugin dev</code> rebuilds on change and reloads the scene in place. A successful build ends like this:</p>
+<figure>
+<pre class="term"><span class="t-prompt">$</span> ilium plugin build
+<span class="t-dim">{"type":"progress","step":"build","message":"Building scene.wasm"}</span>
+<span class="t-dim">{"type":"artifact","path":"dist/scene.wasm","bytes":184320}</span>
+<span class="t-ok">{"type":"result","ok":true}</span>
+<span class="t-dim">{"type":"summary","duration_ms":4120,"warnings":0,"errors":0}</span>
+</pre>
+<figcaption>Illustrative, not generated. The JSONL lines are abbreviated: the real artifact line also carries a `sha256` field.</figcaption>
+</figure>
+
+<h3 id="errors-and-edge-cases">Errors and edge cases</h3>
+<p>The renderer returns no <code>plugin-error</code>, so a failure in the scene appears as a trap, a deadline breach, a dropped frame or a log line. The rules come from the frame budget, the restart rule and the settings check.</p>
+<table>
+<thead>
+<tr>
+<th>Case</th>
+<th>What happens</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ring_count</code> is 13</td>
+<td>The host refuses the value before the scene sees it, and the previous count stays. The message is <code>ring_count: 13 is above the maximum of 12</code>.</td>
+</tr>
+<tr>
+<td><code>reconfigure</code> returns <code>false</code></td>
+<td>The host discards the renderer and builds a new one from a new spec. This is a restart, not a failure.</td>
+</tr>
+<tr>
+<td><code>render</code> runs past the frame budget</td>
+<td>The frame budget is 33 ms at 30 fps. The frame is skipped. The default <code>frame_deadline_ms</code> is that budget, with a ceiling of 50 ms. 30 breaches in a row trap.</td>
+</tr>
+<tr>
+<td><code>render</code> returns without <code>present</code></td>
+<td>The frame is dropped and a warning is logged once per second.</td>
+</tr>
+<tr>
+<td><code>write_tones</code> gets the wrong length</td>
+<td>Only whole rows are written. A remainder is dropped and a warning is logged once per second.</td>
+</tr>
+<tr>
+<td><code>readiness</code> stays <code>Preparing</code> for over 10 s</td>
+<td>Counts as <code>Failed</code>. <code>render</code> is not called until the renderer restarts.</td>
+</tr>
+<tr>
+<td>A trap or a failed readiness</td>
+<td>Counts as one failure. The restart waits 1 s after the first failure, 5 s after the second and 30 s after later ones. The third failure within 10 minutes disables the scene side of the plugin.</td>
+</tr>
+<tr>
+<td>Ring count 12 on a small panel</td>
+<td>Rings are closer together than a cell, so the pattern aliases. This is not an error.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="what-you-see">What you see</h3>
+<p>Open Settings, then the Animations tab. The scene appears in the list as <code>Rings</code>, with the status text that <code>status()</code> returns. Its one setting is a shared number row, drawn with the grey dotted leader, the decrement and increment buttons and the edit button:</p>
+<figure>
+<pre class="term"><span class="t-hi">╭──≡ ● · Rings</span><span class="t-hi">─────────────────────────────────╮</span>
+<span class="t-hi">│</span> Rings <span class="t-dim">………………………………………………………………………………</span> - 3 + * <span class="t-hi">│</span>
+<span class="t-hi">╰──────────────────────────────────────────────╯</span>
+</pre>
+<figcaption>Illustrative, not generated. The row comes from the <code>ring_count</code> property of <code>settings_schema</code>. The colour mode, palette, dither, panel placement and frame-rate cap rows above and below it are the shared rows, which the scene does not draw.</figcaption>
+</figure>
+
+<p>The panels below show the tone values at frame 0 and frame 16, which is about half a second later. The rows are 24 by 6 cells. The characters map tone to brightness, from space (dark) to at-sign (bright). The host's palette supplies the colour on screen.</p>
+<figure>
+<pre class="term"><span class="t-hi">╭──≡ ● · Frame 0─────────╮</span>
+<span class="t-hi">│  :+%@@#+-:..:-+#@@%+:  │</span>
+<span class="t-hi">│ .+%@%+:   ..   :+%@%+. │</span>
+<span class="t-hi">│ :*@@#-  :+%%+:  -#@@*: │</span>
+<span class="t-hi">│ :*@@#-  :+%%+:  -#@@*: │</span>
+<span class="t-hi">│ .+%@%+:   ..   :+%@%+. │</span>
+<span class="t-hi">│  :+%@@#+-:..:-+#@@%+:  │</span>
+<span class="t-hi">╰────────────────────────╯</span>
+<span class="t-ok">╭──≡ ● · Frame 16────────╮</span>
+<span class="t-ok">│+:  :+%@@%####%@@%+:  :+│</span>
+<span class="t-ok">│-  :*@@%+-.  .-+%@@*:  -│</span>
+<span class="t-ok">│. .=%@%+:  ::  :+%@%=. .│</span>
+<span class="t-ok">│. .=%@%+:  ::  :+%@%=. .│</span>
+<span class="t-ok">│-  :*@@%+-.  .-+%@@*:  -│</span>
+<span class="t-ok">│+:  :+%@@%####%@@%+:  :+│</span>
+<span class="t-ok">╰────────────────────────╯</span>
+</pre>
+<figcaption>Illustrative, not generated. The top panel is frame 0 and the lower one is frame 16, both with three rings. The rings move outward from the centre between the two frames.</figcaption>
+</figure>
+
+<h3 id="scene-additions">Scene additions</h3>
+<p>A scene can ask for more than tones. These additions are optional and the rings scene does not need them, but they are how a scene such as a map or a chess board draws text and answers the pointer.</p>
+<table>
+<thead>
+<tr>
+<th>Addition</th>
+<th>Where</th>
+<th>Rust</th>
+<th>TypeScript</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Glyph plane</td>
+<td>manifest <code>glyph_plane: true</code></td>
+<td><code>surface.write_glyphs(&amp;cells)</code></td>
+<td><code>surface.writeGlyphs(cells)</code></td>
+<td>Text cells drawn over the pixels after dithering. At most 131,072 cells per frame. Glyph colours also go through the shared look.</td>
+</tr>
+<tr>
+<td>Clear glyphs</td>
+<td>surface</td>
+<td><code>surface.clear_glyphs()</code></td>
+<td><code>surface.clearGlyphs()</code></td>
+<td>Removes every glyph cell.</td>
+</tr>
+<tr>
+<td>Owner ids</td>
+<td>surface</td>
+<td><code>surface.set_owner_ids(first_row, &amp;ids)</code></td>
+<td><code>surface.setOwnerIds(firstRow, ids)</code></td>
+<td>One <code>u16</code> per pixel, 0 for none. Maps pixels to logical objects.</td>
+</tr>
+<tr>
+<td>Frame receipt</td>
+<td>surface</td>
+<td><code>surface.last_receipt()</code></td>
+<td><code>surface.lastReceipt()</code></td>
+<td><code>frame</code>, <code>presented_at_millis</code>, <code>dropped_before</code> and the <code>pointer_owner</code> under the pointer.</td>
+</tr>
+<tr>
+<td>Pointer</td>
+<td>renderer</td>
+<td><code>fn wants_pointer(&amp;self) -&gt; bool</code></td>
+<td><code>wantsPointer()</code></td>
+<td>A runtime answer, read after the constructor and after each <code>reconfigure</code>. <code>pointer</code> gives the cell, or none outside the scene.</td>
+</tr>
+<tr>
+<td>Pre-rendered loop</td>
+<td>manifest <code>prerender</code></td>
+<td>none</td>
+<td>none</td>
+<td><code>{{ frames, fps, cache_mib }}</code>. The host calls <code>render</code> for the frames once, caches them (at most 128 MiB, 30 fps) and plays the loop.</td>
+</tr>
+<tr>
+<td>Fonts</td>
+<td>scene world</td>
+<td><code>Font::new(asset)</code> then <code>rasterize(text, size_px)</code></td>
+<td><code>new Font(asset)</code></td>
+<td>TTF or OTF from package assets, at most 4 MiB, rasterized to <code>mask8</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>A glyph cell is <code>column</code>, <code>row</code>, <code>text</code>, optional <code>fg</code> and <code>bg</code> colours as <code>0xRRGGBB</code>, and text modifiers. This draws the ring count in the centre of the panel:</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">// scene/src/lib.rs. In render, after surface.write_tones and before present.
+// Needs &quot;glyph_plane&quot;: true on the scene in the manifest.
+let label = GlyphCell {{
+    column: (frame.width / 2) as u16,
+    row: (frame.height / 2) as u16,
+    text: self.settings.ring_count.to_string(),
+    fg: None,
+    bg: None,
+    add: Modifiers::default(),
+}};
+surface.write_glyphs(&amp;[label]);
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">// scene/src/main.ts. In render, after surface.writeTones and before present.
+// Needs &quot;glyph_plane&quot;: true on the scene in the manifest.
+surface.writeGlyphs([{{
+  column: Math.floor(frame.width / 2),
+  row: Math.floor(frame.height / 2),
+  text: String(this.settings.ring_count),
+  fg: undefined,
+  bg: undefined,
+  add: {{}},
+}}]);
+</code></pre>
+<p>The glyph is drawn after the shared look, so it follows the palette and the colour mode like the rings do. The surface size in <code>frame.width</code> and <code>frame.height</code> is in pixels. A glyph cell uses cell coordinates, so a scene divides by the dither sub-cell factor; the SDK pages do not yet expose that factor to a scene, which the gap list notes.</p>
+<p>A pre-rendered scene declares <code>modes: ["pre-rendered"]</code> and <code>prerender</code> in the manifest. The host runs the frames once and plays them with no further calls. A <code>prerender</code> on a scene that answers <code>wants_pointer</code> is the manifest error <code>manifest.scene-prerender</code>.</p>
+<pre><code class="language-json">{{
+  &quot;id&quot;: &quot;rings-loop&quot;, &quot;title&quot;: &quot;Rings loop&quot;, &quot;family&quot;: &quot;procedural&quot;,
+  &quot;modes&quot;: [&quot;pre-rendered&quot;], &quot;clip_seconds&quot;: 8,
+  &quot;prerender&quot;: {{ &quot;frames&quot;: 240, &quot;fps&quot;: 30, &quot;cache_mib&quot;: 32 }}
+}}
+</code></pre>
+<h3 id="see-also">See also</h3>
+<ul>
+<li><a href="/pages/api-scenes/">Scenes</a> lists every renderer member, the surface formats and the readiness rules.</li>
+<li><a href="/pages/settings-screens/">Settings screens</a> explains the JSON-Schema subset that <code>settings_schema</code> uses.</li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a> lists every manifest key.</li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a> lists the frame budget and the restart rule.</li>
+<li><a href="/pages/rust-sdk/">Rust SDK</a> and <a href="/pages/typescript-sdk/">TypeScript SDK</a> cover the shared SDK conventions.</li>
+<li><a href="/pages/tutorial-06-notes-pane/">Tutorial step 6</a> is the step this one builds on, and <a href="/pages/tutorial-08-typescript/">tutorial step 8</a> ports the earlier steps to TypeScript.</li>
+</ul>
+<p>API checked against <code>ilium:plugin@0.1.0</code>, including the scene additions (AX15).</p>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/tutorial-06-notes-pane/"><small>Previous</small>6. Notes pane with drag and drop</a><a class="next" href="/pages/tutorial-08-typescript/"><small>Next</small>8. The same plugin in TypeScript</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#what-you-need">What you need</a></li><li class="l2"><a href="#what-changed-from-step-6">What changed from step 6</a></li><li class="l2"><a href="#the-frame-loop">The frame loop</a></li><li class="l2"><a href="#renderer-surface">Renderer surface</a></li><li class="l2"><a href="#manifest">Manifest</a></li><li class="l2"><a href="#the-pure-tone-function">The pure tone function</a></li><li class="l2"><a href="#the-scene-component-in-rust">The scene component in Rust</a></li><li class="l2"><a href="#the-same-scene-in-typescript">The same scene in TypeScript</a></li><li class="l2"><a href="#build-and-test">Build and test</a></li><li class="l2"><a href="#errors-and-edge-cases">Errors and edge cases</a></li><li class="l2"><a href="#what-you-see">What you see</a></li><li class="l2"><a href="#scene-additions">Scene additions</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

@@ -611,10 +611,11 @@ impl Engine {
             };
             parser.process(&bytes);
             self.terminal.generation.fetch_add(1, Ordering::Release);
+            // Publish while the parser lock is held, so a snapshot taken under that
+            // lock always agrees with the journal sequence it is paired with.
+            (self.terminal.publish)(Arc::clone(&bytes));
             parser.callbacks_mut().take_pending_replies()
         };
-        // Preserve output, including the query that caused a terminal failure.
-        (self.terminal.publish)(bytes);
         let _ = self.terminal.changed.send(());
         if pending.len() > MAX_PENDING_REPLY_BYTES.saturating_sub(self.pending_reply_bytes) {
             return Some((

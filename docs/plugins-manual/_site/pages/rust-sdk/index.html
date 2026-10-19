@@ -1,0 +1,1705 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Rust SDK reference | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details open><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/" aria-current="page">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Guides</b></p>
+<h1>Rust SDK reference</h1>
+
+<p>The Rust SDK, <code>ilium-plugin-sdk</code>, gives a Rust plugin four things: generated bindings for the WIT contract, the <code>#[ilium_plugin]</code> attribute that binds the plugin's exports to Rust types, helpers for asynchronous host calls, and a test double for running handlers without the host. A Rust plugin depends on this crate only. It never depends on an Ilium crate, so the SDK is the whole surface a plugin can see.</p>
+<p>The host loads a plugin as a WebAssembly component. It calls the plugin's exports with batches of events and applies the submissions the plugin returns. The plugin calls host imports when it needs the host to act. The SDK maps both directions to ordinary Rust types, traits and <code>Result</code> values.</p>
+<p>The page documents the contract in full. Every listing appears in Rust and in TypeScript, and the TypeScript SDK reference page mirrors this one section by section; see <a href="/pages/typescript-sdk/">TypeScript SDK reference</a>. The widget catalogue has 51 widgets in seven families, and the host adds thirteen interfaces, four optional exports and nineteen grants.</p>
+<h3 id="you-will-need">You will need</h3>
+<ul>
+<li>Rust 1.90 or newer with the <code>wasm32-wasip2</code> target.</li>
+<li>The <code>ilium</code> command, for <code>ilium plugin new</code>, <code>build</code> and <code>pack</code>.</li>
+<li>A plugin manifest; see <a href="/pages/reference-manifest/">Manifest reference</a>.</li>
+</ul>
+<h2 id="project-layout-and-package-files">Project layout and package files</h2>
+<p><code>ilium plugin new &lt;dir&gt; --id &lt;plugin-id&gt; --lang &lt;rust|typescript&gt; --side &lt;server|client|both|scene&gt;</code> writes the manifest and the language files. The two languages produce the same package: one component per declared side, signed and listed in the manifest.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-toml">[package]
+name = &quot;hello-plugin&quot;
+version = &quot;0.1.0&quot;
+edition = &quot;2021&quot;
+
+[lib]
+crate-type = [&quot;cdylib&quot;]
+
+[dependencies]
+ilium-plugin-sdk = &quot;0.1&quot;
+
+[dev-dependencies]
+ilium-plugin-sdk = { version = &quot;0.1&quot;, features = [&quot;testing&quot;] }
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-json">{
+  &quot;name&quot;: &quot;hello-plugin&quot;,
+  &quot;version&quot;: &quot;0.1.0&quot;,
+  &quot;type&quot;: &quot;module&quot;,
+  &quot;dependencies&quot;: { &quot;@ilium/plugin-sdk&quot;: &quot;0.1.0&quot; },
+  &quot;scripts&quot;: { &quot;test&quot;: &quot;bun test&quot; }
+}
+</code></pre>
+<p>The generated files are <code>manifest.json</code>, <code>Cargo.toml</code> and <code>src/lib.rs</code> for Rust, and <code>manifest.json</code>, <code>package.json</code> and <code>src/main.ts</code> for TypeScript. <code>ilium plugin new</code> does not run <code>bun install</code>; run it yourself. A folder that holds both <code>Cargo.toml</code> and <code>package.json</code> stops the build with <code>toolchain.language-ambiguous</code>.</p>
+<h2 id="how-a-plugin-is-built">How a plugin is built</h2>
+<p><code>ilium plugin build</code> compiles the plugin for WASI Preview 2, wraps the result as a component and writes one file per declared side to <code>dist/</code>, named after the manifest <code>entry</code> (for example <code>dist/server.wasm</code>). <code>ilium plugin pack</code> writes the <code>.iliumpkg</code> package to the same folder. The build runs on the author's machine. The host checks the file inventory and the signature at install time, so an SDK build never skips those checks. The extended calls need no extra build flag: a component links only the imports its manifest requests.</p>
+<figure>
+<svg viewBox="0 0 380 100" role="img" aria-label="Rust plugin build path" width="570" height="150">
+  <defs><marker id="bp-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="currentColor"/></marker></defs>
+  <rect x="4" y="34" width="70" height="36" rx="6" fill="none" stroke="currentColor"/>
+  <text x="39" y="56" text-anchor="middle" fill="currentColor" font-size="11">Rust crate</text>
+  <path d="M74 52 L96 52" stroke="currentColor" fill="none" marker-end="url(#bp-a)"/>
+  <text x="85" y="22" text-anchor="middle" fill="currentColor" font-size="10">build</text>
+  <rect x="98" y="34" width="70" height="36" rx="6" fill="none" stroke="currentColor"/>
+  <text x="133" y="56" text-anchor="middle" fill="currentColor" font-size="11">Component</text>
+  <path d="M168 52 L190 52" stroke="currentColor" fill="none" marker-end="url(#bp-a)"/>
+  <text x="179" y="22" text-anchor="middle" fill="currentColor" font-size="10">pack</text>
+  <rect x="192" y="34" width="70" height="36" rx="6" fill="none" stroke="currentColor"/>
+  <text x="227" y="56" text-anchor="middle" fill="currentColor" font-size="11">.iliumpkg</text>
+  <path d="M262 52 L284 52" stroke="currentColor" fill="none" marker-end="url(#bp-a)"/>
+  <text x="273" y="22" text-anchor="middle" fill="currentColor" font-size="10">install</text>
+  <rect x="286" y="34" width="70" height="36" rx="6" fill="none" stroke="currentColor" stroke-dasharray="4 3"/>
+  <text x="321" y="56" text-anchor="middle" fill="currentColor" font-size="11">Host</text>
+</svg>
+<figcaption>The SDK covers the first two steps. The host checks the package inventory and signature in the last step.</figcaption>
+</figure>
+
+<pre class="term"><span class="t-prompt">$</span> ilium plugin build
+<span class="t-dim">{"type":"progress","step":"compile"}</span>
+<span class="t-ok">{"type":"artifact","path":"dist/server.wasm"}</span>
+<span class="t-dim">{"type":"summary","warnings":0,"errors":0}</span>
+{"type":"result","ok":true}
+</pre>
+
+<p>Illustrative, not generated. Every line is one JSON object in the real output; the lines are shortened for width.</p>
+<h2 id="exports-and-entry-points">Exports and entry points</h2>
+<p>Every server and client component exports a lifecycle and a handler. The manifest <code>exports</code> list names the optional exports the component adds, and the entry must match that list exactly (<code>manifest.exports-mismatch</code> otherwise). The four extended optional exports are <code>catalog-provider</code>, <code>menu-provider</code>, <code>virtual-rows-provider</code> and <code>token-provider</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Manifest export</th>
+<th>Rust trait and methods</th>
+<th>TypeScript member of <code>definePlugin</code></th>
+<th>Side</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>(always) lifecycle</td>
+<td><code>Lifecycle</code>: <code>activate(&amp;mut self, Activation) -&gt; Result&lt;(), PluginError&gt;</code>, <code>deactivate(&amp;mut self, DeactivationReason) -&gt; Option&lt;Vec&lt;u8&gt;&gt;</code></td>
+<td><code>activate(context)</code>, <code>deactivate(reason)</code> returned as <code>lifecycle</code></td>
+<td>S C</td>
+</tr>
+<tr>
+<td>(always) handler</td>
+<td><code>Handler</code>: <code>on_events(&amp;mut self, Vec&lt;Event&gt;) -&gt; Vec&lt;Submission&gt;</code></td>
+<td><code>onEvents(batch)</code> returned as <code>handler</code></td>
+<td>S C</td>
+</tr>
+<tr>
+<td><code>views</code></td>
+<td><code>Views</code>: <code>render(&amp;mut self, ViewTarget, Area) -&gt; UiTree</code></td>
+<td><code>render(view, area)</code> returned as <code>views</code></td>
+<td>C</td>
+</tr>
+<tr>
+<td><code>detector</code></td>
+<td><code>Detector</code>: <code>identify</code>, <code>classify</code></td>
+<td><code>identify(processes)</code>, <code>classify(signature, screen)</code> returned as <code>detector</code></td>
+<td>S</td>
+</tr>
+<tr>
+<td><code>job-runner</code></td>
+<td><code>JobRunner</code>: <code>run(kind, input) -&gt; Result&lt;Vec&lt;u8&gt;, PluginError&gt;</code></td>
+<td><code>run(kind, input)</code> returned as <code>jobRunner</code></td>
+<td>S C A</td>
+</tr>
+<tr>
+<td><code>service-provider</code></td>
+<td><code>ServiceProvider</code>: <code>handle(call) -&gt; ServiceReply</code></td>
+<td><code>handle(call)</code> returned as <code>serviceProvider</code></td>
+<td>S C</td>
+</tr>
+<tr>
+<td><code>inference-provider</code></td>
+<td><code>InferenceProvider</code>: <code>complete(call)</code>, <code>models()</code></td>
+<td><code>complete(call)</code>, <code>models()</code> returned as <code>inferenceProvider</code></td>
+<td>S C</td>
+</tr>
+<tr>
+<td><code>annotator</code></td>
+<td><code>Annotator</code>: <code>annotate(buffer, revision, first_line, lines)</code></td>
+<td><code>annotate(buffer, revision, firstLine, lines)</code> returned as <code>annotator</code></td>
+<td>C</td>
+</tr>
+<tr>
+<td><code>catalog-provider</code></td>
+<td><code>CatalogProvider</code>: <code>query_catalog(&amp;mut self, CatalogQuery) -&gt; Result&lt;CatalogPage, PluginError&gt;</code></td>
+<td><code>queryCatalog(query)</code> returned as <code>catalogProvider</code></td>
+<td>S C</td>
+</tr>
+<tr>
+<td><code>menu-provider</code></td>
+<td><code>MenuProvider</code>: <code>menu_items(&amp;mut self, MenuContext) -&gt; Vec&lt;MenuEntry&gt;</code></td>
+<td><code>menuItems(context)</code> returned as <code>menuProvider</code></td>
+<td>C</td>
+</tr>
+<tr>
+<td><code>virtual-rows-provider</code></td>
+<td><code>VirtualRowsProvider</code>: <code>list_virtual_children(&amp;mut self, row_kind, parent, cursor) -&gt; Result&lt;(Vec&lt;VirtualRowChild&gt;, Option&lt;String&gt;), PluginError&gt;</code></td>
+<td><code>listVirtualChildren(rowKind, parent, cursor)</code> returned as <code>virtualRowsProvider</code></td>
+<td>S C</td>
+</tr>
+<tr>
+<td><code>token-provider</code></td>
+<td><code>TokenProvider</code>: <code>tokens(&amp;mut self, buffer, first_line, lines, state_in) -&gt; (Vec&lt;Token&gt;, Option&lt;Vec&lt;u8&gt;&gt;)</code></td>
+<td><code>tokens(buffer, firstLine, lines, stateIn)</code> returned as <code>tokenProvider</code></td>
+<td>C</td>
+</tr>
+<tr>
+<td><code>hook-handler</code></td>
+<td><code>HookHandler</code>: <code>handle_hook(&amp;mut self, call: HookCall) -&gt; HookReply</code></td>
+<td><code>hookHandler(call)</code> member of <code>definePlugin</code></td>
+<td>S C</td>
+</tr>
+</tbody>
+</table>
+<p>The method and member names of the four new exports follow the naming rule below; the WIT function names are <code>query-catalog</code>, <code>menu-items</code>, <code>list-virtual-children</code> and <code>tokens</code>. The deadlines are 20 ms for the catalogue, menu and virtual-row providers and 10 ms per call for the token provider.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">#[ilium_plugin(side = &quot;client&quot;, exports = [&quot;views&quot;, &quot;catalog-provider&quot;, &quot;token-provider&quot;])]
+#[derive(Default)]
+struct MyPlugin { /* state */ }
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">export const { lifecycle, handler, views, catalogProvider, tokenProvider } = definePlugin({
+  side: 'client',
+  activate(context) {},
+  onEvents(batch) { return []; },
+  render(view, area) { /* returns a UiTree */ },
+  queryCatalog(query) { /* returns a CatalogPage */ },
+  tokens(buffer, firstLine, lines, stateIn) { /* returns [tokens, state] */ },
+});
+</code></pre>
+<p>The Rust attribute takes <code>side</code> (<code>"server"</code>, <code>"client"</code> or <code>"scene"</code>, required) and <code>exports</code> (the manifest names). A listed export without its trait implementation is a compile error, and the struct must implement <code>Default</code>. In TypeScript, <code>definePlugin</code> takes <code>side</code> and the members you implement; the returned names are the interface names in camelCase, and the entry module must export exactly the names the manifest lists plus <code>lifecycle</code> and <code>handler</code>.</p>
+<h2 id="modules-import-paths-and-names">Modules, import paths and names</h2>
+<p>Each WIT package maps to one Rust module and one TypeScript subpath. One rule covers every name: WIT kebab-case becomes snake_case for Rust functions, fields and modules, camelCase for TypeScript functions and fields, UpperCamelCase or PascalCase for types, and kebab-case strings for TypeScript variant tags and enum values.</p>
+<table>
+<thead>
+<tr>
+<th>WIT form</th>
+<th>Rust</th>
+<th>TypeScript</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>function <code>read-cells</code></td>
+<td><code>read_cells</code></td>
+<td><code>readCells</code></td>
+</tr>
+<tr>
+<td>record <code>catalog-item</code>, field <code>disabled-reason</code></td>
+<td><code>CatalogItem { disabled_reason }</code></td>
+<td><code>CatalogItem { disabledReason }</code></td>
+</tr>
+<tr>
+<td>variant <code>event</code>, case <code>screen-changed(x)</code></td>
+<td><code>Event::ScreenChanged(x)</code></td>
+<td><code>{ tag: 'screen-changed', val: x }</code></td>
+</tr>
+<tr>
+<td>enum <code>tone</code>, case <code>warning</code></td>
+<td><code>Tone::Warning</code></td>
+<td><code>'warning'</code></td>
+</tr>
+<tr>
+<td>flags <code>node-flags</code></td>
+<td><code>NodeFlags::HOVER_EVENTS \| NodeFlags::POINTER_EVENTS</code></td>
+<td><code>{ hoverEvents: true, pointerEvents: true }</code></td>
+</tr>
+<tr>
+<td><code>option&lt;T&gt;</code>, <code>result&lt;T, plugin-error&gt;</code></td>
+<td><code>Option&lt;T&gt;</code>, <code>Result&lt;T, PluginError&gt;</code></td>
+<td><code>T \| undefined</code>, returns <code>T</code> or throws <code>PluginError</code></td>
+</tr>
+<tr>
+<td><code>u64</code>, <code>s64</code></td>
+<td><code>u64</code>, <code>i64</code></td>
+<td><code>bigint</code>, always</td>
+</tr>
+<tr>
+<td><code>list&lt;u8&gt;</code>, <code>list&lt;f32&gt;</code></td>
+<td><code>Vec&lt;u8&gt;</code>, <code>Vec&lt;f32&gt;</code></td>
+<td><code>Uint8Array</code>, <code>number[]</code></td>
+</tr>
+<tr>
+<td><code>tuple&lt;A, B&gt;</code></td>
+<td><code>(A, B)</code></td>
+<td><code>[A, B]</code></td>
+</tr>
+<tr>
+<td>resource <code>child</code>, <code>font</code></td>
+<td><code>Child</code>, <code>Font</code> handles that terminate or release on drop</td>
+<td><code>Child</code>, <code>Font</code> classes with <code>close()</code></td>
+</tr>
+<tr>
+<td>WIT keyword <code>loop</code>, <code>type</code></td>
+<td><code>looped</code>, <code>type_</code></td>
+<td><code>loop</code>, <code>type</code></td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr>
+<th>Module</th>
+<th>Rust</th>
+<th>TypeScript</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Common names</td>
+<td><code>ilium_plugin_sdk::prelude::*</code></td>
+<td><code>@ilium/plugin-sdk</code></td>
+</tr>
+<tr>
+<td>Shared records</td>
+<td><code>types::{ids, errors, text, paths, editing, layout, geo, net, tree, ui, requests, intents, events, lifecycle}</code></td>
+<td><code>@ilium/plugin-sdk/types</code></td>
+</tr>
+<tr>
+<td>Host imports</td>
+<td><code>host::{fs, http, jobs, process, settings, storage, timers, ui, ...}</code></td>
+<td><code>@ilium/plugin-sdk/host/&lt;interface&gt;</code></td>
+</tr>
+<tr>
+<td>Host imports, extended</td>
+<td><code>host::{extensions, catalogs, geocode, sessions, vector, kernel_settings, keymap, journal, client_requests, gpu}</code></td>
+<td><code>host/catalogs</code>, <code>host/geocode</code>, <code>host/sessions</code>, <code>host/vector</code>, <code>host/kernel-settings</code>, <code>host/keymap</code>, <code>host/journal</code>, <code>host/client-requests</code>, <code>host/gpu</code></td>
+</tr>
+<tr>
+<td>Primitives</td>
+<td><code>primitives::{terminal, agent, editor, basic}</code></td>
+<td><code>@ilium/plugin-sdk/primitives/&lt;interface&gt;</code></td>
+</tr>
+<tr>
+<td>Scene surface</td>
+<td><code>anim::{surface, renderer, fonts}</code></td>
+<td><code>@ilium/plugin-sdk/anim/surface</code>, <code>anim/renderer</code>, <code>anim/fonts</code></td>
+</tr>
+<tr>
+<td>UI tree builder</td>
+<td><code>ui::build::{Tree, NodeBuilder}</code></td>
+<td><code>@ilium/plugin-sdk/ui/build</code></td>
+</tr>
+<tr>
+<td>Export traits</td>
+<td><code>exports::{Lifecycle, Handler, Views, ..., CatalogProvider, MenuProvider, VirtualRowsProvider, TokenProvider, HookHandler}</code></td>
+<td>returned by <code>definePlugin</code></td>
+</tr>
+<tr>
+<td>Executor</td>
+<td><code>task</code>, <code>request</code></td>
+<td>built into <code>definePlugin</code></td>
+</tr>
+<tr>
+<td>Fake host</td>
+<td><code>testing</code> (feature <code>testing</code>)</td>
+<td><code>@ilium/plugin-sdk/testing</code></td>
+</tr>
+</tbody>
+</table>
+<p>A type lives in the module of the WIT interface that declares it, and the module list above for <code>types</code> is the list of <code>ilium:types</code> interfaces. The types of other packages are not in <code>types</code>: <code>host::geocode::GeocodeQuery</code>, <code>host::catalogs::CatalogQuery</code>, <code>host::inference::{ChatMessage, CompletionRequest}</code>, <code>exports::menu_provider::MenuContext</code>, <code>exports::virtual_rows_provider::VirtualRowChild</code> and <code>exports::token_provider::{Token, TokenKind}</code>. In TypeScript the same types come from <code>@ilium/plugin-sdk/host/geocode</code>, <code>host/catalogs</code>, <code>host/inference</code>, <code>exports/menu-provider</code>, <code>exports/virtual-rows-provider</code> and <code>exports/token-provider</code>. There is no <code>types::catalogs</code>, <code>types::menus</code>, <code>types::tokens</code>, <code>types::fs</code>, <code>types::agent</code>, <code>types::editor</code> or <code>types::primitives</code> module.</p>
+<p>Which worlds may import which interface is fixed per side, and the table in <a href="/pages/worlds-and-sides/">Worlds and sides</a> lists it: <code>vector</code>, <code>kernel-settings</code>, <code>journal</code>, <code>client-requests</code>, <code>catalogs</code> and <code>extensions</code> exist on server and client; <code>geocode</code> on server, client and scenes; <code>keymap</code> on the client only; <code>sessions</code> on the server only; <code>gpu</code> on client and scenes; <code>fonts</code> on scenes only.</p>
+<h2 id="values-submissions-and-outcomes">Values, submissions and outcomes</h2>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">// A submission carries an intent and a correlation number.
+let plain = Submission::new(Intent::DismissToast(DismissToastSpec { id: &quot;copied&quot;.into() }));
+// A keyed submission is de-duplicated for 10 minutes.
+let keyed = Submission::keyed(
+    Intent::FreezePane(FreezePaneSpec { pane }),
+    dedup::key_for(&amp;[&quot;freeze&quot;, &amp;pane.to_string()]),
+);
+// Outcome has a case that carries the new prompt epoch.
+fn describe(outcome: &amp;Outcome) -&gt; &amp;'static str {
+    match outcome {
+        Outcome::Ok | Outcome::OkNode(_) | Outcome::OkEpoch(_) =&gt; &quot;applied&quot;,
+        Outcome::Duplicate(_) =&gt; &quot;already done&quot;,
+        Outcome::Refused(_) | Outcome::Failed(_) =&gt; &quot;not applied&quot;,
+        Outcome::Cancelled =&gt; &quot;cancelled&quot;,
+    }
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">// A submission is a plain object; correlation is a bigint.
+const plain: Submission = {
+  intent: { tag: 'dismiss-toast', val: { id: 'copied' } },
+  correlation: 1n,
+  dedupKey: undefined,
+};
+// A keyed submission is de-duplicated for 10 minutes.
+const keyed: Submission = {
+  intent: { tag: 'freeze-pane', val: { pane } },
+  correlation: 2n,
+  dedupKey: `freeze:${pane}`,
+};
+// Outcome has a case that carries the new prompt epoch.
+function describe(outcome: Outcome): string {
+  switch (outcome.tag) {
+    case 'ok': case 'ok-node': case 'ok-epoch': return 'applied';
+    case 'duplicate': return 'already done';
+    case 'refused': case 'failed': return 'not applied';
+    default: return 'cancelled';
+  }
+}
+</code></pre>
+<p>The outcome case <code>ok-epoch(u64)</code> is returned by <code>send-input</code> on an agent pane. <code>Outcome::is_ok()</code> in Rust and <code>isOk()</code> in TypeScript treat <code>ok</code>, <code>ok-node</code> and <code>ok-epoch</code> alike, so code that checks success needs no special case. Choose your own correlation numbers below 2^63; the SDK uses numbers from 2^63 upward. A dedup key is 1 to 128 characters from <code>[A-Za-z0-9._:/-]</code>.</p>
+<h2 id="calls-requests-and-errors">Calls, requests and errors</h2>
+<p>Fast host calls return at once. Slow calls have an async wrapper named after the WIT function: Rust <code>fs::read_all(&amp;path).await</code>, TypeScript <code>await readAll(path)</code>. The SDK runs one single-threaded executor and resolves each awaited call from the <code>request-completed</code> event, removing that event from the batch before the handler sees it. The suffix rules for the starting form (<code>_request</code> / <code>Request</code>) and for names that end in <code>-json</code> are in <a href="/pages/reference-wit/#wrapper-names-in-the-sdks">Wrapper names in the SDKs</a>. Every call that returns a <code>request-id</code> follows the same pattern: <code>geocode::search</code>, <code>fs::write_atomic</code>, <code>vector::embed</code>, <code>terminal::history_text</code>, <code>agent::transcript</code>, <code>sessions::send</code> and <code>client_requests::request</code>.</p>
+<figure>
+<svg viewBox="0 0 400 240" role="img" aria-label="Lifecycle of an awaited host call" width="600" height="360">
+  <defs><marker id="rq-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="currentColor"/></marker></defs>
+  <rect x="20" y="14" width="200" height="32" rx="6" fill="none" stroke="currentColor"/>
+  <text x="120" y="34" text-anchor="middle" font-size="11" fill="currentColor">Plugin awaits a host call</text>
+  <path d="M120 46 L120 72" stroke="currentColor" fill="none" marker-end="url(#rq-a)"/>
+  <rect x="20" y="74" width="200" height="32" rx="6" fill="none" stroke="currentColor"/>
+  <text x="120" y="94" text-anchor="middle" font-size="11" fill="currentColor">Host completes the request</text>
+  <path d="M120 106 L120 132" stroke="currentColor" fill="none" marker-end="url(#rq-a)"/>
+  <rect x="20" y="134" width="200" height="32" rx="6" fill="none" stroke="currentColor"/>
+  <text x="120" y="154" text-anchor="middle" font-size="11" fill="currentColor">Event enters the batch</text>
+  <path d="M120 166 L120 192" stroke="currentColor" fill="none" marker-end="url(#rq-a)"/>
+  <rect x="20" y="194" width="200" height="32" rx="6" fill="none" stroke="currentColor"/>
+  <text x="120" y="214" text-anchor="middle" font-size="11" fill="currentColor">Awaiting task resumes</text>
+</svg>
+<figcaption>The SDK removes each awaited completion from the batch, so the handler sees only completions that no await is waiting for.</figcaption>
+</figure>
+
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">// Several awaited calls in one task; each await is one request.
+async fn refresh(pane: NodeId) {
+    let text = terminal::history_text(pane, 1 &lt;&lt; 20).await;           // terminal.history
+    let vectors = vector::embed(&amp;[&quot;hello&quot;.to_string()], &quot;search&quot;).await; // inference.embed
+    match (text, vectors) {
+        (Ok(history), Ok(_)) =&gt; log::log(Level::Info, &amp;format!(&quot;{} bytes&quot;, history.len())),
+        (Err(error), _) | (_, Err(error)) =&gt; {
+            if matches!(error.code, ErrorCode::RateLimited) {
+                log::log(Level::Warn, &amp;format!(&quot;retry in {} ms&quot;, error.retry_after_ms.unwrap_or(0)));
+            }
+        }
+    }
+}
+// Started from activate: task::spawn(refresh(pane));
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">// Several awaited calls in one function; each await is one request.
+async function refresh(pane: bigint): Promise&lt;void&gt; {
+  try {
+    const history = await historyText(pane, 1 &lt;&lt; 20);                 // terminal.history
+    await embed(['hello'], 'search');                                  // inference.embed
+    log('info', `${history.length} bytes`);
+  } catch (error) {
+    if (error instanceof PluginError &amp;&amp; error.code === 'rate-limited') {
+      log('warn', `retry in ${error.retryAfterMs} ms`);
+    }
+  }
+}
+// Started from activate: void refresh(pane);
+</code></pre>
+<p>A <code>PluginError</code> has <code>code</code>, <code>message</code> and <code>retry_after_ms</code> (<code>retryAfterMs</code> in TypeScript). The fifteen codes are <code>not-permitted</code>, <code>not-found</code>, <code>invalid-argument</code>, <code>conflict</code>, <code>quota-exceeded</code>, <code>rate-limited</code>, <code>busy</code>, <code>timed-out</code>, <code>cancelled</code>, <code>unsupported</code>, <code>pane-not-ready</code>, <code>revoked</code>, <code>io</code>, <code>network</code> and <code>internal</code>; the meanings and retry rules are on <a href="/pages/reference-errors-and-limits/">Errors and limits</a>. The SDK uses them like this:</p>
+<table>
+<thead>
+<tr>
+<th>Situation</th>
+<th>Code</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Stale <code>expected</code> revision in <code>write_atomic</code>, <code>rename-node</code> with a stale <code>expected-revision</code>, <code>if-current</code> mismatch in <code>send-input</code></td>
+<td><code>conflict</code></td>
+</tr>
+<tr>
+<td>Mouse events with mouse reporting off, <code>freeze-pane</code> on Windows, <code>agent::transcript</code> for a signature without a format, <code>embed</code> without a provider</td>
+<td><code>unsupported</code></td>
+</tr>
+<tr>
+<td>Geocoding before the user consented, a declined <code>open-external</code></td>
+<td><code>not-permitted</code></td>
+</tr>
+<tr>
+<td>More than 3 toasts in 10 s, geocoding faster than 1 per second</td>
+<td><code>rate-limited</code> with <code>retry_after_ms</code></td>
+</tr>
+<tr>
+<td>Detached client in <code>client_requests::request</code></td>
+<td><code>not-found</code></td>
+</tr>
+<tr>
+<td>No answer within the request timeout</td>
+<td><code>timed-out</code></td>
+</tr>
+<tr>
+<td>Popup stack full (4 per view)</td>
+<td><code>quota-exceeded</code></td>
+</tr>
+</tbody>
+</table>
+<p>A contract violation is not an error value. Calling an import the manifest never requested, returning an invalid UI tree, exceeding a fixed cap or breaching a deadline traps the instance. <code>on_events</code>, <code>render</code> and <code>deactivate</code> have no channel for a <code>PluginError</code>, so they cannot report one.</p>
+<h2 id="building-ui-trees">Building UI trees</h2>
+<p>A client plugin with the <code>views</code> export returns a <code>UiTree</code> from <code>render</code>. Both SDKs provide a builder that fills the defaults WIT cannot express and the node indices. The widget catalogue has 51 widgets in seven families; the props, events and keyboard rules of each are on the <a href="/pages/widgets-index/">widgets pages</a>.</p>
+<p>Builder rules:</p>
+<ul>
+<li>Rust: <code>Tree::new()</code> creates a tree. The required prop is the constructor argument, for example <code>tree.paragraph(lines)</code> or <code>tree.dialog("Delete file?")</code>. Every optional prop is a chained setter named after its WIT field in snake_case (<code>.min_first(20)</code>, <code>.reorderable(true)</code>). <code>.key("k")</code> sets the action id, <code>.flags(...)</code> and <code>.tooltip(...)</code> set the node flags and the hover help. <code>tree.finish(root)</code> returns the <code>UiTree</code>.</li>
+<li>TypeScript: <code>@ilium/plugin-sdk/ui/build</code> exports one function per widget in camelCase, and <code>tree(root)</code>. Containers take <code>(props, children)</code>; leaves take the required prop first and an optional props object second. Enum values are the WIT case names as strings.</li>
+<li>The widget <code>key</code> is the action id: a <code>ui-action</code> event carries it, and a widget without a key sends nothing.</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Family</th>
+<th>Widgets (Rust <code>tree.</code> constructor, TypeScript function)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Layout and containers</td>
+<td><code>layout</code>, <code>block</code>, <code>tabs</code>, <code>popup</code>, <code>clear</code>, <code>scrollbar</code>, <code>split</code>, <code>separator</code>, <code>dialog</code>, <code>scroll_view</code> / <code>scrollView</code></td>
+</tr>
+<tr>
+<td>Text</td>
+<td><code>paragraph</code>, <code>markdown</code>, <code>leader_row</code> / <code>leaderRow</code>, <code>key_hints</code> / <code>keyHints</code>, <code>diff_view</code> / <code>diffView</code></td>
+</tr>
+<tr>
+<td>Collections</td>
+<td><code>list</code>, <code>table</code>, <code>tree_list</code> / <code>treeList</code>, <code>menu</code>, <code>check_list</code> / <code>checkList</code>, <code>list_editor</code> / <code>listEditor</code></td>
+</tr>
+<tr>
+<td>Data display</td>
+<td><code>gauge</code>, <code>line_gauge</code> / <code>lineGauge</code>, <code>sparkline</code>, <code>bar_chart</code> / <code>barChart</code>, <code>chart</code>, <code>canvas</code>, <code>calendar</code>, <code>progress_row</code> / <code>progressRow</code>, <code>meter</code>, <code>minimap</code></td>
+</tr>
+<tr>
+<td>Input</td>
+<td><code>button</code>, <code>toggle</code>, <code>choice</code>, <code>number</code>, <code>text_input</code> / <code>textInput</code>, <code>text_area</code> / <code>textArea</code>, <code>schema_form</code> / <code>schemaForm</code>, <code>key_capture</code> / <code>keyCapture</code>, <code>color_picker</code> / <code>colorPicker</code>, <code>path_field</code> / <code>pathField</code>, <code>location_picker</code> / <code>locationPicker</code></td>
+</tr>
+<tr>
+<td>Status and feedback</td>
+<td><code>badge</code>, <code>spinner</code>, <code>notice</code>, <code>icon</code></td>
+</tr>
+<tr>
+<td>Media and embedded</td>
+<td><code>image</code>, <code>surface</code>, <code>code_view</code> / <code>codeView</code>, <code>terminal_view</code> / <code>terminalView</code>, <code>video</code></td>
+</tr>
+</tbody>
+</table>
+<p>Every node also accepts these node fields: <code>tooltip</code>, <code>tab_index</code> / <code>tabIndex</code> (focus order, lower first) and <code>disabled_reason</code> / <code>disabledReason</code> (the node is drawn muted and the reason is its tooltip). <code>NodeFlags</code> gains <code>HOVER_EVENTS</code> and <code>POINTER_EVENTS</code> (<code>hoverEvents</code>, <code>pointerEvents</code>). Overlays are not widgets: a tooltip is a node field, a popover is a non-modal <code>popup</code>, a toast is an intent, and the command palette is a host surface.</p>
+<h3 id="layout-and-containers">Layout and containers</h3>
+<p>A file panel with a resizable <code>split</code>, a <code>separator</code> and a <code>dialog</code>. The dialog sits in a <code>length(0)</code> slot, so it takes no space until it is opened.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">// ui::build::Tree; types::layout::{Direction, Constraint}; types::ui::DialogKind
+impl Views for Explorer {
+    fn render(&amp;mut self, _view: ViewTarget, _area: Area) -&gt; UiTree {
+        let mut tree = Tree::new();
+        let files = tree.paragraph(self.file_lines()).key(&quot;files&quot;);
+        let preview = tree.markdown(self.preview_source()).key(&quot;preview&quot;);
+        let body = tree.split(Direction::Horizontal)
+            .position(350).min_first(20).min_second(30)
+            .child(files).child(preview).key(&quot;main&quot;);
+        let rule = tree.separator(Direction::Horizontal).label(&quot;Selected file&quot;);
+        let confirm = tree.dialog(&quot;Delete file?&quot;)
+            .kind(DialogKind::DangerConfirm)
+            .message(vec![vec![Span::plain(self.selected_name())]])
+            .key(&quot;confirm-delete&quot;);
+        let root = tree
+            .layout(Direction::Vertical, [Constraint::Fill(1), Constraint::Length(1), Constraint::Length(0)])
+            .child(body).child(rule).child(confirm);
+        tree.finish(root)
+    }
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { tree, layout, split, separator, dialog, paragraph, markdown } from '@ilium/plugin-sdk/ui/build';
+
+render(view, area) {
+  return tree(layout({ direction: 'vertical', constraints: [{ tag: 'fill', val: 1 }, { tag: 'length', val: 1 }, { tag: 'length', val: 0 }] }, [
+    split({ key: 'main', direction: 'horizontal', position: 350, minFirst: 20, minSecond: 30 }, [
+      paragraph(fileLines(), { key: 'files' }),
+      markdown(previewSource(), { key: 'preview' }),
+    ]),
+    separator('horizontal', { label: 'Selected file' }),
+    dialog({ key: 'confirm-delete', title: 'Delete file?', kind: 'danger-confirm', message: [[plain(selectedName())]] }, []),
+  ]));
+},
+</code></pre>
+<p>The dialog opens with <code>ui::open_popup("confirm-delete", ...)</code> in Rust and <code>openPopup('confirm-delete', ...)</code> in TypeScript. This is how the opened view looks in a 62-column area, with the danger border of the dialog drawn in the warning colour:</p>
+<pre class="term">╭  ≡ ● · Files───────────────────────────────────────────────╮
+│ ▼ src                            │ # Notes                 │
+│ › ▶ lib.rs                       │ Plugin entry point.     │
+│ › main.rs                        │                         │
+│──Selected file─────────────────────────────────────────    │
+│                                                            │
+│  ╭  Delete file?────────────────╮                          │
+│  │ main.rs                      │                          │
+│  │ Esc Cancel   Enter OK        │                          │
+│  ╰──────────────────────────────╯                          │
+│ Esc cancel · Enter ok                                      │
+╰────────────────────────────────────────────────────────────╯
+</pre>
+
+<p>Not generated; the glyphs are those the client draws (rounded corners, <code>─</code> rules, <code>│</code> dividers, <code>·</code> between hints).</p>
+<h3 id="text">Text</h3>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">// types::text::{RichSpan, SpanTarget}; types::ui::{DiffLayout}
+let advice = vec![vec![
+    RichSpan::plain(&quot;Threshold too low. &quot;),
+    RichSpan::new(&quot;Apply 180k&quot;, Style::default())
+        .target(SpanTarget::Action(&quot;apply-180k&quot;.into()))
+        .tooltip(&quot;Writes the recommended threshold and keeps a revert point&quot;),
+]];
+let text = tree.paragraph(Vec::new()).rich(advice).key(&quot;advice&quot;);   // `rich` replaces `lines`
+let diff = tree.diff_view(self.hunks.clone())
+    .layout(DiffLayout::Split).language(&quot;toml&quot;).word_diff(true).key(&quot;diff&quot;);
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { paragraph, diffView, richSpan } from '@ilium/plugin-sdk/ui/build';
+
+const text = paragraph([], { key: 'advice', rich: [[
+  richSpan('Threshold too low. '),
+  richSpan('Apply 180k', {
+    target: { tag: 'action', val: 'apply-180k' },
+    tooltip: 'Writes the recommended threshold and keeps a revert point',
+  }),
+]] });
+const diff = diffView(hunks, { key: 'diff', layout: 'split', language: 'toml', wordDiff: true });
+</code></pre>
+<p>A click on the span arrives as a <code>ui-action</code> on key <code>advice</code> with kind <code>activated</code> and value <code>text("apply-180k")</code>. <code>markdown</code> gains <code>task_click</code>, <code>images</code> and <code>base</code>; with <code>task_click</code>, a task item sends <code>toggled</code> with the line number and the plugin rewrites its source.</p>
+<h3 id="collections">Collections</h3>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">// types::ui::{CheckItem, ItemFormat}; types::text::TriState
+let members = tree.check_list(vec![
+    CheckItem::new(&quot;agents&quot;, &quot;All agents&quot;).state(TriState::Mixed).children([&quot;p1&quot;, &quot;p2&quot;]),
+    CheckItem::new(&quot;p1&quot;, &quot;claude: refactor&quot;).state(TriState::On),
+    CheckItem::new(&quot;p2&quot;, &quot;codex: tests&quot;).state(TriState::Off).disabled_reason(&quot;frozen&quot;),
+]).all_toggle(true).key(&quot;members&quot;);
+let globs = tree.list_editor(self.ignore_globs.clone())
+    .item_format(ItemFormat::Glob).reorderable(true).max_items(64).key(&quot;ignore&quot;);
+// events: ActionValue::ItemState(id, state) on &quot;members&quot;; ActionValue::Text(json_array) on &quot;ignore&quot;
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { checkList, listEditor } from '@ilium/plugin-sdk/ui/build';
+
+const members = checkList([
+  { id: 'agents', label: 'All agents', state: 'mixed', children: ['p1', 'p2'] },
+  { id: 'p1', label: 'claude: refactor', state: 'on', children: [] },
+  { id: 'p2', label: 'codex: tests', state: 'off', disabledReason: 'frozen', children: [] },
+], { key: 'members', allToggle: true });
+const globs = listEditor(ignoreGlobs, { key: 'ignore', itemFormat: 'glob', reorderable: true, maxItems: 64 });
+// events: { tag: 'item-state', val: [id, state] } and { tag: 'text', val: jsonArray }
+</code></pre>
+<p><code>menu</code> takes <code>entries</code> (submenus to depth 2, icons, tri-state checks, disabled reasons, tooltips, danger items); <code>list</code>, <code>table</code> and <code>tree_list</code> gain filter, multi-select (<code>ActionValue::Ids</code>), <code>follow_tail</code>, item tooltips and the responsive <code>columns</code> of <code>table</code>.</p>
+<h3 id="data-display">Data display</h3>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">// types::ui::{Dataset, ChartRender, Resample, MeterSegment, ProgressState}; types::text::Tone
+let tokens = tree.chart(vec![
+    Dataset::new(&quot;input&quot;, self.input_series()).gaps(true).resample(Resample::MinMax),
+    Dataset::new(&quot;output&quot;, self.output_series()).gaps(true).resample(Resample::MinMax),
+]).render(ChartRender::TextLine).y_label_width(6).key(&quot;tokens&quot;);
+let spend = tree.meter(vec![
+    MeterSegment { label: &quot;today&quot;.into(), value: 4.20, tone: Tone::Info },
+    MeterSegment { label: &quot;over budget&quot;.into(), value: 0.80, tone: Tone::Danger },
+]).max(5.0).show_values(true).key(&quot;spend&quot;);
+let job = tree.progress_row(&quot;Replaying 412 sessions&quot;)
+    .state(ProgressState::Running).percent(37.0).message(&quot;session 152 of 412&quot;).key(&quot;job&quot;);
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { chart, meter, progressRow } from '@ilium/plugin-sdk/ui/build';
+
+const tokens = chart([
+  { name: 'input', points: inputSeries(), gaps: true, resample: 'min-max' },
+  { name: 'output', points: outputSeries(), gaps: true, resample: 'min-max' },
+], { key: 'tokens', render: 'text-line', yLabelWidth: 6 });
+const spend = meter([
+  { label: 'today', value: 4.2, tone: 'info' },
+  { label: 'over budget', value: 0.8, tone: 'danger' },
+], { key: 'spend', max: 5, showValues: true });
+const job = progressRow('Replaying 412 sessions', { key: 'job', state: 'running', percent: 37, message: 'session 152 of 412' });
+</code></pre>
+<p>The progress row draws the same status glyphs as the progress footer of the client:</p>
+<pre class="term">╭  ≡ ● · Jobs────────────────────────────────────────────────╮
+│ ▶ RUNNING  37%  ███░░░░░░░  session 152 of 412             │
+│ <span class="w2">✓</span> DONE  Replay finished                                    │
+│ <span class="w2">✕</span> ERROR  Replay failed                                     │
+│ ! MONITOR FAILED  outcome unknown                          │
+╰────────────────────────────────────────────────────────────╯
+</pre>
+
+<h3 id="input">Input</h3>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">// types::ui::{ChoiceStyle, ViewMode}; types::geo::GeoPoint
+let palette = tree.choice(Vec::new()).source(&quot;ilium.palettes&quot;)
+    .style(ChoiceStyle::Dialog).filter(true).key(&quot;palette&quot;);
+let icon = tree.choice(Vec::new()).source(&quot;ilium.icons&quot;)
+    .style(ChoiceStyle::Dialog).view_modes([ViewMode::List, ViewMode::Grid]).key(&quot;icon&quot;);
+let chord = tree.key_capture().chord(self.chord.clone()).reserved_check(true).key(&quot;chord&quot;);
+let place = tree.location_picker()
+    .value(self.place)              // Option&lt;GeoPoint&gt;
+    .label(self.place_label.clone())
+    .search(true)                   // needs location.geocode
+    .allow_current(true)            // needs location.observer
+    .zoom(true)
+    .key(&quot;place&quot;);
+
+// in on_events
+if let Event::UiAction(UiAction { key, kind: ActionKind::Submitted, value: ActionValue::Geo(point), .. }) = event {
+    if key == &quot;place&quot; { self.place = Some(point); }
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { choice, keyCapture, locationPicker } from '@ilium/plugin-sdk/ui/build';
+
+const palette = choice([], { key: 'palette', source: 'ilium.palettes', style: 'dialog', filter: true });
+const icon = choice([], { key: 'icon', source: 'ilium.icons', style: 'dialog', viewModes: ['list', 'grid'] });
+const chord = keyCapture({ key: 'chord', chord, reservedCheck: true });
+const place = locationPicker({ key: 'place', value: place, label: placeLabel, search: true, allowCurrent: true, zoom: true });
+
+// in onEvents
+if (event.tag === 'ui-action' &amp;&amp; event.val.key === 'place'
+    &amp;&amp; event.val.kind === 'submitted' &amp;&amp; event.val.value.tag === 'geo') {
+  place = event.val.value.val; // { lat, lon }
+}
+</code></pre>
+<p>In a settings view, <code>location_picker</code> writes without any event handling when it has a <code>bind</code> prop (Rust <code>.bind("sky.location")</code>, TypeScript <code>bind: 'sky.location'</code>) naming one of the plugin's own <code>location</code> rows. The other input props: <code>choice</code> <code>items</code>, <code>source</code>, <code>filter</code>, <code>view_modes</code>, <code>disabled_marker</code>, <code>allow_custom</code> and <code>selected_id</code>; <code>number</code> <code>style</code> (<code>stepper</code>, <code>slider</code>), <code>steps</code>, <code>special_values</code>, <code>scale</code> and <code>debounce_ms</code>; <code>toggle</code> <code>style</code> (<code>switch</code>, <code>checkbox</code>, <code>icon</code>) and <code>tri_state</code>; <code>text_input</code> <code>debounce_ms</code>, <code>reveal_last</code>, <code>validation</code> and <code>suggestions</code>; <code>color_picker</code> <code>value</code>, <code>palette</code> and <code>allow_theme_roles</code>; <code>path_field</code> <code>kind</code>, <code>extensions</code> and <code>editable</code>.</p>
+<p>Choice, number, toggle and text rows draw with the leader rule: the label, one blank cell, dots, one blank cell, the control. A gap shorter than five cells stays blank, and the dots are never a hit target.</p>
+<pre class="term">╭  ≡ ● · Settings────────────────────────────────────────────╮
+│ Palette …………………………… ← Sunset … → +                         │
+│ Speed ………………………………… - 42 + *                               │
+│ Notifications ……………… [ On ]                                │
+│ Density ………… ─────●─────                                   │
+╰────────────────────────────────────────────────────────────╯
+</pre>
+
+<pre class="term">╭  ≡ ● · Palette─────────────────────────────────────────────╮
+│ ● Sunset                                                   │
+│   Ocean                                                    │
+│   Mono (needs Color mode)                              ┃   │
+│ 3 of 24 options · Current: Sunset                      │   │
+╰────────────────────────────────────────────────────────────╯
+</pre>
+
+<h3 id="status-and-feedback">Status and feedback</h3>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">// types::ui::SpinnerFrames; types::text::Tone
+let unread = tree.badge().count(self.unread).tone(Tone::Info).key(&quot;unread&quot;);
+let busy = tree.spinner(SpinnerFrames::Braille).interval_ms(100).label(&quot;Indexing&quot;);
+let warn = tree.notice(vec![vec![RichSpan::plain(&quot;The provider sends place names to photon.komoot.io.&quot;)]])
+    .tone(Tone::Warning).title(&quot;Privacy&quot;).actions([(&quot;ok&quot;, &quot;Understood&quot;)]).dismissible(true).key(&quot;privacy&quot;);
+let model = tree.icon().slot(&quot;model.claude&quot;).label(&quot;Claude&quot;);
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { badge, spinner, notice, icon, richSpan } from '@ilium/plugin-sdk/ui/build';
+
+const unread = badge({ key: 'unread', count: unreadCount, tone: 'info' });
+const busy = spinner('braille', { intervalMs: 100, label: 'Indexing' });
+const warn = notice([[richSpan('The provider sends place names to photon.komoot.io.')]], {
+  key: 'privacy', tone: 'warning', title: 'Privacy', actions: [['ok', 'Understood']], dismissible: true,
+});
+const model = icon({ slot: 'model.claude', label: 'Claude' });
+</code></pre>
+<p>The spinner steps its frames in the host (<code>⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏</code> for <code>braille</code>), so the plugin is not called per frame, and reduced motion shows one static frame.</p>
+<h3 id="media-and-embedded">Media and embedded</h3>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">// types::ui::{VideoSource, MediaFit}
+let clip = tree.video(VideoSource::Asset(&quot;loops/shore.webm&quot;.into()))
+    .autoplay(true).looped(true).fit(MediaFit::Cover).key(&quot;clip&quot;);
+let term = tree.terminal_view(self.pane).interactive(true).scrollback(true).key(&quot;term&quot;); // needs terminal.raw-input
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { video, terminalView } from '@ilium/plugin-sdk/ui/build';
+
+const clip = video({ tag: 'asset', val: 'loops/shore.webm' }, { key: 'clip', autoplay: true, loop: true, fit: 'cover' });
+const term = terminalView(pane, { key: 'term', interactive: true, scrollback: true }); // needs terminal.raw-input
+</code></pre>
+<h3 id="hover-pointer-drag-feedback-popovers-and-theme-tokens">Hover, pointer, drag feedback, popovers and theme tokens</h3>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">// Hover and pointer events are opt-in per node.
+let cell = tree.paragraph(self.cell_lines()).key(&quot;cell&quot;)
+    .flags(NodeFlags::FOCUSABLE | NodeFlags::HOVER_EVENTS | NodeFlags::POINTER_EVENTS)
+    .tooltip(Tooltip::text(&quot;Drag to select&quot;));
+// A non-modal popover anchored to a widget of the same view.
+ui::open_popup_with(&quot;stats&quot;, PopupAnchor::AtKey(KeyAnchor { key: &quot;cell&quot;.into(), side: AnchorSide::Below }),
+    PopupOptions { modal: false, pinnable: true, dismiss_on_leave: true, close_on_escape: true })?;
+// Motion and density follow the user.
+let extras = ui::theme_extras();
+let frames = if extras.reduced_motion { 1 } else { 8 };
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { openPopupWith, themeExtras } from '@ilium/plugin-sdk/host/ui';
+
+// Hover and pointer events are opt-in per node.
+const cell = paragraph(cellLines(), {
+  key: 'cell',
+  flags: { focusable: true, hoverEvents: true, pointerEvents: true },
+  tooltip: { lines: [[plain('Drag to select')]], delayMs: undefined },
+});
+// A non-modal popover anchored to a widget of the same view.
+openPopupWith('stats', { tag: 'at-key', val: { key: 'cell', side: 'below' } },
+  { modal: false, pinnable: true, dismissOnLeave: true, closeOnEscape: true });
+// Motion and density follow the user.
+const frames = themeExtras().reducedMotion ? 1 : 8;
+</code></pre>
+<p>Widget state set by the host gains <code>check-list</code> item states (<code>tri</code>), <code>geo</code>, <code>number</code>, <code>split</code> (per mille) and <code>ids</code> cases, next to the basic cases. At most four popups are open per view.</p>
+<h2 id="reacting-to-ui-actions">Reacting to UI actions</h2>
+<p>A <code>ui-action</code> event carries <code>view</code>, <code>key</code>, <code>kind</code> (<code>ActionKind</code>) and <code>value</code> (<code>ActionValue</code>). There are 17 kinds (six of them extended: <code>hover-enter</code>, <code>hover-leave</code>, <code>pointer</code>, <code>drag-over</code>, <code>resized</code>, <code>filter-changed</code>) and 12 value cases (five of them extended: <code>pointer</code>, <code>drag-over</code>, <code>item-state</code>, <code>geo</code>, <code>ids</code>). <code>scrolled</code>, <code>pointer</code> and <code>drag-over</code> are coalesced; the others are never dropped.</p>
+<table>
+<thead>
+<tr>
+<th>New kind</th>
+<th>Sent by</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>hover-enter</code>, <code>hover-leave</code></td>
+<td>nodes with <code>HOVER_EVENTS</code></td>
+<td>none</td>
+</tr>
+<tr>
+<td><code>pointer</code></td>
+<td>nodes with <code>POINTER_EVENTS</code></td>
+<td><code>pointer(ViewPointer)</code> with kind, button, modifiers, column, row, <code>sub_x</code>, <code>sub_y</code>, clicks</td>
+</tr>
+<tr>
+<td><code>drag-over</code></td>
+<td>drop targets during a drag</td>
+<td><code>drag-over(DragOverValue { source_key, target_key, index, accept })</code></td>
+</tr>
+<tr>
+<td><code>resized</code></td>
+<td><code>split</code></td>
+<td><code>number</code> (per mille)</td>
+</tr>
+<tr>
+<td><code>filter-changed</code></td>
+<td><code>list</code>, <code>choice</code></td>
+<td><code>text</code>, debounced 150 ms</td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr>
+<th>New value</th>
+<th>Rust</th>
+<th>TypeScript</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>view pointer</td>
+<td><code>ActionValue::Pointer(ViewPointer)</code></td>
+<td><code>{ tag: 'pointer', val: {...} }</code></td>
+</tr>
+<tr>
+<td>drag feedback</td>
+<td><code>ActionValue::DragOver(DragOverValue)</code></td>
+<td><code>{ tag: 'drag-over', val: {...} }</code></td>
+</tr>
+<tr>
+<td>check item</td>
+<td><code>ActionValue::ItemState(String, TriState)</code></td>
+<td><code>{ tag: 'item-state', val: [id, state] }</code></td>
+</tr>
+<tr>
+<td>place</td>
+<td><code>ActionValue::Geo(GeoPoint)</code></td>
+<td><code>{ tag: 'geo', val: { lat, lon } }</code></td>
+</tr>
+<tr>
+<td>selection</td>
+<td><code>ActionValue::Ids(Vec&lt;String&gt;)</code></td>
+<td><code>{ tag: 'ids', val: ['a', 'b'] }</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">// Answer a drag: the next render sets the target's accept prop.
+let Event::UiAction(UiAction { key, kind, value, .. }) = event else { return };
+match (kind, value) {
+    (ActionKind::DragOver, ActionValue::DragOver(over)) =&gt; {
+        self.accept = if over.index == 0 { DropAccept::Before } else { DropAccept::Inside };
+    }
+    (ActionKind::Pointer, ActionValue::Pointer(pointer)) if pointer.kind == PointerKind::Down =&gt; {
+        self.start_selection(&amp;key, pointer.column, pointer.row, pointer.sub_x);
+    }
+    (ActionKind::Resized, ActionValue::Number(per_mille)) =&gt; self.remember_split(per_mille),
+    _ =&gt; {}
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">// Answer a drag: the next render sets the target's accept prop.
+if (event.tag !== 'ui-action') return;
+const { key, kind, value } = event.val;
+if (kind === 'drag-over' &amp;&amp; value.tag === 'drag-over') {
+  accept = value.val.index === 0 ? 'before' : 'inside';
+} else if (kind === 'pointer' &amp;&amp; value.tag === 'pointer' &amp;&amp; value.val.kind === 'down') {
+  startSelection(key, value.val.column, value.val.row, value.val.subX);
+} else if (kind === 'resized' &amp;&amp; value.tag === 'number') {
+  rememberSplit(value.val);
+}
+</code></pre>
+<h2 id="extended-events-and-intents">Extended events and intents</h2>
+<p>The 18 extended events arrive in <code>on_events</code> / <code>onEvents</code> like any other. The 23 extended intents and the five extended payloads are submitted the same way (see <a href="/pages/reference-events-and-intents/">Events and intents</a> for every payload). Names follow the naming rule: <code>Event::ScreenChanged(..)</code> and <code>{ tag: 'screen-changed', val }</code>, <code>Intent::FreezePane(FreezePaneSpec)</code> and <code>{ tag: 'freeze-pane', val }</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Area</th>
+<th>Extended intents</th>
+<th>Extended payloads</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Pane lifecycle (<code>panes.lifecycle</code>)</td>
+<td><code>freeze-pane</code>, <code>unfreeze-pane</code>, <code>replace-pane-command</code>, <code>terminate-pane-process</code>, <code>resize-pane</code></td>
+<td><code>send-input</code> (<code>if-current</code>, <code>lock-user-input</code>, returns <code>ok-epoch</code>)</td>
+</tr>
+<tr>
+<td>Tree (<code>tree.restructure</code>, <code>tree.write</code>, <code>tree.attention</code>)</td>
+<td><code>create-group</code>, <code>create-folder</code>, <code>create-project</code>, <code>create-split</code>, <code>set-bookmarked</code>, <code>set-expanded</code>, <code>restructure</code>, <code>revert-restructure</code>, <code>set-inferred-icon</code>, <code>mark-attention</code>, <code>ack-attention</code></td>
+<td><code>rename-node</code> (<code>expected-revision</code>), <code>set-virtual-rows</code> (parents, drops)</td>
+</tr>
+<tr>
+<td>Chrome (<code>ui.chrome</code>, <code>notify.toast</code>, <code>open-external</code>)</td>
+<td><code>open-external</code>, <code>set-status-segment</code>, <code>clear-status-segment</code>, <code>set-frame-slot</code>, <code>clear-frame-slot</code>, <code>toast</code>, <code>dismiss-toast</code></td>
+<td><code>set-decoration</code> (spans, tooltip, frames), <code>notify</code> (coalesce key)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">// Freeze a pane for a stable read, then send guarded input.
+let freeze = Submission::keyed(
+    Intent::FreezePane(FreezePaneSpec { pane }),
+    dedup::key_for(&amp;[&quot;freeze&quot;, &amp;pane.to_string()]),
+);
+let send = Submission::new(Intent::SendInput(SendInputSpec {
+    if_current: Some(self.last_epoch),
+    ..SendInputSpec::text(pane, &quot;continue\n&quot;)
+}));
+vec![freeze, send]
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">// Freeze a pane for a stable read, then send guarded input.
+return [
+  { intent: { tag: 'freeze-pane', val: { pane } }, correlation: 1n, dedupKey: `freeze:${pane}` },
+  { intent: { tag: 'send-input', val: { pane, text: 'continue\n', ifCurrent: lastEpoch } },
+    correlation: 2n, dedupKey: undefined },
+];
+</code></pre>
+<p>The 18 extended events, all appended to the <code>event</code> variant: <code>screen-changed</code>, <code>user-line-submitted</code>, <code>signal-changed</code>, <code>agent-model-changed</code>, <code>editor-pointer</code>, <code>editor-viewport-changed</code>, <code>http-stream-data</code>, <code>http-stream-closed</code>, <code>child-output</code>, <code>child-exited</code>, <code>pane-lifecycle-changed</code>, <code>attention-changed</code>, <code>client-request</code>, <code>kernel-settings-changed</code>, <code>keymap-changed</code>, <code>durable-timer-fired</code>, <code>input-uncertain</code> and <code>display-mode-changed</code>. In Rust they are <code>Event::ScreenChanged(..)</code> and so on; in TypeScript <code>{ tag: 'screen-changed', val }</code>. Each needs the grant listed on <a href="/pages/reference-events-and-intents/">Events and intents</a>. Match on the tag and ignore tags you do not know.</p>
+<h2 id="extended-host-services">Extended host services</h2>
+<p>Each service is a module in the table above, gated by a grant. All of the following run in both SDKs; slow calls are awaited as described earlier.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">// catalogs (server or client): query a provider, page with the cursor.
+let page = catalogs::query(CatalogQuery { catalog: &quot;ilium.palettes&quot;.into(), filter: Some(&quot;sun&quot;.into()), cursor: None, limit: 50 }).await?;
+// geocode (client, location.geocode): search and reverse.
+let places = geocode::search(&quot;Lisbon&quot;, 5).await?;            // Vec&lt;GeoPlace&gt;
+// fs: atomic write with a revision guard, and a tail for logs.
+let written = fs::write_atomic(&amp;path, bytes, Some(revision)).await?;     // Revisioned
+let chunk = fs::tail(&amp;path, cursor, 64 * 1024).await?;                    // TailChunk
+// http: a streamed response (server-sent events).
+let stream = http::open_stream(StreamRequest { request, framing: StreamFraming::ServerSentEvents, max_chunk_bytes: 16 * 1024 }).await?;
+// vector: embed text, store, search (inference.embed).
+let ids = vector::embed(&amp;[&quot;notes on retries&quot;.to_string()], &quot;search&quot;).await?;
+// process: spawn a long-lived child (process.long-lived).
+let child = process::spawn(SpawnSpec { process: spec, stdin_open: true, line_mode: true })?;
+child.write_stdin(b&quot;ping\n&quot;)?;
+// durable timers and journal.
+timers::at(&quot;nightly&quot;, 86_400_000, true)?;
+journal::log_event(&quot;moved&quot;, &amp;payload)?;
+// kernel settings and keymap (read-only).
+let value = kernel_settings::read(&quot;terminal.scrollback&quot;)?;
+let chord = keymap::bindings(&quot;palette.open&quot;)?;
+// client requests: ask the attached client to do something.
+let answer = client_requests::request(&quot;pick-file&quot;, &amp;args).await?;
+// sessions (server): list and send to another session.
+let all = sessions::list_live()?;
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import * as catalogs from '@ilium/plugin-sdk/host/catalogs';
+import * as geocode from '@ilium/plugin-sdk/host/geocode';
+import * as fs from '@ilium/plugin-sdk/host/fs';
+import * as http from '@ilium/plugin-sdk/host/http';
+import * as vector from '@ilium/plugin-sdk/host/vector';
+import * as proc from '@ilium/plugin-sdk/host/process';
+import * as timers from '@ilium/plugin-sdk/host/timers';
+import * as journal from '@ilium/plugin-sdk/host/journal';
+import * as kernel from '@ilium/plugin-sdk/host/kernel-settings';
+import * as keymap from '@ilium/plugin-sdk/host/keymap';
+import * as clientRequests from '@ilium/plugin-sdk/host/client-requests';
+import * as sessions from '@ilium/plugin-sdk/host/sessions';
+
+const page = await catalogs.query({ catalog: 'ilium.palettes', filter: 'sun', cursor: undefined, limit: 50 });
+const places = await geocode.search('Lisbon', 5);                         // GeoPlace[]
+const written = await fs.writeAtomic(path, bytes, revision);              // Revisioned
+const chunk = await fs.tail(path, cursor, 64 * 1024);                     // TailChunk
+const stream = await http.stream({ request, framing: 'server-sent-events', maxChunkBytes: 16 * 1024 });
+const ids = await vector.embed(['notes on retries'], 'search');
+const child = proc.spawn({ process: spec, stdinOpen: true, lineMode: true });
+child.writeStdin(new TextEncoder().encode('ping\n'));
+timers.setDurable('nightly', 86_400_000n, true);
+journal.append('moved', payload);
+const value = kernel.get('terminal.scrollback');
+const chord = keymap.lookup('palette.open');
+const answer = await clientRequests.request('pick-file', args);
+const all = sessions.list();
+</code></pre>
+<p>Terminal, agent, editor and basic primitives gain the following functions, each behind the grant named in the table.</p>
+<table>
+<thead>
+<tr>
+<th>Primitive</th>
+<th>Rust</th>
+<th>TypeScript</th>
+<th>Grant</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>terminal</td>
+<td><code>read_cells</code>, <code>modes</code>, <code>foreground_process</code>, <code>freeze_snapshot</code>, <code>history_text</code>, <code>search_history</code>, <code>lock_input</code></td>
+<td><code>readCells</code>, <code>modes</code>, <code>foregroundProcess</code>, <code>freezeSnapshot</code>, <code>historyText</code>, <code>searchHistory</code>, <code>lockInput</code></td>
+<td><code>terminal.read-cells</code>, <code>terminal.history</code>, <code>terminal.input-lock</code></td>
+</tr>
+<tr>
+<td>agent</td>
+<td><code>model</code>, <code>prompt_epoch</code>, <code>transcript</code></td>
+<td><code>model</code>, <code>promptEpoch</code>, <code>transcript</code></td>
+<td><code>agent.transcript</code> for <code>transcript</code></td>
+</tr>
+<tr>
+<td>editor</td>
+<td><code>viewport</code>, <code>set_minimap_marks</code></td>
+<td><code>viewport</code>, <code>setMinimapMarks</code></td>
+<td>existing editor grants</td>
+</tr>
+<tr>
+<td>basic</td>
+<td><code>report_activity</code>, <code>set_dirty</code></td>
+<td><code>reportActivity</code>, <code>setDirty</code></td>
+<td>none beyond <code>basic</code></td>
+</tr>
+<tr>
+<td>cli</td>
+<td>additions listed on <a href="/pages/api-cli/">cli</a></td>
+<td>same, camelCase</td>
+<td><code>cli</code></td>
+</tr>
+<tr>
+<td>ui</td>
+<td><code>open_popup_with</code>, <code>theme_extras</code></td>
+<td><code>openPopupWith</code>, <code>themeExtras</code></td>
+<td><code>ui.chrome</code> for chrome surfaces</td>
+</tr>
+</tbody>
+</table>
+<p><code>gpu</code> is <code>@unstable</code>: import it only from a scene and expect it to change. Nine of the grants in this table are high risk and prompt the user with a separate consent line: <code>terminal.history</code>, <code>terminal.input-lock</code>, <code>terminal.raw-input</code>, <code>panes.lifecycle</code>, <code>tree.restructure</code>, <code>sessions.cross</code>, <code>process.long-lived</code>, <code>agent.transcript</code> and <code>settings.read-kernel:api</code>. See <a href="/pages/reference-capabilities/">Capabilities</a> and <a href="/pages/security/">Security</a>.</p>
+<h2 id="settings-rows-meters-and-row-state">Settings rows, meters and row state</h2>
+<p>The manifest <code>settings</code> object declares 18 row types. The plugin updates a row's state at run time without republishing the manifest.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">// Meter row filled from the plugin, and a state banner on a row.
+ui::set_meter(&quot;usage.spend&quot;, vec![MeterSegment { label: &quot;today&quot;.into(), value: 4.2, tone: Tone::Info }])?;
+ui::set_row_state(&quot;provider.key&quot;, RowState { kind: RowStateKind::Warning, message: &quot;Key expires in 3 days&quot;.into() })?;
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">// Meter row filled from the plugin, and a state banner on a row.
+setMeter('usage.spend', [{ label: 'today', value: 4.2, tone: 'info' }]);
+setRowState('provider.key', { kind: 'warning', message: 'Key expires in 3 days' });
+</code></pre>
+<p>The manifest side, identical for both languages:</p>
+<pre><code class="language-json">{
+  &quot;contributes&quot;: {
+    &quot;settings&quot;: {
+      &quot;sections&quot;: [{
+        &quot;id&quot;: &quot;usage&quot;, &quot;title&quot;: &quot;Usage&quot;,
+        &quot;rows&quot;: [
+          { &quot;id&quot;: &quot;usage.spend&quot;, &quot;type&quot;: &quot;meter&quot;, &quot;label&quot;: &quot;Spend&quot; },
+          { &quot;id&quot;: &quot;provider.key&quot;, &quot;type&quot;: &quot;text&quot;, &quot;label&quot;: &quot;API key&quot;, &quot;secret&quot;: true },
+          { &quot;id&quot;: &quot;sky.location&quot;, &quot;type&quot;: &quot;location&quot;, &quot;label&quot;: &quot;Location&quot; }
+        ]
+      }]
+    }
+  }
+}
+</code></pre>
+<p>See <a href="/pages/reference-settings-schema/">Settings schema</a> for all 18 row types.</p>
+<h2 id="provider-exports">Provider exports</h2>
+<p>Each optional export is a small trait or object.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">impl CatalogProvider for MyPlugin {
+    fn query_catalog(&amp;mut self, query: CatalogQuery) -&gt; Result&lt;CatalogPage, PluginError&gt; {
+        let items = self.palettes.iter()
+            .filter(|p| query.filter.as_deref().map_or(true, |f| p.name.contains(f)))
+            .map(|p| CatalogItem::new(&amp;p.id, &amp;p.name)).collect();
+        Ok(CatalogPage { items, next: None, total: Some(self.palettes.len() as u64) })
+    }
+}
+impl TokenProvider for MyPlugin {
+    fn tokens(&amp;mut self, buffer: BufferId, first_line: u32, lines: Vec&lt;String&gt;, state_in: Option&lt;Vec&lt;u8&gt;&gt;)
+        -&gt; (Vec&lt;Token&gt;, Option&lt;Vec&lt;u8&gt;&gt;) {
+        let found = lines.iter().enumerate()
+            .filter_map(|(i, l)| l.find('#').map(|c| Token { line: first_line + i as u32, start: c as u32, length: (l.len() - c) as u32, kind: TokenKind::Comment }))
+            .collect();
+        (found, state_in)
+    }
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">const provider = definePlugin({
+  side: 'client',
+  queryCatalog(query) {
+    const items = palettes
+      .filter((p) =&gt; query.filter === undefined || p.name.includes(query.filter))
+      .map((p) =&gt; ({ id: p.id, label: p.name }));
+    return { items, next: undefined, total: BigInt(palettes.length) };
+  },
+  tokens(buffer, firstLine, lines, stateIn) {
+    const found = lines.flatMap((l, i) =&gt; l.includes('#')
+      ? [{ line: firstLine + i, start: l.indexOf('#'), length: l.length - l.indexOf('#'), kind: 'comment' as const }]
+      : []);
+    return [found, stateIn];
+  },
+});
+</code></pre>
+<p>The manifest lists the exports and the contribution keys that point at them: <code>catalogs</code>, <code>tree_toolbar</code>, <code>row_actions</code>, <code>tree_orderings</code>, <code>status_segments</code>, <code>pane_frame_slots</code>, <code>display_modes</code>, <code>client_requests</code> and <code>languages</code>, plus the top-level <code>limits_tier</code>. All are explained on <a href="/pages/reference-manifest/">Manifest reference</a>.</p>
+<h2 id="extension-points">Extension points</h2>
+<p>The <code>extensions</code> host interface lets a plugin read the contributions to its own points and run hooks. A plugin that contributes handlers implements <code>hook-handler</code>. The contract is in <a href="/pages/api-extension-points/">Extension points</a>. The examples below are illustrations and are not compiled.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::host::extensions;
+use ilium_plugin_sdk::exports::HookHandler;
+
+// Owner: needs extensions.provide:com.example.notes/after-save
+let entries = extensions::list(&quot;com.example.notes/recognisers&quot;)?;
+let request = extensions::run_hook(&quot;com.example.notes/after-save&quot;, &amp;payload_json).await;
+// Outcome ok: take the reply. refused(extension.vetoed): do not perform the action.
+
+// Contributor: needs extensions.contribute:com.example.notes/after-save
+impl HookHandler for MyPlugin {
+    fn handle_hook(&amp;mut self, call: HookCall) -&gt; HookReply {
+        match call.extension.as_str() {
+            &quot;strip-tokens&quot; =&gt; HookReply::Replace(strip(&amp;call.payload_json)),
+            &quot;no-secrets&quot; if has_secret(&amp;call.payload_json) =&gt; HookReply::Refuse(&quot;secret in text&quot;.into()),
+            _ =&gt; HookReply::Pass,
+        }
+    }
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { list, runHook } from '@ilium/plugin-sdk/host/extensions';
+
+// Owner: needs extensions.provide:com.example.notes/after-save
+const entries = list('com.example.notes/recognisers');
+const outcome = await runHook('com.example.notes/after-save', payloadJson);
+
+// Contributor: needs extensions.contribute:com.example.notes/after-save
+const plugin = definePlugin({
+  side: 'server',
+  hookHandler(call) {
+    if (call.extension === 'strip-tokens') return { tag: 'replace', val: strip(call.payloadJson) };
+    if (hasSecret(call.payloadJson)) return { tag: 'refuse', val: 'secret in text' };
+    return { tag: 'pass' };
+  },
+});
+</code></pre>
+<p>Reply constructors: Rust <code>HookReply::Pass</code>, <code>HookReply::Replace(json)</code>, <code>HookReply::Refuse(reason)</code> and <code>HookReply::Answer(json)</code>. TypeScript <code>{ tag: 'pass' }</code>, <code>{ tag: 'replace', val: json }</code>, <code>{ tag: 'refuse', val: reason }</code> and <code>{ tag: 'answer', val: json }</code>. A reply that the point's mode does not allow counts as a pass. <code>register</code> and <code>unregister</code> work only on collect points with <code>dynamic: true</code>. The owner receives the topic <code>ilium.extensions/changed</code> and calls <code>list</code> again.</p>
+<h2 id="scenes">Scenes</h2>
+<p>A scene plugin (<code>side = "scene"</code>) draws into a surface and follows the shared look; colour, dither and display settings are never scene settings.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">#[ilium_plugin(side = &quot;scene&quot;, exports = [&quot;renderer&quot;])]
+#[derive(Default)]
+struct Waves { phase: f32 }
+
+impl Renderer for Waves {
+    fn frame(&amp;mut self, surface: &amp;mut Surface, delta_ms: u32) {
+        self.phase += delta_ms as f32 * 0.001;
+        surface.clear();
+        for x in 0..surface.width() { surface.set_tone(x, (self.phase + x as f32 * 0.2).sin() * 0.5 + 0.5); }
+    }
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">export const { lifecycle, handler, renderer } = defineScene({
+  frame(surface, deltaMs) {
+    phase += deltaMs * 0.001;
+    surface.clear();
+    for (let x = 0; x &lt; surface.width(); x++) surface.setTone(x, Math.sin(phase + x * 0.2) * 0.5 + 0.5);
+  },
+});
+</code></pre>
+<p>The glyph-plane surface adds font loading through <code>anim::fonts</code> (<code>Font</code> resource) and palette delivery. See <a href="/pages/porting-iliumanim/">Porting IliumAnim</a> and <a href="/pages/performance/">Performance</a>.</p>
+<h2 id="worked-example-a-working-badge">Worked example: a working badge</h2>
+<p>The plugin puts a short badge on every agent that starts working.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::host::log::{self, Level};
+use ilium_plugin_sdk::prelude::*;
+use ilium_plugin_sdk::types::events::AgentActivityEvent;
+use ilium_plugin_sdk::types::intents::SetDecorationSpec;
+use ilium_plugin_sdk::types::tree::AgentActivity;
+
+#[ilium_plugin(side = &quot;server&quot;)]
+#[derive(Default)]
+struct Hello;
+
+impl Lifecycle for Hello {
+    fn activate(&amp;mut self, context: Activation) -&gt; Result&lt;(), PluginError&gt; {
+        log::log(Level::Info, &amp;format!(&quot;hello from {}&quot;, context.plugin));
+        Ok(())
+    }
+}
+
+impl Handler for Hello {
+    fn on_events(&amp;mut self, batch: Vec&lt;Event&gt;) -&gt; Vec&lt;Submission&gt; {
+        let mut submissions = Vec::new();
+        for event in batch {
+            let Event::AgentActivityChanged(AgentActivityEvent { node, current, .. }) = event
+            else { continue };
+            if current != AgentActivity::Working { continue; }
+            submissions.push(Submission::new(Intent::SetDecoration(SetDecorationSpec {
+                node, slot: &quot;hello&quot;.into(), content: vec![Span::plain(&quot;hi&quot;)],
+                icon: None, sort_key: None, persist: false,
+                ..Default::default()   // the extended optional fields: spans, tooltip, frames, tone
+            })));
+        }
+        submissions
+    }
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { definePlugin } from '@ilium/plugin-sdk';
+import { log } from '@ilium/plugin-sdk/host/log';
+
+export const { lifecycle, handler } = definePlugin({
+  side: 'server',
+  activate(context) { log('info', `hello from ${context.plugin}`); },
+  onEvents(batch) {
+    return batch.flatMap((event) =&gt;
+      event.tag === 'agent-activity-changed' &amp;&amp; event.val.current === 'working'
+        ? [{ intent: { tag: 'set-decoration', val: {
+              node: event.val.node, slot: 'hello', content: [{ text: 'hi' }], persist: false } },
+             correlation: 0n, dedupKey: undefined }]
+        : []);
+  },
+});
+</code></pre>
+<p>The manifest, shared by both:</p>
+<pre><code class="language-json">{
+  &quot;server&quot;: { &quot;entry&quot;: &quot;server.wasm&quot;, &quot;world&quot;: &quot;ilium:server/base@0.1.0&quot;, &quot;exports&quot;: [] },
+  &quot;capabilities&quot;: { &quot;server&quot;: [&quot;agent.read&quot;, &quot;tree.decorate&quot;] },
+  &quot;contributes&quot;: {
+    &quot;decoration_slots&quot;: [{ &quot;id&quot;: &quot;hello&quot;, &quot;placement&quot;: &quot;badge&quot;, &quot;priority&quot;: 50 }]
+  }
+}
+</code></pre>
+<h2 id="testing">Testing</h2>
+<p>The test double runs a plugin against a fake host in the same process. Rust enables it with the <code>testing</code> feature; TypeScript imports <code>@ilium/plugin-sdk/testing</code> and runs under <code>bun test</code>. The exact methods, limits and error codes are in <a href="/pages/reference-test-harness/">Test harness reference</a>. The how-to is <a href="/pages/testing/">Testing plugins</a>.</p>
+<table>
+<thead>
+<tr>
+<th>Operation</th>
+<th>Rust (<code>testing::FakeHost</code>)</th>
+<th>TypeScript (<code>createFakeHost()</code>)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Create from the manifest</td>
+<td><code>FakeHost::for_manifest("manifest.json")?</code></td>
+<td><code>createFakeHost().forManifest('manifest.json')</code></td>
+</tr>
+<tr>
+<td>Grant a capability</td>
+<td><code>.grant("tree.decorate")</code> before activation, <code>grant_now</code> after</td>
+<td><code>.grant('tree.decorate')</code>, <code>grantNow</code> after</td>
+</tr>
+<tr>
+<td>Activate</td>
+<td><code>host.activate::&lt;Hello&gt;()</code> returns a <code>PluginHandle</code></td>
+<td><code>await host.activate({ lifecycle, handler })</code> or <code>await host.activateModule('../src/server')</code></td>
+</tr>
+<tr>
+<td>Build events</td>
+<td><code>events::activity(node, previous, current)</code>, <code>events::command(name, arguments_json)</code></td>
+<td><code>events.activity(node, previous, current)</code>, <code>events.command(name, argumentsJson)</code></td>
+</tr>
+<tr>
+<td>Deliver events</td>
+<td><code>host.deliver(events)</code> returns <code>Vec&lt;Submission&gt;</code></td>
+<td><code>host.deliver(events)</code> returns the submissions</td>
+</tr>
+<tr>
+<td>Deliver outcomes</td>
+<td><code>host.settle()</code></td>
+<td><code>await host.settle()</code></td>
+</tr>
+<tr>
+<td>Render</td>
+<td><code>host.render(ViewTarget::Panel("main".into()), 62, 12)</code></td>
+<td><code>host.render({ tag: 'panel', val: 'main' }, 62, 12)</code></td>
+</tr>
+<tr>
+<td>Read the screen</td>
+<td><code>screen.row(n)</code>, <code>screen.cell(row, column)</code></td>
+<td><code>screen.row(n)</code>, <code>screen.cell(row, column)</code></td>
+</tr>
+</tbody>
+</table>
+<pre><code class="language-rust">#[test]
+fn badge_is_set_when_agent_works() {
+    let mut host = FakeHost::for_manifest(&quot;manifest.json&quot;).unwrap();
+    host.activate::&lt;Hello&gt;();
+    let submissions = host.deliver(vec![events::activity(7, AgentActivity::Idle, AgentActivity::Working)]);
+    assert_eq!(submissions.len(), 1);
+}
+</code></pre>
+<pre><code class="language-ts">import { test, expect } from 'bun:test';
+import { createFakeHost, events } from '@ilium/plugin-sdk/testing';
+
+test('badge is set when agent works', async () =&gt; {
+  const host = createFakeHost().forManifest('manifest.json');
+  await host.activateModule('../src/server');
+  expect(host.deliver([events.activity(7n, 'idle', 'working')]).length).toBe(1);
+});
+</code></pre>
+<p>The harness has a golden-file helper, <code>assert_golden</code>, a pointer helper, <code>click</code>, and <code>FakeSession</code> for tests with several plugins. See the reference page.</p>
+<h2 id="package-surface">Package surface</h2>
+<p>The SDK does not build packages. The <code>ilium plugin</code> command does that, from the files of the project. A plugin author touches the package in three places: the manifest, the <code>help/</code> folder and the <code>dist/</code> output. The build stages, the package layout and the signing steps are in <a href="/pages/reference-plugin-cli/">Plugin command-line reference</a> and <a href="/pages/packages/">Packages</a>. <code>ilium plugin pack</code> builds an unsigned package. <code>ilium plugin sign</code> signs it.</p>
+<h2 id="sdk-versioning-policy">SDK versioning policy</h2>
+<p>The SDK version has its own number, separate from the contract <code>ilium:plugin@0.1.0</code>. A new SDK release that keeps the contract compatible raises the minor or patch number. An SDK release that needs a new contract version raises the contract and writes the change in the changelog of the SDK. <code>ilium plugin check</code> fails with <code>component.api-version-mismatch</code> when the component and the manifest name different contract versions. See <a href="/pages/versioning/">Versioning</a>.</p>
+<h2 id="edge-cases">Edge cases</h2>
+<ul>
+<li>A batch holds at most 256 events and a submission list at most 256 entries; a larger list traps the instance with <code>trap.submission-batch</code>.</li>
+<li>A crashed instance restarts after 1 s, then 5 s; the third failure within 10 minutes disables the plugin until the user enables it.</li>
+<li><code>on_events</code> has a 20 ms deadline, <code>render</code> 10 ms, <code>activate</code> 2000 ms and <code>deactivate</code> 500 ms. A breach traps the instance.</li>
+<li>Instance memory is capped at 32 MiB (the <code>memory_mib</code> manifest key can raise it, up to 128 MiB for T2 and T3 plugins).</li>
+<li>A log message over 16 KiB is cut and ends with <code>…[truncated]</code>.</li>
+<li>An await that never completes is cancelled with <code>timed-out</code> when its request timeout elapses.</li>
+<li><code>toolchain.sdk-missing</code>, <code>toolchain.language-ambiguous</code>, <code>manifest.exports-mismatch</code> and <code>package.old-format</code> stop <code>ilium plugin build</code> with a clear message.</li>
+</ul>
+<h2 id="what-the-user-sees">What the user sees</h2>
+<figure>
+<pre class="term"><span class="t-prompt">$</span> ilium plugin logs com.example.hello
+<span class="t-dim">2026-10-12 09:14:02</span> info  server com.example.hello hello from com.example.hello
+<span class="t-dim">2026-10-12 09:14:07</span> <span class="t-warn">warn</span>  server com.example.hello retry in 250 ms
+</pre>
+<figcaption>Rendered at 48 columns. Illustrative. The log format is defined in <a href="/pages/reference-debugging-tools/">Debugging tools</a>.</figcaption>
+</figure>
+
+<h3 id="see-also">See also</h3>
+<ul>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a> and <a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a> and <a href="/pages/api-exports/">Exports</a></li>
+<li><a href="/pages/widgets-index/">Widgets index</a></li>
+<li><a href="/pages/reference-events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+</ul>
+<p>Checked against the API version <code>ilium:plugin@0.1.0</code>.</p>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/porting-iliumanim/"><small>Previous</small>Moving from .iliumanim to .iliumpkg</a><a class="next" href="/pages/settings-screens/"><small>Next</small>Building settings screens</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#you-will-need">You will need</a></li><li class="l2"><a href="#project-layout-and-package-files">Project layout and package files</a></li><li class="l2"><a href="#how-a-plugin-is-built">How a plugin is built</a></li><li class="l2"><a href="#exports-and-entry-points">Exports and entry points</a></li><li class="l2"><a href="#modules-import-paths-and-names">Modules, import paths and names</a></li><li class="l2"><a href="#values-submissions-and-outcomes">Values, submissions and outcomes</a></li><li class="l2"><a href="#calls-requests-and-errors">Calls, requests and errors</a></li><li class="l2"><a href="#building-ui-trees">Building UI trees</a></li><li class="l3"><a href="#layout-and-containers">Layout and containers</a></li><li class="l3"><a href="#text">Text</a></li><li class="l3"><a href="#collections">Collections</a></li><li class="l3"><a href="#data-display">Data display</a></li><li class="l3"><a href="#input">Input</a></li><li class="l3"><a href="#status-and-feedback">Status and feedback</a></li><li class="l3"><a href="#media-and-embedded">Media and embedded</a></li><li class="l3"><a href="#hover-pointer-drag-feedback-popovers-and-theme-tokens">Hover, pointer, drag feedback, popovers and theme tokens</a></li><li class="l2"><a href="#reacting-to-ui-actions">Reacting to UI actions</a></li><li class="l2"><a href="#extended-events-and-intents">Extended events and intents</a></li><li class="l2"><a href="#extended-host-services">Extended host services</a></li><li class="l2"><a href="#settings-rows-meters-and-row-state">Settings rows, meters and row state</a></li><li class="l2"><a href="#provider-exports">Provider exports</a></li><li class="l2"><a href="#extension-points">Extension points</a></li><li class="l2"><a href="#scenes">Scenes</a></li><li class="l2"><a href="#worked-example-a-working-badge">Worked example: a working badge</a></li><li class="l2"><a href="#testing">Testing</a></li><li class="l2"><a href="#package-surface">Package surface</a></li><li class="l2"><a href="#sdk-versioning-policy">SDK versioning policy</a></li><li class="l2"><a href="#edge-cases">Edge cases</a></li><li class="l2"><a href="#what-the-user-sees">What the user sees</a></li><li class="l3"><a href="#see-also">See also</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>
