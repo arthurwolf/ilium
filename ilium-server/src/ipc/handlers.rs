@@ -12145,8 +12145,14 @@ mod tests {
         );
         assert_eq!(progress.report.job_id, "persisted-job");
         assert_eq!(progress.timing.checks.len(), 2);
-        assert_eq!(progress.timing.checks[1].outcome, ilium_core::ProgressCheckOutcome::Failed);
-        assert_eq!(progress.last_observed_unix_millis, progress.timing.checks[0].unix_millis);
+        assert_eq!(
+            progress.timing.checks[1].outcome,
+            ilium_core::ProgressCheckOutcome::Failed
+        );
+        assert_eq!(
+            progress.last_observed_unix_millis,
+            progress.timing.checks[0].unix_millis
+        );
 
         assert!(matches!(
             delivery,
@@ -12174,7 +12180,9 @@ mod tests {
             crate::progress_monitor::test_probes::stderr_then_exit_seven(),
         );
         let original_checks = persisted.latest_progress.timing.checks.clone();
-        restore_persisted_progress_monitor(&state, persisted).await.unwrap();
+        restore_persisted_progress_monitor(&state, persisted)
+            .await
+            .unwrap();
         let tree = state.tree.read().await;
         let progress = &tree.pane_progress(pane_id)[0];
         assert!(progress.monitor_health.is_failed());

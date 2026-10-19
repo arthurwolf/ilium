@@ -834,8 +834,20 @@ pub(crate) fn estimated_progress_bytes(progress: &ilium_core::PaneProgress) -> u
         .saturating_add(progress.report.message.capacity())
         .saturating_add(progress.report.details.capacity())
         .saturating_add(progress.report.error.as_ref().map_or(0, String::capacity))
-        .saturating_add(progress.timing.samples.capacity().saturating_mul(std::mem::size_of::<ilium_core::ProgressSample>()))
-        .saturating_add(progress.timing.checks.capacity().saturating_mul(std::mem::size_of::<ilium_core::ProgressCheck>()))
+        .saturating_add(
+            progress
+                .timing
+                .samples
+                .capacity()
+                .saturating_mul(std::mem::size_of::<ilium_core::ProgressSample>()),
+        )
+        .saturating_add(
+            progress
+                .timing
+                .checks
+                .capacity()
+                .saturating_mul(std::mem::size_of::<ilium_core::ProgressCheck>()),
+        )
         .saturating_add(match &progress.monitor_health {
             ilium_core::ProgressMonitorHealth::Healthy => 0,
             ilium_core::ProgressMonitorHealth::Degraded { last_error, .. }
@@ -885,9 +897,14 @@ mod tests {
     #[test]
     fn progress_estimate_charges_retained_history_details_and_health_error() {
         let report = ilium_core::ProgressTaskReport::new(
-            "estimate".into(), ilium_core::ProgressTaskStatus::Running, 20.0,
-            "Building".into(), String::new(), None,
-        ).unwrap();
+            "estimate".into(),
+            ilium_core::ProgressTaskStatus::Running,
+            20.0,
+            "Building".into(),
+            String::new(),
+            None,
+        )
+        .unwrap();
         let mut progress = ilium_core::PaneProgress::new(1, report, 100).unwrap();
         let baseline = estimated_progress_bytes(&progress);
         let old_checks_capacity = progress.timing.checks.capacity();
@@ -898,12 +915,18 @@ mod tests {
         let last_error = String::with_capacity(1024);
         let error_capacity = last_error.capacity();
         progress.monitor_health = ilium_core::ProgressMonitorHealth::Degraded {
-            consecutive_failures: 1, last_error,
+            consecutive_failures: 1,
+            last_error,
         };
-        assert_eq!(estimated_progress_bytes(&progress) - baseline,
-            progress.report.details.capacity() + error_capacity
-            + (progress.timing.checks.capacity() - old_checks_capacity) * std::mem::size_of::<ilium_core::ProgressCheck>()
-            + (progress.timing.samples.capacity() - old_samples_capacity) * std::mem::size_of::<ilium_core::ProgressSample>());
+        assert_eq!(
+            estimated_progress_bytes(&progress) - baseline,
+            progress.report.details.capacity()
+                + error_capacity
+                + (progress.timing.checks.capacity() - old_checks_capacity)
+                    * std::mem::size_of::<ilium_core::ProgressCheck>()
+                + (progress.timing.samples.capacity() - old_samples_capacity)
+                    * std::mem::size_of::<ilium_core::ProgressSample>()
+        );
     }
 
     #[test]
