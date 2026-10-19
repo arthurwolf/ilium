@@ -349,7 +349,7 @@ The panel after one press of the button. The hint row is drawn dim, and the focu
 ## Edge cases and errors
 
 - **Invalid tree.** A child index out of range, a graph that is not a tree, a duplicate key or more than 4,096 nodes traps the instance. The host restarts it under the restart rule, and three failures within 10 minutes disable the plugin with a notice.
-- **Size.** The manifest can raise the limit to 16,384 nodes and 4 MiB only for first-party plugins.
+- **Size.** The manifest can raise the limit to 16,384 nodes and 4 MiB only for T1 plugins.
 - **Unknown view.** An `invalidate` call for a view the plugin does not declare is ignored, and the host writes one warning that names the view.
 - **Popups.** A `popup` is drawn only while `open-popup` has it open. At most 4 are open per view, and more give `quota-exceeded`. Escape closes the topmost popup and the plugin receives `closed`. A modal popup cannot refuse the close.
 - **Missing grant.** A `code-view` or `terminal-view` without the grant draws an empty frame with the text `not permitted`.

@@ -282,7 +282,7 @@ Backs `http.request`. The fixture key `http` fills it.
 | `host.settings().get(key: &str) -> Option<serde_json::Value>` | `host.settings().get(key)` | Reads a setting |
 
 - **[DEV-465]** `storage` MUST behave as the real store: a `put` is visible to `get` at once inside the same call batch, and values survive `deactivate` then `activate` on the same host.
-- **[DEV-466]** `storage.put` of a value over 1,048,576 bytes MUST return `Err(quota-exceeded)`. A put that makes the bucket sum of key and value bytes exceed `storage_bucket_mib` x 1,048,576 (default 16 MiB) MUST return `Err(quota-exceeded)`. `host.storage().dump(bucket)` returns that bucket as a map.
+- **[DEV-466]** `storage.put` of a value over 1,048,576 bytes MUST return `Err(invalid-argument)`. A put that makes the bucket sum of key and value bytes exceed `storage_bucket_mib` x 1,048,576 (default 16 MiB) MUST return `Err(quota-exceeded)`. `host.storage().dump(bucket)` returns that bucket as a map.
 - **[DEV-467]** `host.settings().set(key, value)` MUST validate the value against the settings schema and deliver `settings-changed` (Rust `Event::SettingsChanged`, TypeScript tag `settings-changed`) with the WIT `settings-change` payload. An invalid value MUST return `Err(invalid-argument)`.
 
 ### Fake tree, panes, agents and jobs

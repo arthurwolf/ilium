@@ -183,7 +183,7 @@ Changes are saved as the user makes them. There is no Save button.
 | Toggle, choice step, choice picked from a list | At once |
 | Number steps | 600 ms after the last step; steps within the window become one write |
 | Typed number or text | 600 ms after the last keystroke, or at once on Enter or when leaving the row |
-| Text area | 1 s after the last keystroke, and at once when the editor closes |
+| Text area | 600 ms after the last keystroke, or 1 s when the text is above 10,000 bytes (`debounce_ms` overrides both), and at once when the editor closes |
 | Path, colour, keybinding, list item | At once, when the dialog is confirmed |
 | Plugin call `set-json` | At once, without a delay |
 

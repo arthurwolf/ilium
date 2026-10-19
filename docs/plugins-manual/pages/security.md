@@ -427,7 +427,7 @@ The extended contract adds limits whose purpose is safety. They are fixed by the
 | Open HTTP streams | `http_streams` (default 4, T1 up to 16) and `session_http_streams` (64); see [Errors and limits](/pages/reference-errors-and-limits/#requestable-limits) | `quota-exceeded` |
 | Pending HTTP requests | `http_pending` (default 256, T1 up to 1,024) | `busy` with `retry-after-ms` |
 | Spawned children | `children` (default 2, T1 up to 8) and the shared `session_processes` (16) | `quota-exceeded` |
-| Concurrent `process.run` | `process_runs` (default 4, T1 up to 16) and the shared `session_processes` (16) | `busy` with `retry-after-ms` |
+| Concurrent `process.run` | the shared `session_processes` (16) | `busy` with `retry-after-ms` |
 | Durable timers | `durable_timers`: 64 (T1 up to 256) | `quota-exceeded` |
 | Package assets | `package_assets_mib`: 64, T1 up to 256 | `manifest.asset-size` at install |
 | `restructure` batch | 256 operations | The batch is refused |

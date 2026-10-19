@@ -93,7 +93,7 @@ Which kind each widget sends is listed on the widget pages, starting with [widge
   and keys must be unique across the whole view, not only among siblings. A duplicate key anywhere traps with `ui.duplicate-key`. The host keeps widget state by key, so a widget without
   a key loses its state on every render.
 - **Size.** A tree is a flat list of nodes with child indices. It holds at most 4,096 nodes and 1 MiB
-  by default. A manifest `limits` entry can raise both to 16,384 nodes and 4 MiB.
+  by default. A manifest `limits` entry can raise both to 16,384 nodes and 4 MiB for a tier 1 bundled plugin; the T2 and T3 ceilings are 4,096 nodes and 1 MiB.
 - **Render time.** `views.render` has a deadline of 10 ms by default (`render_deadline_ms`, ceiling 20 ms).
 - **Pure call.** `views.render` is a pure call, like `annotate` and `settings-validate`. An effectful import called inside it (an intent submission, a request, a storage write or a timer) returns `err(not-permitted)` with the message `effectful import in a pure call` and the call continues [ABI-048]. Read-only imports stay allowed.
 - **Popups.** A `popup` widget in a tree is drawn only while an `open_popup` call has opened it. A popup or dialog node takes no space in its parent's layout. Its size and placement follow [Popup size and placement](/pages/widgets-layout-and-containers/#popup-size-and-placement).

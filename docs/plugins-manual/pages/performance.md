@@ -133,7 +133,7 @@ The host also limits how often a plugin may call some imports. A call over the r
 | `toast` | 3 per 10 s per plugin |
 | `geocode` | 1 request per second per plugin |
 | `set-status-segment`, `set-frame-slot` | 10 per second per slot |
-| `set-row-state`, `set-item-states`, `set-choice-items`, `set-info-rich`, `set-meter`, `set-info` | 10 per second per plugin, together |
+| `set-row-state`, `set-item-states`, `set-choice-items`, `set-info-rich`, `set-meter`, `set-info`, `set-choices`, `set-row-note` | 10 per second per plugin, together |
 | `journal.log-event` | 20 per second per plugin |
 | `screen-changed` delivery | At most 10 per second per pane |
 
@@ -147,7 +147,7 @@ Most of the 51 widgets cost nothing between renders, because the host draws the 
 |---|---|---|
 | `spinner`, decoration frame animation | The host steps frames. The plugin is not called per frame. | Use them instead of a timer that calls `ui.invalidate` every 100 ms. |
 | `chart` with many points | Render size: the tree limit is 4,096 nodes or 1,024 KiB. | Send a series with `resample: min-max` and let the host reduce it to the width of the chart. |
-| `check-list`, `list-editor`, `%list` | Items are part of the tree. | `check-list` is capped at 256 items and `list-editor` at 64; a larger one traps at render time with `ui.invalid-tree`. A `%list` has no item cap, but the whole tree is limited to 4,096 nodes and 1,024 KiB by default. Render a window of rows from the host-owned `offset` (read through `ui.widget-state`) and add a Load more row. Virtual-row providers are for sidebar rows of the tree only. See recipe 4 of the [Patterns cookbook](/pages/guide-patterns-cookbook/). |
+| `check-list`, `list-editor`, `%list` | Items are part of the tree. | `check-list` is capped at 256 items and `list-editor` at 64 (1,024 for a `first-party` `limits_tier` plugin); a larger one traps at render time with `ui.invalid-tree`. A `%list` has no item cap, but the whole tree is limited to 4,096 nodes and 1,024 KiB by default. Render a window of rows from the host-owned `offset` (read through `ui.widget-state`) and add a Load more row. Virtual-row providers are for sidebar rows of the tree only. See recipe 4 of the [Patterns cookbook](/pages/guide-patterns-cookbook/). |
 | `choice` with a catalogue `source` | The host pages the catalogue, 256 items per page, with a 20 ms provider deadline. | Return one page per call. Never build the whole catalogue in `query-catalog`. |
 | `terminal-view`, `video`, `surface` | Native decode and frame pacing. The plugin pays only for the frames it writes. | Prefer `prerender` for a scene that loops, so `render` is called once per frame and then never again. |
 | `screen-changed`, `http-stream-data`, `child-output` | Event volume. | Read only the rows in `first-row` to `last-row`. Handle a whole batch in one call. |

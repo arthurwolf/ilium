@@ -335,7 +335,7 @@ A `load-file` completes once the buffer is open. If the plugin does not call `ta
 | Limit | Value | Error |
 |---|---|---|
 | Lines per `read-lines` call | 10,000 | `invalid-argument` |
-| Decorations or gutter marks per layer | 10,000 | `invalid-argument` |
+| Decorations or gutter marks per layer (separate from the plugin-wide `decorations` quota of 4,096 default, which gives `refused(quota-exceeded)`) | 10,000 | `invalid-argument` |
 | Buffers created or held per plugin | 64 | `quota-exceeded` |
 | Text in `create-buffer` | 16 MiB | `invalid-argument` |
 | Edits in one `editor-apply-edits` | 10,000 | `refused(invalid-argument)` |

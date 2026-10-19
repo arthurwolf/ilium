@@ -66,7 +66,7 @@ Use it when the server side needs one answer from one client now. Use [messages 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
 | `id` | string | required | The request kind. Used as `kind` in `request` and in the `client-request` event. |
-| `timeout_ms` | integer, 1 to 30,000 | none | A ceiling for this kind. The caller always passes its own `timeout-millis`, so there is no default. |
+| `timeout_ms` | integer, 1 to 30,000 | none | A ceiling for this kind. This key has no default; the host reply deadline is 5,000 ms when the caller passes no `timeout-millis`, and the caller can set 1 to 30,000 ms. |
 
 ### Surface
 

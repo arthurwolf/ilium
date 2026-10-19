@@ -140,7 +140,6 @@ const tokens = turns.reduce((sum, turn) => sum + (turn.tokens ?? 0), 0);
 |---|---|---|
 | `transcript` | `unsupported` | the signature has no known session file format |
 | `transcript` | `not-found` | no session yet for the pane |
-| `transcript` | `invalid-argument` | `last-turns` over 512 or `max-bytes` over 4 MiB |
 | completion | `io` | the file could not be read |
 | any | `not-permitted` | the grant is missing |
 

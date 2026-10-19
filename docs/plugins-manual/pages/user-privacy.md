@@ -128,7 +128,7 @@ Core plugins are made by the Ilium project and follow the same permission rules 
 | You revoke a network grant during a request | The request completes as `failed(revoked)` |
 | The audit log | Always on. Install, update, grant, consent, trust and block events are recorded. Plugin data and settings values are not. See [Audit log](/pages/reference-audit-log/) |
 | You share a project folder | Plugin settings and project storage in `.ilium` go with it. Permissions do not |
-| A plugin writes a secret to its log | Ilium cannot detect it. The log rotates at 1 MiB, keeps at most three rotated files, and rotated files older than 14 days are deleted at server start; delete it at once with `--purge` |
+| A plugin writes a secret to its log | Ilium cannot detect it. The log rotates at 4 MiB, keeps four rotated files, and the logs of an uninstalled plugin are deleted 7 days after uninstall; `--purge` deletes them at once |
 
 ### See also
 

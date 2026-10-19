@@ -201,7 +201,7 @@ A `Done` answer that fails `result` completes the caller's request as `failed(in
 |---|---|
 | Payload of one call, or one reply | 1 MiB |
 | Wait for the reply | 30 seconds from the call |
-| Provider activation | `activate_deadline_ms`: 2 seconds by default, 5 seconds at most |
+| Provider activation | `activate_deadline_ms`: 2 seconds by default; the ceiling is 5 seconds for T1 and 2 seconds (no raise) for T2 and T3 |
 
 <div class="warn">
 <p>Plugin-defined services are unstable in 0.1 and may change within 0.x. Update both plugins when the API changes.</p>

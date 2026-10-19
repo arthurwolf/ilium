@@ -136,7 +136,7 @@ Bisect writes only its own state file, `<data>/plugins/bisect.json`, and changes
 
 ### Read the plugin log
 
-Every plugin has a log that holds its own lines and the lines that Ilium writes about it: refused calls, failures, restarts and process runs. The log has four columns: time, level, plugin id and message.
+Every plugin has a log that holds its own lines and the lines that Ilium writes about it: refused calls, failures, restarts and process runs. The log has five columns: time, level, side (`server`, `client`, `scene` or `host`), plugin id and message.
 
 ```sh
 ilium plugin logs com.example.notes --tail 50

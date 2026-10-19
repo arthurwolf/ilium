@@ -109,7 +109,7 @@ Health is computed from these counters and from lifecycle state, with the thresh
 | Close to deadline | Near-miss rate | Detail view, "Why" line |
 | Held by quota | `quota_rejections` in the last minute | Detail view and Resources tab |
 | Waiting for a helper | `helper.too-many` active | Detail view |
-| Memory near the limit | `memory_peak` over 90 % of `memory_mib` | Detail view |
+| Memory near the limit | `memory_peak` over 80 % of `memory_mib` | Detail view |
 | Stale contributions | Stale marker active | Detail view |
 
 - **[HST-363]** The host MUST show the signal that put a plugin in `degraded` as a "Why" line with the counter values in the detail view.

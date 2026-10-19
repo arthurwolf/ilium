@@ -101,15 +101,15 @@ Each plugin has one log, shared by all its sides. The host writes refusals, trap
 
 | Property | Value |
 |---|---|
-| File | `<data>/plugins/logs/<id>.log`, with rotated files `<id>.log.1` to `<id>.log.3` |
+| File | `<data>/plugins/logs/<id>.log`, with rotated files `<id>.log.1` to `<id>.log.4` |
 | Line format | Four columns: local timestamp `YYYY-MM-DD HH:mm:ss`, level padded to five characters, plugin id, message |
-| Rotation | When the file passes 1 MiB it becomes `.1`, `.1` becomes `.2`, `.2` becomes `.3`, and the old `.3` is deleted |
+| Rotation | When the file passes 4 MiB it becomes `.1`, `.1` becomes `.2`, `.2` becomes `.3`, `.3` becomes `.4`, and the old `.4` is deleted |
 | Retention | At most 4 files per plugin. Rotated files older than 14 days are deleted at server start |
 | Rate limit | 200 lines per second for a standard plugin. Extra lines are dropped and counted in one `warn` summary line |
 | Who can read it | The user who owns the folder. A plugin cannot read its own log |
 | After uninstall | Kept for 7 days, then deleted. `--purge` deletes it at once |
 
-- [USR-204] The host MUST rotate the log at 1 MiB, MUST keep at most three rotated files, and MUST delete rotated files older than 14 days at server start. Test: write 5 MiB of log lines through a test plugin and list the folder; then age `<id>.log.2` by 15 days, restart, and assert it is gone.
+- [USR-204] The host MUST rotate the log at 4 MiB, MUST keep at most four rotated files, and MUST delete rotated files older than 14 days at server start. Test: write 5 MiB of log lines through a test plugin and list the folder; then age `<id>.log.2` by 15 days, restart, and assert it is gone.
 - [USR-205] Each log line MUST have the four columns timestamp, level, plugin id and message, with the timestamp in the form `YYYY-MM-DD HH:mm:ss`. Test: read the log and match every line against the pattern.
 
 ### File permissions

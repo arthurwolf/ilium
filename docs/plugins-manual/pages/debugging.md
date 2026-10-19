@@ -339,7 +339,7 @@ When a plugin is disabled, the tree footer shows notice N14 with the plugin name
 
 ### Reload and health while you develop
 
-`ilium plugin dev` reloads each rebuilt side with the reason `upgrade` and keeps restore bytes up to 1 MiB ([Lifecycle](/pages/lifecycle/#development-reload)). A trap during development follows the normal restart rule. Run `ilium plugin status <id>` to see health and near-misses ([Health and watchdog](/pages/reference-health-and-watchdog/)), and `ilium plugin stats <id>` for resource use ([Resource accounting](/pages/reference-resource-accounting/)). A development install can be reset with `--purge-on-exit`.
+`ilium plugin dev` reloads each rebuilt side with the reason `upgrade` and keeps restore bytes up to 1 MiB ([Lifecycle](/pages/lifecycle/#development-reload)). A trap during development follows the normal restart rule with one exception: the third and later failures restart after 5 s and never disable the side ([Lifecycle](/pages/lifecycle/#development-reload)). Run `ilium plugin status <id>` to see health and near-misses ([Health and watchdog](/pages/reference-health-and-watchdog/)), and `ilium plugin stats <id>` for resource use ([Resource accounting](/pages/reference-resource-accounting/)). A development install can be reset with `--purge-on-exit`.
 
 
 ## See also

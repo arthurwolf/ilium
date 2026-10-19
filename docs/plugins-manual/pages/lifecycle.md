@@ -161,7 +161,7 @@ The `startup` trigger applies per side: a server side with `startup` starts when
 
 ## Running
 
-The host calls the exports in response to events, views, commands and scene frames. Each call has its own deadline, for example 20 ms for `handler.on-events`. A breach counts as a failure. See [Errors and limits](/pages/reference-errors-and-limits/).
+The host calls the exports in response to events, views, commands and scene frames. Each call has its own deadline, for example 20 ms for `handler.on-events`. A hard breach counts as a failure at once; a soft breach counts only at the streak limit or 100 ms past its deadline. See [Errors and limits](/pages/reference-errors-and-limits/).
 
 ## Stop and the final save
 
@@ -349,7 +349,7 @@ Failures older than 10 minutes drop out of the count on their own, so a plugin t
 | Trap in any export | yes | Includes a Rust panic and a thrown TypeScript exception that escapes an export. |
 | `activate` returns an error | yes | Also when a `service:` or `cli:` call triggered the activation. |
 | `activate` misses its deadline | yes | |
-| `handler.on-events`, `views.render` or another export misses its deadline | yes | |
+| `handler.on-events`, `views.render` or another export misses its deadline | hard breach: yes; soft breach: only at the streak limit (3, or 30 for scene frames) or 100 ms past the deadline | |
 | `deactivate` misses its deadline, any reason | no | The miss is logged and dropped: the instance is dropped, its restore bytes are discarded and a warn line is logged [HST-191]. |
 | Event queue overflow (more than 1,024 events by default) | yes | |
 | Memory limit of the instance reached | yes | A trap. |

@@ -352,14 +352,14 @@ export const { lifecycle, handler, views } = definePlugin({
 | Case | Result |
 |---|---|
 | Number of children differs from the number of constraints | The render traps the instance, and the message names the layout key [WID-005]. The builder reports the mismatch before the tree leaves the plugin; a hand-built tree traps. |
-| `ratio` with a denominator of 0 | The tree is invalid and traps the instance with `ui.invalid-tree`. |
+| `ratio` with a denominator of 0 | The tree is invalid and traps the instance with `trap.invalid-ui-tree` (detail reason `ui.invalid-tree`). |
 | Constraints that need more cells than the area has | The solver follows ratatui's priority rules; trailing segments shrink, and a segment with 0 cells draws nothing. |
 | `percentage` above 100 | The segment is clamped to the available space. |
 | `ratio` above 1 | Clamped to 1. |
 | `fill(0)` | 0 cells, unless every constraint is `fill(0)`. |
 | A margin larger than the area | The inner area is empty and nothing is drawn. |
 | `spacing: overlap(n)` with bordered children | The shared edge is drawn once with joint glyphs. |
-| A tree of more nodes than the effective `ui_tree_nodes` limit (4,096 by default, up to 16,384 for T1) | The tree is invalid and traps the instance with `ui.too-large`. |
+| A tree of more nodes than the effective `ui_tree_nodes` limit (4,096 by default, up to 16,384 for T1) | The tree is invalid and traps the instance with `trap.invalid-ui-tree`; the logged detail reason is `ui.too-large`. |
 
 A trap ends the plugin instance, and the host applies the [restart and disable rule](/pages/reference-errors-and-limits/#restart-and-disable-rule): restart after 1 s, then 5 s, and disable at the third failure in 10 minutes.
 

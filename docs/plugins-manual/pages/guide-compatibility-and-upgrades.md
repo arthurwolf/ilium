@@ -116,14 +116,14 @@ The host runs an update in a fixed order. Your code sees three of the steps.
 1. The new package is checked like an install. A higher version of an installed id is an update.
 2. The new version is staged beside the old one.
 3. Each running instance of the old version gets `deactivate(upgrade)` and returns restore bytes.
-4. If `data_version` rose, the host takes a backup and calls `migrator.migrate(from, to)` once per side.
+4. If `data_version` rose, the host takes a backup and calls `migrator.migrate(from, to)` once per bucket per update (the global bucket and data directory at first activation, each project or session bucket when its session first activates the plugin).
 5. The new version is activated. It gets the restore bytes only when its `data_version` equals the one of the build that wrote them.
 6. If activation succeeds, the update is committed. If it fails, the host restores the backup, reactivates the old version and shows `Update failed, rolled back`.
 
 | Your code | Runs when | Must |
 |---|---|---|
 | `deactivate(upgrade)` | Old version, before the swap | Return restore bytes that start with a format byte, within 500 ms and 1 MiB |
-| `migrate(from, to)` | New version, once per side, before `activate` | Be idempotent and finish within its deadline |
+| `migrate(from, to)` | New version, once per bucket per update, at the first activation that touches the bucket | Be idempotent and finish within its deadline |
 | `activate` | New version | Check the restore format byte and the length, and fall back to defaults |
 
 A plugin MUST write the restore bytes in a layout whose first byte identifies the format, and MUST fall back to defaults when the first byte is not a format it knows, because the host delivers restore bytes only when the `data_version` equals that of the build that wrote them. [AUT-206]
