@@ -119,8 +119,14 @@ async fn create_detected_claude_pane(client: &mut SessionStream) -> NodeId {
 }
 
 fn write_verified_claude_transcript(server: &TestServer, session_id: &str) {
-    let resolved_cwd = ilium_platform::paths::canonicalize(&server.project_cwd)
-        .unwrap_or_else(|_| server.project_cwd.clone());
+    write_verified_claude_transcript_for(server, &server.project_cwd, session_id);
+}
+
+/// Session discovery verifies a transcript against the pane's own launch
+/// directory, so a worktree pane needs the transcript under its worktree slug.
+fn write_verified_claude_transcript_for(server: &TestServer, project_cwd: &Path, session_id: &str) {
+    let resolved_cwd = ilium_platform::paths::canonicalize(project_cwd)
+        .unwrap_or_else(|_| project_cwd.to_path_buf());
     let slug: String = resolved_cwd
         .to_string_lossy()
         .chars()
@@ -139,7 +145,7 @@ fn write_verified_claude_transcript(server: &TestServer, session_id: &str) {
         serde_json::json!({
             "type": "user",
             "sessionId": session_id,
-            "cwd": server.project_cwd,
+            "cwd": project_cwd,
             "message": {"content": "integration test prompt"}
         })
         .to_string()
@@ -358,6 +364,7 @@ async fn unfreeze_preserves_worktree_ownership() {
         _ => unreachable!("event predicate accepts only workspace results"),
     };
 
+    write_verified_claude_transcript_for(&server, &worktree_root, SESSION_ID);
     write_frame(
         &mut client,
         &ClientRequest::ReplacePaneWithCommand {
@@ -416,13 +423,27 @@ async fn unfreeze_preserves_worktree_ownership() {
         )
     })
     .await;
-    assert!(
-        matches!(
-            removal,
-            ServerEvent::WorkspaceRemoved { request_id: 72, .. }
-        ),
-        "worktree custody remained unresolved after unfreeze: {removal:?}"
-    );
+    // The custody gate fails closed on any same-user process whose cwd it cannot read.
+    // A host can carry such an unrelated process (for example an interactive SSH
+    // login session), so removal may be refused. That refusal is only acceptable
+    // when the worktree stays on disk and the reason names the failed scan.
+    match removal {
+        ServerEvent::WorkspaceRemoved { request_id: 72, .. } => {}
+        ServerEvent::WorkspaceRemovalBlocked {
+            request_id: 72,
+            reasons,
+            ..
+        } if reasons
+            .iter()
+            .any(|reason| reason.contains("cannot inspect cwd of process")) =>
+        {
+            assert!(
+                worktree_root.exists(),
+                "fail-closed refusal must keep the worktree on disk: {reasons:?}"
+            );
+        }
+        other => panic!("worktree custody remained unresolved after unfreeze: {other:?}"),
+    }
 
     write_frame(&mut client, &ClientRequest::KillSession)
         .await

@@ -503,7 +503,10 @@ mod tests {
     async fn notification_is_dropped_when_io_admission_is_saturated() {
         let execution = crate::execution::ServerExecution::start().expect("execution bank");
         let monitor = execution.test_monitor();
-        let limits = monitor.health().quota.limits;
+        // The foundation tenant's input budget is smaller than the root
+        // quota's (the root also covers the codec tenants), so fill the
+        // tenant budget that `send_with` actually draws from.
+        let limits = execution.client.foundation.usage().limits;
         let occupied = execution
             .client
             .foundation

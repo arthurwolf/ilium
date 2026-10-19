@@ -188,6 +188,11 @@ mod tests {
                 agent_debug_menu_enabled: false,
                 progress_monitor_enabled: true,
             }));
+            // `connection::handle` closes a stream at once when the state has
+            // no execution bank or ordered event journal, as in `run`.
+            let execution = crate::execution::ServerExecution::start().expect("execution bank");
+            assert!(state.events.initialize_journal(execution.quota_group()));
+            assert!(state.execution.set(execution).is_ok());
             let loop_state = Arc::clone(&state);
             // Mirrors `run`'s outer shutdown select: a saturated accept loop
             // must remain cancellable even though it does not call accept.
@@ -352,7 +357,12 @@ mod tests {
             .await
             .expect("shutdown did not cancel saturated accept")
             .expect("accept task panicked");
-        listener.state.abort_all_connection_tasks();
+        // Abort the handles directly: `abort_all_connection_tasks` also closes
+        // the ordered event journal, which this test reuses for the fresh
+        // connection that must be admitted after the aborted handle is reaped.
+        for task in listener.state.connection_tasks.lock().unwrap().iter() {
+            task.abort();
+        }
         let admitted_end =
             tokio::time::timeout(TEST_DEADLINE, read_frame::<ServerEvent, _>(&mut admitted))
                 .await

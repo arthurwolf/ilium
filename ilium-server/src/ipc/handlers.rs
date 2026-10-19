@@ -8805,6 +8805,12 @@ mod tests {
     {
         let directory = tempfile::tempdir().expect("isolated title directory");
         let state = snapshot_io_handler_state(&directory);
+        // Title evidence is collected on the bounded execution bank; without
+        // one `collect_title_evidence` grants nothing and every title is refused.
+        assert!(state
+            .execution
+            .set(crate::execution::ServerExecution::start().expect("bank"))
+            .is_ok());
         let pane_id = shell_title_fixture(&state, &directory).await;
         let input = {
             let mut tree = state.tree.write().await;
@@ -8920,6 +8926,7 @@ mod tests {
         {
             runtime.session.kill().expect("cleanup owned fixture");
         };
+        state.execution.get().expect("bank").request_shutdown();
     }
 
     #[tokio::test]
@@ -9023,15 +9030,15 @@ mod tests {
             })
             .unwrap();
         let first = receiver.recv().await.unwrap();
-        let producer = tokio::spawn(async move {
-            tokio::task::yield_now().await;
-            sender
-                .send(ilium_pty::PtyOutputChunk {
-                    sequence: 2,
-                    bytes: b"second".to_vec().into(),
-                })
-                .unwrap();
-        });
+        // Queued before collecting: a producer task raced the 750 us follow-up window
+        // and failed under ni-vm load. The window itself is a timing budget, not the
+        // merge contract this test pins.
+        sender
+            .send(ilium_pty::PtyOutputChunk {
+                sequence: 2,
+                bytes: b"second".to_vec().into(),
+            })
+            .unwrap();
 
         let OutputBurst::Merged {
             first_sequence,
@@ -9041,7 +9048,6 @@ mod tests {
         else {
             panic!("contiguous output must not require replay");
         };
-        producer.await.unwrap();
         assert_eq!((first_sequence, sequence), (1, 2));
         assert_eq!(bytes, b"firstsecond");
     }

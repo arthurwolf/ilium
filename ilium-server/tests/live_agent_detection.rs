@@ -145,6 +145,16 @@ fn write_finished_fake_codex_binary(
 /// deliberately translates that legacy shortcut into `project -> default ->
 /// pane`, so these end-to-end assertions must follow the user-visible tree
 /// rather than assuming a group may live directly under the root.
+/// The pane's node as carried by either a full `TreeSnapshot` or the
+/// single-pane `PaneNodeChanged` update the server sends for confined changes.
+fn pane_node_in_event(event: &ServerEvent, pane_id: NodeId) -> Option<&ilium_core::Node> {
+    match event {
+        ServerEvent::TreeSnapshot(tree) => tree.get(pane_id),
+        ServerEvent::PaneNodeChanged(node) if node.id == pane_id => Some(node),
+        _ => None,
+    }
+}
+
 fn first_launch_project_pane(tree: &ilium_core::Tree) -> NodeId {
     let project_id = tree
         .project_ids()
@@ -977,12 +987,11 @@ async fn a_resumed_claude_processs_session_id_is_discovered_and_broadcast() {
     )
     .await
     .expect("set an inferred title for the old session");
+    // A title change is confined to one pane, so the server publishes the node
+    // alone (`PaneNodeChanged`) rather than a full tree snapshot.
     let _ = expect_event(&mut client, Duration::from_secs(5), |event| {
-        matches!(
-            event,
-            ServerEvent::TreeSnapshot(tree)
-                if tree.get(pane_id).is_some_and(|node| node.name == "Title From The Old Session")
-        )
+        pane_node_in_event(event, pane_id)
+            .is_some_and(|node| node.name == "Title From The Old Session")
     })
     .await;
 
@@ -1022,26 +1031,22 @@ async fn a_resumed_claude_processs_session_id_is_discovered_and_broadcast() {
     .await
     .expect("timed out waiting for both Claude /clear transitions");
     let reset_after_clear = expect_event(&mut client, Duration::from_secs(5), |event| {
-        matches!(
-            event,
-            ServerEvent::TreeSnapshot(tree)
-                if tree.get(pane_id).is_some_and(|node| {
-                    node.name == "<new>"
-                        && node.short_name.is_none()
-                        && node.inferred_icon.is_none()
-                        && node.parent == Some(project_id)
-                        && matches!(
-                            &node.kind,
-                            ilium_core::NodeKind::Pane {
-                                title_source: ilium_core::PaneTitleSource::Automatic,
-                                ..
-                            }
-                        )
-                })
-        )
+        pane_node_in_event(event, pane_id).is_some_and(|node| {
+            node.name == "<new>"
+                && node.short_name.is_none()
+                && node.inferred_icon.is_none()
+                && node.parent == Some(project_id)
+                && matches!(
+                    &node.kind,
+                    ilium_core::NodeKind::Pane {
+                        title_source: ilium_core::PaneTitleSource::Automatic,
+                        ..
+                    }
+                )
+        })
     })
     .await;
-    assert!(matches!(reset_after_clear, ServerEvent::TreeSnapshot(_)));
+    assert!(pane_node_in_event(&reset_after_clear, pane_id).is_some());
 
     write_frame(
         &mut client,

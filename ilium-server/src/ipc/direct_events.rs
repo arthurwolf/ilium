@@ -200,8 +200,11 @@ mod tests {
         let mut owner = crate::execution::ServerExecution::start().unwrap();
         let execution = owner.client.clone();
         let quota = owner.quota_group();
+        // The execution bank's CPU workers already hold resident bytes, so
+        // saturate only what is still free; the full limit can never fit.
+        let usage = quota.snapshot();
         let _saturated = quota
-            .reserve_external_storage(quota.snapshot().limits.worker_bytes)
+            .reserve_external_storage(usage.limits.worker_bytes - usage.worker_bytes)
             .unwrap();
         let (sender, receiver) = DirectEventSender::admitted_channel(1, execution);
         drop(receiver);

@@ -1050,29 +1050,56 @@ mod tests {
 
     #[tokio::test]
     async fn slow_subscriber_preserves_prompt_after_replaceable_state_burst() {
+        // Semantic events (prompt submissions) travel the ordered journal; the
+        // lossy broadcast ring only carries replaceable state and is allowed to
+        // lag, so the no-loss guarantee is asserted on the journal path.
         let events = ServerEvents::new();
-        let mut subscriber = events.subscribe_shared();
+        let quota = ilium_execution::QuotaGroup::new(ilium_execution::QuotaLimits {
+            clients: 0,
+            jobs: 0,
+            service_jobs: 0,
+            input_bytes: 0,
+            result_bytes: 0,
+            worker_threads: 0,
+            worker_bytes: 8 * 1024 * 1024,
+        });
+        assert!(events.initialize_journal(quota));
+        let subscriber = events.subscribe_ordered().expect("ordered subscription");
         let pane_id = NodeId(19);
 
         for activity_revision in 1..=(EVENT_CHANNEL_CAPACITY as u64 + 1) {
-            events.publish(ServerEvent::NodeActivityChanged {
-                node_id: pane_id,
-                activity_revision,
-            });
+            events
+                .try_publish_ordered(
+                    ServerEvent::NodeActivityChanged {
+                        node_id: pane_id,
+                        activity_revision,
+                    },
+                    128,
+                )
+                .expect("journal accepts the state burst");
         }
-        events.publish(ServerEvent::PanePromptSubmitted {
-            pane_id,
-            source: ilium_ipc::PromptSubmissionSource::Keyboard,
-        });
+        events
+            .try_publish_ordered(
+                ServerEvent::PanePromptSubmitted {
+                    pane_id,
+                    source: ilium_ipc::PromptSubmissionSource::Keyboard,
+                },
+                128,
+            )
+            .expect("journal accepts the prompt");
 
         let mut latest_activity_revision = None;
         let mut prompt_seen = false;
-        for _ in 0..=EVENT_CHANNEL_CAPACITY {
-            let event = subscriber
+        for _ in 0..=(EVENT_CHANNEL_CAPACITY + 1) {
+            let journal_event = subscriber
                 .recv()
                 .await
-                .expect("slow subscriber must not lose an accepted semantic event");
-            match event.as_ref() {
+                .expect("slow subscriber must not lose an accepted semantic event")
+                .expect("journal stays open");
+            subscriber
+                .acknowledge(journal_event.sequence)
+                .expect("acknowledge delivered event");
+            match journal_event.event() {
                 ServerEvent::NodeActivityChanged {
                     activity_revision, ..
                 } => latest_activity_revision = Some(*activity_revision),

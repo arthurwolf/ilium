@@ -18,7 +18,7 @@
 //! or cancellation and keep output pipes or other resources open.
 
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 #[cfg(target_os = "linux")]
@@ -373,8 +373,16 @@ pub fn processes_using_directory_bounded(
         if metadata.uid() != own_uid {
             continue;
         }
-        let cwd_matches = match std::fs::read_link(entry.path().join("cwd")) {
+        let cwd_matches = match read_process_cwd(&entry.path(), deadline) {
             Ok(cwd) => cwd.starts_with(&root),
+            Err(error)
+                if error.kind() == io::ErrorKind::PermissionDenied
+                    && is_unreadable_init_child(process_id) =>
+            {
+                // Init-managed user services (for example `systemd --user`) hide their
+                // cwd and fds from every other process. The fd scan below still runs.
+                false
+            }
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
                 // A vanished proc entry is normal; an existing live process
                 // with an unreadable cwd is not proof that the path is free.
@@ -405,6 +413,31 @@ pub fn processes_using_directory_bounded(
     users.sort_unstable();
     users.dedup();
     Ok(users)
+}
+
+/// Reads `<pid>/cwd`, retrying briefly on `EACCES`. The kernel marks a process
+/// non-dumpable while `execve` replaces its image, so a same-user process
+/// mid-exec can refuse `/proc/<pid>/cwd` for a moment. A denial that persists
+/// still fails closed: the caller treats the process as possibly inside the
+/// path.
+#[cfg(target_os = "linux")]
+fn read_process_cwd(process_directory: &Path, deadline: Instant) -> io::Result<PathBuf> {
+    const MAXIMUM_ATTEMPTS: u32 = 8;
+    const RETRY_DELAY: Duration = Duration::from_millis(5);
+    let mut attempt = 1;
+    loop {
+        match std::fs::read_link(process_directory.join("cwd")) {
+            Err(error)
+                if error.kind() == io::ErrorKind::PermissionDenied
+                    && attempt < MAXIMUM_ATTEMPTS
+                    && Instant::now() < deadline =>
+            {
+                attempt += 1;
+                std::thread::sleep(RETRY_DELAY);
+            }
+            result => return result,
+        }
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -486,10 +519,27 @@ fn linux_process_has_worktree_fd(
             Ok(target) if target.starts_with(root) => return Ok(true),
             Ok(_) => {}
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error)
+                if error.kind() == io::ErrorKind::PermissionDenied
+                    && is_unreadable_init_child(process_id) => {}
             Err(error) => return Err(error),
         }
     }
     Ok(false)
+}
+
+/// True for a live process whose parent is init (pid 1) and whose procfs links
+/// are unreadable to us. Only the user-service manager matches this shape in
+/// practice (`systemd --user` runs as a child of init with a non-dumpable
+/// profile). Pane processes are children of `ilium-server`, so they keep failing
+/// closed. A process orphaned into init would also match; that residual gap is
+/// accepted deliberately, and the fd scan still applies to it.
+#[cfg(target_os = "linux")]
+fn is_unreadable_init_child(process_id: u32) -> bool {
+    matches!(
+        read_linux_process(process_id),
+        Ok(process) if process.parent_id == 1 && !matches!(process.state, 'Z' | 'X')
+    )
 }
 
 #[cfg(target_os = "linux")]

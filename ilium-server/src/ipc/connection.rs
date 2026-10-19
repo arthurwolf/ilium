@@ -1870,6 +1870,10 @@ mod tests {
             agent_debug_menu_enabled: false,
             progress_monitor_enabled: true,
         }));
+        assert!(state
+            .execution
+            .set(crate::execution::ServerExecution::start().expect("execution bank"))
+            .is_ok());
         let (server_stream, mut client_stream) = duplex(4096);
         let (broadcast_tx, broadcast_rx) = broadcast::channel(1);
         let (direct_tx, direct_rx) = DirectEventSender::channel(8);
@@ -1986,11 +1990,14 @@ mod tests {
             is_complete: true,
         };
         let delivered = HashMap::from([(NodeId(9), 7)]);
-        assert!(
-            normalize_broadcast_terminal_replay(replay.clone(), &delivered, Some(&state))
-                .await
-                .is_err()
-        );
+        // A pane that closed after the replay was queued has no journal to
+        // recover from. The writer drops the stale replay and keeps the
+        // connection open; an `Err` is reserved for failed recovery of a
+        // pane that still exists.
+        assert!(matches!(
+            normalize_broadcast_terminal_replay(replay.clone(), &delivered, Some(&state)).await,
+            Ok(None)
+        ));
         let normalized = normalize_broadcast_terminal_replay(replay.clone(), &delivered, None)
             .await
             .expect("isolated writer tests have no recovery errors");
@@ -2022,6 +2029,10 @@ mod tests {
             agent_debug_menu_enabled: false,
             progress_monitor_enabled: true,
         }));
+        assert!(state
+            .execution
+            .set(crate::execution::ServerExecution::start().expect("execution bank"))
+            .is_ok());
         let group_id = state
             .tree
             .write()
@@ -2359,6 +2370,10 @@ mod text_trigger_writer_tests {
             agent_debug_menu_enabled: false,
             progress_monitor_enabled: false,
         }));
+        assert!(state
+            .execution
+            .set(crate::execution::ServerExecution::start().expect("execution bank"))
+            .is_ok());
         (state, Task(sound_task))
     }
     async fn accept(state: &ServerState, message: &str, revision: u64) {
@@ -2633,6 +2648,10 @@ mod text_trigger_ordering_regressions {
             agent_debug_menu_enabled: false,
             progress_monitor_enabled: true,
         }));
+        assert!(state
+            .execution
+            .set(crate::execution::ServerExecution::start().expect("execution bank"))
+            .is_ok());
         let newer = TextTriggerSettings {
             triggers: vec![TextTrigger {
                 id: "retained-newer-rule".to_owned(),

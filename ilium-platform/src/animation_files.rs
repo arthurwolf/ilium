@@ -930,9 +930,17 @@ fn unix_list_with_progress(
                 "directory contains unsupported link/special entry",
             ));
         }
+        // A directory's st_size is filesystem bookkeeping (block or entry
+        // accounting), not content size, and varies by filesystem. Report 0 as
+        // Windows does for directories.
+        let bytes = if kind == libc::S_IFDIR {
+            0
+        } else {
+            stat.st_size.max(0) as u64
+        };
         entries.push(DirectoryEntry {
             name: name.to_owned(),
-            bytes: stat.st_size.max(0) as u64,
+            bytes,
             is_directory: kind == libc::S_IFDIR,
         });
         if scanned % 64 == 0 {

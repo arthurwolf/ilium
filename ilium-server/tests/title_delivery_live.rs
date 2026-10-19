@@ -176,6 +176,12 @@ async fn acknowledged_authored_enter_authorizes_title_before_request_history_flu
                         node.presentation_revision > original.presentation_revision
                     });
                 }
+                // The server now fences a single changed pane with a targeted
+                // node event instead of a whole-tree snapshot.
+                ServerEvent::PaneNodeChanged(node) if node.id == pane_id => {
+                    observed_revision_fence |=
+                        node.presentation_revision > original.presentation_revision;
+                }
                 ServerEvent::PanePromptSubmitted {
                     pane_id: submitted,
                     source,
@@ -221,13 +227,14 @@ async fn acknowledged_authored_enter_authorizes_title_before_request_history_flu
     )
     .await
     .unwrap();
+    // A single accepted title is published as a targeted node event.
     let accepted = expect_event(&mut client, WAIT, |event| {
-        matches!(event, ServerEvent::TreeSnapshot(tree) if tree.get(pane_id).is_some_and(|node| node.name == "Authentication validation"))
+        matches!(event, ServerEvent::PaneNodeChanged(node) if node.id == pane_id && node.name == "Authentication validation")
     }).await;
-    let ServerEvent::TreeSnapshot(accepted) = accepted else {
+    let ServerEvent::PaneNodeChanged(named) = accepted else {
         unreachable!()
     };
-    let named = accepted.get(pane_id).unwrap();
+    let named = &*named;
     assert!(!named.is_name_fixed);
     assert!(matches!(
         named.kind,

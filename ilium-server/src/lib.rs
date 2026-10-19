@@ -1521,6 +1521,22 @@ mod restore_tests {
             .expect("project .ilium directory")
             .join("backups")
             .join("restore-test");
+        // The socket is live before startup writes its backup (`run` binds the
+        // listener first, then captures the backup), so wait for the backup
+        // instead of reading the directory the moment the socket answers.
+        let backup_written = wait_until(
+            || {
+                std::fs::read_dir(&backup_directory)
+                    .map(|mut entries| entries.next().is_some())
+                    .unwrap_or(false)
+            },
+            Duration::from_secs(5),
+        )
+        .await;
+        assert!(
+            backup_written,
+            "server did not write its startup backup in time"
+        );
         let backups = std::fs::read_dir(&backup_directory)
             .expect("read startup backup directory")
             .map(|entry| entry.expect("backup entry").path())

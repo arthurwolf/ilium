@@ -1730,8 +1730,8 @@ fn fluid_pixels(
         .collect()
 }
 
-fn pixel_signature(pixel: &PixelResult) -> (LinearRgba, Option<FaceOwner>, [Option<FaceOwner>; 9]) {
-    (pixel.color, pixel.front_owner, pixel.contributors)
+fn pixel_signature(pixel: &PixelResult) -> (LinearRgba, Option<FaceOwner>, Vec<Option<FaceOwner>>) {
+    (pixel.color, pixel.front_owner, pixel.contributors.to_vec())
 }
 
 #[test]

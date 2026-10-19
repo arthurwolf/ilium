@@ -248,6 +248,39 @@ pub fn install(directory: &Path, name: &str, behavior: &FixtureBehavior) -> Inst
     InstalledFixture { path }
 }
 
+/// Spawns a command whose executable was just written by [`install`].
+///
+/// Tests run on parallel threads, and a fork in one thread briefly inherits the
+/// writable descriptor another thread holds while copying a fixture, so an exec
+/// of the fresh file can fail with `ETXTBSY` ("Text file busy") for a moment.
+/// That is a race in the test harness, not a fixture defect, so only that one
+/// error is retried, for a short bounded period.
+pub fn spawn_installed(command: &mut std::process::Command) -> std::io::Result<std::process::Child> {
+    const ATTEMPT_LIMIT: u32 = 50;
+    const RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(20);
+    let mut attempt = 0;
+    loop {
+        match command.spawn() {
+            Err(error) if is_text_file_busy(&error) && attempt + 1 < ATTEMPT_LIMIT => {
+                attempt += 1;
+                std::thread::sleep(RETRY_DELAY);
+            }
+            outcome => return outcome,
+        }
+    }
+}
+
+#[cfg(unix)]
+fn is_text_file_busy(error: &std::io::Error) -> bool {
+    // `ETXTBSY` is 26 on Linux and macOS; `libc` stays out of test crates by policy.
+    error.raw_os_error() == Some(26)
+}
+
+#[cfg(not(unix))]
+fn is_text_file_busy(_error: &std::io::Error) -> bool {
+    false
+}
+
 /// The sidecar path holding an installed fixture's behaviour. Shared by
 /// [`install`] and the binary so the two can never disagree about it.
 pub fn behavior_file_for(executable: &Path) -> PathBuf {

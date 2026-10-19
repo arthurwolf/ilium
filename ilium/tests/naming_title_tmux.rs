@@ -35,10 +35,12 @@ fn shell_quote(value: &str) -> String {
 
 impl Fixture {
     fn new() -> Self {
-        let evidence = PathBuf::from(
-            std::env::var_os("ILIUM_NAMING_EVIDENCE_DIR")
-                .expect("set absolute ILIUM_NAMING_EVIDENCE_DIR"),
-        );
+        // Unset means a default under the system temp directory, so the test
+        // runs unattended (remote workspace runs). Set it to keep evidence in a
+        // chosen scratch folder.
+        let evidence = std::env::var_os("ILIUM_NAMING_EVIDENCE_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| std::env::temp_dir().join("ilium-naming-evidence"));
         assert!(evidence.is_absolute());
         std::fs::create_dir_all(&evidence).unwrap();
         let root = tempfile::Builder::new()

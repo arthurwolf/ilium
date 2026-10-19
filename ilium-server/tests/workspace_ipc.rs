@@ -1505,11 +1505,12 @@ async fn isolated_server_creates_attaches_and_removes_only_owned_worktree() {
     .await;
     if let ServerEvent::WorkspaceRemovalBlocked { reasons, .. } = &removed {
         // Some hosts restrict procfs cwd reads even for a same-user service
-        // manager. Force must fail closed when process custody is unknown.
+        // manager. Force must fail closed when process custody is unknown; the
+        // server reports that as a failed worktree process scan job.
         assert!(
             reasons
                 .iter()
-                .any(|reason| reason.contains("process directory probe is unavailable")),
+                .any(|reason| reason.contains("process scan job failed")),
             "{removed:?}"
         );
         assert!(linked.exists());
