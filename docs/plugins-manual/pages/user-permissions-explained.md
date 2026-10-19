@@ -122,12 +122,13 @@ Terminal text can hold passwords, tokens and private notes. Terminal rows are th
 
 | Permission | In plain words | Risk |
 |---|---|---|
-| `fs.read:<scope>` | Read files in one named place. The place is a scope, see below | normal; HIGH for agent transcripts |
+| `fs.read:<scope>` | Read files in one named place. The place is a scope, see below | normal; HIGH for agent transcripts and agent settings |
 | `fs.write:<scope>` | Create and change files in one named place | HIGH, except its own data and cache |
 | `fs.watch:<scope>` | Be told when files in a place change | normal |
 | `fs.pick` | Ask you to choose a file or folder, then read that one only | normal |
+| `agent-config.propose:<agent>` | Suggest changes to one agent's settings files. Ilium shows you every change first and writes only the files you tick; a plugin can never write those files itself | HIGH |
 
-The scopes you will see: `project` (the project folder you launched Ilium in), `worktrees` (the folder of Git worktrees), `agent-sessions:<agent>` (an agent's saved conversations), `agent-config:<agent>` (an agent's settings), `minecraft-saves`, and `path:<template>` (a custom place built from your home, config, data, cache, project or worktree folders). Its own `data`, `cache` and `package` folders are always allowed. A plugin sees the granted place and nothing around it.
+The scopes you will see: `project` (the project folder you launched Ilium in), `worktrees` (the folder of Git worktrees), `agent-sessions:<agent>` (an agent's saved conversations), `agent-config:<agent>` (an agent's settings; a plugin may read them, but changes always come to you as a proposal), `minecraft-saves`, and `path:<template>` (a custom place built from your home, config, data, cache, project or worktree folders). Its own `data`, `cache` and `package` folders are always allowed. A plugin sees the granted place and nothing around it.
 
 Reading the project folder is a normal-risk permission, because the plugin cannot read anything outside it. Writing there is HIGH.
 

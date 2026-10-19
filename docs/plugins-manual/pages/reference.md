@@ -161,7 +161,7 @@ A `PluginError` carries `code`, `message` and `retryAfterMs`. The function retur
 
 ## Where the extended items are listed
 
-The four reference pages list the extended items in their own sections: [manifest keys](/pages/reference-manifest/#chrome-and-contribution-keys), [events and intents](/pages/reference-events-and-intents/), [errors and limits](/pages/reference-errors-and-limits/#requestable-limits) and [capabilities](/pages/reference-capabilities/). Twenty-three grants are listed there, and eleven of them are high risk. The settings row table lives in the [settings schema reference](/pages/reference-settings-schema/).
+The four reference pages list the extended items in their own sections: [manifest keys](/pages/reference-manifest/#chrome-and-contribution-keys), [events and intents](/pages/reference-events-and-intents/), [errors and limits](/pages/reference-errors-and-limits/#requestable-limits) and [capabilities](/pages/reference-capabilities/). Twenty-four grants are listed there, and twelve of them are high risk. The settings row table lives in the [settings schema reference](/pages/reference-settings-schema/).
 
 The render shows the lookup the CLI offers for a key. Illustrative, not generated.
 

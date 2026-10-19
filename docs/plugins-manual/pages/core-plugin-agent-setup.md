@@ -6,7 +6,7 @@ permalink: /pages/core-plugin-agent-setup/
 
 ## Agent setup
 
-Agents work better in Ilium when their instruction files describe what Ilium offers. Agent setup installs two blocks of instructions into the files an agent reads at start. The Chatroom block tells agents how to talk to each other. The Progress block tells them how to report long jobs. The plugin id is `ilium.core.agent-setup`. The client side draws the Setup tab and asks before it changes a file. The server side reads and writes the files, because only the server holds the file grants.
+Agents work better in Ilium when their instruction files describe what Ilium offers. Agent setup installs two blocks of instructions into the files an agent reads at start. The Chatroom block tells agents how to talk to each other. The Progress block tells them how to report long jobs. The plugin id is `ilium.core.agent-setup`. The client side draws the Setup tab and asks before it changes a project file. The server side reads the files and writes the project files, because only the server holds the file grants. It never writes a global file in an agent's configuration folder: it proposes the change with `agent-config.propose:<agent>`, the kernel shows the user the diff, and the host writes only what the user accepts ([agent-config.propose](/pages/capability-agent-config-propose/)).
 
 Each block sits between two marker lines, so Ilium can find it, upgrade it and leave everything else alone.
 
@@ -15,7 +15,7 @@ Each block sits between two marker lines, so Ilium can find it, upgrade it and l
 - The two blocks, Chatroom and Progress, and the files they go into: the global Claude file `~/.claude/CLAUDE.md` (the path can be changed), the global Codex file `~/.codex/AGENTS.md`, and for each open project a `CLAUDE.md` and an `AGENTS.md`.
 - Markers: `<!-- ilium-agent-feature: chatroom -->` before the block and `<!-- /ilium-agent-feature: chatroom -->` after it. The Progress marker adds a version, as in `<!-- ilium-agent-feature: progress version=13 -->`, so an older block is upgraded and a newer block is left alone.
 - Safety rules: text outside the markers is kept, a file over 512 KiB is not changed, a symbolic link stays a symbolic link, and look-alike text without markers is reported as "Instruction detected" and not touched.
-- Timing: global blocks are installed and refreshed when a client attaches and when a project opens. Project copies are never added automatically. They come only from the Setup tab.
+- Timing: when a client attaches and when a project opens, the plugin checks the global files. A missing or older global block becomes one proposal per agent, which the user accepts or rejects in the kernel's proposal dialog. A rejected proposal is not repeated for the same block version; the user installs it later from the Setup tab. Project copies are never added automatically. They come only from the Setup tab.
 - The five statuses: Set up by Ilium, Ilium update required, Newer Ilium instructions detected, Instruction detected, Not set up.
 - Chatroom setup also creates `CHATROOM.md` and the hooks that deliver messages.
 
@@ -49,14 +49,14 @@ The Setup tab belongs to this plugin, and the Chatroom and Progress pages link h
 | Status badge | Meaning |
 |---|---|
 | Set up by Ilium | The current managed block is present. |
-| Ilium update required | An older managed block is present. It is refreshed automatically. |
+| Ilium update required | An older managed block is present. The plugin proposes the refresh, and it is applied when the user accepts it. |
 | Newer Ilium instructions detected | The file was written by a newer Ilium. It is left untouched. |
 | Instruction detected | Matching text that Ilium did not write. |
 | Not set up | No block yet. |
 
 There is no sixth badge for a file over 512 KiB. Such a file keeps the badge its content gives it, the install and refresh actions on its row fail with `invalid-argument` and the message `file is over 512 KiB`, the notice shows that message, and the file is not read further or written.
 
-Each feature has a **Global file** row (`Enter` changes the path, `R` restores `~/.claude/CLAUDE.md`), a **Global** row per global file and a **Project** row for every open project. `Enter` on a target refreshes it. Setup is not an on/off switch, because removing a mandatory block would leave new agents uninformed. The paths are stored in `[agent_setup]` as `chatroom_global_file` and `progress_global_file`.
+Each feature has a **Global file** row (`Enter` changes the path, `R` restores `~/.claude/CLAUDE.md`), a **Global** row per global file and a **Project** row for every open project. `Enter` on a target refreshes it: a project target after the plugin's own confirm dialog, a global target through a proposal that the user accepts in the kernel's dialog. Setup is not an on/off switch, because removing a mandatory block would leave new agents uninformed. The paths are stored in `[agent_setup]` as `chatroom_global_file` and `progress_global_file`.
 
 | Scope | Files edited |
 |---|---|
@@ -96,7 +96,7 @@ Blocks sit between the markers `<!-- ilium-agent-feature: chatroom -->` and `<!-
 
 This block is a fragment. It lists the contributions. The whole manifest is in [Complete manifest](#complete-manifest).
 
-The plugin is replaceable. A replacement must provide the service and the three points: the `surface` list names exactly those (a surface entry has the form `services:`, `points:`, `commands:`, `pane-kinds:`, `topics:` or `cli:`, so a settings tab cannot be listed) and install checks only that list. Without its own Setup tab the replacement leaves the Setup tab empty, and agents lose the per-project install rows. The grants for the files use the scopes `agent-config:<agent>`, which are high risk for writing, and `project`.
+The plugin is replaceable. A replacement must provide the service and the three points: the `surface` list names exactly those (a surface entry has the form `services:`, `points:`, `commands:`, `pane-kinds:`, `topics:` or `cli:`, so a settings tab cannot be listed) and install checks only that list. Without its own Setup tab the replacement leaves the Setup tab empty, and agents lose the per-project install rows. The grants for the files are `fs.read:agent-config:<agent>` (high risk) with `agent-config.propose:<agent>` (high risk) for the global files, and `fs.read:project` with `fs.write:project` for the project files. A direct `fs.write:agent-config:<agent>` grant is refused at install with `manifest.grant-scope`.
 
 ```json
 {
@@ -123,8 +123,8 @@ The plugin is replaceable. A replacement must provide the service and the three 
   },
   "capabilities": {
     "server": [
-      "fs.read:agent-config:claude", "fs.write:agent-config:claude",
-      "fs.read:agent-config:codex", "fs.write:agent-config:codex",
+      "fs.read:agent-config:claude", "agent-config.propose:claude",
+      "fs.read:agent-config:codex", "agent-config.propose:codex",
       "fs.read:project", "fs.write:project",
       "projects.read", "settings.read-kernel:agent-setup",
       "services.provide:ilium.core.agent-setup/install",
@@ -200,9 +200,9 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
   "capabilities": {
     "server": [
       "fs.read:agent-config:claude",
-      "fs.write:agent-config:claude",
+      "agent-config.propose:claude",
       "fs.read:agent-config:codex",
-      "fs.write:agent-config:codex",
+      "agent-config.propose:codex",
       "fs.read:project",
       "fs.write:project",
       "projects.read",
@@ -424,12 +424,12 @@ If the plugin is disabled, the tab stays in the rail with its stored values show
 
 #### Replace one marked block in place
 
-The core of the plugin is one pure function and one safe write. The function finds the markers, replaces what lies between them, and returns the new text. It replaces only when both markers are present and the opening marker comes first. In every other case (no marker, only one of the two, or the closing marker before the opening one) the sample appends the block at the end and leaves the stray marker text where it is. The real plugin first reports the lone or reversed marker as "Instruction detected" (see the safety rules above) and does not write, so this append-only fallback is a sample simplification. The write uses the revision that came with the read, so a change made by someone else in between ends as `failed(conflict)` and nothing is lost. See [atomic write and revisions](/pages/api-fs-atomic-and-tail/) and [fs.write](/pages/capability-fs-write/).
+The core of the plugin is one pure function and one safe change. The function finds the markers, replaces what lies between them, and returns the new text. It replaces only when both markers are present and the opening marker comes first. In every other case (no marker, only one of the two, or the closing marker before the opening one) the sample appends the block at the end and leaves the stray marker text where it is. The real plugin first reports the lone or reversed marker as "Instruction detected" (see the safety rules above) and does not write, so this append-only fallback is a sample simplification. A project file is written with `write-atomic`. A global file in an agent's configuration folder is proposed with `propose-agent-config`, so the kernel shows the user the diff and the host writes it only when the user accepts. Both carry the revision that came with the read, so a change made by someone else in between ends as `failed(conflict)` and nothing is lost. See [atomic write and revisions](/pages/api-fs-atomic-and-tail/), [fs.write](/pages/capability-fs-write/) and [agent-config.propose](/pages/capability-agent-config-propose/).
 
 **Rust**
 
 ```rust
-use ilium_plugin_sdk::host::fs;
+use ilium_plugin_sdk::host::fs::{self, ConfigChange};
 use ilium_plugin_sdk::types::paths::FsPath;
 
 const MAX_BYTES: usize = 512 * 1024;
@@ -452,8 +452,23 @@ async fn install(path: FsPath, marker: &str, block: &str) -> Result<(), PluginEr
         return Err(PluginError::invalid_argument("file is over 512 KiB"));
     }
     let text = String::from_utf8_lossy(&current.bytes);
-    let next = with_block(&text, marker, block);
-    fs::write_atomic(&path, next.into_bytes(), Some(current.revision)).await?;
+    let next = with_block(&text, marker, block).into_bytes();
+    match path.scope.strip_prefix("agent-config:") {
+        // A global file: the user sees the diff and decides. A rejection ends as Err(not-permitted).
+        Some(agent) => {
+            let change = ConfigChange {
+                path: path.path.clone(),
+                content: Some(next),
+                revision: Some(current.revision),
+                summary: format!("install the {marker} block"),
+            };
+            fs::propose_agent_config(agent, "Ilium instructions", vec![change]).await?;
+        }
+        // A project file, after the plugin's own confirm dialog.
+        None => {
+            fs::write_atomic(&path, next, Some(current.revision)).await?;
+        }
+    }
     Ok(())
 }
 ```
@@ -461,7 +476,7 @@ async fn install(path: FsPath, marker: &str, block: &str) -> Result<(), PluginEr
 **TypeScript**
 
 ```ts
-import { readWithRevision, writeAtomic } from '@ilium/plugin-sdk/host/fs';
+import { proposeAgentConfig, readWithRevision, writeAtomic } from '@ilium/plugin-sdk/host/fs';
 import type { FsPath } from '@ilium/plugin-sdk/types';
 
 const MAX_BYTES = 512 * 1024;
@@ -479,8 +494,16 @@ export function withBlock(text: string, marker: string, block: string): string {
 export async function install(path: FsPath, marker: string, block: string): Promise<void> {
   const current = await readWithRevision(path);
   if (current.bytes.length > MAX_BYTES) throw { code: 'invalid-argument', message: 'file is over 512 KiB' };
-  const next = withBlock(new TextDecoder().decode(current.bytes), marker, block);
-  await writeAtomic(path, new TextEncoder().encode(next), current.revision);
+  const next = new TextEncoder().encode(withBlock(new TextDecoder().decode(current.bytes), marker, block));
+  if (path.scope.startsWith('agent-config:')) {
+    // A global file: the user sees the diff and decides. A rejection throws not-permitted.
+    const agent = path.scope.slice('agent-config:'.length);
+    await proposeAgentConfig(agent, 'Ilium instructions', [
+      { path: path.path, content: next, revision: current.revision, summary: `install the ${marker} block` },
+    ]);
+    return;
+  }
+  await writeAtomic(path, next, current.revision); // a project file, after the plugin's own confirm dialog
 }
 ```
 
@@ -671,7 +694,7 @@ export function onAttach(): void {
 
 #### Owner side: the veto hook before an install
 
-`before-install` is a veto hook with high risk. The plugin runs it before every write with the target, the block and the path. A handler may refuse, for example a policy plugin that forbids edits to a shared team file. A refusal completes the request as `refused` with the code `extension.vetoed`. The plugin then shows the reason and writes nothing. See [events](/pages/api-events/) and [requests and outcomes](/pages/requests-and-outcomes/).
+`before-install` is a veto hook with high risk. The plugin runs it before every write or proposal with the target, the block and the path. A handler may refuse, for example a policy plugin that forbids edits to a shared team file. A refusal completes the request as `refused` with the code `extension.vetoed`. The plugin then shows the reason and writes nothing. See [events](/pages/api-events/) and [requests and outcomes](/pages/requests-and-outcomes/).
 
 **Rust**
 
@@ -788,7 +811,7 @@ Other plugins change what `ilium.core.agent-setup` does through the points below
 | Point | Kind | What it does | Payload | Risk |
 |---|---|---|---|---|
 | `instruction-blocks` | collect | Add a marker-delimited instruction block that Setup installs. | entry: id, title, marker, file (text under the plugin's `help/` folder) | standard |
-| `targets` | collect | Add a file that Setup can edit, such as a new agent config file. | entry: id, title, path_template, scope (global, project) | standard |
+| `targets` | collect | Add a file that Setup can edit, such as a new agent config file. A global target is changed through a proposal, so it must lie in an `agent-config:<agent>` scope this plugin can propose for. | entry: id, title, path_template, scope (global, project) | standard |
 | `before-install` | hook (veto) | Refuse writing a block to a file. | target, block, path | high |
 
 **Services** (grant `services.use:<name>`):

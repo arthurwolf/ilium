@@ -83,7 +83,7 @@ A plugin that is not running is activated for a due durable timer: the activatio
 
 ### The journal
 
-The journal holds plugin entries and host entries per pane. A plugin writes its own entries with `log-event`. The host writes entries for what it does:
+The journal records what happened to each pane, and every entry names the plugin that wrote it. The trim limit `journal_entries` applies per plugin, to that plugin's own entries. A plugin writes its own entries with `log-event`. The host writes entries for what it does:
 
 | Host entry kind | When |
 |---|---|

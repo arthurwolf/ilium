@@ -67,7 +67,7 @@ Related pages: [kernel and boot](/pages/reference-kernel-and-boot/), [config and
 | F-034 | Agent icons and identifiers | `agent-monitoring` | primitive-extended | agent-detect plugin | client | ui.chrome | [ui] claude_agent_icon, codex_agent_icon, antigravity_agent_icon, agent_identifier_mode | none | 4b | COR-011 |
 | F-035 | Agent toolbar | `agent-monitoring` | primitive-extended | agent-toolbar plugin | both | ui.chrome, terminal.write | [ui] agent_toolbar_enabled, show_toolbar_labels | none | 4a | COR-011 |
 | F-036 | Agent messaging and Ask for update | `automation` | primitive-extended | fleet plugin | both | terminal.write, panes.read | none | none | 4b | COR-011 |
-| F-037 | Configure agent (agent config files) | `titles-and-instructions` | plugin-wasm | agent-setup plugin | client | fs.write:agent-config:<agent> | none | agent config files | 4b | COR-011 |
+| F-037 | Configure agent (agent config files) | `titles-and-instructions` | plugin-wasm | agent-setup plugin | client | fs.read:agent-config:<agent>, agent-config.propose:<agent> | none | agent config files | 4b | COR-011 |
 
 ### 5. Cost, titles and organisation
 
@@ -108,7 +108,7 @@ Related pages: [kernel and boot](/pages/reference-kernel-and-boot/), [config and
 | F-060 | ilium progress CLI | `cli-reference` | plugin-wasm | progress plugin | server | cli.contribute | none | none | 4b | COR-040 |
 | F-061 | Progress footer in tree | `automation` | plugin-wasm | progress plugin | client | ui.chrome | [ui] completed_progress_hide_after_seconds, task_progress_frames | none | 4b | COR-011 |
 | F-062 | Chatroom | `automation` | plugin-wasm | chatroom plugin | both | cli.contribute, fs.write:project | none | CHATROOM.md, .ilium/chat-readers/ | 4b | COR-011 |
-| F-063 | Agent setup (hooks and instructions) | `automation` | plugin-wasm | agent-setup plugin | client | fs.write:agent-config:<agent> | [agent_setup] | agent config files | 4b | COR-011 |
+| F-063 | Agent setup (hooks and instructions) | `automation` | plugin-wasm | agent-setup plugin | client | fs.read:agent-config:<agent>, agent-config.propose:<agent> | [agent_setup] | agent config files | 4b | COR-011 |
 | F-064 | Context-injection hook | `automation` | plugin-wasm | chatroom plugin | server | cli.contribute | none | chat-readers | 4b | COR-040 |
 
 ### 8. Smart Copy and worktrees

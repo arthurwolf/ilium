@@ -23,13 +23,13 @@ The additional scopes:
 | Scope (grant argument) | Preopen | Root | Risk |
 |---|---|---|---|
 | `agent-sessions:gemini` | `/agent-sessions/gemini` | the Gemini CLI transcripts, `~/.gemini/tmp/*/chats` | high for read; a write grant is refused at install, as for every `agent-sessions` scope |
-| `agent-config:gemini` | `/agent-config/gemini` | the Gemini CLI configuration, `~/.gemini/settings.json` | normal for read, high for write |
-| `agent-config:antigravity` | `/agent-config/antigravity` | the Antigravity configuration directory, `~/.gemini/antigravity` (a directory root, not a single file) | normal for read, high for write |
+| `agent-config:gemini` | `/agent-config/gemini` | the Gemini CLI configuration, `~/.gemini/settings.json` | high for read; a write grant is refused at install, changes are proposed with `agent-config.propose:gemini` |
+| `agent-config:antigravity` | `/agent-config/antigravity` | the Antigravity configuration directory, `~/.gemini/antigravity` (a directory root, not a single file) | high for read; a write grant is refused at install, changes are proposed with `agent-config.propose:antigravity` |
 
 The kernel resolves each root per platform, so a plugin never builds the home path itself. A scope whose directory does not exist is still granted; the calls then return `not-found`.
 
 ```json
-"capabilities": { "server": ["fs.read:agent-sessions:gemini", "fs.read:agent-config:gemini", "fs.write:agent-config:gemini"] }
+"capabilities": { "server": ["fs.read:agent-sessions:gemini", "fs.read:agent-config:gemini", "agent-config.propose:gemini"] }
 ```
 
 ### Signatures
@@ -319,15 +319,20 @@ export const { lifecycle, handler } = definePlugin({
 
 ### Agent homes
 
-The three scopes above let a plugin read what the Gemini CLI and Antigravity store, in the same way the Claude and Codex scopes work. Typical uses: list Gemini chats for a transcript view, read the auto-compact setting of an agent, or write a hook entry into an agent configuration. A write to a configuration file should use `write-atomic` with the revision read just before, so an edit by the agent itself is never overwritten.
+The three scopes above let a plugin read what the Gemini CLI and Antigravity store, in the same way the Claude and Codex scopes work. Typical uses: list Gemini chats for a transcript view, read the auto-compact setting of an agent, or propose a hook entry for an agent configuration. A plugin never writes a configuration file itself: it reads the file with its revision and proposes the new content with `propose-agent-config`. The kernel shows the user the diff, and the host writes the file only when the user accepts it and the file is still at that revision, so an edit by the agent itself is never overwritten. See [agent-config.propose](/pages/capability-agent-config-propose/).
 
 **Rust**
 
 ```rust
 let settings = FsPath { scope: "agent-config:gemini".into(), path: "settings.json".into() };
 let current = fs::read_with_revision(&settings).await?;
-let updated = add_hook(&current.bytes)?;
-fs::write_atomic(&settings, updated, Some(current.revision)).await?;
+let change = ConfigChange {
+    path: "settings.json".into(),
+    content: Some(add_hook(&current.bytes)?),
+    revision: Some(current.revision),
+    summary: "add the Ilium hook".into(),
+};
+fs::propose_agent_config("gemini", "Ilium hook", vec![change]).await?;
 ```
 
 **TypeScript**
@@ -335,24 +340,26 @@ fs::write_atomic(&settings, updated, Some(current.revision)).await?;
 ```ts
 const settings = { scope: 'agent-config:gemini', path: 'settings.json' };
 const current = await readWithRevision(settings);
-await writeAtomic(settings, addHook(current.bytes), current.revision);
+await proposeAgentConfig('gemini', 'Ilium hook', [
+  { path: 'settings.json', content: addHook(current.bytes), revision: current.revision, summary: 'add the Ilium hook' },
+]);
 ```
 
 Paths inside an agent scope are relative to the root the kernel resolved, so a Gemini chat is addressed as `<project-hash>/chats/<file>` under `agent-sessions:gemini`. Use `list-dir` or `scan` with a glob to find them.
 
 ### What the user sees
 
-The grant dialog shows the new scopes in plain words. A high-risk grant is drawn in the warning style, and a write to an agent configuration is logged at info level like every write outside `data` and `cache`.
+The grant dialog shows the new scopes in plain words. A high-risk grant is drawn in the warning style. A proposal for an agent configuration opens the kernel's diff dialog, and each file the user accepts is logged at info level like every write outside `data` and `cache`.
 
 <pre class="term"><span class="t-prompt">$</span> ilium plugin logs example.kanban --tail 4
 <span class="t-dim">10:02:11</span> <span class="t-ok">info</span>  fs.write project .kanban/board.json replace
 <span class="t-dim">10:02:13</span> <span class="t-warn">warn</span>  fs.write-atomic .kanban/board.json: conflict
 <span class="t-dim">10:02:13</span> <span class="t-ok">info</span>  fs.write project .kanban/board.json replace
-<span class="t-dim">10:02:40</span> <span class="t-ok">info</span>  fs.write agent-config:gemini settings.json
+<span class="t-dim">10:02:40</span> <span class="t-ok">info</span>  applied agent-config:gemini settings.json
 <span class="t-prompt">$</span> <span class="t-dim">4 lines shown, 0 dropped</span>
 </pre>
 
-Illustrative, not generated. The log of a plugin that lost one write race, retried on the new revision and then edited the Gemini configuration.
+Illustrative, not generated. The log of a plugin that lost one write race, retried on the new revision and then proposed a change to the Gemini configuration, which the user accepted.
 
 ### Errors and limits
 

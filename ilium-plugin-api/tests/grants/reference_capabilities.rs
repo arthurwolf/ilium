@@ -990,3 +990,45 @@ fn cap_003_host_wildcard_covers_a_subdomain_and_exact_host_does_not_cover_others
     assert!(!grant("http:api.example.com").covers(&grant("http:*.example.com")));
     assert!(!grant("http:api.example.com").covers(&grant("http:other.example.com")));
 }
+
+// ---------------------------------------------------------------- CAP-886 agent-config.propose grant
+
+/// REQ: CAP-886
+#[test]
+fn cap_886_agent_config_propose_names_one_agent_is_high_risk_and_needs_the_read_grant() {
+    let read = "fs.read:agent-config:claude";
+    let propose = "agent-config.propose:claude";
+    assert!(reports(
+        Tier::T2,
+        Side::Server,
+        &["agent-config.propose", read],
+        "manifest.grant-argument-missing"
+    ));
+    assert!(reports(
+        Tier::T2,
+        Side::Server,
+        &["agent-config.propose:*", read],
+        "manifest.grant-wildcard"
+    ));
+    assert!(reports(
+        Tier::T2,
+        Side::Server,
+        &["agent-config.propose:cursor"],
+        "manifest.grant-scope"
+    ));
+    for tier in [Tier::T1, Tier::T2, Tier::T3] {
+        assert_eq!(risk_of(&[grant(propose)]), Risk::High, "{tier:?}");
+    }
+    assert!(reports(
+        Tier::T2,
+        Side::Server,
+        &[propose],
+        "manifest.grant-dependency"
+    ));
+    assert!(!reports(
+        Tier::T2,
+        Side::Server,
+        &[propose, read],
+        "manifest.grant-dependency"
+    ));
+}

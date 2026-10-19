@@ -742,3 +742,77 @@ impl KernelFacade for FakeKernel {
         self.process_kind
     }
 }
+
+/// One file row of an open agent-config proposal dialog (CAP-887).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProposalRow {
+    /// Whether the user has checked this row.
+    pub checked: bool,
+}
+
+/// The kernel-drawn dialog of an `agent-config.propose` call (CAP-887).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProposalDialog {
+    /// One row per proposed file.
+    pub rows: Vec<ProposalRow>,
+    /// The complete diff of every proposed change.
+    pub full_diff: String,
+}
+
+/// Agent-config proposal hooks (CAP-887..891).
+impl FakeKernel {
+    /// Whether the agent's config file exists.
+    pub fn agent_config_file_exists(&self, _agent: &str, _path: &str) -> bool {
+        unimplemented!("host::testing::FakeKernel::agent_config_file_exists")
+    }
+
+    /// The open proposal dialog, if any.
+    pub fn open_proposal_dialog(&self) -> Option<ProposalDialog> {
+        unimplemented!("host::testing::FakeKernel::open_proposal_dialog")
+    }
+
+    /// Makes the next atomic rename fail with an I/O error.
+    pub fn fail_next_rename(&self) {
+        unimplemented!("host::testing::FakeKernel::fail_next_rename")
+    }
+
+    /// Checks one dialog row and presses Apply.
+    pub fn check_row_and_apply(&self, _row: usize) {
+        unimplemented!("host::testing::FakeKernel::check_row_and_apply")
+    }
+
+    /// Presses Reject all.
+    pub fn reject_all(&self) {
+        unimplemented!("host::testing::FakeKernel::reject_all")
+    }
+
+    /// Writes an agent config file directly, as the user editing it.
+    pub fn write_agent_config_file(&self, _agent: &str, _path: &str, _content: &[u8]) {
+        unimplemented!("host::testing::FakeKernel::write_agent_config_file")
+    }
+
+    /// The current revision token of an agent config file.
+    pub fn agent_config_revision(&self, _agent: &str, _path: &str) -> String {
+        unimplemented!("host::testing::FakeKernel::agent_config_revision")
+    }
+
+    /// The bytes of an agent config file.
+    pub fn read_agent_config_file(&self, _agent: &str, _path: &str) -> Vec<u8> {
+        unimplemented!("host::testing::FakeKernel::read_agent_config_file")
+    }
+
+    /// Whether `consents.json` is byte-identical to its state at rig start.
+    pub fn consents_json_is_unchanged(&self) -> bool {
+        unimplemented!("host::testing::FakeKernel::consents_json_is_unchanged")
+    }
+
+    /// The bytes of a file under the plugin's data directory.
+    pub fn plugin_data_file(&self, _path: &str) -> Vec<u8> {
+        unimplemented!("host::testing::FakeKernel::plugin_data_file")
+    }
+
+    /// The audit records of one event kind.
+    pub fn audit_records(&self, _event: &str) -> Vec<serde_json::Value> {
+        unimplemented!("host::testing::FakeKernel::audit_records")
+    }
+}

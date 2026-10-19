@@ -26,7 +26,7 @@ pub use ext_world::{
     ExtWorld, HandlerAction, HandlerRun, HandlerScript, PointEntry, PointListing, ReplacementShape,
     SettingReading,
 };
-pub use fake_kernel::{FakeKernel, FakePaneScreen, HttpAnswer};
+pub use fake_kernel::{FakeKernel, FakePaneScreen, HttpAnswer, ProposalDialog, ProposalRow};
 pub use fake_net::{FakeNet, FakeResponse, SeenRequest};
 pub use fake_registry::FakeRegistry;
 pub use harness::{

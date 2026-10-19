@@ -32,6 +32,7 @@ The grant is `fs.write:<scope>`. The argument is one scope name from the table i
 | `fs.write:/home/me/notes` | no | `manifest.grant-scope`; an absolute path needs `path:<template>` |
 | `fs.write:package` | no | `manifest.grant-scope`; the `package` scope is read only |
 | `fs.write:agent-sessions:claude` | no | `manifest.grant-scope`; agent transcripts are read only |
+| `fs.write:agent-config:claude` | no | `manifest.grant-scope`; agent configuration is changed only through a proposal, see [agent-config.propose](/pages/capability-agent-config-propose/) |
 | `fs.read:project` | no | a read grant does not allow writes |
 
 A literal absolute path inside `path:` (for example `fs.write:path:/srv/logs/**`) is high risk and, as in the sandbox scope table, is available to all tiers.
@@ -43,7 +44,7 @@ A literal absolute path inside `path:` (for example `fs.write:path:/srv/logs/**`
 | `project` | the session's project folder, without the `.ilium` folder | `fs.write:project` | H |
 | `worktrees` | the worktree folder from `workspace.worktree_root` | `fs.write:worktrees` | H |
 | `path:<template>` | the folders a template names | `fs.write:path:<template>` | H |
-| `agent-config:claude`, `agent-config:codex` | each agent's configuration folder | refused at install with `manifest.grant-scope`; agent scopes are read only | n/a |
+| `agent-config:<agent>` (`claude`, `codex`, `gemini`, `antigravity`) | each agent's configuration folder | none: `fs.write:agent-config:<agent>` is refused at install with `manifest.grant-scope`. A plugin proposes changes with [`agent-config.propose:<agent>`](/pages/capability-agent-config-propose/), and the host writes only what the user accepts | H for the proposal grant |
 | `picked/<n>` | the file or folder the user chose | `fs.write:picked` for a save pick | normal |
 | `data` | the plugin's private data folder | always granted | none |
 | `cache` | the plugin's private cache folder, which the host may evict | always granted | none |
@@ -284,13 +285,13 @@ Writes outside `data` and `cache` appear in the plugin log. The user reads them 
 First-party plugins from [feature traceability](/pages/reference-feature-traceability/):
 
 - 32 Agent debug history appends to the `data` scope, which needs no grant.
-- 37 Configure agent: no write grant is possible. `fs.write:agent-config:claude` and `fs.write:agent-config:codex` are refused at install with `manifest.grant-scope` (see the scopes table above). Open design question: this plugin has no write path to agent configuration.
+- 37 Configure agent: no `fs.write` grant on agent configuration (`fs.write:agent-config:<agent>` is refused at install with `manifest.grant-scope`). It proposes each edit with `agent-config.propose:claude` and `agent-config.propose:codex`, and the user approves the diff ([agent-config.propose](/pages/capability-agent-config-propose/)).
 - 62 Chatroom: `fs.write:project`, used for appends.
-- 63 Agent setup: no write grant is possible. `fs.write:agent-config:claude` and `fs.write:agent-config:codex` are refused at install with `manifest.grant-scope`. Open design question: this plugin has no write path to agent configuration.
+- 63 Agent setup: `fs.write:project` for instruction files in the project folder. Files in an agent's configuration folder are changed only through `agent-config.propose:claude` and `agent-config.propose:codex`, with the user approving each diff.
 - 67 Agent in a new Git worktree: `fs.write:worktrees`.
 - 71 Worktree include copy: `fs.write:worktrees`.
-- 77 Convert a session: no write grant on `agent-sessions`. Transcripts are read only, and a manifest that asks for a write is refused at install.
-- 82 Compaction optimiser: no write grant is possible. `fs.write:agent-config:claude` and `fs.write:agent-config:codex` are refused at install with `manifest.grant-scope`. Open design question: this plugin has no write path to agent configuration; revert data would be kept in `data`.
+- 77 Convert a session: no write grant on `agent-sessions` or `agent-config`. Transcripts are read only, and a manifest that asks for a write is refused at install. The converted Claude Code transcript is proposed as a new file with `agent-config.propose:claude`, and the host writes it when the user accepts.
+- 82 Compaction optimiser: no `fs.write` grant on agent configuration. **Apply** and **Revert** propose the threshold change with `agent-config.propose:claude` and `agent-config.propose:codex`; the host keeps the previous content in the plugin's `data` scope as the history entry that **Revert** proposes back.
 
 Requirement ids for this page: [CAP-008]. See the [requirements index](/pages/reference-requirements/).
 
@@ -299,6 +300,7 @@ Requirement ids for this page: [CAP-008]. See the [requirements index](/pages/re
 - [fs.read](/pages/capability-fs-read/) for the read side of the same scopes and the path rules.
 - [fs.watch](/pages/capability-fs-watch/) to react to changes made by other writers.
 - [fs.pick](/pages/capability-fs-pick/) for saving to a path the user chose.
+- [agent-config.propose](/pages/capability-agent-config-propose/) for changing agent configuration through a user-approved proposal.
 - [fs](/pages/api-fs/) for the full function surface, including locks.
 - [Workspace manage](/pages/capability-workspace-manage/) for worktrees, which need `fs.write:worktrees`.
 - [Requests and outcomes](/pages/requests-and-outcomes/) for how completions are delivered.
@@ -306,4 +308,4 @@ Requirement ids for this page: [CAP-008]. See the [requirements index](/pages/re
 
 ### Security
 
-The authoritative file scope table is in [Sandbox reference](/pages/reference-sandbox/) ([SEC-058] to [SEC-062]). Writes outside `data` and `cache` are high risk.
+The authoritative file scope table is in [Sandbox reference](/pages/reference-sandbox/) ([SEC-058] to [SEC-062]). Writes outside `data` and `cache` are high risk. Agent configuration is never written directly; see [agent-config.propose](/pages/capability-agent-config-propose/).

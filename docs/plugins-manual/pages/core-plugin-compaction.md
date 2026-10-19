@@ -8,13 +8,13 @@ permalink: /pages/core-plugin-compaction/
 
 The Compaction plugin (id `ilium.core.compaction`, sides: server and client) is the plugin form of Ilium's context compaction. When an agent's context fills up, the plugin builds a summary of the transcript in a background job, routes the agent toolbar's compact button to that job, and lets the agent resume from the summary. On the client it draws the compaction optimiser, which suggests the cheapest auto-compact threshold and lets the user apply or revert it. It also converts a session between Claude and Codex.
 
-An agent's own auto-compact trigger lives inside the agent command-line tool, so the plugin only reads it and never changes how the agent decides. The summary job and the optimiser are ordinary plugin code that use the contract version 0.1.
+An agent's own auto-compact trigger lives in the agent's configuration file (Claude's `settings.json`, Codex's `config.toml`). The plugin reads it with `fs.read:agent-config:<agent>` and never writes it: **Apply** and **Revert** propose the change with `agent-config.propose:<agent>`, the kernel shows the user the diff, and the host writes it only when the user accepts ([agent-config.propose](/pages/capability-agent-config-propose/)). The summary job and the optimiser are ordinary plugin code that use the contract version 0.1.
 
 ### What it covers
 
 - **Remote compaction.** The summary is built through the inference model in a job, so the agent keeps working while it runs. The user page `src/docs/remote-compaction.md` describes what the user sees.
 - **Compact button routing.** The compact button of the agent toolbar starts the same job as the palette command. See the section Starting it in `src/docs/remote-compaction.md`.
-- **Compaction optimiser.** The Optimization tab of Settings recommends a threshold, with Apply and Revert. See the Remote compaction section of `src/docs/settings.md`.
+- **Compaction optimiser.** The Optimization tab of Settings recommends a threshold, with Apply and Revert. Apply proposes the recommended threshold. Revert proposes the previous value, which the host kept in the history entry of the accepted proposal. Both open the kernel's proposal dialog, and nothing changes until the user accepts. See the Remote compaction section of `src/docs/settings.md`.
 - **Auto-compact trigger reader.** The plugin reads the trigger each agent uses (see the section Techniques in `src/docs/remote-compaction.md`), so the recommendation matches the agent.
 - **Session conversion.** Convert a session between Claude and Codex, described in `src/docs/session-recovery.md`.
 
@@ -68,7 +68,8 @@ The plugin ships with Ilium as a first-party (T1) package. The server side runs 
   },
   "capabilities": {
     "server": ["agent.transcript", "inference", "jobs.run", "panes.lifecycle",
-               "fs.read:agent-homes", "fs.write:agent-homes"],
+               "fs.read:agent-config:claude", "agent-config.propose:claude",
+               "fs.read:agent-config:codex", "agent-config.propose:codex"],
     "client": ["open-external", "ui.panels"]
   },
   "contributes": {
@@ -112,8 +113,10 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "inference",
       "jobs.run",
       "panes.lifecycle",
-      "fs.read:agent-homes",
-      "fs.write:agent-homes"
+      "fs.read:agent-config:claude",
+      "agent-config.propose:claude",
+      "fs.read:agent-config:codex",
+      "agent-config.propose:codex"
     ],
     "client": [
       "open-external",
@@ -277,7 +280,7 @@ export const { lifecycle, handler, jobRunner } = definePlugin({
 
 #### 2. Optimiser recommendation
 
-The client draws the cheapest auto-compact threshold in a `meter` widget and in a `meter` settings row, with `button` widgets for Apply and Revert. The widgets are listed in the [widget catalogue](/pages/widgets-index/) and drawn as described in [data display](/pages/widgets-data-display/). The row type is in [settings rows](/pages/reference-settings-rows/) and the buttons are in [input widgets](/pages/widgets-input/). `applyThreshold` and `revertThreshold` are the plugin's own functions.
+The client draws the cheapest auto-compact threshold in a `meter` widget and in a `meter` settings row, with `button` widgets for Apply and Revert. The widgets are listed in the [widget catalogue](/pages/widgets-index/) and drawn as described in [data display](/pages/widgets-data-display/). The row type is in [settings rows](/pages/reference-settings-rows/) and the buttons are in [input widgets](/pages/widgets-input/). `applyThreshold` and `revertThreshold` are the plugin's own functions. The client forwards them to the server side, which holds the grants. `applyThreshold` calls `propose-agent-config` with the new threshold and the revision it read; `revertThreshold` reads the newest history entry `agent-config-history/<agent>/<request-id>.json` in the plugin's `data` scope and proposes its previous content. A rejected proposal changes nothing, and a revision conflict ends as `failed(conflict)`. See [agent-config.propose](/pages/capability-agent-config-propose/).
 
 **Rust**
 
@@ -433,7 +436,7 @@ fn open_converted(session_file: &str) -> Submission {
     Submission {
         intent: Intent::OpenExternal(OpenExternalSpec {
             target: ExternalTarget::File(FsPath {
-                scope: "agent-homes".into(),
+                scope: "agent-sessions:codex".into(),
                 path: session_file.into(),
             }),
         }),
@@ -453,7 +456,7 @@ export function openConverted(sessionFile: string): Submission {
   return {
     intent: {
       tag: 'open-external',
-      val: { target: { tag: 'file', val: { scope: 'agent-homes', path: sessionFile } } },
+      val: { target: { tag: 'file', val: { scope: 'agent-sessions:codex', path: sessionFile } } },
     },
     correlation: 1n,
     dedupKey: undefined,
@@ -551,6 +554,7 @@ A handler that is late, traps or returns a reply the mode does not allow counts 
 - [Input widgets](/pages/widgets-input/)
 - [Settings rows](/pages/reference-settings-rows/)
 - [open-external grant](/pages/capability-open-external/) and [chrome intents](/pages/api-intent-chrome/)
+- [fs.read grant](/pages/capability-fs-read/) and the [agent-config.propose grant](/pages/capability-agent-config-propose/)
 
 ### See also
 

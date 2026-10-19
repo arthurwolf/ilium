@@ -444,6 +444,7 @@ No new `error-code` case exists. The extended functions reuse the 15 codes. Code
 | `surface.write-glyphs`, `set-owner-ids` | `invalid-argument`, `quota-exceeded`, `unsupported` | none |
 | `media.open-video-bytes`, `open-video-range` | `invalid-argument` (including more than 16 MiB) | `io` |
 | `fs.write-atomic` | `not-permitted` | `conflict`, `io` |
+| `fs.propose-agent-config` | `not-permitted` (`scope`: a path outside the folder, a credential file or the deny set), `invalid-argument` (an empty list, two changes to one path, more than 32 changes, more than 16 MiB of new content in total, a title over 80 or a summary over 200 characters), `busy`, `rate-limited` | `not-permitted` (`declined`), `timed-out`, `conflict`, `quota-exceeded` (history entry), `io`, `cancelled` |
 | `fs.tail` | `not-found`, `io` | none |
 | `http.open-stream` | `not-permitted`, `quota-exceeded` | `network`, `timed-out`, `rate-limited` (in `http-stream-closed`) |
 | `vector.embed` | `unsupported`, `invalid-argument` | `network`, `rate-limited`, `timed-out` |
@@ -564,7 +565,7 @@ Fixed caps. They are the same for every tier unless `limits_tier` is `first-part
 | `check-list` items | 256 | `trap.invalid-ui-tree` (detail `ui.invalid-tree`), logged |
 | `list-editor` items | 64 (1,024 with `first-party`) | `trap.invalid-ui-tree` (detail `ui.invalid-tree`), logged |
 | `vector.embed` | 256 texts of at most 8 KiB | `invalid-argument` |
-| Journal bytes per pane, all plugins | 4 MiB | oldest trimmed |
+| Journal bytes per plugin, own entries | 4 MiB | oldest trimmed |
 | Pre-rendered scene loop | 30 fps, 3,600 frames, 128 MiB | `manifest.scene-prerender` |
 | Video from bytes, font asset | 16 MiB, 4 MiB | `quota-exceeded`, `manifest.asset-size` |
 | `status_segments`, `pane_frame_slots`, `tree_toolbar`, `row_actions`, `tree_orderings`, `display_modes` | 2, 4, 4, 4, 4, 2 | `manifest.contribution-limit` |
@@ -746,7 +747,7 @@ A refusal carries one reason word from this closed list. For the codes `not-perm
 
 | Reason | Code | Meaning |
 |---|---|---|
-| `declined` | `not-permitted` | The user left the requested grant unchecked |
+| `declined` | `not-permitted` | The user left the requested grant unchecked, or rejected every change of an agent configuration proposal |
 | `revoked` | `not-permitted` | The grant was removed after the plugin started |
 | `not-granted` | `not-permitted` | The argument is outside the grant: another host, program or command |
 | `scope` | `not-permitted` | A path lies outside the granted scope |

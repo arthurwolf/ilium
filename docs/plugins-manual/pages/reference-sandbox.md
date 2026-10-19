@@ -157,14 +157,14 @@ The authoritative scope table. Other pages link here.
 | `picked` | per pick | per pick | per pick | all | A path the user chose |
 | `worktrees` | normal | H | normal | all | Setting `workspace.worktree_root` |
 | `agent-sessions:<agent>` | H | refused | H | all | Transcript folders, read only |
-| `agent-config:<agent>` | H | refused | H | all | Configuration folders, credential files excluded ([SEC-063]) |
+| `agent-config:<agent>` | H | refused; changes go through `agent-config.propose:<agent>` (H) | refused | all | Configuration folders, credential files excluded ([SEC-063]); the host writes only the changes the user accepts in a proposal |
 | `minecraft-saves` | normal | H | normal | all | The game's saves folder, for the Minecraft scenes |
 | `path:{project}` / `{data}` / `{cache}` | normal | H | normal | all | Same as the named scope |
 | `path:{config}` | H | H | H | all | The Ilium configuration folder; the deny set still applies |
 | `path:{home}/...` | normal below a sensitive path-free subtree, H otherwise ([SEC-061], [SEC-062]) | H | same as read | all | Template with `{home}` |
 | literal absolute path | H | H | H | all | Review dialog shows the path |
 
-Writes to `agent-sessions` fail at install with `manifest.grant-scope`. Writes to `agent-config:<agent>` are also refused at install with `manifest.grant-scope`. This resolves the earlier disagreement between pages: agent scopes are read-only and `H` for read.
+Writes to `agent-sessions` fail at install with `manifest.grant-scope`. Writes to `agent-config:<agent>` are also refused at install with `manifest.grant-scope`, and so is a watch on it. Agent scopes are read-only for plugins and `H` for read. A plugin that needs to change agent configuration holds the H grant `agent-config.propose:<agent>` instead: it submits whole new file contents, the kernel shows the full diff in a consent dialog, and the host applies only the files the user checks, all or none, after saving the previous contents in the plugin's `data` scope. Credential files ([SEC-063]) and the deny set ([SEC-060]) stay out of every proposal. See [agent-config.propose](/pages/capability-agent-config-propose/).
 
 **[SEC-058]** Path resolution uses `openat2` with `RESOLVE_BENEATH | RESOLVE_NO_MAGICLINKS | RESOLVE_NO_XDEV` relative to a file descriptor opened on the scope root (or the closest equivalent where `openat2` is missing, which is an `openat` walk that checks every component with `O_NOFOLLOW`). The kernel never checks a path string and then opens it later. A symlink swap between check and open therefore cannot leave the scope.
 
@@ -203,7 +203,7 @@ An escape hatch is a feature whose effect leaves the sandbox by design. Each one
 | `agent.control` | Code execution (drives an agent) | H grant | existing |
 | `process.run:<program>` | Code execution | H grant per program; env denylist; fixed PATH; noexec data | [SEC-031] to [SEC-035] |
 | `process.run:sh` | Code execution | T1 only | existing |
-| `fs.write` to dotfiles or agent config | Code execution at next shell start | Write outside `data` and `cache` is H; `agent-config` writes refused; dotfile paths in `{home}` are in the sensitive set | [SEC-061] |
+| `fs.write` to dotfiles or agent config | Code execution at next shell or agent start | Write outside `data` and `cache` is H; direct `agent-config` writes refused; agent configuration changes only through an H `agent-config.propose:<agent>` proposal that the user reviews as a diff; dotfile paths in `{home}` are in the sensitive set | [SEC-061], [CAP-887] |
 | `clipboard.write` | UI integrity (paste hijack) | Size and control character rules | [SEC-044] |
 | `open-external` file targets | Code execution through the desktop handler | Scope, mode bit and extension rules | [SEC-043] |
 | `notify.desktop` | UI integrity (spoofing) | Title prefix by the host | [SEC-045] |

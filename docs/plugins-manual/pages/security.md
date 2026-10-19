@@ -199,16 +199,17 @@ A grant is written as a name, or as a name and an argument separated by the firs
 | `settings.contribute` | One built-in tab id, no `*` | `settings.contribute:terminal` |
 | `extensions.provide`, `extensions.contribute` | One global point id `<plugin-id>/<point>`, no `*` | `extensions.contribute:ilium.core.smart-copy/recognisers` |
 | `settings.read-kernel` | One built-in tab id, no `*` | `settings.read-kernel:terminal` |
+| `agent-config.propose` | One agent name, no `*` | `agent-config.propose:claude` |
 
-Four argument forms deserve a note: `http:setting:<key>`, `settings.read-kernel:<kernel-tab-id>`, and the agent scopes `agent-sessions:gemini`, `agent-config:gemini` and `agent-config:antigravity` of `fs.read` and `fs.watch`. The agent scopes are read only, and `fs.write:agent-sessions:<agent>` is refused at install with `manifest.grant-scope`.
+Four argument forms deserve a note: `http:setting:<key>`, `settings.read-kernel:<kernel-tab-id>`, and the agent scopes `agent-sessions:gemini`, `agent-config:gemini` and `agent-config:antigravity` of `fs.read` (`agent-sessions:gemini` can also be watched). The agent scopes are read only: `fs.write:agent-sessions:<agent>` and `fs.write:agent-config:<agent>` are refused at install with `manifest.grant-scope`. A plugin changes agent configuration only with the H grant `agent-config.propose:<agent>`, which shows the user the full diff and writes only what the user accepts ([agent-config.propose](/pages/capability-agent-config-propose/)).
 
 Grants without an argument, such as `tree.read` or `agent.read`, take none. The [Capability table](/pages/reference-capabilities/) lists every grant.
 
-Each grant has a risk mark. `always` grants are always on. `normal` grants are checked by default in the review dialog. High-risk (H) grants start unchecked, and the user checks each one. H grants include `panes.signal`, `terminal.write`, `agent.read-prompts`, `agent.control`, `process.run`, `panes.create-command`, `inference.provide`, `clipboard.read`, `location.observer`, file writes outside `data` and `cache`, file reads that reach a sensitive path ([SEC-061]), and the eleven grants in the next section (nine in its table, plus `settings.write-kernel:<tab-id>`, which is T1 only and listed after it, and `panes.create-command`, already named in this list). Grants are recorded per plugin and per side in the grant store ([SEC-112]).
+Each grant has a risk mark. `always` grants are always on. `normal` grants are checked by default in the review dialog. High-risk (H) grants start unchecked, and the user checks each one. H grants include `panes.signal`, `terminal.write`, `agent.read-prompts`, `agent.control`, `process.run`, `panes.create-command`, `inference.provide`, `clipboard.read`, `location.observer`, file writes outside `data` and `cache`, file reads that reach a sensitive path ([SEC-061]), and the twelve grants in the next section (ten in its table, plus `settings.write-kernel:<tab-id>`, which is T1 only and listed after it, and `panes.create-command`, already named in this list). Grants are recorded per plugin and per side in the grant store ([SEC-112]).
 
 ## More high-risk grants
 
-These eleven grants are high risk: the nine in the table, `settings.write-kernel:<tab-id>`, described after it, and `panes.create-command:<program>`, described below it. They follow the same rule as every other H grant: a T1 bundled plugin still needs an explicit grant for each of them, and the dialog shows them in the warning style, never pre-checked.
+These twelve grants are high risk: the ten in the table, `settings.write-kernel:<tab-id>`, described after it, and `panes.create-command:<program>`, described below it. They follow the same rule as every other H grant: a T1 bundled plugin still needs an explicit grant for each of them, and the dialog shows them in the warning style, never pre-checked.
 
 | Grant | Sides | What it allows | Why it is high risk | Extra rule |
 |---|---|---|---|---|
@@ -221,6 +222,7 @@ These eleven grants are high risk: the nine in the table, `settings.write-kernel
 | `process.long-lived` | S C | Start a streaming child with `process.spawn` | A child outlives a single call | The program must also match a `process.run:<program>` grant. Children run in the helper's confinement |
 | `agent.transcript` | S C | Read typed turns of an agent session | A transcript holds every prompt, answer and tool call | The host parses and redacts it, so a plugin never reads the raw file (D22) |
 | `settings.read-kernel:api` | S C | Read the `api` tab of the built-in settings | The `api` tab holds the keys for model providers | Secrets are always returned as `<redacted>`. Other tabs are normal risk |
+| `agent-config.propose:<agent>` | S C | Propose new contents for files in one agent's configuration folder; the host shows the diff and writes only what the user accepts | Agent configuration decides what a coding agent runs and which instructions it follows | Needs `fs.read:agent-config:<agent>`. No direct write grant exists, credential files are excluded ([SEC-063]), and each proposal is a [SEC-105] prompt ([agent-config.propose](/pages/capability-agent-config-propose/)) |
 
 Four more grants are high risk and available to T1 bundled plugins only: `settings.read-all`, `settings.write-all`, `plugins.manage` and `settings.write-kernel:<tab-id>`. A T1 plugin gets each of them through the first-start prompt like any other H grant, and a T2 or T3 install that lists one fails with `manifest.grant-tier`. `settings.read-kernel:api` is high risk at every tier: T1 is asked at first activation, T2 and T3 see it unchecked in the review dialog, and no tier refuses it at install.
 
@@ -236,6 +238,8 @@ A grant is a standing permission. Four extended features also ask the user at th
 | `http:setting:<key>` | The user | When the setting holds a host the plugin has not used before (SEC-074) | The request fails with `not-permitted`, and the host is not contacted |
 | `location.geocode` | The user | The first time a plugin geocodes. The host service is Photon, with Nominatim as fallback (decision D14 in the [Design decisions](/pages/design-decisions/)) | Calls return `not-permitted` |
 | Bundled plugin with H grants | The user | Once, at the first activation of a T1 plugin | The plugin runs without them. The question comes back at the next server start, and after three answers of Not now it stops ([SEC-111]) |
+
+An agent configuration proposal ([agent-config.propose](/pages/capability-agent-config-propose/)) also asks the user at the moment of use and counts against the same prompt limits ([SEC-105]), but its answer applies to that one proposal only and is never stored in the consent store.
 
 <figure>
 <pre class="term"><span class="t-hi">╭─ Bundled plugin, first start ────────────────╮</span>
@@ -375,7 +379,7 @@ Scopes are resolved by the kernel once per grant, to canonical directories. A pl
 | `picked` | Each path the user chose in `fs.pick` or a `path-field` | Grant per pick |
 | `worktrees` | The setting `workspace.worktree_root` | Grant. Write is H |
 | `agent-sessions:<agent>` | Agent transcript folder, read only. Includes `gemini` | Grant, H |
-| `agent-config:<agent>` | Agent configuration folder, read and write (`fs.read` H, `fs.write` H). Includes `gemini` and `antigravity` | Grant, H for read and H for write |
+| `agent-config:<agent>` | Agent configuration folder, read only (`fs.read` H; `fs.write` and `fs.watch` refused). Changes go through `agent-config.propose:<agent>` (H). Includes `gemini` and `antigravity` | Grant, H for read; H for a proposal |
 | `path:<template>` | Template with `{home}`, `{config}`, `{data}`, `{cache}`, `{project}`, `{worktrees}` | Grant. Literal absolute paths are H |
 
 Each write is atomic. The kernel writes a temporary sibling file and renames it over the target, so a reader never sees a half-written file. With the `write-atomic` call, the write also carries an expected revision and fails with `conflict` when the file changed. Writes outside `data` and `cache` need an explicit user grant, even for T1 plugins.

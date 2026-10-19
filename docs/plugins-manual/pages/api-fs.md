@@ -47,7 +47,7 @@ Manifest example for a server side that reads and writes the project and watches
 | `worktrees` | `/worktrees` | the worktree folder set by `workspace.worktree_root` | grant, high risk for read and for write |
 | `picked` | `/picked/<n>` | each path the user chose in the picker | grant per pick |
 | `agent-sessions:claude`, `agent-sessions:codex`, `agent-sessions:antigravity`, `agent-sessions:gemini` | `/agent-sessions/<agent>` | the agent's transcript folder | grant, high risk |
-| `agent-config:claude`, `agent-config:codex`, `agent-config:gemini`, `agent-config:antigravity` | `/agent-config/<agent>` | the agent's configuration folder | grant, high risk for write |
+| `agent-config:claude`, `agent-config:codex`, `agent-config:gemini`, `agent-config:antigravity` | `/agent-config/<agent>` | the agent's configuration folder | grant, high risk for read; no write grant (changes are proposed with `agent-config.propose:<agent>`) |
 | `minecraft-saves` | `/minecraft-saves` | the platform's Minecraft saves folder | grant |
 | `path:<template>` | `/paths/<n>` | a template with `{home}`, `{config}`, `{data}`, `{cache}`, `{project}`, `{worktrees}`, optionally ending in `/**` | grant |
 
@@ -77,6 +77,7 @@ Every scope except `package` and the `agent-config` scopes can be watched (a wat
 | `read_with_revision(path)` | `fs.read` | async | Whole file plus its revision token. See [atomic write and tail](/pages/api-fs-atomic-and-tail/). |
 | `write_atomic(path, data, expected)` | `fs.write` | async | Replaces the file only if it is still at `expected`, or does not exist when `expected` is none. Fails with `conflict` otherwise. |
 | `tail(path, cursor, max_bytes)` | `fs.read` | sync | Bytes appended since `cursor`, at most 1 MiB, with the next cursor and a `truncated` flag. |
+| `propose_agent_config(agent, title, changes)` | `agent-config.propose:<agent>` | async | Submits whole new contents for files in an agent's configuration folder. The kernel shows the diff to the user and the host writes only the files the user checks. Returns the applied and rejected paths. See [agent-config.propose](/pages/capability-agent-config-propose/). |
 
 Async functions are `async` in Rust and return a `Promise` in TypeScript. The raw `*_request` and `take_*` functions stay available, but normal code does not need them.
 

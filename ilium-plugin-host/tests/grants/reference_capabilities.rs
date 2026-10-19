@@ -559,3 +559,116 @@ fn cap_018_a_granted_import_is_neither_trap_nor_refusal() {
         .call_import("ilium:host/fs.read-all", read_project());
     assert!(is_ok(&result), "{result:?}");
 }
+
+// ---------------------------------------------------------------- CAP-887..891 agent-config.propose
+
+const PROPOSE_GRANTS: [&str; 2] = ["fs.read:agent-config:claude", "agent-config.propose:claude"];
+const PROPOSE_IMPORT: &str = "ilium:host/fs.propose-agent-config";
+
+fn proposal(path: &str) -> serde_json::Value {
+    json!({
+        "agent": "claude",
+        "title": "Ilium instructions",
+        "changes": [{ "path": path, "content": [104, 105], "revision": null, "summary": "add" }],
+    })
+}
+
+/// REQ: CAP-887
+#[test]
+fn cap_887_a_proposal_changes_no_file_before_the_answer_and_applies_all_or_none() {
+    let rig = rig(Tier::T2, Side::Server, &PROPOSE_GRANTS);
+    let pending = rig.host.call_import(PROPOSE_IMPORT, proposal("CLAUDE.md"));
+    assert!(is_ok(&pending), "{pending:?}");
+    assert!(!rig.kernel.agent_config_file_exists("claude", "CLAUDE.md"));
+    let dialog = rig.kernel.open_proposal_dialog().expect("a dialog is open");
+    assert!(dialog.rows.iter().all(|row| !row.checked));
+    assert!(!dialog.full_diff.is_empty());
+    rig.kernel.fail_next_rename();
+    rig.kernel.check_row_and_apply(0);
+    rig.host.pump(8);
+    assert_eq!(rig.host.last_proposal_failure_code(), Some(ErrorCode::Io));
+    assert!(!rig.kernel.agent_config_file_exists("claude", "CLAUDE.md"));
+}
+
+/// REQ: CAP-888
+#[test]
+fn cap_888_a_credential_path_is_refused_with_scope_and_opens_no_dialog() {
+    let rig = rig(Tier::T2, Side::Server, &PROPOSE_GRANTS);
+    let result = rig
+        .host
+        .call_import(PROPOSE_IMPORT, proposal(".credentials.json"));
+    match result {
+        ImportResult::Err(error) => {
+            assert_eq!(error.code, ErrorCode::NotPermitted);
+            assert!(error.message.starts_with("scope: "), "{}", error.message);
+        }
+        other => panic!("expected not-permitted, got {other:?}"),
+    }
+    assert!(rig.kernel.open_proposal_dialog().is_none());
+    let empty = json!({ "agent": "claude", "title": "t", "changes": [] });
+    match rig.host.call_import(PROPOSE_IMPORT, empty) {
+        ImportResult::Err(error) => assert_eq!(error.code, ErrorCode::InvalidArgument),
+        other => panic!("expected invalid-argument, got {other:?}"),
+    }
+}
+
+/// REQ: CAP-889
+#[test]
+fn cap_889_an_edited_file_completes_failed_conflict_and_stays_unchanged() {
+    let rig = rig(Tier::T2, Side::Server, &PROPOSE_GRANTS);
+    rig.kernel.write_agent_config_file("claude", "CLAUDE.md", b"old");
+    let revision = rig.kernel.agent_config_revision("claude", "CLAUDE.md");
+    let mut request = proposal("CLAUDE.md");
+    request["changes"][0]["revision"] = json!(revision);
+    let pending = rig.host.call_import(PROPOSE_IMPORT, request);
+    assert!(is_ok(&pending), "{pending:?}");
+    rig.kernel.write_agent_config_file("claude", "CLAUDE.md", b"edited");
+    rig.kernel.check_row_and_apply(0);
+    rig.host.pump(8);
+    assert_eq!(
+        rig.host.last_proposal_failure_code(),
+        Some(ErrorCode::Conflict)
+    );
+    assert_eq!(
+        rig.kernel.read_agent_config_file("claude", "CLAUDE.md"),
+        b"edited".to_vec()
+    );
+}
+
+/// REQ: CAP-890
+#[test]
+fn cap_890_reject_all_declines_and_is_never_stored_in_consents() {
+    let rig = rig(Tier::T2, Side::Server, &PROPOSE_GRANTS);
+    let pending = rig.host.call_import(PROPOSE_IMPORT, proposal("CLAUDE.md"));
+    assert!(is_ok(&pending), "{pending:?}");
+    match rig.host.call_import(PROPOSE_IMPORT, proposal("other.md")) {
+        ImportResult::Err(error) => assert_eq!(error.code, ErrorCode::Busy),
+        other => panic!("expected busy, got {other:?}"),
+    }
+    rig.kernel.reject_all();
+    rig.host.pump(8);
+    let failure = rig.host.last_proposal_failure().expect("completed failed");
+    assert_eq!(failure.code, ErrorCode::NotPermitted);
+    assert!(failure.message.starts_with("declined: "), "{}", failure.message);
+    assert!(rig.kernel.consents_json_is_unchanged());
+}
+
+/// REQ: CAP-891
+#[test]
+fn cap_891_an_applied_file_leaves_a_history_entry_an_audit_record_and_the_applied_list() {
+    let rig = rig(Tier::T2, Side::Server, &PROPOSE_GRANTS);
+    rig.kernel.write_agent_config_file("claude", "CLAUDE.md", b"old");
+    let revision = rig.kernel.agent_config_revision("claude", "CLAUDE.md");
+    let mut request = proposal("CLAUDE.md");
+    request["changes"][0]["revision"] = json!(revision);
+    let pending = rig.host.call_import(PROPOSE_IMPORT, request);
+    assert!(is_ok(&pending), "{pending:?}");
+    rig.kernel.check_row_and_apply(0);
+    rig.host.pump(8);
+    let result = rig.host.take_proposal().expect("the proposal completed");
+    assert_eq!(result.applied, vec!["CLAUDE.md".to_owned()]);
+    let history = rig.kernel.plugin_data_file(&result.history);
+    assert!(result.history.starts_with("agent-config-history/claude/"));
+    assert!(String::from_utf8_lossy(&history).contains("old"));
+    assert_eq!(rig.kernel.audit_records("write-outside-data").len(), 1);
+}

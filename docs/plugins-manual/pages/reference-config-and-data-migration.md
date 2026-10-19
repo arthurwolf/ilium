@@ -248,7 +248,7 @@ These files belong to the agent tools, not to Ilium. Ilium edits only its own ma
 | `<project>/.gitignore` | project | `/CHATROOM.md` and `/CHATROOM.archive.md` lines | Chatroom |
 | Agent session files (Claude, Codex, Gemini, Antigravity) | global | Written only by Session convert (new files) and Compaction (resume files). Existing files are never edited | Session convert, Compaction |
 
-A write to any of these files uses `fs.write` with the scope `agent-config:<agent>` or `project`, with a revision check, so a change made by another process in the meantime is detected and the write is refused with `conflict`. See [fs atomic writes](/pages/api-fs-atomic-and-tail/).
+A file in the project folder is written with `fs.write:project` and a revision check. A file in an agent's configuration folder (the rows marked global) is never written by the plugin: the plugin proposes the new content with `agent-config.propose:<agent>`, the kernel shows the user the diff, and the host writes only the files the user accepts ([agent-config.propose](/pages/capability-agent-config-propose/)). Both routes check the revision, so a change made by another process in the meantime is detected and the change is refused with `conflict`. See [fs atomic writes](/pages/api-fs-atomic-and-tail/).
 
 ### A worked migration
 

@@ -126,7 +126,7 @@ A plugin adds a settings tab, a section in a kernel tab, or its own view-rendere
 
 #### Capabilities
 
-One grant per feature, such as `tree.decorate`, `agent.read` or `fs.read:<scope>`. There are 23 further grants, eleven of them high risk. The user sees every grant in the review dialog before it takes effect. The [capability reference](/pages/capabilities/) lists them all with their sides and risk. The pages in the groups below describe each grant and what it unlocks.
+One grant per feature, such as `tree.decorate`, `agent.read` or `fs.read:<scope>`. There are 24 further grants, twelve of them high risk. The user sees every grant in the review dialog before it takes effect. The [capability reference](/pages/capabilities/) lists them all with their sides and risk. The pages in the groups below describe each grant and what it unlocks.
 
 | Group | Grants |
 |---|---|

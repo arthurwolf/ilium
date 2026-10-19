@@ -15,7 +15,7 @@ The original transcript is read and never changed. Antigravity sessions cannot b
 - The entries **Convert to Codex** (for a Claude Code pane) and **Convert to Claude Code** (for a Codex pane). The entry for the other agent is always listed in the menu of an agent pane. It is enabled only when the pane has a verified session, no other conversion is running, and the pane is not a worktree pane; otherwise it stays visible but disabled and shows the reason.
 - The progress dialog with one row per step, a progress bar and a log.
 - Claude Code to Codex: locate the transcript, inspect it, start a private `codex app-server`, import the session with Codex's own importer, verify the Codex rollout, stop the app-server.
-- Codex to Claude Code: locate the rollout, parse it, convert it to Claude Code lines, write the Claude Code transcript, verify it, register it with Claude Code. User prompts, assistant text, and shell or tool calls with results are carried over. Reasoning and token events are dropped.
+- Codex to Claude Code: locate the rollout, parse it, convert it to Claude Code lines, propose the Claude Code transcript as a new file (the user accepts it in the kernel's proposal dialog), verify it, register it with Claude Code. User prompts, assistant text, and shell or tool calls with results are carried over. Reasoning and token events are dropped.
 - Cancel with Esc, and the recovery choice after a failure: Enter resumes the original session, Esc closes the dialog.
 
 ### See it
@@ -101,7 +101,7 @@ The contract version is 0.1. The plugin is replaceable. A replacement must provi
     "server": [
       "panes.read", "panes.lifecycle", "panes.create", "tree.write", "agent.read",
       "fs.read:agent-sessions:claude", "fs.read:agent-sessions:codex",
-      "fs.write:agent-config:claude",
+      "fs.read:agent-config:claude", "agent-config.propose:claude",
       "process.run:codex", "process.long-lived", "jobs.run", "notify.toast",
       "services.provide:ilium.core.session-convert/convert",
       "extensions.provide:ilium.core.session-convert/formats",
@@ -181,7 +181,8 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "agent.read",
       "fs.read:agent-sessions:claude",
       "fs.read:agent-sessions:codex",
-      "fs.write:agent-config:claude",
+      "fs.read:agent-config:claude",
+      "agent-config.propose:claude",
       "process.run:codex",
       "process.long-lived",
       "jobs.run",
@@ -520,40 +521,46 @@ export function codexToClaude(input: { rollout: string }) {
 
 #### Write the Claude Code transcript and verify it
 
-The new transcript is written with an atomic write whose expected revision is `none`, so an existing file is never replaced: a clash completes as `failed(conflict)`. After the write, the plugin reads the file back with its revision and checks the line count before it registers the session. See [atomic write and revisions](/pages/api-fs-atomic-and-tail/) and [fs.write](/pages/capability-fs-write/).
+The plugin holds no write grant on Claude's folders. It proposes the new transcript as one new file with `propose-agent-config` and the revision `none`, so an existing file is never replaced: a clash completes as `failed(conflict)`. The kernel shows the user the new file, and the host writes it only when the user accepts; a rejection completes as `failed(not-permitted)` and the conversion stops with the recovery choice. After the write, the plugin reads the file back with its revision and checks the line count before it registers the session. See [atomic write and revisions](/pages/api-fs-atomic-and-tail/) and [agent-config.propose](/pages/capability-agent-config-propose/).
 
 **Rust**
 
 ```rust
-use ilium_plugin_sdk::host::fs;
+use ilium_plugin_sdk::host::fs::{self, ConfigChange};
 
+// `path.scope` is "agent-config:claude"; the user accepts the new file in the proposal dialog.
 async fn write_and_verify(path: FsPath, jsonl: String, expected_lines: usize) -> Result<String, PluginError> {
-    let revision = fs::write_atomic(&path, jsonl.into_bytes(), None).await?; // None: the file must not exist
+    let change = ConfigChange {
+        path: path.path.clone(),
+        content: Some(jsonl.into_bytes()),
+        revision: None, // None: the file must not exist
+        summary: "converted Codex session".into(),
+    };
+    fs::propose_agent_config("claude", "Converted session", vec![change]).await?;
     let back = fs::read_with_revision(&path).await?;
-    if back.revision != revision {
-        return Err(PluginError::conflict("transcript changed after the write"));
-    }
     let lines = back.bytes.iter().filter(|byte| **byte == b'\n').count() + 1;
     if lines != expected_lines {
         return Err(PluginError::internal("line count differs after the write"));
     }
-    Ok(revision)
+    Ok(back.revision)
 }
 ```
 
 **TypeScript**
 
 ```ts
-import { readWithRevision, writeAtomic } from '@ilium/plugin-sdk/host/fs';
+import { proposeAgentConfig, readWithRevision } from '@ilium/plugin-sdk/host/fs';
 import type { FsPath } from '@ilium/plugin-sdk/types';
 
+// path.scope is 'agent-config:claude'; the user accepts the new file in the proposal dialog.
 export async function writeAndVerify(path: FsPath, jsonl: string, expectedLines: number): Promise<string> {
-  const revision = await writeAtomic(path, new TextEncoder().encode(jsonl), undefined); // undefined: must not exist
+  await proposeAgentConfig('claude', 'Converted session', [
+    { path: path.path, content: new TextEncoder().encode(jsonl), revision: undefined, summary: 'converted Codex session' },
+  ]); // revision undefined: the file must not exist
   const back = await readWithRevision(path);
-  if (back.revision !== revision) throw { code: 'conflict', message: 'transcript changed after the write' };
   const lines = back.bytes.filter((byte) => byte === 0x0a).length + 1;
   if (lines !== expectedLines) throw { code: 'internal', message: 'line count differs after the write' };
-  return revision;
+  return back.revision;
 }
 ```
 
@@ -816,6 +823,7 @@ A package adds this entry in its manifest. It needs no code.
 - [Storage](/pages/api-storage/), [durable timers and the journal](/pages/api-durable-timers/)
 - [Jobs](/pages/api-jobs/) and [jobs.run](/pages/capability-jobs-run/)
 - [fs](/pages/api-fs/), [atomic write and revisions](/pages/api-fs-atomic-and-tail/) and [file access](/pages/file-access/)
+- [agent-config.propose](/pages/capability-agent-config-propose/)
 - [Process control](/pages/api-process-control/) and [process.long-lived](/pages/capability-process-long-lived/)
 - [Layout and containers](/pages/widgets-layout-and-containers/) and [data display](/pages/widgets-data-display/)
 - [Intents](/pages/api-intents/), [events](/pages/api-events/) and [requests and outcomes](/pages/requests-and-outcomes/)

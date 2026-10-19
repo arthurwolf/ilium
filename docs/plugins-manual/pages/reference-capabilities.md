@@ -59,7 +59,7 @@ The `fs` grants take a scope argument. Each scope has a fixed preopen name in th
 | `worktrees` | `/worktrees` | the workspace worktree root | grant, H for write |
 | `picked` | `/picked/<n>` | each path the user chose in `fs.pick` | grant per pick |
 | `agent-sessions:<agent>` | `/agent-sessions/<agent>` | the agent's transcript folder, read only | grant, H, read and watch only |
-| `agent-config:<agent>` | `/agent-config/<agent>` | the agent's configuration folder | grant, H for read and H for write |
+| `agent-config:<agent>` | `/agent-config/<agent>` | the agent's configuration folder | grant, H for read; a write grant is refused, changes go through `agent-config.propose:<agent>` (H) |
 | `minecraft-saves` | `/minecraft-saves` | the Minecraft saves folder | grant |
 | `path:<template>` | `/paths/<n>` | a template with `{home}`, `{config}`, `{data}`, `{cache}`, `{project}` or `{worktrees}` | grant |
 
@@ -120,8 +120,9 @@ Every grant is listed once. Capabilities with several grants share one row.
 | `keymap.read` | none | C | normal | [page](/pages/capability-keymap-read/) | [api-keys](/pages/api-keys/) |
 | `commands.invoke:<pattern>` | pattern; exact id, plugin-id/*, bare * (high) | S C | H if * | [page](/pages/capability-commands-invoke/) | [api-commands](/pages/api-commands/) |
 | `fs.read:<scope>` | scope, including agent-sessions:gemini, agent-config:gemini, agent-config:antigravity | S C A | normal; H for agent-sessions and agent-config | [page](/pages/capability-fs-read/) | [api-fs](/pages/api-fs/) |
-| `fs.write:<scope>` | scope; `agent-sessions` is refused with `manifest.grant-scope`; `agent-config` is refused with `manifest.grant-scope` | S C A | H outside data and cache | [page](/pages/capability-fs-write/) | [api-fs](/pages/api-fs/) |
+| `fs.write:<scope>` | scope; `agent-sessions` is refused with `manifest.grant-scope`; `agent-config` is refused with `manifest.grant-scope` (use `agent-config.propose:<agent>`) | S C A | H outside data and cache | [page](/pages/capability-fs-write/) | [api-fs](/pages/api-fs/) |
 | `fs.watch:<scope>` | scope; `agent-config` is refused with `manifest.grant-scope` | S C | same as `fs.read:<scope>`; `package`, `data` and `cache` are always granted | [page](/pages/capability-fs-watch/) | [api-fs](/pages/api-fs/) |
+| `agent-config.propose:<agent>` | one agent: `claude`, `codex`, `gemini` or `antigravity`; no wildcard (`manifest.grant-wildcard`); unknown agent `manifest.grant-scope`; needs `fs.read:agent-config:<agent>` on the same side, else `manifest.grant-dependency` | S C | **H** | [page](/pages/capability-agent-config-propose/) | [api-fs](/pages/api-fs/) |
 | `fs.pick` | none | C | normal | [page](/pages/capability-fs-pick/) | [api-fs](/pages/api-fs/) |
 | `jobs.run` | none | S C A | normal | [page](/pages/capability-jobs-run/) | [api-jobs](/pages/api-jobs/) |
 | `http:<host-pattern>` | host pattern, `http:setting:<key>`, or loopback with a port | S C A | normal; H for loopback and private-address literals | [page](/pages/capability-http/) | [api-http](/pages/api-http/) |
@@ -160,7 +161,7 @@ Every grant is listed once. Capabilities with several grants share one row.
 
 ### Newer grants
 
-The grants below extend the base set. Eleven of them are high risk and always need an explicit grant, even for a T1 bundled plugin: `terminal.history`, `terminal.input-lock`, `terminal.raw-input`, `panes.lifecycle`, `tree.restructure`, `sessions.cross`, `process.long-lived`, `agent.transcript`, `settings.read-kernel:api` and `settings.write-kernel:<tab-id>` (T1 only) and `panes.create-command:<program>`. The grant `gpu.kernels` is unstable and exists only in development builds. Both `extensions.*` grants take exactly one global point id and refuse wildcards (`manifest.grant-wildcard`). `extensions.contribute` is high risk only for a point that declares `risk: "high"`; the review dialog then shows a warning. Four argument forms are less common: `http:setting:<key>` (the host comes from one of the plugin's own settings, and the user confirms a changed host before the first request), `fs.read:agent-sessions:gemini` with `fs.read:agent-config:gemini`, `fs.read:agent-config:antigravity`, and `settings.read-kernel:<kernel-tab-id>` (argument required, no wildcard).
+The grants below extend the base set. Twelve of them are high risk and always need an explicit grant, even for a T1 bundled plugin: `terminal.history`, `terminal.input-lock`, `terminal.raw-input`, `panes.lifecycle`, `tree.restructure`, `sessions.cross`, `process.long-lived`, `agent.transcript`, `settings.read-kernel:api`, `settings.write-kernel:<tab-id>` (T1 only), `panes.create-command:<program>` and `agent-config.propose:<agent>`. The grant `gpu.kernels` is unstable and exists only in development builds. Both `extensions.*` grants take exactly one global point id and refuse wildcards (`manifest.grant-wildcard`). `extensions.contribute` is high risk only for a point that declares `risk: "high"`; the review dialog then shows a warning. Four argument forms are less common: `http:setting:<key>` (the host comes from one of the plugin's own settings, and the user confirms a changed host before the first request), `fs.read:agent-sessions:gemini` with `fs.read:agent-config:gemini`, `fs.read:agent-config:antigravity`, and `settings.read-kernel:<kernel-tab-id>` (argument required, no wildcard).
 
 | Grant | Page |
 |---|---|
@@ -187,6 +188,7 @@ The grants below extend the base set. Eleven of them are high risk and always ne
 | `gpu.kernels` | [page](/pages/capability-gpu-kernels/) |
 | `extensions.provide:<plugin-id>/<point>` | [page](/pages/capability-extensions-provide/) |
 | `extensions.contribute:<plugin-id>/<point>` | [page](/pages/capability-extensions-contribute/) |
+| `agent-config.propose:<agent>` | [page](/pages/capability-agent-config-propose/) |
 
 Each capability has its own page with the full behaviour, for example [capability-http](/pages/capability-http/), [capability-fs-read](/pages/capability-fs-read/), [capability-tree-read](/pages/capability-tree-read/) and [capability-process-run](/pages/capability-process-run/).
 

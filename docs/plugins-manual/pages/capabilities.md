@@ -94,9 +94,10 @@ Sides: S is the server world, C is the client world and A is the animation (scen
 | `keys.intercept` | none | C | **H** | [page](/pages/capability-keys-intercept/) | [api-keys](/pages/api-keys/) |
 | `keymap.read` | none | C | normal | [page](/pages/capability-keymap-read/) | [api-keys](/pages/api-keys/) |
 | `commands.invoke:<pattern>` | pattern; exact id, plugin-id/*, bare * (high) | S C | H if * | [page](/pages/capability-commands-invoke/) | [api-commands](/pages/api-commands/) |
-| `fs.read:<scope>` | scope, including agent-sessions:gemini, agent-config:gemini, agent-config:antigravity | S C A | normal; high for agent-sessions | [page](/pages/capability-fs-read/) | [api-fs](/pages/api-fs/) |
-| `fs.write:<scope>` | scope | S C A | H outside data and cache | [page](/pages/capability-fs-write/) | [api-fs](/pages/api-fs/) |
-| `fs.watch:<scope>` | scope | S C | normal | [page](/pages/capability-fs-watch/) | [api-fs](/pages/api-fs/) |
+| `fs.read:<scope>` | scope, including agent-sessions:gemini, agent-config:gemini, agent-config:antigravity | S C A | normal; high for agent-sessions and agent-config | [page](/pages/capability-fs-read/) | [api-fs](/pages/api-fs/) |
+| `fs.write:<scope>` | scope; `agent-sessions` and `agent-config` are refused | S C A | H outside data and cache | [page](/pages/capability-fs-write/) | [api-fs](/pages/api-fs/) |
+| `fs.watch:<scope>` | scope; `agent-config` is refused | S C | normal | [page](/pages/capability-fs-watch/) | [api-fs](/pages/api-fs/) |
+| `agent-config.propose:<agent>` | one agent; needs `fs.read:agent-config:<agent>` | S C | **H** | [page](/pages/capability-agent-config-propose/) | [api-fs](/pages/api-fs/) |
 | `fs.pick` | none | C | normal | [page](/pages/capability-fs-pick/) | [api-fs](/pages/api-fs/) |
 | `jobs.run` | none | S C A | normal | [page](/pages/capability-jobs-run/) | [api-jobs](/pages/api-jobs/) |
 | `http:<host-pattern>` | host pattern, or http:setting:<key> | S C A | normal | [page](/pages/capability-http/) | [api-http](/pages/api-http/) |
@@ -133,7 +134,7 @@ Sides: S is the server world, C is the client world and A is the animation (scen
 
 ### Extended grants
 
-The grants below cover the wider kernel surface: tree restructuring, pane lifecycle, terminal and agent data, chrome, sessions, inference and process control. Eleven of them are high risk and always need an explicit grant, even for a T1 bundled plugin: `terminal.history`, `terminal.input-lock`, `terminal.raw-input`, `panes.lifecycle`, `tree.restructure`, `sessions.cross`, `process.long-lived`, `agent.transcript`, `settings.read-kernel:api`, `settings.write-kernel:<tab>` and `panes.create-command:<program>`. The grant `gpu.kernels` is unstable and exists only in development builds. Both `extensions.*` grants take exactly one global point id and refuse wildcards (`manifest.grant-wildcard`). `extensions.contribute` is high risk only for a point that declares `risk: "high"`; the review dialog then shows a warning. Four argument forms are worth knowing: `http:setting:<key>` (the host comes from one of the plugin's own settings, and the user confirms a changed host before the first request), `fs.read:agent-sessions:gemini` with `fs.read:agent-config:gemini`, `fs.read:agent-config:antigravity`, and `settings.read-kernel:<kernel-tab-id>` (argument required, no wildcard).
+The grants below cover the wider kernel surface: tree restructuring, pane lifecycle, terminal and agent data, chrome, sessions, inference and process control. Twelve of them are high risk and always need an explicit grant, even for a T1 bundled plugin: `terminal.history`, `terminal.input-lock`, `terminal.raw-input`, `panes.lifecycle`, `tree.restructure`, `sessions.cross`, `process.long-lived`, `agent.transcript`, `settings.read-kernel:api`, `settings.write-kernel:<tab>`, `panes.create-command:<program>` and `agent-config.propose:<agent>`. The grant `gpu.kernels` is unstable and exists only in development builds. Both `extensions.*` grants take exactly one global point id and refuse wildcards (`manifest.grant-wildcard`). `extensions.contribute` is high risk only for a point that declares `risk: "high"`; the review dialog then shows a warning. Four argument forms are worth knowing: `http:setting:<key>` (the host comes from one of the plugin's own settings, and the user confirms a changed host before the first request), `fs.read:agent-sessions:gemini` with `fs.read:agent-config:gemini`, `fs.read:agent-config:antigravity`, and `settings.read-kernel:<kernel-tab-id>` (argument required, no wildcard).
 
 | New grant | Page |
 |---|---|
@@ -158,6 +159,7 @@ The grants below cover the wider kernel surface: tree restructuring, pane lifecy
 | `gpu.kernels` | [page](/pages/capability-gpu-kernels/) |
 | `extensions.provide:<plugin-id>/<point>` | [page](/pages/capability-extensions-provide/) |
 | `extensions.contribute:<plugin-id>/<point>` | [page](/pages/capability-extensions-contribute/) |
+| `agent-config.propose:<agent>` | [page](/pages/capability-agent-config-propose/) |
 
 The always-granted set needs no entry in the manifest. See [Always granted](#always-granted).
 
@@ -181,7 +183,7 @@ File scopes are the argument of `fs.read`, `fs.write` and `fs.watch`:
 - `data` and `cache` are the plugin's own folders. Their read and write grants are always granted.
 - `package` is the plugin's own package. It is always readable and never watchable.
 - `agent-sessions:<agent>` holds transcripts and is H. It is read only.
-- `agent-config:<agent>` holds agent configuration. Writes are H.
+- `agent-config:<agent>` holds agent configuration. Reads are H. Writes and watches are refused; a plugin proposes changes with the H grant `agent-config.propose:<agent>`, and the host applies only what the user accepts.
 - `minecraft-saves` is the platform's saves folder.
 - `path:<template>` is a path template. It starts with a placeholder (`{home}`, `{config}`,
   `{data}`, `{cache}`, `{project}`, `{worktrees}`) or with a literal absolute path. A literal path

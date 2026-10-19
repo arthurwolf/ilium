@@ -10,7 +10,7 @@ The Rust SDK, `ilium-plugin-sdk`, gives a Rust plugin four things: generated bin
 
 The host loads a plugin as a WebAssembly component. It calls the plugin's exports with batches of events and applies the submissions the plugin returns. The plugin calls host imports when it needs the host to act. The SDK maps both directions to ordinary Rust types, traits and `Result` values.
 
-The page documents the contract in full. Every listing appears in Rust and in TypeScript, and the TypeScript SDK reference page mirrors this one section by section; see [TypeScript SDK reference](/pages/typescript-sdk/). The widget catalogue has 51 widgets in seven families, and the host adds thirteen interfaces, four optional exports and 23 grants.
+The page documents the contract in full. Every listing appears in Rust and in TypeScript, and the TypeScript SDK reference page mirrors this one section by section; see [TypeScript SDK reference](/pages/typescript-sdk/). The widget catalogue has 51 widgets in seven families, and the host adds thirteen interfaces, four optional exports and 24 grants.
 
 ### You will need
 
@@ -801,7 +801,7 @@ Terminal, agent, editor and basic primitives gain the following functions, each 
 | cli | additions listed on [cli](/pages/api-cli/) | same, camelCase | `cli` |
 | ui | `open_popup_with`, `theme_extras` | `openPopupWith`, `themeExtras` | `ui.chrome` for chrome surfaces |
 
-`gpu` is `@unstable`: import it only from a scene and expect it to change. Eleven of the 23 grants are high risk and prompt the user with a separate consent line: `terminal.history`, `terminal.input-lock`, `terminal.raw-input`, `panes.lifecycle`, `tree.restructure`, `sessions.cross`, `process.long-lived`, `agent.transcript`, `settings.read-kernel:api`, `settings.write-kernel:<tab-id>` and `panes.create-command:<program>`. See [Capabilities](/pages/reference-capabilities/) and [Security](/pages/security/).
+`gpu` is `@unstable`: import it only from a scene and expect it to change. Twelve of the 24 grants are high risk and prompt the user with a separate consent line: `terminal.history`, `terminal.input-lock`, `terminal.raw-input`, `panes.lifecycle`, `tree.restructure`, `sessions.cross`, `process.long-lived`, `agent.transcript`, `settings.read-kernel:api`, `settings.write-kernel:<tab-id>`, `panes.create-command:<program>` and `agent-config.propose:<agent>`. See [Capabilities](/pages/reference-capabilities/) and [Security](/pages/security/).
 
 ## Settings rows, meters and row state
 

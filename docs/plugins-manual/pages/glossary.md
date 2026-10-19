@@ -148,7 +148,7 @@ A plugin is a WebAssembly component that the host loads, checks and runs. It rea
 
 **Frame slot.** A place in a pane frame (header icon, header text, footer row or banner) that a plugin fills with `set-frame-slot`.
 
-**High-risk grant (H).** A grant that is off by default in every dialog and always needs an explicit user choice, even for a bundled plugin. Eleven grants are high risk in the contract; `settings.read-kernel` is high only for the `api` tab.
+**High-risk grant (H).** A grant that is off by default in every dialog and always needs an explicit user choice, even for a bundled plugin. Twelve grants are high risk in the contract; `settings.read-kernel` is high only for the `api` tab.
 
 **Host catalogue.** A catalogue owned by the kernel, such as `ilium.palettes`, `ilium.dithers`, `ilium.filters`, `ilium.style-presets` or `ilium.icons`.
 
@@ -323,7 +323,7 @@ Grants are recorded per plugin, per side, and per user configuration. They are n
 
 ### Further grants
 
-Twenty-three grant rows are new. Eleven are high risk (H).
+Twenty-four grant rows are new. Twelve are high risk (H).
 
 | Grant | Sides | Meaning | Risk |
 |---|---|---|---|
@@ -348,10 +348,11 @@ Twenty-three grant rows are new. Eleven are high risk (H).
 | `journal.read` | S C | Host and other plugins' journal entries | |
 | `gpu.kernels` | A | Host GPU kernels, `@unstable`, development builds only | |
 | `panes.create-command:<program>` | S C | Create a pane that runs one named program; needs `panes.create` | H |
+| `agent-config.propose:<agent>` | S C | Propose changes to one agent's configuration files; the user accepts the diff; needs `fs.read:agent-config:<agent>` | H |
 | `extensions.provide:<plugin-id>/<point>` | S C A | Own one extension point and receive its contributions | |
 | `extensions.contribute:<plugin-id>/<point>` | S C | Contribute to one extension point; high when the point declares `risk: "high"` | |
 
-New argument forms: `http:setting:<key>`, `fs.read:agent-sessions:gemini`, `fs.read:agent-config:gemini`, `fs.read:agent-config:antigravity` and `settings.read-kernel:<kernel-tab-id>`.
+New argument forms: `http:setting:<key>`, `fs.read:agent-sessions:gemini`, `fs.read:agent-config:gemini`, `fs.read:agent-config:antigravity`, `settings.read-kernel:<kernel-tab-id>` and `agent-config.propose:<agent>`.
 
 ### Further events and intents
 

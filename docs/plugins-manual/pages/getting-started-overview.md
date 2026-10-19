@@ -106,7 +106,7 @@ A batch holds at most 256 events, and one `on-events` call may return at most 25
 
 A grant is a name, or a name with one argument after the first colon, such as `tree.read` or `http:api.example.com`. A plugin lists its grants per side in `capabilities`. Grants are recorded per side and per user configuration, not per project. Normal grants are checked by default in the install dialog. High-risk grants, marked H, are never checked by default. A bundled plugin gets its normal grants up to the manifest ceiling and is asked once for each H grant at first activation.
 
-The contract includes 23 further grants for terminal cell reads, history and raw input, pane lifecycle, tree restructuring, attention marks, client chrome, external opening, cross-session control, long-lived children, kernel settings and keymap reads, agent transcripts, geocoding, embeddings, toasts and the pane journal. Eleven of them are high risk. The [capability reference](/pages/capabilities/) lists every one.
+The contract includes 24 further grants for terminal cell reads, history and raw input, pane lifecycle, tree restructuring, attention marks, client chrome, external opening, cross-session control, long-lived children, kernel settings and keymap reads, agent transcripts, geocoding, embeddings, toasts, the pane journal and agent configuration proposals. Twelve of them are high risk. The [capability reference](/pages/capabilities/) lists every one.
 
 Two outcomes matter when you write code:
 

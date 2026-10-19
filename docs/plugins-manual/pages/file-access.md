@@ -36,7 +36,7 @@ A grant names a scope, and the scope names a directory. The plugin sees each sco
 | `project` | `/project` | The canonical project directory | Grant | Grant | Grant |
 | `picked` | `/picked/<n>` | Each path the user chose in the picker | Grant per pick | Grant | Folders only |
 | `agent-sessions:claude`, `:codex`, `:antigravity` | `/agent-sessions/<agent>` | The agent's transcript directory | Grant, high risk | Refused | Grant |
-| `agent-config:claude`, `:codex` | `/agent-config/<agent>` | The agent's configuration directory | Grant, high risk | Grant, high risk | Grant |
+| `agent-config:claude`, `:codex` | `/agent-config/<agent>` | The agent's configuration directory | Grant, high risk | Refused; propose changes with [`agent-config.propose:<agent>`](/pages/capability-agent-config-propose/), high risk | Refused |
 | `minecraft-saves` | `/minecraft-saves` | The platform's saves directory | Grant | Grant | Grant |
 | `worktrees` | `/worktrees` | The root set by `workspace.worktree_root` | Grant | High risk | Grant |
 | `path:<template>` | `/paths/<n>` | A template, see below | Grant | Grant | Grant |
@@ -282,7 +282,7 @@ Two plugins, or a plugin and an agent CLI, often share one file. Use `read-with-
 
 `tail` reads what a growing file gained. The plugin keeps the `cursor` from the last chunk. When the chunk has `truncated: true`, the file shrank or was replaced, and the next read restarts at 0. One call returns at most 1 MiB.
 
-Further scopes are `agent-sessions:gemini`, `agent-config:gemini` and `agent-config:antigravity`, with the same risk as the Claude and Codex ones.
+Further scopes are `agent-sessions:gemini`, `agent-config:gemini` and `agent-config:antigravity`, with the same risk as the Claude and Codex ones. No plugin writes an agent configuration file directly: it proposes the new content with `agent-config.propose:<agent>`, the kernel shows the user the diff, and the host writes only the files the user accepts, still checking the revision.
 
 <figure>
 <pre class="term">╭ Write ─────────────────────────────────────────────────────╮

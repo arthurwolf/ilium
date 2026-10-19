@@ -1811,3 +1811,30 @@ impl HarnessHandle {
         unimplemented!("host::testing::HarnessHandle::call_export")
     }
 }
+
+/// The result of a completed `agent-config.propose` request (CAP-891).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProposalResult {
+    /// Paths of the files that were applied.
+    pub applied: Vec<String>,
+    /// Plugin-data path of the history entry that holds the previous contents.
+    pub history: String,
+}
+
+/// Agent-config proposal observers (CAP-887..891).
+impl HarnessHandle {
+    /// The error code of the last proposal that completed failed.
+    pub fn last_proposal_failure_code(&self) -> Option<ilium_plugin_api::ErrorCode> {
+        unimplemented!("host::testing::HarnessHandle::last_proposal_failure_code")
+    }
+
+    /// The last proposal that completed failed.
+    pub fn last_proposal_failure(&self) -> Option<ilium_plugin_api::PluginError> {
+        unimplemented!("host::testing::HarnessHandle::last_proposal_failure")
+    }
+
+    /// Takes the completed proposal result.
+    pub fn take_proposal(&self) -> Option<ProposalResult> {
+        unimplemented!("host::testing::HarnessHandle::take_proposal")
+    }
+}
