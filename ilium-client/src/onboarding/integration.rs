@@ -193,7 +193,8 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let geometry = screen::render_shell(frame, area, step);
     if let Some(message) = &app.status_message {
         frame.render_widget(
-            Paragraph::new(message.as_str()).style(Style::new().fg(Color::Rgb(194, 176, 148))),
+            Paragraph::new(format!("F9 details · {message}"))
+                .style(Style::new().fg(Color::Rgb(194, 176, 148))),
             Rect::new(
                 geometry.header.x,
                 geometry.header.y.saturating_add(1),
@@ -408,7 +409,8 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
                 geometry.content.height.min(1),
             );
             frame.render_widget(
-                Paragraph::new(message.as_str()).style(Style::new().fg(Color::Rgb(144, 157, 179))),
+                Paragraph::new(format!("F9 details · {message}"))
+                    .style(Style::new().fg(Color::Rgb(144, 157, 179))),
                 row,
             );
         }

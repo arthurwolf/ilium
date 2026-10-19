@@ -129,6 +129,7 @@ pub(crate) struct Stream {
     window_allocation: Arc<ilium_execution::StorageAdmission>,
 }
 impl Stream {
+    #[allow(clippy::too_many_arguments)] // Each stream identity, storage admission and limit stays explicit.
     pub fn new(
         identity: Arc<()>,
         physical_count: usize,

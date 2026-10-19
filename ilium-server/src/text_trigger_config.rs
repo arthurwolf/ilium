@@ -220,8 +220,11 @@ mod durability_tests {
             agent_debug_menu_enabled: false,
             progress_monitor_enabled: false,
         }));
-        assert!(state.events.initialize_journal(execution.quota_group()));
-        assert!(state.execution.set(execution).is_ok());
+        // Each durability fixture owns its journal's admission root. Filling
+        // all 4096 entries must exercise EntryLimit, not contend with other
+        // tests sharing the process-wide worker fixture.
+        let journal_quota = crate::execution::ServerResources::new().quota_group();
+        assert!(state.events.initialize_journal(journal_quota));
         state
             .text_trigger_config_path
             .set(directory.join("config.toml"))

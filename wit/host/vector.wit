@@ -1,0 +1,16 @@
+package ilium:host@0.1.0;
+
+interface vector {
+  use ilium:types/ids@0.1.0.{request-id, index-id};
+  use ilium:types/errors@0.1.0.{plugin-error};
+  /// Async, take-vectors. At most 256 texts of at most 8 KiB each.
+  embed: func(texts: list<string>, purpose: string) -> result<request-id, plugin-error>;
+  take-vectors: func(request: request-id) -> option<list<list<f32>>>;
+  /// Persisted in the plugin's data scope. dimensions 1 to 4,096.
+  create-index: func(name: string, dimensions: u16) -> result<index-id, plugin-error>;
+  upsert: func(index: index-id, entries: list<tuple<string, list<f32>>>) -> result<_, plugin-error>;
+  remove-entries: func(index: index-id, ids: list<string>) -> result<_, plugin-error>;
+  /// Cosine similarity. k at most 100.
+  top-k: func(index: index-id, query: list<f32>, k: u16) -> result<list<tuple<string, f32>>, plugin-error>;
+  drop-index: func(index: index-id);
+}

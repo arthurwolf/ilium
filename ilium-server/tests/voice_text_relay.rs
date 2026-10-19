@@ -20,6 +20,7 @@ async fn attach(server: &TestServer, session: &str) -> ilium_transport::SessionS
         &mut stream,
         &ClientRequest::AttachInteractive {
             session: session.to_owned(),
+            hello: Default::default(),
         },
     )
     .await

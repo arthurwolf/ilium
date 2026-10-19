@@ -23,6 +23,15 @@ use super::direct_events::{DirectEventReceiver, DirectEventSender, QueuedServerE
 use crate::ipc::handlers;
 use crate::state::ServerState;
 
+#[cfg(test)]
+fn initialize_fixture_execution(state: &ServerState) {
+    let execution =
+        crate::execution::ServerExecution::start().expect("isolated connection execution bank");
+    let journal_quota = execution.quota_group();
+    assert!(state.execution.set(execution).is_ok());
+    assert!(state.events.initialize_journal(journal_quota));
+}
+
 /// Bound on this connection's own direct-reply queue (`Attach` snapshots,
 /// per-request errors, resize/key/mouse acks). A slow or stalled client
 /// still gets backpressured -- `handlers::send_direct` awaits capacity --
@@ -439,7 +448,9 @@ async fn read_requests<R>(
 
 /// Forwards direct replies and session events from the ordered journal and
 /// legacy broadcast to this client. A journal cursor advances only after its
-/// event is flushed or intentionally filtered.
+/// event is flushed or intentionally filtered. Production connections use
+/// `write_replies_ordered`; this journal-less form is kept for tests.
+#[cfg(test)]
 async fn write_replies<W, E>(
     write_half: W,
     broadcast_rx: tokio::sync::broadcast::Receiver<E>,
@@ -490,7 +501,7 @@ async fn write_replies_ordered<W, E>(
 async fn write_replies_inner<W, E>(
     write_half: W,
     mut broadcast_rx: tokio::sync::broadcast::Receiver<E>,
-    mut ordered_rx: Option<crate::state::OrderedEventSubscription>,
+    ordered_rx: Option<crate::state::OrderedEventSubscription>,
     mut direct_rx: DirectEventReceiver,
     mut attach_phase_rx: watch::Receiver<AttachPhase>,
     mut stream_control_rx: mpsc::Receiver<StreamControlCommand>,
@@ -1314,6 +1325,18 @@ where
         })?;
         event = Arc::new(crate::text_trigger_config::snapshot(authority).await);
     }
+    if matches!(event.as_ref(), ServerEvent::BlockingErrorsSnapshot { .. }) {
+        let authority = state.ok_or_else(|| {
+            ilium_ipc::IpcError::Io(std::io::Error::other(
+                "Blocking error output requires server authority",
+            ))
+        })?;
+        // Attach/lag repair and older queued live events all use the same
+        // authority fence; a stale event cannot resurrect a recovered error.
+        event = Arc::new(ServerEvent::BlockingErrorsSnapshot {
+            errors: authority.blocking_errors_snapshot(),
+        });
+    }
     let preparation = codec_client(state, false)?;
     // Acquire the empty envelope before scarce codec credit. The raw event
     // already exists; preattachment cancellation still needs producer custody.
@@ -1870,10 +1893,7 @@ mod tests {
             agent_debug_menu_enabled: false,
             progress_monitor_enabled: true,
         }));
-        assert!(state
-            .execution
-            .set(crate::execution::ServerExecution::start().expect("execution bank"))
-            .is_ok());
+        initialize_fixture_execution(&state);
         let (server_stream, mut client_stream) = duplex(4096);
         let (broadcast_tx, broadcast_rx) = broadcast::channel(1);
         let (direct_tx, direct_rx) = DirectEventSender::channel(8);
@@ -1990,14 +2010,13 @@ mod tests {
             is_complete: true,
         };
         let delivered = HashMap::from([(NodeId(9), 7)]);
-        // A pane that closed after the replay was queued has no journal to
-        // recover from. The writer drops the stale replay and keeps the
-        // connection open; an `Err` is reserved for failed recovery of a
-        // pane that still exists.
-        assert!(matches!(
-            normalize_broadcast_terminal_replay(replay.clone(), &delivered, Some(&state)).await,
-            Ok(None)
-        ));
+        assert!(
+            normalize_broadcast_terminal_replay(replay.clone(), &delivered, Some(&state))
+                .await
+                .expect("a closed pane needs no recovery")
+                .is_none(),
+            "a stale broadcast replay must not reach a parser after pane closure"
+        );
         let normalized = normalize_broadcast_terminal_replay(replay.clone(), &delivered, None)
             .await
             .expect("isolated writer tests have no recovery errors");
@@ -2029,10 +2048,7 @@ mod tests {
             agent_debug_menu_enabled: false,
             progress_monitor_enabled: true,
         }));
-        assert!(state
-            .execution
-            .set(crate::execution::ServerExecution::start().expect("execution bank"))
-            .is_ok());
+        initialize_fixture_execution(&state);
         let group_id = state
             .tree
             .write()
@@ -2047,6 +2063,7 @@ mod tests {
             !handlers::handle_request(
                 &state,
                 ClientRequest::NewPane {
+                    request_id: 0,
                     parent_group: group_id,
                     kind: ilium_ipc::NewPaneKind::Command(
                         "printf 'writer-prefix\\n'; read phase; printf 'writer-tail\\n'; read hold"
@@ -2370,10 +2387,7 @@ mod text_trigger_writer_tests {
             agent_debug_menu_enabled: false,
             progress_monitor_enabled: false,
         }));
-        assert!(state
-            .execution
-            .set(crate::execution::ServerExecution::start().expect("execution bank"))
-            .is_ok());
+        initialize_fixture_execution(&state);
         (state, Task(sound_task))
     }
     async fn accept(state: &ServerState, message: &str, revision: u64) {
@@ -2520,6 +2534,49 @@ mod text_trigger_writer_tests {
     }
 
     #[tokio::test]
+    async fn blocking_error_lag_repair_and_queued_old_event_use_current_authority() {
+        let directory = tempfile::tempdir().unwrap();
+        let (state, _sound) = state_at(directory.path());
+        state.record_blocking_error(None, "launch", "launch refused");
+        let stale = ServerEvent::BlockingErrorsSnapshot {
+            errors: state.blocking_errors_snapshot(),
+        };
+        state.clear_blocking_error(None, "launch");
+        let (server, mut client) = duplex(64 * 1024);
+        let mut writer = FrameWriter::new(server);
+        let mut sequences = HashMap::new();
+        let expected = handlers::resynchronization_events(&state, &sequences)
+            .await
+            .len();
+        assert!(
+            write_resynchronization(
+                &mut writer,
+                &state,
+                &mut sequences,
+                &TerminalStreamSelection::None
+            )
+            .await
+        );
+        write_server_event(&mut writer, stale, &mut sequences, Some(&state))
+            .await
+            .unwrap();
+        let mut saw_empty_snapshot = false;
+        for _ in 0..expected {
+            if let ServerEvent::BlockingErrorsSnapshot { errors } = read(&mut client).await {
+                assert!(errors.is_empty());
+                saw_empty_snapshot = true;
+            }
+        }
+        assert!(
+            saw_empty_snapshot,
+            "lag repair must replay the current empty error set"
+        );
+        assert!(
+            matches!(read(&mut client).await, ServerEvent::BlockingErrorsSnapshot { errors } if errors.is_empty())
+        );
+    }
+
+    #[tokio::test]
     async fn text_trigger_writer_refuses_snapshots_without_authority() {
         let mut writer = FrameWriter::new(tokio::io::sink());
         let mut sequences = HashMap::new();
@@ -2648,10 +2705,7 @@ mod text_trigger_ordering_regressions {
             agent_debug_menu_enabled: false,
             progress_monitor_enabled: true,
         }));
-        assert!(state
-            .execution
-            .set(crate::execution::ServerExecution::start().expect("execution bank"))
-            .is_ok());
+        initialize_fixture_execution(&state);
         let newer = TextTriggerSettings {
             triggers: vec![TextTrigger {
                 id: "retained-newer-rule".to_owned(),

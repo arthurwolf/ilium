@@ -88,6 +88,67 @@ impl Screen {
             .set_size(crate::grid::Size { rows, cols });
     }
 
+    /// Returns additional storage required to allocate any currently dormant
+    /// live screen. In particular, entering the alternate screen can allocate
+    /// this storage from a single escape-sequence byte. Already allocated grids
+    /// contribute zero, so this is additional to [`Self::allocation_bytes`].
+    #[must_use]
+    pub fn pending_screen_allocation_bytes(&self) -> usize {
+        self.grid
+            .pending_screen_allocation_bytes()
+            .saturating_add(self.alternate_grid.pending_screen_allocation_bytes())
+    }
+
+    /// Returns retained terminal storage bytes, including both screens, all
+    /// history cell buffers and unused vector capacities. Allocator metadata is
+    /// excluded. This measures current storage rather than resize high-water marks.
+    #[must_use]
+    pub fn allocation_bytes(&self) -> usize {
+        std::mem::size_of::<Self>()
+            .saturating_add(self.grid.heap_allocation_bytes())
+            .saturating_add(self.alternate_grid.heap_allocation_bytes())
+    }
+
+    /// Sets the maximum retained history rows, discarding oldest excess rows.
+    ///
+    /// Applies to the primary screen even while the alternate screen is active.
+    /// Live cells, cursor, modes and saved primary/alternate state are preserved.
+    /// Retained allocations are compacted; surviving historical rows keep their
+    /// original width and text. The alternate screen never retains history.
+    pub fn set_scrollback_limit(&mut self, rows: usize) {
+        self.grid.set_scrollback_limit(rows);
+        self.alternate_grid.trim_scrollback(0);
+    }
+
+    /// Returns the primary screen's configured maximum retained history rows.
+    #[must_use]
+    pub fn scrollback_limit(&self) -> usize {
+        self.grid.scrollback_len()
+    }
+
+    /// Drops oldest primary-screen history until at most `rows` remain, without
+    /// changing the configured retention limit or resetting any terminal state.
+    /// Also releases excess row and collection capacities on both screens.
+    pub fn trim_scrollback(&mut self, rows: usize) {
+        self.grid.trim_scrollback(rows);
+        self.alternate_grid.trim_scrollback(0);
+    }
+
+    /// Discards all history outside the current visible viewport, preserving
+    /// its exact cells and rendering attributes without cloning cell buffers.
+    /// Drawing rows, cursor, modes and the future retention limit are unchanged.
+    /// History on the inactive screen is discarded as well. This is useful for
+    /// reducing a frozen historical view to its visible window under pressure.
+    pub fn retain_visible_scrollback(&mut self) {
+        if self.alternate_screen() {
+            self.alternate_grid.retain_visible_scrollback();
+            self.grid.trim_scrollback(0);
+        } else {
+            self.grid.retain_visible_scrollback();
+            self.alternate_grid.trim_scrollback(0);
+        }
+    }
+
     /// Returns the current size of the terminal.
     ///
     /// The return value will be (rows, cols).
@@ -567,6 +628,31 @@ impl Screen {
     #[must_use]
     pub fn alternate_screen(&self) -> bool {
         self.mode(MODE_ALTERNATE_SCREEN)
+    }
+
+    /// Returns the DECSTBM scroll region as zero-based inclusive (top, bottom) rows.
+    #[must_use]
+    pub fn scroll_region(&self) -> (u16, u16) {
+        self.grid().scroll_region()
+    }
+
+    /// Returns whether origin mode (DECOM) is enabled.
+    #[must_use]
+    pub fn origin_mode(&self) -> bool {
+        self.grid().origin_mode()
+    }
+
+    /// Returns the cursor position saved by DECSC, zero-based (row, col).
+    #[must_use]
+    pub fn saved_cursor_position(&self) -> (u16, u16) {
+        let pos = self.grid().saved_pos();
+        (pos.row, pos.col)
+    }
+
+    /// Returns whether origin mode was enabled when the cursor was saved by DECSC.
+    #[must_use]
+    pub fn saved_origin_mode(&self) -> bool {
+        self.grid().saved_origin_mode()
     }
 
     /// Returns whether the terminal should be in application keypad mode.

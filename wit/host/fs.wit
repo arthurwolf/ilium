@@ -1,0 +1,63 @@
+package ilium:host@0.1.0;
+
+interface fs {
+  use ilium:types/ids@0.1.0.{request-id, watch-id, lock-id};
+  use ilium:types/errors@0.1.0.{plugin-error};
+  use ilium:types/paths@0.1.0.{fs-path};
+
+  enum entry-kind { file, directory, symlink, other }
+  record fs-metadata { kind: entry-kind, length: u64, modified-unix-millis: option<u64>, read-only: bool }
+  record dir-entry { name: string, metadata: fs-metadata }
+  record scope-root { scope: string, writable: bool }
+  record scanned-entry { relative-path: string, entry: dir-entry }
+  enum write-mode { create-new, replace, append }
+  enum pick-kind { open-file, open-directory, save-file }
+  record pick-spec { kind: pick-kind, title: string, extensions: list<string> }
+  /// Opaque. Equal tokens mean equal content.
+  type revision-token = string;
+  record revisioned { bytes: list<u8>, revision: revision-token }
+  /// truncated: the file shrank or was replaced, and the next read restarts at 0.
+  record tail-chunk { bytes: list<u8>, cursor: u64, truncated: bool }
+
+  /// Granted scopes and whether each is writable.
+  roots: func() -> list<scope-root>;
+  /// Sync. Errors: not-found.
+  metadata: func(path: fs-path) -> result<fs-metadata, plugin-error>;
+  /// Sync. max-entries at most 4,096.
+  list-dir: func(path: fs-path, max-entries: u32) -> result<list<dir-entry>, plugin-error>;
+  /// Sync. max-bytes at most 1 MiB.
+  read: func(path: fs-path, offset: u64, max-bytes: u32) -> result<list<u8>, plugin-error>;
+  /// Async, take-bytes. At most 64 MiB.
+  read-all: func(path: fs-path) -> result<request-id, plugin-error>;
+  /// Async, take-entries. glob follows the scope root. max-entries at most 100,000.
+  scan: func(path: fs-path, glob: string, max-entries: u32) -> result<request-id, plugin-error>;
+  /// Async, take-written is not used: the answer is request-completed ok. replace is atomic.
+  write: func(path: fs-path, data: list<u8>, mode: write-mode) -> result<request-id, plugin-error>;
+  create-dir: func(path: fs-path) -> result<_, plugin-error>;
+  /// Async. request-completed ok.
+  remove: func(path: fs-path) -> result<request-id, plugin-error>;
+  /// Async. Same scope only. request-completed ok.
+  rename: func(source: fs-path, target: fs-path) -> result<request-id, plugin-error>;
+  /// Grant fs.watch. Fires fs-changed.
+  watch: func(path: fs-path, recursive: bool) -> result<watch-id, plugin-error>;
+  unwatch: func(watch: watch-id);
+  /// Async, take-lock. Advisory lock. timeout-millis at most 60,000. Errors: timed-out, busy.
+  lock: func(path: fs-path, exclusive: bool, timeout-millis: u32) -> result<request-id, plugin-error>;
+  unlock: func(lock: lock-id);
+  /// Async, take-picked. Client only. Grant fs.pick. none: the user cancelled.
+  pick: func(spec: pick-spec) -> result<request-id, plugin-error>;
+  /// Async, take-revisioned.
+  read-with-revision: func(path: fs-path) -> result<request-id, plugin-error>;
+  /// Async, take-written. expected none: create only, conflict if the file exists.
+  /// expected some(token): replace only if unchanged, else conflict.
+  write-atomic: func(path: fs-path, data: list<u8>, expected: option<revision-token>) -> result<request-id, plugin-error>;
+  /// Sync. max-bytes at most 1 MiB.
+  tail: func(path: fs-path, cursor: u64, max-bytes: u32) -> result<tail-chunk, plugin-error>;
+
+  take-bytes: func(request: request-id) -> option<list<u8>>;
+  take-entries: func(request: request-id) -> option<list<scanned-entry>>;
+  take-lock: func(request: request-id) -> option<lock-id>;
+  take-picked: func(request: request-id) -> option<fs-path>;
+  take-revisioned: func(request: request-id) -> option<revisioned>;
+  take-written: func(request: request-id) -> option<revision-token>;
+}

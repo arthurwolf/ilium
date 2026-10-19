@@ -7,6 +7,7 @@ members = [
     "ilium-agent-debug",
     "ilium-agent-session",
     "ilium-client",
+    "ilium-control",
     "ilium-compaction-analysis",
     "ilium-core",
     "ilium-detect",
@@ -29,6 +30,20 @@ members = [
     "ilium-sound",
     "ilium-voice",
     "ilium",
+    # Plugin platform (docs/research/plugin-platform/test-plan.md section 1.1). The test-only
+    # crates ilium-plugin-conformance and ilium-plugin-bench join when their lanes create them,
+    # and so does "plugins/fixtures/*" (Cargo rejects a member glob that matches no crate).
+    "ilium-plugin-api",
+    "ilium-plugin-host",
+    "ilium-plugin-helper",
+    "ilium-plugin-sdk-core",
+    "ilium-plugin-sdk-macros",
+    "ilium-plugin-sdk",
+    "ilium-plugin-testkit",
+    "ilium-plugin-conformance",
+    "ilium-plugin-bench",
+    "plugins/core/*",
+    "plugins/fixtures/*",
 ]
 # The patched third-party crate remains a dependency, not an ilium workspace
 # package; this also lets its own upstream-style unit tests run independently.

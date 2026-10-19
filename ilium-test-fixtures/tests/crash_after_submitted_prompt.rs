@@ -4,7 +4,7 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use ilium_pty::{PtyCommand, PtySession};
-use ilium_test_fixtures::{install, spawn_installed, FixtureBehavior};
+use ilium_test_fixtures::{install, spawn_fixture, FixtureBehavior};
 
 fn prompt() -> String {
     format!(
@@ -36,7 +36,7 @@ fn both_provider_names_crash_after_preserving_one_exact_unflushed_submission() {
             },
         );
         assert!(fixture.path.is_absolute());
-        let mut child = spawn_installed(
+        let mut child = spawn_fixture(
             Command::new(&fixture.path)
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())

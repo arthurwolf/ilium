@@ -180,7 +180,11 @@ impl std::fmt::Display for ShutdownRequestsError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.inspect(|custody| write!(f,
             "request drain {}: {} original requests retained, {} accepted to transport queue, flush {:?}; server acceptance unknown; no automatic prefix replay",
-            self.cause, custody.pending_originals().len() + self.additional.len(), custody.accepted_prefix(), custody.flush_status()))
+            self.cause, custody.pending_originals().len() + self.additional.len(), custody.accepted_prefix(), custody.flush_status()))?;
+        if let Some(other) = &self.other {
+            write!(f, "; original client error: {other}")?;
+        }
+        Ok(())
     }
 }
 impl std::error::Error for ShutdownRequestsError {

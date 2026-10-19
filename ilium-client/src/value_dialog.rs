@@ -133,6 +133,7 @@ impl ChoiceDialogState {
             Some(option) if option.disabled_reason.is_some() => {
                 self.highlighted_id = Some(option.id.clone());
                 self.notice = option.disabled_reason.clone();
+                self.scroll_line = 0;
                 DialogOutcome::Continue
             }
             Some(option) => {
@@ -462,6 +463,18 @@ struct ChoiceLine {
 
 fn choice_rows(state: &ChoiceDialogState, width: u16) -> Vec<ChoiceLine> {
     let mut rows = Vec::new();
+    if let Some(notice) = &state.notice {
+        for text in wrap_cells(notice, width) {
+            rows.push(ChoiceLine {
+                option_id: None,
+                text,
+                is_reason: true,
+                is_current: false,
+                is_highlighted: false,
+                is_disabled: false,
+            });
+        }
+    }
     for index in state.filtered_indices() {
         let option = &state.options[index];
         let is_current = state.selected_id.as_deref() == Some(option.id.as_str());
@@ -524,7 +537,7 @@ fn choice_rows(state: &ChoiceDialogState, width: u16) -> Vec<ChoiceLine> {
 
 /// Wraps every printable grapheme; no option or reason is cut to a fixed row
 /// count. A terminal narrower than a wide grapheme shows an ellipsis for it.
-fn wrap_cells(text: &str, width: u16) -> Vec<String> {
+pub(crate) fn wrap_cells(text: &str, width: u16) -> Vec<String> {
     if width == 0 {
         return Vec::new();
     }
@@ -533,6 +546,11 @@ fn wrap_cells(text: &str, width: u16) -> Vec<String> {
     let mut line = String::new();
     let mut used = 0;
     for source in UnicodeSegmentation::graphemes(text, true) {
+        if source == "\n" || source == "\r\n" {
+            lines.push(std::mem::take(&mut line));
+            used = 0;
+            continue;
+        }
         let grapheme = if source.chars().any(char::is_control) {
             " "
         } else {
@@ -743,14 +761,18 @@ impl<'a> PreparedValueDialog<'a> {
                     )
             },
         );
-        let status = choice.notice.clone().unwrap_or_else(|| {
-            format!(
-                "{} of {} options · Current: {}",
-                choice.filtered_indices().len(),
-                choice.options.len(),
-                current
-            )
-        });
+        let status = choice
+            .notice
+            .as_ref()
+            .map(|_| "F9: full diagnostic · Scroll to read notice".to_owned())
+            .unwrap_or_else(|| {
+                format!(
+                    "{} of {} options · Current: {}",
+                    choice.filtered_indices().len(),
+                    choice.options.len(),
+                    current
+                )
+            });
         paint(
             frame,
             self.layout.status,
@@ -779,7 +801,14 @@ impl<'a> PreparedValueDialog<'a> {
         paint(
             frame,
             self.layout.status,
-            &clip_cells("Enter applies · Esc cancels", self.layout.status.width),
+            &clip_cells(
+                if number.error.is_some() {
+                    "F9: full diagnostic · Enter applies · Esc cancels"
+                } else {
+                    "Enter applies · Esc cancels"
+                },
+                self.layout.status.width,
+            ),
             styles.normal,
         );
     }
@@ -877,6 +906,16 @@ mod tests {
             Some("a".into()),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn choice_notice_keeps_unicode_newlines_and_suffix_in_scrollable_rows() {
+        let mut state = ChoiceDialogState::new("Choices", vec![], None).unwrap();
+        state.notice = Some(format!("{}\nFINAL_SUFFIX", "界 diagnostic ".repeat(80)));
+        let rows = choice_rows(&state, 12);
+        assert!(rows.iter().any(|row| row.text.contains("FINAL_SUFFIX")));
+        assert!(rows.iter().all(|row| cell_width(&row.text) <= 12));
+        assert_eq!(wrap_cells("first\nlast", 20), vec!["first", "last"]);
     }
 
     #[test]

@@ -206,7 +206,9 @@ pub(crate) fn request_retained_bytes(request: &ilium_ipc::ClientRequest) -> usiz
         visits: 0,
     };
     match request {
-        R::Attach { session } | R::AttachInteractive { session } => count.string(session),
+        R::Attach { session, .. } | R::AttachInteractive { session, .. } => count.string(session),
+        // Plugin envelopes are bounded by the plugin IPC limits (HST-104), not counted here.
+        R::Plugin(_) => {}
         R::KeyInput { bytes, .. } => count.add(bytes.capacity()),
         R::UserKeyInput {
             bytes,
@@ -489,6 +491,7 @@ pub(crate) fn request_retained_bytes(request: &ilium_ipc::ClientRequest) -> usiz
         | R::ResolveSessionRecovery { .. }
         | R::UpdateDebugLogging { .. }
         | R::UpdateAgentDebugMenu { .. }
+        | R::GetPaneRecapScreen { .. }
         | R::GetPaneDebugLog { .. }
         | R::SetNodeBookmarked { .. }
         | R::RecordNodeActivity { .. }

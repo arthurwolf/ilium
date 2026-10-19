@@ -1,6 +1,6 @@
 <p align="center"><img src="assets/ilium-mark.svg" alt="" width="68" height="68"></p>
 <h1 align="center">Ilium</h1>
-<p align="center"><strong>AI names agents and organizes your project tree.</strong><br>Keep agent work, terminals, editors, and boards together, with activity in view.</p>
+<p align="center"><strong>Running 100+ CLI agents across dozens of projects and need some help auto-organizing that mess?</strong><br>Keep agent work, terminals, editors, and boards together, with activity in view.</p>
 <p align="center"><sub>Linux · macOS · Windows · Rust · MIT</sub></p>
 <p align="center"><a href="#quick-start">Quick start</a> · <a href="#daily-use">Daily use</a> · <a href="#see-it-in-action">Demos</a> · <a href="#what-ilium-does">Features</a> · <a href="src/docs/README.md">Full documentation</a></p>
 
@@ -107,7 +107,7 @@ All keys, mouse use and remapping: [Getting started](src/docs/getting-started.md
 ## What Ilium does
 
 - **Arrange**: group panes and split the screen four ways. The project tree stays visible. [Panes and layout](src/docs/panes-and-layout.md)
-- **Track**: identify agent CLIs from process trees and read activity from terminal screens. [Agent monitoring](src/docs/agent-monitoring.md)
+- **Track**: identify agent CLIs from process trees and read activity from terminal screens, optionally showing each session's model icon in the tree. Stale activity checks show a caution with their age on hover. [Agent monitoring](src/docs/agent-monitoring.md)
 - **Separate**: start agents in linked Git worktrees. Unclear file, process, or ownership state blocks cleanup. [Worktrees](src/docs/worktrees.md)
 - **Resume**: detach without stopping panes. Recovery rebuilds the layout and relaunches pane programs. [Session recovery](src/docs/session-recovery.md)
 
@@ -139,6 +139,7 @@ After a restart, Ilium restores the layout and relaunches pane programs, resumin
 | `ilium new-pane [--keep-open] -- <cmd>` | Add a terminal pane without attaching the TUI. The pane closes when the command exits unless `--keep-open` is given. |
 | `ilium chat --help` / `ilium progress --help` | Chatroom and progress commands. |
 | `ilium voice say --help` | Typed voice input. |
+| `ilium ctl <command>` | Full remote control for agents and scripts: read the tree as JSON/YAML/Markdown, create, move, rename, close and drive panes. Start with `ilium ctl guide`. |
 | `ilium panes` / `ilium broadcast <message>` | List panes, or message agents, across every running session; filter by project, agent, state, text or regex. |
 
 Every command and flag: [Command-line reference](src/docs/cli-reference.md).
@@ -152,3 +153,5 @@ Open Settings with `Ctrl+B :` and the key map with `Ctrl+B ?`. Global settings l
 Report problems in [issues](https://github.com/arthurwolf/ilium/issues) with your version, OS, terminal, command and observed behaviour; remove private content from logs. Design: [ARCHITECTURE.md](ARCHITECTURE.md). Contribution rules: [AGENTS.md](AGENTS.md) and [Contributing](src/docs/contributing.md).
 
 Ilium is [MIT licensed](LICENSE). The vendored `vt100` patch and `tui-tree-widget` fork retain their MIT licences. Cascadia Code uses SIL Open Font License 1.1; see the [font notice](ilium-client/assets/fonts/NOTICE.md).
+
+Blocking failures appear as caution triangles beside affected agents and projects. Hover the triangle to read the cause; unavailable terminals also show their failure reason.

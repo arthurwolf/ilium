@@ -1,0 +1,1 @@
+- manual: the shape of a `contributes.help` entry is not documented; animation_help.rs assumes `{ "id", "text" }` and a `help` field naming a topic on each settings row (F-093, F-094).

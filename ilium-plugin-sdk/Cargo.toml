@@ -1,0 +1,20 @@
+[package]
+name = "ilium-plugin-sdk"
+description = "Ilium plugin SDK facade: SDK core, the ilium_plugin macro and, with the testing feature, the testkit"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+ilium-plugin-sdk-core = { version = "0.1.1", path = "../ilium-plugin-sdk-core" }
+ilium-plugin-sdk-macros = { version = "0.1.1", path = "../ilium-plugin-sdk-macros" }
+ilium-plugin-testkit = { version = "0.1.1", path = "../ilium-plugin-testkit", optional = true }
+
+[features]
+# Re-exports the testkit as `ilium_plugin_sdk::testing`.
+testing = ["dep:ilium-plugin-testkit"]
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(testing_reexports)'] }

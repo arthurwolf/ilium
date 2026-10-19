@@ -56,6 +56,10 @@ pub enum FixtureBehavior {
     /// which care only about argv and never about activity classification.
     Idle,
 
+    /// Emits one supplied terminal screen and keeps the process alive without
+    /// further output, so unchanged-screen/background detection is exercised.
+    StaticScreen { text: String },
+
     /// Prints Codex's shared-footer goal suffix plus the literal working
     /// marker (`ilium_detect`'s `"esc to interrupt"`) once a second for
     /// `working_seconds`, then *clears the screen* and prints an idle line.
@@ -248,37 +252,33 @@ pub fn install(directory: &Path, name: &str, behavior: &FixtureBehavior) -> Inst
     InstalledFixture { path }
 }
 
-/// Spawns a command whose executable was just written by [`install`].
-///
-/// Tests run on parallel threads, and a fork in one thread briefly inherits the
-/// writable descriptor another thread holds while copying a fixture, so an exec
-/// of the fresh file can fail with `ETXTBSY` ("Text file busy") for a moment.
-/// That is a race in the test harness, not a fixture defect, so only that one
-/// error is retried, for a short bounded period.
-pub fn spawn_installed(command: &mut std::process::Command) -> std::io::Result<std::process::Child> {
-    const ATTEMPT_LIMIT: u32 = 50;
-    const RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(20);
-    let mut attempt = 0;
-    loop {
-        match command.spawn() {
-            Err(error) if is_text_file_busy(&error) && attempt + 1 < ATTEMPT_LIMIT => {
-                attempt += 1;
-                std::thread::sleep(RETRY_DELAY);
+/// Spawn a freshly copied fixture, tolerating only the kernel's transient
+/// executable-write conflict. A concurrent fork can inherit the copy's write
+/// descriptor until it execs. A failed exec starts no child, so retry is safe.
+pub fn spawn_fixture(command: &mut std::process::Command) -> std::io::Result<std::process::Child> {
+    retry_executable_write_conflict(
+        || command.spawn(),
+        || {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        },
+    )
+}
+
+fn retry_executable_write_conflict<T>(
+    mut spawn: impl FnMut() -> std::io::Result<T>,
+    mut wait: impl FnMut(),
+) -> std::io::Result<T> {
+    for attempt in 0..=100 {
+        match spawn() {
+            Err(error)
+                if error.kind() == std::io::ErrorKind::ExecutableFileBusy && attempt < 100 =>
+            {
+                wait();
             }
-            outcome => return outcome,
+            result => return result,
         }
     }
-}
-
-#[cfg(unix)]
-fn is_text_file_busy(error: &std::io::Error) -> bool {
-    // `ETXTBSY` is 26 on Linux and macOS; `libc` stays out of test crates by policy.
-    error.raw_os_error() == Some(26)
-}
-
-#[cfg(not(unix))]
-fn is_text_file_busy(_error: &std::io::Error) -> bool {
-    false
+    unreachable!("the last attempt always returns its result")
 }
 
 /// The sidecar path holding an installed fixture's behaviour. Shared by
@@ -399,6 +399,50 @@ mod tests {
     use super::*;
 
     #[test]
+    fn fixture_spawn_retries_only_transient_exec_conflicts_and_is_bounded() {
+        let mut attempts = 0;
+        let value = retry_executable_write_conflict(
+            || {
+                attempts += 1;
+                if attempts == 3 {
+                    Ok(42)
+                } else {
+                    Err(std::io::Error::from(std::io::ErrorKind::ExecutableFileBusy))
+                }
+            },
+            || {},
+        );
+        assert_eq!(value.unwrap(), 42);
+        assert_eq!(attempts, 3);
+        attempts = 0;
+        let failure = retry_executable_write_conflict::<()>(
+            || {
+                attempts += 1;
+                Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied))
+            },
+            || panic!("other failures must not retry"),
+        );
+        assert_eq!(
+            failure.unwrap_err().kind(),
+            std::io::ErrorKind::PermissionDenied
+        );
+        assert_eq!(attempts, 1);
+        attempts = 0;
+        let failure = retry_executable_write_conflict::<()>(
+            || {
+                attempts += 1;
+                Err(std::io::Error::from(std::io::ErrorKind::ExecutableFileBusy))
+            },
+            || {},
+        );
+        assert_eq!(
+            failure.unwrap_err().kind(),
+            std::io::ErrorKind::ExecutableFileBusy
+        );
+        assert_eq!(attempts, 101);
+    }
+
+    #[test]
     fn behavior_file_sits_beside_the_executable_including_its_extension() {
         // Deliberately checked with an extension present: appending to the
         // full file name (rather than replacing the extension) is what lets
@@ -417,6 +461,7 @@ mod tests {
     fn assert_every_variant_is_covered(behavior: &FixtureBehavior) {
         match behavior {
             FixtureBehavior::Idle
+            | FixtureBehavior::StaticScreen { .. }
             | FixtureBehavior::WorkingThenIdle { .. }
             | FixtureBehavior::WorkingUntilMarker { .. }
             | FixtureBehavior::HoldArgument { .. }
@@ -445,6 +490,9 @@ mod tests {
         // fixture that silently does the wrong thing.
         let behaviors = [
             FixtureBehavior::Idle,
+            FixtureBehavior::StaticScreen {
+                text: "❯ idle\nSession: first seen 4m …".to_string(),
+            },
             FixtureBehavior::WorkingThenIdle { working_seconds: 5 },
             FixtureBehavior::WorkingUntilMarker {
                 marker_path: PathBuf::from("/tmp/marker"),

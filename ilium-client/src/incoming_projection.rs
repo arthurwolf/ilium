@@ -132,7 +132,8 @@ impl ProjectionRetention {
                 (Slot::Debug(entry.sequence), Some(*pane_id))
             }
             ProjectRestructureRejected { project_id, .. } => (global, Some(*project_id)),
-            ScreenUpdate { .. }
+            PaneRecapScreen { .. }
+            | ScreenUpdate { .. }
             | TerminalReplay { .. }
             | VoiceTextOffered { .. }
             | VoiceTextResult { .. }
@@ -162,7 +163,11 @@ impl ProjectionRetention {
             | AntigravityStatuslineCompleted { .. }
             | Error { .. }
             | PaneResizeRejected { .. }
-            | WorkspaceRemovalBlocked { .. } => return update,
+            | WorkspaceRemovalBlocked { .. }
+            // Plugin-platform events are projected by the plugin client layer, not here (skeleton).
+            | Plugin(_)
+            | Contributions(_)
+            | Rejected(_) => return update,
             AgentDetectionSettingsChanged { result, .. } => match result {
                 Ok(_) => {
                     update.clear_detection_error = true;
@@ -173,6 +178,8 @@ impl ProjectionRetention {
             TextTriggersChanged { .. }
             | PaneProcessTerminated { .. }
             | PaneFrozen { .. }
+            | BlockingErrorsSnapshot { .. }
+            | PaneCreateFinished { .. }
             | SoundPreviewCompleted { .. } => (global, None),
         };
         update.keys.push(Key { slot, scope });

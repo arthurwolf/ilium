@@ -55,6 +55,7 @@ fn selected_video_backend_before_review(fixture: &Fixture) -> PluginBackend {
     let wake = fixture.wake_sender.clone();
     let mut backend = PluginBackend::new(
         fixture.quota.clone(),
+        Arc::clone(&fixture.cadence_owner),
         fixture.resources.clone(),
         Arc::clone(&fixture.review),
         Arc::new(move || {

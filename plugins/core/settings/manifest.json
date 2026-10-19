@@ -1,0 +1,83 @@
+{
+  "api": "ilium:plugin@0.1.0",
+  "id": "ilium.core.settings",
+  "name": "Settings",
+  "version": "0.1.0",
+  "publisher": "Ilium",
+  "description": "The Settings plugin (id ilium.core.settings, side: client) is the plugin form of the Settings screen.",
+  "license": "MIT",
+  "client": {
+    "entry": "client.wasm",
+    "world": "ilium:client/base@0.1.0",
+    "exports": [
+      "views"
+    ]
+  },
+  "capabilities": {
+    "client": [
+      "settings.contribute:user-interface",
+      "settings.read-all",
+      "settings.write-all",
+      "ui.panels",
+      "settings.write-kernel:user-interface",
+      "settings.write-kernel:icons",
+      "settings.write-kernel:debug",
+      "settings.write-kernel:about"
+    ]
+  },
+  "activation": [
+    "startup"
+  ],
+  "contributes": {
+    "settings": [
+      {
+        "kind": "section",
+        "id": "appearance",
+        "tab": "user-interface",
+        "placement": "end",
+        "title": "Appearance",
+        "scope": "client",
+        "rows": [
+          {
+            "type": "choice",
+            "key": "density",
+            "title": "Density",
+            "default": "comfortable",
+            "options": [
+              {
+                "value": "compact",
+                "title": "Compact"
+              },
+              {
+                "value": "comfortable",
+                "title": "Comfortable"
+              }
+            ]
+          },
+          {
+            "type": "color",
+            "key": "accent",
+            "title": "Accent colour",
+            "swatches": "theme",
+            "default": "#4a9eff"
+          }
+        ]
+      }
+    ],
+    "onboarding_steps": [
+      {
+        "id": "first-run",
+        "title": "Welcome",
+        "order": 10
+      }
+    ],
+    "panels": [
+      {
+        "id": "overview",
+        "title": "All settings",
+        "modal": false
+      }
+    ]
+  },
+  "limits_tier": "first-party"
+}

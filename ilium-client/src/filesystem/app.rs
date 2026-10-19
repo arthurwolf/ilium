@@ -118,13 +118,17 @@ impl App {
                 }
             }
         };
-        tokio::time::timeout(std::time::Duration::from_secs(5), drain)
+        tokio::pin!(drain);
+        if tokio::time::timeout(std::time::Duration::from_secs(5), &mut drain)
             .await
-            .map_err(|_| {
-                std::io::Error::other(
-                    "Filesystem drain deadline; pending write publication is unconfirmed",
-                )
-            })
+            .is_err()
+        {
+            // Accepted writes retain their publication owner beyond the warning
+            // deadline; cancellation cannot establish whether disk was changed.
+            tracing::warn!("Filesystem drain exceeded five seconds; retaining accepted writes until publication");
+            drain.await;
+        }
+        Ok(())
     }
     #[cfg(test)]
     pub(crate) fn settle_filesystem_for_test(&mut self) {
@@ -835,6 +839,15 @@ mod shutdown_drain_tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn filesystem_shutdown_keeps_accepted_board_write_until_disk_readback() {
+        filesystem_shutdown_board_case(false).await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn filesystem_shutdown_reports_failed_accepted_write_without_claiming_saved() {
+        filesystem_shutdown_board_case(true).await;
+    }
+
+    async fn filesystem_shutdown_board_case(fail_publication: bool) {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("accepted-board.md");
         let quota = QuotaGroup::new(QuotaLimits {
@@ -911,11 +924,22 @@ mod shutdown_drain_tests {
         let mut board = board_files.attach(source).unwrap();
         board.add_column("Accepted during shutdown".into()).unwrap();
         app.board_files = Some(board_files);
+        if fail_publication {
+            // read_source(create=true) already created this isolated fixture
+            // file. Replace it after acceptance so publication fails against
+            // an external directory, without altering the retained draft.
+            std::fs::remove_file(&path).unwrap();
+            std::fs::create_dir(&path).unwrap();
+        }
 
         // Release independently of the async test runtime so even the original
         // deadline failure cannot strand the owned I/O thread.
         let releaser = std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(5100));
+            std::thread::sleep(Duration::from_millis(if fail_publication {
+                1
+            } else {
+                5100
+            }));
             release_sender.send(()).unwrap();
         });
         let drain = app.drain_filesystem().await;
@@ -925,16 +949,37 @@ mod shutdown_drain_tests {
             "shutdown must retain the accepted writer past its warning deadline: {drain:?}"
         );
         assert_eq!(app.board_files.as_ref().unwrap().pending(), 0);
-        assert!(path.is_file(), "accepted board save must reach disk");
-        let saved = crate::board::read_source(
-            ilium_core::BoardStorage::MarkdownFile { path: path.clone() },
-            false,
-        )
-        .unwrap();
-        assert!(saved
-            .columns
-            .iter()
-            .any(|column| column.title == "Accepted during shutdown"));
+        if fail_publication {
+            assert!(
+                path.is_dir(),
+                "failed publication must leave the conflicting entry intact"
+            );
+            let status = app
+                .status_message
+                .as_deref()
+                .expect("accepted save failure is reported");
+            assert!(
+                status.starts_with("Board edits remain unsaved:"),
+                "{status}"
+            );
+            assert!(status.contains("failed authored data retained"), "{status}");
+            assert!(board
+                .columns
+                .iter()
+                .any(|column| column.title == "Accepted during shutdown"));
+        } else {
+            assert!(path.is_file(), "accepted board save must reach disk");
+            let saved = crate::board::read_source(
+                ilium_core::BoardStorage::MarkdownFile { path: path.clone() },
+                false,
+            )
+            .unwrap();
+            assert!(saved
+                .columns
+                .iter()
+                .any(|column| column.title == "Accepted during shutdown"));
+            drop(saved);
+        }
 
         let deadline = Instant::now() + Duration::from_secs(3);
         loop {
@@ -955,7 +1000,6 @@ mod shutdown_drain_tests {
                 }
             }
         }
-        drop(saved);
         drop(blocker);
         drop(board);
         drop(app);

@@ -1,0 +1,9 @@
+package ilium:host@0.1.0;
+
+interface clipboard {
+  use ilium:types/errors@0.1.0.{plugin-error};
+  /// At most 1 MiB in UTF-8 bytes. Longer text is cut at a scalar boundary.
+  read-text: func() -> option<string>;
+  /// Errors: invalid-argument above 1 MiB.
+  write-text: func(text: string) -> result<_, plugin-error>;
+}

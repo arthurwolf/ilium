@@ -1,0 +1,46 @@
+package ilium:host@0.1.0;
+
+interface settings {
+  use ilium:types/ids@0.1.0.{plugin-id};
+  use ilium:types/errors@0.1.0.{plugin-error};
+  use ilium:types/text@0.1.0.{rich-text};
+  use ilium:types/intents@0.1.0.{plugin-side};
+  use ilium:types/ui@0.1.0.{catalog-item, row-state, meter-segment};
+
+  record choice-option { value: string, title: string }
+  record item-state { index: u32, state: row-state }
+  record settings-ref {
+    plugin: plugin-id, tab: string, section: option<string>, title: string, side: plugin-side,
+    kernel-tab: option<string>,
+  }
+  record field-error { key: string, message: string }
+
+  /// Own values as one JSON object. Always allowed.
+  get-json: func() -> string;
+  /// Merge patch (RFC 7396), validated against the schema. Does not call settings-validate.
+  /// Errors: invalid-argument for a key of the other side or one that is not in the schema.
+  set-json: func(patch: string) -> result<_, plugin-error>;
+
+  // own rows
+  /// info row with live true. At most 120 characters.
+  set-info: func(key: string, text: string) -> result<_, plugin-error>;
+  /// choice row with dynamic true. 1 to 64 options.
+  set-choices: func(key: string, options: list<choice-option>) -> result<_, plugin-error>;
+  /// A dim note under the description. At most 120 characters.
+  set-row-note: func(key: string, note: option<string>) -> result<_, plugin-error>;
+  set-row-state: func(key: string, state: row-state) -> result<_, plugin-error>;
+  set-item-states: func(key: string, items: list<item-state>) -> result<_, plugin-error>;
+  set-choice-items: func(key: string, items: list<catalog-item>) -> result<_, plugin-error>;
+  set-info-rich: func(key: string, text: rich-text) -> result<_, plugin-error>;
+  /// At most 8 segments.
+  set-meter: func(id: string, segments: list<meter-segment>) -> result<_, plugin-error>;
+  /// Client only. Opens the settings page of the plugin, or a target.
+  open: func(target: string) -> result<_, plugin-error>;
+
+  // other plugins
+  /// Grant settings.read-all.
+  list-settings: func() -> list<settings-ref>;
+  get-plugin-json: func(plugin: plugin-id) -> result<string, plugin-error>;
+  /// Grant settings.write-all.
+  set-plugin-json: func(plugin: plugin-id, patch: string) -> result<_, plugin-error>;
+}

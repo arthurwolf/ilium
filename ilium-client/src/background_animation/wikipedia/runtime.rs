@@ -89,6 +89,8 @@ impl WikipediaRuntime {
         elapsed: Duration,
         resources: Option<&AmbientResources>,
     ) {
+        #[cfg(test)]
+        let _ = resources; // Tests never start the HTTP loader that uses it.
         #[cfg(not(test))]
         if self.loader.is_none() && elapsed >= self.retry_after {
             let Some(resources) = resources else {
@@ -328,6 +330,7 @@ mod tests {
             })
             .unwrap();
         let resources = AmbientResources::new(client);
+        let baseline = quota.snapshot();
         let first = Arc::new(Stored::new(
             article("First"),
             resources.reserve_storage(16).unwrap(),
@@ -344,12 +347,13 @@ mod tests {
         let mut runtime = WikipediaRuntime::default();
         runtime.activate_loaded(first, &settings, Duration::ZERO);
         runtime.prefetched = Some(second);
-        assert_eq!(quota.snapshot().result_bytes, 32);
+        assert_eq!(quota.snapshot().worker_bytes, baseline.worker_bytes + 32);
         assert!(runtime.advance(&settings, Duration::from_secs(1), 0.0, 100));
         assert_eq!(runtime.document().unwrap().title, "Second");
-        assert_eq!(quota.snapshot().result_bytes, 16);
+        assert_eq!(quota.snapshot().worker_bytes, baseline.worker_bytes + 16);
         runtime.release();
-        assert_eq!(quota.snapshot().result_bytes, 0);
+        assert_eq!(quota.snapshot().worker_bytes, baseline.worker_bytes);
+        assert_eq!(quota.snapshot().result_bytes, baseline.result_bytes);
         let mut execution = execution;
         execution.request_shutdown(ShutdownMode::Cancel);
         let joined = execution
