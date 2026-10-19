@@ -159,36 +159,7 @@ Every grant is listed once. Capabilities with several grants share one row.
 | `extensions.provide:<plugin-id>/<point>` | one global point id of the plugin's own, no wildcard | S C A | normal | [page](/pages/capability-extensions-provide/) | [api-extension-points](/pages/api-extension-points/) |
 | `extensions.contribute:<plugin-id>/<point>` | one global point id, no wildcard | S C | normal; high when the point declares `risk: "high"` | [page](/pages/capability-extensions-contribute/) | [api-extension-points](/pages/api-extension-points/) |
 
-### Newer grants
-
-The grants below extend the base set. Twelve of them are high risk and always need an explicit grant, even for a T1 bundled plugin: `terminal.history`, `terminal.input-lock`, `terminal.raw-input`, `panes.lifecycle`, `tree.restructure`, `sessions.cross`, `process.long-lived`, `agent.transcript`, `settings.read-kernel:api`, `settings.write-kernel:<tab-id>` (T1 only), `panes.create-command:<program>` and `agent-config.propose:<agent>`. The grant `gpu.kernels` is unstable and exists only in development builds. Both `extensions.*` grants take exactly one global point id and refuse wildcards (`manifest.grant-wildcard`). `extensions.contribute` is high risk only for a point that declares `risk: "high"`; the review dialog then shows a warning. Four argument forms are less common: `http:setting:<key>` (the host comes from one of the plugin's own settings, and the user confirms a changed host before the first request), `fs.read:agent-sessions:gemini` with `fs.read:agent-config:gemini`, `fs.read:agent-config:antigravity`, and `settings.read-kernel:<kernel-tab-id>` (argument required, no wildcard).
-
-| Grant | Page |
-|---|---|
-| `tree.restructure` | [page](/pages/capability-tree-restructure/) |
-| `tree.attention` | [page](/pages/capability-tree-attention/) |
-| `panes.lifecycle` | [page](/pages/capability-panes-lifecycle/) |
-| `terminal.read-cells` | [page](/pages/capability-terminal-read-cells/) |
-| `terminal.history` | [page](/pages/capability-terminal-history/) |
-| `terminal.input-lock` | [page](/pages/capability-terminal-input-lock/) |
-| `terminal.raw-input` | [page](/pages/capability-terminal-raw-input/) |
-| `agent.transcript` | [page](/pages/capability-agent-transcript/) |
-| `ui.chrome` | [page](/pages/capability-ui-chrome/) |
-| `keymap.read` | [page](/pages/capability-keymap-read/) |
-| `panes.create-command:<program>` | [page](/pages/capability-panes-create/) |
-| `process.long-lived` | [page](/pages/capability-process-long-lived/) |
-| `inference.embed` | [page](/pages/capability-inference-embed/) |
-| `notify.toast` | [page](/pages/capability-notify-toast/) |
-| `open-external` | [page](/pages/capability-open-external/) |
-| `location.geocode` | [page](/pages/capability-location-geocode/) |
-| `sessions.cross` | [page](/pages/capability-sessions-cross/) |
-| `settings.read-kernel:<kernel-tab-id>` | [page](/pages/capability-settings-read-kernel/) |
-| `settings.write-kernel:<kernel-tab-id>` | [page](/pages/capability-settings-write-kernel/) |
-| `journal.read` | [page](/pages/capability-journal-read/) |
-| `gpu.kernels` | [page](/pages/capability-gpu-kernels/) |
-| `extensions.provide:<plugin-id>/<point>` | [page](/pages/capability-extensions-provide/) |
-| `extensions.contribute:<plugin-id>/<point>` | [page](/pages/capability-extensions-contribute/) |
-| `agent-config.propose:<agent>` | [page](/pages/capability-agent-config-propose/) |
+Twelve grants in the table are high risk and always need an explicit grant, even for a T1 bundled plugin: `terminal.history`, `terminal.input-lock`, `terminal.raw-input`, `panes.lifecycle`, `tree.restructure`, `sessions.cross`, `process.long-lived`, `agent.transcript`, `settings.read-kernel:api`, `settings.write-kernel:<tab-id>` (T1 only), `panes.create-command:<program>` and `agent-config.propose:<agent>`. The grant `gpu.kernels` is unstable and exists only in development builds. Both `extensions.*` grants take exactly one global point id and refuse wildcards (`manifest.grant-wildcard`). `extensions.contribute` is high risk only for a point that declares `risk: "high"`; the review dialog then shows a warning. Four argument forms are less common: `http:setting:<key>` (the host comes from one of the plugin's own settings, and the user confirms a changed host before the first request), `fs.read:agent-sessions:gemini` with `fs.read:agent-config:gemini`, `fs.read:agent-config:antigravity`, and `settings.read-kernel:<kernel-tab-id>` (argument required, no wildcard).
 
 Each capability has its own page with the full behaviour, for example [capability-http](/pages/capability-http/), [capability-fs-read](/pages/capability-fs-read/), [capability-tree-read](/pages/capability-tree-read/) and [capability-process-run](/pages/capability-process-run/).
 

@@ -856,9 +856,9 @@ fn doc_cap_017_every_grant_used_in_capability_pages_exists_in_the_table() {
 
 /// REQ: CAP-017
 #[test]
-fn doc_cap_017_requirement_states_87_forms() {
+fn doc_cap_017_requirement_states_71_forms() {
     let page = manual_page("reference-requirements-capabilities.md");
-    assert!(page.contains("MUST list 87 forms"));
+    assert!(page.contains("MUST list 71 forms"));
 }
 
 // ---------------------------------------------------------------- matrix: tier x side x risk
