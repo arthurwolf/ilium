@@ -95,7 +95,7 @@ An edit names the revision that the plugin read. The kernel applies all edits of
 
 ### Annotator export
 
-The annotator is an optional export of the client side. It has one method, `annotate`, which the kernel calls for the visible lines of a buffer. It runs at most once every 100 ms per buffer, and a late result for an old revision is dropped. It needs `editor.read`. A call that breaches its time budget is dropped, and three breaches in a row trap the plugin. See [Plugin exports](/pages/api-exports/).
+The annotator is an optional export of the client side. It has one method, `annotate`, which the kernel calls for the visible lines of a buffer. It runs at most once every 100 ms per view, and a late result for an old revision is dropped. It needs `editor.read`. A call that breaches its time budget is dropped, and three breaches in a row trap the plugin. See [Plugin exports](/pages/api-exports/).
 
 ### Worked example in Rust
 

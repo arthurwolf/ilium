@@ -91,7 +91,7 @@ The journal holds plugin entries and host entries per pane. A plugin writes its 
 | `pane-exited` | A pane's process ends. |
 | `input-sent` | A `send-input` completes. The payload holds the dedup key and the delivery result. |
 
-The journal survives restarts in the snapshot. It is trimmed oldest first when it passes `journal_entries` (5,000 per pane by default).
+The journal survives restarts in the snapshot. It is trimmed oldest first when it passes `journal_entries` (5,000 per plugin by default, as in the limits table of the errors and limits reference).
 
 ### The input journal
 
@@ -299,7 +299,7 @@ The plugin log records what happened around a restart:
 | Limit | Default | Ceiling tier 1 | Ceiling tier 2 and 3 |
 |---|---|---|---|
 | `durable_timers` | 64 | 256 | 64 |
-| `journal_entries` (per pane, own entries) | 5,000 | 20,000 | 5,000 |
+| `journal_entries` (per plugin, own entries) | 5,000 | 20,000 | 5,000 |
 | Journal payload | 4 KiB | 4 KiB | 4 KiB |
 
 `journal.read` returns at most 1,000 entries per call (a larger `limit` is clamped). `durable_timers` and `journal_entries` are requestable in the manifest `limits` up to the ceiling for the tier. Beyond `journal_entries`, the oldest entries are trimmed.

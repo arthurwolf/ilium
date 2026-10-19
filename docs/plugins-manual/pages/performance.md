@@ -76,7 +76,7 @@ The contract also has thirteen requestable limits in the same form. They bound t
 | `vector_indexes` | 4 | 16 | 4 | `quota-exceeded` |
 | `vector_entries` (all indexes) | 10,000 | 200,000 | 50,000 | `quota-exceeded` |
 | `shared_cache_mib` | 64 | 256 | 128 | Oldest entries evicted |
-| `journal_entries` (per pane) | 5,000 | 20,000 | 5,000 | Oldest trimmed |
+| `journal_entries` (per plugin) | 5,000 | 20,000 | 5,000 | Oldest trimmed |
 | `toasts_pending` | 3 | 3 | 3 | Oldest replaced |
 | `package_assets_mib` | 64 | 256 | 64 | `manifest.asset-size` |
 | `event_queue` | 1,024 | 4,096 | 1,024 | Stuck plugin is restarted |
@@ -511,9 +511,9 @@ Rust names are the snake_case form of these, for example `jobs::report_progress`
 | Code | Where it comes from | Meaning and fix |
 |---|---|---|
 | `timed-out` | Job CPU or wall deadline | Split the work into smaller jobs, or raise the kind's `deadline_ms` within the ceiling. |
-| `quota-exceeded` | Job memory, `fs.read-all` size, job output | Read in parts with `fs.read` or lower the data per job. |
+| `quota-exceeded` | Job memory, `fs.read-all` size | Read in parts with `fs.read` or lower the data per job. |
 | `busy` | `jobs.start` when the queue is full, or 64 pending requests | Retry later, or wait for an existing request to complete. |
-| `invalid-argument` | Unknown job kind, or input over `job_io_mib` | Check the kind against `contributes.jobs`. |
+| `invalid-argument` | Unknown job kind, or input or output over `job_io_mib` | Check the kind against `contributes.jobs`. |
 | `cancelled` | `jobs.cancel`, or a shutdown | Stop and clean up. The output is dropped. |
 | `internal` | A trap inside a job instance | Read the trap text in the log. The job does not count toward the restart rule. |
 

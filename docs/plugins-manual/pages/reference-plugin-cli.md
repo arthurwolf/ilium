@@ -70,7 +70,7 @@ Codes 7 (policy) and 8 (network) are added by [Distribution commands](/pages/ref
 | 1 | failed | The operation failed: a build error, a refused install, a write error. |
 | 2 | usage | A flag or argument is wrong, or a reserved command was used. |
 | 3 | findings | `check`, `lint` or `test` ran to the end and found problems. |
-| 4 | environment | A tool, target, SDK or version that the command needs is missing or too old. |
+| 4 | environment | A tool, target, SDK or version that the command needs is missing or too old, or the install lock is held (`install.locked`). |
 | 5 | not found | The plugin id, package, key or publisher does not exist. |
 | 6 | no session | A session command found no reachable session. |
 | 130 | interrupted | The user pressed Ctrl+C. |

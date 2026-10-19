@@ -8,7 +8,7 @@ permalink: /pages/debugging/
 
 A plugin problem shows up in one of four places: the plugin log, a trap, a deadline breach or the disabled notice in the tree footer. This page explains the `log` import and its levels, how to read `ilium plugin logs`, what the host writes for traps and restarts, how a debug build maps trap frames to source lines, and how `ilium plugin dev` reloads a plugin while you edit it.
 
-The plugin log holds one entry per line: the time, the level, the plugin id and the message. The host writes entries for your own log calls, for standard output and error, for calls refused by a missing or declined grant, and for every trap, deadline breach and restart.
+The plugin log holds one entry per line: the time, the level, the side (`server`, `client`, `scene` or `host`), the plugin id and the message. The host writes entries for your own log calls, for standard output and error, for calls refused by a missing or declined grant, and for every trap, deadline breach and restart.
 
 ## What you need
 

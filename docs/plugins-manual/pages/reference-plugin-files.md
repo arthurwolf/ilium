@@ -102,7 +102,7 @@ Each plugin has one log, shared by all its sides. The host writes refusals, trap
 | Property | Value |
 |---|---|
 | File | `<state>/plugins/logs/<session-slug>/<id>.log`, with rotated files `<id>.log.1` to `<id>.log.4` |
-| Line format | Four columns: local timestamp `YYYY-MM-DD HH:mm:ss`, level padded to five characters, plugin id, message |
+| Line format | Five columns: local timestamp `YYYY-MM-DD HH:mm:ss`, level padded to five characters, side padded to six, plugin id, message |
 | Rotation | When the file passes 4 MiB it becomes `.1`, `.1` becomes `.2`, `.2` becomes `.3`, `.3` becomes `.4`, and the old `.4` is deleted |
 | Retention | The active file plus at most 4 rotated files (5 files per plugin). Rotated files older than 14 days are deleted at server start |
 | Rate limit | 200 lines per second for a standard plugin. Extra lines are dropped and counted in one `warn` summary line |

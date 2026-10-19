@@ -38,7 +38,7 @@ The scope is the text after the colon. Valid grants:
 | `fs.read:worktrees` | `/worktrees` | The project's worktree folder from `workspace.worktree_root`. | normal |
 | `fs.read:picked` | `/picked/<n>` | Each path the user chose in a picker. Granted per pick. | normal |
 | `fs.read:minecraft-saves` | `/minecraft-saves` | The platform's Minecraft saves directory. | normal |
-| `fs.read:agent-config:claude` | `/agent-config/claude` | The Claude configuration directory. Also `codex`. | normal |
+| `fs.read:agent-config:claude` | `/agent-config/claude` | The Claude configuration directory. Also `codex`. | high |
 | `fs.read:agent-sessions:claude` | `/agent-sessions/claude` | Claude transcript directory. Also `codex` and `antigravity`. | high |
 | `fs.read:path:<template>` | `/paths/<n>` | A path template, see below. | normal, high if literal |
 

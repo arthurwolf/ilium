@@ -128,7 +128,7 @@ The character set is deliberately ASCII. It removes Unicode normalisation (NFC a
 |---|---|---|---|
 | [PKG-126] | Entries in the archive | 4,096 | `package.entry-limit` |
 | [PKG-127] | `manifest.json` | 1 MiB (1,048,576 bytes) | `package.manifest-size` |
-| [PKG-128] | One component | 64 MiB | `package.size-limit` |
+| [PKG-128] | One component, at the archive check (the component check later refuses a component over 32 MiB with `component.too-large`) | 64 MiB | `package.size-limit` |
 | [PKG-129] | One non-component entry | 64 MiB | `package.size-limit` |
 | [PKG-130] | The package file | 300 MiB | `package.size-limit` |
 | [PKG-131] | `signature` | 16 KiB | `package.size-limit` |
@@ -194,7 +194,7 @@ The installer validates in a fixed order. The full pipeline has eleven stages. A
 | 7 | signature | Format and Ed25519 verification | `package.signature-format`, `manifest.signature-invalid` | no (first error) |
 | 8 | trust | Key trust, publisher binding, tier assignment | `trust.*`, `manifest.publisher-mismatch`, `package.publisher-key-changed` | no |
 | 9 | policy | Platform gate, tier grant rules, administrator policy, version rules | `package.platform-unsupported`, `manifest.grant-*`, `manifest.limits-tier`, `policy.*`, `package.downgrade`, `package.version-reused` | yes |
-| 10 | dependencies | `requires.plugins`, host version, cycles | `dependency.*` | yes |
+| 10 | dependencies | `requires.plugins`, host version, cycles | `dependency.*`, `manifest.service-cycle` | yes |
 | 11 | review | The user reviews grants | none | not applicable |
 
 | Id | Rule |

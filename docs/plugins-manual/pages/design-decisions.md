@@ -532,7 +532,7 @@ The decisions of the extended contract that need explanation are these:
 - **Kernel keeps the engine, plugins own the choice.** Every addition names the part that stays in the kernel: dithering and the shared look, the vt100 emulation, the tree layout solver, the toast stack, the command palette, the syntax engine and every GPU shader. The plugin supplies content and intent. The kernel draws and decides.
 - **Intents, not mutations.** Pane lifecycle, tree restructure, attention, status segments, frame slots, toasts and `open-external` are intents. The kernel checks them against the grant and the current state, and a submission completes with one outcome. A new outcome case, `ok-epoch`, carries the new prompt epoch for `send-input` on an agent pane.
 - **Read paths are typed and redacted.** Terminal cells, scrollback, transcripts, kernel settings and the keymap are read paths, each behind its own grant, and all of them are read only.
-- **High risk is explicit even for T1.** The ten high-risk grants of the extended set always need an explicit grant, and the dialog shows them in the warning style.
+- **High risk is explicit even for T1.** The eleven high-risk grants of the extended set always need an explicit grant, and the dialog shows them in the warning style.
 - **Streaming, not polling.** HTTP streams, spawned children and screen changes arrive as events whose delivery policy is stated per event: coalesced, or never dropped with back-pressure.
 
 ## What the user sees

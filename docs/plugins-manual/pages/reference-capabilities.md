@@ -120,7 +120,7 @@ Every grant is listed once. Capabilities with several grants share one row.
 | `keymap.read` | none | C | normal | [page](/pages/capability-keymap-read/) | [api-keys](/pages/api-keys/) |
 | `commands.invoke:<pattern>` | pattern; exact id, plugin-id/*, bare * (high) | S C | H if * | [page](/pages/capability-commands-invoke/) | [api-commands](/pages/api-commands/) |
 | `fs.read:<scope>` | scope, including agent-sessions:gemini, agent-config:gemini, agent-config:antigravity | S C A | normal; H for agent-sessions and agent-config | [page](/pages/capability-fs-read/) | [api-fs](/pages/api-fs/) |
-| `fs.write:<scope>` | scope; `agent-sessions` is refused with `manifest.grant-scope`; `agent-config` needs an H grant | S C A | H outside data and cache | [page](/pages/capability-fs-write/) | [api-fs](/pages/api-fs/) |
+| `fs.write:<scope>` | scope; `agent-sessions` is refused with `manifest.grant-scope`; `agent-config` is refused with `manifest.grant-scope` | S C A | H outside data and cache | [page](/pages/capability-fs-write/) | [api-fs](/pages/api-fs/) |
 | `fs.watch:<scope>` | scope; `agent-config` is refused with `manifest.grant-scope` | S C | same as `fs.read:<scope>`; `package`, `data` and `cache` are always granted | [page](/pages/capability-fs-watch/) | [api-fs](/pages/api-fs/) |
 | `fs.pick` | none | C | normal | [page](/pages/capability-fs-pick/) | [api-fs](/pages/api-fs/) |
 | `jobs.run` | none | S C A | normal | [page](/pages/capability-jobs-run/) | [api-jobs](/pages/api-jobs/) |

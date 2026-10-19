@@ -28,7 +28,7 @@ The handler is the `Handler` trait in Rust and the `onEvents` function in TypeSc
 
 An instance runs one call at a time, so a handler never re-enters itself.
 
-The `on-events` deadline is 20 ms by default for every tier. A manifest may request up to 50 ms, and only a T1 plugin gets above 20 ms (T2 and T3 ceiling: 20 ms). A breach traps the instance, which follows the [restart and disable rule](/pages/reference-errors-and-limits/#restart-and-disable-rule): restart after 1 s, then 5 s, and disable at the third failure within 10 minutes, with a notice in the tree footer. See [Errors and limits](/pages/reference-errors-and-limits/).
+The `on-events` deadline for a batch without a `command-invoked` event is 20 ms by default for every tier. A manifest may request up to 50 ms, and only a T1 plugin gets above 20 ms (T2 and T3 ceiling: 20 ms). A batch that contains a `command-invoked` event runs under `command_deadline_ms` instead: 50 ms default for every tier, 100 ms T1 ceiling, 50 ms T2 and T3 ceiling. A breach traps the instance, which follows the [restart and disable rule](/pages/reference-errors-and-limits/#restart-and-disable-rule): restart after 1 s, then 5 s, and disable at the third failure within 10 minutes, with a notice in the tree footer. See [Errors and limits](/pages/reference-errors-and-limits/).
 
 ## Event catalogue
 

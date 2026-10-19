@@ -27,7 +27,6 @@ The grant is `fs.write:<scope>`. The argument is one scope name from the table i
 | `fs.write:project` | yes | the session's project folder, high risk |
 | `fs.write:path:{project}/**` | yes | a template with the `{project}` placeholder and a trailing `/**`, high risk |
 | `fs.write:worktrees` | yes | the worktree folder, high risk; `{worktrees}` names the same root |
-| `fs.write:agent-config:claude` | yes | the Claude configuration folder, high risk |
 | `fs.write:data` | yes | always granted, so no manifest entry is needed; not logged |
 | `fs.write` | no | `manifest.grant-argument-missing`: needs an argument, for example `fs.write:project` |
 | `fs.write:/home/me/notes` | no | `manifest.grant-scope`; an absolute path needs `path:<template>` |
@@ -35,7 +34,7 @@ The grant is `fs.write:<scope>`. The argument is one scope name from the table i
 | `fs.write:agent-sessions:claude` | no | `manifest.grant-scope`; agent transcripts are read only |
 | `fs.read:project` | no | a read grant does not allow writes |
 
-A literal absolute path inside `path:` (for example `fs.write:path:/srv/logs/**`) is high risk and is available to bundled T1 plugins only.
+A literal absolute path inside `path:` (for example `fs.write:path:/srv/logs/**`) is high risk and, as in the sandbox scope table, is available to all tiers.
 
 ### Scopes
 
@@ -44,7 +43,7 @@ A literal absolute path inside `path:` (for example `fs.write:path:/srv/logs/**`
 | `project` | the session's project folder, without the `.ilium` folder | `fs.write:project` | H |
 | `worktrees` | the worktree folder from `workspace.worktree_root` | `fs.write:worktrees` | H |
 | `path:<template>` | the folders a template names | `fs.write:path:<template>` | H |
-| `agent-config:claude`, `agent-config:codex` | each agent's configuration folder | one grant per agent | H |
+| `agent-config:claude`, `agent-config:codex` | each agent's configuration folder | refused at install with `manifest.grant-scope`; agent scopes are read only | n/a |
 | `picked/<n>` | the file or folder the user chose | `fs.write:picked` for a save pick | normal |
 | `data` | the plugin's private data folder | always granted | none |
 | `cache` | the plugin's private cache folder, which the host may evict | always granted | none |
@@ -285,13 +284,13 @@ Writes outside `data` and `cache` appear in the plugin log. The user reads them 
 First-party plugins from [feature traceability](/pages/reference-feature-traceability/):
 
 - 32 Agent debug history appends to the `data` scope, which needs no grant.
-- 37 Configure agent: `fs.write:agent-config:claude` and `fs.write:agent-config:codex`.
+- 37 Configure agent: no write grant is possible. `fs.write:agent-config:claude` and `fs.write:agent-config:codex` are refused at install with `manifest.grant-scope` (see the scopes table above). Open design question: this plugin has no write path to agent configuration.
 - 62 Chatroom: `fs.write:project`, used for appends.
-- 63 Agent setup: `fs.write:agent-config:claude` and `fs.write:agent-config:codex`.
+- 63 Agent setup: no write grant is possible. `fs.write:agent-config:claude` and `fs.write:agent-config:codex` are refused at install with `manifest.grant-scope`. Open design question: this plugin has no write path to agent configuration.
 - 67 Agent in a new Git worktree: `fs.write:worktrees`.
 - 71 Worktree include copy: `fs.write:worktrees`.
 - 77 Convert a session: no write grant on `agent-sessions`. Transcripts are read only, and a manifest that asks for a write is refused at install.
-- 82 Compaction optimiser: `fs.write:agent-config:claude` and `fs.write:agent-config:codex`, with revert data kept in `data`.
+- 82 Compaction optimiser: no write grant is possible. `fs.write:agent-config:claude` and `fs.write:agent-config:codex` are refused at install with `manifest.grant-scope`. Open design question: this plugin has no write path to agent configuration; revert data would be kept in `data`.
 
 Requirement ids for this page: [CAP-008]. See the [requirements index](/pages/reference-requirements/).
 

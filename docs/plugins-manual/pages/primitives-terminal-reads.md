@@ -98,7 +98,7 @@ A `cell` holds the grapheme cluster at that position in `text`, the resolved for
 
 ### Frozen snapshots
 
-`freeze-snapshot` copies the visible screen and the scrollback into a stable object and returns its id. Reads through `read-snapshot-cells` see exactly that copy while the program keeps printing. This is what Smart Copy needs: the user selects, the plugin freezes, analyses at leisure, and writes the result to the clipboard. A snapshot is held by the host until `drop-snapshot`, until the plugin stops, or until the pane is removed. A plugin holds at most 4 snapshots per pane; the fifth call returns `quota-exceeded`. The copy shares storage with the live grid until a row changes, so a snapshot of an idle pane costs almost nothing.
+`freeze-snapshot` copies the visible screen and the scrollback into a stable object and returns its id. Reads through `read-snapshot-cells` see exactly that copy while the program keeps printing. This is what Smart Copy needs: the user selects, the plugin freezes, analyses at leisure, and writes the result to the clipboard. A snapshot is held by the host until `drop-snapshot`, until the plugin stops, or until the pane is removed. A plugin holds at most 4 snapshots in total across all panes; the fifth call returns `quota-exceeded`. The copy shares storage with the live grid until a row changes, so a snapshot of an idle pane costs almost nothing.
 
 ### History text and search
 
@@ -211,7 +211,7 @@ for (const match of found ?? []) { /* match.row, match.column, match.length */ }
 |---|---|---|
 | `freeze-snapshot` | `pane-not-ready` | the pane has no process yet |
 | `freeze-snapshot` | `not-found` | no such pane |
-| `freeze-snapshot` | `quota-exceeded` | more than 4 live snapshots on this pane |
+| `freeze-snapshot` | `quota-exceeded` | more than 4 live snapshots held by this plugin across all panes |
 | `search-history` | `invalid-argument` | the regex does not compile in the `regex` dialect, or is over 1 KiB, or `max-matches` is 0 |
 | `history-text`, `search-history` | completion `timed-out` | the host gave up after its deadline |
 | any call | `not-permitted` | the grant is missing or revoked |
@@ -221,7 +221,7 @@ for (const match of found ?? []) { /* match.row, match.column, match.length */ }
 | Rows per `read-cells` | 1,000 |
 | `history-text` | 4 MiB, newest kept |
 | Matches per search | the `max-matches` you pass, at most 10,000 |
-| Live snapshots per pane and plugin | 4 |
+| Live snapshots per plugin (across all panes) | 4 |
 | `screen-changed` | 10 per second per pane |
 
 ### What the user sees

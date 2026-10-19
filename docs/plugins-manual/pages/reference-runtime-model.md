@@ -176,7 +176,7 @@ A field or parameter whose name ends in `-json` carries UTF-8 JSON text. The hos
 
 - **Grammar.** RFC 8259. A document that is not valid JSON is `invalid-argument`. A byte order mark, comments, trailing commas and `NaN` or `Infinity` are not allowed.
 - **Depth.** At most 64 levels of nesting. A deeper document is `invalid-argument`.
-- **Size.** The limit of the field applies. The default is 65,536 bytes for a service payload, a command argument or a topic payload, and 1 MiB for settings. A larger document is `invalid-argument`, or `quota-exceeded` where the field's page says so.
+- **Size.** The limit of the field applies. The default is 65,536 bytes for a service payload, a command argument or a topic payload, and 256 KiB for settings (all values of one plugin together). A larger document is `invalid-argument`, or `quota-exceeded` where the field's page says so.
 - **Numbers.** A JSON number is read as a 64-bit float. An integer beyond 2^53 loses exactness, so a value that may exceed 2^53 MUST be sent as a string. Ids (`node-id`, `request-id`, `buffer-id`) are `u64` and are written as JSON strings in every `*-json` field. A `bigint` in TypeScript is written as a string by the SDK.
 - **Keys.** Duplicate keys in one object are `invalid-argument`. Key order is not significant.
 - **Strings.** The text is UTF-8. An unpaired surrogate escape such as `\ud800` is `invalid-argument`.

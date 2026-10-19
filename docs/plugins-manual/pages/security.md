@@ -204,11 +204,11 @@ Four argument forms deserve a note: `http:setting:<key>`, `settings.read-kernel:
 
 Grants without an argument, such as `tree.read` or `agent.read`, take none. The [Capability table](/pages/reference-capabilities/) lists every grant.
 
-Each grant has a risk mark. `always` grants are always on. `normal` grants are checked by default in the review dialog. High-risk (H) grants start unchecked, and the user checks each one. H grants include `panes.signal`, `terminal.write`, `agent.read-prompts`, `agent.control`, `process.run`, `panes.create-command`, `inference.provide`, `clipboard.read`, `location.observer`, file writes outside `data` and `cache`, file reads that reach a sensitive path ([SEC-061]), and the ten grants in the next section (nine in its table, plus `settings.write-kernel:<tab-id>`, which is T1 only and listed after it). Grants are recorded per plugin and per side in the grant store ([SEC-112]).
+Each grant has a risk mark. `always` grants are always on. `normal` grants are checked by default in the review dialog. High-risk (H) grants start unchecked, and the user checks each one. H grants include `panes.signal`, `terminal.write`, `agent.read-prompts`, `agent.control`, `process.run`, `panes.create-command`, `inference.provide`, `clipboard.read`, `location.observer`, file writes outside `data` and `cache`, file reads that reach a sensitive path ([SEC-061]), and the eleven grants in the next section (nine in its table, plus `settings.write-kernel:<tab-id>`, which is T1 only and listed after it, and `panes.create-command`, already named in this list). Grants are recorded per plugin and per side in the grant store ([SEC-112]).
 
 ## More high-risk grants
 
-These ten grants are high risk: the nine in the table and `settings.write-kernel:<tab-id>`, described after it. They follow the same rule as every other H grant: a T1 bundled plugin still needs an explicit grant for each of them, and the dialog shows them in the warning style, never pre-checked.
+These eleven grants are high risk: the nine in the table, `settings.write-kernel:<tab-id>`, described after it, and `panes.create-command:<program>`, described below it. They follow the same rule as every other H grant: a T1 bundled plugin still needs an explicit grant for each of them, and the dialog shows them in the warning style, never pre-checked.
 
 | Grant | Sides | What it allows | Why it is high risk | Extra rule |
 |---|---|---|---|---|
@@ -425,7 +425,7 @@ The extended contract adds limits whose purpose is safety. They are fixed by the
 | Status segments and frame slots | 10 updates per second per slot (a status segment id is a slot) | Updates are coalesced |
 | Geocoding | 1 request per second per plugin, 10 s timeout, 24 h cache | `rate-limited` with `retry-after-ms` |
 | Open HTTP streams | `http_streams` (default 4, T1 up to 16) and `session_http_streams` (64); see [Errors and limits](/pages/reference-errors-and-limits/#requestable-limits) | `quota-exceeded` |
-| Pending HTTP requests | `http_pending` (default 256, T1 up to 1,024) | `busy` with `retry-after-ms` |
+| Pending HTTP requests | `pending_requests` (default 64, T1 up to 256, ABI-013) | `busy` with `retry-after-ms` |
 | Spawned children | `children` (default 2, T1 up to 8) and the shared `session_processes` (16) | `quota-exceeded` |
 | Concurrent `process.run` | the shared `session_processes` (16) | `busy` with `retry-after-ms` |
 | Durable timers | `durable_timers`: 64 (T1 up to 256) | `quota-exceeded` |
