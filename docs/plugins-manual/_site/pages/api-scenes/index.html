@@ -1,0 +1,968 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Scenes | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details open><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/" aria-current="page">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Host API</b></p>
+<h1>Scenes</h1>
+<h2 id="scenes-iliumanim">Scenes (<code>ilium:anim</code>)</h2>
+<p>A scene is an animated background. The host runs each scene in its own animation world, separate from the server and client worlds. The host creates one <code>renderer</code> for the scene, reads its frame rate, and calls <code>render</code> once per frame with a <code>frame-surface</code>. The scene writes tone or cell colours into that surface and calls <code>present</code>. The host then applies the shared look: colour mode, palette, colour filters and dithering. A scene never adds its own brightness, contrast, palette or dither controls.</p>
+<p>Use a scene for an animated background the user can choose and tune. Use a client view or pane for anything interactive.</p>
+<h3 id="what-you-need">What you need</h3>
+<ul>
+<li><strong>Package:</strong> a <code>scene</code> component (<code>scene.wasm</code>) with the world <code>ilium:anim/base@0.1.0</code>, and a <code>contributes.scenes</code> entry for each scene.</li>
+<li><strong>Language:</strong> Rust stable 1.90 or later with the <code>wasm32-wasip2</code> target, using <code>ilium-plugin-sdk</code>; or TypeScript with Bun 1.2 or later and <code>@ilium/plugin-sdk</code>. The SDK pins the binding generator versions, so <code>bun install</code> is the only install step.</li>
+<li><strong>Imports:</strong> <code>ilium:anim/base</code> allows <code>log</code>, <code>clock</code>, <code>storage</code>, <code>fs</code>, <code>codec</code>, <code>jobs</code>, <code>http</code>, <code>audio</code>, <code>media</code>, <code>location</code> and the surface. Nothing else is linked.</li>
+<li><strong>Exports:</strong> <code>lifecycle</code> and <code>renderer</code> are required. The optional <code>job-runner</code> export needs <code>jobs.run</code>.</li>
+<li><strong>Grants:</strong> the scene side always has <code>log</code>, <code>clock</code>, <code>storage</code> (own buckets), <code>codec</code>, and the <code>fs</code> scopes <code>package</code>, <code>data</code> and <code>cache</code>. Every other grant goes in <code>capabilities.scene</code>, for example <code>jobs.run</code>, <code>http:api.example.com</code> or <code>media.video</code>. <code>audio.capture</code> and <code>location.observer</code> are high risk and need an explicit user grant.</li>
+</ul>
+<h3 id="manifest-contributions">Manifest contributions</h3>
+<p>Each scene is declared in <code>contributes.scenes</code>. The host reads the entry before it loads the component.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>id</code></td>
+<td>string</td>
+<td>none</td>
+<td>Scene id, unique within the plugin. The global id is <code>&lt;plugin-id&gt;:&lt;id&gt;</code>.</td>
+</tr>
+<tr>
+<td><code>title</code></td>
+<td>string</td>
+<td>none</td>
+<td>Name shown in the animation settings list.</td>
+</tr>
+<tr>
+<td><code>family</code></td>
+<td>string</td>
+<td>none</td>
+<td>One of <code>natural</code>, <code>procedural</code>, <code>geometry</code>, <code>simulation</code>, <code>live-data</code>, <code>maps-and-space</code>, <code>saved-world</code>, <code>media</code>, <code>other</code>.</td>
+</tr>
+<tr>
+<td><code>modes</code></td>
+<td>list of strings</td>
+<td>none</td>
+<td>Any of <code>live</code> and <code>pre-rendered</code>. The first value is the default mode.</td>
+</tr>
+<tr>
+<td><code>settings_schema</code></td>
+<td>JSON schema object</td>
+<td>none</td>
+<td>The scene's own settings, in the same subset used by settings pages.</td>
+</tr>
+<tr>
+<td><code>frame_rate_cap</code></td>
+<td>integer 1 to 60</td>
+<td>30</td>
+<td>Upper bound for the frame rate the scene may ask for. A value above 60 is clamped to 60 and logged.</td>
+</tr>
+<tr>
+<td><code>clip_seconds</code></td>
+<td>integer 1 to 30</td>
+<td>10</td>
+<td>Length of the clip in <code>pre-rendered</code> mode.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="renderer-surface">Renderer surface</h3>
+<p>The renderer is a guest resource. The SDK names below are the ones a plugin writes. The WIT names are the same in kebab-case.</p>
+<table>
+<thead>
+<tr>
+<th>Member</th>
+<th>Rust</th>
+<th>TypeScript</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>constructor</td>
+<td><code>fn new(spec: SceneSpec) -&gt; Self</code></td>
+<td><code>constructor(spec: SceneSpec)</code></td>
+<td>none</td>
+<td>Called when the scene is shown.</td>
+</tr>
+<tr>
+<td>readiness</td>
+<td><code>fn readiness(&amp;self) -&gt; Readiness</code></td>
+<td><code>readiness()</code></td>
+<td><code>Ready</code></td>
+<td><code>Ready</code>, <code>Preparing</code> or <code>Failed</code>.</td>
+</tr>
+<tr>
+<td>frames-per-second</td>
+<td><code>fn frames_per_second(&amp;self) -&gt; u32</code></td>
+<td><code>framesPerSecond()</code></td>
+<td>30</td>
+<td>Requested rate, capped by <code>frame_rate_cap</code>.</td>
+</tr>
+<tr>
+<td>wants-pointer</td>
+<td><code>fn wants_pointer(&amp;self) -&gt; bool</code></td>
+<td><code>wantsPointer()</code></td>
+<td>false</td>
+<td>Enables <code>pointer()</code> on the surface.</td>
+</tr>
+<tr>
+<td>wants-occupancy</td>
+<td><code>fn wants_occupancy(&amp;self) -&gt; bool</code></td>
+<td><code>wantsOccupancy()</code></td>
+<td>false</td>
+<td>Enables <code>occupancy()</code> on the surface.</td>
+</tr>
+<tr>
+<td>uses-cell-colors</td>
+<td><code>fn uses_cell_colors(&amp;self) -&gt; bool</code></td>
+<td><code>usesCellColors()</code></td>
+<td>false</td>
+<td>Enables <code>write_cell_colors</code>.</td>
+</tr>
+<tr>
+<td>render</td>
+<td><code>fn render(&amp;mut self, frame: FrameInput, surface: &amp;FrameSurface)</code></td>
+<td><code>render(frame, surface)</code></td>
+<td>required</td>
+<td>Draws one frame.</td>
+</tr>
+<tr>
+<td>set-palette</td>
+<td><code>fn set_palette(&amp;mut self, palette_rgb: Vec&lt;u32&gt;)</code></td>
+<td><code>setPalette(palette)</code></td>
+<td>ignored</td>
+<td>Called when the palette changes.</td>
+</tr>
+<tr>
+<td>reconfigure</td>
+<td><code>fn reconfigure(&amp;mut self, settings_json: String) -&gt; bool</code></td>
+<td><code>reconfigure(settings)</code></td>
+<td><code>false</code></td>
+<td>Applies new settings. <code>false</code> means restart.</td>
+</tr>
+<tr>
+<td>status</td>
+<td><code>fn status(&amp;self) -&gt; Option&lt;String&gt;</code></td>
+<td><code>status()</code></td>
+<td>none</td>
+<td>Short text shown beside the scene title while set.</td>
+</tr>
+</tbody>
+</table>
+<p>The frame input holds these fields:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Rust</th>
+<th>TypeScript</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>time</td>
+<td><code>time_millis: u64</code></td>
+<td><code>timeMillis: bigint</code></td>
+<td>Milliseconds since the scene started.</td>
+</tr>
+<tr>
+<td>visible time</td>
+<td><code>wall_millis: u64</code></td>
+<td><code>wallMillis: bigint</code></td>
+<td>Milliseconds since the scene was last made visible.</td>
+</tr>
+<tr>
+<td>clock</td>
+<td><code>now_unix_millis: u64</code></td>
+<td><code>nowUnixMillis: bigint</code></td>
+<td>Wall-clock time in Unix milliseconds.</td>
+</tr>
+<tr>
+<td>size</td>
+<td><code>width: u32</code>, <code>height: u32</code></td>
+<td><code>width</code>, <code>height</code></td>
+<td>Surface size in pixels (cells times the dither sub-cell factor).</td>
+</tr>
+<tr>
+<td>palette</td>
+<td><code>palette_rgb: Vec&lt;u32&gt;</code></td>
+<td><code>paletteRgb: number[]</code></td>
+<td>Current palette as <code>0xRRGGBB</code> values. Empty in greyscale and monotone modes.</td>
+</tr>
+</tbody>
+</table>
+<p>The surface methods are <code>size</code>, <code>write_rows</code> (<code>writeRows</code>), <code>write_cell_colors</code> (<code>writeCellColors</code>), <code>occupancy</code>, <code>pointer</code> and <code>present</code>. The SDK adds two helpers: <code>write_tones</code> (<code>writeTones</code>) writes <code>gray8</code> rows, and <code>write_rgb</code> (<code>writeRgb</code>) writes <code>rgb8</code> rows.</p>
+<table>
+<thead>
+<tr>
+<th>Pixel format</th>
+<th>Bytes per pixel</th>
+<th>Use</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>gray8</code></td>
+<td>1</td>
+<td>One tone per pixel. The host colours it with the shared look.</td>
+</tr>
+<tr>
+<td><code>rgb8</code></td>
+<td>3</td>
+<td>Natural colour, in R, G, B order. The host still applies the shared look.</td>
+</tr>
+<tr>
+<td><code>rgba8</code></td>
+<td>4</td>
+<td>As <code>rgb8</code> with a fourth byte, in R, G, B, A order.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="lifecycle-of-a-renderer">Lifecycle of a renderer</h3>
+<p>The host constructs the renderer when the scene is shown, and again after a restart. The spec is a JSON object with <code>scene</code> (the scene id), <code>settings</code>, <code>palette</code> and <code>mode</code> (<code>live</code> or <code>pre-rendered</code>). Rust receives it as <code>SceneSpec</code>. TypeScript receives it parsed, with <code>settings</code> typed <code>unknown</code>, so the scene checks it before use.</p>
+<p>The host reads <code>readiness</code> before each frame. <code>Preparing</code> frames are not presented, and <code>Failed</code> stops drawing. The frame rate is read once after construction and after each <code>reconfigure</code> that returns <code>true</code>, never per frame. A palette change calls <code>set_palette</code> before the next frame. A setting change is validated against <code>settings_schema</code> first, then sent to <code>reconfigure</code>.</p>
+<p>In <code>pre-rendered</code> mode the host calls <code>render</code> for <code>clip_seconds</code> of frames, stores the clip in host memory and loops it without calling <code>render</code> again. A change to the palette or the settings rebuilds the clip. A clip is limited to 64 MiB; a longer clip is shortened to fit, with a minimum of one second.</p>
+<figure>
+<svg viewBox="0 0 400 200" role="img" aria-label="Scene frame flow from host to scene and back to the panel" width="600" height="300">
+  <defs>
+    <marker id="scene-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <rect x="20" y="12" width="170" height="36" rx="6" fill="none" stroke="currentColor"/>
+  <text x="105" y="34" font-size="11" text-anchor="middle" fill="currentColor">Host calls render(frame)</text>
+  <line x1="105" y1="48" x2="105" y2="74" stroke="currentColor" marker-end="url(#scene-arrow)"/>
+  <rect x="20" y="76" width="170" height="36" rx="6" fill="none" stroke="currentColor"/>
+  <text x="105" y="98" font-size="11" text-anchor="middle" fill="currentColor">Scene writes rows</text>
+  <line x1="105" y1="112" x2="105" y2="138" stroke="currentColor" marker-end="url(#scene-arrow)"/>
+  <rect x="20" y="140" width="170" height="36" rx="6" fill="none" stroke="currentColor"/>
+  <text x="105" y="162" font-size="11" text-anchor="middle" fill="currentColor">Scene calls present</text>
+  <line x1="190" y1="158" x2="238" y2="158" stroke="currentColor" marker-end="url(#scene-arrow)"/>
+  <rect x="240" y="140" width="150" height="36" rx="6" fill="none" stroke="currentColor"/>
+  <text x="315" y="162" font-size="11" text-anchor="middle" fill="currentColor">Host applies the look</text>
+  <line x1="315" y1="138" x2="315" y2="116" stroke="currentColor" marker-end="url(#scene-arrow)"/>
+  <rect x="240" y="76" width="150" height="36" rx="6" fill="none" stroke="currentColor"/>
+  <text x="315" y="98" font-size="11" text-anchor="middle" fill="currentColor">Panel shows the frame</text>
+</svg>
+<figcaption>The scene draws tone or colour and presents the frame. The host adds the palette, colour filters and dithering.</figcaption>
+</figure>
+
+<h3 id="surface-rules">Surface rules</h3>
+<ul>
+<li>A row is <code>width</code> bytes in <code>gray8</code>, <code>3 x width</code> bytes in <code>rgb8</code>, and <code>4 x width</code> bytes in <code>rgba8</code>. <code>write_rows</code> writes whole rows only. A remainder is dropped and a warn line is written once per second.</li>
+<li>Rows at or past <code>height</code> are ignored.</li>
+<li><code>write_cell_colors</code> takes one packed <code>0xRRGGBB</code> value per cell, row-major. It is ignored unless <code>uses-cell-colors</code> is <code>true</code>.</li>
+<li><code>occupancy()</code> returns one byte per pixel, row-major: 0 for free and 255 for covered by a panel or popup. It returns <code>none</code> unless <code>wants-occupancy</code> is <code>true</code>.</li>
+<li><code>pointer()</code> returns the column and row in cells, counted from the top left of the scene area. It returns <code>none</code> when the pointer is outside that area, or when <code>wants-pointer</code> is <code>false</code>.</li>
+<li>A <code>render</code> call that returns without <code>present</code> drops that frame, and a warn line is written once per second.</li>
+</ul>
+<h3 id="example-1-a-gradient-in-rust">Example 1: a gradient in Rust</h3>
+<p>The scene draws a vertical grey gradient at 24 frames per second. It needs no settings and no palette. The host adds the shared look, so the gradient follows the user's colour mode and dithering without any code in the scene.</p>
+<pre><code class="language-rust">use ilium_plugin_sdk::prelude::*;
+use ilium_plugin_sdk::anim::renderer::{FrameInput, Renderer, SceneSpec};
+use ilium_plugin_sdk::anim::surface::FrameSurface;
+
+#[ilium_plugin(side = &quot;scene&quot;)]
+#[derive(Default)]
+struct Gradient;
+
+impl Lifecycle for Gradient {}
+
+impl Renderer for Gradient {
+    fn new(_spec: SceneSpec) -&gt; Self {
+        Gradient
+    }
+
+    fn frames_per_second(&amp;self) -&gt; u32 {
+        24
+    }
+
+    fn render(&amp;mut self, frame: FrameInput, surface: &amp;FrameSurface) {
+        let mut tones = Vec::with_capacity((frame.width * frame.height) as usize);
+        for row in 0..frame.height {
+            let tone = (row * 255 / frame.height.max(1)) as u8;
+            tones.extend(std::iter::repeat(tone).take(frame.width as usize));
+        }
+        surface.write_tones(0, &amp;tones);
+        surface.present();
+    }
+}
+</code></pre>
+<p>The manifest declares the scene and its rate:</p>
+<pre><code class="language-json">{
+  &quot;api&quot;: &quot;ilium:plugin@0.1.0&quot;,
+  &quot;id&quot;: &quot;example.gradient&quot;,
+  &quot;name&quot;: &quot;Gradient&quot;,
+  &quot;version&quot;: &quot;0.1.0&quot;,
+  &quot;publisher&quot;: &quot;Example Developer&quot;,
+  &quot;scene&quot;: { &quot;entry&quot;: &quot;scene.wasm&quot;, &quot;world&quot;: &quot;ilium:anim/base@0.1.0&quot;, &quot;exports&quot;: [] },
+  &quot;capabilities&quot;: { &quot;scene&quot;: [] },
+  &quot;contributes&quot;: {
+    &quot;scenes&quot;: [
+      {
+        &quot;id&quot;: &quot;gradient&quot;,
+        &quot;title&quot;: &quot;Gradient&quot;,
+        &quot;family&quot;: &quot;procedural&quot;,
+        &quot;modes&quot;: [&quot;live&quot;],
+        &quot;frame_rate_cap&quot;: 24,
+        &quot;settings_schema&quot;: { &quot;type&quot;: &quot;object&quot;, &quot;properties&quot;: {} }
+      }
+    ]
+  }
+}
+</code></pre>
+<h3 id="example-2-a-settings-driven-scene-in-typescript">Example 2: a settings-driven scene in TypeScript</h3>
+<p>The scene draws concentric rings. The <code>ring_count</code> setting comes from <code>settings_schema</code>. The <code>reconfigure</code> method accepts a new count without a restart, and returns <code>false</code> for a value it cannot read, which makes the host restart the scene. The manifest adds the <code>pre-rendered</code> mode with a 12-second clip.</p>
+<pre><code class="language-ts">import { defineScene } from '@ilium/plugin-sdk';
+import type { FrameInput, SceneSpec } from '@ilium/plugin-sdk/anim/renderer';
+import type { FrameSurface } from '@ilium/plugin-sdk/anim/surface';
+
+interface RingSettings {
+  ring_count: number;
+}
+
+function readRingSettings(value: unknown): RingSettings | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const ringCount = (value as { ring_count?: unknown }).ring_count;
+  return typeof ringCount === 'number' ? { ring_count: ringCount } : undefined;
+}
+
+function ringTone(column: number, row: number, frame: FrameInput, ringCount: number): number {
+  const distance = Math.hypot(column - frame.width / 2, (row - frame.height / 2) * 2);
+  const phase = Number(frame.timeMillis) / 1000;
+  const wave = Math.sin(distance * ringCount * 0.1 - phase * 2);
+  return Math.round(((wave + 1) / 2) * 255);
+}
+
+class Rings {
+  private settings: RingSettings = { ring_count: 3 };
+
+  constructor(spec: SceneSpec) {
+    this.settings = readRingSettings(spec.settings) ?? this.settings;
+  }
+
+  framesPerSecond(): number {
+    return 24;
+  }
+
+  render(frame: FrameInput, surface: FrameSurface): void {
+    const tones = new Uint8Array(frame.width * frame.height);
+    for (let row = 0; row &lt; frame.height; row++) {
+      for (let column = 0; column &lt; frame.width; column++) {
+        tones[row * frame.width + column] = ringTone(column, row, frame, this.settings.ring_count);
+      }
+    }
+    surface.writeTones(0, tones);
+    surface.present();
+  }
+
+  reconfigure(settings: unknown): boolean {
+    const next = readRingSettings(settings);
+    if (next === undefined) return false;
+    this.settings = next;
+    return true;
+  }
+}
+
+export const { lifecycle, renderer } = defineScene(Rings);
+</code></pre>
+<p>The manifest entry for this scene:</p>
+<pre><code class="language-json">{
+  &quot;id&quot;: &quot;rings&quot;,
+  &quot;title&quot;: &quot;Rings&quot;,
+  &quot;family&quot;: &quot;procedural&quot;,
+  &quot;modes&quot;: [&quot;live&quot;, &quot;pre-rendered&quot;],
+  &quot;frame_rate_cap&quot;: 24,
+  &quot;clip_seconds&quot;: 12,
+  &quot;settings_schema&quot;: {
+    &quot;type&quot;: &quot;object&quot;,
+    &quot;properties&quot;: {
+      &quot;ring_count&quot;: { &quot;type&quot;: &quot;integer&quot;, &quot;title&quot;: &quot;Rings&quot;, &quot;default&quot;: 3,
+                      &quot;minimum&quot;: 1, &quot;maximum&quot;: 12, &quot;step&quot;: 1 }
+    }
+  }
+}
+</code></pre>
+<h3 id="what-the-user-sees">What the user sees</h3>
+<p>The scene appears in the animation settings list under its title, next to the shared rows: colour mode, palette, filters, dithering, panel placement, frame-rate cap, speed, density and background. The scene's own settings come from <code>settings_schema</code>. A <code>status</code> string appears beside the title while it is set. After a failure the plugin log records the reason, and the third failure in 10 minutes disables the scene side. Settings &gt; Plugins then shows the notice described in <a href="/pages/lifecycle/">Lifecycle</a>.</p>
+<pre class="term">
+<span class="t-prompt">$</span> ilium plugin logs example.rings --tail 3
+2026-10-11 12:04:09 error example.rings scene trapped, memory over 32 MiB
+2026-10-11 12:04:10 warn  example.rings restart in 1 s (failure 1 of 3)
+2026-10-11 12:04:11 info  example.rings renderer built, 24 frames per second
+</pre>
+
+<p>Illustrative, not generated. The rings scene traps once, restarts after one second and draws again.</p>
+<h3 id="edge-cases-and-errors">Edge cases and errors</h3>
+<table>
+<thead>
+<tr>
+<th>Situation</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>render</code> traps, or the scene exceeds <code>memory_mib</code> (32 MiB by default)</td>
+<td>Trap. The frame is skipped and the plugin follows the <a href="/pages/reference-errors-and-limits/#restart-and-disable-rule">restart and disable rule</a>. A scene failure counts as a failure of the whole plugin on that side [API-045].</td>
+</tr>
+<tr>
+<td>A frame passes <code>frame_deadline_ms</code> (the frame budget, at most 50 ms)</td>
+<td>The frame is skipped. Thirty breaches in a row trap.</td>
+</tr>
+<tr>
+<td><code>readiness</code> returns <code>Failed</code>, or stays <code>Preparing</code> for more than 10 s</td>
+<td>Counts as one failure. The host stops calling <code>render</code> until the restart.</td>
+</tr>
+<tr>
+<td>Settings fail <code>settings_schema</code></td>
+<td>The host refuses the change before the scene sees it. The previous values stay.</td>
+</tr>
+<tr>
+<td><code>reconfigure</code> returns <code>false</code></td>
+<td>The host restarts the renderer with the new spec. This is not a failure.</td>
+</tr>
+<tr>
+<td>A call to an import without its grant, or <code>http.fetch</code> outside the grant</td>
+<td><code>not-permitted</code>, synchronously.</td>
+</tr>
+<tr>
+<td><code>location.current</code> with no position set or a declined grant</td>
+<td><code>none</code>, not an error.</td>
+</tr>
+<tr>
+<td><code>codec.decode-image</code> with an unsupported format</td>
+<td><code>unsupported</code>.</td>
+</tr>
+<tr>
+<td><code>jobs.start</code> with the job queue full</td>
+<td><code>busy</code>. Retry later.</td>
+</tr>
+<tr>
+<td><code>storage.put</code> over 1 MiB, or a bucket over 16 MiB</td>
+<td><code>invalid-argument</code> or <code>quota-exceeded</code>.</td>
+</tr>
+<tr>
+<td>Revocation of a grant</td>
+<td>The renderer restarts with the reduced grants. Not a failure.</td>
+</tr>
+</tbody>
+</table>
+<p>Limits that apply to a scene, from the limits table:</p>
+<table>
+<thead>
+<tr>
+<th>Limit</th>
+<th>Default</th>
+<th>Ceiling (T1 / T2 and T3)</th>
+<th>Error on breach</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>memory_mib</code></td>
+<td>32</td>
+<td>256 / 128</td>
+<td>trap</td>
+</tr>
+<tr>
+<td><code>table_elements</code></td>
+<td>10,000</td>
+<td>50,000 / 20,000</td>
+<td>trap</td>
+</tr>
+<tr>
+<td><code>frame_deadline_ms</code></td>
+<td>frame budget</td>
+<td>50 / 50</td>
+<td>frame skipped, trap after 30 in a row</td>
+</tr>
+<tr>
+<td><code>storage_bucket_mib</code></td>
+<td>16</td>
+<td>256 / 16</td>
+<td><code>quota-exceeded</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="glyph-plane-and-loops">Glyph plane and loops</h3>
+<p>Scenes can now use a glyph plane for text, owner ids and frame receipts for hit tests, fonts, and pre-rendered loops. They are described in <a href="/pages/api-surface-glyph-plane/">glyph plane</a>. The manifest keys are <code>glyph_plane: true</code> and <code>prerender: { frames, fps, cache_mib }</code>; a scene that declares <code>wants-pointer</code> cannot also declare <code>prerender</code> (<code>manifest.scene-prerender</code>).</p>
+<table>
+<thead>
+<tr>
+<th>Need</th>
+<th>Use</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Labels over the picture</td>
+<td><code>write-glyphs</code> (131,072 cells per frame)</td>
+</tr>
+<tr>
+<td>Which object is under the pointer</td>
+<td><code>set-owner-ids</code> and <code>last-receipt().pointer-owner</code></td>
+</tr>
+<tr>
+<td>Text as pixels</td>
+<td><code>Font::rasterize</code> into <code>mask8</code></td>
+</tr>
+<tr>
+<td>A loop that costs no plugin calls</td>
+<td><code>prerender</code> (3,600 frames, 30 fps, 128 MiB)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">let owner = surface.last_receipt().and_then(|receipt| receipt.pointer_owner);
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">const owner = surface.lastReceipt()?.pointerOwner;
+</code></pre>
+<p>The shared look still applies: palette, dithering and appearance are the host's, and <code>PALETTE (future plugin contract)</code> scenes follow the palette the host passes in the constructor.</p>
+<p>Requirement ids for this page: [API-045], [RND-002], [RND-003], [RND-004], [RND-005], [RND-006], [RND-007], [RND-008], [RND-009], [RND-010], [RND-011], [RND-012], [RND-013], [RND-014]. See the <a href="/pages/reference-requirements/">requirements index</a>.</p>
+<h3 id="wit">WIT</h3>
+<p>The contract below is an excerpt. The owner is the <a href="/pages/reference-wit/">WIT reference</a>, and that page wins if the two differ.</p>
+<pre><code class="language-wit">// Excerpt of ilium:anim/surface in reference-wit
+/// An occupancy value per cell, set by the host from the pane text: true where text is drawn.
+record occupancy-grid { columns: u16, rows: u16, cells: list&lt;bool&gt; }
+record scene-pointer { column: u16, row: u16, sub-x: u8, sub-y: u8, pressed: bool }
+record glyph-cell { column: u16, row: u16, text: string, fg: option&lt;u32&gt;, bg: option&lt;u32&gt;, add: modifiers }
+/// pointer-owner is the owner id under the pointer at the presented frame.
+record frame-receipt { frame: u64, presented-at-millis: u64, dropped-before: u32, pointer-owner: option&lt;u16&gt; }
+resource frame-surface {
+  /// Width and height in pixels.
+  size: func() -&gt; tuple&lt;u32, u32&gt;;
+  /// Rows are top to bottom. first-row plus the rows written must be within the height.
+  /// Errors: invalid-argument for a bad length or a format the scene did not declare.
+  write-rows: func(first-row: u32, format: pixel-format, data: list&lt;u8&gt;) -&gt; result&lt;_, plugin-error&gt;;
+  /// Needs uses-cell-colors. One 0xRRGGBB value per cell, row by row.
+  write-cell-colors: func(first-row: u32, colors: list&lt;u32&gt;) -&gt; result&lt;_, plugin-error&gt;;
+  /// Needs wants-occupancy.
+  occupancy: func() -&gt; option&lt;occupancy-grid&gt;;
+  /// Needs wants-pointer.
+  pointer: func() -&gt; option&lt;scene-pointer&gt;;
+  /// Ends the frame. A render call that returns without present drops the frame.
+  present: func();
+  /// Needs glyph_plane true. At most 131,072 cells per frame.
+  write-glyphs: func(cells: list&lt;glyph-cell&gt;) -&gt; result&lt;_, plugin-error&gt;;
+  clear-glyphs: func();
+  /// One id per pixel, 0 means none.
+  set-owner-ids: func(first-row: u32, ids: list&lt;u16&gt;) -&gt; result&lt;_, plugin-error&gt;;
+  last-receipt: func() -&gt; option&lt;frame-receipt&gt;;
+}
+</code></pre>
+<h3 id="see-also">See also</h3>
+<ul>
+<li><a href="/pages/api-exports/">Plugin exports</a> for the <code>renderer</code> export and <code>job-runner</code>.</li>
+<li><a href="/pages/api-storage/">Storage</a>, <a href="/pages/api-fs/">File access</a> and <a href="/pages/api-codec/">Codec</a> for the scene's data and images.</li>
+<li><a href="/pages/api-jobs/">Background jobs</a>, <a href="/pages/api-http/">HTTP</a>, <a href="/pages/api-location/">Location</a>, <a href="/pages/api-audio/">Audio</a> and <a href="/pages/api-media/">Media</a> for the other imports.</li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a> for the full error codes.</li>
+<li><a href="/pages/tutorial-07-ambient-scene/">Tutorial 7: ambient scene</a> for a step-by-step scene plugin.</li>
+</ul>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/api-process-control/"><small>Previous</small>Process control</a><a class="next" href="/pages/api-services/"><small>Next</small>services</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#scenes-iliumanim">Scenes (ilium:anim)</a></li><li class="l3"><a href="#what-you-need">What you need</a></li><li class="l3"><a href="#manifest-contributions">Manifest contributions</a></li><li class="l3"><a href="#renderer-surface">Renderer surface</a></li><li class="l3"><a href="#lifecycle-of-a-renderer">Lifecycle of a renderer</a></li><li class="l3"><a href="#surface-rules">Surface rules</a></li><li class="l3"><a href="#example-1-a-gradient-in-rust">Example 1: a gradient in Rust</a></li><li class="l3"><a href="#example-2-a-settings-driven-scene-in-typescript">Example 2: a settings-driven scene in TypeScript</a></li><li class="l3"><a href="#what-the-user-sees">What the user sees</a></li><li class="l3"><a href="#edge-cases-and-errors">Edge cases and errors</a></li><li class="l3"><a href="#glyph-plane-and-loops">Glyph plane and loops</a></li><li class="l3"><a href="#wit">WIT</a></li><li class="l3"><a href="#see-also">See also</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

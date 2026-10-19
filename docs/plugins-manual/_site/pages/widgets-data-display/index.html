@@ -1,0 +1,1514 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Data display | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details open><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/" aria-current="page">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Widgets</b></p>
+<h1>Data display</h1>
+
+<p>Data widgets turn numbers into pictures. This family has ten widgets. <code>gauge</code> and <code>line-gauge</code> show one ratio. <code>sparkline</code> shows a short series in one row. <code>bar-chart</code> shows bars. <code>chart</code> plots datasets with axes, in a high resolution Braille render or as a text line. <code>canvas</code> draws shapes in a coordinate space. <code>calendar</code> shows a month. <code>progress-row</code> shows the state of one job. <code>meter</code> shows a segmented bar for costs and quotas. <code>minimap</code> shows the shape of a long text.</p>
+<p>The plugin computes the numbers and the host draws them. Most data widgets are one way: they send nothing back unless the plugin sets the <code>focusable</code> flag or the widget has an action of its own, such as a click on a progress row.</p>
+<h2 id="you-need">You need</h2>
+<ul>
+<li>A grant to show the view: <code>ui.panels</code> for a panel (<a href="/pages/capability-ui-panels/">UI panels</a>), or <code>panes.provide-kind</code> for a pane kind. <code>ui.invalidate</code> is always granted for views the plugin contributes.</li>
+<li>Rust with the <code>ilium-plugin-sdk</code> crate, or TypeScript with <code>@ilium/plugin-sdk</code>. Both target API <code>ilium:plugin@0.1.0</code>.</li>
+<li>The <a href="/pages/widgets-index/">widget catalogue</a> for the common props, the widget keys, and the rule that a plugin renders only when it calls <code>ui.invalidate</code> or the view area changes.</li>
+</ul>
+<figure>
+<svg viewBox="0 0 340 130" role="img" aria-label="A plugin sends numbers to the host, and the host draws them without sending actions back" width="510" height="195">
+  <title>Data widgets are one way</title>
+  <desc>The plugin computes numbers and sends a new tree after ui.invalidate. The host draws the widget and sends no action back.</desc>
+  <defs>
+    <marker id="dd-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <rect x="6" y="40" width="110" height="52" rx="6" fill="none" stroke="currentColor" stroke-dasharray="6 4"/>
+  <text x="61" y="61" font-size="12" text-anchor="middle" fill="currentColor">Plugin</text>
+  <text x="61" y="78" font-size="10" text-anchor="middle" fill="currentColor">computes numbers</text>
+  <rect x="224" y="40" width="110" height="52" rx="6" fill="none" stroke="currentColor" stroke-width="2"/>
+  <text x="279" y="61" font-size="12" text-anchor="middle" fill="currentColor">Host</text>
+  <text x="279" y="78" font-size="10" text-anchor="middle" fill="currentColor">draws the widget</text>
+  <line x1="118" y1="56" x2="220" y2="56" stroke="currentColor" marker-end="url(#dd-arrow)"/>
+  <text x="169" y="50" font-size="10" text-anchor="middle" fill="currentColor">ui.invalidate</text>
+  <line x1="118" y1="76" x2="220" y2="76" stroke="currentColor" marker-end="url(#dd-arrow)"/>
+  <text x="169" y="90" font-size="10" text-anchor="middle" fill="currentColor">new ui-tree</text>
+  <text x="170" y="118" font-size="10" text-anchor="middle" fill="currentColor">Most data widgets send no ui-action back.</text>
+</svg>
+<figcaption>Data widgets are mostly one way. The plugin computes the numbers and returns a new tree when they change.</figcaption>
+</figure>
+
+<h2 id="how-a-data-view-updates">How a data view updates</h2>
+<p>The host calls the plugin's <code>render</code> function when the view first opens, after <code>ui.invalidate</code> for that view, and when the area changes. The plugin answers with a full <code>ui-tree</code>. The host diffs the new tree against the last one by node <code>key</code>, and repaints the nodes that changed. Give a node a <code>key</code> that stays the same across renders, so that the diff can match it.</p>
+<h2 id="the-widgets">The widgets</h2>
+<table>
+<thead>
+<tr>
+<th>Widget</th>
+<th>Shows</th>
+<th>Sends</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>gauge</code></td>
+<td>One ratio as a bar with a centred label</td>
+<td>nothing</td>
+</tr>
+<tr>
+<td><code>line-gauge</code></td>
+<td>One ratio as a single line</td>
+<td>nothing</td>
+</tr>
+<tr>
+<td><code>sparkline</code></td>
+<td>A series in one row</td>
+<td>nothing</td>
+</tr>
+<tr>
+<td><code>bar-chart</code></td>
+<td>Bars in groups</td>
+<td><code>selected</code> (a bar) when focusable</td>
+</tr>
+<tr>
+<td><code>chart</code></td>
+<td>Datasets on axes</td>
+<td><code>selected</code> (a point) when focusable</td>
+</tr>
+<tr>
+<td><code>canvas</code></td>
+<td>Shapes in a coordinate space</td>
+<td><code>activated</code> with a cell when focusable</td>
+</tr>
+<tr>
+<td><code>calendar</code></td>
+<td>One month (unstable)</td>
+<td><code>selected</code> (a day)</td>
+</tr>
+<tr>
+<td><code>progress-row</code></td>
+<td>The state of one job</td>
+<td><code>activated</code></td>
+</tr>
+<tr>
+<td><code>meter</code></td>
+<td>A segmented bar</td>
+<td><code>selected</code> (a segment) when focusable</td>
+</tr>
+<tr>
+<td><code>minimap</code></td>
+<td>The shape of a long text</td>
+<td><code>activated</code>, <code>scrolled</code></td>
+</tr>
+</tbody>
+</table>
+<p>Every widget has a builder. The required prop is the constructor argument, and the other props are setters. In Rust the setters are snake_case and chain on the node handle. In TypeScript they go in the props object in camelCase. A prop that is not set takes the default in the last column of its table.</p>
+<h2 id="gauge">gauge</h2>
+<p>Mirrors <code>ratatui::widgets::Gauge</code>. It fills a bar with a ratio and draws a label over it.</p>
+<table>
+<thead>
+<tr>
+<th>Prop</th>
+<th>Type</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ratio</code></td>
+<td><code>f64</code> (0 to 1)</td>
+<td>required</td>
+<td>The fraction of the bar that is filled.</td>
+</tr>
+<tr>
+<td><code>label</code></td>
+<td><code>option&lt;styled-text&gt;</code></td>
+<td>none</td>
+<td>Text centred over the bar.</td>
+</tr>
+<tr>
+<td><code>use-unicode</code></td>
+<td><code>bool</code></td>
+<td><code>true</code></td>
+<td>Whether partial cells use block characters.</td>
+</tr>
+<tr>
+<td><code>gauge-style</code></td>
+<td><code>style</code></td>
+<td>empty</td>
+<td>Colours of the filled and unfilled parts.</td>
+</tr>
+</tbody>
+</table>
+<p>Keys, mouse and actions: none. Roles: <code>accent</code> for the filled part and <code>muted</code> for the rest.</p>
+<figure>
+<pre class="term">╭─ Disk use ───────────────────────────────────╮
+│<span class="t-ok">█</span><span class="t-ok">█</span><span class="t-ok">█</span><span class="t-ok">█</span><span class="t-ok">█</span><span class="t-ok">█</span><span class="t-ok">█</span><span class="t-ok">█</span><span class="t-ok">█</span><span class="t-ok">█</span><span class="t-ok">█</span><span class="t-ok">█</span><span class="t-ok">█</span><span class="t-ok">█</span><span class="t-ok">█</span><span class="t-ok">█</span><span class="t-ok">█</span><span class="t-ok">█</span><span class="t-ok">█</span><span class="t-ok">█</span><span class="t-hi"> </span><span class="t-hi">6</span><span class="t-hi">7</span><span class="t-hi"> </span><span class="t-hi">%</span><span class="t-hi"> </span><span class="t-ok">█</span><span class="t-ok">█</span><span class="t-ok">█</span><span class="t-ok">█</span><span class="t-ok">█</span><span class="t-dim">░</span><span class="t-dim">░</span><span class="t-dim">░</span><span class="t-dim">░</span><span class="t-dim">░</span><span class="t-dim">░</span><span class="t-dim">░</span><span class="t-dim">░</span><span class="t-dim">░</span><span class="t-dim">░</span><span class="t-dim">░</span><span class="t-dim">░</span><span class="t-dim">░</span><span class="t-dim">░</span><span class="t-dim">░</span>│
+╰──────────────────────────────────────────────╯
+</pre>
+<figcaption>Rendered at 48 columns. A <code>gauge</code> at 67 per cent with its label centred over the bar. The filled part uses <code>accent</code> (shown as success green here) and the rest uses <code>muted</code>.</figcaption>
+</figure>
+
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">let disk = tree
+    .gauge(0.67)
+    .label(vec![Span::plain(&quot;67 %&quot;)])
+    .gauge_style(Style::role(ColorRole::Accent))
+    .key(&quot;disk&quot;);
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">const disk = gauge(0.67, {
+  key: 'disk',
+  label: [span('67 %')],
+  gaugeStyle: { fg: role('accent') },
+});
+</code></pre>
+<h2 id="line-gauge">line-gauge</h2>
+<p>Mirrors <code>ratatui::widgets::LineGauge</code>. It draws the same ratio as a single line.</p>
+<table>
+<thead>
+<tr>
+<th>Prop</th>
+<th>Type</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ratio</code></td>
+<td><code>f64</code> (0 to 1)</td>
+<td>required</td>
+<td>The fraction of the line that is filled.</td>
+</tr>
+<tr>
+<td><code>label</code></td>
+<td><code>option&lt;styled-text&gt;</code></td>
+<td>none</td>
+<td>Text before the line.</td>
+</tr>
+<tr>
+<td><code>filled-style</code>, <code>unfilled-style</code></td>
+<td><code>style</code></td>
+<td>empty</td>
+<td>Colours of the two parts.</td>
+</tr>
+<tr>
+<td><code>line-set</code></td>
+<td><code>normal</code>, <code>thick</code> or <code>double</code></td>
+<td><code>normal</code></td>
+<td>The characters that draw the line.</td>
+</tr>
+</tbody>
+</table>
+<p>The filled part is <code>━</code> and the rest is <code>─</code>. This is the line the client uses for the countdown of a toast. Actions: none.</p>
+<figure>
+<pre class="term">╭─ Context window ─────────────────────────────╮
+│ <span class="t-hi">67%</span> <span class="t-ok">━━━━━━━━━━━━━━━━━━━━━━━━━━</span><span class="t-dim">─────────────</span>  │
+╰──────────────────────────────────────────────╯
+</pre>
+<figcaption>Rendered at 48 columns. A <code>line-gauge</code> with the label before the line. The filled part is <code>━</code> and the rest is <code>─</code>.</figcaption>
+</figure>
+
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">let context = tree
+    .line_gauge(0.67)
+    .label(vec![Span::plain(&quot;67%&quot;)])
+    .key(&quot;context&quot;);
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">const context = lineGauge(0.67, { key: 'context', label: [span('67%')] });
+</code></pre>
+<h2 id="sparkline">sparkline</h2>
+<p>Mirrors <code>ratatui::widgets::Sparkline</code>. Each entry is one column. A <code>none</code> entry leaves its column empty, which shows a gap in the data.</p>
+<table>
+<thead>
+<tr>
+<th>Prop</th>
+<th>Type</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>data</code></td>
+<td><code>list&lt;option&lt;u64&gt;&gt;</code></td>
+<td>required</td>
+<td>One value per column.</td>
+</tr>
+<tr>
+<td><code>max</code></td>
+<td><code>option&lt;u64&gt;</code></td>
+<td>none</td>
+<td>The value that fills the full height. Without it, the largest value fills it.</td>
+</tr>
+<tr>
+<td><code>direction</code></td>
+<td><code>left-to-right</code> or <code>right-to-left</code></td>
+<td><code>left-to-right</code></td>
+<td>Which end the newest value uses.</td>
+</tr>
+<tr>
+<td><code>style</code></td>
+<td><code>style</code></td>
+<td>empty</td>
+<td>The colour of the bars.</td>
+</tr>
+</tbody>
+</table>
+<p>Mouse: hovering a column shows its value as a tooltip. Roles: <code>accent</code>. Glyphs: <code>▁▂▃▄▅▆▇█</code>.</p>
+<figure>
+<pre class="term">╭─ Sessions per hour ──────────────────────────╮
+│ <span class="t-ok">▁▂▃▄▅▆▇█ ▇▆▅▄▃▂▁▂▄▆█</span>   <span class="t-dim">peak 8 at 07:00</span>       │
+╰──────────────────────────────────────────────╯
+</pre>
+<figcaption>Rendered at 48 columns. A <code>sparkline</code> of 20 samples with one gap. Each sample is one cell wide and picks one of the eight block heights <code>▁▂▃▄▅▆▇█</code>.</figcaption>
+</figure>
+
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">let hourly = tree
+    .sparkline(vec![Some(1), Some(2), Some(8), None, Some(5)])
+    .max(Some(8))
+    .style(Style::role(ColorRole::Accent))
+    .key(&quot;hourly&quot;);
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">const hourly = sparkline([1, 2, 8, null, 5], {
+  key: 'hourly',
+  max: 8,
+  style: { fg: role('accent') },
+});
+</code></pre>
+<h2 id="bar-chart">bar-chart</h2>
+<p>Mirrors <code>ratatui::widgets::BarChart</code>. Bars are grouped: each <code>bar-group</code> has a label and one or more bars. Each bar has a <code>value: u64</code>, a <code>label</code> drawn under the bar, a <code>text-value</code> drawn on the bar, and a <code>style</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Prop</th>
+<th>Type</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>groups</code></td>
+<td><code>list&lt;bar-group&gt;</code></td>
+<td>required</td>
+<td>The groups, each with a label and its bars.</td>
+</tr>
+<tr>
+<td><code>bar-width</code></td>
+<td><code>u16</code></td>
+<td><code>1</code></td>
+<td>Width of one bar in cells.</td>
+</tr>
+<tr>
+<td><code>bar-gap</code></td>
+<td><code>u16</code></td>
+<td><code>1</code></td>
+<td>Cells between bars in a group.</td>
+</tr>
+<tr>
+<td><code>group-gap</code></td>
+<td><code>u16</code></td>
+<td><code>0</code></td>
+<td>Cells between groups.</td>
+</tr>
+<tr>
+<td><code>direction</code></td>
+<td><code>vertical</code> or <code>horizontal</code></td>
+<td><code>vertical</code></td>
+<td>Which way the bars grow.</td>
+</tr>
+<tr>
+<td><code>max</code></td>
+<td><code>option&lt;u64&gt;</code></td>
+<td>none</td>
+<td>The value that fills the full length. Without it, the largest value fills it.</td>
+</tr>
+</tbody>
+</table>
+<p>When the node is focusable, Left and Right move between bars and a click on a bar sends <code>selected</code> with <code>index(u32)</code>. Roles: <code>accent</code> for bars and <code>muted</code> for labels. Glyphs: <code>█</code> and the eighth blocks.</p>
+<figure>
+<pre class="term">╭─ Commands per day ───────────────────────────╮
+│       <span class="t-ok">▂▂▂</span>         <span class="t-ok">███</span>                        │
+│       <span class="t-ok">███</span>         <span class="t-ok">███</span>                        │
+│       <span class="t-ok">███</span>   <span class="t-ok">▆▆▆</span>   <span class="t-ok">███</span>                        │
+│ <span class="t-ok">███</span>   <span class="t-ok">███</span>   <span class="t-ok">███</span>   <span class="t-ok">███</span>   <span class="t-ok">▂▂▂</span>                  │
+│ <span class="t-ok">███</span>   <span class="t-ok">███</span>   <span class="t-ok">███</span>   <span class="t-ok">███</span>   <span class="t-ok">███</span>                  │
+│ <span class="t-ok">███</span>   <span class="t-ok">███</span>   <span class="t-ok">███</span>   <span class="t-ok">███</span>   <span class="t-ok">███</span>                  │
+│ Mon   Tue   Wed   Thu   Fri                  │
+╰──────────────────────────────────────────────╯
+</pre>
+<figcaption>Rendered at 48 columns. A vertical <code>bar-chart</code>, three cells per bar with a gap of three. The top of a bar uses an eighth block when the value falls between two rows.</figcaption>
+</figure>
+
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">let commands = tree
+    .bar_chart(vec![BarGroup::new(&quot;week&quot;, vec![
+        BarItem::new(4).label(&quot;Mon&quot;),
+        BarItem::new(7).label(&quot;Tue&quot;),
+        BarItem::new(5).label(&quot;Wed&quot;),
+    ])])
+    .bar_width(3)
+    .bar_gap(3)
+    .key(&quot;commands&quot;);
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">const commands = barChart([{
+  label: 'week',
+  bars: [
+    { value: 4, label: 'Mon' },
+    { value: 7, label: 'Tue' },
+    { value: 5, label: 'Wed' },
+  ],
+}], { key: 'commands', barWidth: 3, barGap: 3 });
+</code></pre>
+<h2 id="chart">chart</h2>
+<p>Mirrors <code>ratatui::widgets::Chart</code>. A chart has datasets, two axes and an optional legend. Each dataset draws its points as scatter markers, a line or bars, with its own marker and colour.</p>
+<table>
+<thead>
+<tr>
+<th>Record or prop</th>
+<th>Field</th>
+<th>Type</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>dataset</code></td>
+<td><code>name</code></td>
+<td><code>string</code></td>
+<td>Legend text.</td>
+</tr>
+<tr>
+<td></td>
+<td><code>marker</code></td>
+<td><code>dot</code>, <code>block</code>, <code>bar</code>, <code>braille</code>, <code>half-block</code>, <code>quadrant</code>, <code>sextant</code> or <code>octant</code></td>
+<td>Glyph set for the points.</td>
+</tr>
+<tr>
+<td></td>
+<td><code>graph-type</code></td>
+<td><code>scatter</code>, <code>line</code> or <code>bar</code></td>
+<td>How the points are drawn.</td>
+</tr>
+<tr>
+<td></td>
+<td><code>points</code></td>
+<td><code>list&lt;tuple&lt;f64, f64&gt;&gt;</code></td>
+<td>The data, in axis units.</td>
+</tr>
+<tr>
+<td></td>
+<td><code>style</code></td>
+<td><code>style</code></td>
+<td>Colour of the dataset.</td>
+</tr>
+<tr>
+<td></td>
+<td><code>gaps</code></td>
+<td><code>bool</code></td>
+<td>A <code>NaN</code> y value ends the line segment.</td>
+</tr>
+<tr>
+<td></td>
+<td><code>resample</code></td>
+<td><code>none</code>, <code>mean</code>, <code>max</code> or <code>min-max</code></td>
+<td>The host fits the points to the width.</td>
+</tr>
+<tr>
+<td></td>
+<td><code>fill</code></td>
+<td><code>bool</code></td>
+<td>Fill the area under the line.</td>
+</tr>
+<tr>
+<td><code>axis</code></td>
+<td><code>title</code></td>
+<td><code>option&lt;styled-text&gt;</code></td>
+<td>Axis title, shown beside the axis.</td>
+</tr>
+<tr>
+<td></td>
+<td><code>bounds</code></td>
+<td><code>tuple&lt;f64, f64&gt;</code></td>
+<td>The lowest and highest value on the axis.</td>
+</tr>
+<tr>
+<td></td>
+<td><code>labels</code></td>
+<td><code>list&lt;styled-text&gt;</code></td>
+<td>Tick labels drawn along the axis.</td>
+</tr>
+<tr>
+<td><code>legend-position</code></td>
+<td></td>
+<td><code>option&lt;legend-position&gt;</code></td>
+<td><code>top</code>, <code>top-right</code>, <code>top-left</code>, <code>left</code>, <code>right</code>, <code>bottom</code>, <code>bottom-right</code> or <code>bottom-left</code>. None hides the legend.</td>
+</tr>
+<tr>
+<td><code>render</code></td>
+<td></td>
+<td><code>braille</code> or <code>text-line</code></td>
+<td>The render. Default <code>braille</code>.</td>
+</tr>
+<tr>
+<td><code>y-label-width</code></td>
+<td></td>
+<td><code>option&lt;u16&gt;</code></td>
+<td>The width of the y labels in cells.</td>
+</tr>
+</tbody>
+</table>
+<p>When the node is focusable, Left and Right move a cursor along the points and <code>selected</code> with <code>index(u32)</code> reports the point. Hovering a point shows it as a tooltip. Roles: the dataset styles, and <code>muted</code> for the axes.</p>
+<h3 id="braille-render">Braille render</h3>
+<p>The default render draws each dataset on a grid of Braille dots, two dots wide and four dots high in each cell. A line of 36 cells has 72 dots across.</p>
+<figure>
+<pre class="term">╭─ Spend ────────────────────────────────────╮
+│ 8 <span class="t-dim">│</span><span class="t-ok">⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⡤⠤⠖⠒⠉⠉⠉⠉</span>    │
+│   <span class="t-dim">│</span><span class="t-ok">⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⣠⠤⠴⠒⠋⠁⠀⠀⠀⠀⠀⠀⠀⠀</span>    │
+│ 6 <span class="t-dim">│</span><span class="t-ok">⠉⠁⠉⠉⠉⠈⠉⠉⠈⠉⠉⠁⠉⠉⠁⠉⠉⢁⣩⠟⠋⠉⠉⠉⠈⠉⠉⠁⠉⠉⠁⠉⠉⠉⠈⠉</span>    │
+│   <span class="t-dim">│</span><span class="t-ok">⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⡤⠖⠚⠉⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀</span>    │
+│ 4 <span class="t-dim">│</span><span class="t-ok">⠀⠀⠀⠀⠀⠀⠀⣀⣀⡤⠤⠞⠉⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀</span>    │
+│   <span class="t-dim">│</span><span class="t-ok">⠀⠀⠀⣠⠴⠒⠋⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀</span>    │
+│ 2 <span class="t-dim">│</span><span class="t-ok">⣠⠖⠋⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀</span>    │
+│   <span class="t-dim">│</span><span class="t-ok">⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀</span>    │
+│ 0 <span class="t-dim">┼────────────────────────────────────</span>    │
+│      0             5                10     │
+│ <span class="t-ok">⠒</span> cost per day   <span class="t-warn">⠒</span> budget                  │
+╰────────────────────────────────────────────╯
+</pre>
+<figcaption>Rendered at 46 columns. A <code>chart</code> with the default <code>braille</code> render. Each cell holds a 2 by 4 grid of dots, so a line has eight times the cell resolution. The axes use <code>muted</code>. The legend sits at the bottom.</figcaption>
+</figure>
+
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">// types::ui::{Dataset, GraphType, Marker, Axis}
+let spend = tree
+    .chart(
+        vec![
+            Dataset::new(&quot;cost per day&quot;, self.cost_points.clone())
+                .marker(Marker::Braille)
+                .graph_type(GraphType::Line),
+            Dataset::new(&quot;budget&quot;, vec![(0.0, 6.0), (10.0, 6.0)])
+                .marker(Marker::Braille)
+                .graph_type(GraphType::Line),
+        ],
+        Axis { title: None, bounds: (0.0, 10.0), labels: vec![] },
+        Axis { title: None, bounds: (0.0, 8.0), labels: vec![] },
+    )
+    .legend_position(Some(LegendPosition::Bottom))
+    .key(&quot;spend&quot;);
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">const spend = chart(
+  [
+    { name: 'cost per day', points: costPoints, marker: 'braille', graphType: 'line' },
+    { name: 'budget', points: [[0, 6], [10, 6]], marker: 'braille', graphType: 'line' },
+  ],
+  { bounds: [0, 10], labels: [] },
+  { bounds: [0, 8], labels: [] },
+  { key: 'spend', legendPosition: 'bottom' },
+);
+</code></pre>
+<h3 id="text-line-render">Text-line render</h3>
+<p>With <code>render: text-line</code> the host draws the datasets as a line of box-drawing glyphs, with the y labels right-aligned in <code>y-label-width</code> cells. It works over plain terminals and in places where Braille is hard to read. Use <code>gaps</code> for a series with holes, and <code>resample</code> when there are more points than cells: <code>mean</code> and <code>max</code> keep one value per cell, and <code>min-max</code> keeps the extremes of each cell.</p>
+<figure>
+<pre class="term">╭─ Tokens per minute ────────────────────────╮
+│   12.0┤           ╭╮                       │
+│   10.5┤          ╭╯╰╮                      │
+│    9.0┤    ╭╮    │  ╰╮                     │
+│    7.5┤   ╭╯╰╮  ╭╯   ╰                     │
+│    6.0┤ ╭╮│  ╰╮ │                          │
+│    4.5┤╭╯╰╯   ╰─╯                          │
+│    3.0┼╯                                   │
+╰────────────────────────────────────────────╯
+</pre>
+<figcaption>Rendered at 46 columns. A <code>chart</code> with <code>render: text-line</code>. The host draws the curve with the box-drawing glyphs <code>╭ ╮ ╰ ╯ ─ │</code>, the axis with <code>┤</code> and <code>┼</code>, and the y labels right-aligned in <code>y-label-width</code> cells.</figcaption>
+</figure>
+
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">// types::ui::{Dataset, ChartRender, Resample}
+let tokens = tree
+    .chart(
+        vec![
+            Dataset::new(&quot;input&quot;, self.input_series()).gaps(true).resample(Resample::MinMax),
+            Dataset::new(&quot;output&quot;, self.output_series()).gaps(true).resample(Resample::MinMax),
+        ],
+        Axis { title: None, bounds: (0.0, 60.0), labels: vec![] },
+        Axis { title: None, bounds: (0.0, 12.0), labels: vec![] },
+    )
+    .render(ChartRender::TextLine)
+    .y_label_width(6)
+    .key(&quot;tokens&quot;);
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">const tokens = chart(
+  [
+    { name: 'input', points: inputSeries(), gaps: true, resample: 'min-max' },
+    { name: 'output', points: outputSeries(), gaps: true, resample: 'min-max' },
+  ],
+  { bounds: [0, 60], labels: [] },
+  { bounds: [0, 12], labels: [] },
+  { key: 'tokens', render: 'text-line', yLabelWidth: 6 },
+);
+</code></pre>
+<h2 id="canvas">canvas</h2>
+<p>Mirrors <code>ratatui::widgets::canvas::Canvas</code>. The plugin gives the bounds of a coordinate space and a list of shapes. The <code>marker</code> chooses the resolution: <code>dot</code> is one cell per point, and <code>braille</code> gives a sub-cell grid of dots. The default is <code>braille</code>. Canvas is also the glyph plane that a plugin can draw a map on.</p>
+<table>
+<thead>
+<tr>
+<th>Prop</th>
+<th>Type</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>x-bounds</code>, <code>y-bounds</code></td>
+<td><code>tuple&lt;f64, f64&gt;</code></td>
+<td>required</td>
+<td>The coordinate space.</td>
+</tr>
+<tr>
+<td><code>marker</code></td>
+<td>the marker enum of <code>chart</code></td>
+<td><code>braille</code></td>
+<td>The resolution of drawing.</td>
+</tr>
+<tr>
+<td><code>shapes</code></td>
+<td><code>list&lt;shape&gt;</code></td>
+<td>empty</td>
+<td>The shapes, drawn in list order.</td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr>
+<th>Shape</th>
+<th>Fields</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>canvas-line</code></td>
+<td><code>x1</code>, <code>y1</code>, <code>x2</code>, <code>y2</code>, <code>color</code></td>
+</tr>
+<tr>
+<td><code>canvas-rectangle</code></td>
+<td><code>x</code>, <code>y</code>, <code>width</code>, <code>height</code>, <code>color</code></td>
+</tr>
+<tr>
+<td><code>canvas-circle</code></td>
+<td><code>x</code>, <code>y</code>, <code>radius</code>, <code>color</code></td>
+</tr>
+<tr>
+<td><code>canvas-points</code></td>
+<td><code>coords: list&lt;tuple&lt;f64, f64&gt;&gt;</code>, <code>color</code></td>
+</tr>
+<tr>
+<td><code>canvas-label</code></td>
+<td><code>x</code>, <code>y</code>, <code>text: string</code></td>
+</tr>
+<tr>
+<td><code>canvas-map</code></td>
+<td><code>resolution</code> (<code>low</code> or <code>high</code>), <code>color</code>, and <code>land-color</code>, <code>sea-color</code>, <code>projection</code> (<code>equirectangular</code>), <code>bounds</code></td>
+</tr>
+</tbody>
+</table>
+<p>When the node is focusable, a click sends <code>activated</code> with <code>cell(cell-position)</code>. The <code>color</code> field takes a colour in the same form as <code>style.fg</code>. See <a href="/pages/accessibility-and-theming/">Accessibility and theming</a>. For a surface that the plugin fills cell by cell, use <code>surface</code> (<a href="/pages/widgets-media-and-embedded/">Media and embedded</a>).</p>
+<figure>
+<pre class="term">╭─ Topology ─────────────────────────────────╮
+│ <span class="t-ok">⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀</span>       │
+│ <span class="t-ok">⠀⠀⡏⠉node A⠉⠉⠉⠉⠉⡇⠀⠀⠀⠀⣤⠀⠀⢀⡠⠤⠤⠤⣀⠀⠛⠀⠀⠀⠀⠀</span>       │
+│ <span class="t-ok">⠀⠀⡇⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡇⠀⠀⠀⠀⠀⢀⡔⠉⠀⠀⠀⠀⠈⠑⣄⠀⠀⠀⠀⠀</span>       │
+│ <span class="t-ok">⠀⠀⡇⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡇⠀⠀⠀⠀⠀⡎⠀⠀⠀⠀⠀⠀⠀⠀⠈⡆⠀⠀⠀⠀</span>       │
+│ <span class="t-ok">⠀⠀⠧⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠇⠀⠀⠀⠀⠀⡇⠀⠀⠀⠀⠀⠀⠀⠀⠀⡇⠀⠀⠀⠀</span>       │
+│ <span class="t-ok">⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠘⢆⠀⠀⠀⠀⠀⠀⢀⠞⠀⠀⠀⠀⠀</span>       │
+│ <span class="t-ok">⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠙⠢⠤⠤⠤⠚⠁⠀⠀⠀⣤⠀⠀</span>       │
+│ <span class="t-ok">⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀</span>       │
+╰────────────────────────────────────────────╯
+</pre>
+<figcaption>Rendered at 46 columns. A <code>canvas</code> with the default <code>braille</code> marker: a rectangle, a circle, three points and a <code>canvas-label</code> (the label cells replace the dots under them).</figcaption>
+</figure>
+
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">// types::ui::Shape
+let topology = tree
+    .canvas((0.0, 72.0), (0.0, 32.0))
+    .shapes(vec![
+        Shape::rectangle(4.0, 4.0, 26.0, 14.0, Color::role(ColorRole::Accent)),
+        Shape::circle(52.0, 16.0, 10.0, Color::role(ColorRole::Accent)),
+        Shape::points(vec![(40.0, 6.0), (60.0, 4.0)], Color::role(ColorRole::Success)),
+        Shape::label(6.0, 28.0, &quot;node A&quot;),
+    ])
+    .key(&quot;topology&quot;);
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">const topology = canvas([0, 72], [0, 32], {
+  key: 'topology',
+  shapes: [
+    { tag: 'canvas-rectangle', val: { x: 4, y: 4, width: 26, height: 14, color: role('accent') } },
+    { tag: 'canvas-circle', val: { x: 52, y: 16, radius: 10, color: role('accent') } },
+    { tag: 'canvas-points', val: { coords: [[40, 6], [60, 4]], color: role('success') } },
+    { tag: 'canvas-label', val: { x: 6, y: 28, text: 'node A' } },
+  ],
+});
+</code></pre>
+<h2 id="calendar">calendar</h2>
+<p>Mirrors <code>ratatui::widgets::calendar::Monthly</code>. It shows one month with Monday first. Marked days are drawn with a style of their own. The widget is unstable.</p>
+<table>
+<thead>
+<tr>
+<th>Prop</th>
+<th>Type</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>year</code></td>
+<td><code>u32</code></td>
+<td>required</td>
+<td>The year to show.</td>
+</tr>
+<tr>
+<td><code>month</code></td>
+<td><code>u32</code> (1 to 12)</td>
+<td>required</td>
+<td>The month to show.</td>
+</tr>
+<tr>
+<td><code>marked</code></td>
+<td><code>list&lt;marked-day&gt;</code></td>
+<td>empty</td>
+<td>Days with a style of their own.</td>
+</tr>
+<tr>
+<td><code>show-month-header</code></td>
+<td><code>bool</code></td>
+<td><code>true</code></td>
+<td>Whether the month and year are shown above the grid.</td>
+</tr>
+<tr>
+<td><code>show-weekdays</code></td>
+<td><code>bool</code></td>
+<td><code>true</code></td>
+<td>Whether the weekday header is shown.</td>
+</tr>
+</tbody>
+</table>
+<p>A <code>marked-day</code> record has two fields only: <code>day: u8</code> and <code>style: style</code>. Actions: <code>selected</code> with <code>index(u32)</code>, the day of the month, when the user clicks a day or moves with the arrow keys. Roles: <code>accent</code> for today and <code>selection</code>.</p>
+<figure>
+<pre class="term">╭─ October 2026 ─────────────╮
+│ Mo Tu We Th Fr Sa Su       │
+│             1  2  3  4     │
+│  5  6  7  8  9 10 <span class="t-hi">11</span>       │
+│ 12 13 14 15 16 17 18       │
+│ 19 20 21 22 23 24 25       │
+│ 26 27 28 29 30 31          │
+╰────────────────────────────╯
+</pre>
+<figcaption>Rendered at 30 columns. A <code>calendar</code> (unstable) with the 11th marked. Weeks start on Monday.</figcaption>
+</figure>
+
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">let october = tree
+    .calendar(2026, 10)
+    .marked(vec![MarkedDay { day: 11, style: Style::role(ColorRole::Accent) }])
+    .key(&quot;october&quot;);
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">const october = calendar(2026, 10, {
+  key: 'october',
+  marked: [{ day: 11, style: { fg: role('accent') } }],
+});
+</code></pre>
+<h2 id="progress-row">progress-row</h2>
+<p><code>progress-row</code> is one monitor row of the progress footer. It shows the state of one job as an icon, a state name, a percentage and a bar. It is the row that the Ilium progress monitors use.</p>
+<table>
+<thead>
+<tr>
+<th>Prop</th>
+<th>Type</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>state</code></td>
+<td><code>waiting</code>, <code>running</code>, <code>done</code> or <code>error</code></td>
+<td>The state of the job.</td>
+</tr>
+<tr>
+<td><code>title</code></td>
+<td><code>styled-text</code></td>
+<td>The name of the job.</td>
+</tr>
+<tr>
+<td><code>percent</code></td>
+<td><code>option&lt;f32&gt;</code></td>
+<td>The percentage from 0 to 100. None draws an empty bar.</td>
+</tr>
+<tr>
+<td><code>message</code></td>
+<td><code>option&lt;string&gt;</code></td>
+<td>A short line after the bar.</td>
+</tr>
+<tr>
+<td><code>details</code></td>
+<td><code>option&lt;styled-lines&gt;</code></td>
+<td>Longer text, shown as a tooltip on hover.</td>
+</tr>
+</tbody>
+</table>
+<p>Actions: <code>activated</code> with <code>none</code>, on Enter or on a click. Roles: <code>accent</code> for running, <code>success</code> for done, <code>danger</code> for error, <code>warning</code> for a degraded monitor, and <code>muted</code> for waiting. Glyphs: <code>▶</code> running, <code>✓</code> done, <code>✕</code> error, <code>!</code> degraded, <code>○</code> waiting, and a bar of <code>█</code> over <code>░</code>.</p>
+<figure>
+<pre class="term">╭─ Progress ─────────────────────────────────────────────╮
+│ <span class="t-hi">▶ RUNNING  42%</span>  <span class="t-hi">████████</span><span class="t-dim">░░░░░░░░░░░░</span>  152 of 412       │
+│ <span class="t-ok"><span class="w2">✓</span> DONE  100%</span>  <span class="t-ok">████████████████████</span><span class="t-dim"></span>                     │
+│ <span class="t-err"><span class="w2">✕</span> ERROR  17%</span>  <span class="t-err">███</span><span class="t-dim">░░░░░░░░░░░░░░░░░</span>  3 failed           │
+│ <span class="t-warn">! MONITOR FAILED  0%</span>  <span class="t-dim">░░░░░░░░░░░░░░░░░░░░</span>             │
+│ <span class="t-dim">○ NOT STARTED</span>                                          │
+╰────────────────────────────────────────────────────────╯
+</pre>
+<figcaption>Rendered at 58 columns. Five <code>progress-row</code> states. The status prefix is bold in the state colour: <code>accent</code> for running, <code>success</code> for done, <code>danger</code> for error and <code>warning</code> for a degraded monitor. The bar is <code>█</code> filled and <code>░</code> unfilled.</figcaption>
+</figure>
+
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">// types::ui::ProgressState
+let job = tree
+    .progress_row(&quot;Replaying 412 sessions&quot;)
+    .state(ProgressState::Running)
+    .percent(37.0)
+    .message(&quot;session 152 of 412&quot;)
+    .key(&quot;job&quot;);
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">const job = progressRow('Replaying 412 sessions', {
+  key: 'job',
+  state: 'running',
+  percent: 37,
+  message: 'session 152 of 412',
+});
+</code></pre>
+<h2 id="meter">meter</h2>
+<p><code>meter</code> is a segmented bar. It shows how a total splits into parts, such as the cost of a month against a budget. A segment has a <code>label</code>, a <code>value</code> and a <code>tone</code>. The tone is one of <code>info</code>, <code>success</code>, <code>warning</code>, <code>danger</code> and <code>muted</code>, and it picks the colour. The same record is used by the settings call <code>set-meter</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Prop</th>
+<th>Type</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>segments</code></td>
+<td><code>list&lt;meter-segment&gt;</code></td>
+<td>At most 8 segments.</td>
+</tr>
+<tr>
+<td><code>max</code></td>
+<td><code>f64</code></td>
+<td>The value that fills the whole bar.</td>
+</tr>
+<tr>
+<td><code>label</code></td>
+<td><code>option&lt;styled-text&gt;</code></td>
+<td>Text before the bar.</td>
+</tr>
+<tr>
+<td><code>show-values</code></td>
+<td><code>bool</code></td>
+<td>Show the value of each segment.</td>
+</tr>
+<tr>
+<td><code>orientation</code></td>
+<td><code>horizontal</code> or <code>vertical</code></td>
+<td>The direction of the bar.</td>
+</tr>
+</tbody>
+</table>
+<p>When the node is focusable, Left and Right move between segments and <code>selected</code> with <code>index(u32)</code> reports the segment. Hovering a segment shows its label and value. Glyphs: <code>█</code> for segments and <code>░</code> for the remainder.</p>
+<figure>
+<pre class="term">╭─ Spend this month ───────────────────────────────╮
+│ <span class="t-hi">█████████████████████</span><span class="t-err">████</span><span class="t-dim">░░░░░░░░░░░░░░░</span>  $5.00  │
+│ <span class="t-hi">█</span> today $4.20   <span class="t-err">█</span> over budget $0.80              │
+╰──────────────────────────────────────────────────╯
+</pre>
+<figcaption>Rendered at 52 columns. A <code>meter</code> with two segments and <code>max</code> 5.0, with <code>show-values</code> on. Each segment uses the colour of its <code>tone</code>. The remainder up to <code>max</code> is <code>░</code>.</figcaption>
+</figure>
+
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">// types::ui::MeterSegment; types::text::Tone
+let spend = tree
+    .meter(vec![
+        MeterSegment { label: &quot;today&quot;.into(), value: 4.20, tone: Tone::Info },
+        MeterSegment { label: &quot;over budget&quot;.into(), value: 0.80, tone: Tone::Danger },
+    ])
+    .max(5.0)
+    .show_values(true)
+    .key(&quot;spend&quot;);
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">const spend = meter([
+  { label: 'today', value: 4.2, tone: 'info' },
+  { label: 'over budget', value: 0.8, tone: 'danger' },
+], { key: 'spend', max: 5, showValues: true });
+</code></pre>
+<h2 id="minimap">minimap</h2>
+<p><code>minimap</code> draws the shape of a long text in a narrow column. The plugin gives one density value for each line bucket and the host draws it with the density ramp <code>· - = ≡ ≣ █</code>, from light to heavy. The host also draws the marks and the viewport box.</p>
+<table>
+<thead>
+<tr>
+<th>Prop</th>
+<th>Type</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>density</code></td>
+<td><code>list&lt;u8&gt;</code></td>
+<td>One value from 0 to 255 for each line bucket.</td>
+</tr>
+<tr>
+<td><code>marks</code></td>
+<td><code>list&lt;minimap-mark&gt;</code></td>
+<td>Coloured marks: <code>line</code>, <code>color</code> and <code>lane</code> (0 to 2).</td>
+</tr>
+<tr>
+<td><code>viewport</code></td>
+<td><code>tuple&lt;u32, u32&gt;</code></td>
+<td>The first and last visible line.</td>
+</tr>
+<tr>
+<td><code>total-lines</code></td>
+<td><code>u32</code></td>
+<td>The number of lines in the text.</td>
+</tr>
+</tbody>
+</table>
+<p>Actions: <code>activated</code> with <code>index(u32)</code>, the line, when the user clicks, and <code>scrolled</code> with <code>index(u32)</code> when the user drags the viewport. Keys: Up and Down move the viewport box. The plugin moves its own view on <code>scrolled</code>. Roles: <code>muted</code> for the density and the colours of the marks.</p>
+<figure>
+<pre class="term">╭─ notes.md ─────────────────────╮
+│ # Release notes           <span class="t-dim">≣</span>    │
+│                           <span class="t-dim">·</span>    │
+│ Fixes the detection loop. <span class="t-hi">│</span><span class="t-dim">=</span><span class="t-hi">│</span>  │
+│                          <span class="t-hi">│</span><span class="t-dim">·</span><span class="t-hi">│</span>   │
+│ - faster startup         <span class="t-hi">│</span><span class="t-dim">-</span><span class="t-hi">│</span>   │
+│ - fewer redraws          <span class="t-hi">│</span><span class="t-dim">-</span><span class="t-hi">│</span>   │
+│                           <span class="t-dim">·</span>    │
+│ ```                       <span class="t-dim">≡</span>    │
+│ run()                     <span class="t-dim">≡</span>    │
+│ ```                       <span class="t-dim">≡</span>    │
+│                           <span class="t-dim">·</span>    │
+╰────────────────────────────────╯
+</pre>
+<figcaption>Rendered at 34 columns. A <code>minimap</code> beside a text view. Each row is one line bucket drawn with the density ramp <code>· - = ≡ ≣ █</code>. The two <code>│</code> columns mark the viewport.</figcaption>
+</figure>
+
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">// types::ui::MinimapMark
+let overview = tree
+    .minimap(self.density.clone())
+    .marks(vec![MinimapMark { line: 120, color: Color::role(ColorRole::Danger), lane: 1 }])
+    .viewport((self.first_line, self.last_line))
+    .total_lines(self.total_lines)
+    .key(&quot;overview&quot;);
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">const overview = minimap(density, {
+  key: 'overview',
+  marks: [{ line: 120, color: role('danger'), lane: 1 }],
+  viewport: [firstLine, lastLine],
+  totalLines: totalLines,
+});
+</code></pre>
+<h2 id="where-the-tooltip-comes-from">Where the tooltip comes from</h2>
+<p>A data widget with a hover tooltip (a sparkline column, a chart point, a meter segment, the details of a progress row) draws it with the same rounded block as every other tooltip, after the 500 ms delay. <a href="/pages/ui-model/">The UI model</a> shows it.</p>
+<h2 id="worked-example-in-rust">Worked example in Rust</h2>
+<p>This plugin panel shows the context window as a line gauge, a token series as a text line chart, a job as a progress row and the month's spend as a meter. It keeps its data in fields, and the host calls <code>render</code> each time the plugin calls <code>ui::invalidate</code>.</p>
+<pre><code class="language-rust">use ilium_plugin_sdk::prelude::*;
+use ilium_plugin_sdk::types::layout::{Area, Constraint, Direction};
+use ilium_plugin_sdk::types::ui::{Axis, Dataset, MeterSegment, ProgressState, UiTree, ViewTarget};
+use ilium_plugin_sdk::types::text::Tone;
+use ilium_plugin_sdk::types::ui::{ChartRender, Resample};
+use ilium_plugin_sdk::ui::build::Tree;
+
+#[ilium_plugin(side = &quot;client&quot;, exports = [&quot;views&quot;])]
+#[derive(Default)]
+pub struct UsagePanel {
+    pub context_ratio: f64,
+    pub tokens: Vec&lt;(f64, f64)&gt;,
+    pub percent: f32,
+    pub spent: f64,
+}
+
+impl Views for UsagePanel {
+    fn render(&amp;mut self, _view: ViewTarget, _area: Area) -&gt; UiTree {
+        let mut tree = Tree::new();
+        let context = tree.line_gauge(self.context_ratio).key(&quot;context&quot;);
+        let tokens = tree
+            .chart(
+                vec![Dataset::new(&quot;tokens&quot;, self.tokens.clone()).resample(Resample::MinMax)],
+                Axis { title: None, bounds: (0.0, 60.0), labels: vec![] },
+                Axis { title: None, bounds: (0.0, 12.0), labels: vec![] },
+            )
+            .render(ChartRender::TextLine)
+            .y_label_width(6)
+            .key(&quot;tokens&quot;);
+        let job = tree
+            .progress_row(&quot;Replaying sessions&quot;)
+            .state(ProgressState::Running)
+            .percent(self.percent)
+            .key(&quot;job&quot;);
+        let spend = tree
+            .meter(vec![MeterSegment { label: &quot;today&quot;.into(), value: self.spent, tone: Tone::Info }])
+            .max(5.0)
+            .show_values(true)
+            .key(&quot;spend&quot;);
+        let column = tree
+            .layout(
+                Direction::Vertical,
+                [Constraint::Length(1), Constraint::Fill(1), Constraint::Length(1), Constraint::Length(2)],
+            )
+            .child(context)
+            .child(tokens)
+            .child(job)
+            .child(spend);
+        let frame = tree.block().title(&quot;Usage&quot;).child(column);
+        tree.finish(frame)
+    }
+}
+</code></pre>
+<p><code>tree.finish</code> fills the version and the node indices and returns the <code>UiTree</code> that <code>render</code> must return. Call <code>ui::invalidate(view)</code> in the event handler after a field changes.</p>
+<h2 id="worked-example-in-typescript">Worked example in TypeScript</h2>
+<p>The same panel in TypeScript. The builders take the required prop first, then the props object, then the child handles.</p>
+<pre><code class="language-ts">import { definePlugin } from '@ilium/plugin-sdk';
+import {
+  block, chart, fill, layout, length, lineGauge, meter, progressRow, tree,
+} from '@ilium/plugin-sdk/ui/build';
+
+let contextRatio = 0.67;
+let tokens: [number, number][] = [];
+let percent = 37;
+let spent = 4.2;
+
+export const { lifecycle, handler, views } = definePlugin({
+  side: 'client',
+  activate(_context) {},
+  onEvents(_batch) { return []; },
+  render(_view, _area) {
+    const context = lineGauge(contextRatio, { key: 'context' });
+    const tokenChart = chart(
+      [{ name: 'tokens', points: tokens, resample: 'min-max' }],
+      { bounds: [0, 60], labels: [] },
+      { bounds: [0, 12], labels: [] },
+      { key: 'tokens', render: 'text-line', yLabelWidth: 6 },
+    );
+    const job = progressRow('Replaying sessions', { key: 'job', state: 'running', percent });
+    const spend = meter([{ label: 'today', value: spent, tone: 'info' }], {
+      key: 'spend', max: 5, showValues: true,
+    });
+    const column = layout({
+      direction: 'vertical',
+      constraints: [length(1), fill(1), length(1), length(2)],
+    }, [context, tokenChart, job, spend]);
+    return tree(block({ titles: [{ text: 'Usage', position: 'top', alignment: 'left' }] }, [column]));
+  },
+});
+</code></pre>
+<p>Style fields that are not given take their empty value, so <code>{ fg: role('success') }</code> leaves <code>bg</code>, <code>add</code> and <code>remove</code> empty.</p>
+<h2 id="edge-cases-and-errors">Edge cases and errors</h2>
+<p>Data widgets return no error codes. Their mistakes show up as a trap or as a quiet empty draw.</p>
+<table>
+<thead>
+<tr>
+<th>Case</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ratio</code> below 0 or above 1</td>
+<td>The host clamps it to the range. <code>NaN</code> draws as 0.</td>
+</tr>
+<tr>
+<td><code>sparkline</code> or <code>bar-chart</code> with no entries, or a sparkline with only <code>none</code></td>
+<td>The frame draws with no bars or columns.</td>
+</tr>
+<tr>
+<td>A <code>value</code> above <code>max</code></td>
+<td>The bar fills the full length.</td>
+</tr>
+<tr>
+<td>A dataset with no points</td>
+<td>The dataset draws nothing.</td>
+</tr>
+<tr>
+<td>A <code>NaN</code> y value without <code>gaps</code></td>
+<td>The point is skipped. With <code>gaps</code> it ends the line segment.</td>
+</tr>
+<tr>
+<td><code>resample</code> with fewer points than cells</td>
+<td>No change.</td>
+</tr>
+<tr>
+<td>Points or shapes outside the bounds</td>
+<td>They are clipped at the edge of the plot.</td>
+</tr>
+<tr>
+<td><code>marked</code> day outside the month</td>
+<td>The entry is ignored.</td>
+</tr>
+<tr>
+<td><code>progress-row</code> with <code>percent</code> above 100</td>
+<td>The host clamps it to 100.</td>
+</tr>
+<tr>
+<td><code>meter</code> with more than 8 segments</td>
+<td>The tree is invalid.</td>
+</tr>
+<tr>
+<td><code>meter</code> segments that sum to more than <code>max</code></td>
+<td>The bar is full, and the last segments are cut.</td>
+</tr>
+<tr>
+<td><code>minimap</code> with empty <code>density</code></td>
+<td>The column draws empty.</td>
+</tr>
+<tr>
+<td><code>month</code> outside 1 to 12, or axis or canvas bounds where the low value is not below the high value</td>
+<td>The builder stops the render with a message that names the widget, and the invalid tree traps the instance.</td>
+</tr>
+<tr>
+<td>A tree of more nodes than the effective <code>ui_tree_nodes</code> limit (4,096 by default)</td>
+<td>The tree is invalid and traps the instance.</td>
+</tr>
+<tr>
+<td><code>ui.invalidate</code> for a view the plugin does not declare</td>
+<td>The call is ignored, and the host writes one <code>warn</code> log line that names the view.</td>
+</tr>
+</tbody>
+</table>
+<p>A trap ends the plugin instance, and the host applies the <a href="/pages/reference-errors-and-limits/#restart-and-disable-rule">restart and disable rule</a>: restart after 1 s, then 5 s, and disable at the third failure in 10 minutes.</p>
+<h2 id="what-the-user-sees">What the user sees</h2>
+<p>The view repaints when the plugin returns a new tree. Most data widgets take no key input of their own and send nothing back, so a key press on them does nothing unless the plugin sets the <code>focusable</code> flag or the widget has an action of its own. Colours come from the theme and the shared look, and the user can switch to stable glyphs. Under reduced motion the plugin should avoid redrawing a chart faster than the data changes.</p>
+<p>Requirement ids for this page: [WID-022], [WID-023], [WID-024]. See the <a href="/pages/reference-requirements/">requirements index</a>.</p>
+<h2 id="see-also">See also</h2>
+<ul>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded</a> for <code>surface</code>, <code>image</code> and <code>video</code></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/accessibility-and-theming/">Accessibility and theming</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+</ul>
+<p>API version: <code>ilium:plugin@0.1.0</code>.</p>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/widgets-collections/"><small>Previous</small>Collections</a><a class="next" href="/pages/widgets-index/"><small>Next</small>Widget catalogue</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#you-need">You need</a></li><li class="l2"><a href="#how-a-data-view-updates">How a data view updates</a></li><li class="l2"><a href="#the-widgets">The widgets</a></li><li class="l2"><a href="#gauge">gauge</a></li><li class="l2"><a href="#line-gauge">line-gauge</a></li><li class="l2"><a href="#sparkline">sparkline</a></li><li class="l2"><a href="#bar-chart">bar-chart</a></li><li class="l2"><a href="#chart">chart</a></li><li class="l3"><a href="#braille-render">Braille render</a></li><li class="l3"><a href="#text-line-render">Text-line render</a></li><li class="l2"><a href="#canvas">canvas</a></li><li class="l2"><a href="#calendar">calendar</a></li><li class="l2"><a href="#progress-row">progress-row</a></li><li class="l2"><a href="#meter">meter</a></li><li class="l2"><a href="#minimap">minimap</a></li><li class="l2"><a href="#where-the-tooltip-comes-from">Where the tooltip comes from</a></li><li class="l2"><a href="#worked-example-in-rust">Worked example in Rust</a></li><li class="l2"><a href="#worked-example-in-typescript">Worked example in TypeScript</a></li><li class="l2"><a href="#edge-cases-and-errors">Edge cases and errors</a></li><li class="l2"><a href="#what-the-user-sees">What the user sees</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

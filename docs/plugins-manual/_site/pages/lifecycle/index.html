@@ -1,0 +1,1270 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Lifecycle | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details open><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/" aria-current="page">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Concepts</b></p>
+<h1>Lifecycle</h1>
+
+<p>A plugin moves through install, activation, running, stopping and, when something goes wrong, failure, revocation or disable. The host decides when each stage happens. Your code receives two calls, <code>activate</code> and <code>deactivate</code>. The bytes you return from <code>deactivate</code> come back as <code>restored</code> on the next activation, so a cursor or a scroll position can survive a restart.</p>
+<h2 id="you-will-need">You will need</h2>
+<ul>
+<li>A package with a <code>manifest.json</code>. Add the <code>activation</code> key for every trigger that must fire without a user action. See <a href="/pages/packages/">Packages and manifests</a> and <a href="/pages/reference-manifest/">Reference: manifest</a>.</li>
+<li>Every component exports <code>lifecycle</code> and <code>handler</code>. The manifest lists only the optional exports, such as <code>views</code> or <code>detector</code>.</li>
+<li>For Rust: a stable Rust toolchain with the WASI Preview 2 component target, and the <code>ilium-plugin-sdk</code> crate. For TypeScript: Bun and <code>@ilium/plugin-sdk</code>. The SDK release pins the toolchain versions it needs, so nothing is installed globally.</li>
+<li>The grants your code uses. A plugin runs without any grant, and it sees only the grants listed in <code>granted</code>. See <a href="/pages/capabilities/">Capabilities and grants</a>.</li>
+</ul>
+<h2 id="install">Install</h2>
+<p>Installing verifies the package and records the grants the user accepts.</p>
+<ul>
+<li><code>ilium plugin install &lt;file.iliumpkg&gt; [--allow-unsigned]</code> installs a package. The check covers the layout, the file inventory, the <code>api</code> field and the <code>ilium:api-version</code> section of each component. A component built for a newer minor version than the host is refused, and the error names both versions.</li>
+<li>Tier T2 needs a signature from a publisher key the user trusts. <code>ilium plugin trust add &lt;publisher.pub&gt;</code> adds a key. An unknown key is offered for trust with its fingerprint, and declining refuses the install. T3 packages install only with <code>--allow-unsigned</code> or through <code>ilium plugin dev</code>.</li>
+<li>For a T2 or T3 package, the review dialog lists every capability with its risk. Normal capabilities are checked by default, high-risk ones are unchecked. An unchecked capability is not granted.</li>
+<li>A T1 bundled plugin receives its manifest ceiling automatically. Its high-risk capabilities are asked once, at first activation, with <code>Allow selected</code> and <code>Not now</code>. <code>Not now</code> asks again at the next server start, at most three times. The counter is stored with the grants record and is reset by an update ([LIF-275]).</li>
+<li>Installing a newer version is an update, and the dialog shows only the new capabilities. A lower version is refused unless you pass <code>--allow-downgrade</code>. The full pipeline, rollback and uninstall are specified in <a href="/pages/reference-install-update-uninstall/">Install, update and uninstall</a>.</li>
+<li>On Windows and macOS, T2 and T3 packages are refused with <code>Cannot install &lt;name&gt; &lt;version&gt;.</code> and the sandbox message. Bundled plugins keep working.</li>
+</ul>
+<h2 id="activation">Activation</h2>
+<p>A plugin is not instantiated at install. The host instantiates it when one of its triggers fires. Without an <code>activation</code> key, the plugin is instantiated on the first use of any of its contributions. That is lazy loading. A plugin that publishes decorations from the start must declare <code>"activation": ["startup"]</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Trigger</th>
+<th>Fires when</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>startup</code></td>
+<td>the server starts, or the client starts for client-side plugins</td>
+</tr>
+<tr>
+<td><code>event:&lt;event-name&gt;</code></td>
+<td>the named event is delivered to the plugin</td>
+</tr>
+<tr>
+<td><code>command:&lt;id&gt;</code></td>
+<td>a command of the plugin is invoked</td>
+</tr>
+<tr>
+<td><code>view:&lt;id&gt;</code></td>
+<td>the plugin's view is opened</td>
+</tr>
+<tr>
+<td><code>pane-kind:&lt;id&gt;</code></td>
+<td>a pane of the plugin's kind is created or restored</td>
+</tr>
+<tr>
+<td><code>scene:&lt;id&gt;</code></td>
+<td>the plugin's scene is shown</td>
+</tr>
+<tr>
+<td><code>cli:&lt;name&gt;</code></td>
+<td>the plugin's subcommand runs</td>
+</tr>
+<tr>
+<td><code>http:&lt;path&gt;</code></td>
+<td>a request arrives on the plugin's route</td>
+</tr>
+<tr>
+<td><code>service:&lt;interface&gt;</code></td>
+<td>a caller invokes the service, which waits for activation</td>
+</tr>
+<tr>
+<td><code>topic:&lt;topic&gt;</code></td>
+<td>the exact topic is published; a pattern subscriber uses <code>startup</code></td>
+</tr>
+<tr>
+<td><code>settings:&lt;tab-id&gt;</code></td>
+<td>the plugin's own settings tab is opened, or a built-in tab that carries one of its sections is opened</td>
+</tr>
+</tbody>
+</table>
+<p><code>activate</code> receives a context record. Its fields are the same in every language.</p>
+<table>
+<thead>
+<tr>
+<th>WIT field</th>
+<th>Rust</th>
+<th>TypeScript</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>plugin</code></td>
+<td><code>plugin</code></td>
+<td><code>plugin</code></td>
+<td>the plugin id</td>
+</tr>
+<tr>
+<td><code>api</code></td>
+<td><code>api</code></td>
+<td><code>api</code></td>
+<td>the API version string</td>
+</tr>
+<tr>
+<td><code>instance</code></td>
+<td><code>instance: u64</code></td>
+<td><code>instance: bigint</code></td>
+<td>the instance number, unique per run</td>
+</tr>
+<tr>
+<td><code>side</code></td>
+<td><code>side</code></td>
+<td><code>side</code></td>
+<td><code>server</code>, <code>client</code> or <code>scene</code></td>
+</tr>
+<tr>
+<td><code>settings-json</code></td>
+<td><code>settings_json</code></td>
+<td><code>settingsJson</code></td>
+<td>the current settings as a JSON object</td>
+</tr>
+<tr>
+<td><code>granted</code></td>
+<td><code>granted: Vec&lt;String&gt;</code></td>
+<td><code>granted: string[]</code></td>
+<td>grants the user accepted; declined ones are absent</td>
+</tr>
+<tr>
+<td><code>restored</code></td>
+<td><code>restored: Option&lt;Vec&lt;u8&gt;&gt;</code></td>
+<td><code>restored: Uint8Array \| undefined</code></td>
+<td>bytes from the last <code>deactivate</code>, or none</td>
+</tr>
+</tbody>
+</table>
+<p>The WIT signatures are <code>activate: func(context: activation) -&gt; result&lt;_, plugin-error&gt;</code> and <code>deactivate: func(reason: deactivation-reason) -&gt; option&lt;list&lt;u8&gt;&gt;</code>.</p>
+<p>The <code>activate</code> call may yield. Its deadline is 2 s by default and 5 s for T1 plugins (<code>activate_deadline_ms</code>). A breach is a trap. The <code>deactivate</code> call has 500 ms by default and 1 s for T1 plugins (<code>deactivate_deadline_ms</code>). When it misses that deadline, the instance is dropped and no restore bytes are kept. The defaults are the same for every tier, and the figures for T1 are ceilings. Every deadline, its breach effect and whether it counts as a failure are in the call-class table of <a href="/pages/reference-host-scheduling/#call-classes">Host scheduling</a>.</p>
+<p>The reasons passed to <code>deactivate</code> are:</p>
+<table>
+<thead>
+<tr>
+<th>Reason</th>
+<th>Sent when</th>
+<th>Counts as a failure</th>
+<th>Returned bytes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>shutdown</code></td>
+<td>the server stops, after its services stop</td>
+<td>no</td>
+<td>stored as restore state</td>
+</tr>
+<tr>
+<td><code>disabled</code></td>
+<td>the user switches the plugin off</td>
+<td>no</td>
+<td>kept for the next activation</td>
+</tr>
+<tr>
+<td><code>upgrade</code></td>
+<td>an installed update replaces the running version, or <code>ilium plugin dev</code> rebuilds it</td>
+<td>no</td>
+<td>passed to the new version as <code>restored</code> when its <code>data_version</code> is unchanged</td>
+</tr>
+<tr>
+<td><code>revoked</code></td>
+<td>a granted capability is revoked</td>
+<td>no</td>
+<td>passed back as <code>restored</code></td>
+</tr>
+<tr>
+<td><code>granted</code></td>
+<td>a capability is added</td>
+<td>no</td>
+<td>passed back as <code>restored</code></td>
+</tr>
+<tr>
+<td><code>crash-restart</code></td>
+<td>reserved, never sent [ABI-028]; a trap drops the instance without a call</td>
+<td>not applicable</td>
+<td>none</td>
+</tr>
+</tbody>
+</table>
+<p>The enum <code>deactivation-reason</code> has six cases in a fixed order: <code>shutdown</code>, <code>disabled</code>, <code>upgrade</code>, <code>crash-restart</code>, <code>revoked</code>, <code>granted</code>. Five are delivered. A client that disconnects has no case of its own: the host deactivates that instance with <code>shutdown</code> and the returned bytes are stored as restore state, see <a href="/pages/reference-persistence-and-restart/">persistence and restart</a>.</p>
+<ul>
+<li>[LIF-043] The enum <code>deactivation-reason</code> MUST have the six values above, and the host MUST send <code>crash-restart</code> never. Test: enumerate the reasons seen across a full lifecycle test.</li>
+<li>[LIF-044] A production update MUST send <code>upgrade</code> to every live instance of the old version before the swap. Test: update an active plugin and read the reason.</li>
+</ul>
+<p>Revocations and grant changes re-activate the plugin with the new <code>granted</code> list, so read <code>granted</code> on every activation.</p>
+<h2 id="durable-timers-and-further-triggers">Durable timers and further triggers</h2>
+<p>Ordinary timers end with the instance. A durable timer (<code>timers.at</code>, always granted) survives a server restart. It fires as <code>durable-timer-fired</code> with <code>timer</code>, <code>name</code> and <code>late-by-millis</code>. If Ilium was not running at the due time, it fires once after the next activation, with the lateness. The same <code>name</code> replaces an earlier timer. Durable timers and journal entries also survive a deactivation.</p>
+<p>Further activation triggers are <code>catalog:&lt;id&gt;</code>, <code>menu:&lt;id&gt;</code>, <code>virtual-rows:&lt;row-kind&gt;</code>, <code>language:&lt;id&gt;</code>, <code>client-request:&lt;kind&gt;</code> and <code>durable-timer</code>. On stop, the host also closes the plugin's HTTP streams, ends its spawned children, releases its input locks, withdraws its status segments, frame slots, toasts and row actions, and fails its open client requests with <code>cancelled</code>. After a trap the host does the same for the dead instance, and also cancels the jobs and ends the helper processes it started ([LIF-271]). A <code>cli</code> entry with <code>requires_server: false</code> activates the server component in the CLI process and deactivates it with the reason <code>shutdown</code> at the end of the command.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">// Re-arm after every activation. The same name replaces an earlier timer.
+timers::at(clock::now_unix_millis() + 86_400_000, &quot;nightly-scan&quot;)?;
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">// Re-arm after every activation. The same name replaces an earlier timer.
+timers.at(clock.nowUnixMillis() + 86_400_000n, 'nightly-scan');
+</code></pre>
+<h2 id="activation-order">Activation order</h2>
+<p>The host decides which plugins start and in which order. This section is normative.</p>
+<h3 id="start-order">Start order</h3>
+<p>On the server, the kernel starts in this order:</p>
+<ol>
+<li>Boot and configuration load.</li>
+<li>The snapshot is restored.</li>
+<li>The plugin host verifies each installed manifest, applies policy and safe mode, and registers static contributions. Nothing is instantiated yet.</li>
+<li>Plugins with the <code>startup</code> trigger are activated, in the order below.</li>
+<li>Each activated plugin receives one <code>tree-changed</code> batch for all restored nodes.</li>
+</ol>
+<p>The <code>startup</code> trigger fires when the server starts for server-side plugins, and when the client starts for client-side plugins.</p>
+<ul>
+<li>[LIF-045] The host MUST compute the start order of <code>startup</code> plugins with Kahn's algorithm over the edges of the non-optional <code>requires.plugins</code> entries and of the <code>requires.services</code> entries to their providers. A provider's <code>activate</code> MUST return before any consumer that requires it begins <code>activate</code>. Test: three plugins, A requires B requires C, record the order of <code>activate.begin</code>.</li>
+<li>[LIF-046] At each step of that algorithm the host MUST take the ready node with the smallest key: the tier number (T1 first), then the plugin id in ascending byte order. Test: install T1 <code>b</code>, T2 <code>a</code> and T1 <code>a</code> with no dependencies and assert the order T1 <code>a</code>, T1 <code>b</code>, T2 <code>a</code>.</li>
+<li>[LIF-047] Independent plugins MAY activate in parallel. The host MUST run at most 4 concurrent activations per side, and MUST start them in the order of LIF-046. Test: 12 independent plugins, each blocking in <code>activate</code>, and assert the peak is 4 and that the begin order is the key order.</li>
+<li>[LIF-048] A cycle in the non-optional <code>requires.services</code> entries MUST be refused at install, at stage 10, with <code>manifest.service-cycle</code>. A cycle in <code>requires.plugins</code> is refused with <code>dependency.cycle</code>. The rules for both are in <a href="/pages/reference-dependency-resolution/">Versions and dependencies</a>. Test: install two plugins that require each other's services and read the code and the cycle order.</li>
+<li>[LIF-049] Dependencies are <code>requires.plugins</code> and <code>requires.services</code>. The host version is checked only through <code>requires.host</code>, which is refused with <code>dependency.host-version</code> at stage 10. A key named <code>engines</code> is refused with <code>manifest.unknown-key</code>. Test: install a manifest with <code>requires.host</code> above the running release, and one with an <code>engines</code> key.</li>
+</ul>
+<h3 id="stop-order">Stop order</h3>
+<ul>
+<li>[LIF-050] On server stop the host MUST call <code>deactivate(shutdown)</code> in the exact reverse of the start order, one at a time, so that a consumer stops before the providers it requires. The order of completion of the starts does not matter. Test: record the order of <code>deactivate</code> calls after a start in which activations finished in a different order.</li>
+</ul>
+<h3 id="when-a-provider-is-not-available">When a provider is not available</h3>
+<p>A consumer is a plugin that requires a service interface. A consumer is never deactivated because its provider changed state.</p>
+<table>
+<thead>
+<tr>
+<th>Provider state</th>
+<th>What a call to the service returns</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>activating</code> or <code>inactive</code></td>
+<td>The call waits for activation, up to the call deadline (<code>service:</code> trigger).</td>
+</tr>
+<tr>
+<td><code>restart-scheduled</code></td>
+<td><code>busy</code> with <code>retry-after-ms</code> set to the time left on the timer.</td>
+</tr>
+<tr>
+<td><code>stopped-by-failure</code>, <code>installed-disabled-by-user</code>, <code>disabled-untrusted</code>, <code>disabled-blocked</code>, refused or uninstalled</td>
+<td><code>not-found</code>.</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>[LIF-051] A consumer MUST stay active when its provider fails, is disabled or is uninstalled. Test: disable the provider and assert the consumer state.</li>
+<li>[LIF-052] The host MUST return the code in the table for a service call. Test: one case per row.</li>
+<li>[LIF-053] The host MUST send the event <code>service-availability-changed</code> (<code>interface</code>, <code>available</code>, <code>provider</code>) to every active consumer when the availability of a required interface changes. Test: disable and enable the provider and read the events.</li>
+<li>[LIF-054] When the user disables a plugin that is a provider for other plugins, the disable dialog MUST list the dependants, and the CLI MUST print a <code>warning</code> line for each dependant. The disable is not blocked. Test: disable a provider and read the dialog text.</li>
+</ul>
+<h3 id="extension-owners-and-contributors">Extension owners and contributors</h3>
+<ul>
+<li>[LIF-055] The host MUST activate the owner of an extension point before its contributors. After the owner's <code>activate</code> returns, the host MUST activate in the background the lazy contributors of its points, so that a contribution needs no trigger of its own. Test: a lazy contributor to a hook point becomes <code>active</code> after the owner activates.</li>
+<li>[LIF-056] A hook call MUST NOT wait for a contributor that is not yet <code>active</code>. The host skips it, treats it as <code>pass</code> and logs <code>extension.contributor-not-ready</code>. Test: call a hook while the contributor is <code>activating</code>.</li>
+</ul>
+<h3 id="client-handshake-and-version-skew">Client handshake and version skew</h3>
+<p>The client handshake carries the plugin id, version and API version of every installed plugin. A mismatch in the API version fails loudly, as before. A difference in plugin version is allowed during an update.</p>
+<ul>
+<li>[LIF-057] If the server and a client run different versions of one plugin, each side MUST keep running the version it has until it receives the change notice for the update. The host MUST NOT block messages between the sides. Test: update a plugin while a client is attached and assert both sides finish on the new version.</li>
+<li>[LIF-058] A client whose API version differs from the server's MUST be refused at the handshake with the message <code>api-version mismatch</code> naming both versions. Test: connect a client with a different API version.</li>
+</ul>
+<h3 id="startup-budget">Startup budget</h3>
+<ul>
+<li>[LIF-059] The client SHOULD render its first frame when the essential client plugins are active, or after 1,000 ms, whichever comes first. Plugins that are not active by then continue to activate in the background, and the first frame shows a <code>starting plugins</code> mark. Test: delay a non-essential plugin by 3 s and assert the first frame appears within 1,100 ms.</li>
+</ul>
+<h2 id="core-plugins-at-boot">Core plugins at boot</h2>
+<p>The <code>startup</code> trigger applies per side: a server side with <code>startup</code> starts when the server host starts, and a client side with <code>startup</code> starts when the client host starts. The core plugins that start at boot and those that start on first use are listed in <a href="/pages/reference-kernel-and-boot/#startup-and-lazy-activation-of-the-30-core-plugins">startup and lazy activation</a>. Safe start (<code>--safe-plugins</code>) loads only the essential set, and <code>--no-plugins</code> loads none. [COR-020] [COR-021]</p>
+<h2 id="running">Running</h2>
+<p>The host calls the exports in response to events, views, commands and scene frames. Each call has its own deadline, for example 20 ms for <code>handler.on-events</code>. A breach counts as a failure. See <a href="/pages/errors-and-limits/">Errors and limits</a>.</p>
+<h2 id="stop-and-the-final-save">Stop and the final save</h2>
+<p>On server shutdown, the services stop first. Then the plugin host refuses new plugin submissions, which complete as <code>cancelled</code>. Each active plugin receives <code>deactivate(shutdown)</code> in reverse start order (consumers before the providers they require), and its returned bytes become its restore state. Pending requests are cancelled and instances are dropped. The final snapshot is written last, so no plugin intent can reach it after the writer stops.</p>
+<figure>
+<svg viewBox="0 0 400 260" role="img" aria-label="Server start and shutdown sequence" width="600" height="390">
+  <title>Server start and shutdown sequence</title>
+  <desc>Start runs from boot through snapshot restore, plugin host start, startup activation and the first tree-changed batch. Shutdown runs from services stopping through deactivate calls, request cancellation and the final snapshot.</desc>
+  <text x="8" y="20" font-size="11" fill="currentColor">Server start</text>
+  <line x1="24" y1="26" x2="24" y2="128" stroke="currentColor"/>
+  <circle cx="24" cy="40" r="4" fill="currentColor"/>
+  <text x="40" y="44" font-size="10" fill="currentColor">Kernel boot and configuration load</text>
+  <circle cx="24" cy="62" r="4" fill="currentColor"/>
+  <text x="40" y="66" font-size="10" fill="currentColor">Snapshot restored</text>
+  <circle cx="24" cy="84" r="4" fill="currentColor"/>
+  <text x="40" y="88" font-size="10" fill="currentColor">Plugin host verifies manifests and registers contributions</text>
+  <circle cx="24" cy="106" r="4" fill="currentColor"/>
+  <text x="40" y="110" font-size="10" fill="currentColor">Startup plugins activated, providers before consumers</text>
+  <circle cx="24" cy="128" r="4" fill="currentColor"/>
+  <text x="40" y="132" font-size="10" fill="currentColor">One tree-changed batch for all restored nodes</text>
+  <text x="8" y="162" font-size="11" fill="currentColor">Server shutdown</text>
+  <line x1="24" y1="168" x2="24" y2="248" stroke="currentColor"/>
+  <circle cx="24" cy="182" r="4" fill="currentColor"/>
+  <text x="40" y="186" font-size="10" fill="currentColor">Services stop, plugin submissions are refused</text>
+  <circle cx="24" cy="204" r="4" fill="currentColor"/>
+  <text x="40" y="208" font-size="10" fill="currentColor">deactivate(shutdown) in reverse activation order</text>
+  <circle cx="24" cy="226" r="4" fill="currentColor"/>
+  <text x="40" y="230" font-size="10" fill="currentColor">Pending requests cancelled, instances dropped</text>
+  <circle cx="24" cy="248" r="4" fill="currentColor"/>
+  <text x="40" y="252" font-size="10" fill="currentColor">Final snapshot written</text>
+</svg>
+<figcaption>Start runs top to bottom. On shutdown the final snapshot is written last, so no plugin intent reaches it.</figcaption>
+</figure>
+
+<h2 id="worked-example-keep-a-cursor-across-restarts">Worked example: keep a cursor across restarts</h2>
+<p>The Rust example is a client plugin. It keeps a line number in memory, saves it on shutdown and reads it back on the next activation. It moves the cursor on a command, and it moves it only when the user granted <code>fs.read:project</code>. Both exports are required, so the plugin implements <code>Handler</code> as well as <code>Lifecycle</code>.</p>
+<pre><code class="language-rust">use ilium_plugin_sdk::prelude::*;
+use ilium_plugin_sdk::exports::{Activation, DeactivationReason};
+use ilium_plugin_sdk::host::log::{self, Level};
+
+const NEXT_COMMAND: &amp;str = &quot;com.example.cursor/next&quot;;
+const FILE_READ_GRANT: &amp;str = &quot;fs.read:project&quot;;
+
+#[ilium_plugin(side = &quot;client&quot;)]
+#[derive(Default)]
+struct CursorKeeper {
+    cursor_line: u32,
+    can_read_files: bool,
+}
+
+impl Lifecycle for CursorKeeper {
+    fn activate(&amp;mut self, context: Activation) -&gt; Result&lt;(), PluginError&gt; {
+        self.can_read_files = context.granted.iter().any(|grant| grant.as_str() == FILE_READ_GRANT);
+        if let Some(saved) = context.restored.as_deref() {
+            if let Ok(four_bytes) = &lt;[u8; 4]&gt;::try_from(saved) {
+                self.cursor_line = u32::from_le_bytes(four_bytes);
+            }
+        }
+        log::log(Level::Info, &amp;format!(&quot;cursor at line {}&quot;, self.cursor_line));
+        Ok(())
+    }
+
+    fn deactivate(&amp;mut self, reason: DeactivationReason) -&gt; Option&lt;Vec&lt;u8&gt;&gt; {
+        match reason {
+            DeactivationReason::Shutdown =&gt; Some(self.cursor_line.to_le_bytes().to_vec()),
+            _ =&gt; None,
+        }
+    }
+}
+
+impl Handler for CursorKeeper {
+    fn on_events(&amp;mut self, batch: Vec&lt;Event&gt;) -&gt; Vec&lt;Submission&gt; {
+        for event in batch {
+            if let Event::CommandInvoked(invoked) = event {
+                if invoked.command == NEXT_COMMAND &amp;&amp; self.can_read_files {
+                    self.cursor_line += 1;
+                }
+            }
+        }
+        Vec::new()
+    }
+}
+</code></pre>
+<p>The TypeScript version uses the same manifest and the same behaviour. <code>definePlugin</code> infers the types of <code>context</code> and <code>reason</code>, so no import is needed for them.</p>
+<pre><code class="language-ts">import { definePlugin, type Event, type Submission } from '@ilium/plugin-sdk';
+import { log } from '@ilium/plugin-sdk/host/log';
+
+const NEXT_COMMAND = 'com.example.cursor/next';
+const FILE_READ_GRANT = 'fs.read:project';
+
+let cursorLine = 0;
+let canReadFiles = false;
+
+export const { lifecycle, handler } = definePlugin({
+  side: 'client',
+  activate(context) {
+    canReadFiles = context.granted.includes(FILE_READ_GRANT);
+    if (context.restored !== undefined &amp;&amp; context.restored.byteLength === 4) {
+      const view = new DataView(context.restored.buffer, context.restored.byteOffset, 4);
+      cursorLine = view.getUint32(0, true);
+    }
+    const reads = canReadFiles ? 'allowed' : 'hidden';
+    log('info', `cursor at line ${cursorLine}, file reads ${reads}`);
+  },
+  deactivate(reason) {
+    if (reason !== 'shutdown') return undefined;
+    const bytes = new Uint8Array(4);
+    new DataView(bytes.buffer).setUint32(0, cursorLine, true);
+    return bytes;
+  },
+  onEvents(batch: Event[]): Submission[] {
+    for (const event of batch) {
+      if (event.tag === 'command-invoked' &amp;&amp; event.val.command === NEXT_COMMAND &amp;&amp; canReadFiles) {
+        cursorLine += 1;
+      }
+    }
+    return [];
+  },
+});
+</code></pre>
+<p>Both versions store the cursor as four little-endian bytes and check the length before decoding.</p>
+<h2 id="failure-counting-and-restart">Failure counting and restart</h2>
+<p>This section is the single normative source for what counts as a failure and for restart delays. Other pages link here and do not restate the numbers.</p>
+<p>A failure is an event that makes the host drop a running instance because of the plugin. When the host drops an instance after a failure, it withdraws the instance's dynamic contributions, keeps its decorations marked stale, cancels its pending requests, records the failure and then either schedules a restart or stops the side.</p>
+<h3 id="the-failure-window">The failure window</h3>
+<ul>
+<li>[LIF-025] The host MUST keep one failure window for each combination of plugin id, side and scope. The scope is the session server for the <code>server</code> side, and one attached client connection for the <code>client</code> and <code>scene</code> sides. Test: attach two clients, trap the plugin twice on client A and once on client B, and assert that <code>failures-in-window</code> is 2 and 1.</li>
+<li>[LIF-026] Two clients MUST NOT share a window. Disabling the plugin by failure on client A MUST NOT stop it on client B or on the server. Test: as above, with a third trap on client A.</li>
+<li>[LIF-027] A window MUST be a sliding window of 10 minutes on a monotonic clock. A failure counts while its age is less than 600 s. Test: with the FakeHost <code>advance_clock</code>, trap at 0 s, advance 599 s and assert the failure counts, advance 2 s more and assert it does not.</li>
+<li>[LIF-285] The failure window is per plugin, per side, per scope and per version. It MUST be emptied when the active version changes, on <code>ilium plugin dev</code> reload and on a manual enable. The first activation failure of an update candidate is not counted (LIF-075), and a manual <code>ilium plugin restart &lt;id&gt;</code> neither counts nor empties the window. Test: trap twice, change the active version and trap again and assert 1 failure; repeat for dev reload and enable; fail a candidate's first activation and assert the window is empty; restart manually and assert the count is unchanged.</li>
+<li>[LIF-028] The first counted failure in a window MUST schedule a restart after 1 s. Test: trap once and read <code>restart-at</code>.</li>
+<li>[LIF-029] The second counted failure in a window MUST schedule a restart after 5 s. Test: trap twice within 10 minutes.</li>
+<li>[LIF-030] The third counted failure in a window MUST stop that side with the instance state <code>stopped-by-failure</code> and MUST NOT schedule a restart. The package state stays <code>installed-enabled</code>. Test: trap three times within 10 minutes and assert no activation follows.</li>
+<li>[LIF-031] The host MUST NOT use any other restart delay. There is no step after the second, because the third failure stops the side. Test: after a stop, advance the clock one hour and assert the side is still stopped.</li>
+<li>[LIF-032] The host MUST NOT add random jitter. The delay timer starts when the instance is dropped. The next activation MUST NOT begin earlier than the delay, and SHOULD begin within 250 ms after it. Test: assert the begin time is in the range delay to delay plus 250 ms.</li>
+</ul>
+<p>Failures older than 10 minutes drop out of the count on their own, so a plugin that runs for 10 minutes without a failure starts again from zero. A stable run needs no separate reset rule. For example, failures at 0 s, 300 s and 660 s: the failure at 660 s sees only the one at 300 s in the window, so it is the second counted failure and restarts after 5 s.</p>
+<figure>
+<svg viewBox="0 0 440 200" role="img" aria-label="Two timelines of failures and restarts" width="660" height="300">
+  <title>Worked failure timelines</title>
+  <desc>Timeline A has three traps within ten minutes: restart after 1 s, restart after 5 s, then the side is stopped. Timeline B has traps at 0 s, 300 s and 660 s: the third trap sees only one earlier failure, so it restarts after 5 s.</desc>
+  <text x="8" y="16" font-size="11" fill="currentColor">A: three failures inside 10 minutes</text>
+  <line x1="20" y1="60" x2="420" y2="60" stroke="currentColor"/>
+  <circle cx="40" cy="60" r="4" fill="currentColor"/>
+  <text x="40" y="46" font-size="10" text-anchor="middle" fill="currentColor">0 s trap</text>
+  <text x="40" y="78" font-size="10" text-anchor="middle" fill="currentColor">restart +1 s</text>
+  <circle cx="150" cy="60" r="4" fill="currentColor"/>
+  <text x="150" y="46" font-size="10" text-anchor="middle" fill="currentColor">61 s trap</text>
+  <text x="150" y="78" font-size="10" text-anchor="middle" fill="currentColor">restart +5 s</text>
+  <circle cx="300" cy="60" r="4" fill="currentColor"/>
+  <text x="300" y="46" font-size="10" text-anchor="middle" fill="currentColor">180 s trap</text>
+  <text x="300" y="78" font-size="10" text-anchor="middle" fill="currentColor">stopped</text>
+  <text x="8" y="116" font-size="11" fill="currentColor">B: the first failure expires</text>
+  <line x1="20" y1="156" x2="420" y2="156" stroke="currentColor"/>
+  <circle cx="40" cy="156" r="4" fill="currentColor"/>
+  <text x="40" y="142" font-size="10" text-anchor="middle" fill="currentColor">0 s trap</text>
+  <text x="40" y="174" font-size="10" text-anchor="middle" fill="currentColor">restart +1 s</text>
+  <circle cx="190" cy="156" r="4" fill="currentColor"/>
+  <text x="190" y="142" font-size="10" text-anchor="middle" fill="currentColor">300 s trap</text>
+  <text x="190" y="174" font-size="10" text-anchor="middle" fill="currentColor">restart +5 s</text>
+  <circle cx="390" cy="156" r="4" fill="currentColor"/>
+  <text x="390" y="142" font-size="10" text-anchor="middle" fill="currentColor">660 s trap</text>
+  <text x="390" y="174" font-size="10" text-anchor="middle" fill="currentColor">restart +5 s</text>
+</svg>
+<figcaption>Timeline A stops the side on the third trap. In timeline B the trap at 0 s is older than 600 s when the third trap arrives, so the window holds two failures.</figcaption>
+</figure>
+
+<h3 id="what-counts">What counts</h3>
+<table>
+<thead>
+<tr>
+<th>Kind of failure</th>
+<th>Counts</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Trap in any export</td>
+<td>yes</td>
+<td>Includes a Rust panic and a thrown TypeScript exception that escapes an export.</td>
+</tr>
+<tr>
+<td><code>activate</code> returns an error</td>
+<td>yes</td>
+<td>Also when a <code>service:</code> or <code>cli:</code> call triggered the activation.</td>
+</tr>
+<tr>
+<td><code>activate</code> misses its deadline</td>
+<td>yes</td>
+<td></td>
+</tr>
+<tr>
+<td><code>handler.on-events</code>, <code>views.render</code> or another export misses its deadline</td>
+<td>yes</td>
+<td></td>
+</tr>
+<tr>
+<td><code>deactivate</code> misses its deadline, reason <code>disabled</code> or <code>shutdown</code></td>
+<td>no</td>
+<td>The plugin is leaving anyway. The instance is dropped and a warn line is logged.</td>
+</tr>
+<tr>
+<td><code>deactivate</code> misses its deadline, reason <code>upgrade</code> or <code>revoked</code></td>
+<td>yes</td>
+<td>The plugin was to continue.</td>
+</tr>
+<tr>
+<td>Event queue overflow (more than 1,024 events by default)</td>
+<td>yes</td>
+<td></td>
+</tr>
+<tr>
+<td>Memory limit of the instance reached</td>
+<td>yes</td>
+<td>A trap.</td>
+</tr>
+<tr>
+<td>Instantiation refused because the session memory pool is full</td>
+<td>no</td>
+<td>Host capacity, see below.</td>
+</tr>
+<tr>
+<td>Service provider fails to start when a call needs it</td>
+<td>yes</td>
+<td>It is an <code>activate</code> failure. The caller gets <code>busy</code> or <code>not-found</code>.</td>
+</tr>
+<tr>
+<td>Failed job (trap, deadline, memory)</td>
+<td>never</td>
+<td>The job request completes as failed. The plugin keeps running.</td>
+</tr>
+<tr>
+<td>Extension handler timeout, trap or error</td>
+<td>not for restart</td>
+<td>It counts only toward the 3-breach stop of that extension. See <a href="/pages/api-extension-points/">extension points</a>.</td>
+</tr>
+<tr>
+<td>Sandbox helper process crash or hang (T2, T3)</td>
+<td>one failure for the plugin whose export was running, none for the others</td>
+<td>The other plugins in the helper restart without a count. See <a href="/pages/reference-health-and-watchdog/">health and watchdog</a>.</td>
+</tr>
+<tr>
+<td>Revocation, grant, disable, update, shutdown, detach</td>
+<td>never</td>
+<td>These are deliberate stops.</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>[LIF-033] The host MUST count each kind in the table as the table says. Test: a parametrised test, one case per row, reading <code>failures-in-window</code>.</li>
+<li>[LIF-034] A refusal caused by host capacity MUST NOT count against the plugin. The instance stays <code>inactive</code> with the reason <code>host-capacity</code>. The host MUST retry the activation when pool memory is released, and in any case 1 s, 5 s and 30 s after the refusal, then every 60 s without end while the plugin is enabled. Test: fill the pool, trigger activation, assert <code>failures-in-window</code> is 0, free memory and assert the activation runs.</li>
+<li>[LIF-035] A failed job MUST NOT count. Test: trap inside a job and assert <code>failures-in-window</code> is unchanged.</li>
+</ul>
+<h3 id="reset-and-persistence">Reset and persistence</h3>
+<ul>
+<li>[LIF-036] Enabling the plugin, the command <code>ilium plugin reset-failures &lt;id&gt;</code>, the Enable action of the recovery page and installing an update MUST clear the failure window of the affected sides. Test: two traps, then each action, then one trap restarts after 1 s.</li>
+<li>[LIF-037] The instance state <code>stopped-by-failure</code> of the server side MUST be written to <code>failure_stopped</code> in <code>installed.json</code> and MUST survive a server restart. The failure window itself MUST NOT; it starts empty. The state of a client or scene side MUST be dropped when its client detaches. Test: stop the server after a stop-by-failure and assert the state after the restart; detach and reattach a client and assert the client side runs again.</li>
+</ul>
+<h3 id="restart-timer-and-other-events">Restart timer and other events</h3>
+<ul>
+<li>[LIF-038] When a server stop begins, the host MUST cancel all pending restart timers and MUST NOT schedule a new one. A failure during shutdown is logged and not counted. Test: schedule a restart, begin a stop and assert no activation.</li>
+<li>[LIF-039] When the user disables the plugin while a restart is pending, the host MUST cancel the timer and move the side to <code>installed-disabled-by-user</code>. Test: schedule, disable, advance the clock past the delay and assert no activation.</li>
+<li>[LIF-040] When an update arrives while a restart is pending, the host MUST cancel the timer, clear the window and activate the new version by its normal triggers. Test: schedule, update, assert the new version activates.</li>
+<li>[LIF-041] A revocation or grant while a restart is pending MUST keep the timer. The new instance MUST receive the current <code>granted</code> list. Test: schedule, revoke a grant, assert the restarted instance sees the shorter list.</li>
+<li>[LIF-042] An essential core plugin (see <a href="/pages/core-plugins/">Core plugins</a>) MUST never be stopped by failure. Its third and later failures in a window MUST restart after 5 s and MUST raise the essential-failure banner. Test: trap <code>ilium.core.tree</code> three times and assert it restarts and the banner shows.</li>
+</ul>
+<p>When the host stops a side, the tree footer shows one notice, called N14 in this manual, and Settings &gt; Plugins lists the same text. This is the only place where the notice is defined. Other pages link here.</p>
+<ul>
+<li>[USR-130] The notice N14 MUST read <code>Plugin &lt;name&gt; stopped after 3 failures in 10 minutes: &lt;export&gt; &lt;code or trap&gt;. Turn it on again in Settings &gt; Plugins.</code> The <code>&lt;export&gt;</code> is the failing export. It names the view, as in <code>views.render trap (sidebar)</code>, only when the failing export was <code>views.render</code>. The tree footer and the row in Settings &gt; Plugins MUST show the same text. Test: trap a plugin three times and compare the footer text and the row text with the template.</li>
+</ul>
+<figure>
+<pre class="term">$ ilium plugin logs com.example.cursor
+<span class="t-err">error</span> trap in activate: index out of bounds
+<span class="t-warn">warn</span>  restart in 1 s (failure 1 of 3, 10 min)
+<span class="t-err">error</span> trap in activate: index out of bounds
+<span class="t-warn">warn</span>  restart in 5 s (failure 2 of 3, 10 min)
+<span class="t-err">error</span> trap in activate: index out of bounds
+<span class="t-err">error</span> stopped: failure 3 of 3, 10 min
+</pre>
+<figcaption>Illustrative, not generated. Log lines of a plugin that traps three times while it activates.</figcaption>
+</figure>
+
+<figure>
+<pre class="term">
+<span class="t-err">!</span> Plugin Cursor keeper stopped after 3 failures
+  in 10 minutes: activate trap. Turn it on
+  again in Settings &gt; Plugins.
+</pre>
+<figcaption>Rendered at 48 columns. Illustrative. Notice N14, the tree footer notice after the third failure. The notice uses the danger colour.</figcaption>
+</figure>
+
+<p>A user re-enables a stopped plugin in Settings &gt; Plugins. That clears the failure window, as LIF-036 says. A call to <code>plugins.set-enabled(id, true)</code> on a failed plugin clears its <code>failed</code> state the same way.</p>
+<h2 id="dormant-extensions">Dormant extensions</h2>
+<p>A plugin may contribute to a point whose owner is not installed or not enabled. Install does not fail. The contribution stays in the package and counts for nothing, and Settings &gt; Plugins shows <code>waiting for &lt;owner&gt;</code>. When the owner appears, the host activates the contribution and sends the owner <code>ilium.extensions/changed</code>. When the owner is disabled, its points drop their contributions in the same way, and they return when it is enabled again. A contributor that was stopped after three breaches in a row stays stopped until its plugin instance restarts or the user presses Reset. The stop is not saved across a server restart ([LIF-270]). See <a href="/pages/api-extension-points/">extension points</a>.</p>
+<h2 id="disable-and-enable">Disable and enable</h2>
+<p><code>plugins.set-enabled(id, false)</code> and the Settings switch take effect at once. The call returns <code>ok</code> when the change is recorded. Then the plugin receives <code>deactivate(disabled)</code> within its deadline, its contributions are withdrawn, its locks are released and its requests are cancelled. Enabling records the change and activates the plugin by its normal rules: a <code>startup</code> plugin at once, a lazy plugin at its next trigger.</p>
+<p>Disabling or uninstalling removes all decorations of the plugin. A disable keeps the plugin's <code>data</code> directory and its storage. An uninstall keeps or deletes them by the rules in <a href="/pages/reference-install-update-uninstall/">Install, update and uninstall</a>. A session bucket is deleted with its session.</p>
+<h3 id="uninstall-cascade">Uninstall cascade</h3>
+<p>An uninstall changes what other plugins see. Nothing is deleted from them. The table is the one rule set for every page. The user-facing wording is in <a href="/pages/user-install-and-manage/#remove-a-plugin">Install and manage plugins</a>.</p>
+<table>
+<thead>
+<tr>
+<th>What depended on the removed plugin</th>
+<th>What happens</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A contribution to a point it owned</td>
+<td>The contribution goes dormant and Settings shows <code>waiting for &lt;owner&gt;</code>. It wakes when the owner returns.</td>
+</tr>
+<tr>
+<td>A consumer of one of its services</td>
+<td>The consumer stays active. Calls return <code>not-found</code> ([LIF-051]).</td>
+</tr>
+<tr>
+<td>A contribution it made to another plugin's point</td>
+<td>It disappears from that point at once.</td>
+</tr>
+<tr>
+<td>A core plugin it replaced</td>
+<td>The core plugin turns back on. Its data was never touched.</td>
+</tr>
+<tr>
+<td>A pane of a kind it provided</td>
+<td>The pane stays in the tree as a placeholder, described in <a href="/pages/api-panes/#a-pane-whose-plugin-is-gone">Panes</a>.</td>
+</tr>
+<tr>
+<td>Keys, menu items, status segments, toolbar buttons</td>
+<td>They disappear.</td>
+</tr>
+<tr>
+<td>The user's order for its points</td>
+<td>The entries are deleted.</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>[USR-172] An uninstall MUST apply the effects of the table above in the same host step that removes the plugin from the registry. Test: remove a provider with a consumer, a contributor and a pane, and check each row.</li>
+</ul>
+<h3 id="settings-rows-by-state">Settings rows by state</h3>
+<p>Settings rows follow the plugin's state. A value is never deleted by disable, failure, upgrade or uninstall.</p>
+<table>
+<thead>
+<tr>
+<th>State</th>
+<th>Plugin tab</th>
+<th>Section in a built-in tab</th>
+<th>Values</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Enabled, not yet started</td>
+<td>normal; starts when the tab opens (<code>settings:&lt;tab-id&gt;</code>)</td>
+<td>normal</td>
+<td>editable</td>
+</tr>
+<tr>
+<td>Running</td>
+<td>normal</td>
+<td>normal</td>
+<td>editable</td>
+</tr>
+<tr>
+<td>Restarting after a failure</td>
+<td>a notice names the attempt and the delay</td>
+<td>the divider shows <code>plugin · restarting</code></td>
+<td>editable, unless the plugin exports <code>settings-validate</code>, then read-only</td>
+</tr>
+<tr>
+<td>Disabled by the user</td>
+<td>dim in the rail, with a button to the recovery page</td>
+<td>the divider shows <code>plugin · off</code>; rows dim and read-only</td>
+<td>kept, read-only</td>
+</tr>
+<tr>
+<td>Disabled after repeated failures</td>
+<td>the same as disabled, with the reason</td>
+<td>the divider shows <code>plugin · disabled</code></td>
+<td>kept, read-only</td>
+</tr>
+<tr>
+<td>Refused at load (API or schema)</td>
+<td>dim, with the required API version</td>
+<td>as disabled</td>
+<td>kept, untouched</td>
+</tr>
+<tr>
+<td>Uninstalled</td>
+<td>gone from the rail</td>
+<td>gone</td>
+<td>kept until the user purges them with <code>ilium plugin uninstall --purge</code> or "Forget settings" on the recovery page</td>
+</tr>
+</tbody>
+</table>
+<p>A reinstalled plugin reads its kept values again. The recovery page is the only settings screen that stays reachable when the plugin is disabled.</p>
+<h2 id="revocation-and-grant-changes">Revocation and grant changes</h2>
+<p>Revoking a grant in Settings &gt; Plugins &gt; Capabilities, or with <code>ilium plugin grants &lt;id&gt; --revoke &lt;grant&gt;</code>, bumps the authorization epoch. Calls in flight return <code>revoked</code>, and pending requests that need the capability complete as <code>failed(revoked)</code>. The plugin receives <code>deactivate(revoked)</code> and is activated again with the reduced grant set and its restore bytes. Decorations, toolbar state, grabs, claims, highlights, filters, watches and routes that need the capability are withdrawn.</p>
+<p>A capability added later by the user, or by an accepted upgrade, produces <code>deactivate(shutdown)</code> and a re-activation with the new set. Neither revocation nor a grant change counts as a failure.</p>
+<h2 id="development-reload">Development reload</h2>
+<p><code>ilium plugin dev</code>, run in the package directory, watches the sources and reloads the plugin in a running session. This section is normative. The walkthrough is in <a href="/pages/debugging/">Debugging</a>.</p>
+<ul>
+<li>[LIF-220] <code>ilium plugin dev</code> MUST attach to the session of <code>--cwd</code> (the current directory by default), or to the session named by <code>--session &lt;name&gt;</code>. When no server runs for it, the command MUST exit with code 2 and the error code <code>dev.no-server</code>, unless <code>--start-server</code> is given. Test: run it with no server.</li>
+<li>[LIF-221] A development package MUST shadow an installed package with the same id for that session only. When <code>ilium plugin dev</code> ends, the installed version MUST become active again. Test: install version 1, run dev with version 2, end dev and read the version.</li>
+<li>[LIF-222] A rebuild MUST start 300 ms after the last change in the directory. Test: touch a file twice 100 ms apart and assert one build.</li>
+<li>[LIF-223] The reload steps MUST run in this order: build, validate the manifest, compare grants, deactivate the server side with <code>upgrade</code>, deactivate each attached client side with <code>upgrade</code> in attach order, swap, activate the server side, then each client side, each with <code>restored</code>. Test: record the log order with two clients.</li>
+<li>[LIF-224] New grants MUST produce a review prompt in the dev terminal, and grants that are no longer in the manifest MUST be revoked without a prompt. With <code>--grant &lt;name&gt;</code> the named grants are accepted without a prompt. A new high-risk grant that is not accepted MUST NOT be granted, and the reload MUST continue with the smaller set. Test: add a grant to the manifest and assert the prompt.</li>
+<li>[LIF-225] A change to contributions or activation triggers MUST be re-registered at the swap and MUST be followed by <code>ilium.extensions/changed</code> for the affected points. Test: add an extension contribution and read the event.</li>
+<li>[LIF-226] In dev mode, failures MUST be counted and shown but MUST NOT stop the plugin. The third and later failures restart after 5 s. A successful reload MUST clear the window. Test: trap three times and assert the plugin restarts.</li>
+<li>[LIF-227] A failed build or a manifest error MUST keep the running instance and print one <code>build-error</code> line. No <code>deactivate</code> MUST be sent. Test: introduce a compile error.</li>
+<li>[LIF-228] Restore bytes MUST be passed to the new build only when its <code>data_version</code> equals the one of the build that produced them. Otherwise they are dropped and the host logs <code>restore.dropped-data-version</code>. Test: change <code>data_version</code> between two builds.</li>
+<li>[LIF-229] The dev instance MUST be held by a lease. The <code>ilium plugin dev</code> process renews it every 2 s over its connection. The server MUST remove the dev package and restore the installed version when the lease is not renewed for 10 s, or when the connection closes. Test: kill the dev process with SIGKILL and assert the installed version returns within 10 s.</li>
+</ul>
+<p>The command prints JSON lines. Every line has a <code>type</code>.</p>
+<table>
+<thead>
+<tr>
+<th><code>type</code></th>
+<th>Fields</th>
+<th>When</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>dev-start</code></td>
+<td><code>plugin</code>, <code>session</code>, <code>version</code></td>
+<td>the command attached</td>
+</tr>
+<tr>
+<td><code>build</code></td>
+<td><code>plugin</code>, <code>ok</code>, <code>millis</code></td>
+<td>a build ended</td>
+</tr>
+<tr>
+<td><code>build-error</code></td>
+<td><code>plugin</code>, <code>message</code>, <code>file</code>, <code>line</code></td>
+<td>a build or manifest check failed</td>
+</tr>
+<tr>
+<td><code>grant-review</code></td>
+<td><code>plugin</code>, <code>added</code>, <code>removed</code></td>
+<td>the grants changed</td>
+</tr>
+<tr>
+<td><code>reload</code></td>
+<td><code>plugin</code>, <code>version</code>, <code>restored_bytes</code>, <code>sides</code></td>
+<td>a reload finished</td>
+</tr>
+<tr>
+<td><code>plugin-failure</code></td>
+<td><code>plugin</code>, <code>side</code>, <code>code</code>, <code>failures_in_window</code></td>
+<td>a counted failure in dev mode</td>
+</tr>
+<tr>
+<td><code>dev-stop</code></td>
+<td><code>plugin</code>, <code>restored_version</code></td>
+<td>the command ended</td>
+</tr>
+</tbody>
+</table>
+<pre><code class="language-text">{&quot;type&quot;:&quot;reload&quot;,&quot;plugin&quot;:&quot;&lt;id&gt;&quot;,&quot;version&quot;:&quot;&lt;version&gt;&quot;,&quot;restored_bytes&quot;:&lt;n&gt;,&quot;sides&quot;:[&quot;server&quot;,&quot;client&quot;]}
+</code></pre>
+<p>A development package carries a <code>dev</code> badge in Settings, and it uses the T3 sandbox and ceilings. Plugin logs appear in <code>ilium plugin logs &lt;id&gt;</code>.</p>
+<h2 id="what-activate-does-not-tell-you">What <code>activate</code> does not tell you</h2>
+<p>The <code>activate</code> call receives the activation context and the restore bytes, and nothing else about the past. There is no <code>previous-version</code> value and no flag that says "this is the first run after an update" in <code>ilium:plugin@0.1.0</code>. A plugin that must act once after an update uses one of these two ways, in this order of preference:</p>
+<ol>
+<li>Put the work in a <code>migrator</code> export and raise <code>data_version</code>. The host calls it once per side before <code>activate</code>, with the old and new data versions (<a href="/pages/guide-data-migration/">Data migration</a>).</li>
+<li>Store the version that last ran under a storage key such as <code>last_version</code>, compare it in <code>activate</code> and write the new value after the work succeeds.</li>
+</ol>
+<p>A plugin MUST NOT rely on a deactivate reason or a restore value to detect that an update happened, because <code>upgrade</code> is also the reason used by <code>ilium plugin dev</code>. [AUT-215] The author rules for updates are in <a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a>.</p>
+<h2 id="edge-cases-and-errors">Edge cases and errors</h2>
+<table>
+<thead>
+<tr>
+<th>Situation</th>
+<th>What happens</th>
+<th>Code the caller sees</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>activate</code> returns an error</td>
+<td>the error is logged at level error with its code and message; counts as a failure</td>
+<td>none; the instance is not active</td>
+</tr>
+<tr>
+<td><code>activate</code> passes its deadline</td>
+<td>trap; counts as a failure</td>
+<td>none</td>
+</tr>
+<tr>
+<td>call in flight during revocation</td>
+<td>fails</td>
+<td><code>revoked</code></td>
+</tr>
+<tr>
+<td>pending request when the plugin stops or is disabled</td>
+<td>cancelled</td>
+<td><code>cancelled</code></td>
+</tr>
+<tr>
+<td>HTTP route call open when the plugin stops</td>
+<td>answered with a 503 response</td>
+<td><code>503 Service Unavailable</code></td>
+</tr>
+<tr>
+<td>message to a plugin whose activation fails</td>
+<td>discarded; the sender's <code>ok</code> stands</td>
+<td>none</td>
+</tr>
+<tr>
+<td>watch or video id used after a restart</td>
+<td>the id no longer exists; watch again in <code>activate</code></td>
+<td><code>not-found</code></td>
+</tr>
+<tr>
+<td>input to a restored pane before its process starts</td>
+<td>refused</td>
+<td><code>pane-not-ready</code></td>
+</tr>
+<tr>
+<td>restore bytes over 1 MiB</td>
+<td>dropped; the next activation gets no <code>restored</code> value</td>
+<td>none; one warn log line</td>
+</tr>
+<tr>
+<td>contribution to a point whose owner is missing or disabled</td>
+<td>dormant until the owner is enabled</td>
+<td>none; Settings shows <code>waiting for &lt;owner&gt;</code></td>
+</tr>
+<tr>
+<td><code>deactivate</code> passes its deadline</td>
+<td>instance dropped without restore bytes</td>
+<td>none; one warn log line</td>
+</tr>
+<tr>
+<td>activation refused because the session memory pool is full</td>
+<td>the side stays <code>inactive</code> with reason <code>host-capacity</code>; not a failure</td>
+<td>none; the list shows <code>waiting for memory</code></td>
+</tr>
+<tr>
+<td>trap while a restart is already scheduled</td>
+<td>impossible: there is no instance; a second failure needs a new instance</td>
+<td>none</td>
+</tr>
+<tr>
+<td>server stops with a restart scheduled</td>
+<td>the timer is cancelled</td>
+<td>none</td>
+</tr>
+</tbody>
+</table>
+<h2 id="what-the-user-sees">What the user sees</h2>
+<p>The tree footer shows notice N14 when the host stopped a plugin. Settings &gt; Plugins shows the plugin state and its capabilities, with the state words of the row state table. The install review dialog lists the capabilities before installation. <code>ilium plugin logs &lt;id&gt;</code> shows every trap, restart, deadline breach and dropped restore value.</p>
+<div class="warn">
+<p>Restore bytes are not a migration. If a new build changes their layout, it must check the length and fall back to defaults when the bytes do not fit.</p>
+</div>
+
+<figure>
+<pre class="term">╭  ≡ ● · Plugins ────────────────────────────────────────────────╮
+│ <span class="t-hi">com.example.cursor 0.1.0</span>    T2  <span class="t-ok">On</span>                             │
+│ com.example.notes 0.1.0     T2  <span class="t-dim">Off</span>                            │
+│ vendor.ext 0.1.0            T3  <span class="t-warn">Refused: no sandbox</span>            │
+│                                                                │
+╰────────────────────────────────────────────────────────────────╯
+</pre>
+<figcaption>Illustrative. The plugin list shows each plugin with its tier and state. The state words are defined in the row state table of <a href="/pages/core-plugin-settings/#plugin-row-states">Settings, plugin rows</a>. An off plugin keeps its durable timers until it is removed.</figcaption>
+</figure>
+
+<h3 id="rules-defined-elsewhere-on-this-page">Rules defined elsewhere on this page</h3>
+<ul>
+<li>[LIF-271] On a trap or stop the host MUST release every effect listed in the stop-effects paragraph of this page, for the dead instance as well. Test: trap a plugin holding an input lock, a stream and a child process.</li>
+<li>[USR-173] An update MUST keep the grants the user already answered and MUST ask only for new ones. A failed update MUST roll back to the previous version. The user-facing rules are USR-123 and USR-124 in <a href="/pages/user-install-and-manage/#update-a-plugin">Install and manage plugins</a>. Test: update with one new grant and count the rows in the dialog.</li>
+<li>[LIF-275] An update MUST reset the "Not now" counter of a bundled plugin. Test: answer Not now twice, update, and count prompts.</li>
+</ul>
+<h2 id="see-also">See also</h2>
+<ul>
+<li><a href="/pages/settings-extension/">Plugin settings extension</a> for settings rows in each lifecycle state</li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/api-exports/">Exports</a></li>
+<li><a href="/pages/api-storage/">Storage</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Plugin lifecycle states</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Install, update and uninstall</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Persistence and restart</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and troubleshooting</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Health and watchdog</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+</ul>
+<p>API version checked: <code>ilium:plugin@0.1.0</code>.</p>
+<h3 id="security">Security</h3>
+<p><code>ilium --safe-mode</code> (the same as <code>--safe-mode=third-party</code>) starts with all third-party plugins off ([SEC-328]). See <a href="/pages/reference-security-response/">Security response</a>.</p>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/layout/"><small>Previous</small>Layout constraints</a><a class="next" href="/pages/packages/"><small>Next</small>Packages and manifests</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#you-will-need">You will need</a></li><li class="l2"><a href="#install">Install</a></li><li class="l2"><a href="#activation">Activation</a></li><li class="l2"><a href="#durable-timers-and-further-triggers">Durable timers and further triggers</a></li><li class="l2"><a href="#activation-order">Activation order</a></li><li class="l3"><a href="#start-order">Start order</a></li><li class="l3"><a href="#stop-order">Stop order</a></li><li class="l3"><a href="#when-a-provider-is-not-available">When a provider is not available</a></li><li class="l3"><a href="#extension-owners-and-contributors">Extension owners and contributors</a></li><li class="l3"><a href="#client-handshake-and-version-skew">Client handshake and version skew</a></li><li class="l3"><a href="#startup-budget">Startup budget</a></li><li class="l2"><a href="#core-plugins-at-boot">Core plugins at boot</a></li><li class="l2"><a href="#running">Running</a></li><li class="l2"><a href="#stop-and-the-final-save">Stop and the final save</a></li><li class="l2"><a href="#worked-example-keep-a-cursor-across-restarts">Worked example: keep a cursor across restarts</a></li><li class="l2"><a href="#failure-counting-and-restart">Failure counting and restart</a></li><li class="l3"><a href="#the-failure-window">The failure window</a></li><li class="l3"><a href="#what-counts">What counts</a></li><li class="l3"><a href="#reset-and-persistence">Reset and persistence</a></li><li class="l3"><a href="#restart-timer-and-other-events">Restart timer and other events</a></li><li class="l2"><a href="#dormant-extensions">Dormant extensions</a></li><li class="l2"><a href="#disable-and-enable">Disable and enable</a></li><li class="l3"><a href="#uninstall-cascade">Uninstall cascade</a></li><li class="l3"><a href="#settings-rows-by-state">Settings rows by state</a></li><li class="l2"><a href="#revocation-and-grant-changes">Revocation and grant changes</a></li><li class="l2"><a href="#development-reload">Development reload</a></li><li class="l2"><a href="#what-activate-does-not-tell-you">What activate does not tell you</a></li><li class="l2"><a href="#edge-cases-and-errors">Edge cases and errors</a></li><li class="l2"><a href="#what-the-user-sees">What the user sees</a></li><li class="l3"><a href="#rules-defined-elsewhere-on-this-page">Rules defined elsewhere on this page</a></li><li class="l2"><a href="#see-also">See also</a></li><li class="l3"><a href="#security">Security</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

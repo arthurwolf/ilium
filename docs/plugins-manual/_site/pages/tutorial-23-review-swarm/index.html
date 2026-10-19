@@ -1,0 +1,1157 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>23. Drive the fleet: a review swarm | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details open><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/" aria-current="page">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Tutorials</b></p>
+<h1>23. Drive the fleet: a review swarm</h1>
+
+<p>This step builds <code>example.swarm</code>, a plugin with a server side and a client side. One command starts a review swarm. The plugin creates N worktrees, starts one review agent in a new pane for each, sends them one shared instruction, shows progress, collects the diffs when the agents stop, and sends one notification with the result.</p>
+<p>Core services are called as in <a href="/pages/extending-core-plugins/">Extending core plugins</a>. Their names are in <a href="/pages/reference-core-extension-points/">Reference: core extension points</a>. Use them from here. This page does not repeat those tables. <a href="/pages/tutorial-22-versioned-service-with-fallbacks/">Tutorial 22</a> covers the failure rules of service calls.</p>
+<p>You have finished tutorials 1 to 9 and read <a href="/pages/api-services/">Services</a>. Rust and TypeScript behave the same in every step.</p>
+<h3 id="you-will-need">You will need</h3>
+<ul>
+<li>Rust: stable 1.90 or later with the <code>wasm32-wasip2</code> target, and the crates <code>ilium-plugin-sdk</code> and <code>serde_json</code>. TypeScript: Bun 1.2 or later and <code>@ilium/plugin-sdk</code>.</li>
+<li>A Git repository with at least one commit, and an agent command on the path, such as <code>claude</code>.</li>
+<li><code>"unstable": ["plugin-services"]</code>, because the plugin uses core services (dev mode, T2 and T3).</li>
+</ul>
+<h3 id="the-surface-this-step-uses">The surface this step uses</h3>
+<table>
+<thead>
+<tr>
+<th>Surface</th>
+<th>Used for</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ilium.core.worktrees/create</code></td>
+<td>One worktree per reviewer.</td>
+</tr>
+<tr>
+<td><code>Intent::CreatePane</code> and the grant <code>panes.create</code></td>
+<td>One terminal pane per reviewer.</td>
+</tr>
+<tr>
+<td><code>freeze-pane</code> and <code>terminate-pane-process</code> (grant <code>panes.lifecycle</code>)</td>
+<td>Stop agents on cancel or at the deadline.</td>
+</tr>
+<tr>
+<td><code>ilium.core.fleet/broadcast</code></td>
+<td>One instruction to every reviewer.</td>
+</tr>
+<tr>
+<td><code>ilium.core.progress/report</code></td>
+<td>A progress bar for the run.</td>
+</tr>
+<tr>
+<td><code>ilium.core.notifications/notify</code></td>
+<td>The result.</td>
+</tr>
+<tr>
+<td>Storage (always granted)</td>
+<td>The run state, so a restart can resume.</td>
+</tr>
+<tr>
+<td><code>timers::at</code> and <code>timers::cancel_durable</code></td>
+<td>The deadline.</td>
+</tr>
+<tr>
+<td><code>jobs</code> (grant <code>jobs.run</code>)</td>
+<td>Reading each diff off the main thread.</td>
+</tr>
+<tr>
+<td><code>dedup::key_for</code> and <code>Submission::keyed</code></td>
+<td>Each step happens once.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="the-permission-summary">The permission summary</h3>
+<p>This plugin asks for a lot. Say so in its description and in this table. The user reads it in the review dialog.</p>
+<table>
+<thead>
+<tr>
+<th>Grant</th>
+<th>Risk</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>services.use</code> for four core services</td>
+<td>normal</td>
+<td>Worktrees, broadcast, progress, notifications.</td>
+</tr>
+<tr>
+<td><code>panes.create</code></td>
+<td>normal</td>
+<td>Reviewer panes.</td>
+</tr>
+<tr>
+<td><code>fs.read:project</code></td>
+<td>normal</td>
+<td>The pane's working folder is a worktree path.</td>
+</tr>
+<tr>
+<td><code>terminal.write</code></td>
+<td>high</td>
+<td>The first instruction is typed into the agent's terminal at start.</td>
+</tr>
+<tr>
+<td><code>panes.lifecycle</code></td>
+<td>high</td>
+<td>Stop agents on cancel and at the deadline. Server only.</td>
+</tr>
+<tr>
+<td><code>process.run:git</code></td>
+<td>high</td>
+<td>The job runs <code>git diff</code> in a worktree.</td>
+</tr>
+<tr>
+<td><code>jobs.run</code></td>
+<td>normal</td>
+<td>The diff job.</td>
+</tr>
+<tr>
+<td><code>panes.read</code></td>
+<td>normal</td>
+<td>Learn that a reviewer pane has ended.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="the-flow">The flow</h3>
+<figure>
+<svg viewBox="0 0 480 330" role="img" aria-label="Sequence of a review swarm" width="720" height="495">
+  <title>One review swarm run</title>
+  <desc>The user starts the swarm. The plugin creates worktrees and panes, broadcasts an instruction, waits for the agents to stop, collects diffs with a job, and sends a notification.</desc>
+  <defs>
+    <marker id="t23-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+  </defs>
+  <rect x="10" y="8" width="70" height="26" rx="4" fill="none" stroke="currentColor"/> <text x="45" y="25" font-size="11" text-anchor="middle" fill="currentColor">User</text>
+  <rect x="120" y="8" width="90" height="26" rx="4" fill="none" stroke="currentColor"/> <text x="165" y="25" font-size="11" text-anchor="middle" fill="currentColor">Swarm</text>
+  <rect x="260" y="8" width="90" height="26" rx="4" fill="none" stroke="currentColor"/> <text x="305" y="25" font-size="11" text-anchor="middle" fill="currentColor">Core plugins</text>
+  <rect x="390" y="8" width="80" height="26" rx="4" fill="none" stroke="currentColor"/> <text x="430" y="25" font-size="11" text-anchor="middle" fill="currentColor">Panes, jobs</text>
+  <line x1="45" y1="34" x2="45" y2="320" stroke="currentColor" stroke-dasharray="3 4"/>
+  <line x1="165" y1="34" x2="165" y2="320" stroke="currentColor" stroke-dasharray="3 4"/>
+  <line x1="305" y1="34" x2="305" y2="320" stroke="currentColor" stroke-dasharray="3 4"/>
+  <line x1="430" y1="34" x2="430" y2="320" stroke="currentColor" stroke-dasharray="3 4"/>
+  <line x1="45" y1="56" x2="165" y2="56" stroke="currentColor" marker-end="url(#t23-arrow)"/> <text x="105" y="50" font-size="10" text-anchor="middle" fill="currentColor">start (N = 3)</text>
+  <line x1="165" y1="88" x2="305" y2="88" stroke="currentColor" marker-end="url(#t23-arrow)"/> <text x="235" y="82" font-size="10" text-anchor="middle" fill="currentColor">worktrees/create x N</text>
+  <line x1="165" y1="122" x2="430" y2="122" stroke="currentColor" marker-end="url(#t23-arrow)"/> <text x="298" y="116" font-size="10" text-anchor="middle" fill="currentColor">create-pane x N</text>
+  <line x1="165" y1="156" x2="305" y2="156" stroke="currentColor" marker-end="url(#t23-arrow)"/> <text x="235" y="150" font-size="10" text-anchor="middle" fill="currentColor">fleet/broadcast</text>
+  <line x1="165" y1="190" x2="305" y2="190" stroke="currentColor" stroke-dasharray="5 3" marker-end="url(#t23-arrow)"/> <text x="235" y="184" font-size="10" text-anchor="middle" fill="currentColor">progress/report</text>
+  <line x1="430" y1="224" x2="165" y2="224" stroke="currentColor" marker-end="url(#t23-arrow)"/> <text x="298" y="218" font-size="10" text-anchor="middle" fill="currentColor">pane ended / deadline</text>
+  <line x1="165" y1="258" x2="430" y2="258" stroke="currentColor" marker-end="url(#t23-arrow)"/> <text x="298" y="252" font-size="10" text-anchor="middle" fill="currentColor">job: git diff x N</text>
+  <line x1="165" y1="296" x2="305" y2="296" stroke="currentColor" marker-end="url(#t23-arrow)"/> <text x="235" y="290" font-size="10" text-anchor="middle" fill="currentColor">notifications/notify</text>
+</svg>
+<figcaption>Every arrow out of the swarm is one step with its own dedup key. A restart resumes at the first step that did not finish.</figcaption>
+</figure>
+
+<h3 id="step-1-the-manifest">Step 1: the manifest</h3>
+<pre><code class="language-json">{
+  &quot;api&quot;: &quot;ilium:plugin@0.1.0&quot;,
+  &quot;id&quot;: &quot;example.swarm&quot;,
+  &quot;name&quot;: &quot;Review swarm&quot;,
+  &quot;version&quot;: &quot;0.1.0&quot;,
+  &quot;publisher&quot;: &quot;Example Developer&quot;,
+  &quot;description&quot;: &quot;Starts N review agents in N worktrees, sends them one instruction and reports the diffs. Needs terminal write, pane control and git.&quot;,
+  &quot;icon&quot;: &quot;users-group&quot;,
+  &quot;unstable&quot;: [&quot;plugin-services&quot;],
+  &quot;server&quot;: {
+    &quot;entry&quot;: &quot;server.wasm&quot;,
+    &quot;world&quot;: &quot;ilium:server/base@0.1.0&quot;,
+    &quot;exports&quot;: [&quot;job-runner&quot;]
+  },
+  &quot;client&quot;: { &quot;entry&quot;: &quot;client.wasm&quot;, &quot;world&quot;: &quot;ilium:client/base@0.1.0&quot;, &quot;exports&quot;: [] },
+  &quot;capabilities&quot;: {
+    &quot;server&quot;: [
+      &quot;services.use:ilium.core.worktrees/create&quot;,
+      &quot;services.use:ilium.core.fleet/broadcast&quot;,
+      &quot;services.use:ilium.core.progress/report&quot;,
+      &quot;services.use:ilium.core.notifications/notify&quot;,
+      &quot;panes.create&quot;,
+      &quot;panes.read&quot;,
+      &quot;panes.lifecycle&quot;,
+      &quot;fs.read:project&quot;,
+      &quot;terminal.write&quot;,
+      &quot;process.run:git&quot;,
+      &quot;jobs.run&quot;,
+      &quot;topics.subscribe:ilium.core.worktrees/changed&quot;
+    ],
+    &quot;client&quot;: [&quot;topics.subscribe:example.swarm/status&quot;]
+  },
+  &quot;activation&quot;: [&quot;startup&quot;],
+  &quot;contributes&quot;: {
+    &quot;commands&quot;: [
+      { &quot;id&quot;: &quot;example.swarm/start&quot;, &quot;title&quot;: &quot;Start a review swarm&quot;, &quot;side&quot;: &quot;server&quot; },
+      { &quot;id&quot;: &quot;example.swarm/cancel&quot;, &quot;title&quot;: &quot;Cancel the review swarm&quot;, &quot;side&quot;: &quot;server&quot; }
+    ],
+    &quot;jobs&quot;: [{ &quot;kind&quot;: &quot;example.swarm/diff&quot;, &quot;deadline_ms&quot;: 60000, &quot;memory_mib&quot;: 128 }],
+    &quot;topics&quot;: {
+      &quot;publishes&quot;: [&quot;example.swarm/status&quot;],
+      &quot;subscribes&quot;: [&quot;ilium.core.worktrees/changed&quot;]
+    }
+  }
+}
+</code></pre>
+<p>The server holds all the logic and all the high-risk grants. The client side only shows the status topic, and it cannot hold <code>panes.lifecycle</code>.</p>
+<h3 id="step-2-the-state-saved-to-storage">Step 2: the state, saved to storage</h3>
+<p>A run holds an id, a phase, a UTC deadline and one entry per reviewer (worktree path, pane node, <code>ended</code> flag, diff summary). The plugin saves it to storage after every step. A value is at most 1 MiB, so each diff summary is cut to 20 KiB.</p>
+<p>Keep every decision in one pure function. It takes the run and one input, and returns the new run and a list of actions. The host calls live in a thin layer outside it. That split makes each phase testable without a host.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">// src/plan.rs
+use serde::{Deserialize, Serialize};
+
+pub const MAX_REVIEWERS: usize = 8;
+pub const DIFF_BYTES: usize = 20 * 1024;
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum Phase { Creating, Working, Collecting, Done, Cancelled, Failed }
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Reviewer { pub worktree: Option&lt;String&gt;, pub pane: Option&lt;u64&gt;, pub ended: bool, pub diff: Option&lt;String&gt; }
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Run { pub run: String, pub phase: Phase, pub deadline: i64, pub reviewers: Vec&lt;Reviewer&gt; }
+
+#[derive(Debug, PartialEq)]
+pub enum Action { CreateWorktree(usize), CreatePane(usize), Broadcast, CollectDiff(usize), StopPane(u64), Notify(String) }
+
+#[derive(Debug)]
+pub enum Input {
+    WorktreeReady(usize, String), PaneReady(usize, u64), PaneEnded(u64),
+    DiffReady(usize, String), Deadline, Cancel, StepFailed(String),
+}
+
+/// A count the user typed, clamped to a safe range.
+pub fn clamp_count(asked: i64) -&gt; usize { asked.clamp(1, MAX_REVIEWERS as i64) as usize }
+
+pub fn start(run: &amp;str, count: usize, now: i64, window_ms: i64) -&gt; (Run, Vec&lt;Action&gt;) {
+    let blank = Reviewer { worktree: None, pane: None, ended: false, diff: None };
+    let state = Run { run: run.into(), phase: Phase::Creating, deadline: now + window_ms, reviewers: vec![blank; count] };
+    (state, (0..count).map(Action::CreateWorktree).collect())
+}
+
+fn stop_all(state: &amp;Run) -&gt; Vec&lt;Action&gt; {
+    state.reviewers.iter().filter(|r| !r.ended).filter_map(|r| r.pane).map(Action::StopPane).collect()
+}
+
+/// One pure step. Any input after the run has finished changes nothing.
+pub fn step(mut state: Run, input: Input) -&gt; (Run, Vec&lt;Action&gt;) {
+    if matches!(state.phase, Phase::Done | Phase::Cancelled | Phase::Failed) {
+        return (state, vec![]);
+    }
+    let mut actions = vec![];
+    let collect = |s: &amp;Run| (0..s.reviewers.len()).map(Action::CollectDiff).collect::&lt;Vec&lt;_&gt;&gt;();
+    match input {
+        Input::WorktreeReady(i, path) =&gt; {
+            if let Some(r) = state.reviewers.get_mut(i) { r.worktree = Some(path); actions.push(Action::CreatePane(i)); }
+        }
+        Input::PaneReady(i, node) =&gt; {
+            if let Some(r) = state.reviewers.get_mut(i) { r.pane = Some(node); }
+            if state.reviewers.iter().all(|r| r.pane.is_some()) { state.phase = Phase::Working; actions.push(Action::Broadcast); }
+        }
+        Input::PaneEnded(node) =&gt; {
+            state.reviewers.iter_mut().filter(|r| r.pane == Some(node)).for_each(|r| r.ended = true);
+            if state.reviewers.iter().all(|r| r.ended) { state.phase = Phase::Collecting; actions = collect(&amp;state); }
+        }
+        Input::Deadline =&gt; {
+            // Stop what still runs, then collect what the agents wrote.
+            actions = stop_all(&amp;state);
+            state.reviewers.iter_mut().for_each(|r| r.ended = true);
+            state.phase = Phase::Collecting;
+            actions.extend(collect(&amp;state));
+        }
+        Input::DiffReady(i, text) =&gt; {
+            if let Some(r) = state.reviewers.get_mut(i) { r.diff = Some(text.chars().take(DIFF_BYTES).collect()); }
+            if state.phase == Phase::Collecting &amp;&amp; state.reviewers.iter().all(|r| r.diff.is_some()) {
+                state.phase = Phase::Done;
+                let changed = state.reviewers.iter().filter(|r| r.diff.as_deref().is_some_and(|d| !d.is_empty())).count();
+                actions.push(Action::Notify(format!(&quot;Review swarm done: {changed} of {} reviewers changed files.&quot;, state.reviewers.len())));
+            }
+        }
+        Input::Cancel =&gt; { actions = stop_all(&amp;state); state.phase = Phase::Cancelled; }
+        Input::StepFailed(reason) =&gt; {
+            actions = stop_all(&amp;state);
+            state.phase = Phase::Failed;
+            actions.push(Action::Notify(format!(&quot;Review swarm failed: {reason}&quot;)));
+        }
+    }
+    (state, actions)
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">// src/plan.ts
+export const MAX_REVIEWERS = 8;
+export const DIFF_BYTES = 20 * 1024;
+
+export type Phase = 'creating' | 'working' | 'collecting' | 'done' | 'cancelled' | 'failed';
+export interface Reviewer { worktree?: string; pane?: number; ended: boolean; diff?: string }
+export interface Run { run: string; phase: Phase; deadline: number; reviewers: Reviewer[] }
+
+export type Action =
+  | { kind: 'create-worktree' | 'create-pane' | 'collect-diff'; index: number }
+  | { kind: 'broadcast' }
+  | { kind: 'stop-pane'; node: number }
+  | { kind: 'notify'; text: string };
+
+export type Input =
+  | { kind: 'worktree-ready'; index: number; path: string }
+  | { kind: 'pane-ready'; index: number; node: number }
+  | { kind: 'pane-ended'; node: number }
+  | { kind: 'diff-ready'; index: number; text: string }
+  | { kind: 'deadline' | 'cancel' }
+  | { kind: 'step-failed'; reason: string };
+
+/** A count the user typed, clamped to a safe range. */
+export function clampCount(asked: number): number {
+  return Math.min(MAX_REVIEWERS, Math.max(1, Math.trunc(asked) || 1));
+}
+
+export function start(run: string, count: number, now: number, windowMs: number): { state: Run; actions: Action[] } {
+  const reviewers: Reviewer[] = Array.from({ length: count }, () =&gt; ({ ended: false }));
+  const actions = reviewers.map((_, index): Action =&gt; ({ kind: 'create-worktree', index }));
+  return { state: { run, phase: 'creating', deadline: now + windowMs, reviewers }, actions };
+}
+
+const FINISHED: Phase[] = ['done', 'cancelled', 'failed'];
+
+/** One pure step. Any input after the run has finished changes nothing. */
+export function step(old: Run, input: Input): { state: Run; actions: Action[] } {
+  const state: Run = structuredClone(old);
+  let actions: Action[] = [];
+  if (FINISHED.includes(state.phase)) return { state, actions };
+  const collect = (): Action[] =&gt; state.reviewers.map((_, index) =&gt; ({ kind: 'collect-diff', index }));
+  const stopAll = (): Action[] =&gt;
+    state.reviewers.filter((r) =&gt; !r.ended &amp;&amp; r.pane !== undefined).map((r) =&gt; ({ kind: 'stop-pane', node: r.pane! }));
+  switch (input.kind) {
+    case 'worktree-ready':
+      if (state.reviewers[input.index]) {
+        state.reviewers[input.index].worktree = input.path;
+        actions.push({ kind: 'create-pane', index: input.index });
+      }
+      break;
+    case 'pane-ready':
+      if (state.reviewers[input.index]) state.reviewers[input.index].pane = input.node;
+      if (state.reviewers.every((r) =&gt; r.pane !== undefined)) { state.phase = 'working'; actions.push({ kind: 'broadcast' }); }
+      break;
+    case 'pane-ended':
+      state.reviewers.filter((r) =&gt; r.pane === input.node).forEach((r) =&gt; { r.ended = true; });
+      if (state.reviewers.every((r) =&gt; r.ended)) { state.phase = 'collecting'; actions = collect(); }
+      break;
+    case 'deadline':
+      // Stop what still runs, then collect what the agents wrote.
+      actions = [...stopAll(), ...collect()];
+      state.reviewers.forEach((r) =&gt; { r.ended = true; });
+      state.phase = 'collecting';
+      break;
+    case 'diff-ready':
+      if (state.reviewers[input.index]) state.reviewers[input.index].diff = input.text.slice(0, DIFF_BYTES);
+      if (state.phase === 'collecting' &amp;&amp; state.reviewers.every((r) =&gt; r.diff !== undefined)) {
+        state.phase = 'done';
+        const changed = state.reviewers.filter((r) =&gt; r.diff !== '').length;
+        actions.push({ kind: 'notify', text: `Review swarm done: ${changed} of ${state.reviewers.length} reviewers changed files.` });
+      }
+      break;
+    case 'cancel': actions = stopAll(); state.phase = 'cancelled'; break;
+    case 'step-failed':
+      actions = [...stopAll(), { kind: 'notify', text: `Review swarm failed: ${input.reason}` }];
+      state.phase = 'failed';
+      break;
+  }
+  return { state, actions };
+}
+</code></pre>
+<h3 id="step-3-the-host-calls">Step 3: the host calls</h3>
+<p>The thin layer turns each action into a host call. Every call that changes the world has a dedup key, or an id in its payload, so a repeat after a restart is harmless. A repeat inside the 10-minute window gives <code>duplicate</code>, and the layer treats that as success.</p>
+<p>The payloads of the core services below are the shapes this page uses. Check the fields against <a href="/pages/reference-core-extension-points/">Reference: core extension points</a> for the version you run. The functions <code>pane_intent</code> and <code>stop_intent</code> build the <code>CreatePaneSpec</code> (title <code>Review 1</code>, content kind <code>ilium.terminal</code>, the worktree as <code>cwd</code>, the command <code>claude</code>) and the terminate intent with a grace period.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">// src/lib.rs
+use std::collections::HashMap;
+
+use ilium_plugin_sdk::dedup;
+use ilium_plugin_sdk::host::{clock, jobs, services, storage, timers, topics};
+use ilium_plugin_sdk::prelude::*;
+use serde_json::{json, Value};
+mod plan;
+use plan::{Action, Input, Phase, Run};
+
+const WINDOW_MS: i64 = 20 * 60_000;
+enum Waiting { Worktree(usize), Service, Diff(usize) }
+
+#[ilium_plugin(side = &quot;server&quot;, exports = [&quot;handler&quot;, &quot;job-runner&quot;])]
+#[derive(Default)]
+struct Swarm { run: Option&lt;Run&gt;, waiting: HashMap&lt;RequestId, Waiting&gt; }
+
+impl Lifecycle for Swarm {
+    fn activate(&amp;mut self) {
+        // Restart recovery: read the saved run. Step 5 says what happens next.
+        let saved = storage::get(&quot;project&quot;, &quot;run&quot;).ok().flatten();
+        self.run = saved.and_then(|text| serde_json::from_str(&amp;text).ok());
+    }
+}
+
+impl Handler for Swarm {
+    fn on_events(&amp;mut self, batch: Vec&lt;Event&gt;) -&gt; Vec&lt;Submission&gt; {
+        let mut out = Vec::new();
+        for event in batch {
+            let input = match event {
+                Event::CommandInvoked(c) if c.command == &quot;example.swarm/start&quot; =&gt; {
+                    let args: Value = serde_json::from_str(&amp;c.arguments_json).unwrap_or(Value::Null);
+                    let now = clock::now_unix_millis();
+                    let (state, actions) = plan::start(&amp;format!(&quot;{now:x}&quot;), plan::clamp_count(args[&quot;count&quot;].as_i64().unwrap_or(3)), now, WINDOW_MS);
+                    let _ = timers::at(state.deadline, &quot;deadline&quot;);
+                    self.run = Some(state);
+                    self.perform(actions, &amp;mut out);
+                    None
+                }
+                Event::CommandInvoked(c) if c.command == &quot;example.swarm/cancel&quot; =&gt; Some(Input::Cancel),
+                Event::DurableTimerFired { name, .. } if name == &quot;deadline&quot; =&gt; Some(Input::Deadline),
+                Event::PaneLifecycleChanged(change) if change.ended =&gt; Some(Input::PaneEnded(change.node)),
+                Event::RequestCompleted(done) =&gt; self.completed(done),
+                _ =&gt; None,
+            };
+            if let (Some(input), Some(run)) = (input, self.run.take()) {
+                let (next, actions) = plan::step(run, input);
+                if matches!(next.phase, Phase::Done | Phase::Cancelled | Phase::Failed) {
+                    let _ = timers::cancel_durable(&quot;deadline&quot;);
+                }
+                self.run = Some(next);
+                self.perform(actions, &amp;mut out);
+            }
+        }
+        if let Some(run) = &amp;self.run {
+            let _ = storage::put(&quot;project&quot;, &quot;run&quot;, &amp;serde_json::to_string(run).unwrap_or_default());
+            let _ = topics::publish(&quot;example.swarm/status&quot;, &amp;json!({ &quot;run&quot;: run.run, &quot;phase&quot;: run.phase }).to_string());
+        }
+        out
+    }
+}
+
+impl Swarm {
+    fn call(&amp;mut self, service: &amp;str, payload: Value, why: Waiting) {
+        if let Ok(id) = services::call_request(service, &quot;send&quot;, &amp;payload.to_string()) {
+            self.waiting.insert(id, why);
+        }
+    }
+
+    fn perform(&amp;mut self, actions: Vec&lt;Action&gt;, out: &amp;mut Vec&lt;Submission&gt;) {
+        let Some(run) = self.run.clone() else { return };
+        for action in actions {
+            match action {
+                Action::CreateWorktree(i) =&gt; self.call(&quot;ilium.core.worktrees/create&quot;,
+                    json!({ &quot;branch&quot;: format!(&quot;swarm/{}/{i}&quot;, run.run), &quot;agent&quot;: &quot;review&quot; }), Waiting::Worktree(i)),
+                Action::CreatePane(i) =&gt; out.push(Submission::keyed(
+                    pane_intent(&amp;run, i), dedup::key_for(&amp;[&quot;swarm&quot;, &amp;run.run, &quot;pane&quot;, &amp;i.to_string()]))),
+                Action::Broadcast =&gt; self.call(&quot;ilium.core.fleet/broadcast&quot;,
+                    json!({ &quot;message&quot;: &quot;Review the diff against main. List risks only.&quot;, &quot;run&quot;: run.run }), Waiting::Service),
+                Action::CollectDiff(i) =&gt; {
+                    let path = run.reviewers[i].worktree.clone().unwrap_or_default();
+                    if let Ok(id) = jobs::start_json(&quot;example.swarm/diff&quot;, &amp;json!({ &quot;path&quot;: path }).to_string()) {
+                        self.waiting.insert(id, Waiting::Diff(i));
+                    }
+                }
+                Action::StopPane(node) =&gt; out.push(Submission::keyed(
+                    stop_intent(node), dedup::key_for(&amp;[&quot;swarm&quot;, &amp;run.run, &quot;stop&quot;, &amp;node.to_string()]))),
+                Action::Notify(text) =&gt; self.call(&quot;ilium.core.notifications/notify&quot;,
+                    json!({ &quot;title&quot;: &quot;Review swarm&quot;, &quot;body&quot;: text, &quot;urgency&quot;: &quot;normal&quot;, &quot;run&quot;: run.run }), Waiting::Service),
+            }
+        }
+    }
+
+    fn completed(&amp;mut self, done: RequestResult) -&gt; Option&lt;Input&gt; {
+        match self.waiting.remove(&amp;done.request)? {
+            Waiting::Service =&gt; None,
+            Waiting::Diff(i) =&gt; Some(Input::DiffReady(i, jobs::take_output(done.request).unwrap_or_default())),
+            Waiting::Worktree(i) =&gt; match services::take_reply(done.request) {
+                Ok(text) =&gt; {
+                    let path = serde_json::from_str::&lt;Value&gt;(&amp;text).ok()?[&quot;path&quot;].as_str()?.to_string();
+                    Some(Input::WorktreeReady(i, path))
+                }
+                Err(error) =&gt; Some(Input::StepFailed(error.code)),
+            },
+        }
+    }
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">// src/index.ts
+import { definePlugin, type Event, type Submission } from '@ilium/plugin-sdk';
+import { nowUnixMillis } from '@ilium/plugin-sdk/host/clock';
+import { startJson, takeOutput } from '@ilium/plugin-sdk/host/jobs';
+import { callRequest, takeReply } from '@ilium/plugin-sdk/host/services';
+import { get, put } from '@ilium/plugin-sdk/host/storage';
+import { at, cancelDurable } from '@ilium/plugin-sdk/host/timers';
+import { publish } from '@ilium/plugin-sdk/host/topics';
+import { clampCount, start, step, type Action, type Input, type Run } from './plan';
+const WINDOW_MS = 20 * 60_000;
+type Waiting = { kind: 'worktree' | 'diff'; index: number } | { kind: 'service' };
+
+let run: Run | undefined;
+const waiting = new Map&lt;bigint, Waiting&gt;();
+let correlation = 1n;
+
+function keyed(intent: Submission['intent'], ...parts: string[]): Submission {
+  const dedupKey = parts.join(':').replace(/[^A-Za-z0-9._:/-]/g, '-').slice(0, 128);
+  return { intent, correlation: correlation++, dedupKey };
+}
+
+function call(service: string, payload: object, why: Waiting): void {
+  try { waiting.set(callRequest(service, 'send', JSON.stringify(payload)), why); } catch { /* the host logs it */ }
+}
+
+function perform(actions: Action[], out: Submission[]): void {
+  if (!run) return;
+  for (const a of actions) {
+    if (a.kind === 'create-worktree') {
+      call('ilium.core.worktrees/create', { branch: `swarm/${run.run}/${a.index}`, agent: 'review' }, { kind: 'worktree', index: a.index });
+    } else if (a.kind === 'create-pane') {
+      out.push(keyed(paneIntent(run, a.index), 'swarm', run.run, 'pane', String(a.index)));
+    } else if (a.kind === 'broadcast') {
+      call('ilium.core.fleet/broadcast', { message: 'Review the diff against main. List risks only.', run: run.run }, { kind: 'service' });
+    } else if (a.kind === 'collect-diff') {
+      try {
+        const id = startJson('example.swarm/diff', JSON.stringify({ path: run.reviewers[a.index].worktree ?? '' }));
+        waiting.set(id, { kind: 'diff', index: a.index });
+      } catch { /* the host logs it */ }
+    } else if (a.kind === 'stop-pane') {
+      out.push(keyed(stopIntent(a.node), 'swarm', run.run, 'stop', String(a.node)));
+    } else {
+      call('ilium.core.notifications/notify', { title: 'Review swarm', body: a.text, urgency: 'normal', run: run.run }, { kind: 'service' });
+    }
+  }
+}
+
+function completed(request: bigint): Input | undefined {
+  const entry = waiting.get(request);
+  waiting.delete(request);
+  if (!entry || entry.kind === 'service') return undefined;
+  if (entry.kind === 'diff') return { kind: 'diff-ready', index: entry.index, text: takeOutput(request) ?? '' };
+  try {
+    const path = (JSON.parse(takeReply(request)) as { path?: string }).path;
+    return path ? { kind: 'worktree-ready', index: entry.index, path } : { kind: 'step-failed', reason: 'no worktree path' };
+  } catch (error) {
+    return { kind: 'step-failed', reason: (error as { code?: string }).code ?? 'failed' };
+  }
+}
+
+export const { lifecycle, handler, jobRunner } = definePlugin({
+  side: 'server',
+  activate() {
+    // Restart recovery: read the saved run. Step 5 says what happens next.
+    const saved = get('project', 'run');
+    run = saved ? (JSON.parse(saved) as Run) : undefined;
+  },
+  onEvents(batch: Event[]): Submission[] {
+    const out: Submission[] = [];
+    for (const event of batch) {
+      let input: Input | undefined;
+      if (event.tag === 'command-invoked' &amp;&amp; event.val.command === 'example.swarm/start') {
+        const args = JSON.parse(event.val.argumentsJson) as { count?: number };
+        const now = Number(nowUnixMillis());
+        const started = start(now.toString(16), clampCount(args.count ?? 3), now, WINDOW_MS);
+        run = started.state;
+        at(BigInt(run.deadline), 'deadline');
+        perform(started.actions, out);
+      } else if (event.tag === 'command-invoked' &amp;&amp; event.val.command === 'example.swarm/cancel') {
+        input = { kind: 'cancel' };
+      } else if (event.tag === 'durable-timer-fired' &amp;&amp; event.val.name === 'deadline') {
+        input = { kind: 'deadline' };
+      } else if (event.tag === 'pane-lifecycle-changed' &amp;&amp; event.val.ended) {
+        input = { kind: 'pane-ended', node: Number(event.val.node) };
+      } else if (event.tag === 'request-completed') {
+        input = completed(event.val.request);
+      }
+      if (input &amp;&amp; run) {
+        const result = step(run, input);
+        run = result.state;
+        if (['done', 'cancelled', 'failed'].includes(run.phase)) cancelDurable('deadline');
+        perform(result.actions, out);
+      }
+    }
+    if (run) {
+      put('project', 'run', JSON.stringify(run));
+      publish('example.swarm/status', JSON.stringify({ run: run.run, phase: run.phase }));
+    }
+    return out;
+  },
+});
+</code></pre>
+<p>A restart loses <code>waiting</code>, the map from a request to its purpose. The saved run survives. Step 5 covers recovery.</p>
+<h3 id="step-4-the-diff-job">Step 4: the diff job</h3>
+<p>The job runs in its own instance with its own limits. It runs <code>git diff --stat</code> in one worktree, so the output stays short.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">// src/job.rs
+use ilium_plugin_sdk::host::process::{self, ProcessSpec};
+
+impl JobRunner for Swarm {
+    fn run(&amp;mut self, job: JobCall) -&gt; JobResult {
+        let params: serde_json::Value = serde_json::from_str(&amp;job.payload_json).unwrap_or_default();
+        let path = params[&quot;path&quot;].as_str().unwrap_or(&quot;&quot;);
+        let args = [&quot;-C&quot;, path, &quot;diff&quot;, &quot;--stat&quot;, &quot;HEAD&quot;].map(String::from).to_vec();
+        match process::run(&amp;ProcessSpec { command: &quot;git&quot;.into(), args, timeout_millis: 20_000 }) {
+            Ok(output) =&gt; JobResult::Done(output.stdout.chars().take(20 * 1024).collect()),
+            Err(error) =&gt; JobResult::Failed(error.code),
+        }
+    }
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">// src/job.ts
+import { run as runProcess } from '@ilium/plugin-sdk/host/process';
+
+export function runJob(payloadJson: string): { tag: 'done' | 'failed'; val: string } {
+  const { path = '' } = JSON.parse(payloadJson) as { path?: string };
+  try {
+    const args = ['-C', path, 'diff', '--stat', 'HEAD'];
+    return { tag: 'done', val: runProcess({ command: 'git', args, timeoutMillis: 20_000 }).stdout.slice(0, 20 * 1024) };
+  } catch (error) {
+    return { tag: 'failed', val: (error as { code?: string }).code ?? 'failed' };
+  }
+}
+</code></pre>
+<h3 id="step-5-restart-cancel-and-duplicates">Step 5: restart, cancel and duplicates</h3>
+<p>Three events can cut a run short.</p>
+<ul>
+<li><strong>Ilium restarts.</strong> <code>activate</code> reads the saved run. The <code>waiting</code> map is gone, so the listing does not match old replies. Resume by phase: in <code>creating</code> ask again for worktrees that have no path, in <code>working</code> wait for pane events and the durable deadline, in <code>collecting</code> start the diffs that are empty.</li>
+<li><strong>The user cancels.</strong> <code>Cancel</code> stops every running pane with <code>terminate-pane-process</code> and a grace period, and the layer cancels the timer. Worktrees stay on disk for the user to inspect.</li>
+<li><strong>A second start.</strong> Refuse the command while the saved phase is <code>creating</code>, <code>working</code> or <code>collecting</code>. One run at a time.</li>
+</ul>
+<p>Recovery works because every action is safe to repeat. A pane intent has a dedup key, so a repeat inside 10 minutes gives <code>duplicate</code>. After that window create a pane only when the saved reviewer has none. The worktree call uses a fixed branch name, so a repeat should return the existing path. Check this against the worktrees plugin you run. Replies after a cancel are dropped, because <code>step</code> ignores every input in a finished run. The listing above restores the run but leaves the resume loop and the second-start guard to you.</p>
+<h3 id="step-6-test-it">Step 6: test it</h3>
+<p><code>FakeHost</code> has fake panes and jobs, and <code>FakeSession.install_core</code> adds stubs of the core plugins. Test the pure plan, then the pane and job calls with the fakes. Follow <a href="/pages/testing/">Testing</a> and <a href="/pages/reference-test-harness/">Test harness reference</a>. Check the real core services in the app.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">#[cfg(test)]
+mod tests {
+    use super::plan::*;
+
+    fn working(count: usize) -&gt; Run {
+        let (mut state, _) = start(&quot;r1&quot;, count, 1_000, 60_000);
+        for i in 0..count {
+            state = step(state, Input::WorktreeReady(i, format!(&quot;/w/{i}&quot;))).0;
+            state = step(state, Input::PaneReady(i, 10 + i as u64)).0;
+        }
+        state
+    }
+
+    #[test]
+    fn deadline_stops_only_running_panes_then_one_notification() {
+        assert_eq!(clamp_count(500), MAX_REVIEWERS);
+        let (state, _) = step(working(2), Input::PaneEnded(10));
+        let (state, actions) = step(state, Input::Deadline);
+        assert!(actions.contains(&amp;Action::StopPane(11)) &amp;&amp; !actions.contains(&amp;Action::StopPane(10)));
+        let (state, none) = step(state, Input::DiffReady(0, &quot;a&quot;.into()));
+        assert!(none.is_empty());
+        let (state, done) = step(state, Input::DiffReady(1, &quot;&quot;.into()));
+        assert_eq!(state.phase, Phase::Done);
+        assert_eq!(done, vec![Action::Notify(&quot;Review swarm done: 1 of 2 reviewers changed files.&quot;.into())]);
+    }
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">// src/plan.test.ts
+import { expect, test } from 'bun:test';
+import { clampCount, MAX_REVIEWERS, start, step, type Run } from './plan';
+
+function working(count: number): Run {
+  let { state } = start('r1', count, 1000, 60000);
+  for (let i = 0; i &lt; count; i++) {
+    state = step(state, { kind: 'worktree-ready', index: i, path: `/w/${i}` }).state;
+    state = step(state, { kind: 'pane-ready', index: i, node: 10 + i }).state;
+  }
+  return state;
+}
+
+test('deadline stops only running panes, then one notification', () =&gt; {
+  expect(clampCount(500)).toBe(MAX_REVIEWERS);
+  const ended = step(working(2), { kind: 'pane-ended', node: 10 }).state;
+  const result = step(ended, { kind: 'deadline' });
+  expect(result.actions).toContainEqual({ kind: 'stop-pane', node: 11 });
+  expect(result.actions).not.toContainEqual({ kind: 'stop-pane', node: 10 });
+  const none = step(result.state, { kind: 'diff-ready', index: 0, text: 'a' });
+  expect(none.actions).toEqual([]);
+  const done = step(none.state, { kind: 'diff-ready', index: 1, text: '' });
+  expect(done.state.phase).toBe('done');
+  expect(done.actions).toEqual([{ kind: 'notify', text: 'Review swarm done: 1 of 2 reviewers changed files.' }]);
+});
+
+</code></pre>
+<p>Run <code>cargo test</code> or <code>bun test</code>. Then check the live path with the steps in <a href="/pages/debugging/">Debugging</a>:</p>
+<ol>
+<li>Pack and install as in <a href="/pages/tutorial-09-package-and-share/">tutorial 9</a>. Read the three high-risk rows before you confirm.</li>
+<li>Run <code>Start a review swarm</code> with count 2 in a Git project. Two panes appear.</li>
+<li>Run <code>Cancel the review swarm</code>, then read <code>ilium plugin logs example.swarm --tail 20</code>.</li>
+</ol>
+<h3 id="what-you-see">What you see</h3>
+<p>The review dialog lists the three high-risk grants, unchecked.</p>
+<figure>
+<pre class="term">
+╭──────────────────────────────────────────────╮
+│ Review: example.swarm 0.1.0                  │
+│                                              │
+│ Grants                                       │
+│   [x] services.use (4 core services)         │
+│   [x] panes.create                           │
+│   [x] panes.read                             │
+│   [x] fs.read:project                        │
+│   [x] jobs.run                               │
+│   [ ] terminal.write               HIGH      │
+│   [ ] panes.lifecycle              HIGH      │
+│   [ ] process.run:git              HIGH      │
+│                                              │
+│   [install]  [cancel]                        │
+╰──────────────────────────────────────────────╯
+</pre>
+<figcaption>Rendered at 48 columns. Illustrative. HIGH rows start unchecked and the user ticks each one.</figcaption>
+</figure>
+
+<h3 id="edge-cases-and-errors-what-can-go-wrong">Edge cases and errors: what can go wrong</h3>
+<table>
+<thead>
+<tr>
+<th>Code or symptom</th>
+<th>Cause</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>not-permitted</code> on a service</td>
+<td>A <code>services.use</code> grant is missing or revoked</td>
+<td>Grant it. The run ends as failed with this code.</td>
+</tr>
+<tr>
+<td><code>not-found</code> on a service</td>
+<td>The core plugin is off</td>
+<td>Turn it on. The run ends as failed.</td>
+</tr>
+<tr>
+<td><code>refused</code> on <code>create-pane</code></td>
+<td><code>panes.create</code> or <code>fs.read</code> is missing</td>
+<td>Grant it. Check <code>ilium plugin grants example.swarm</code>.</td>
+</tr>
+<tr>
+<td><code>refused</code> on stop</td>
+<td><code>panes.lifecycle</code> was left off</td>
+<td>Tick it, or stop the agents by hand.</td>
+</tr>
+<tr>
+<td><code>timed-out</code> on a service</td>
+<td>A core plugin took over 30 s</td>
+<td>The run fails. Start again.</td>
+</tr>
+<tr>
+<td>Job <code>failed</code></td>
+<td>Git is not allowed or the path is gone</td>
+<td>Check <code>process.run:git</code>. A failed diff gives an empty summary.</td>
+</tr>
+<tr>
+<td>Restart in the middle</td>
+<td>Ilium restarted</td>
+<td>The saved run is read. Resume by phase (step 5).</td>
+</tr>
+</tbody>
+</table>
+<h3 id="see-also">See also</h3>
+<ul>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a> and <a href="/pages/reference-core-extension-points/">Reference: core extension points</a> for the core services.</li>
+<li><a href="/pages/api-services/">Services</a>, <a href="/pages/tutorial-22-versioned-service-with-fallbacks/">tutorial 22</a>, <a href="/pages/testing/">Testing</a>, <a href="/pages/debugging/">Debugging</a> and <a href="/pages/reference-manifest/">Manifest reference</a>.</li>
+</ul>
+<p>API checked against <code>ilium:plugin@0.1.0</code>.</p>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/tutorial-22-versioned-service-with-fallbacks/"><small>Previous</small>22. A versioned service with fallbacks</a><a class="next" href="/pages/architecture/"><small>Next</small>Architecture</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#you-will-need">You will need</a></li><li class="l2"><a href="#the-surface-this-step-uses">The surface this step uses</a></li><li class="l2"><a href="#the-permission-summary">The permission summary</a></li><li class="l2"><a href="#the-flow">The flow</a></li><li class="l2"><a href="#step-1-the-manifest">Step 1: the manifest</a></li><li class="l2"><a href="#step-2-the-state-saved-to-storage">Step 2: the state, saved to storage</a></li><li class="l2"><a href="#step-3-the-host-calls">Step 3: the host calls</a></li><li class="l2"><a href="#step-4-the-diff-job">Step 4: the diff job</a></li><li class="l2"><a href="#step-5-restart-cancel-and-duplicates">Step 5: restart, cancel and duplicates</a></li><li class="l2"><a href="#step-6-test-it">Step 6: test it</a></li><li class="l2"><a href="#what-you-see">What you see</a></li><li class="l2"><a href="#edge-cases-and-errors-what-can-go-wrong">Edge cases and errors: what can go wrong</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>
