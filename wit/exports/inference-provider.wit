@@ -1,0 +1,10 @@
+package ilium:exports@0.1.0;
+
+interface inference-provider {
+  use ilium:types/errors@0.1.0.{plugin-error};
+  use ilium:host/inference@0.1.0.{completion-request};
+  record provider-call { call: u64, request: completion-request }
+  /// Answer later with inference.provider-reply.
+  complete: func(call: provider-call) -> result<_, plugin-error>;
+  models: func() -> list<string>;
+}

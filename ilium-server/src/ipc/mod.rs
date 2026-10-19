@@ -240,6 +240,7 @@ mod tests {
             stream,
             &ClientRequest::Attach {
                 session: "admission-test".to_string(),
+                hello: Default::default(),
             },
         )
         .await
@@ -281,6 +282,7 @@ mod tests {
                 &mut queued,
                 &ClientRequest::Attach {
                     session: wrong_session.clone(),
+                    hello: Default::default(),
                 },
             )
             .await
@@ -289,6 +291,7 @@ mod tests {
                 &mut queued,
                 &ClientRequest::Attach {
                     session: "admission-test".to_string(),
+                    hello: Default::default(),
                 },
             )
             .await
@@ -366,6 +369,7 @@ mod tests {
             &mut queued,
             &ClientRequest::Attach {
                 session: "admission-test".to_string(),
+                hello: Default::default(),
             },
         )
         .await

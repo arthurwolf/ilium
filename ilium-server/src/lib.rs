@@ -38,6 +38,7 @@ mod notifications;
 mod pane;
 pub mod paths;
 mod persistence;
+pub mod plugin_host;
 mod progress_monitor;
 mod progress_watchdog;
 mod prompt_queue;
@@ -1654,6 +1655,7 @@ mod restore_tests {
             &mut client,
             &ClientRequest::Attach {
                 session: "restore-test".to_string(),
+                hello: Default::default(),
             },
         )
         .await

@@ -164,7 +164,11 @@ impl ProjectionRetention {
             | AntigravityStatuslineCompleted { .. }
             | Error { .. }
             | PaneResizeRejected { .. }
-            | WorkspaceRemovalBlocked { .. } => return update,
+            | WorkspaceRemovalBlocked { .. }
+            // Plugin-platform events are projected by the plugin client layer, not here (skeleton).
+            | Plugin(_)
+            | Contributions(_)
+            | Rejected(_) => return update,
             AgentDetectionSettingsChanged { result, .. } => match result {
                 Ok(_) => {
                     update.clear_detection_error = true;

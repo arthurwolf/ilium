@@ -24,6 +24,8 @@ ilium-detect = { version = "0.1.1", path = "../ilium-detect" }
 ilium-execution = { version = "0.1.1", path = "../ilium-execution" }
 ilium-git = { version = "0.1.1", path = "../ilium-git" }
 ilium-ipc = { version = "0.1.1", path = "../ilium-ipc" }
+ilium-plugin-host = { version = "0.1.1", path = "../ilium-plugin-host" }
+ilium-plugin-api = { version = "0.1.1", path = "../ilium-plugin-api" }
 ilium-logging = { version = "0.1.1", path = "../ilium-logging" }
 ilium-platform = { version = "0.1.1", path = "../ilium-platform" }
 ilium-pty = { version = "0.1.1", path = "../ilium-pty" }
@@ -46,5 +48,9 @@ vt100 = "0.16.2"
 walkdir = "2.5.0"
 
 [dev-dependencies]
+# Plugin platform test lanes (test-plan.md section 1.5).
+ilium-plugin-host = { version = "0.1.1", path = "../ilium-plugin-host", features = ["testing"] }
+ilium-plugin-testkit = { version = "0.1.1", path = "../ilium-plugin-testkit" }
+proptest = "1"
 ilium-test-fixtures = { version = "0.1.1", path = "../ilium-test-fixtures" }
 tempfile = "3.27.0"

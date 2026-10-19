@@ -1,0 +1,80 @@
+{
+  "api": "ilium:plugin@0.1.0",
+  "id": "ilium.core.agent-detect",
+  "name": "Agent detect",
+  "version": "0.1.0",
+  "publisher": "Ilium",
+  "description": "The Agent detection plugin has the id ilium.core.agent-detect and runs on both sides.",
+  "license": "MIT",
+  "server": {
+    "entry": "server.wasm",
+    "world": "ilium:server/base@0.1.0",
+    "exports": [
+      "detector"
+    ]
+  },
+  "client": {
+    "entry": "client.wasm",
+    "world": "ilium:client/base@0.1.0"
+  },
+  "capabilities": {
+    "server": [
+      "agent.read",
+      "agent.signatures",
+      "tree.decorate",
+      "panes.read"
+    ],
+    "client": [
+      "agent.read",
+      "ui.panels",
+      "settings.write-kernel:agent-monitoring"
+    ]
+  },
+  "activation": [
+    "startup",
+    "view:agent-detect.panel"
+  ],
+  "contributes": {
+    "signatures": [
+      {
+        "id": "example-agent",
+        "process_names": [
+          "example-agent"
+        ],
+        "aliases": [
+          "example"
+        ],
+        "icon": "robot"
+      }
+    ],
+    "panels": [
+      {
+        "id": "panel",
+        "title": "Agent detection",
+        "modal": false
+      }
+    ],
+    "decoration_slots": [
+      {
+        "id": "activity",
+        "placement": "icon",
+        "priority": 90
+      },
+      {
+        "id": "goal",
+        "placement": "badge",
+        "priority": 80
+      }
+    ],
+    "display_modes": [
+      {
+        "id": "attention",
+        "title": "Attention",
+        "icon": "bell",
+        "slot": "activity",
+        "hide_unmarked": true
+      }
+    ]
+  },
+  "limits_tier": "first-party"
+}

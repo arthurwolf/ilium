@@ -1,0 +1,23 @@
+[package]
+name = "ilium-plugin-conformance"
+description = "Conformance cases, probe plugin sources and WAT fixtures of the Ilium plugin platform (test-only)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+ilium-plugin-api = { version = "0.1.1", path = "../ilium-plugin-api" }
+ilium-plugin-host = { version = "0.1.1", path = "../ilium-plugin-host", features = ["testing"] }
+ilium-plugin-testkit = { version = "0.1.1", path = "../ilium-plugin-testkit" }
+serde_json = "1.0.151"
+
+[dev-dependencies]
+proptest = "1"
+tempfile = "3.27.0"
+
+[[test]]
+name = "xref"
+path = "tests/xref/main.rs"

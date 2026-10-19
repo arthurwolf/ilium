@@ -1,0 +1,7 @@
+package ilium:exports@0.1.0;
+
+interface job-runner {
+  use ilium:types/errors@0.1.0.{plugin-error};
+  /// Runs in a job instance, see Runtime model. The output is at most 4 MiB.
+  run: func(kind: string, input: list<u8>) -> result<list<u8>, plugin-error>;
+}

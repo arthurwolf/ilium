@@ -269,6 +269,7 @@ fn history_budget_bytes(budget_mib: u16) -> usize {
 
 /// Bounded observation of OSC parsing state for stream-continuity regressions.
 /// Allocation admission uses the parser's actual fixed-capacity storage.
+#[cfg(test)]
 #[derive(Default, Clone, Copy)]
 struct OscAllocation {
     escaped: bool,
@@ -276,6 +277,7 @@ struct OscAllocation {
     length: usize,
     highwater: usize,
 }
+#[cfg(test)]
 impl OscAllocation {
     fn advance(mut self, bytes: &[u8]) -> Self {
         for &byte in bytes {
@@ -329,6 +331,7 @@ pub(crate) struct TerminalState {
     /// Authoritative live terminal state. Its scrollback offset stays at zero;
     /// historical navigation happens only through `historical_viewport`.
     parser: vt100::Parser,
+    #[cfg(test)]
     osc_allocation: OscAllocation,
     allocated_max_columns: u16,
     render_scrollback_rows: usize,
@@ -357,6 +360,8 @@ pub(crate) struct TerminalState {
     /// is raw bytes with no per-row estimation, so the cap is exact.
     history_segments: VecDeque<HistorySegment>,
     history_retained_len: usize,
+    /// Cached heap capacities keep per-slice admission independent of history length.
+    history_allocation_bytes: usize,
     history_origin: Arc<()>,
     /// Current raw-history retention cap in bytes, derived from the
     /// configured MiB budget via `history_budget_bytes`. Stored so
@@ -367,6 +372,7 @@ pub(crate) struct TerminalState {
     /// renders the label but deliberately discards the metadata, so the
     /// client retains this narrow side-channel for click activation.
     osc8_links: VecDeque<(String, String)>,
+    osc8_link_allocation_bytes: usize,
     /// Unconsumed raw output while an OSC-8 sequence spans IPC chunks.
     osc8_stream: Vec<u8>,
     /// Fingerprint of `parser`'s visible character cells after the most recent
@@ -405,6 +411,7 @@ impl TerminalState {
 
         Self {
             parser,
+            #[cfg(test)]
             osc_allocation: OscAllocation::default(),
             allocated_max_columns: cols,
             render_scrollback_rows: render_scrollback_rows(cols),
@@ -416,9 +423,11 @@ impl TerminalState {
                 start: 0,
             }]),
             history_retained_len: 0,
+            history_allocation_bytes: 0,
             history_origin: Arc::new(()),
             history_budget_bytes: history_budget_bytes(budget_mib),
             osc8_links: VecDeque::new(),
+            osc8_link_allocation_bytes: 0,
             osc8_stream: Vec::new(),
             visible_text_fingerprint,
             visible_row_fingerprints,
@@ -447,7 +456,10 @@ impl TerminalState {
     pub fn feed(&mut self, bytes: &[u8]) {
         self.observe_osc8_links(bytes);
         self.append_history(bytes);
-        self.osc_allocation = self.osc_allocation.advance(bytes);
+        #[cfg(test)]
+        {
+            self.osc_allocation = self.osc_allocation.advance(bytes);
+        }
         self.parser.process(bytes);
         self.invalidate_live_render_if_visible();
         self.refresh_scrollback_total();
@@ -466,6 +478,7 @@ impl TerminalState {
 
         let (rows, cols) = self.parser.screen().size();
         self.history_segments.clear();
+        self.history_allocation_bytes = 0;
         self.history_segments.push_back(HistorySegment {
             bytes: Arc::new(Vec::new()),
             start: 0,
@@ -473,6 +486,7 @@ impl TerminalState {
         self.history_retained_len = 0;
         self.history_origin = Arc::new(());
         self.osc8_links.clear();
+        self.osc8_link_allocation_bytes = 0;
         self.osc8_stream.clear();
         self.observe_osc8_links(bytes);
         self.append_history(bytes);
@@ -480,9 +494,15 @@ impl TerminalState {
 
         self.render_scrollback_rows = render_scrollback_rows(cols.max(self.allocated_max_columns));
         self.parser = vt100::Parser::new(rows, cols, self.render_scrollback_rows);
-        self.osc_allocation = OscAllocation::default();
+        #[cfg(test)]
+        {
+            self.osc_allocation = OscAllocation::default();
+        }
         self.scrollback_total = 0;
-        self.osc_allocation = self.osc_allocation.advance(bytes);
+        #[cfg(test)]
+        {
+            self.osc_allocation = self.osc_allocation.advance(bytes);
+        }
         self.parser.process(bytes);
         self.invalidate_live_render_if_visible();
         self.refresh_scrollback_total();
@@ -538,7 +558,10 @@ impl TerminalState {
         }
         self.append_history(bytes);
         self.observe_osc8_links(bytes);
-        self.osc_allocation = self.osc_allocation.advance(bytes);
+        #[cfg(test)]
+        {
+            self.osc_allocation = self.osc_allocation.advance(bytes);
+        }
         self.parser.process(bytes);
         self.invalidate_live_render_if_visible();
         self.refresh_scrollback_total();
@@ -715,9 +738,12 @@ impl TerminalState {
             self.osc8_stream
                 .drain(..close_after + close_end + close_terminator_width);
             if !target.is_empty() && !label.is_empty() {
+                self.osc8_link_allocation_bytes += label.capacity() + target.capacity();
                 self.osc8_links.push_back((label, target));
                 if self.osc8_links.len() > 256 {
-                    self.osc8_links.pop_front();
+                    if let Some((label, target)) = self.osc8_links.pop_front() {
+                        self.osc8_link_allocation_bytes -= label.capacity() + target.capacity();
+                    }
                 }
             }
         }
@@ -1063,6 +1089,11 @@ impl TerminalState {
                 .history_segments
                 .back_mut()
                 .expect("active history segment");
+            let previous_capacity = if needs_segment {
+                0
+            } else {
+                segment.bytes.capacity()
+            };
             let active = Arc::make_mut(&mut segment.bytes);
             if active.len().saturating_add(chunk.len()) > active.capacity() {
                 let capacity = active
@@ -1073,11 +1104,13 @@ impl TerminalState {
                 active.reserve_exact(capacity.saturating_sub(active.len()));
             }
             active.extend_from_slice(chunk);
+            self.history_allocation_bytes += active.capacity() - previous_capacity;
             self.history_retained_len = self.history_retained_len.saturating_add(chunk.len());
             self.trim_history_to_budget();
         }
     }
 
+    #[cfg(any(test, feature = "ui-capture"))]
     fn collect_retained_history(&self) -> Vec<u8> {
         let mut bytes = Vec::with_capacity(self.history_retained_len);
         for segment in &self.history_segments {
@@ -1114,7 +1147,9 @@ impl TerminalState {
             excess -= removed;
             if oldest_segment.start == oldest_segment.bytes.len() && self.history_segments.len() > 1
             {
-                self.history_segments.pop_front();
+                if let Some(segment) = self.history_segments.pop_front() {
+                    self.history_allocation_bytes -= segment.bytes.capacity();
+                }
             }
         }
     }
@@ -1315,6 +1350,22 @@ impl std::ops::Deref for PreparationSnapshot {
         &self.snapshot
     }
 }
+/// Allocation-producing commands retain the small admission slice. Escape runs
+/// cannot execute commands, so admit one scheduler quantum at once instead of
+/// repeating bookkeeping for every64 bytes of an inert control stream.
+fn ordered_output_slice_end(bytes: &[u8], start: usize) -> usize {
+    if bytes[start] == 0x1b {
+        let run = bytes[start..bytes.len().min(start.saturating_add(16 * 1024))]
+            .iter()
+            .take_while(|byte| **byte == 0x1b)
+            .count();
+        if run >= 64 {
+            return start + run;
+        }
+    }
+    start.saturating_add(64).min(bytes.len())
+}
+
 impl TerminalState {
     pub(crate) fn publish(&self) -> TerminalSnapshot {
         TerminalSnapshot {
@@ -1334,18 +1385,21 @@ impl TerminalState {
     pub(crate) fn output_sequence(&self) -> u64 {
         self.last_output_sequence
     }
-    pub(crate) fn live_size(&self) -> (u16, u16) {
-        self.parser.screen().size()
-    }
     pub(crate) fn input_peak_bytes(&self, bytes: &[u8]) -> usize {
         let chunk = bytes.len();
         let columns = usize::from(self.parser.screen().size().1);
         // One final CSI byte can scroll an entire viewport, including when
         // its introducer arrived in another chunk. Vendor commands clamp each
         // scroll to the viewport height; repeated commands remain bounded here.
-        let rows = self
-            .render_scrollback_rows
-            .min(chunk.saturating_mul(usize::from(self.parser.screen().size().0)));
+        let escape_only = !bytes.is_empty() && bytes.iter().all(|byte| *byte == 0x1b);
+        let rows = if escape_only {
+            // ESC cancels an unfinished sequence and enters Escape; repeated
+            // ESC bytes cannot execute a scroll or activate the alternate grid.
+            0
+        } else {
+            self.render_scrollback_rows
+                .min(chunk.saturating_mul(usize::from(self.parser.screen().size().0)))
+        };
         let history_extra = 64 * 1024 + chunk;
         // A fresh shared-history segment can also grow the deque. VecDeque
         // may retain its old buffer while allocating twice its prior capacity.
@@ -1355,23 +1409,42 @@ impl TerminalState {
             .max(1)
             .saturating_mul(2)
             .saturating_mul(std::mem::size_of::<HistorySegment>());
+        let observes_links = !self.osc8_stream.is_empty() || bytes.contains(&0x1b);
+        let pending_source = self.osc8_stream.len().saturating_add(chunk);
+        let source_allocation_peak =
+            if observes_links && pending_source > self.osc8_stream.capacity() {
+                // Reallocation may overlap the already charged old buffer.
+                pending_source
+                    .max(self.osc8_stream.capacity())
+                    .saturating_mul(2)
+            } else {
+                0
+            };
         self.retained_allocation_bytes()
             // An alternate-screen activation can be completed by one final
             // byte after a split CSI, even with visual history disabled.
-            .saturating_add(self.parser.screen().pending_screen_allocation_bytes())
-            .saturating_add(
-                self.osc8_stream
-                    .len()
-                    .saturating_add(chunk)
-                    .saturating_mul(2)
-                    .saturating_sub(self.osc8_stream.capacity()),
-            )
-            .saturating_add(if self.osc8_stream.is_empty() && !bytes.contains(&0x1b) {
+            .saturating_add(if escape_only {
+                0
+            } else {
+                self.parser.screen().pending_screen_allocation_bytes()
+            })
+            .saturating_add(source_allocation_peak)
+            .saturating_add(if !observes_links {
                 0
             } else {
                 // Existing OSC8 observer caps source scratch at64KiB. Account
                 // lossy UTF-8 conversion, label/URI clones and deque growth.
-                64 * 1024 * 8 + self.osc8_links.capacity() * std::mem::size_of::<(String, String)>()
+                self.osc8_stream
+                    .len()
+                    .saturating_add(chunk)
+                    .min(64 * 1024)
+                    .saturating_mul(8)
+                    .saturating_add(
+                        self.osc8_links
+                            .capacity()
+                            .saturating_mul(2)
+                            .saturating_mul(std::mem::size_of::<(String, String)>()),
+                    )
             })
             .saturating_add(
                 rows.saturating_mul(
@@ -1400,12 +1473,15 @@ impl TerminalState {
             return Err("non-contiguous terminal output requires replay".into());
         }
         while cursor.consumed < bytes.len() {
-            let end = cursor.consumed.saturating_add(64).min(bytes.len());
+            let end = ordered_output_slice_end(bytes, cursor.consumed);
             let chunk = &bytes[cursor.consumed..end];
             before(self, chunk)?;
             self.append_history(chunk);
             self.observe_osc8_links(chunk);
-            self.osc_allocation = self.osc_allocation.advance(chunk);
+            #[cfg(test)]
+            {
+                self.osc_allocation = self.osc_allocation.advance(chunk);
+            }
             self.parser.process(chunk);
             cursor.consumed = end;
             self.invalidate_live_render_if_visible();
@@ -1431,6 +1507,7 @@ impl TerminalState {
         if !cursor.replay_started {
             let (rows, cols) = self.parser.screen().size();
             self.history_segments.clear();
+            self.history_allocation_bytes = 0;
             self.history_segments.push_back(HistorySegment {
                 bytes: Arc::new(Vec::new()),
                 start: 0,
@@ -1438,6 +1515,7 @@ impl TerminalState {
             self.history_retained_len = 0;
             self.history_origin = Arc::new(());
             self.osc8_links.clear();
+            self.osc8_link_allocation_bytes = 0;
             self.osc8_stream.clear();
             self.render_scrollback_rows =
                 render_scrollback_rows(cols.max(self.allocated_max_columns));
@@ -1446,17 +1524,23 @@ impl TerminalState {
             self.parser = vt100::Parser::new(1, 1, 0);
             self.parser = vt100::Parser::new(rows, cols, self.render_scrollback_rows);
             self.allocated_max_columns = cols;
-            self.osc_allocation = OscAllocation::default();
+            #[cfg(test)]
+            {
+                self.osc_allocation = OscAllocation::default();
+            }
             self.scrollback_total = 0;
             cursor.replay_started = true;
         }
         while cursor.consumed < bytes.len() {
-            let end = cursor.consumed.saturating_add(64).min(bytes.len());
+            let end = ordered_output_slice_end(bytes, cursor.consumed);
             let chunk = &bytes[cursor.consumed..end];
             before(self, chunk)?;
             self.append_history(chunk);
             self.observe_osc8_links(chunk);
-            self.osc_allocation = self.osc_allocation.advance(chunk);
+            #[cfg(test)]
+            {
+                self.osc_allocation = self.osc_allocation.advance(chunk);
+            }
             self.parser.process(chunk);
             cursor.consumed = end;
             self.refresh_scrollback_total();
@@ -1479,6 +1563,7 @@ impl TerminalState {
         let target = limit.saturating_sub(limit / 8);
         while self.retained_allocation_bytes() > target {
             if let Some(segment) = self.history_segments.pop_front() {
+                self.history_allocation_bytes -= segment.bytes.capacity();
                 self.history_retained_len = self
                     .history_retained_len
                     .saturating_sub(segment.bytes.len().saturating_sub(segment.start));
@@ -1561,17 +1646,7 @@ impl TerminalState {
     }
 
     pub(crate) fn retained_allocation_bytes(&self) -> usize {
-        let history = self
-            .history_segments
-            .iter()
-            .map(|segment| segment.bytes.capacity())
-            .sum::<usize>();
-        let links = self
-            .osc8_links
-            .iter()
-            .map(|(label, target)| label.capacity().saturating_add(target.capacity()))
-            .sum::<usize>();
-        history
+        self.history_allocation_bytes
             .saturating_add(self.parser.allocation_bytes())
             .saturating_add(
                 self.historical_viewport
@@ -1588,7 +1663,7 @@ impl TerminalState {
                     .capacity()
                     .saturating_mul(std::mem::size_of::<(String, String)>()),
             )
-            .saturating_add(links)
+            .saturating_add(self.osc8_link_allocation_bytes)
             .saturating_add(self.osc8_stream.capacity())
             .saturating_add(self.visible_row_fingerprints.capacity().saturating_mul(8))
             .saturating_add(128 * 1024)
@@ -1865,7 +1940,11 @@ mod tests {
 
         assert_eq!(snapshot.to_vec(), retained);
         assert_eq!(snapshot.len(), 1024 * 1024);
-        assert_eq!(view.history_segments.len(), 2);
+        assert!(view.history_segments.len() > 1);
+        assert!(view
+            .history_segments
+            .iter()
+            .all(|segment| segment.bytes.capacity() <= 65536));
         assert!(view.searchable_history().ends_with(&vec![b'b'; 4096]));
     }
 

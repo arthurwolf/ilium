@@ -3,7 +3,9 @@
 pub struct Parser<CB: crate::callbacks::Callbacks = ()> {
     // vte without its std feature uses a fixed OSC buffer. Oversized terminal
     // metadata is truncated until its terminator, never accumulated unboundedly.
-    parser: vte::Parser<65536>,
+    // Keep the fixed buffer on the heap: moving parsers through pane startup
+    // must not multiply 64 KiB stack frames in debug builds.
+    parser: Box<vte::Parser<65536>>,
     screen: crate::perform::WrappedScreen<CB>,
 }
 
@@ -13,7 +15,7 @@ impl Parser {
     #[must_use]
     pub fn new(rows: u16, cols: u16, scrollback_len: usize) -> Self {
         Self {
-            parser: vte::Parser::new_with_size(),
+            parser: Box::new(vte::Parser::new_with_size()),
             screen: crate::perform::WrappedScreen::new(rows, cols, scrollback_len),
         }
     }
@@ -26,7 +28,7 @@ impl<CB: crate::callbacks::Callbacks> Parser<CB> {
     /// implementation.
     pub fn new_with_callbacks(rows: u16, cols: u16, scrollback_len: usize, callbacks: CB) -> Self {
         Self {
-            parser: vte::Parser::new_with_size(),
+            parser: Box::new(vte::Parser::new_with_size()),
             screen: crate::perform::WrappedScreen::new_with_callbacks(
                 rows,
                 cols,
@@ -48,6 +50,7 @@ impl<CB: crate::callbacks::Callbacks> Parser<CB> {
     #[must_use]
     pub fn allocation_bytes(&self) -> usize {
         std::mem::size_of::<Self>()
+            .saturating_add(std::mem::size_of_val(self.parser.as_ref()))
             .saturating_add(self.screen.screen.allocation_bytes())
             .saturating_sub(std::mem::size_of::<crate::Screen>())
     }
@@ -100,6 +103,17 @@ impl std::io::Write for Parser {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn boxed_control_buffer_is_charged_without_inflating_parser_stack_size() {
+        let parser = super::Parser::new(1, 1, 0);
+        assert!(std::mem::size_of_val(&parser) < 4096);
+        assert!(parser.allocation_bytes() >= 65536 + parser.screen().allocation_bytes());
+    }
+
+    #[test]
+    fn parser_metadata_capacity_does_not_inflate_owner_stack_frames() {
+        assert!(std::mem::size_of::<super::Parser>() < 4096);
+    }
     use super::Parser;
 
     #[test]

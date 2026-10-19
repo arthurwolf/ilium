@@ -810,6 +810,13 @@ impl HeapBytes for ServerEvent {
                 .heap_bytes()
                 .saturating_add(short.heap_bytes())
                 .saturating_add(long.heap_bytes()),
+            // Plugin traffic is bounded by the plugin IPC limits (HST-104, HST-109); its exact
+            // heap accounting is added with the implementation.
+            Self::Plugin(_) | Self::Contributions(_) => 0,
+            Self::Rejected(rejection) => rejection
+                .code
+                .heap_bytes()
+                .saturating_add(rejection.message.heap_bytes()),
         }
     }
 }
