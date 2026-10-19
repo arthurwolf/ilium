@@ -1283,7 +1283,7 @@ fn tab_icon(tab: SettingsTab) -> &'static str {
         SettingsTab::KanbanBoard => "▥",
         SettingsTab::Animations => "▷",
         SettingsTab::Sound => "♪",
-        SettingsTab::VoiceControl => "◎",
+        SettingsTab::VoiceControl => "🎙",
         SettingsTab::ResetPlanning => "↻",
         SettingsTab::Inference => "⚡",
         SettingsTab::LlmInstructions => "≡",

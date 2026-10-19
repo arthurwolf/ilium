@@ -134,7 +134,7 @@ impl ValueControl {
         let control_width = row.width - label_width - label_gap;
         let geometry = &mut prepared.geometry;
         geometry.label = Rect::new(row.x, row.y, label_width, 1);
-        prepared.label_text = clip_cells(spec.label, label_width);
+        prepared.label_text = clip_label_cells(spec.label, label_width);
         if control_width < 2 * step_width + 2 {
             geometry.open = Rect::new(control_x + control_width - 1, row.y, 1, 1);
             geometry.value_slot = Rect::new(control_x, row.y, control_width - 1, 1);
@@ -379,7 +379,19 @@ pub fn cell_width(text: &str) -> usize {
         .map(UnicodeWidthStr::width)
         .sum()
 }
+/// Clips text to `width` cells, cutting mid-word when the text does not fit.
+/// Values and dialog text use this; labels use `clip_label_cells`.
 pub fn clip_cells(text: &str, width: u16) -> String {
+    clip_cells_with_word_break(text, width, false)
+}
+
+/// Clips a label to `width` cells, ending at a whole word when that still shows
+/// at least a third of the room.
+pub fn clip_label_cells(text: &str, width: u16) -> String {
+    clip_cells_with_word_break(text, width, true)
+}
+
+fn clip_cells_with_word_break(text: &str, width: u16, prefer_word_break: bool) -> String {
     if width == 0 {
         return String::new();
     }
@@ -409,7 +421,7 @@ pub fn clip_cells(text: &str, width: u16) -> String {
         }
         if let Some((gap_bytes, gap_used)) = last_word_gap {
             // Keep a word-ending cut only when it still shows at least a third of the room.
-            if gap_used * 3 >= limit {
+            if prefer_word_break && gap_used * 3 >= limit {
                 output.truncate(gap_bytes);
                 output.push('…');
                 return output;
@@ -1002,9 +1014,9 @@ mod tests {
         assert_eq!(clip_cells("a\nb\tc\r\nd", 20), "a b c d");
         // A clipped label ends at a whole word when that still shows a third of the room,
         // and falls back to a mid-word cut when the last word gap is too early.
-        assert_eq!(clip_cells("Top-level destination", 15), "Top-level…");
-        assert_eq!(clip_cells("Top-level destination", 19), "Top-level…");
-        assert_eq!(clip_cells("a extraordinarily long", 10), "a extraor…");
+        assert_eq!(clip_label_cells("Top-level destination", 15), "Top-level…");
+        assert_eq!(clip_label_cells("Top-level destination", 19), "Top-level…");
+        assert_eq!(clip_label_cells("a extraordinarily long", 10), "a extraor…");
         let emoji = "👩‍❤️‍💋‍👩";
         let emoji_width = cell_width(emoji) as u16;
         assert_eq!(clip_cells(emoji, emoji_width), emoji);
