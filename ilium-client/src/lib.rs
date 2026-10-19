@@ -117,6 +117,7 @@ pub mod padding_dialog;
 pub mod padding_ui;
 pub mod pane_title;
 pub mod paths;
+pub mod plugin_host;
 pub mod popover;
 pub mod presentation;
 pub mod progress_bar;

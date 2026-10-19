@@ -1,0 +1,7 @@
+package ilium:host@0.1.0;
+
+interface http-api {
+  use ilium:types/errors@0.1.0.{plugin-error};
+  /// Answers http-called. Errors: not-found for an unknown or answered call.
+  respond: func(call: u64, status: u16, headers: list<tuple<string, string>>, body: list<u8>) -> result<_, plugin-error>;
+}

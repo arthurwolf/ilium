@@ -1,0 +1,7 @@
+╭─ Sounds ─────────────────────────────────────╮
+│ Approval needed …………………………………………………… ‹ ask › │
+│ Agent finished ………………………………………… ‹ finished › │
+│ Task done ………………………………………………………………… ‹ none › │
+│ Desktop notifications ……………………………………… ‹ On › │
+│ Merge task alerts within …………………………………… 30 s │
+╰──────────────────────────────────────────────╯

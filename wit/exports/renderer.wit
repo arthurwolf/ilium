@@ -1,0 +1,20 @@
+package ilium:exports@0.1.0;
+
+interface renderer {
+  use ilium:anim/surface@0.1.0.{frame-surface};
+  use ilium:anim/renderer-types@0.1.0.{readiness, frame-input};
+  resource scene-renderer {
+    /// spec-json holds scene, settings, palette and mode.
+    constructor(spec-json: string);
+    readiness: func() -> readiness;
+    frames-per-second: func() -> u32;
+    wants-pointer: func() -> bool;
+    wants-occupancy: func() -> bool;
+    uses-cell-colors: func() -> bool;
+    render: func(frame: frame-input, surface: borrow<frame-surface>);
+    set-palette: func(palette-rgb: list<u32>);
+    /// false asks the host to restart the scene.
+    reconfigure: func(settings-json: string) -> bool;
+    status: func() -> option<string>;
+  }
+}

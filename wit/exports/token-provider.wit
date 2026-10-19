@@ -1,0 +1,9 @@
+package ilium:exports@0.1.0;
+
+interface token-provider {
+  use ilium:types/ids@0.1.0.{buffer-id};
+  enum token-kind { keyword, string, number, comment, type-name, function, variable, operator, punctuation, constant, tag, attribute, plain }
+  record token { line: u32, start: u32, length: u32, kind: token-kind }
+  tokens: func(buffer: buffer-id, first-line: u32, lines: list<string>, state-in: option<list<u8>>)
+    -> tuple<list<token>, option<list<u8>>>;
+}

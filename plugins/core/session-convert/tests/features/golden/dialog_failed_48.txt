@@ -1,0 +1,10 @@
+╭─ Convert Codex to Claude Code ───────────────╮
+│ ✕ Conversion failed                          │
+│   The Claude Code transcript did not verify. │
+│   The original session is untouched.         │
+│                                              │
+│ Carried over ……………………………………………………… 212 items │
+│ Left out …………………………………………………………………… 57 items │
+│                                              │
+│ [ Resume original ]   [ Close ]              │
+╰──────────────────────────────────────────────╯

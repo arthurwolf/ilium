@@ -15,6 +15,7 @@ mod allocation;
 mod bounded_decode;
 mod error;
 mod framing;
+pub mod plugin;
 mod protocol;
 mod startup;
 mod terminal_bytes;
@@ -32,6 +33,7 @@ pub use ilium_agent_debug::{
     AgentDebugEventMetadata, AgentDebugField, AgentDebugFieldPresentation, AgentDebugSeverity,
     AgentDebugSource, PaneDebugLog, PaneResizeCause,
 };
+pub use plugin::PLUGIN_PROTOCOL_VERSION;
 pub use protocol::{
     AgentDetectionSettings, AgentDetectionSettingsError, AntigravityStatuslineAction,
     BlockingError, ClientRequest, CustomAgentSignature, DetectionReason, MouseButton,
@@ -167,6 +169,7 @@ mod tests {
         vec![
             ClientRequest::Attach {
                 session: "main".to_string(),
+                hello: Default::default(),
             },
             ClientRequest::NewPane {
                 request_id: 0,
@@ -470,6 +473,7 @@ mod tests {
             ClientRequest::RecordNodeActivity { node_id: NodeId(2) },
             ClientRequest::AttachInteractive {
                 session: "main".to_string(),
+                hello: Default::default(),
             },
             ClientRequest::SetVisiblePanes {
                 pane_ids: vec![NodeId(2), NodeId(3)],

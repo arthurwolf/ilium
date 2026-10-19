@@ -1,0 +1,39 @@
+package ilium:host@0.1.0;
+
+interface plugins {
+  use ilium:types/ids@0.1.0.{plugin-id};
+  use ilium:types/errors@0.1.0.{plugin-error};
+  enum package-state {
+    not-installed, installed-enabled, installed-disabled-by-user, disabled-untrusted,
+    disabled-blocked, disabled-by-policy, refused-at-load, update-staged, uninstall-pending,
+  }
+  enum instance-state {
+    inactive, activating, waiting-dependency, active, deactivating, restart-scheduled,
+    stopped-by-failure, stopped,
+  }
+  enum health-state { healthy, degraded, restarting, failed, disabled, dormant, refused }
+  record side-state {
+    /// "server", "client" or "scene".
+    side: string,
+    /// "server", or the attached client id.
+    scope: string,
+    state: instance-state,
+    failures-in-window: u32,
+    /// For example "trap.deadline".
+    last-error-code: option<string>,
+    restart-at-unix-ms: option<u64>,
+  }
+  record plugin-info {
+    id: plugin-id, name: string, version: string, tier: string, enabled: bool, failed: bool,
+    state: package-state, side-states: list<side-state>,
+    /// "global" in 0.1.0.
+    scope: string,
+    disabled-reason: option<string>, health: health-state,
+    publisher: string, publisher-key: option<string>,
+    source: string, channel: string, pinned: bool,
+    update-available: option<string>, deprecated: bool, yanked: bool,
+  }
+  %list: func() -> list<plugin-info>;
+  /// scope is "global" in 0.1.0.
+  set-enabled: func(plugin: plugin-id, enabled: bool, scope: string) -> result<_, plugin-error>;
+}

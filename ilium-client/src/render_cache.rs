@@ -633,6 +633,8 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
         }
         // One-shot recap consumers own this direct reply; it is not UI state.
         ServerEvent::PaneRecapScreen { .. } => None,
+        // Plugin traffic is consumed by the client plugin host, not by the render cache.
+        ServerEvent::Plugin(_) | ServerEvent::Contributions(_) | ServerEvent::Rejected(_) => None,
         ServerEvent::AntigravityStatuslineCompleted { .. } => None,
         ServerEvent::VoiceTextOffered {
             request_id,

@@ -1,0 +1,12 @@
+{
+  "format": "ilium-sig/1",
+  "signatures": [
+    {
+      "algorithm": "ed25519",
+      "key_id": "56475aa75463474c0285df5dbf2bcab73da651358839e9b77481b2eab107708c",
+      "publisher_id": "example",
+      "signature": "jv5zcDEiiDljfN-iy3nZLtCgScmbTMJoOv0M3X9r0D9Tm4dvdqE43gpEEAW_cqVod6iYQAjeIR8E0-vFwEplBw",
+      "signed_at": "2026-10-12 10:00:00"
+    }
+  ]
+}

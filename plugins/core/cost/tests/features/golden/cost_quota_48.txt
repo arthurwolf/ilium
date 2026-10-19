@@ -1,0 +1,7 @@
+╭ Quota ──────────────────────────────────────╮
+│ 5-hour window  ██████████░░░░░░░░░░  48%    │
+│ Weekly         ████████████████░░░░  81%    │
+│                                             │
+│ Forecast: 5-hour window resets at 18:40     │
+│ Forecast: weekly window resets on Friday    │
+╰─────────────────────────────────────────────╯

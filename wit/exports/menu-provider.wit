@@ -1,0 +1,24 @@
+package ilium:exports@0.1.0;
+
+interface menu-provider {
+  use ilium:types/ids@0.1.0.{node-id, buffer-id};
+  use ilium:types/errors@0.1.0.{plugin-error};
+  use ilium:types/text@0.1.0.{tooltip, tri-state};
+  use ilium:types/ui@0.1.0.{view-target};
+  record menu-context {
+    menu: string, node: option<node-id>, pane: option<node-id>, view: option<view-target>,
+    key: option<string>, buffer: option<buffer-id>, line: option<u32>, selection: option<string>,
+  }
+  record menu-entry {
+    id: string, label: string, icon: option<string>, shortcut: option<string>,
+    /// Id of a submenu entry. Depth is at most 2.
+    parent: option<string>,
+    is-submenu: bool, separator-before: bool,
+    checked: option<tri-state>,
+    /// At most 40 characters.
+    disabled-reason: option<string>,
+    tooltip: option<tooltip>, danger: bool,
+  }
+  /// At most 64 entries.
+  menu-items: func(context: menu-context) -> list<menu-entry>;
+}
