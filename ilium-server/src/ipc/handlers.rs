@@ -171,11 +171,20 @@ pub async fn handle_request(
     direct_tx: &DirectEventSender,
 ) -> bool {
     let operation = request.diagnostic_name();
+    let requested_node = request_error_node(&request);
     let target = {
         let tree = state.tree.read().await;
-        request_error_node(&request).filter(|node_id| tree.get(*node_id).is_some())
+        requested_node.filter(|node_id| tree.get(*node_id).is_some())
     };
-    let scoped_tx = direct_tx.with_error_scope(state, target, operation);
+    // A request aimed at a node that no longer exists (a duplicate close, a
+    // click racing a restructure) has no node to attach a retained error to.
+    // Filing it as session-wide would mark every node with a blocking error
+    // that nothing ever clears, so its failure stays a transient status line.
+    let scoped_tx = if requested_node.is_some() && target.is_none() {
+        direct_tx.clone()
+    } else {
+        direct_tx.with_error_scope(state, target, operation)
+    };
     let should_close = handle_scoped_request(state, request, &scoped_tx).await;
     if matches!(
         operation,
@@ -205,6 +214,43 @@ async fn handle_scoped_request(
         // Plugin envelopes are routed by the plugin kernel once it exists (skeleton: ignored).
         ClientRequest::Plugin(_) => {
             tracing::debug!("plugin envelope ignored: plugin kernel not implemented");
+            false
+        }
+        ClientRequest::TerminalHistory {
+            pane_id,
+            before_sequence,
+            max_bytes,
+        } => {
+            let max_bytes = usize::try_from(max_bytes)
+                .unwrap_or(usize::MAX)
+                .min(TERMINAL_HISTORY_MAX_BYTES);
+            let history = {
+                let panes = state.panes.read().await;
+                match panes.get(&pane_id) {
+                    Some(PaneResource::Terminal(runtime)) => {
+                        Some(runtime.session.output_history_before(before_sequence, max_bytes))
+                    }
+                    _ => None,
+                }
+            };
+            let event = match history {
+                Some(history) => ServerEvent::TerminalHistory {
+                    pane_id,
+                    first_sequence: history.first_sequence,
+                    before_sequence: history.before_sequence,
+                    bytes: history.bytes,
+                    reaches_journal_start: history.reaches_journal_start,
+                },
+                // A pane that no longer exists has no older output to show.
+                None => ServerEvent::TerminalHistory {
+                    pane_id,
+                    first_sequence: before_sequence,
+                    before_sequence,
+                    bytes: Vec::new(),
+                    reaches_journal_start: true,
+                },
+            };
+            send_direct(direct_tx, event).await;
             false
         }
         ClientRequest::GetPaneRecapScreen { pane_id } => {
@@ -1603,6 +1649,10 @@ async fn send_initial_state(
     }
 }
 
+/// Largest raw history reply one `TerminalHistory` request may return. Clients
+/// ask again for older output, so a large scroll never needs a large frame.
+const TERMINAL_HISTORY_MAX_BYTES: usize = 1024 * 1024;
+
 /// Selects how terminal journals synchronize for one connection. Attach has
 /// no prior parser and needs full replays; live recovery appends exact missing
 /// deltas while retained, falling back to replay only past the journal window.
@@ -1616,6 +1666,9 @@ struct TerminalOutputEstimate {
     input: PtyInput,
     estimate: PtyOutputRecoveryEstimate,
     after_sequence: u64,
+    /// The screen built during estimation, so admission reserves its exact
+    /// size and the event carries the same bytes without a second capture.
+    snapshot: Option<ilium_pty::PtyScreenSnapshot>,
 }
 
 impl TerminalOutputSynchronization<'_> {
@@ -1624,11 +1677,24 @@ impl TerminalOutputSynchronization<'_> {
         pane_id: NodeId,
         session: &ilium_pty::PtySession,
     ) -> Option<TerminalOutputEstimate> {
-        let (after_sequence, estimate) = match self {
-            Self::All => (
-                0,
-                PtyOutputRecoveryEstimate::Replay(session.output_replay_estimate()),
-            ),
+        let (after_sequence, estimate, snapshot) = match self {
+            Self::All => match session.attach_snapshot() {
+                Some(snapshot) => (
+                    0,
+                    PtyOutputRecoveryEstimate::Snapshot {
+                        through_sequence: snapshot.through_sequence,
+                        byte_len: snapshot.bytes.len(),
+                    },
+                    Some(snapshot),
+                ),
+                // An unreadable parser cannot rebuild its screen; the retained
+                // journal is the only remaining evidence of what it showed.
+                None => (
+                    0,
+                    PtyOutputRecoveryEstimate::Replay(session.output_replay_estimate()),
+                    None,
+                ),
+            },
             Self::None => return None,
             Self::RecoverAfter(delivered_sequences) => {
                 let after_sequence = delivered_sequences
@@ -1638,6 +1704,7 @@ impl TerminalOutputSynchronization<'_> {
                 (
                     after_sequence,
                     session.output_recovery_estimate_after(after_sequence)?,
+                    None,
                 )
             }
         };
@@ -1645,6 +1712,7 @@ impl TerminalOutputSynchronization<'_> {
             input: session.input_handle(),
             estimate,
             after_sequence,
+            snapshot,
         })
     }
 
@@ -1655,13 +1723,16 @@ impl TerminalOutputSynchronization<'_> {
         estimated: &TerminalOutputEstimate,
     ) -> Option<ServerEvent> {
         match self {
-            Self::All => {
-                let PtyOutputRecoveryEstimate::Replay(replay_estimate) = estimated.estimate else {
-                    return None;
-                };
-                let replay = session.output_replay_through_if_retained(replay_estimate)?;
-                Some(terminal_replay_event(pane_id, replay))
-            }
+            Self::All => match (&estimated.estimate, &estimated.snapshot) {
+                (PtyOutputRecoveryEstimate::Snapshot { .. }, Some(snapshot)) => {
+                    Some(terminal_snapshot_event(pane_id, snapshot.clone()))
+                }
+                (PtyOutputRecoveryEstimate::Replay(replay_estimate), None) => {
+                    let replay = session.output_replay_through_if_retained(*replay_estimate)?;
+                    Some(terminal_replay_event(pane_id, replay))
+                }
+                _ => None,
+            },
             Self::None => None,
             Self::RecoverAfter(_) => match session
                 .output_recovery_if_unchanged(estimated.after_sequence, estimated.estimate)?
@@ -1683,7 +1754,10 @@ impl TerminalOutputSynchronization<'_> {
     #[cfg(test)]
     fn event_for(&self, pane_id: NodeId, session: &ilium_pty::PtySession) -> Option<ServerEvent> {
         match self {
-            Self::All => Some(terminal_replay_event(pane_id, session.output_replay())),
+            Self::All => match session.attach_snapshot() {
+                Some(snapshot) => Some(terminal_snapshot_event(pane_id, snapshot)),
+                None => Some(terminal_replay_event(pane_id, session.output_replay())),
+            },
             Self::None => None,
             Self::RecoverAfter(delivered_sequences) => {
                 let after_sequence = delivered_sequences
@@ -1776,6 +1850,7 @@ pub(crate) async fn admitted_terminal_recovery_prefix(
         };
         let byte_len = match estimate {
             PtyOutputRecoveryEstimate::Delta { byte_len, .. } => byte_len,
+            PtyOutputRecoveryEstimate::Snapshot { byte_len, .. } => byte_len,
             PtyOutputRecoveryEstimate::Replay(replay) => replay.byte_len,
         }
         .min(TERMINAL_RECOVERY_EVENT_MAX_BYTES);
@@ -1855,6 +1930,7 @@ pub(crate) async fn admitted_terminal_recovery_event(
         };
         let byte_len = match estimate {
             PtyOutputRecoveryEstimate::Delta { byte_len, .. } => byte_len,
+            PtyOutputRecoveryEstimate::Snapshot { byte_len, .. } => byte_len,
             PtyOutputRecoveryEstimate::Replay(replay) => replay.byte_len,
         };
         let producer_storage = reserve_connection_event_storage(
@@ -2008,6 +2084,7 @@ async fn admitted_state_synchronization_events(
         let estimated_payload_bytes = estimates.values().try_fold(0usize, |total, estimate| {
             let bytes = match estimate.estimate {
                 PtyOutputRecoveryEstimate::Delta { byte_len, .. } => byte_len,
+                PtyOutputRecoveryEstimate::Snapshot { byte_len, .. } => byte_len,
                 PtyOutputRecoveryEstimate::Replay(replay) => replay.byte_len,
             };
             total.checked_add(bytes)
@@ -6105,6 +6182,18 @@ fn terminal_recovery_from_session(
     }
 }
 
+/// Converts one screen snapshot into the attach-time protocol event. The
+/// client applies it at once; output after `through_sequence` follows as live
+/// `ScreenUpdate`s.
+fn terminal_snapshot_event(pane_id: NodeId, snapshot: ilium_pty::PtyScreenSnapshot) -> ServerEvent {
+    ServerEvent::TerminalSnapshot {
+        pane_id,
+        through_sequence: snapshot.through_sequence,
+        bytes: snapshot.bytes,
+        is_complete: snapshot.is_complete,
+    }
+}
+
 /// Converts one atomically captured PTY journal snapshot into the protocol
 /// event used by both attach-time reconstruction and live lag recovery.
 fn terminal_replay_event(pane_id: NodeId, replay: ilium_pty::PtyOutputReplay) -> ServerEvent {
@@ -6299,7 +6388,11 @@ async fn handle_close_pane_with_spawn_guard(
     let mut tree = state.tree.write().await;
     if tree.get(pane_id).is_none() {
         drop(tree);
-        send_direct_error(direct_tx, format!("no such node {pane_id:?}")).await;
+        // Closing is idempotent: the pane is already gone, which is the
+        // requested outcome. Re-broadcasting the tree ends the client's
+        // pending "Closing" spinner.
+        tracing::info!(?pane_id, "close requested for a pane that is already removed");
+        broadcast_and_persist(state).await;
         return;
     }
     let descendant_pane_ids = collect_pane_descendants(&tree, pane_id);
@@ -8439,6 +8532,50 @@ mod tests {
         state.clear_blocking_error(Some(group), "new_pane");
         let events = initial_state_events(&state, false, false).await;
         assert!(events.iter().any(|event| matches!(event, ServerEvent::BlockingErrorsSnapshot { errors } if errors.is_empty())));
+    }
+
+    #[tokio::test]
+    async fn closing_a_removed_pane_leaves_no_retained_blocking_error() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = snapshot_io_handler_state(&directory);
+        let (sender, mut replies) = DirectEventSender::channel(16);
+        let removed_pane = NodeId(987_654);
+        for _ in 0..2 {
+            handle_request(
+                &state,
+                ClientRequest::ClosePane {
+                    pane_id: removed_pane,
+                },
+                &sender,
+            )
+            .await;
+        }
+        assert!(state.blocking_errors_snapshot().is_empty());
+        while let Ok(event) = replies.try_recv() {
+            assert!(!matches!(event, ServerEvent::Error { .. }));
+        }
+    }
+
+    #[tokio::test]
+    async fn failed_request_for_a_removed_node_is_not_filed_session_wide() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = snapshot_io_handler_state(&directory);
+        let (sender, _replies) = DirectEventSender::channel(16);
+        handle_request(
+            &state,
+            ClientRequest::RenameNode {
+                node_id: NodeId(987_655),
+                title: "gone".into(),
+                short_title: None,
+                inferred_icon: None,
+            },
+            &sender,
+        )
+        .await;
+        assert!(state
+            .blocking_errors_snapshot()
+            .iter()
+            .all(|error| error.node_id.is_some()));
     }
 
     #[cfg(unix)]
