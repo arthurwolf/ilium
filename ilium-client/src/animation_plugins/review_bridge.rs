@@ -660,7 +660,9 @@ impl ReviewBridge {
             Intent::Cancel { .. } => {
                 // Cancellation is intent until the owning controller settles
                 // original teardown/invalidation; do not claim it completed.
-                Ok(Some(ReviewAction::Cancel))
+                Ok(Some(ReviewAction::Cancel {
+                    selection_revision: selection,
+                }))
             }
             Intent::Pick {
                 request_id, path, ..

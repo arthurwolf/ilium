@@ -2535,11 +2535,11 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
         if matches!(key.code, KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q')) {
             state.padding.dialog = None;
         }
-        app.mode = Mode::Settings(state);
+        app.mode = Mode::Settings(Box::new(state));
         return;
     }
     if state.tab == SettingsTab::Padding && crate::padding_ui::handle_key(app, &mut state, *key) {
-        app.mode = Mode::Settings(state);
+        app.mode = Mode::Settings(Box::new(state));
         return;
     }
 

@@ -201,7 +201,7 @@ impl InputEvent {
                 ..
             })
         ) {
-            return Err(Box::new(self));
+            return Err(self);
         }
         drop(self);
         Ok(())

@@ -82,7 +82,7 @@ pub(crate) fn consume_intent(
                 bridge.set_phase(selection_revision, ReviewPhase::Creating, None)?;
             }
         }
-        ReviewAction::Cancel => {
+        ReviewAction::Cancel { .. } => {
             return Ok(IntentOutcome::Cancelled(controller.cancel()));
         }
         ReviewAction::Pick {

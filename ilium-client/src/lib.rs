@@ -4453,7 +4453,7 @@ where
                     if let Some(pane_id) = destination {
                         if !crate::keys::intercept_event(app, event.view()) {
                             if let Err(error) = app.capture_native_terminal_paste(pane_id, event) {
-                                failure = Some(*error);
+                                failure = Some(error);
                             }
                         }
                         // Preserve App::handle_event's post-key layout sampling,
@@ -4744,7 +4744,7 @@ fn for_each_ready_input_event_until<S: ReadyInput>(
                     match newest_motion.coalesce_motion() {
                         Ok(()) => newest_motion = candidate,
                         Err(original) => {
-                            newest_motion = *original;
+                            newest_motion = original;
                             next = Some(candidate);
                             break;
                         }
@@ -5202,9 +5202,11 @@ mod responsiveness_tests {
         assert!(dispatch_ready_input_events(
             &mut app,
             &mut rx,
-            &mut naming,
-            &mut icons,
-            None,
+            ReadyInputWorkers {
+                naming_workers: &mut naming,
+                icon_search_workers: &mut icons,
+                home_dir: None,
+            },
             release,
             &mut deferred,
             &mut editor
@@ -5255,9 +5257,11 @@ mod responsiveness_tests {
         assert!(dispatch_ready_input_events(
             &mut app,
             &mut rx,
-            &mut naming,
-            &mut icons,
-            None,
+            ReadyInputWorkers {
+                naming_workers: &mut naming,
+                icon_search_workers: &mut icons,
+                home_dir: None,
+            },
             Ok(press),
             &mut deferred,
             &mut editor
@@ -5290,9 +5294,11 @@ mod responsiveness_tests {
         assert!(dispatch_ready_input_events(
             &mut app,
             &mut rx,
-            &mut naming,
-            &mut icons,
-            None,
+            ReadyInputWorkers {
+                naming_workers: &mut naming,
+                icon_search_workers: &mut icons,
+                home_dir: None,
+            },
             first,
             &mut deferred,
             &mut editor

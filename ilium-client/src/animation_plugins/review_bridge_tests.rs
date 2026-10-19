@@ -124,7 +124,7 @@ fn denied_unresolved_default_and_all_four_exact_native_choices() {
                 assert_eq!(review.instance_id(), 7);
                 assert_eq!(answers["pointer"], choice.native_intent());
             }
-            ReviewAction::Cancel => panic!("unexpected cancel"),
+            ReviewAction::Cancel { .. } => panic!("unexpected cancel"),
             ReviewAction::Pick { .. } => panic!("unexpected picker"),
             ReviewAction::PickAudio { .. } => panic!("unexpected audio picker"),
         }
@@ -394,7 +394,9 @@ fn mouse_choice_shared_geometry_and_cancel_return_original_native_action() {
     session.handle_key(&bridge, KeyCode::Esc).unwrap();
     assert!(matches!(
         bridge.take_action(1, 7, 1, epoch).unwrap(),
-        Some(ReviewAction::Cancel)
+        Some(ReviewAction::Cancel {
+            selection_revision: 1
+        })
     ));
 }
 

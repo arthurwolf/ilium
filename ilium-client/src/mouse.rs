@@ -2307,7 +2307,7 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                 if let Some(target) = target {
                     if !crate::padding_dialog::click(app, &mut dialog, target) {
                         state.padding.dialog = None;
-                        app.mode = Mode::Settings(state);
+                        app.mode = Mode::Settings(Box::new(state));
                         return;
                     }
                 }
@@ -2315,7 +2315,7 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
             _ => {}
         }
         state.padding.dialog = Some(dialog);
-        app.mode = Mode::Settings(state);
+        app.mode = Mode::Settings(Box::new(state));
         return;
     }
     if state.tab == crate::app::SettingsTab::Padding && layout.content_area.contains(position) {
@@ -2332,7 +2332,7 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
             }
             _ => {}
         }
-        app.mode = Mode::Settings(state);
+        app.mode = Mode::Settings(Box::new(state));
         return;
     }
     // Invalidate before header/sidebar/editor early returns: the issue-row

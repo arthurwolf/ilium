@@ -229,6 +229,7 @@ impl PermissionReview {
             .zip(&self.choices)
             .map(|(request, choice)| PermissionDecision {
                 request_id: request.request_id.clone(),
+                capability: request.capability.clone(),
                 choice: *choice,
             })
             .collect())

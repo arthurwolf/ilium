@@ -39,7 +39,10 @@ pub(crate) fn save_with_env(
         directory.is_absolute(),
         "capture directory must be absolute"
     );
-    std::fs::create_dir_all(directory).expect("create task-owned capture directory");
+    assert!(name
+        .chars()
+        .all(|character| character.is_ascii_alphanumeric() || character == '-'));
+    std::fs::create_dir_all(&directory).expect("create task-owned capture directory");
     let buffer = terminal.backend().buffer();
     let cells: Vec<_> = buffer
         .content
