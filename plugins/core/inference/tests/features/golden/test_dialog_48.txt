@@ -1,0 +1,6 @@
+╭─ Test provider ──────────────────────────────╮
+│ Sending: Reply with the word ok.             │
+│ ok                                           │
+│ Reply received from gpt-5.6-terra            │
+│ Test passed in 812 ms                        │
+╰──────────────────────────────────────────────╯

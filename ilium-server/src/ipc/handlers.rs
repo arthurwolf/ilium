@@ -202,6 +202,11 @@ async fn handle_scoped_request(
     direct_tx: &DirectEventSender,
 ) -> bool {
     match request {
+        // Plugin envelopes are routed by the plugin kernel once it exists (skeleton: ignored).
+        ClientRequest::Plugin(_) => {
+            tracing::debug!("plugin envelope ignored: plugin kernel not implemented");
+            false
+        }
         ClientRequest::GetPaneRecapScreen { pane_id } => {
             let captured = {
                 let panes = state.panes.read().await;
@@ -230,11 +235,11 @@ async fn handle_scoped_request(
             send_direct(direct_tx, ServerEvent::PaneRecapScreen { pane_id, result }).await;
             false
         }
-        ClientRequest::Attach { session } => {
+        ClientRequest::Attach { session, .. } => {
             handle_attach(state, &session, direct_tx, true).await;
             false
         }
-        ClientRequest::AttachInteractive { session } => {
+        ClientRequest::AttachInteractive { session, .. } => {
             handle_attach(state, &session, direct_tx, false).await;
             false
         }
@@ -8326,6 +8331,37 @@ async fn handle_kill_session(state: &Arc<ServerState>) -> crate::recovery::Resol
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn request_future_stack_budget() {
+        fn future_bytes<F: std::future::Future>(_: impl FnOnce() -> F) -> usize {
+            std::mem::size_of::<F>()
+        }
+        let state: Option<&std::sync::Arc<crate::state::ServerState>> = None;
+        let sender: Option<&super::DirectEventSender> = None;
+        let outer = future_bytes(|| {
+            super::handle_request(
+                state.unwrap(),
+                ilium_ipc::ClientRequest::Detach,
+                sender.unwrap(),
+            )
+        });
+        let scoped = future_bytes(|| {
+            super::handle_scoped_request(
+                state.unwrap(),
+                ilium_ipc::ClientRequest::Detach,
+                sender.unwrap(),
+            )
+        });
+        eprintln!("request future bytes: outer={outer}, scoped={scoped}");
+        assert!(
+            outer < 65536,
+            "request frame retains oversized child: {outer}"
+        );
+        assert!(
+            scoped < 65536,
+            "dispatch frame retains oversized child: {scoped}"
+        );
+    }
     fn snapshot_io_handler_state(directory: &tempfile::TempDir) -> Arc<ServerState> {
         let (sound_requests, _sound_receiver) = crate::sounds::test_channel(1);
         Arc::new(ServerState::new(crate::state::ServerStateOptions {
@@ -12123,8 +12159,14 @@ mod tests {
         );
         assert_eq!(progress.report.job_id, "persisted-job");
         assert_eq!(progress.timing.checks.len(), 2);
-        assert_eq!(progress.timing.checks[1].outcome, ilium_core::ProgressCheckOutcome::Failed);
-        assert_eq!(progress.last_observed_unix_millis, progress.timing.checks[0].unix_millis);
+        assert_eq!(
+            progress.timing.checks[1].outcome,
+            ilium_core::ProgressCheckOutcome::Failed
+        );
+        assert_eq!(
+            progress.last_observed_unix_millis,
+            progress.timing.checks[0].unix_millis
+        );
 
         assert!(matches!(
             delivery,
@@ -12152,7 +12194,9 @@ mod tests {
             crate::progress_monitor::test_probes::stderr_then_exit_seven(),
         );
         let original_checks = persisted.latest_progress.timing.checks.clone();
-        restore_persisted_progress_monitor(&state, persisted).await.unwrap();
+        restore_persisted_progress_monitor(&state, persisted)
+            .await
+            .unwrap();
         let tree = state.tree.read().await;
         let progress = &tree.pane_progress(pane_id)[0];
         assert!(progress.monitor_health.is_failed());

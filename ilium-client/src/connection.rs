@@ -412,7 +412,10 @@ impl Connection {
         };
 
         request_tx
-            .send(ClientRequest::AttachInteractive { session })
+            .send(ClientRequest::AttachInteractive {
+                session,
+                hello: Default::default(),
+            })
             .await
             // The receiver can only be closed if `writer_task` already
             // panicked before this line, which can't happen -- it hasn't

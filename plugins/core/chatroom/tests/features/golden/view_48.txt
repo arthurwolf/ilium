@@ -1,0 +1,9 @@
+╭─ Chatroom ─────────────────────────────────────╮
+│ Agents in this project                         │
+│ fix-auth · review                              │
+│ 2026-10-12 09:14:02 fix-auth Claiming          │
+│   src/auth.rs until 10:00.                     │
+│ 2026-10-12 09:15:40 review Tests pass.         │
+├────────────────────────────────────────────────┤
+│ Write message - Enter sends                    │
+╰────────────────────────────────────────────────╯

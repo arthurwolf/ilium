@@ -126,7 +126,15 @@ Track the actual job identity and its final exit/result record, not merely a loc
 #[test]
 fn progress_instructions_separate_heartbeat_from_work_and_require_real_job_identity() {
     let source = ilium_prompts::agent::PROGRESS_INSTRUCTIONS;
-    for required in ["only a heartbeat", "progress is indeterminate", "real completed/total counters", "PID reuse", "remote worker", "recheck the result", "observation failure"] {
+    for required in [
+        "only a heartbeat",
+        "progress is indeterminate",
+        "real completed/total counters",
+        "PID reuse",
+        "remote worker",
+        "recheck the result",
+        "observation failure",
+    ] {
         assert!(source.contains(required), "missing {required}");
     }
 }

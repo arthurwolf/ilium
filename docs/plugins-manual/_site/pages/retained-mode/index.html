@@ -1,0 +1,804 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Retained mode | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details open><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/" aria-current="page">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Concepts</b></p>
+<h1>Retained mode</h1>
+
+<p>Plugins do not draw on every frame. A plugin describes the state it wants, such as a badge on a tree row, a virtual row in the tree or the enabled state of an agent toolbar button. The kernel stores that state, draws it on every frame and sends it to every attached client. A plugin changes the state only when its meaning changes.</p>
+<p>Views work differently. A panel, a pane body or a popup is a widget tree that the plugin returns from <code>views.render</code>. The kernel calls that export when the view first opens, after <code>ui.invalidate</code> and on resize. It never calls it per frame. This page covers the three kinds of retained output, the intents and calls that set them, how long each one lives and what happens when a plugin fails.</p>
+<h2 id="you-will-need">You will need</h2>
+<ul>
+<li>The grants <code>tree.decorate</code> (decorations and virtual rows) and <code>agent.control</code> (toolbar state). Reading agent activity, as the examples do, needs <code>agent.read</code>.</li>
+<li>Declarations in the manifest <code>contributes</code> block: <code>decoration_slots</code> for each slot, <code>virtual_rows</code> for each row kind, <code>toolbar_buttons</code> for each button and <code>commands</code> for each command a row invokes. The kernel rejects an undeclared slot or row kind.</li>
+<li>The Rust SDK (<code>ilium_plugin_sdk</code>) or the TypeScript SDK (<code>@ilium/plugin-sdk</code>). The examples run on the server side.</li>
+<li>A working knowledge of <a href="/pages/events-and-intents/">events and intents</a> and <a href="/pages/requests-and-outcomes/">requests and outcomes</a>. Each intent completes exactly once, with one outcome.</li>
+</ul>
+<h2 id="what-is-retained">What is retained</h2>
+<table>
+<thead>
+<tr>
+<th>Output</th>
+<th>Set by</th>
+<th>Cleared or replaced by</th>
+<th>Grant</th>
+<th>Where it appears</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Decoration</td>
+<td><code>set-decoration</code> intent</td>
+<td><code>clear-decoration</code> intent, removal of the node, disable</td>
+<td><code>tree.decorate</code></td>
+<td>A declared slot on a tree row</td>
+</tr>
+<tr>
+<td>Virtual rows</td>
+<td><code>set-virtual-rows</code> intent</td>
+<td>Another <code>set-virtual-rows</code> call with the same row kind; an empty <code>rows</code> list</td>
+<td><code>tree.decorate</code></td>
+<td>Rows under the project or session, named by <code>virtual_rows</code></td>
+</tr>
+<tr>
+<td>Toolbar state</td>
+<td><code>set-toolbar-state</code> function of the agent primitive</td>
+<td>Another call; a plugin restart resets it to the manifest state</td>
+<td><code>agent.control</code></td>
+<td>The toolbar of an agent pane</td>
+</tr>
+</tbody>
+</table>
+<p>Views are not retained. A plugin that changes a view calls <code>ui.invalidate</code> and the kernel asks it for a new tree on its next render.</p>
+<h2 id="surface">Surface</h2>
+<h3 id="intents">Intents</h3>
+<table>
+<thead>
+<tr>
+<th>Intent</th>
+<th>Fields</th>
+<th>Outcome</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>set-decoration</code></td>
+<td><code>node: node-id</code>, <code>slot: string</code>, <code>content: styled-text</code>, <code>icon: option&lt;string&gt;</code>, <code>sort-key: option&lt;s64&gt;</code>, <code>persist: bool</code></td>
+<td><code>ok</code></td>
+</tr>
+<tr>
+<td><code>clear-decoration</code></td>
+<td><code>node: node-id</code>, <code>slot: string</code></td>
+<td><code>ok</code>, also on an empty slot</td>
+</tr>
+<tr>
+<td><code>set-virtual-rows</code></td>
+<td><code>row-kind: string</code>, <code>rows: list&lt;virtual-row&gt;</code></td>
+<td><code>ok</code></td>
+</tr>
+</tbody>
+</table>
+<p>A <code>virtual-row</code> has <code>id: string</code>, <code>label: string</code> (plain text), <code>icon: option&lt;string&gt;</code> and <code>command: option&lt;string&gt;</code>. The <code>command</code> is the global id <code>&lt;plugin-id&gt;/&lt;id&gt;</code> of a command the plugin declares. An <code>icon</code> is a Tabler icon name, not a file path. An unknown name draws no icon.</p>
+<p><code>content</code> is a <code>styled-text</code>: a list of <code>span</code> records. Each span has <code>text</code> and a <code>style</code> with <code>fg</code>, <code>bg</code>, <code>add</code> and <code>remove</code>. Colours can be theme roles (<code>foreground</code>, <code>muted</code>, <code>accent</code>, <code>success</code>, <code>warning</code>, <code>danger</code>, <code>info</code>, <code>selection</code>, <code>border</code>), so a decoration follows the theme.</p>
+<p>In Rust the payloads are <code>SetDecorationSpec</code>, <code>DecorationKey</code> and <code>SetVirtualRowsSpec</code> (with <code>VirtualRow</code>) in <code>ilium_plugin_sdk::types::intents</code>. In TypeScript the same objects use camelCase fields, such as <code>sortKey</code> and <code>rowKind</code>.</p>
+<h3 id="extended-decoration">Extended decoration</h3>
+<p><code>set-decoration</code> has optional fields: <code>spans</code> (rich text), <code>tooltip</code> (<code>{ lines, delay-ms }</code>), <code>frames</code> (2 to 16 frames) with <code>frame-ms</code> (at least 90), <code>trailing</code> and <code>visibility</code> (<code>always</code> or <code>on-hover</code>). A decoration with <code>frames</code> animates in the host with no plugin call. <code>set-virtual-rows</code> rows gain <code>parent</code>, <code>expandable</code>, <code>accepts-drop</code>, <code>tooltip</code>, <code>label</code> and <code>trailing</code>. The intents <code>set-expanded</code>, <code>set-bookmarked</code> and <code>set-inferred-icon</code> change retained node state in the same way. <a href="/pages/tutorial-01-agent-badge/">Tutorial 1</a> shows the record in Rust and TypeScript.</p>
+<h3 id="calls">Calls</h3>
+<table>
+<thead>
+<tr>
+<th>Call</th>
+<th>Rust</th>
+<th>TypeScript</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Set the state of a toolbar button</td>
+<td><code>primitives::agent::set_toolbar_state(button, pane, enabled, label)</code></td>
+<td><code>setToolbarState(button, pane, enabled, label)</code> from <code>@ilium/plugin-sdk/primitives/agent</code></td>
+<td><code>Result&lt;(), PluginError&gt;</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>button</code> is the local id from <code>toolbar_buttons</code>. <code>pane</code> is <code>None</code> (or <code>none</code>) for every agent pane that shows the button, or a node id for one pane. <code>label</code> is <code>None</code> (or <code>none</code>) to keep the current label.</p>
+<h3 id="placements">Placements</h3>
+<table>
+<thead>
+<tr>
+<th>Placement</th>
+<th>Position on the row</th>
+<th>Size limit</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>icon</code></td>
+<td>Before the title</td>
+<td>2 cells</td>
+</tr>
+<tr>
+<td><code>badge</code></td>
+<td>Right of the title</td>
+<td>12 cells</td>
+</tr>
+<tr>
+<td><code>subtitle</code></td>
+<td>Under the title</td>
+<td>Width of the row</td>
+</tr>
+<tr>
+<td><code>footer</code></td>
+<td>Bottom line of the row</td>
+<td>Width of the row</td>
+</tr>
+</tbody>
+</table>
+<p>Text wider than the limit is cut and ends with <code>…</code>. Widths use the host's display-width rules, so a wide glyph counts as two cells. The <code>priority</code> in the manifest orders slots of one placement; a lower number is drawn first. Give each kind of information its own slot, so that two badges do not replace each other.</p>
+<h2 id="setting-a-decoration-in-rust">Setting a decoration in Rust</h2>
+<p>The manifest declares the slot and the capability:</p>
+<pre><code class="language-json">{
+  &quot;capabilities&quot;: { &quot;server&quot;: [&quot;agent.read&quot;, &quot;tree.decorate&quot;] },
+  &quot;contributes&quot;: {
+    &quot;decoration_slots&quot;: [{ &quot;id&quot;: &quot;review-count&quot;, &quot;placement&quot;: &quot;badge&quot;, &quot;priority&quot;: 10 }]
+  }
+}
+</code></pre>
+<p>The plugin shows a badge while an agent works and clears it when the agent leaves that state:</p>
+<pre><code class="language-rust">use ilium_plugin_sdk::host::log::{self, Level};
+use ilium_plugin_sdk::prelude::*;
+use ilium_plugin_sdk::types::events::AgentActivityEvent;
+use ilium_plugin_sdk::types::intents::{DecorationKey, SetDecorationSpec};
+use ilium_plugin_sdk::types::tree::AgentActivity;
+
+const SLOT: &amp;str = &quot;review-count&quot;;
+
+#[ilium_plugin(side = &quot;server&quot;)]
+#[derive(Default)]
+struct ReviewBadge;
+
+impl Lifecycle for ReviewBadge {
+    fn activate(&amp;mut self, context: Activation) -&gt; Result&lt;(), PluginError&gt; {
+        let message = format!(&quot;review badge active in {}&quot;, context.plugin);
+        log::log(Level::Info, &amp;message);
+        Ok(())
+    }
+}
+
+impl Handler for ReviewBadge {
+    fn on_events(&amp;mut self, batch: Vec&lt;Event&gt;) -&gt; Vec&lt;Submission&gt; {
+        let mut submissions = Vec::new();
+        for event in batch {
+            let Event::AgentActivityChanged(change) = event else { continue };
+            let intent = if change.current == AgentActivity::Working {
+                Intent::SetDecoration(SetDecorationSpec {
+                    node: change.node,
+                    slot: SLOT.into(),
+                    content: vec![Span::plain(&quot;reviewing&quot;)],
+                    icon: Some(&quot;checks&quot;.into()),
+                    sort_key: None,
+                    persist: false,
+                })
+            } else {
+                Intent::ClearDecoration(DecorationKey { node: change.node, slot: SLOT.into() })
+            };
+            submissions.push(Submission::new(intent));
+        }
+        submissions
+    }
+}
+</code></pre>
+<p><code>Submission::new</code> takes the next correlation number and no dedup key. <code>Submission::keyed(intent, key)</code> adds a key. The handler sends one submission per event, and the kernel checks the batch as a whole.</p>
+<h2 id="virtual-rows-in-typescript">Virtual rows in TypeScript</h2>
+<p>The manifest declares the row kind and the command that the row invokes:</p>
+<pre><code class="language-json">{
+  &quot;contributes&quot;: {
+    &quot;virtual_rows&quot;: [{ &quot;id&quot;: &quot;review-queue&quot;, &quot;title&quot;: &quot;Reviews&quot;, &quot;icon&quot;: &quot;checks&quot;, &quot;parent&quot;: &quot;project&quot; }],
+    &quot;commands&quot;: [{ &quot;id&quot;: &quot;open-review&quot;, &quot;title&quot;: &quot;Open review&quot; }]
+  }
+}
+</code></pre>
+<p>The plugin keeps the finished panes in memory and sends the whole list each time it changes. Each <code>set-virtual-rows</code> call replaces every row of that kind:</p>
+<pre><code class="language-ts">import { definePlugin, type Event, type Submission } from '@ilium/plugin-sdk';
+import { log } from '@ilium/plugin-sdk/host/log';
+
+const ROW_KIND = 'review-queue';
+const OPEN_REVIEW = 'com.example.review-tools/open-review';
+const finishedPanes = new Map&lt;bigint, string&gt;();
+let nextCorrelation = 1n;
+
+function rowsSubmission(): Submission {
+  const rows = [...finishedPanes].map(([node, label]) =&gt; ({
+    id: String(node), label, icon: 'checks', command: OPEN_REVIEW,
+  }));
+  return {
+    intent: { tag: 'set-virtual-rows', val: { rowKind: ROW_KIND, rows } },
+    correlation: nextCorrelation++,
+    dedupKey: undefined,
+  };
+}
+
+export const { lifecycle, handler } = definePlugin({
+  side: 'server',
+  activate(context) {
+    log('info', `review queue active for ${context.plugin}`);
+  },
+  onEvents(batch: Event[]): Submission[] {
+    let changed = false;
+    for (const event of batch) {
+      if (event.tag === 'agent-activity-changed') {
+        const { node, current } = event.val;
+        if (current === 'done') finishedPanes.set(node, `Review ready in pane ${node}`);
+        else finishedPanes.delete(node);
+        changed = true;
+      } else if (event.tag === 'node-removed' &amp;&amp; finishedPanes.delete(event.val)) {
+        changed = true;
+      }
+    }
+    return changed ? [rowsSubmission()] : [];
+  },
+});
+</code></pre>
+<p>The <code>node-removed</code> branch matters. Without it the row would keep pointing at a pane that no longer exists.</p>
+<h2 id="toolbar-state">Toolbar state</h2>
+<p>Toolbar state is a direct call, not an intent. The SDK returns its result at once, because the function has no request id. This sketch disables a button named <code>review</code> on one pane while that pane has no review to run:</p>
+<pre><code class="language-rust">use ilium_plugin_sdk::prelude::*;
+use ilium_plugin_sdk::primitives::agent;
+
+fn set_review_button(pane: u64, has_review: bool) -&gt; Result&lt;(), PluginError&gt; {
+    agent::set_toolbar_state(&quot;review&quot;, Some(pane), has_review, Some(&quot;Review now&quot;.into()))
+}
+</code></pre>
+<p>The state lasts until the plugin changes it. A label over 32 cells is refused.</p>
+<h2 id="what-you-see">What you see</h2>
+<p>The tree row below is the result of the Rust example above. Only the row whose agent changed is different.</p>
+<figure>
+<pre class="term">╭  ≡ ● · Sessions ───────────────────────────────╮
+│ ▼ <span class="w2">📂</span> shop                                      │
+│ › ▼ <span class="w2">📂</span> api                                     │
+│ ››   <span class="w2">🦀</span> <span class="t-ok">⠋</span> Fix login redirect <span class="t-warn">reviewing</span>         │
+│ ››   <span class="w2">🖥️</span>    Shell                               │
+│                                                │
+╰────────────────────────────────────────────────╯
+</pre>
+<figcaption>Illustrative. The badge slot shows the text of the decoration in the warning colour, after the title.</figcaption>
+</figure>
+
+<p>After a server restart a persisted decoration is shown in the muted colour until the plugin sets or clears it again:</p>
+<figure>
+<pre class="term">╭  ≡ ● · Sessions ───────────────────────────────╮
+│ ▼ <span class="w2">📂</span> shop                                      │
+│ › ▼ <span class="w2">📂</span> api                                     │
+│ ››   <span class="w2">🦀</span> <span class="t-ok">⠋</span> Fix login redirect <span class="t-dim">reviewing</span>         │
+│ ››   <span class="w2">🖥️</span>    Shell                               │
+│                                                │
+╰────────────────────────────────────────────────╯
+</pre>
+<figcaption>Illustrative. The muted badge marks a decoration that the kernel kept from the previous run.</figcaption>
+</figure>
+
+<p>The virtual row appears under the project as a separate entry:</p>
+<figure>
+<pre class="term">╭  ≡ ● · Sessions ───────────────────────────────╮
+│ ▼ <span class="w2">📂</span> shop                                      │
+│ ››   <span class="w2">🖥️</span>    Shell                               │
+│ ▼ <span class="t-hi">Reviews</span>                                      │
+│ ›   Review ready in pane 42 <span class="t-ok">open</span>               │
+│                                                │
+╰────────────────────────────────────────────────╯
+</pre>
+<figcaption>Illustrative. Activating the row invokes the command named in the row.</figcaption>
+</figure>
+
+<p>The diagram shows the path of one decoration from the plugin to the clients:</p>
+<figure>
+<svg viewBox="0 0 400 200" role="img" aria-label="Decoration path from plugin to clients" width="600" height="300">
+  <title>Retained decoration state</title>
+  <desc>The plugin sends a set-decoration intent to the kernel. The kernel keeps the state and sends it to two clients, which draw it on every frame.</desc>
+  <defs>
+    <marker id="retained-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <rect x="8" y="20" width="130" height="48" rx="6" fill="none" stroke="currentColor" stroke-dasharray="6 4"/>
+  <text x="73" y="40" font-size="12" text-anchor="middle" fill="currentColor">Plugin</text>
+  <text x="73" y="56" font-size="10" text-anchor="middle" fill="currentColor">sends set-decoration</text>
+  <line x1="73" y1="68" x2="73" y2="110" stroke="currentColor" marker-end="url(#retained-arrow)"/>
+  <text x="82" y="92" font-size="10" fill="currentColor">intent</text>
+  <rect x="8" y="110" width="170" height="56" rx="6" fill="none" stroke="currentColor" stroke-width="2"/>
+  <text x="93" y="130" font-size="12" text-anchor="middle" fill="currentColor">Kernel</text>
+  <text x="93" y="150" font-size="10" text-anchor="middle" fill="currentColor">retained state per node</text>
+  <line x1="178" y1="128" x2="240" y2="44" stroke="currentColor" marker-end="url(#retained-arrow)"/>
+  <text x="210" y="100" font-size="10" fill="currentColor">delta</text>
+  <line x1="178" y1="150" x2="240" y2="154" stroke="currentColor" marker-end="url(#retained-arrow)"/>
+  <rect x="240" y="20" width="150" height="48" rx="6" fill="none" stroke="currentColor"/>
+  <text x="315" y="40" font-size="12" text-anchor="middle" fill="currentColor">Client A</text>
+  <text x="315" y="56" font-size="10" text-anchor="middle" fill="currentColor">draws each frame</text>
+  <rect x="240" y="130" width="150" height="48" rx="6" fill="none" stroke="currentColor"/>
+  <text x="315" y="150" font-size="12" text-anchor="middle" fill="currentColor">Client B</text>
+  <text x="315" y="166" font-size="10" text-anchor="middle" fill="currentColor">draws each frame</text>
+</svg>
+<figcaption>The plugin changes retained state in the kernel. The kernel sends each change to every client, and each client draws it.</figcaption>
+</figure>
+
+<h2 id="edge-cases-and-errors">Edge cases and errors</h2>
+<table>
+<thead>
+<tr>
+<th>Case</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>set-decoration</code> or <code>clear-decoration</code> on a node that does not exist</td>
+<td><code>refused(not-found)</code></td>
+</tr>
+<tr>
+<td>Slot not declared in <code>decoration_slots</code></td>
+<td><code>refused(invalid-argument)</code></td>
+</tr>
+<tr>
+<td>More than 4,096 decorations for one plugin at the default limit</td>
+<td><code>refused(quota-exceeded)</code></td>
+</tr>
+<tr>
+<td><code>set-virtual-rows</code> with a row kind not declared in <code>virtual_rows</code></td>
+<td><code>refused(invalid-argument)</code></td>
+</tr>
+<tr>
+<td><code>clear-decoration</code> on an empty slot</td>
+<td><code>ok</code></td>
+</tr>
+<tr>
+<td><code>set-decoration</code> on a slot that already holds a decoration</td>
+<td>Replaces it; the slot never holds two</td>
+</tr>
+<tr>
+<td>Toolbar call for a button that is not the plugin's own, or for a missing pane</td>
+<td><code>not-found</code></td>
+</tr>
+<tr>
+<td>Toolbar label over 32 cells</td>
+<td><code>invalid-argument</code></td>
+</tr>
+<tr>
+<td>A malformed submission in a batch</td>
+<td>The whole batch is refused, so nothing is half-applied</td>
+</tr>
+<tr>
+<td>Repeat of a submission with the same <code>dedup-key</code> within 10 minutes</td>
+<td><code>duplicate(original)</code>, with no effect</td>
+</tr>
+<tr>
+<td>Node removed</td>
+<td>Its decorations and its rows are removed with it</td>
+</tr>
+</tbody>
+</table>
+<p>Wide content is cut, as described under placements. Limits apply per plugin, and the host limit for all plugins together is 65,536 decorations.</p>
+<h2 id="lifetime-and-failure">Lifetime and failure</h2>
+<ul>
+<li><code>persist: true</code> stores the decoration in the snapshot. After a server restart it is shown in the muted colour, and it stays that way until the plugin sets or clears it after its activation.</li>
+<li><code>persist: false</code> decorations are dropped at server shutdown.</li>
+<li>A trap, a deadline breach or a crash keeps the plugin's decorations, marked stale in the muted colour. The plugin's virtual rows are withdrawn until it sets them again. The toolbar state returns to the manifest state on restart.</li>
+<li>Disable and uninstall remove all of the plugin's retained state.</li>
+<li>A revoked <code>tree.decorate</code> or <code>agent.control</code> grant withdraws the matching output.</li>
+</ul>
+<p>A plugin that fails three times in 10 minutes is disabled, and the tree footer shows a notice. See <a href="/pages/lifecycle/">Lifecycle</a>.</p>
+<h2 id="rules-for-retained-state">Rules for retained state</h2>
+<ul>
+<li>Set a decoration when its meaning changes, not on every event. A repeated intent costs one submission each time and changes nothing on screen.</li>
+<li>Keep slot ids, row kinds and row ids stable across plugin versions. The kernel stores them as strings in the snapshot.</li>
+<li>Give an intent a <code>dedup-key</code> when a repeat would be harmful, for example a notice that must not appear twice.</li>
+<li>Send the complete row list on every <code>set-virtual-rows</code> call. The call replaces the rows of its kind; it does not add to them.</li>
+</ul>
+<h2 id="see-also">See also</h2>
+<ul>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/capability-tree-decorate/">Capability: tree.decorate</a></li>
+<li><a href="/pages/capability-agent-control/">Capability: agent.control</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+</ul>
+<p>API version checked: <code>ilium:plugin@0.1.0</code>.</p>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/requests-and-outcomes/"><small>Previous</small>Requests and outcomes</a><a class="next" href="/pages/services/"><small>Next</small>Services</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#you-will-need">You will need</a></li><li class="l2"><a href="#what-is-retained">What is retained</a></li><li class="l2"><a href="#surface">Surface</a></li><li class="l3"><a href="#intents">Intents</a></li><li class="l3"><a href="#extended-decoration">Extended decoration</a></li><li class="l3"><a href="#calls">Calls</a></li><li class="l3"><a href="#placements">Placements</a></li><li class="l2"><a href="#setting-a-decoration-in-rust">Setting a decoration in Rust</a></li><li class="l2"><a href="#virtual-rows-in-typescript">Virtual rows in TypeScript</a></li><li class="l2"><a href="#toolbar-state">Toolbar state</a></li><li class="l2"><a href="#what-you-see">What you see</a></li><li class="l2"><a href="#edge-cases-and-errors">Edge cases and errors</a></li><li class="l2"><a href="#lifetime-and-failure">Lifetime and failure</a></li><li class="l2"><a href="#rules-for-retained-state">Rules for retained state</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

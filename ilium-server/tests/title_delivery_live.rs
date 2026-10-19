@@ -63,6 +63,7 @@ async fn acknowledged_authored_enter_authorizes_title_before_request_history_flu
         &mut client,
         &ClientRequest::Attach {
             session: SESSION.into(),
+            hello: Default::default(),
         },
     )
     .await
@@ -97,6 +98,7 @@ async fn acknowledged_authored_enter_authorizes_title_before_request_history_flu
         &mut client,
         &ClientRequest::Attach {
             session: SESSION.into(),
+            hello: Default::default(),
         },
     )
     .await
@@ -149,6 +151,7 @@ async fn acknowledged_authored_enter_authorizes_title_before_request_history_flu
         &mut client,
         &ClientRequest::Attach {
             session: SESSION.into(),
+            hello: Default::default(),
         },
     )
     .await
@@ -203,6 +206,7 @@ async fn acknowledged_authored_enter_authorizes_title_before_request_history_flu
         &mut client,
         &ClientRequest::Attach {
             session: SESSION.into(),
+            hello: Default::default(),
         },
     )
     .await
@@ -256,6 +260,7 @@ async fn acknowledged_authored_enter_authorizes_title_before_request_history_flu
         &mut client,
         &ClientRequest::Attach {
             session: SESSION.into(),
+            hello: Default::default(),
         },
     )
     .await
@@ -325,6 +330,7 @@ async fn exited_agent_titles_require_verified_own_history_and_preserve_manual_na
         &mut client,
         &ClientRequest::Attach {
             session: RECOVERY_SESSION.into(),
+            hello: Default::default(),
         },
     )
     .await
@@ -373,6 +379,7 @@ async fn exited_agent_titles_require_verified_own_history_and_preserve_manual_na
         &mut client,
         &ClientRequest::Attach {
             session: RECOVERY_SESSION.into(),
+            hello: Default::default(),
         },
     )
     .await
@@ -427,6 +434,7 @@ async fn exited_agent_titles_require_verified_own_history_and_preserve_manual_na
             &mut client,
             &ClientRequest::Attach {
                 session: RECOVERY_SESSION.into(),
+                hello: Default::default(),
             },
         )
         .await
@@ -479,6 +487,7 @@ async fn exited_agent_titles_require_verified_own_history_and_preserve_manual_na
         &mut client,
         &ClientRequest::Attach {
             session: RECOVERY_SESSION.into(),
+            hello: Default::default(),
         },
     )
     .await
@@ -514,6 +523,7 @@ async fn exited_agent_titles_require_verified_own_history_and_preserve_manual_na
         &mut client,
         &ClientRequest::Attach {
             session: RECOVERY_SESSION.into(),
+            hello: Default::default(),
         },
     )
     .await

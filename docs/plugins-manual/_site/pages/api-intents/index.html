@@ -1,0 +1,1311 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>intents | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details open><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/" aria-current="page">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Host API</b></p>
+<h1>intents</h1>
+
+<p>An intent is a request that asks the kernel to change something: rename a node, close a pane, type into a terminal, show a notice. A plugin never changes the tree, a pane or a window itself. It returns submissions from <code>on-events</code>, or calls <code>intents.submit</code> from a timer or request callback. The kernel checks each batch against the plugin's grants, applies the accepted submissions in order, and gives every submission exactly one outcome.</p>
+<p><strong>You need:</strong> the grant listed for each intent in the catalogue below, declared in the manifest for the side that submits it (see <a href="/pages/capabilities/">capabilities</a>). Results that arrive later come as <code>request-completed</code> in <a href="/pages/api-events/">events</a>. In Rust, add the <code>ilium_plugin</code> attribute to a struct and implement <code>Handler</code> (see <a href="/pages/rust-sdk/">Rust SDK</a>). In TypeScript, export the object from <code>definePlugin</code> (see <a href="/pages/typescript-sdk/">TypeScript SDK</a>).</p>
+<h3 id="interface">Interface</h3>
+<p>The records, the outcome and the submit function, as declared in WIT:</p>
+<pre><code class="language-wit">record submission { intent: intent, correlation: u64, dedup-key: option&lt;string&gt; }
+variant request-ref { submission(u64), call(request-id) }
+variant outcome {
+  ok, ok-node(node-id), duplicate(request-ref), refused(plugin-error),
+  failed(plugin-error), cancelled,
+  ok-epoch(u64),   // send-input on an agent pane, the new prompt epoch
+}
+record request-result { request: request-ref, outcome: outcome }
+
+submit: func(submission: submission) -&gt; result&lt;request-id, plugin-error&gt;;
+</code></pre>
+<p>The intent variant has one case per catalogue row. A case with one value carries that value. A case with several fields carries a record named <code>&lt;case&gt;-spec</code>:</p>
+<pre><code class="language-wit">// Excerpt of ilium:types/intents in reference-wit
+variant intent {
+  rename-node(rename-node-spec),
+  move-node(move-node-spec),
+  close-node(node-id),
+  set-node-locked(set-node-locked-spec),
+  create-pane(create-pane-spec),
+  signal-pane(signal-pane-spec),
+  send-input(send-input-spec),
+  agent-action(agent-action-spec),
+  set-decoration(set-decoration-spec),
+  clear-decoration(decoration-key),
+  set-virtual-rows(set-virtual-rows-spec),
+  play-sound(string),
+  notify(notify-spec),
+  open-view(open-view-spec),
+  close-view(view-target),
+  invoke-command(invoke-command-spec),
+  message(message-spec),
+  editor-apply-edits(editor-apply-edits-spec),
+  editor-open(editor-open-spec),
+  // appended in this order
+  freeze-pane(freeze-pane-spec),
+  unfreeze-pane(freeze-pane-spec),
+  replace-pane-command(replace-pane-command-spec),
+  terminate-pane-process(terminate-pane-process-spec),
+  resize-pane(resize-pane-spec),
+  create-group(create-group-spec),
+  create-folder(create-folder-spec),
+  create-project(create-project-spec),
+  create-split(create-split-spec),
+  set-bookmarked(set-bookmarked-spec),
+  set-expanded(set-expanded-spec),
+  restructure(restructure-spec),
+  revert-restructure(u64),
+  set-inferred-icon(set-inferred-icon-spec),
+  mark-attention(mark-attention-spec),
+  ack-attention(node-id),
+  open-external(open-external-spec),
+  set-status-segment(set-status-segment-spec),
+  clear-status-segment(string),
+  set-frame-slot(set-frame-slot-spec),
+  clear-frame-slot(clear-frame-slot-spec),
+  toast(toast-spec),
+  dismiss-toast(string),
+}
+</code></pre>
+<p>New cases are only ever appended, so existing plugins keep decoding. The record names follow the same <code>&lt;case&gt;-spec</code> rule; the fields of each record are the payload columns of the tables below. A case with exactly one value carries that value, (<code>revert-restructure</code> carries the token, <code>dismiss-toast</code> the toast id).</p>
+<p>Import paths:</p>
+<ul>
+<li>Rust: <code>ilium_plugin_sdk::types::intents::{Intent, Submission}</code> and <code>ilium_plugin_sdk::host::intents::submit</code>. The prelude (<code>use ilium_plugin_sdk::prelude::*;</code>) also brings in <code>Intent</code>, <code>Submission</code>, <code>Outcome</code> and <code>RequestRef</code>.</li>
+<li>TypeScript: <code>Submission</code> and <code>Intent</code> from <code>@ilium/plugin-sdk/types</code>, and <code>submit</code> from <code>@ilium/plugin-sdk/host/intents</code>.</li>
+</ul>
+<p><code>submit</code> returns a <code>request-id</code> at once. Its completion arrives later as <code>request-completed</code>, with <code>request-ref</code> set to <code>call(&lt;request-id&gt;)</code>. Use it only from timers and request callbacks. Inside <code>on-events</code>, return submissions instead.</p>
+<h3 id="batches">Batches</h3>
+<ul>
+<li><code>on-events</code> returns a list of <code>Submission</code> values. The kernel checks the batch against the grants and applies the submissions in order.</li>
+<li>A node removed by an earlier submission in the same batch makes a later submission on that node fail with <code>failed(not-found)</code>.</li>
+<li>A return of more than 256 submissions traps the plugin. None of them is applied.</li>
+<li>A batch is refused as a whole in two cases, both checked over the whole list in index order before any effect: a malformed submission (shape, then a missing or malformed dedup key), and a missing grant. The lowest-index offender gets <code>refused(invalid-argument)</code> or <code>refused(not-permitted)</code> (shape before grant inside one submission). Every other submission gets <code>refused(cancelled)</code>. All carry the message <code>batch refused: submission &lt;index&gt;</code>, with the 0-based index of the offender. Nothing is half applied and no dedup key is reserved.</li>
+<li>Every other check is per submission. A missing target, a payload value that is well formed but invalid (for example a text node id), a stale revision or a rate limit affects only its own submission.</li>
+<li><code>correlation</code> is a number the plugin chooses. It is returned as <code>request-ref</code> <code>submission(&lt;correlation&gt;)</code> in <code>request-completed</code>. Plugin numbers stay below 2^63. <code>Submission::new</code> in Rust takes the next SDK number, which starts at 2^63.</li>
+</ul>
+<figure>
+<svg viewBox="0 0 400 236" role="img" aria-label="How the kernel applies a submission batch" width="600" height="354">
+  <defs>
+    <marker id="intent-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7"
+            markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <rect x="110" y="8" width="180" height="34" rx="6" fill="none" stroke="currentColor"/>
+  <text x="200" y="30" font-size="12" text-anchor="middle" fill="currentColor">Batch from on-events</text>
+  <line x1="200" y1="42" x2="200" y2="62" stroke="currentColor" marker-end="url(#intent-arrow)"/>
+  <rect x="110" y="62" width="180" height="34" rx="6" fill="none" stroke="currentColor"/>
+  <text x="200" y="84" font-size="12" text-anchor="middle" fill="currentColor">Check batch and grants</text>
+  <line x1="170" y1="96" x2="84" y2="122" stroke="currentColor" marker-end="url(#intent-arrow)"/>
+  <line x1="230" y1="96" x2="316" y2="122" stroke="currentColor" marker-end="url(#intent-arrow)"/>
+  <rect x="8" y="122" width="152" height="54" rx="6" fill="none" stroke="currentColor"/>
+  <text x="84" y="144" font-size="12" text-anchor="middle" fill="currentColor">All checks pass</text>
+  <text x="84" y="162" font-size="11" text-anchor="middle" fill="currentColor">apply in order</text>
+  <rect x="240" y="122" width="152" height="54" rx="6" fill="none" stroke="currentColor" stroke-dasharray="4 3"/>
+  <text x="316" y="144" font-size="12" text-anchor="middle" fill="currentColor">Malformed or no grant</text>
+  <text x="316" y="162" font-size="11" text-anchor="middle" fill="currentColor">refuse the batch</text>
+  <line x1="84" y1="176" x2="150" y2="200" stroke="currentColor" marker-end="url(#intent-arrow)"/>
+  <line x1="316" y1="176" x2="250" y2="200" stroke="currentColor" marker-end="url(#intent-arrow)"/>
+  <rect x="90" y="200" width="220" height="28" rx="6" fill="none" stroke="currentColor"/>
+  <text x="200" y="218" font-size="12" text-anchor="middle" fill="currentColor">request-completed events</text>
+</svg>
+<figcaption>A batch is all or nothing at the grant and shape level. Every submission then gets one outcome.</figcaption>
+</figure>
+
+<h3 id="functions">Functions</h3>
+<table>
+<thead>
+<tr>
+<th>Function</th>
+<th>Signature</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>intents.submit</code></td>
+<td><code>submit(submission) -&gt; result&lt;request-id, plugin-error&gt;</code></td>
+<td>Queues one submission from a timer or request callback. Errors: <code>invalid-argument</code> for a malformed submission or a missing mandatory key, <code>not-permitted</code> at once when the grant is missing, <code>rate-limited</code>. The completion carries <code>submission(correlation)</code> from the submission passed in. The returned request id is informational and never appears in a completion.</td>
+</tr>
+</tbody>
+</table>
+<p>Rust: <code>host::intents::submit(submission)</code> returns <code>Result&lt;RequestId, PluginError&gt;</code>. TypeScript: <code>submit(submission)</code> returns the request id as <code>bigint</code> and throws <code>PluginError</code>.</p>
+<h3 id="dedup-keys">Dedup keys</h3>
+<p>A submission may carry a <code>dedup-key</code>. The rules:</p>
+<ul>
+<li>Format: 1 to 128 characters from <code>A-Z</code>, <code>a-z</code>, <code>0-9</code>, <code>.</code>, <code>_</code>, <code>:</code>, <code>/</code> and <code>-</code>. Any other character makes the submission malformed.</li>
+<li>Scope: the pair (plugin id, key), at the kernel that applies the intent. The server and each client keep separate tables.</li>
+<li>Window: 10 minutes from the moment the key is reserved.</li>
+<li>Duplicate: a submission with a reserved key completes as <code>duplicate(&lt;original&gt;)</code> and has no effect. <code>original</code> is the <code>request-ref</code> of the submission that reserved the key.</li>
+<li>A key is reserved only after every acceptance check passes. A refused submission keeps its key free, so a retry with the same key after fixing the cause is valid. A submission that was accepted keeps its key even if it later fails. Retry a failed action with a new key.</li>
+<li><code>send-input</code> and <code>agent-action</code> require a key. Without one, the batch is refused. The kernel journals these keys before the write, for 24 hours or 4,096 entries per session, whichever is smaller. A restart therefore does not repeat the input.</li>
+</ul>
+<p>The SDK helper <code>dedup::key_for(&amp;["finish", &amp;node.to_string()])</code> joins its parts with <code>:</code> and replaces disallowed characters with <code>-</code>. TypeScript plugins write the key string directly.</p>
+<h3 id="intent-catalogue">Intent catalogue</h3>
+<table>
+<thead>
+<tr>
+<th>Intent</th>
+<th>Payload</th>
+<th>Grant</th>
+<th>Outcome, beyond <code>ok</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>rename-node</code></td>
+<td><code>node: node-id</code>, <code>title: string</code></td>
+<td><code>tree.write</code></td>
+<td><code>refused(conflict)</code> when the user named the node by hand and the plugin is a titler; <code>refused(not-found)</code></td>
+</tr>
+<tr>
+<td><code>move-node</code></td>
+<td><code>node</code>, <code>target: node-id</code>, <code>placement</code> (before, after, inside-first, inside-last)</td>
+<td><code>tree.write</code></td>
+<td><code>refused(invalid-argument)</code> when the target is inside the moved node</td>
+</tr>
+<tr>
+<td><code>close-node</code></td>
+<td><code>node</code></td>
+<td><code>tree.write</code></td>
+<td><code>refused(conflict)</code> on a locked node</td>
+</tr>
+<tr>
+<td><code>set-node-locked</code></td>
+<td><code>node</code>, <code>locked: bool</code></td>
+<td><code>tree.write</code></td>
+<td><code>refused(not-found)</code></td>
+</tr>
+<tr>
+<td><code>create-pane</code></td>
+<td><code>parent: option&lt;node-id&gt;</code>, <code>title</code>, <code>content-kind: string</code>, <code>cwd: option&lt;fs-path&gt;</code>, <code>command: option&lt;list&lt;string&gt;&gt;</code>, <code>initial-input: option&lt;string&gt;</code></td>
+<td><code>panes.create</code>, plus <code>terminal.write</code> when <code>initial-input</code> is set</td>
+<td><code>ok-node(node-id)</code>; <code>refused(not-found)</code> for a missing parent or <code>cwd</code>; <code>failed(not-found)</code> for a missing program; <code>failed(io)</code> on spawn failure</td>
+</tr>
+<tr>
+<td><code>signal-pane</code></td>
+<td><code>pane: node-id</code>, <code>signal</code> (interrupt, terminate, kill, hangup)</td>
+<td><code>panes.signal</code></td>
+<td><code>refused(not-found)</code> with no running process; <code>refused(pane-not-ready)</code> on a restored pane</td>
+</tr>
+<tr>
+<td><code>send-input</code></td>
+<td><code>pane: node-id</code>, <code>text: string</code>, <code>delivery</code> (typed, submitted, pasted), <code>prompt-epoch: option&lt;u64&gt;</code>, key required</td>
+<td><code>terminal.write</code></td>
+<td><code>refused(pane-not-ready)</code>; <code>refused(conflict)</code> on a stale epoch; <code>refused(rate-limited)</code></td>
+</tr>
+<tr>
+<td><code>agent-action</code></td>
+<td><code>pane: node-id</code>, <code>action-id: string</code>, key required</td>
+<td><code>agent.control</code></td>
+<td><code>refused(unsupported)</code> when the signature has no such action; <code>refused(conflict)</code> when the activity is not allowed</td>
+</tr>
+<tr>
+<td><code>set-decoration</code></td>
+<td><code>node</code>, <code>slot: string</code>, <code>content: styled-text</code>, <code>icon: option&lt;string&gt;</code>, <code>sort-key: option&lt;s64&gt;</code>, <code>persist: bool</code></td>
+<td><code>tree.decorate</code></td>
+<td><code>refused(invalid-argument)</code> for an undeclared slot; <code>refused(quota-exceeded)</code></td>
+</tr>
+<tr>
+<td><code>clear-decoration</code></td>
+<td><code>node</code>, <code>slot</code></td>
+<td><code>tree.decorate</code></td>
+<td><code>refused(invalid-argument)</code> for an undeclared slot</td>
+</tr>
+<tr>
+<td><code>set-virtual-rows</code></td>
+<td><code>row-kind: string</code>, <code>rows: list&lt;virtual-row&gt;</code> (id, label, icon, command)</td>
+<td><code>tree.decorate</code></td>
+<td><code>refused(invalid-argument)</code> for an undeclared row kind</td>
+</tr>
+<tr>
+<td><code>play-sound</code></td>
+<td>sound id: <code>string</code></td>
+<td><code>sound.play</code></td>
+<td><code>refused(not-found)</code> for an id outside the catalogue; <code>refused(rate-limited)</code></td>
+</tr>
+<tr>
+<td><code>notify</code></td>
+<td><code>title</code>, <code>body</code>, <code>urgency</code> (low, normal, high), <code>sound: option&lt;string&gt;</code></td>
+<td><code>notify.desktop</code></td>
+<td><code>refused(rate-limited)</code></td>
+</tr>
+<tr>
+<td><code>open-view</code></td>
+<td><code>view-target</code>, <code>focus: bool</code></td>
+<td><code>ui.panels</code></td>
+<td><code>refused(not-found)</code> for an undeclared view</td>
+</tr>
+<tr>
+<td><code>close-view</code></td>
+<td><code>view-target</code></td>
+<td><code>ui.panels</code></td>
+<td>none beyond the universal codes</td>
+</tr>
+<tr>
+<td><code>invoke-command</code></td>
+<td><code>command: string</code>, <code>arguments-json: string</code></td>
+<td><code>commands.invoke:&lt;pattern&gt;</code></td>
+<td><code>ok</code> once the command has run; <code>refused(not-found)</code>; the command's own <code>failed</code> code; <code>failed(timed-out)</code> after 30 s</td>
+</tr>
+<tr>
+<td><code>message</code></td>
+<td><code>to: string</code> (plugin id), <code>channel: string</code>, <code>payload: list&lt;u8&gt;</code></td>
+<td><code>messages.peer:&lt;plugin-id&gt;</code></td>
+<td><code>ok</code> when queued; <code>refused(not-found)</code> when the target is not installed; <code>refused(invalid-argument)</code> over 1 MiB</td>
+</tr>
+<tr>
+<td><code>editor-apply-edits</code></td>
+<td><code>buffer</code>, <code>base-revision: u64</code>, <code>edits: list&lt;text-edit&gt;</code></td>
+<td><code>editor.edit</code></td>
+<td><code>refused(conflict)</code> on a stale revision; <code>refused(invalid-argument)</code> for overlapping edits</td>
+</tr>
+<tr>
+<td><code>editor-open</code></td>
+<td><code>path: fs-path</code>, <code>line: option&lt;u32&gt;</code>, <code>placement</code> (new-pane, split, replace)</td>
+<td><code>editor.edit</code> and <code>fs.read</code> for the path</td>
+<td><code>ok-node(node-id)</code>; <code>failed(not-found)</code>; <code>failed(io)</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>send-input</code> and <code>set-decoration</code> also accept the optional fields listed under "Further intents and extended intents" below.</p>
+<p>Every intent can also return <code>refused(not-permitted)</code> when its grant is missing. Its submission gets that code, and the other submissions in the batch get <code>refused(cancelled)</code>.</p>
+<h3 id="which-side-applies-an-intent">Which side applies an intent</h3>
+<p>The tree, the panes and the terminals live in the session server. A plugin half in a client therefore cannot apply most intents itself. The client forwards them to the server and the outcome returns to the client that submitted them.</p>
+<table>
+<thead>
+<tr>
+<th>Intents</th>
+<th>Applied by</th>
+<th>Path from a client plugin</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>rename-node</code>, <code>move-node</code>, <code>close-node</code>, <code>set-node-locked</code>, <code>set-bookmarked</code>, <code>set-expanded</code></td>
+<td>Server</td>
+<td>Forwarded</td>
+</tr>
+<tr>
+<td><code>create-pane</code>, <code>signal-pane</code>, <code>freeze-pane</code>, <code>unfreeze-pane</code>, <code>replace-pane-command</code>, <code>terminate-pane-process</code>, <code>resize-pane</code></td>
+<td>Server</td>
+<td>Forwarded</td>
+</tr>
+<tr>
+<td><code>create-group</code>, <code>create-folder</code>, <code>create-project</code>, <code>create-split</code>, <code>restructure</code>, <code>revert-restructure</code></td>
+<td>Server</td>
+<td>Forwarded</td>
+</tr>
+<tr>
+<td><code>send-input</code>, <code>agent-action</code></td>
+<td>Server</td>
+<td>Forwarded; a dedup key is required</td>
+</tr>
+<tr>
+<td><code>set-decoration</code>, <code>clear-decoration</code>, <code>set-virtual-rows</code>, <code>set-inferred-icon</code>, <code>mark-attention</code>, <code>ack-attention</code></td>
+<td>Server</td>
+<td>Forwarded; the server replicates the result to every client</td>
+</tr>
+<tr>
+<td><code>notify</code>, <code>play-sound</code></td>
+<td>Server (desktop and sound queue)</td>
+<td>Forwarded</td>
+</tr>
+<tr>
+<td><code>message</code></td>
+<td>Server routes it to the peer side</td>
+<td>Forwarded</td>
+</tr>
+<tr>
+<td><code>invoke-command</code></td>
+<td>The side that registered the command</td>
+<td>Forwarded when the command is a server command</td>
+</tr>
+<tr>
+<td><code>open-view</code>, <code>close-view</code>, <code>toast</code>, <code>dismiss-toast</code>, <code>set-status-segment</code>, <code>clear-status-segment</code>, <code>set-frame-slot</code>, <code>clear-frame-slot</code>, <code>open-external</code></td>
+<td>The client kernel of the submitting plugin half</td>
+<td>Applied locally; nothing is forwarded</td>
+</tr>
+<tr>
+<td><code>editor-apply-edits</code>, <code>editor-open</code></td>
+<td>The client kernel that holds the buffer</td>
+<td>Applied locally</td>
+</tr>
+</tbody>
+</table>
+<p>A server plugin submits all of these to the server directly. The chrome intents of a server plugin are applied by the server and replicated to every client as retained contributions. A client plugin's chrome intents change only that client.</p>
+<p>For a forwarded intent:</p>
+<ul>
+<li>The outcome returns only to the client that submitted it, as <code>request-completed</code>.</li>
+<li>The tree change that the intent caused reaches that client before the outcome (see <a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a>).</li>
+<li>The added latency is 3 ms at the 99th percentile on a local connection (benchmark B15).</li>
+<li>
+<p>If the client is detached, the submission waits in a queue of 256. The 257th queued submission completes as <code>refused(busy)</code> at once, and submissions still queued when the client exits complete as <code>cancelled</code>.</p>
+</li>
+<li>
+<p><strong>[HST-490]</strong> Every intent MUST be applied by exactly one side as listed above, and an intent applied by the server MUST be forwarded when the submitter is a client plugin half.</p>
+</li>
+<li><strong>[HST-491]</strong> The outcome of a forwarded submission MUST be delivered only to the submitting client.</li>
+<li><strong>[HST-492]</strong> The added latency of a forwarded submission MUST be at most 3 ms at the 99th percentile on an idle local connection (B15).</li>
+</ul>
+<h3 id="send-input-check-order">Send-input check order</h3>
+<p>For <code>send-input</code>, two checks run at batch level before the list below, over the whole batch: shape (key present, total text across all stages at most 65,536 bytes, otherwise <code>invalid-argument</code>) and the grant <code>terminal.write</code> (otherwise <code>not-permitted</code>). The kernel then checks each submission in this order. <code>agent-action</code> uses the same order, with its own grant. The first failing check decides the outcome.</p>
+<ol>
+<li>Dedup key. A reserved key gives <code>duplicate(&lt;original&gt;)</code>.</li>
+<li>The pane exists and is a terminal pane. Otherwise <code>not-found</code> or <code>unsupported</code>.</li>
+<li>The pane is restored, which means its process has started. Otherwise <code>pane-not-ready</code>.</li>
+<li>The rate limit has room: 20 per second per pane and plugin. Otherwise <code>rate-limited</code>.</li>
+<li>The epoch, if given, equals the pane's current prompt epoch. Otherwise <code>conflict</code>.</li>
+<li>The <code>if-current</code> precondition, if given, matches the pane. Otherwise <code>conflict</code> with the message <code>precondition: &lt;field&gt;</code>.</li>
+<li>No other plugin holds the input lock of the pane. Otherwise <code>conflict</code> with the message <code>input-locked</code>.</li>
+<li>The input is accepted: the key is reserved, the rate token is taken and the text is written. A refused attempt never takes a rate token.</li>
+</ol>
+<p><code>agent-action</code> is refused with <code>conflict</code> and the message <code>agent is working</code> while the agent is working. By default an action is allowed in the <code>idle</code>, <code>done</code>, <code>awaiting-approval</code> and <code>menu</code> states, unless its signature says otherwise.</p>
+<h3 id="limits">Limits</h3>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Submissions per <code>on-events</code> return</td>
+<td>256; more traps</td>
+</tr>
+<tr>
+<td><code>send-input</code> text</td>
+<td>64 KiB</td>
+</tr>
+<tr>
+<td><code>message</code> payload</td>
+<td>1 MiB</td>
+</tr>
+<tr>
+<td><code>invoke-command</code> <code>arguments-json</code></td>
+<td>one JSON object, at most 64 KiB</td>
+</tr>
+<tr>
+<td><code>notify</code> rate</td>
+<td>6 per minute per plugin</td>
+</tr>
+<tr>
+<td><code>toast</code> rate</td>
+<td>3 per 10 s per plugin (<code>rate-limited</code>)</td>
+</tr>
+<tr>
+<td><code>set-status-segment</code>, <code>set-frame-slot</code> rate</td>
+<td>10 per second per slot</td>
+</tr>
+<tr>
+<td><code>restructure</code> operations</td>
+<td>256</td>
+</tr>
+<tr>
+<td><code>send-input</code> stages and total stage delay</td>
+<td>16 and 10 s</td>
+</tr>
+<tr>
+<td><code>send-input</code> <code>raw</code> bytes</td>
+<td>64 KiB</td>
+</tr>
+<tr>
+<td>Input lock</td>
+<td>2 s; one lock per pane</td>
+</tr>
+<tr>
+<td><code>terminate-pane-process</code> <code>grace-ms</code></td>
+<td>at most 10,000</td>
+</tr>
+<tr>
+<td>Decoration frames, frame time</td>
+<td>2 to 16, at least 90 ms</td>
+</tr>
+<tr>
+<td><code>toast</code> title, body, actions</td>
+<td>60, 200 characters, 2</td>
+</tr>
+<tr>
+<td><code>mark-attention</code> reason</td>
+<td>80 characters</td>
+</tr>
+<tr>
+<td><code>play-sound</code> rate</td>
+<td>4 per second per plugin</td>
+</tr>
+<tr>
+<td><code>send-input</code> rate</td>
+<td>20 per second per pane and plugin</td>
+</tr>
+<tr>
+<td>Dedup window</td>
+<td>10 minutes</td>
+</tr>
+</tbody>
+</table>
+<h3 id="example-rename-a-pane-when-its-agent-finishes-rust">Example: rename a pane when its agent finishes (Rust)</h3>
+<p>This server-side plugin renames the pane when its agent reaches <code>done</code>. The key stops a repeated <code>done</code> from renaming the pane again within 10 minutes. The plugin logs any refused outcome from the next batch. The manifest grants <code>tree.write</code> to the server side.</p>
+<pre><code class="language-rust">use ilium_plugin_sdk::prelude::*;
+use ilium_plugin_sdk::dedup;
+use ilium_plugin_sdk::host::log::{self, Level};
+use ilium_plugin_sdk::types::events::AgentActivityEvent;
+use ilium_plugin_sdk::types::intents::RenameNodeSpec;
+use ilium_plugin_sdk::types::tree::AgentActivity;
+
+#[ilium_plugin(side = &quot;server&quot;)]
+#[derive(Default)]
+struct FinishTitler;
+
+impl Handler for FinishTitler {
+    fn on_events(&amp;mut self, batch: Vec&lt;Event&gt;) -&gt; Vec&lt;Submission&gt; {
+        let mut submissions = Vec::new();
+        for event in batch {
+            match event {
+                Event::AgentActivityChanged(AgentActivityEvent { node, current, .. })
+                    if current == AgentActivity::Done =&gt;
+                {
+                    let spec = RenameNodeSpec { node, title: &quot;Agent finished&quot;.to_string() };
+                    let key = dedup::key_for(&amp;[&quot;finished&quot;, &amp;node.to_string()]);
+                    submissions.push(Submission::keyed(Intent::RenameNode(spec), key));
+                }
+                Event::RequestCompleted(result) =&gt; {
+                    if let Outcome::Refused(error) = result.outcome {
+                        log::log(Level::Warn, &amp;format!(&quot;rename refused: {}&quot;, error.message));
+                    }
+                }
+                _ =&gt; {}
+            }
+        }
+        submissions
+    }
+}
+</code></pre>
+<h3 id="example-open-a-panel-and-notify-once-typescript">Example: open a panel and notify once (TypeScript)</h3>
+<p>This client-side plugin opens its status panel when the user runs its command. It sends a notice with a key, so a second run within 10 minutes opens the panel again but shows no second notice. The manifest grants <code>ui.panels</code> and <code>notify.desktop</code> on the client side.</p>
+<pre><code class="language-ts">import { definePlugin, type Event } from '@ilium/plugin-sdk';
+import type { Submission } from '@ilium/plugin-sdk/types';
+import { log } from '@ilium/plugin-sdk/host/log';
+
+const STATUS_COMMAND = 'com.example.notes/open-status';
+
+export const { lifecycle, handler } = definePlugin({
+  side: 'client',
+  activate(context) {
+    log('info', `ready in ${context.plugin}`);
+  },
+  onEvents(batch: Event[]): Submission[] {
+    const submissions: Submission[] = [];
+    for (const event of batch) {
+      if (event.tag === 'command-invoked' &amp;&amp; event.val.command === STATUS_COMMAND) {
+        submissions.push({
+          intent: { tag: 'open-view', val: { view: { tag: 'panel', val: 'status' }, focus: true } },
+          correlation: 1n,
+          dedupKey: undefined,
+        });
+        submissions.push({
+          intent: {
+            tag: 'notify',
+            val: { title: 'Status', body: 'Panel opened', urgency: 'low', sound: undefined },
+          },
+          correlation: 2n,
+          dedupKey: 'status:opened',
+        });
+      }
+      if (event.tag === 'request-completed' &amp;&amp; event.val.outcome.tag === 'refused') {
+        log('warn', 'an intent was refused; the outcome names the reason');
+      }
+    }
+    return submissions;
+  },
+});
+</code></pre>
+<h3 id="further-intents-and-extended-intents">Further intents and extended intents</h3>
+<p>The contract has 23 further intent cases and extends 5 existing ones. The batch rule, the dedup rule and the outcome rules above apply unchanged. <code>restructure</code> is atomic inside the batch. Four deep pages cover the groups: <a href="/pages/api-intent-send-input/">send-input stages</a>, <a href="/pages/api-intent-pane-lifecycle/">pane lifecycle</a>, <a href="/pages/api-intent-tree-structure/">tree structure and restructure</a> and <a href="/pages/api-intent-chrome/">toast, status segments and open-external</a>.</p>
+<p>The new outcome case is <code>ok-epoch(u64)</code>. <code>send-input</code> returns it on an agent pane, carrying the pane's new prompt epoch. A plugin that tests only for <code>ok</code> still works through the SDK: <code>is_ok()</code> in Rust and <code>isOk()</code> in TypeScript are true for both <code>ok</code> and <code>ok-epoch</code>.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">match result.outcome {
+    Outcome::OkEpoch(epoch) =&gt; self.prompt_epoch.insert(pane, epoch),
+    outcome if outcome.is_ok() =&gt; None,
+    Outcome::Refused(error) | Outcome::Failed(error) =&gt; {
+        log::log(Level::Warn, &amp;format!(&quot;{}: {}&quot;, error.code, error.message));
+        None
+    }
+    _ =&gt; None,
+};
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">const { outcome } = event.val;
+if (outcome.tag === 'ok-epoch') {
+  promptEpochs.set(pane, outcome.val);           // bigint
+} else if (outcome.tag === 'refused' || outcome.tag === 'failed') {
+  log('warn', `${outcome.val.code}: ${outcome.val.message}`);
+}
+</code></pre>
+<h4 id="pane-lifecycle-grant-paneslifecycle-high-risk-server-only">Pane lifecycle (grant <code>panes.lifecycle</code>, high risk, server only)</h4>
+<table>
+<thead>
+<tr>
+<th>Intent</th>
+<th>Payload</th>
+<th>Outcome</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>freeze-pane</code></td>
+<td><code>pane</code></td>
+<td><code>ok</code>; the process is stopped (SIGSTOP on Unix), output stops, the pane shows the frozen mark; <code>refused(unsupported)</code> on Windows</td>
+</tr>
+<tr>
+<td><code>unfreeze-pane</code></td>
+<td><code>pane</code></td>
+<td><code>ok</code>; <code>refused(conflict)</code> when the pane is not frozen</td>
+</tr>
+<tr>
+<td><code>replace-pane-command</code></td>
+<td><code>pane</code>, <code>command: list&lt;string&gt;</code>, <code>cwd: option&lt;fs-path&gt;</code>, <code>keep-scrollback: bool</code></td>
+<td><code>ok</code> once the new process runs; the durable resume binding stays with the kernel</td>
+</tr>
+<tr>
+<td><code>terminate-pane-process</code></td>
+<td><code>pane</code>, <code>grace-ms: u32</code> (at most 10,000)</td>
+<td><code>ok</code> when the process has exited; the pane stays open with its exit status</td>
+</tr>
+<tr>
+<td><code>resize-pane</code></td>
+<td><code>pane</code>, <code>columns: option&lt;u16&gt;</code>, <code>rows: option&lt;u16&gt;</code></td>
+<td><code>ok</code>; <code>refused(conflict)</code> when the layout cannot give the size, and the message names the limiting neighbour</td>
+</tr>
+</tbody>
+</table>
+<h4 id="tree-structure-and-attention-grants-treerestructure-treewrite-treedecorate-treeattention">Tree structure and attention (grants <code>tree.restructure</code>, <code>tree.write</code>, <code>tree.decorate</code>, <code>tree.attention</code>)</h4>
+<table>
+<thead>
+<tr>
+<th>Intent</th>
+<th>Payload</th>
+<th>Grant</th>
+<th>Outcome</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>create-group</code></td>
+<td><code>parent</code>, <code>title</code>, <code>placement</code>, <code>children: list&lt;node-id&gt;</code></td>
+<td><code>tree.restructure</code></td>
+<td><code>ok-node</code></td>
+</tr>
+<tr>
+<td><code>create-folder</code></td>
+<td><code>parent</code>, <code>title</code>, <code>path: option&lt;fs-path&gt;</code></td>
+<td><code>tree.restructure</code></td>
+<td><code>ok-node</code></td>
+</tr>
+<tr>
+<td><code>create-project</code></td>
+<td><code>title</code>, <code>root: fs-path</code></td>
+<td><code>tree.restructure</code></td>
+<td><code>ok-node</code></td>
+</tr>
+<tr>
+<td><code>create-split</code></td>
+<td><code>panes: list&lt;node-id&gt;</code> (2 to 4), <code>direction</code></td>
+<td><code>tree.restructure</code></td>
+<td><code>ok-node</code> (the split container)</td>
+</tr>
+<tr>
+<td><code>set-bookmarked</code></td>
+<td><code>node</code>, <code>bookmarked: bool</code></td>
+<td><code>tree.write</code></td>
+<td><code>ok</code></td>
+</tr>
+<tr>
+<td><code>set-expanded</code></td>
+<td><code>node</code> or <code>virtual-row: string</code>, <code>expanded: bool</code></td>
+<td><code>tree.write</code> for nodes, own <code>virtual_rows</code> for rows</td>
+<td><code>ok</code></td>
+</tr>
+<tr>
+<td><code>restructure</code></td>
+<td><code>operations: list&lt;restructure-op&gt;</code> (move, create-group, ungroup, rename; at most 256), <code>label: string</code></td>
+<td><code>tree.restructure</code></td>
+<td><code>ok-node</code> carrying an undo token (0 when none); all or nothing: one failing operation refuses the whole intent with <code>refused(conflict)</code> and the operation index in the message</td>
+</tr>
+<tr>
+<td><code>revert-restructure</code></td>
+<td><code>token: u64</code></td>
+<td><code>tree.restructure</code></td>
+<td><code>ok</code>; <code>refused(conflict)</code> when a later change touched the same nodes</td>
+</tr>
+<tr>
+<td><code>set-inferred-icon</code></td>
+<td><code>node</code>, <code>icon: option&lt;string&gt;</code> (catalogue id or glyph), <code>source: string</code></td>
+<td><code>tree.decorate</code></td>
+<td><code>ok</code>; a manual icon wins (<code>refused(conflict)</code>)</td>
+</tr>
+<tr>
+<td><code>mark-attention</code></td>
+<td><code>node</code>, <code>reason: string</code> (at most 80)</td>
+<td><code>tree.attention</code></td>
+<td><code>ok</code>; the attention policy (done prefix, sound) stays with the kernel</td>
+</tr>
+<tr>
+<td><code>ack-attention</code></td>
+<td><code>node</code></td>
+<td><code>tree.attention</code></td>
+<td><code>ok</code></td>
+</tr>
+</tbody>
+</table>
+<h4 id="chrome-and-feedback-grants-open-external-uichrome-notifytoast">Chrome and feedback (grants <code>open-external</code>, <code>ui.chrome</code>, <code>notify.toast</code>)</h4>
+<table>
+<thead>
+<tr>
+<th>Intent</th>
+<th>Payload</th>
+<th>Grant</th>
+<th>Outcome</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>open-external</code></td>
+<td><code>target</code>: <code>url(string)</code>, <code>file(fs-path)</code> or <code>settings(string)</code> for <code>ilium://settings/...</code></td>
+<td><code>open-external</code></td>
+<td><code>ok</code> after the desktop handler started; <code>refused(not-permitted)</code> when the user declines; only <code>http</code>, <code>https</code> and <code>mailto</code> URLs</td>
+</tr>
+<tr>
+<td><code>set-status-segment</code></td>
+<td><code>segment</code> (own <code>status_segments</code> id), <code>content: rich-text</code>, <code>tooltip: option&lt;tooltip&gt;</code>, <code>tone: option&lt;tone&gt;</code></td>
+<td><code>ui.chrome</code></td>
+<td><code>ok</code>; at most 10 per second per segment</td>
+</tr>
+<tr>
+<td><code>clear-status-segment</code></td>
+<td><code>segment</code></td>
+<td><code>ui.chrome</code></td>
+<td><code>ok</code></td>
+</tr>
+<tr>
+<td><code>set-frame-slot</code></td>
+<td><code>pane</code>, <code>slot</code> (own <code>pane_frame_slots</code> id), <code>content: rich-text</code>, <code>icon: option&lt;string&gt;</code>, <code>tooltip</code></td>
+<td><code>ui.chrome</code></td>
+<td><code>ok</code>; <code>refused(invalid-argument)</code> when the pane does not match the slot's <code>applies_to</code></td>
+</tr>
+<tr>
+<td><code>clear-frame-slot</code></td>
+<td><code>pane</code>, <code>slot</code></td>
+<td><code>ui.chrome</code></td>
+<td><code>ok</code></td>
+</tr>
+<tr>
+<td><code>toast</code></td>
+<td><code>id: option&lt;string&gt;</code>, <code>tone</code>, <code>title</code> (60), <code>body: option&lt;rich-text&gt;</code> (200 characters), <code>actions: list&lt;toast-action&gt;</code> (2), <code>duration-ms: option&lt;u32&gt;</code></td>
+<td><code>notify.toast</code></td>
+<td><code>ok</code>; 3 per 10 s per plugin (<code>rate-limited</code>); a shown <code>id</code> is replaced</td>
+</tr>
+<tr>
+<td><code>dismiss-toast</code></td>
+<td><code>id</code></td>
+<td><code>notify.toast</code></td>
+<td><code>ok</code></td>
+</tr>
+</tbody>
+</table>
+<pre><code class="language-wit">// Excerpt of ilium:types/intents in reference-wit
+record toast-action { label: string, command: string }
+</code></pre>
+<h4 id="extended-intents">Extended intents</h4>
+<p>The extended intents add optional fields. A submission that leaves them out behaves as it does without them.</p>
+<table>
+<thead>
+<tr>
+<th>Intent</th>
+<th>New fields</th>
+<th>Rule</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>send-input</code></td>
+<td><code>stages</code>, <code>raw</code>, <code>mouse</code>, <code>if-current</code>, <code>lock-user-input</code>, <code>journal</code></td>
+<td>The check order is the one above. <code>refused(conflict)</code> names the failed precondition. See <a href="/pages/api-intent-send-input/">send-input stages</a>.</td>
+</tr>
+<tr>
+<td><code>set-decoration</code></td>
+<td><code>spans: option&lt;rich-text&gt;</code>, <code>tooltip: option&lt;tooltip&gt;</code>, <code>frames: list&lt;styled-text&gt;</code> (2 to 16), <code>frame-ms: u16</code> (at least 90), <code>trailing: bool</code>, <code>visibility</code> (<code>always</code>, <code>on-hover</code>), <code>tone</code></td>
+<td>The host steps the frames with no plugin call. Reduced motion shows the first frame. See <a href="/pages/api-intent-chrome/">toast, status segments and open-external</a>.</td>
+</tr>
+<tr>
+<td><code>rename-node</code></td>
+<td><code>source</code> (<code>plugin</code>, <code>inferred</code>), <code>expected-revision: option&lt;u64&gt;</code></td>
+<td>A stale revision is <code>refused(conflict)</code>. An <code>inferred</code> title never replaces a manual one.</td>
+</tr>
+<tr>
+<td><code>notify</code></td>
+<td><code>coalesce-key: option&lt;string&gt;</code>, <code>coalesce-window-ms: u32</code> (at most 60,000)</td>
+<td>Notifications with the same key inside the window replace each other.</td>
+</tr>
+<tr>
+<td><code>set-virtual-rows</code></td>
+<td>rows gain <code>parent: option&lt;string&gt;</code>, <code>expandable</code>, <code>accepts-drop</code>, <code>tooltip</code>, <code>label: rich-text</code>, <code>trailing</code></td>
+<td>Kinds declared with <code>children: "provider"</code> ask the provider export instead (see <a href="/pages/api-exports/">plugin exports</a>).</td>
+</tr>
+</tbody>
+</table>
+<h4 id="error-codes-of-the-further-intents">Error codes of the further intents</h4>
+<p>No error code was added: the intents reuse the 15 codes of the error model. Beyond the universal codes (<code>not-permitted</code>, <code>invalid-argument</code>, <code>cancelled</code>), these arise:</p>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Intents and cause</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>unsupported</code></td>
+<td><code>freeze-pane</code> on Windows; <code>send-input</code> <code>mouse</code> while mouse reporting is off</td>
+</tr>
+<tr>
+<td><code>conflict</code></td>
+<td><code>unfreeze-pane</code> on a pane that is not frozen; <code>resize-pane</code> the layout cannot satisfy; <code>restructure</code> with a failing operation (index in the message); <code>revert-restructure</code> after a later change; <code>set-inferred-icon</code> and <code>rename-node</code> against a manual value or a stale revision; <code>send-input</code> with a failed <code>if-current</code> or a held input lock</td>
+</tr>
+<tr>
+<td><code>invalid-argument</code></td>
+<td>more than 16 stages, more than 10 s of delay, more than 64 KiB of <code>raw</code>, a lock over 2 s, more than 256 operations, frames outside 2 to 16 or under 90 ms, a slot whose <code>applies_to</code> does not match</td>
+</tr>
+<tr>
+<td><code>rate-limited</code></td>
+<td><code>toast</code>, <code>set-status-segment</code>, <code>set-frame-slot</code>, with <code>retry-after-ms</code></td>
+</tr>
+<tr>
+<td><code>not-permitted</code></td>
+<td>a missing grant, or <code>open-external</code> declined by the user</td>
+</tr>
+<tr>
+<td><code>pane-not-ready</code></td>
+<td><code>send-input</code> and the lifecycle intents on a restored pane that has not started</td>
+</tr>
+<tr>
+<td><code>not-found</code></td>
+<td>a node, pane, slot or segment that does not exist or is not the plugin's own</td>
+</tr>
+</tbody>
+</table>
+<h4 id="sequence-a-staged-send-with-a-precondition">Sequence: a staged send with a precondition</h4>
+<figure>
+<svg viewBox="0 0 420 250" role="img" aria-label="Sequence of a send-input submission with stages and a precondition" width="630" height="375">
+  <defs>
+    <marker id="intents-seq-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <text x="70" y="18" font-size="12" text-anchor="middle" fill="currentColor">Plugin</text>
+  <text x="210" y="18" font-size="12" text-anchor="middle" fill="currentColor">Kernel</text>
+  <text x="350" y="18" font-size="12" text-anchor="middle" fill="currentColor">Terminal pane</text>
+  <line x1="70" y1="26" x2="70" y2="240" stroke="currentColor" stroke-dasharray="3 3"/>
+  <line x1="210" y1="26" x2="210" y2="240" stroke="currentColor" stroke-dasharray="3 3"/>
+  <line x1="350" y1="26" x2="350" y2="240" stroke="currentColor" stroke-dasharray="3 3"/>
+  <line x1="70" y1="46" x2="208" y2="46" stroke="currentColor" marker-end="url(#intents-seq-arrow)"/>
+  <text x="140" y="40" font-size="10" text-anchor="middle" fill="currentColor">send-input + key</text>
+  <text x="214" y="68" font-size="10" fill="currentColor">grant, key, if-current, lock</text>
+  <line x1="210" y1="86" x2="348" y2="86" stroke="currentColor" marker-end="url(#intents-seq-arrow)"/>
+  <text x="280" y="80" font-size="10" text-anchor="middle" fill="currentColor">stage 1: /compact</text>
+  <text x="214" y="108" font-size="10" fill="currentColor">wait delay-ms</text>
+  <line x1="210" y1="126" x2="348" y2="126" stroke="currentColor" marker-end="url(#intents-seq-arrow)"/>
+  <text x="280" y="120" font-size="10" text-anchor="middle" fill="currentColor">stage 2: submit</text>
+  <line x1="208" y1="170" x2="72" y2="170" stroke="currentColor" marker-end="url(#intents-seq-arrow)"/>
+  <text x="140" y="164" font-size="10" text-anchor="middle" fill="currentColor">request-completed</text>
+  <text x="140" y="188" font-size="10" text-anchor="middle" fill="currentColor">ok or ok-epoch(7)</text>
+  <text x="140" y="222" font-size="10" text-anchor="middle" fill="currentColor">or refused(conflict)</text>
+</svg>
+<figcaption>The kernel checks the whole submission before the first byte is written. The outcome arrives once, after the last stage was sent.</figcaption>
+</figure>
+
+<h4 id="example-freeze-a-pane-then-show-a-toast-rust-and-typescript">Example: freeze a pane, then show a toast (Rust and TypeScript)</h4>
+<p>This server-side plugin freezes a runaway terminal and tells the user how to resume it. It holds <code>panes.lifecycle</code> on the server side and <code>notify.toast</code> where the toast is shown. The freeze carries a key, so a repeated command does not freeze twice. The toast <code>id</code> makes a second toast replace the first.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::prelude::*;
+use ilium_plugin_sdk::types::intents::{FreezePaneSpec, ToastSpec};
+use ilium_plugin_sdk::types::text::Tone;
+
+fn freeze_and_tell(pane: NodeId) -&gt; Vec&lt;Submission&gt; {
+    vec![
+        Submission::keyed(Intent::FreezePane(FreezePaneSpec { pane }), format!(&quot;freeze-{pane}&quot;)),
+        Submission::new(Intent::Toast(ToastSpec {
+            id: Some(&quot;frozen&quot;.into()),
+            tone: Tone::Warning,
+            title: &quot;Pane frozen&quot;.into(),
+            body: None,
+            actions: vec![],
+            duration_ms: Some(5_000),
+        })),
+    ]
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import type { Submission } from '@ilium/plugin-sdk/types';
+
+function freezeAndTell(pane: bigint): Submission[] {
+  return [
+    { intent: { tag: 'freeze-pane', val: { pane } }, correlation: 1n, dedupKey: `freeze-${pane}` },
+    {
+      intent: {
+        tag: 'toast',
+        val: { id: 'frozen', tone: 'warning', title: 'Pane frozen', body: undefined, actions: [], durationMs: 5000 },
+      },
+      correlation: 2n,
+      dedupKey: undefined,
+    },
+  ];
+}
+</code></pre>
+<p>The log of the test harness for this batch, when the pane is already frozen:</p>
+<pre class="term"><span class="t-prompt">$</span> ilium plugin test ./freezer --fixture freeze-twice.json
+<span class="t-ok">{"type":"outcome","i":0,"intent":"freeze-pane","outcome":"ok"}</span>
+<span class="t-ok">{"type":"outcome","i":1,"intent":"toast","outcome":"ok"}</span>
+{"type":"outcome","i":2,"intent":"freeze-pane","outcome":"duplicate(0)"}
+<span class="t-ok">{"type":"outcome","i":3,"intent":"toast","outcome":"ok"}</span>
+<span class="t-dim">{"type":"summary","ok":3,"duplicate":1,"refused":0}</span>
+</pre>
+
+<p>Illustrative, not generated: the JSONL form follows the harness output of the example earlier on this page; the fixture delivers the command twice.</p>
+<h3 id="edge-cases-and-errors">Edge cases and errors</h3>
+<ul>
+<li><code>refused(pane-not-ready)</code> means a restored pane has not started its process yet. Retry after <code>pane-created</code> or <code>tree-changed</code> for that pane.</li>
+<li><code>refused(rate-limited)</code> always carries <code>retry-after-ms</code>. Wait that long before retrying.</li>
+<li><code>refused(conflict)</code> means the state changed. Read the current state, then submit again. A refused submission keeps its key free, so the same key is valid for the retry.</li>
+<li><code>failed(timed-out)</code> on <code>invoke-command</code> means the command did not reply within 30 seconds. The command may still finish later, so check its effect before a retry.</li>
+<li><code>cancelled</code> means another submission in the same batch was refused. Fix the refused one, then resubmit the whole group.</li>
+<li><code>duplicate(&lt;original&gt;)</code> is not an error. It confirms that an earlier submission with the same key already took effect.</li>
+<li>A trap ends the plugin instance. The kernel restarts it under the restart rule in <a href="/pages/errors-and-limits/">errors and limits</a>.</li>
+</ul>
+<h3 id="what-the-user-sees">What the user sees</h3>
+<ul>
+<li>A rename, a decoration or a closed node changes the tree at once. A badge is at most 12 cells wide. Longer text is cut and ends with <code>…</code>.</li>
+<li><code>send-input</code> types into the pane as if the user typed the text. <code>submitted</code> also presses the submit keys of the pane's signature, which default to a carriage return. <code>pasted</code> uses bracketed paste when the program enables it.</li>
+<li><code>notify</code> shows a desktop notification. When an attached client reports that the pane the notice is about has focus, the notice appears in the client footer instead.</li>
+<li>A refused outcome is silent to the user. Only the plugin sees it, in its log or in its own state. Use the test harness in <a href="/pages/testing/">testing</a> to see outcomes before you ship.</li>
+</ul>
+<pre class="term">$ ilium plugin test ./titler --fixture done.json
+<span class="t-hi">{"type":"submission","i":0,"intent":"rename-node"}</span>
+<span class="t-ok">{"type":"outcome","i":0,"outcome":"ok"}</span>
+<span class="t-hi">{"type":"submission","i":1,"intent":"rename-node"}</span>
+{"type":"outcome","i":1,"outcome":"duplicate(submission(0))"}
+<span class="t-dim">{"type":"summary","ok":1,"duplicate":1,"refused":0}</span>
+</pre>
+
+<p>Illustrative, not generated: the JSONL that <code>ilium plugin test</code> prints for the Rust example when its fixture delivers the same <code>done</code> event twice.</p>
+<h3 id="units-and-conventions">Units and conventions</h3>
+<p>Times are <code>epoch-ms</code> (<code>u64</code>, milliseconds since the Unix epoch, UTC) and durations are milliseconds. Correlation numbers below 2^63 belong to the plugin and the rest to the SDK. A limit in characters counts Unicode scalar values. The rules are stated once in the <a href="/pages/reference-wit/#2-conventions">conventions of the WIT reference</a>.</p>
+<h3 id="see-also">See also</h3>
+<ul>
+<li><a href="/pages/api-events/">Events</a>: the events that start a batch, and <code>request-completed</code>.</li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a>: how the outcome and the take functions relate.</li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a>: the error codes and the per-call caps.</li>
+<li><a href="/pages/api-tree/">Tree</a>, <a href="/pages/api-panes/">panes</a>, <a href="/pages/api-commands/">commands</a>, <a href="/pages/api-notifications/">notifications</a> and <a href="/pages/api-messages-and-topics/">messages and topics</a>: the reads that go with these intents.</li>
+<li>Capabilities: <a href="/pages/capability-tree-write/">tree.write</a>, <a href="/pages/capability-terminal-write/">terminal.write</a>, <a href="/pages/capability-agent-control/">agent.control</a>, <a href="/pages/capability-panes-signal/">panes.signal</a>, <a href="/pages/capability-notify-desktop/">notify.desktop</a> and <a href="/pages/capability-editor-edit/">editor.edit</a>.</li>
+<li>Deep pages: <a href="/pages/api-intent-send-input/">send-input stages</a>, <a href="/pages/api-intent-pane-lifecycle/">pane lifecycle</a>, <a href="/pages/api-intent-tree-structure/">tree structure</a> and <a href="/pages/api-intent-chrome/">chrome intents</a>.</li>
+<li><a href="/pages/testing/">Testing</a>: fixtures and the <code>ilium plugin test</code> command.</li>
+</ul>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/api-inference/"><small>Previous</small>inference</a><a class="next" href="/pages/api-jobs/"><small>Next</small>jobs</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#interface">Interface</a></li><li class="l2"><a href="#batches">Batches</a></li><li class="l2"><a href="#functions">Functions</a></li><li class="l2"><a href="#dedup-keys">Dedup keys</a></li><li class="l2"><a href="#intent-catalogue">Intent catalogue</a></li><li class="l2"><a href="#which-side-applies-an-intent">Which side applies an intent</a></li><li class="l2"><a href="#send-input-check-order">Send-input check order</a></li><li class="l2"><a href="#limits">Limits</a></li><li class="l2"><a href="#example-rename-a-pane-when-its-agent-finishes-rust">Example: rename a pane when its agent finishes (Rust)</a></li><li class="l2"><a href="#example-open-a-panel-and-notify-once-typescript">Example: open a panel and notify once (TypeScript)</a></li><li class="l2"><a href="#further-intents-and-extended-intents">Further intents and extended intents</a></li><li class="l3"><a href="#pane-lifecycle-grant-paneslifecycle-high-risk-server-only">Pane lifecycle (grant panes.lifecycle, high risk, server only)</a></li><li class="l3"><a href="#tree-structure-and-attention-grants-treerestructure-treewrite-treedecorate-treeattention">Tree structure and attention (grants tree.restructure, tree.write, tree.decorate, tree.attention)</a></li><li class="l3"><a href="#chrome-and-feedback-grants-open-external-uichrome-notifytoast">Chrome and feedback (grants open-external, ui.chrome, notify.toast)</a></li><li class="l3"><a href="#extended-intents">Extended intents</a></li><li class="l3"><a href="#error-codes-of-the-further-intents">Error codes of the further intents</a></li><li class="l3"><a href="#sequence-a-staged-send-with-a-precondition">Sequence: a staged send with a precondition</a></li><li class="l3"><a href="#example-freeze-a-pane-then-show-a-toast-rust-and-typescript">Example: freeze a pane, then show a toast (Rust and TypeScript)</a></li><li class="l2"><a href="#edge-cases-and-errors">Edge cases and errors</a></li><li class="l2"><a href="#what-the-user-sees">What the user sees</a></li><li class="l2"><a href="#units-and-conventions">Units and conventions</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

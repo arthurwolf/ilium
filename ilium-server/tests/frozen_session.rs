@@ -78,6 +78,7 @@ async fn attach(server: &TestServer, session_name: &str) -> SessionStream {
         &mut client,
         &ClientRequest::Attach {
             session: session_name.to_string(),
+            hello: Default::default(),
         },
     )
     .await
@@ -282,6 +283,7 @@ async fn unfreeze_restarts_the_saved_provider_session_and_recovers_its_identity(
         &mut client,
         &ClientRequest::Attach {
             session: session_name.to_string(),
+            hello: Default::default(),
         },
     )
     .await

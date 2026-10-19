@@ -1,0 +1,6 @@
+$ ilium panes
+SESSION  PANE  AGENT   STATE      COST
+default  3     claude  working    $1.42
+default  5     codex   idle       $0.31
+review   2     claude  approval   $0.87
+review   4     shell   -          -

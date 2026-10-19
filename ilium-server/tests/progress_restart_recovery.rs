@@ -94,6 +94,7 @@ async fn attach_and_read_initial_state(
         client,
         &ClientRequest::Attach {
             session: session_name.to_string(),
+            hello: Default::default(),
         },
     )
     .await

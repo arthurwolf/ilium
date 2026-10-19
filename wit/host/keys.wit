@@ -1,0 +1,11 @@
+package ilium:host@0.1.0;
+
+interface keys {
+  use ilium:types/ids@0.1.0.{node-id, grab-id};
+  use ilium:types/errors@0.1.0.{plugin-error};
+  /// chords: 1 to 32. until-release stops the grab when the chord is released.
+  record grab-spec { chords: list<string>, pane: option<node-id>, until-release: bool }
+  /// Errors: conflict when a reserved chord is named, quota-exceeded above 8 grabs.
+  grab: func(spec: grab-spec) -> result<grab-id, plugin-error>;
+  release: func(grab: grab-id);
+}

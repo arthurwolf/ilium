@@ -1,0 +1,165 @@
+{
+  "api": "ilium:plugin@0.1.0",
+  "id": "ilium.core.diagnostics",
+  "name": "Diagnostics",
+  "version": "0.1.0",
+  "publisher": "Ilium",
+  "description": "Diagnostics helps when something goes wrong.",
+  "license": "MIT",
+  "server": {
+    "entry": "server.wasm",
+    "world": "ilium:server/base@0.1.0",
+    "exports": [
+      "service-provider"
+    ]
+  },
+  "client": {
+    "entry": "client.wasm",
+    "world": "ilium:client/base@0.1.0",
+    "exports": [
+      "views"
+    ]
+  },
+  "capabilities": {
+    "server": [
+      "fs.read:path:/tmp/.ilium-1000/logs",
+      "settings.read-kernel:debug",
+      "panes.read",
+      "journal.read",
+      "services.use:ilium.core.settings/get",
+      "services.provide:ilium.core.diagnostics/report",
+      "extensions.provide:ilium.core.diagnostics/log-sinks",
+      "extensions.provide:ilium.core.diagnostics/report-sections"
+    ],
+    "client": [
+      "ui.panels",
+      "fs.pick",
+      "notify.toast",
+      "help.read"
+    ]
+  },
+  "activation": [
+    "startup",
+    "view:diagnostics.warnings"
+  ],
+  "replaceable": true,
+  "surface": [
+    "services:report",
+    "points:log-sinks",
+    "points:report-sections",
+    "commands:build-report"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "id": "build-report",
+        "title": "Build diagnostics report",
+        "category": "Help"
+      }
+    ],
+    "panels": [
+      {
+        "id": "warnings",
+        "title": "Warnings",
+        "icon": "alert-triangle"
+      }
+    ],
+    "help": [
+      {
+        "id": "diagnostics",
+        "file": "help/diagnostics.md",
+        "title": "Logs and reports"
+      }
+    ],
+    "services": {
+      "ilium.core.diagnostics/report": {
+        "build": {
+          "params": {
+            "type": "object",
+            "properties": {
+              "include_log_tail": {
+                "type": "boolean"
+              }
+            }
+          },
+          "result": {
+            "type": "object",
+            "required": [
+              "text"
+            ],
+            "properties": {
+              "text": {
+                "type": "string",
+                "maxLength": 262144
+              }
+            }
+          }
+        }
+      }
+    },
+    "extension_points": [
+      {
+        "id": "log-sinks",
+        "kind": "hook",
+        "mode": "observe",
+        "title": "Log sinks",
+        "payload_schema": {
+          "type": "object",
+          "properties": {
+            "level": {
+              "type": "string",
+              "enum": [
+                "warn",
+                "error"
+              ]
+            },
+            "plugin": {
+              "type": "string"
+            },
+            "target": {
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            },
+            "time": {
+              "type": "string"
+            }
+          }
+        },
+        "risk": "standard",
+        "deadline_ms": 20,
+        "max_handlers": 8,
+        "version": "0.1.0"
+      },
+      {
+        "id": "report-sections",
+        "kind": "collect",
+        "title": "Report sections",
+        "entry_schema": {
+          "type": "object",
+          "required": [
+            "id",
+            "title",
+            "service"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "service": {
+              "type": "string"
+            }
+          }
+        },
+        "max_entries": 32,
+        "dynamic": false,
+        "version": "0.1.0"
+      }
+    ]
+  },
+  "limits_tier": "first-party"
+}

@@ -137,6 +137,24 @@ impl Grid {
         self.pos
     }
 
+    /// Scroll region as zero-based inclusive (top, bottom) rows.
+    pub fn scroll_region(&self) -> (u16, u16) {
+        (self.scroll_top, self.scroll_bottom)
+    }
+
+    pub fn origin_mode(&self) -> bool {
+        self.origin_mode
+    }
+
+    /// Cursor position saved by DECSC, zero-based (row, col).
+    pub fn saved_pos(&self) -> Pos {
+        self.saved_pos
+    }
+
+    pub fn saved_origin_mode(&self) -> bool {
+        self.saved_origin_mode
+    }
+
     pub fn set_pos(&mut self, mut pos: Pos) {
         if self.origin_mode {
             pos.row = pos.row.saturating_add(self.scroll_top);

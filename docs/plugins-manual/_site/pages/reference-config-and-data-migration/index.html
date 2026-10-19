@@ -1,0 +1,1374 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Config and data migration | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details open><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/" aria-current="page">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Reference</b></p>
+<h1>Config and data migration</h1>
+
+<p>Ilium already stores user data: a global <code>config.toml</code>, a project <code>.ilium/config.yaml</code>, session snapshots, rolling backups, agent instruction files and a chatroom file. Core plugins must read and write the same files, with the same key names, so that a user who installs the plugin build loses nothing and can read every file with the old tools. This page states the migration rules, lists every key and file with its owner, and defines the one mechanism that plugins use to store state in a session snapshot.</p>
+<p>Contract version: <code>ilium:plugin@0.1.0</code>. The platform is not implemented. Requirement ids have the form <code>[COR-nnn]</code> and are collected in <a href="/pages/reference-requirements-core-parity/">Core plugin parity requirements</a>.</p>
+<h3 id="contents">Contents</h3>
+<ul>
+<li>Migration rules</li>
+<li>Settings ownership: kernel tables and plugin tables</li>
+<li>Who owns each tab</li>
+<li><code>config.toml</code>, key by key</li>
+<li>Plugin tables in <code>config.toml</code></li>
+<li>Project YAML</li>
+<li>Session snapshots</li>
+<li>Snapshot sections</li>
+<li>Data files</li>
+<li>Agent configuration files that Ilium writes</li>
+<li>A worked migration</li>
+<li>Errors and edge cases</li>
+<li>Requirements</li>
+</ul>
+<h3 id="migration-rules">Migration rules</h3>
+<ol>
+<li><strong>No key is renamed or moved.</strong> Every key in <code>config.toml</code> and <code>.ilium/config.yaml</code> keeps its table and name. A feature that becomes a plugin keeps reading the kernel key through <code>settings.read-kernel:&lt;tab&gt;</code>. It does not copy the value to <code>[plugins."ilium.core.&lt;name&gt;"]</code>.</li>
+<li><strong>The plugin tables are additive.</strong> The platform adds <code>[plugins]</code>, <code>[plugins.limits]</code> and <code>[plugins."&lt;id&gt;"]</code>. A build that does not know them MUST ignore and preserve them.</li>
+<li><strong>Unknown keys are preserved.</strong> The kernel keeps every key it does not know when it rewrites a file, as it does today for the project YAML.</li>
+<li><strong>A value that fails validation fails its table, not the file.</strong> The message names the key. The other tables still load.</li>
+<li><strong>A format that changes gets a version.</strong> <code>config.toml</code> carries an integer <code>config_version</code>. Absent means 0, the format of the build before plugins. The snapshot carries <code>version</code>. Each plugin section in a snapshot carries <code>schema_version</code>.</li>
+<li><strong>Migrations run once, on read, and are idempotent.</strong> A migration reads the old shape, writes the new one to a temporary file in the same folder and renames it. Running it twice gives the same file.</li>
+<li><strong>A migration keeps a copy.</strong> Before the first write of a new <code>version</code>, the kernel keeps the old file next to it as <code>&lt;stem&gt;.pre-migration.&lt;old-version&gt;&lt;ext&gt;</code>, where the file name splits into stem and extension at the last dot and <code>&lt;old-version&gt;</code> is the old <code>version</code> number. For example <code>main.json</code> at version 3 is kept as <code>main.pre-migration.3.json</code>. Snapshots also keep the existing <code>.pre-restore.json</code> copies (see Session recovery in the user documentation).</li>
+<li><strong>No downgrade promise for snapshots.</strong> A snapshot written by the plugin build has <code>version</code> 4. A build that only knows version 3 reads it without the plugin sections and without error (unknown fields are ignored), but the plugin state is not restored.</li>
+<li><strong>Seeds are not re-run.</strong> Default values are applied only for missing keys. A default never overwrites a stored value.</li>
+</ol>
+<h3 id="settings-ownership-kernel-tables-and-plugin-tables">Settings ownership: kernel tables and plugin tables</h3>
+<p>Two stores exist and they do not overlap.</p>
+<table>
+<thead>
+<tr>
+<th>Store</th>
+<th>Where</th>
+<th>Who writes</th>
+<th>Who reads</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Kernel tables</td>
+<td><code>[ui]</code>, <code>[terminal]</code>, <code>[inference]</code> and the other 25 tab tables of <code>config.toml</code>, plus the project YAML</td>
+<td>The kernel when the user edits a row. The one owner plugin of the tab, with <code>settings.write-kernel:&lt;tab&gt;</code></td>
+<td>Any plugin with <code>settings.read-kernel:&lt;tab&gt;</code></td>
+</tr>
+<tr>
+<td>Plugin tables</td>
+<td><code>[plugins."&lt;id&gt;"]</code> and <code>.ilium/config.yaml</code> key <code>plugins.&lt;id&gt;</code></td>
+<td>The plugin, through the always-granted <code>settings.set-json</code></td>
+<td>The plugin. Other plugins with <code>settings.read-all</code> (T1 only)</td>
+</tr>
+</tbody>
+</table>
+<p>The rules for the kernel tables, which close the question of "who may write a kernel value" (this replaces the read-only wording of D13, see <a href="/pages/design-decisions/#d13-kernel-settings-are-readable-and-the-tab-owner-may-write">design decisions</a>):</p>
+<ul>
+<li><strong>[COR-030]</strong> A kernel tab MUST have exactly one owner plugin when its feature is a core plugin. Only that plugin MAY hold <code>settings.write-kernel:&lt;tab&gt;</code>. A second plugin that declares the same grant fails to install with <code>manifest.settings-owner</code>.</li>
+<li><strong>[COR-031]</strong> <code>settings.write-kernel:&lt;tab&gt;</code> is a T1-only, high-risk grant. A T2 or T3 package that declares it fails with <code>manifest.grant-tier</code>. Any plugin, of any tier, MAY hold <code>settings.read-kernel:&lt;tab&gt;</code>.</li>
+<li>The write goes through the same validator as the Settings screen. A value outside its range fails with <code>settings.invalid-value</code> and nothing is written. A write is atomic for the whole tab object: all keys in the call apply or none do.</li>
+<li>The rows of a kernel tab stay drawn by the kernel from the <a href="/pages/reference-settings-schema/">settings schema</a>. The owner plugin does not draw them again. The owner uses the write grant for changes the user did not type on the row: an import, a migration, a price update, a reset to defaults.</li>
+<li>A tab with no core plugin owner (a feature that stays native, such as the Editor and Kanban Board tabs in v1) has no owner. The kernel writes it.</li>
+</ul>
+<h3 id="who-owns-each-tab">Who owns each tab</h3>
+<p>The 25 frozen tab ids and their owners. The owner is the only plugin that may hold <code>settings.write-kernel:&lt;tab&gt;</code>. The last column lists plugins that read the tab.</p>
+<table>
+<thead>
+<tr>
+<th>Tab id</th>
+<th>Label</th>
+<th><code>config.toml</code> table</th>
+<th>Owner</th>
+<th>Readers</th>
+<th>Keys written</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>user-interface</code></td>
+<td>User Interface</td>
+<td><code>[ui]</code>, <code>[theme]</code></td>
+<td>Settings</td>
+<td>Tree, Agent toolbar, Titles, Diagnostics, Terminal</td>
+<td>Every <code>[ui]</code> key except the ten listed under <code>agent-monitoring</code>, plus <code>[theme]</code></td>
+</tr>
+<tr>
+<td><code>icons</code></td>
+<td>Icons</td>
+<td><code>[ui.icons]</code></td>
+<td>Settings</td>
+<td>Tree, Agent toolbar</td>
+<td><code>[ui.icons]</code></td>
+</tr>
+<tr>
+<td><code>agent-monitoring</code></td>
+<td>Agent Monitoring</td>
+<td><code>[ui]</code>, <code>[detection]</code></td>
+<td>Agent detect</td>
+<td>Progress, Agent toolbar, Notifications</td>
+<td><code>[ui]</code> <code>agent_identifier_mode</code>, <code>agent_monitoring_mode</code>, <code>attention_running_indicator</code>, <code>claude_agent_icon</code>, <code>codex_agent_icon</code>, <code>antigravity_agent_icon</code>, <code>progress_monitor_enabled</code>, <code>progress_max_lines</code>, <code>completed_progress_hide_after_seconds</code>, <code>task_progress_frames</code>; all of <code>[detection]</code></td>
+</tr>
+<tr>
+<td><code>agent-cost</code></td>
+<td>Agent Cost</td>
+<td><code>[cost]</code></td>
+<td>Cost</td>
+<td>Fleet, Tree</td>
+<td><code>[cost]</code></td>
+</tr>
+<tr>
+<td><code>optimization</code></td>
+<td>Optimization</td>
+<td>none (writes the agent's own config)</td>
+<td>Compaction</td>
+<td>none</td>
+<td>none</td>
+</tr>
+<tr>
+<td><code>remote-compaction</code></td>
+<td>Remote compaction</td>
+<td><code>[remote_compaction]</code></td>
+<td>Compaction</td>
+<td>none</td>
+<td><code>[remote_compaction]</code></td>
+</tr>
+<tr>
+<td><code>keyboard</code></td>
+<td>Keyboard</td>
+<td><code>[keyboard]</code>, <code>[keybindings]</code></td>
+<td>Keys and help</td>
+<td>none</td>
+<td><code>[keyboard]</code>, <code>[keybindings]</code></td>
+</tr>
+<tr>
+<td><code>terminal</code></td>
+<td>Terminal</td>
+<td><code>[terminal]</code></td>
+<td>Terminal</td>
+<td>Smart copy</td>
+<td><code>[terminal]</code></td>
+</tr>
+<tr>
+<td><code>editor</code></td>
+<td>Editor</td>
+<td><code>[editor]</code></td>
+<td>Editor (kernel while native)</td>
+<td>Terminal</td>
+<td><code>[editor]</code></td>
+</tr>
+<tr>
+<td><code>session</code></td>
+<td>Session</td>
+<td><code>[session]</code></td>
+<td>Sessions</td>
+<td>none</td>
+<td><code>[session]</code></td>
+</tr>
+<tr>
+<td><code>git</code></td>
+<td>Git</td>
+<td><code>[git]</code></td>
+<td>Worktrees</td>
+<td>Fleet</td>
+<td><code>[git]</code></td>
+</tr>
+<tr>
+<td><code>kanban-board</code></td>
+<td>Kanban Board</td>
+<td><code>[kanban_board]</code></td>
+<td>Kanban (kernel while native)</td>
+<td>none</td>
+<td><code>[kanban_board]</code></td>
+</tr>
+<tr>
+<td><code>animations</code></td>
+<td>Animations</td>
+<td>project YAML <code>animation</code></td>
+<td>Ambient look</td>
+<td>Scenes</td>
+<td>project YAML <code>animation</code></td>
+</tr>
+<tr>
+<td><code>sound</code></td>
+<td>Sound</td>
+<td><code>[sound]</code>, <code>[notifications]</code></td>
+<td>Notifications</td>
+<td>none</td>
+<td><code>[sound]</code>, <code>[notifications]</code></td>
+</tr>
+<tr>
+<td><code>voice-control</code></td>
+<td>Voice control</td>
+<td><code>[voice]</code></td>
+<td>Voice</td>
+<td>none</td>
+<td>Every <code>[voice]</code> key except <code>custom_prompt</code></td>
+</tr>
+<tr>
+<td><code>reset-planning</code></td>
+<td>Reset planning</td>
+<td><code>[reset_planning]</code></td>
+<td>Cost</td>
+<td>Notifications</td>
+<td><code>[reset_planning]</code></td>
+</tr>
+<tr>
+<td><code>inference</code></td>
+<td>Inference</td>
+<td><code>[inference]</code></td>
+<td>Inference</td>
+<td>Titles, Recap, Search, Smart copy, Compaction, Voice</td>
+<td>Every <code>[inference]</code> key except <code>title_style</code> and <code>instructions</code></td>
+</tr>
+<tr>
+<td><code>llm-instructions</code></td>
+<td>LLM Instructions</td>
+<td><code>[inference.instructions]</code>, <code>[voice]</code></td>
+<td>Inference</td>
+<td>Titles, Recap, Smart copy, Voice</td>
+<td><code>[inference.instructions]</code> and <code>[voice] custom_prompt</code></td>
+</tr>
+<tr>
+<td><code>titles</code></td>
+<td>Titles</td>
+<td><code>[inference]</code></td>
+<td>Titles</td>
+<td>none</td>
+<td><code>[inference] title_style</code> only</td>
+</tr>
+<tr>
+<td><code>triggers</code></td>
+<td>Triggers</td>
+<td><code>[triggers]</code></td>
+<td>Titles</td>
+<td>none</td>
+<td><code>[triggers]</code></td>
+</tr>
+<tr>
+<td><code>text-triggers</code></td>
+<td>Text Triggers</td>
+<td><code>[text_triggers]</code></td>
+<td>Text triggers</td>
+<td>none</td>
+<td><code>[text_triggers]</code></td>
+</tr>
+<tr>
+<td><code>debug</code></td>
+<td>Debug</td>
+<td><code>[debug]</code></td>
+<td>Settings</td>
+<td>Diagnostics</td>
+<td><code>[debug]</code></td>
+</tr>
+<tr>
+<td><code>api</code></td>
+<td>API</td>
+<td><code>[api]</code></td>
+<td>Fleet</td>
+<td>none</td>
+<td><code>[api]</code></td>
+</tr>
+<tr>
+<td><code>about</code></td>
+<td>About</td>
+<td>none</td>
+<td>Settings</td>
+<td>none</td>
+<td>none</td>
+</tr>
+<tr>
+<td><code>setup</code></td>
+<td>Setup</td>
+<td><code>[agent_setup]</code></td>
+<td>Agent setup</td>
+<td>none</td>
+<td><code>[agent_setup]</code></td>
+</tr>
+</tbody>
+</table>
+<p>The table order is the rail order, equal to <code>src/docs/settings.md</code>: User Interface, Icons, Agent Monitoring, Agent Cost, Optimization, Remote compaction, Keyboard, Terminal, Editor, Session, Git, Kanban Board, Animations, Sound, Voice control, Reset planning, Inference, LLM Instructions, Titles, Triggers, Text Triggers, Debug, API, About, Setup. Plugin tabs follow after About and Setup. The labels are the baseline labels. The high-risk marking of the API tab is a notice row inside the tab, not part of the label.</p>
+<p><strong>[COR-034]</strong> The "Keys written" column is enforced by the host. A write through <code>settings.write-kernel:&lt;tab&gt;</code> that names a key outside the column fails with <code>settings.key-not-owned</code> and nothing is written, even when another tab of the same table holds that key. Several tabs share the <code>[ui]</code>, <code>[inference]</code> and <code>[voice]</code> tables; each tab rewrites only its own keys, as the baseline Settings screen does.</p>
+<p>Twelve core plugins do not own a tab: Agent toolbar, Chatroom, Diagnostics, Layout, Progress, Recap, Scenes, Scheduler, Search, Session convert, Smart copy and Tree. They read the tabs of the plugins whose feature they depend on. Tree options such as tree order and project separators live on the User Interface tab and are written by the kernel when the user edits a row.</p>
+<p>The tab <code>agent-cost</code> is also the id of the Cost plugin's earlier plugin tab. A plugin tab id is local to its plugin (<code>self:&lt;tab-id&gt;</code>) and never collides with a kernel id, but the two names must not both appear in one rail. The Cost plugin therefore declares no tab of its own. It adds sections to the kernel tab with <code>settings.contribute:agent-cost</code>. See <a href="/pages/settings-extension/">Plugin settings extension</a>.</p>
+<h3 id="configtoml-key-by-key"><code>config.toml</code>, key by key</h3>
+<p>The tables below are the complete list of keys the kernel knows today (see the <a href="/pages/settings-screens/">Settings page</a> for values and defaults). The column <strong>Consumer</strong> names the core plugin whose behaviour the key changes. <strong>Live</strong> says whether a running side sees the change without a restart.</p>
+<table>
+<thead>
+<tr>
+<th>Table</th>
+<th>Keys</th>
+<th>Consumer</th>
+<th>Live</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>[ui]</code> panel sizing</td>
+<td><code>left_panel_sizing_mode</code>, <code>left_panel_fixed_width</code>, <code>left_panel_unfocused_width</code>, <code>left_panel_focused_width</code>, <code>left_panel_minimum_terminal_width</code></td>
+<td>Kernel layout</td>
+<td>yes</td>
+</tr>
+<tr>
+<td><code>[ui]</code> tree</td>
+<td><code>tree_order</code>, <code>show_tree_row_management_controls</code>, <code>show_project_separators</code>, <code>lock_closed_enabled</code>, <code>auto_remove_empty_groups</code></td>
+<td>Tree</td>
+<td>yes</td>
+</tr>
+<tr>
+<td><code>[ui]</code> agents</td>
+<td><code>agent_identifier_mode</code>, <code>agent_monitoring_mode</code>, <code>attention_running_indicator</code>, <code>claude_agent_icon</code>, <code>codex_agent_icon</code>, <code>antigravity_agent_icon</code>, <code>show_inferred_title_icons</code></td>
+<td>Agent detect, Titles</td>
+<td>yes</td>
+</tr>
+<tr>
+<td><code>[ui]</code> look</td>
+<td><code>color_scheme</code>, <code>motion_level</code>, <code>sidebar_density</code>, <code>use_stable_glyphs</code>, <code>show_context_menu_icons</code></td>
+<td>Kernel theme and menus</td>
+<td>yes</td>
+</tr>
+<tr>
+<td><code>[ui]</code> toolbar</td>
+<td><code>agent_toolbar_enabled</code>, <code>show_toolbar_labels</code>, <code>last_prompt_enabled</code>, <code>last_prompt_max_lines</code></td>
+<td>Agent toolbar</td>
+<td>yes</td>
+</tr>
+<tr>
+<td><code>[ui]</code> other</td>
+<td><code>agent_debug_menu_enabled</code>, <code>terminal_text_selection_enabled</code></td>
+<td>Diagnostics, Terminal</td>
+<td>yes</td>
+</tr>
+<tr>
+<td><code>[ui]</code> progress</td>
+<td><code>progress_monitor_enabled</code>, <code>progress_max_lines</code>, <code>completed_progress_hide_after_seconds</code>, <code>task_progress_frames</code></td>
+<td>Progress</td>
+<td>yes (server-owned)</td>
+</tr>
+<tr>
+<td><code>[ui.icons]</code></td>
+<td>one key per icon role</td>
+<td>Tree, Agent toolbar</td>
+<td>yes</td>
+</tr>
+<tr>
+<td><code>[theme]</code></td>
+<td><code>accent_bg</code>, <code>accent_fg</code>, <code>border_focused</code>, <code>border_unfocused</code></td>
+<td>Kernel theme</td>
+<td>yes</td>
+</tr>
+<tr>
+<td><code>[detection]</code></td>
+<td><code>working_poll_seconds</code>, <code>idle_poll_seconds</code>, <code>auto_answer_interstitial_prompts</code>, <code>[[detection.custom_signatures]]</code></td>
+<td>Agent detect</td>
+<td>yes (server-owned)</td>
+</tr>
+<tr>
+<td><code>[cost]</code></td>
+<td><code>metric</code>, <code>quota_window</code>, <code>calibration</code>, <code>fixed_cuts</code>, <code>burn_cuts</code>, <code>budget_usd</code>, <code>quota_fixed_cuts</code>, <code>quota_burn_cuts</code>, <code>quota_budget_percent</code>, <code>history_days</code>, <code>sparkline_window_minutes</code>, <code>sparkline_cells</code>, <code>level_glyph</code>, <code>level_dollars</code>, <code>meter</code>, <code>sparkline</code>, <code>group_totals</code>, <code>detail_card</code>, <code>header_total</code>, <code>burn_marker</code>, <code>sort_by_cost</code>, <code>prices</code></td>
+<td>Cost</td>
+<td>yes</td>
+</tr>
+<tr>
+<td><code>[remote_compaction]</code></td>
+<td><code>enabled</code>, <code>automatic</code>, <code>threshold_percent</code>, <code>claude_technique</code>, <code>codex_technique</code>, <code>other_technique</code>, <code>custom_prompt</code>, <code>tail_tokens</code>, <code>protected_recent_tool_tokens</code>, <code>tool_result_chars</code>, <code>redact_secrets</code>, <code>summarizer_context_tokens</code>, <code>pause_timeout_seconds</code>, <code>cooldown_minutes</code>, <code>keep_backups</code>, <code>privacy_banner_dismissed</code></td>
+<td>Compaction</td>
+<td>yes</td>
+</tr>
+<tr>
+<td><code>[keyboard]</code>, <code>[keybindings]</code></td>
+<td><code>[keyboard]</code> holds the prefix keys and the preset; <code>[keybindings]</code> holds one key per action id, named by the action id in the key reference</td>
+<td>Kernel keymap, Keys and help</td>
+<td>yes</td>
+</tr>
+<tr>
+<td><code>[terminal]</code></td>
+<td><code>scrollback_budget_mib</code>, <code>engine_memory_budget_mib</code>, <code>new_pane_directory</code>, <code>smart_copy_light</code>, <code>smart_copy_light_key</code></td>
+<td>Terminal, Smart copy</td>
+<td>yes (<code>engine_memory_budget_mib</code> for new panes)</td>
+</tr>
+<tr>
+<td><code>[editor]</code></td>
+<td><code>line_display</code>, <code>show_line_numbers</code>, <code>show_minimap</code>, <code>autosave_enabled</code>, <code>autosave_delay_ms</code>, <code>markdown_rendered_by_default</code></td>
+<td>Editor</td>
+<td>yes</td>
+</tr>
+<tr>
+<td><code>[session]</code></td>
+<td><code>recovery_policy</code>, <code>backups_enabled</code></td>
+<td>Sessions, kernel snapshot writer</td>
+<td>yes (server-owned)</td>
+</tr>
+<tr>
+<td><code>[git]</code></td>
+<td><code>default_where</code>, <code>branch_prefix</code>, <code>worktree_location_template</code>, <code>default_base</code>, <code>branch_line</code>, <code>setup_command</code>, <code>default_close_policy</code></td>
+<td>Worktrees</td>
+<td>yes</td>
+</tr>
+<tr>
+<td><code>[kanban_board]</code></td>
+<td><code>card_preview_lines</code>, <code>minimum_column_width</code></td>
+<td>Kanban</td>
+<td>yes</td>
+</tr>
+<tr>
+<td><code>[sound]</code>: <code>source</code>, <code>file</code>, <code>design</code>, <code>events</code>. <code>[notifications]</code>: <code>enabled</code>, <code>agent_finished</code>, <code>approval_required</code>, <code>task_succeeded</code>, <code>task_failed</code>, <code>suppress_redundant_task_outcomes</code>, <code>task_coalesce_seconds</code></td>
+<td>Notifications</td>
+<td>yes (server-owned)</td>
+<td></td>
+</tr>
+<tr>
+<td><code>[voice]</code></td>
+<td><code>enabled</code>, <code>api_key</code>, <code>model</code>, <code>voice</code>, <code>reasoning_effort</code>, <code>input_mode</code>, <code>vad_eagerness</code>, <code>input_device_name</code>, <code>output_device_name</code>, <code>output_volume_percent</code>, <code>confirm_terminal_submissions</code>, <code>pause_media_while_active</code>, <code>custom_prompt</code></td>
+<td>Voice</td>
+<td>yes</td>
+</tr>
+<tr>
+<td><code>[reset_planning]</code></td>
+<td><code>monitor_claude</code>, <code>monitor_codex</code>, <code>time_style</code></td>
+<td>Cost</td>
+<td>yes</td>
+</tr>
+<tr>
+<td><code>[inference]</code></td>
+<td><code>selected_provider</code>, <code>title_style</code>, <code>restructure_prompt_token_limit</code>, <code>instructions</code>, and the provider tables <code>kilo_gateway</code>, <code>ollama</code>, <code>openai</code>, <code>anthropic</code>, <code>openrouter</code></td>
+<td>Inference, Titles</td>
+<td>yes</td>
+</tr>
+<tr>
+<td><code>[inference.instructions]</code></td>
+<td>seven instruction inputs</td>
+<td>Inference, Titles, Recap, Smart copy</td>
+<td>yes</td>
+</tr>
+<tr>
+<td><code>[triggers]</code></td>
+<td>eight event keys, each with an action list; the key names are the event names in the Triggers tab of <code>src/docs/settings.md</code></td>
+<td>Titles</td>
+<td>yes</td>
+</tr>
+<tr>
+<td><code>[text_triggers]</code></td>
+<td>rule list</td>
+<td>Text triggers</td>
+<td>yes (server-owned)</td>
+</tr>
+<tr>
+<td><code>[agent_setup]</code></td>
+<td>the global instruction file paths and the never-ask choices; the field names are those of the Setup tab in <code>src/docs/settings.md</code></td>
+<td>Agent setup</td>
+<td>yes</td>
+</tr>
+<tr>
+<td><code>[debug]</code></td>
+<td><code>file_logging_enabled</code></td>
+<td>Kernel logger, Diagnostics</td>
+<td>yes</td>
+</tr>
+<tr>
+<td><code>[api]</code></td>
+<td><code>port</code></td>
+<td>Kernel HTTP listener</td>
+<td>at next server start</td>
+</tr>
+<tr>
+<td><code>[onboarding]</code></td>
+<td>guided-setup progress, no credentials</td>
+<td>Settings</td>
+<td>yes</td>
+</tr>
+</tbody>
+</table>
+<p>Credentials: keys with secrets (API keys) keep their present storage. A plugin that reads a tab sees <code>"&lt;redacted&gt;"</code> in place of every secret (see <a href="/pages/api-kernel-settings-and-keymap/">kernel settings</a>). A plugin that must send a credential does so through a service that the owner provides (for example the Inference plugin calls the provider itself), never by reading the secret.</p>
+<h3 id="plugin-tables-in-configtoml">Plugin tables in <code>config.toml</code></h3>
+<pre><code class="language-toml"># config.toml
+config_version = 1
+
+[plugins]
+auto_update = &quot;notify&quot;          # off, notify, install
+auto_update_interval_hours = 24
+channel = &quot;stable&quot;
+metered = false
+
+[plugins.limits]
+event_queue = 2048
+
+[plugins.&quot;com.example.notes&quot;]
+density = &quot;compact&quot;
+
+[plugins.&quot;com.example.notes&quot;.limits]
+memory_mib = 64
+</code></pre>
+<ul>
+<li><code>[plugins]</code> keys are owned by the plugin host. Other keys are refused with <code>config.unknown-key</code>.</li>
+<li><code>[plugins.limits]</code> sets a limit for every plugin. <code>[plugins."&lt;id&gt;".limits]</code> sets it for one plugin and wins. The effective value is <code>min(ceiling, first set of [plugins."&lt;id&gt;".limits] value, [plugins.limits] value, manifest value, default)</code> (LIF-143).</li>
+<li><code>[plugins."&lt;id&gt;"]</code> holds the plugin's own settings. The reserved key <code>limits</code> is the only sub-table the host reads there.</li>
+<li>A core plugin keeps its values in the kernel tables listed above, not in <code>[plugins."ilium.core.&lt;name&gt;"]</code>. A core plugin MAY have a plugin table for values that are new in the plugin build, and each such key is listed on its page.</li>
+<li>The always-granted <code>settings</code> import reads and writes only the plugin's own table. It never sees <code>[plugins.limits]</code> of another plugin.</li>
+</ul>
+<h3 id="project-yaml">Project YAML</h3>
+<p><code>&lt;project&gt;/.ilium/config.yaml</code> keeps its four keys. Unknown keys are preserved.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Owner</th>
+<th>Consumer</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>project name</code></td>
+<td>Titles (project naming)</td>
+<td>Tree</td>
+</tr>
+<tr>
+<td><code>project icon</code></td>
+<td>Titles</td>
+<td>Tree</td>
+</tr>
+<tr>
+<td><code>show project separators</code></td>
+<td>Tree</td>
+<td>Tree</td>
+</tr>
+<tr>
+<td><code>animation</code></td>
+<td>Ambient look</td>
+<td>Scenes, kernel painter</td>
+</tr>
+<tr>
+<td><code>plugins.&lt;id&gt;</code></td>
+<td>the plugin</td>
+<td>the plugin (project scope of its settings)</td>
+</tr>
+</tbody>
+</table>
+<p>The <code>animation</code> key holds the scene <code>kind</code>, the shared look and the per-scene controls. A scene control is stored under <code>animation.scene.&lt;scene-id&gt;</code>. The shared look is stored once, under <code>animation.look</code>, and is never repeated per scene. The file is written under an exclusive lock, and a plugin write goes through the same lock, so the kernel and a plugin never write at the same moment.</p>
+<h3 id="session-snapshots">Session snapshots</h3>
+<p>The snapshot is <code>&lt;project&gt;/.ilium/sessions/&lt;session name&gt;.json</code>. It is written by the kernel, atomically, 750 ms after the last change at most. At the baseline commit the file has <code>version</code> 3 and these fields.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Meaning</th>
+<th>Owner in the plugin build</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>version</code></td>
+<td>Format version of the whole file</td>
+<td>Kernel</td>
+</tr>
+<tr>
+<td><code>tree</code></td>
+<td>Nodes, groups, titles, order</td>
+<td>Kernel</td>
+</tr>
+<tr>
+<td><code>panes</code></td>
+<td>One entry per pane: <code>node_id</code> and <code>kind</code> (shell, agent with its resume command, editor, board)</td>
+<td>Kernel</td>
+</tr>
+<tr>
+<td><code>agent_debug_logs</code></td>
+<td>Pane histories for the agent debug menu</td>
+<td>Diagnostics section</td>
+</tr>
+<tr>
+<td><code>progress_monitors</code></td>
+<td>Durable monitor registrations and result delivery state</td>
+<td>Progress section</td>
+</tr>
+<tr>
+<td><code>workspace_close_preferences</code></td>
+<td>Close policy of a worktree workspace</td>
+<td>Worktrees section</td>
+</tr>
+<tr>
+<td><code>tree</code> pane fields <code>scheduled_input</code>, <code>prompt_queue</code></td>
+<td>Pending scheduled input and prompt queue</td>
+<td>Scheduler section</td>
+</tr>
+</tbody>
+</table>
+<p>Version 4 adds one field:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>plugin_sections</code></td>
+<td>object, key is plugin id</td>
+<td>One entry per plugin that offered a section. Each entry is <code>{ "schema_version": &lt;int&gt;, "data": &lt;json&gt; }</code></td>
+</tr>
+</tbody>
+</table>
+<p>The migration from 3 to 4 moves the three top-level fields and the two pane fields into <code>plugin_sections</code> under the ids of their owners (<code>ilium.core.diagnostics</code>, <code>ilium.core.progress</code>, <code>ilium.core.worktrees</code>, <code>ilium.core.scheduler</code>). The scheduler section is <code>plugin_sections["ilium.core.scheduler"] = {"schema_version":1,"data":{"panes":[{"pane_id":&lt;n&gt;,"scheduled_input":&lt;v3 value or null&gt;,"prompt_queue":&lt;v3 value&gt;}]}}</code>. The kernel keeps publishing the objective signal "scheduled input pending" from that section while the scheduler is disabled. It runs once, in the kernel, while no plugin exists. The old fields are removed from the file after the old file is kept as <code>&lt;name&gt;.pre-migration.3</code>. If the owner plugin is not installed, the section is kept as stored JSON and written back unchanged for 30 days of server time, then dropped with a warning in the lifecycle log (see Snapshot sections).</p>
+<h3 id="snapshot-sections">Snapshot sections</h3>
+<p>One mechanism stores plugin state in a session snapshot: the extension point <code>ilium.core.sessions/snapshot-sections</code>. The earlier idea of storing opaque bytes at <code>deactivate</code> is not a persistence path. The bytes returned by <code>deactivate(restore)</code> live in the host's memory, are handed to the new instance on an update or a restart of the same session, and are lost when the server stops (see <a href="/pages/reference-host-architecture/">Host architecture</a>). The rules:</p>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Rule</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Entry</td>
+<td><code>{ "id": "&lt;section id&gt;", "title": "...", "max_bytes": &lt;n&gt; }</code> contributed to <code>snapshot-sections</code>. <code>max_bytes</code> is at most 262144. The owner is the contributing plugin. One section per plugin in v1</td>
+</tr>
+<tr>
+<td>Write</td>
+<td>The plugin implements the request <code>snapshot-section</code> in its handler and returns JSON. It is asked at every snapshot, at most once per 750 ms</td>
+</tr>
+<tr>
+<td>Size</td>
+<td>At most <code>max_bytes</code> per section, and never more than 256 KiB (262144 bytes). A larger value is dropped with <code>snapshot.section-too-large</code> and the previous stored value is kept</td>
+</tr>
+<tr>
+<td>Version</td>
+<td>The plugin returns <code>schema_version</code>. The host stores it with the data</td>
+</tr>
+<tr>
+<td>Read</td>
+<td>At boot step 7 the host sends <code>restore-section { schema_version, data }</code> to the plugin before any other event</td>
+</tr>
+<tr>
+<td>Unknown version</td>
+<td>If the plugin does not accept the <code>schema_version</code>, it answers <code>section-unsupported</code>. The section stays unchanged in the file</td>
+</tr>
+<tr>
+<td>Missing plugin</td>
+<td>A section of an uninstalled plugin, including one created by the 3 to 4 migration, is written back unchanged for 30 days of server time, then dropped with a warning in the lifecycle log</td>
+</tr>
+<tr>
+<td>Crash safety</td>
+<td>The kernel writes the last stored data of a failed plugin unchanged. A failed plugin never blocks the snapshot</td>
+</tr>
+</tbody>
+</table>
+<p>[COR-032] covers this. The session storage bucket of the <code>storage</code> import is a second, separate mechanism: key-value data that a plugin owns and the host copies into the snapshot as the bucket <code>session</code>. A core plugin uses snapshot sections for state that other parts of Ilium must see at restore time, such as scheduled sends (snapshot section <code>ilium.core.scheduler</code>) and progress monitors, and the bucket for its private state.</p>
+<h3 id="data-files">Data files</h3>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Location</th>
+<th>Format</th>
+<th>Written by</th>
+<th>Plugin owner</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>config.toml</code></td>
+<td><code>&lt;config&gt;/config.toml</code></td>
+<td>TOML</td>
+<td>Kernel, tab owners</td>
+<td>per tab</td>
+<td><code>ILIUM_CONFIG_DIR</code> overrides the folder</td>
+</tr>
+<tr>
+<td><code>.ilium/config.yaml</code></td>
+<td><code>&lt;project&gt;/.ilium/config.yaml</code></td>
+<td>YAML</td>
+<td>Kernel, Ambient look, Titles</td>
+<td>per key</td>
+<td>Unknown keys preserved</td>
+</tr>
+<tr>
+<td>Session snapshot</td>
+<td><code>&lt;project&gt;/.ilium/sessions/&lt;name&gt;.json</code></td>
+<td>JSON</td>
+<td>Kernel</td>
+<td>Sessions offers sections</td>
+<td>Atomic</td>
+</tr>
+<tr>
+<td>Pre-restore copies</td>
+<td><code>&lt;project&gt;/.ilium/sessions/&lt;name&gt;.pre-restore.json</code> and <code>.pre-restore.1.json</code></td>
+<td>JSON</td>
+<td>Kernel</td>
+<td>none</td>
+<td>Last two starts</td>
+</tr>
+<tr>
+<td>Rolling backups</td>
+<td><code>&lt;project&gt;/.ilium/backups/&lt;name&gt;/&lt;ms&gt;-&lt;uuid&gt;.json</code></td>
+<td>JSON</td>
+<td>Kernel</td>
+<td>Sessions (policy)</td>
+<td>When <code>backups_enabled</code></td>
+</tr>
+<tr>
+<td>Lifecycle log</td>
+<td><code>&lt;project&gt;/.ilium/logs/&lt;name&gt;.lifecycle.jsonl</code></td>
+<td>JSONL</td>
+<td>Kernel</td>
+<td>Sessions</td>
+<td>Rotated once at 8 MiB</td>
+</tr>
+<tr>
+<td>Worktrees</td>
+<td><code>&lt;repo parent&gt;/&lt;main checkout name&gt;.worktrees/&lt;branch slug&gt;</code></td>
+<td>Git worktree</td>
+<td>Worktrees</td>
+<td>Worktrees</td>
+<td>From the template <code>{repo_parent}/{repo_name}.worktrees/{branch_slug}</code>; created by <code>new-pane --worktree</code></td>
+</tr>
+<tr>
+<td>Chatroom</td>
+<td><code>&lt;project&gt;/CHATROOM.md</code> and <code>CHATROOM.archive.md</code></td>
+<td>Markdown</td>
+<td>Chatroom</td>
+<td>Chatroom</td>
+<td><code>/CHATROOM.md</code> and <code>/CHATROOM.archive.md</code> are added to <code>.gitignore</code></td>
+</tr>
+<tr>
+<td>Boards</td>
+<td>any <code>.md</code> path the user picks</td>
+<td>Markdown</td>
+<td>Kanban</td>
+<td>Kanban</td>
+<td>Every change is saved to the file</td>
+</tr>
+<tr>
+<td>Debug logs</td>
+<td><code>$ILIUM_DEBUG_LOG_DIR/…</code></td>
+<td>text</td>
+<td>Kernel</td>
+<td>Diagnostics</td>
+<td>Five newest per session</td>
+</tr>
+<tr>
+<td>Plugin storage</td>
+<td><code>&lt;data&gt;/plugins/storage/&lt;id&gt;.db</code>, <code>&lt;project&gt;/.ilium/plugins/&lt;id&gt;.db</code></td>
+<td>key-value</td>
+<td>the plugin</td>
+<td>the plugin</td>
+<td>See <a href="/pages/reference-plugin-files/">Plugin files</a></td>
+</tr>
+<tr>
+<td>Claude statusline registry</td>
+<td><code>&lt;data&gt;/claude-model-statusline-projects.json</code></td>
+<td>JSON</td>
+<td>Agent detect (client side)</td>
+<td>Agent detect</td>
+<td>Holds session id, project path, model id</td>
+</tr>
+</tbody>
+</table>
+<p>All paths follow the folder rules of <a href="/pages/reference-plugin-files/">Plugin files on disk</a>. A core plugin never writes to a path outside this table without a grant (<code>fs.write:&lt;scope&gt;</code>).</p>
+<h3 id="agent-configuration-files-that-ilium-writes">Agent configuration files that Ilium writes</h3>
+<p>These files belong to the agent tools, not to Ilium. Ilium edits only its own marked block, or its own entry, and leaves the rest of the file unchanged. Agent setup owns all of them, except where noted.</p>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Scope</th>
+<th>What Ilium writes</th>
+<th>Owner</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>~/.claude/CLAUDE.md</code></td>
+<td>global</td>
+<td>Marked Chatroom and Progress instruction blocks</td>
+<td>Agent setup</td>
+</tr>
+<tr>
+<td><code>~/.codex/AGENTS.md</code></td>
+<td>global</td>
+<td>The same blocks. Paths come from <code>[agent_setup]</code></td>
+<td>Agent setup</td>
+</tr>
+<tr>
+<td><code>&lt;project&gt;/CLAUDE.md</code>, <code>&lt;project&gt;/AGENTS.md</code></td>
+<td>project</td>
+<td>The same blocks. A symlink is followed and written once</td>
+<td>Agent setup</td>
+</tr>
+<tr>
+<td><code>&lt;project&gt;/.claude/settings.local.json</code></td>
+<td>project</td>
+<td>Chatroom hook entries. A temporary <code>statusLine</code> entry that captures the model, restored on exit</td>
+<td>Agent setup (hooks), Agent detect (statusLine)</td>
+</tr>
+<tr>
+<td><code>&lt;project&gt;/.codex/hooks.json</code></td>
+<td>project</td>
+<td>Chatroom hook entries</td>
+<td>Agent setup</td>
+</tr>
+<tr>
+<td><code>&lt;project&gt;/.gitignore</code></td>
+<td>project</td>
+<td><code>/CHATROOM.md</code> and <code>/CHATROOM.archive.md</code> lines</td>
+<td>Chatroom</td>
+</tr>
+<tr>
+<td>Agent session files (Claude, Codex, Gemini, Antigravity)</td>
+<td>global</td>
+<td>Written only by Session convert (new files) and Compaction (resume files). Existing files are never edited</td>
+<td>Session convert, Compaction</td>
+</tr>
+</tbody>
+</table>
+<p>A write to any of these files uses <code>fs.write</code> with the scope <code>agent-config:&lt;agent&gt;</code> or <code>project</code>, with a revision check, so a change made by another process in the meantime is detected and the write is refused with <code>fs.conflict</code>. See <a href="/pages/api-fs-atomic-and-tail/">fs atomic writes</a>.</p>
+<h3 id="a-worked-migration">A worked migration</h3>
+<p>A user has a build before plugins with this <code>config.toml</code> and snapshot, and installs the plugin build.</p>
+<pre><code class="language-toml">[terminal]
+scrollback_budget_mib = 16
+
+[detection]
+working_poll_seconds = 1
+</code></pre>
+<ol>
+<li>The server starts. It reads <code>config.toml</code>. No <code>config_version</code>, so it is 0. No key changes. The server adds nothing until the user changes a setting.</li>
+<li>The server reads the snapshot with <code>version</code> 3 and 2 progress monitors. The kernel keeps <code>main.pre-migration.3.json</code>, then writes version 4 with <code>plugin_sections["ilium.core.progress"] = { "schema_version": 1, "data": { "monitors": [ … ] } }</code>.</li>
+<li>The host starts. Progress is a startup plugin. At step 7 it receives <code>restore-section</code>. It runs one probe per monitor before it reinstalls it (the same rule as today).</li>
+<li>The user opens Settings. The Terminal tab shows 16 for the scrollback. The Terminal plugin reads <code>[terminal]</code> through <code>settings.read-kernel:terminal</code> and has the same value. No copy exists in <code>[plugins."ilium.core.terminal"]</code>.</li>
+<li>The user changes the value to 32. The kernel writes <code>[terminal] scrollback_budget_mib = 32</code>, sends <code>kernel-settings-changed</code> and the plugin reads again.</li>
+</ol>
+<p>A short sample of the plugin side of step 3:</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::prelude::*;
+use serde_json::{json, Value};
+
+const SCHEMA_VERSION: u32 = 1;
+
+impl Handler for ProgressPlugin {
+    fn on_request(&amp;mut self, request: Request) -&gt; Response {
+        match request.kind.as_str() {
+            &quot;snapshot-section&quot; =&gt; Response::json(json!({
+                &quot;schema_version&quot;: SCHEMA_VERSION,
+                &quot;data&quot;: { &quot;monitors&quot;: self.monitors_as_json() }
+            })),
+            &quot;restore-section&quot; =&gt; {
+                let schema_version = request.field_u64(&quot;schema_version&quot;).unwrap_or(0);
+                if schema_version != u64::from(SCHEMA_VERSION) {
+                    return Response::error(&quot;section-unsupported&quot;);
+                }
+                let data: Value = request.field_json(&quot;data&quot;).unwrap_or(Value::Null);
+                self.restore_monitors(&amp;data);
+                Response::ok()
+            }
+            _ =&gt; Response::error(&quot;unknown-request&quot;),
+        }
+    }
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { definePlugin, type Request, type Response } from '@ilium/plugin-sdk';
+
+const SCHEMA_VERSION = 1;
+let monitors: unknown[] = [];
+
+export const { lifecycle, handler } = definePlugin({
+  side: 'server',
+  activate() {},
+  onRequest(request: Request): Response {
+    if (request.kind === 'snapshot-section') {
+      return { tag: 'json', val: { schema_version: SCHEMA_VERSION, data: { monitors } } };
+    }
+    if (request.kind === 'restore-section') {
+      const body = request.body as { schema_version?: number; data?: { monitors?: unknown[] } };
+      if (body.schema_version !== SCHEMA_VERSION) return { tag: 'error', val: 'section-unsupported' };
+      monitors = body.data?.monitors ?? [];
+      return { tag: 'ok' };
+    }
+    return { tag: 'error', val: 'unknown-request' };
+  },
+});
+</code></pre>
+<p>The request names are the only contract here. The SDK helper names follow <a href="/pages/requests-and-outcomes/">Requests and outcomes</a>.</p>
+<h3 id="errors-and-edge-cases">Errors and edge cases</h3>
+<table>
+<thead>
+<tr>
+<th>Situation</th>
+<th>Result</th>
+<th>Code</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Two plugins declare <code>settings.write-kernel:&lt;tab&gt;</code> for one tab</td>
+<td>The second install is refused</td>
+<td><code>manifest.settings-owner</code></td>
+</tr>
+<tr>
+<td>A T2 package declares <code>settings.write-kernel:&lt;tab&gt;</code></td>
+<td>Install refused</td>
+<td><code>manifest.grant-tier</code></td>
+</tr>
+<tr>
+<td>A write is outside the range of a row</td>
+<td>Nothing is written</td>
+<td><code>settings.invalid-value</code></td>
+</tr>
+<tr>
+<td>A write names a key that belongs to another tab of the same table</td>
+<td>Nothing is written</td>
+<td><code>settings.key-not-owned</code></td>
+</tr>
+<tr>
+<td>A write names a key the kernel does not know in that tab</td>
+<td>Nothing is written</td>
+<td><code>settings.unknown-key</code></td>
+</tr>
+<tr>
+<td><code>config.toml</code> has a table the build does not know</td>
+<td>Preserved</td>
+<td>none</td>
+</tr>
+<tr>
+<td>The migration from 3 to 4 is interrupted</td>
+<td>The next start reads the old file and runs it again</td>
+<td>none</td>
+</tr>
+<tr>
+<td>A snapshot section is larger than its <code>max_bytes</code> (at most 256 KiB)</td>
+<td>The section is dropped, the old value is kept</td>
+<td><code>snapshot.section-too-large</code></td>
+</tr>
+<tr>
+<td>A section's plugin rejects its <code>schema_version</code></td>
+<td>The section is kept unchanged</td>
+<td><code>section-unsupported</code></td>
+</tr>
+<tr>
+<td>The <code>.ilium/config.yaml</code> lock is held by another process</td>
+<td>The write waits up to 2 s, then fails</td>
+<td><code>fs.locked</code></td>
+</tr>
+<tr>
+<td>An agent file changed during a write</td>
+<td>The write is refused, the user is told</td>
+<td><code>fs.conflict</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="requirements">Requirements</h3>
+<ul>
+<li>[COR-030] A kernel tab MUST have at most one plugin that holds <code>settings.write-kernel:&lt;tab&gt;</code>, and a second declaration MUST fail with <code>manifest.settings-owner</code>. Test: install two fixture T1 plugins that ask for <code>settings.write-kernel:terminal</code>; the second install fails.</li>
+<li>[COR-031] <code>settings.write-kernel:&lt;tab&gt;</code> MUST be T1 only and high risk, and <code>settings.read-kernel:&lt;tab&gt;</code> MUST be available to every tier. Test: a T2 package with the write grant fails with <code>manifest.grant-tier</code>; a T3 package with the read grant installs.</li>
+<li>[COR-032] Plugin state in a snapshot MUST be stored only through <code>snapshot-sections</code> with a <code>schema_version</code>, a section larger than its <code>max_bytes</code> (at most 256 KiB) MUST be dropped without losing the previous value, and a failed plugin MUST NOT block the snapshot. Test: write a 300 KiB section, check the old value stays; crash the plugin, check that the file still has the last value.</li>
+<li>[COR-033] No key in <code>config.toml</code> or <code>.ilium/config.yaml</code> MAY be renamed or moved by the plugin build, and the plugin build MUST preserve unknown keys and tables. Test: run the plugin build on a fixture config with an unknown key, change one setting, compare the files with a diff that must show only that change.</li>
+</ul>
+<h3 id="see-also">See also</h3>
+<ul>
+<li><a href="/pages/settings-screens/">Settings screens</a> and <a href="/pages/reference-settings-schema/">Settings schema</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">Kernel settings and keymap</a> and <a href="/pages/capability-settings-read-kernel/">settings.read-kernel</a></li>
+<li><a href="/pages/settings-extension/">Plugin settings extension</a> and <a href="/pages/api-settings/">Settings API</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+</ul>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/reference-cli-compatibility/"><small>Previous</small>CLI compatibility</a><a class="next" href="/pages/reference-conformance-suite/"><small>Next</small>Conformance suite</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#contents">Contents</a></li><li class="l2"><a href="#migration-rules">Migration rules</a></li><li class="l2"><a href="#settings-ownership-kernel-tables-and-plugin-tables">Settings ownership: kernel tables and plugin tables</a></li><li class="l2"><a href="#who-owns-each-tab">Who owns each tab</a></li><li class="l2"><a href="#configtoml-key-by-key">config.toml, key by key</a></li><li class="l2"><a href="#plugin-tables-in-configtoml">Plugin tables in config.toml</a></li><li class="l2"><a href="#project-yaml">Project YAML</a></li><li class="l2"><a href="#session-snapshots">Session snapshots</a></li><li class="l2"><a href="#snapshot-sections">Snapshot sections</a></li><li class="l2"><a href="#data-files">Data files</a></li><li class="l2"><a href="#agent-configuration-files-that-ilium-writes">Agent configuration files that Ilium writes</a></li><li class="l2"><a href="#a-worked-migration">A worked migration</a></li><li class="l2"><a href="#errors-and-edge-cases">Errors and edge cases</a></li><li class="l2"><a href="#requirements">Requirements</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

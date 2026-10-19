@@ -1,0 +1,12 @@
+title: "Ilium Plugin Developer Manual"
+baseurl: ""
+url: "http://127.0.0.1:4327"
+
+# Source files that are not site pages (see README.md and CONVENTIONS.md).
+exclude:
+  - README.md
+  - CONVENTIONS.md
+  - build.sh
+  - build_fallback.py
+  - Gemfile
+  - Gemfile.lock
