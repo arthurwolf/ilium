@@ -24,10 +24,13 @@ const MAX_BLOCK_Y: f64 = 319.0;
 pub const LOCAL_MIN: f64 = -8.0;
 pub const LOCAL_MAX: f64 = 9.0;
 const MAX_ENUMERATED_CHUNKS: u64 = 65_536;
-pub const MAX_REQUESTED_CHUNKS: usize = 512;
-// Both BTreeSets can retain 512 positions. This includes conservative node,
+// Sized for a 160 by 50 cell view at the default zoom, which needs more chunks
+// than the earlier 512 cap (that cap rejected every candidate route at that size).
+// Kept at 1024 so the projected read stays under the shared 1 GiB budget ceiling.
+pub const MAX_REQUESTED_CHUNKS: usize = 1024;
+// Both BTreeSets can retain MAX_REQUESTED_CHUNKS positions. This includes conservative node,
 // pointer and allocator slack for each position in each set.
-const CHUNK_SET_CHARGE: u64 = 2 * 512 * 160 + 8192;
+const CHUNK_SET_CHARGE: u64 = 2 * MAX_REQUESTED_CHUNKS as u64 * 160 + 8192;
 // Fixed projection/inverse work plus every possible support-ring insertion.
 // The rectangle enumeration count is added per candidate before request().
 const PROJECTION_WORK_BASE: u64 = 128;

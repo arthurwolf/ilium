@@ -567,7 +567,7 @@ fn settings_snapshot(app: &App) -> Value {
             "notifications.task_failed", "notifications.suppress_redundant_task_outcomes",
             "notifications.task_coalesce_seconds",
             "triggers.<event_key>",
-            "inference.provider", "inference.title_style", "inference.restructure_prompt_token_limit", "inference.kilo_gateway.model",
+            "inference.provider", "inference.title_style", "inference.codex_official_thread_names", "inference.restructure_prompt_token_limit", "inference.kilo_gateway.model",
             "inference.ollama.url", "inference.ollama.model",
             "inference.openai.url", "inference.openai.api_key", "inference.openai.model",
             "inference.anthropic.url", "inference.anthropic.api_key", "inference.anthropic.model",
@@ -686,6 +686,7 @@ fn settings_snapshot(app: &App) -> Value {
                 ilium_inference::TitleStyle::Labeling => "labeling",
                 ilium_inference::TitleStyle::Summarization => "summarization",
             },
+            "codex_official_thread_names": app.inference_settings.codex_official_thread_names,
             "restructure_prompt_token_limit": app.inference_settings.restructure_prompt_token_limit,
             "selected_model": app.inference_settings.selected_model(),
             "kilo_gateway": {

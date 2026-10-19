@@ -509,6 +509,7 @@ pub(crate) fn request_retained_bytes(request: &ilium_ipc::ClientRequest) -> usiz
         | R::QueryWorkspaceInventory { .. }
         | R::QueryWorkspaceCloseOffer { .. }
         | R::TerminatePaneProcess { .. }
+        | R::TerminalHistory { .. }
         | R::FreezePane { .. } => {}
     }
     count.bytes
@@ -1004,6 +1005,8 @@ impl IpcPreparation {
             &event.view().0,
             ilium_ipc::ServerEvent::ScreenUpdate { .. }
                 | ilium_ipc::ServerEvent::TerminalReplay { .. }
+                | ilium_ipc::ServerEvent::TerminalSnapshot { .. }
+                | ilium_ipc::ServerEvent::TerminalHistory { .. }
         );
         let bytes = event
             .view()

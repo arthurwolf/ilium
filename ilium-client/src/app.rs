@@ -101,6 +101,74 @@ use ilium_ipc::TextTriggerSettings;
 /// matches `tree_state.scroll_up(3)`/`scroll_down(3)`'s existing per-notch
 /// amount elsewhere in this crate.
 const TERMINAL_WHEEL_SCROLL_LINES: u16 = 3;
+/// Largest older-output reply asked for per scroll; the server caps it again.
+const TERMINAL_HISTORY_REQUEST_BYTES: u32 = 1024 * 1024;
+
+/// What an accepted terminal command means for its pane's older-history paging.
+enum HistoryPagingChange {
+    Snapshot {
+        through_sequence: u64,
+        byte_len: usize,
+    },
+    Replay {
+        byte_len: usize,
+    },
+    Output {
+        byte_len: usize,
+    },
+    History {
+        first_sequence: u64,
+        byte_len: usize,
+        reaches_journal_start: bool,
+    },
+}
+
+impl HistoryPagingChange {
+    fn of(body: &crate::terminal_parsing::PaneCommand) -> Option<Self> {
+        use crate::terminal_parsing::PaneCommand;
+        match body {
+            PaneCommand::Snapshot {
+                sequence, bytes, ..
+            } => Some(Self::Snapshot {
+                through_sequence: *sequence,
+                byte_len: bytes.len(),
+            }),
+            PaneCommand::Replay { bytes, .. } => Some(Self::Replay {
+                byte_len: bytes.len(),
+            }),
+            PaneCommand::Output { bytes, .. } => Some(Self::Output {
+                byte_len: bytes.len(),
+            }),
+            PaneCommand::PrependHistory {
+                first_sequence,
+                bytes,
+                reaches_journal_start,
+                ..
+            } => Some(Self::History {
+                first_sequence: *first_sequence,
+                byte_len: bytes.len(),
+                reaches_journal_start: *reaches_journal_start,
+            }),
+            _ => None,
+        }
+    }
+
+    fn apply(self, paging: &mut crate::terminal_view::HistoryPaging) {
+        match self {
+            Self::Snapshot {
+                through_sequence,
+                byte_len,
+            } => paging.snapshot_applied(through_sequence, byte_len),
+            Self::Replay { byte_len } => paging.replay_applied(byte_len),
+            Self::Output { byte_len } => paging.output_applied(byte_len),
+            Self::History {
+                first_sequence,
+                byte_len,
+                reaches_journal_start,
+            } => paging.history_applied(first_sequence, byte_len, reaches_journal_start),
+        }
+    }
+}
 
 /// File-backed chatrooms need eventual observation of external agent writes,
 /// but filesystem repair and parsing do not belong on animation cadences.
@@ -11917,6 +11985,34 @@ impl App {
                     complete: is_complete,
                 },
             ),
+            ilium_ipc::ServerEvent::TerminalSnapshot {
+                pane_id,
+                through_sequence,
+                bytes,
+                is_complete,
+            } => (
+                pane_id,
+                PaneCommand::Snapshot {
+                    sequence: through_sequence,
+                    bytes,
+                    complete: is_complete,
+                },
+            ),
+            ilium_ipc::ServerEvent::TerminalHistory {
+                pane_id,
+                before_sequence,
+                first_sequence,
+                bytes,
+                reaches_journal_start,
+            } => (
+                pane_id,
+                PaneCommand::PrependHistory {
+                    before_sequence,
+                    first_sequence,
+                    bytes,
+                    reaches_journal_start,
+                },
+            ),
             other => return Err(Box::new(other)),
         };
         let is_displayed = self.is_pane_displayed(pane_id);
@@ -11960,13 +12056,19 @@ impl App {
                 view.admission_error = Some(error);
             }
         }
+        let paging_change = HistoryPagingChange::of(&body);
         let rejected = if let Some(frontend) = &mut view.frontend {
             frontend.submit(body).err()
         } else {
             Some(body)
         };
         match rejected {
-            None => Ok(()),
+            None => {
+                if let Some(change) = paging_change {
+                    change.apply(&mut view.history_paging);
+                }
+                Ok(())
+            }
             Some(PaneCommand::Output {
                 first,
                 sequence,
@@ -11977,6 +12079,28 @@ impl App {
                 first_sequence: first,
                 sequence,
                 bytes,
+            })),
+            Some(PaneCommand::Snapshot {
+                sequence,
+                bytes,
+                complete,
+            }) => Err(Box::new(ilium_ipc::ServerEvent::TerminalSnapshot {
+                pane_id,
+                through_sequence: sequence,
+                bytes,
+                is_complete: complete,
+            })),
+            Some(PaneCommand::PrependHistory {
+                before_sequence,
+                first_sequence,
+                bytes,
+                reaches_journal_start,
+            }) => Err(Box::new(ilium_ipc::ServerEvent::TerminalHistory {
+                pane_id,
+                before_sequence,
+                first_sequence,
+                bytes,
+                reaches_journal_start,
             })),
             Some(PaneCommand::Replay {
                 sequence,
@@ -11989,6 +12113,28 @@ impl App {
                 is_complete: complete,
             })),
             _ => Ok(()),
+        }
+    }
+    /// Asks the server for older output of one terminal pane when the user
+    /// scrolls up and the pane's retained history is still below its budget.
+    fn request_older_terminal_history(&mut self, pane_id: NodeId) {
+        let Some(PaneRuntime::Terminal(view)) = self.panes.get_mut(&pane_id) else {
+            return;
+        };
+        let budget_bytes = crate::terminal_view::history_budget_bytes(view.budget_mib);
+        let Some(before_sequence) = view.history_paging.next_request(budget_bytes) else {
+            return;
+        };
+        view.history_paging.mark_request_sent();
+        let queued = self.queue_request(ClientRequest::TerminalHistory {
+            pane_id,
+            before_sequence,
+            max_bytes: TERMINAL_HISTORY_REQUEST_BYTES,
+        });
+        if !queued {
+            if let Some(PaneRuntime::Terminal(view)) = self.panes.get_mut(&pane_id) {
+                view.history_paging.reply_arrived();
+            }
         }
     }
     /// The start-up dialog shows until the server's initial state has arrived.
@@ -12640,6 +12786,9 @@ impl App {
                         }
                     }
                     self.clear_terminal_selection_for(pane_id);
+                    if up {
+                        self.request_older_terminal_history(pane_id);
+                    }
                 } else {
                     self.queue_preflighted_terminal_request(request);
                 }
@@ -15367,7 +15516,7 @@ impl App {
 
     /// Uses the host clipboard for terminal text while keeping UI feedback at
     /// the terminal interaction boundary.
-    fn copy_terminal_text_to_clipboard(&mut self, text: String, success_message: &str) {
+    pub(crate) fn copy_terminal_text_to_clipboard(&mut self, text: String, success_message: &str) {
         if success_message.len() > 1024 {
             self.status_message =
                 Some("Clipboard acknowledgement label exceeds its admission limit".into());

@@ -3,6 +3,7 @@
 use super::{
     assets::{
         archive::{DuplicateMember, DuplicatePolicy, ZipSource},
+        directory_snapshot,
         budget::{ByteBudget, Cancel, Limits},
         error::{AssetError, Result},
         identity::{AssetPath, Digest256, Label, OriginKind},
@@ -43,15 +44,14 @@ fn source(
     }
     let limits = SourceLimits::default();
     if directory {
+        // Snapshot on load: the folder is read once here, and every later tile
+        // reads the immutable copy whose digest identifies what was loaded.
+        let tree = LocalTree::open(path, BTreeMap::new(), limits, budget, cancel)?;
+        let (snapshot, digest) = directory_snapshot::snapshot_directory(&tree, budget, cancel)?;
+        drop(tree);
         Ok(MountSource {
-            source: Arc::new(LocalTree::open(
-                path,
-                BTreeMap::new(),
-                limits,
-                budget,
-                cancel,
-            )?),
-            source_sha256: None,
+            source: Arc::new(snapshot),
+            source_sha256: Some(digest),
             duplicate_members: Vec::new(),
         })
     } else {
@@ -225,7 +225,7 @@ mod immutable_source_tests {
     use std::sync::atomic::AtomicBool;
 
     #[test]
-    fn mounted_directory_is_live_while_loaded_zip_is_an_immutable_snapshot() {
+    fn mounted_directory_and_loaded_zip_are_both_immutable_snapshots() {
         let root = tempfile::tempdir().unwrap();
         let directory = root.path().join("selected-directory");
         std::fs::create_dir(&directory).unwrap();
@@ -239,12 +239,12 @@ mod immutable_source_tests {
         let budget = ByteBudget::new(64 << 20).unwrap();
         let stop = AtomicBool::new(false);
         let cancel = Cancel::new(&stop);
-        let live = source(&directory, true, DuplicatePolicy::Reject, &budget, cancel).unwrap();
+        let mounted_directory = source(&directory, true, DuplicatePolicy::Reject, &budget, cancel).unwrap();
         let frozen = source(&archive, false, DuplicatePolicy::Reject, &budget, cancel).unwrap();
-        assert!(live.source_sha256.is_none());
+        // A directory is snapshotted at load, so it has a digest like a ZIP does.
+        assert!(mounted_directory.source_sha256.is_some());
         assert!(frozen.source_sha256.is_some());
-        assert!(!(frozen.source_sha256.is_some() && live.source_sha256.is_some())); // A directory add-on disqualifies an otherwise immutable ZIP base.
-        drop(live);
+        drop(mounted_directory);
         drop(frozen);
         assert_eq!(budget.used(), 0);
     }

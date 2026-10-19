@@ -134,6 +134,7 @@ fn expected_ids() -> BTreeSet<String> {
     add_range(&mut ids, "INF", 1, 15);
     add_range(&mut ids, "LLM", 1, 7);
     ids.insert("TITLE-01".to_owned());
+    ids.insert("TITLE-02".to_owned());
     add_range(&mut ids, "TRIGGER", 1, 8);
     ids.insert("TEXTTRIGGER-01".to_owned());
     ids

@@ -199,7 +199,13 @@ fn run_request(
                     result: Err(error),
                 },
                 Ok(()) => panic::catch_unwind(AssertUnwindSafe(|| {
-                    crate::session_naming::infer_pane_title_with_trace(settings, &home, &input)
+                    if settings.codex_official_thread_names
+                        && input.agent_class == ilium_core::AgentClass::Codex
+                    {
+                        crate::session_naming::official_codex_thread_title(&home, &input)
+                    } else {
+                        crate::session_naming::infer_pane_title_with_trace(settings, &home, &input)
+                    }
                 }))
                 .unwrap_or_else(|_| {
                     crate::session_naming::SessionTitleInferenceTrace {

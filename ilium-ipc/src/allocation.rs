@@ -583,6 +583,28 @@ impl HeapBytes for ServerEvent {
                 .saturating_add(through_sequence.heap_bytes())
                 .saturating_add(bytes.heap_bytes())
                 .saturating_add(is_complete.heap_bytes()),
+            Self::TerminalSnapshot {
+                pane_id,
+                through_sequence,
+                bytes,
+                is_complete,
+            } => 0usize
+                .saturating_add(pane_id.heap_bytes())
+                .saturating_add(through_sequence.heap_bytes())
+                .saturating_add(bytes.heap_bytes())
+                .saturating_add(is_complete.heap_bytes()),
+            Self::TerminalHistory {
+                pane_id,
+                first_sequence,
+                before_sequence,
+                bytes,
+                reaches_journal_start,
+            } => 0usize
+                .saturating_add(pane_id.heap_bytes())
+                .saturating_add(first_sequence.heap_bytes())
+                .saturating_add(before_sequence.heap_bytes())
+                .saturating_add(bytes.heap_bytes())
+                .saturating_add(reaches_journal_start.heap_bytes()),
             Self::PaneSessionTitleCleared {
                 pane_id,
                 title_generation,
