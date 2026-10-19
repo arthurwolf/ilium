@@ -47,7 +47,7 @@ The column "Can you turn it off" lists the fixed set of plugins that your own sw
 |---|---|---|---|---|
 | Tree (`ilium.core.tree`) | The project tree: groups, folders, moving, renaming, bookmarks, locks | The tree stops working. Ilium has nothing to show | no | yes |
 | Layout (`ilium.core.layout`) | Split views, focus, moving between panes, resizing with the mouse | Panes can no longer be arranged | no | yes |
-| Terminal (`ilium.core.terminal`) | Terminal panes: processes, scrollback, input, links | No terminal panes | no | yes |
+| Terminal (`ilium.core.terminal`) | Terminal panes: processes, scrollback, input, links | No terminal panes | yes | yes |
 | Smart Copy (`ilium.core.smart-copy`) | Selecting text, the right-click menu and Smart Copy | Plain selection only | yes | yes |
 | Editor (`ilium.core.editor`) | Editor panes, highlighting, Markdown view, file explorer | Editor panes show a placeholder | yes | yes |
 | Kanban (`ilium.core.kanban`) | Board panes backed by Markdown files | Board panes show a placeholder | yes | yes |
@@ -87,7 +87,7 @@ The column "Can you turn it off" lists the fixed set of plugins that your own sw
 | Plugin | What it does for you | If you turn it off | Can you turn it off | Replaceable |
 |---|---|---|---|---|
 | Settings (`ilium.core.settings`) | The Settings screen, auto-save, guided setup | The Settings screen goes away and the recovery page is the only way to change plugins | no | no |
-| Keys and help (`ilium.core.keys-and-help`) | The prefix key, key bindings, the key reference, help topics | Ilium keeps only the fixed kernel keys | no | yes |
+| Keys and help (`ilium.core.keys-and-help`) | The prefix key, key bindings, the key reference, help topics | Ilium keeps only the fixed kernel keys | yes | yes |
 | Workspace search (`ilium.core.search`) | One panel to find agents, terminals and files | No search panel | yes | yes |
 | Ambient look (`ilium.core.ambient`) | Colour, palette and dither for backgrounds | Backgrounds lose the shared look | yes | yes |
 | Scenes (`ilium.core.scenes`) | The animated background scenes | No animated backgrounds | yes | yes |

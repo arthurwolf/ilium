@@ -160,7 +160,7 @@ A scene is an animated background that a plugin renders. Scenes run on the dedic
 | Surface write per frame | 16 MiB |
 | Frame rate | 60 |
 | Scenes active per client | 1 |
-| Clip memory | 256 MiB in total across clips; one clip is limited to 64 MiB ([scenes](/pages/api-scenes/)) |
+| Clip memory | 256 MiB in total across clips; one clip is limited to 128 MiB ([scenes](/pages/api-scenes/)) |
 
 - **[HST-262]** Scene frames MUST be rendered on the scene thread into a back buffer, and the UI thread MUST read only a complete front buffer.
 - **[HST-263]** A late scene frame MUST be skipped without delaying the UI, and the host MUST apply the shared look to each presented frame.

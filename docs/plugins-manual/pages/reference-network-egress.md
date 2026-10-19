@@ -65,7 +65,7 @@ A name that a user granted may resolve to an address the user never meant to all
 
 **[SEC-081]** There is no cookie jar. The host stores no cookie between requests, and no jar is shared between plugins.
 
-**[SEC-082]** Size caps. A request body is at most 8 MiB. A buffered response body is at most 32 MiB; a larger body ends with `quota-exceeded` and reason `response-size`. A stream delivers at most 256 MiB over its lifetime and 8 MiB per read; beyond that the stream ends with `quota-exceeded` and reason `stream-size`. The timeouts are those of the capability page.
+**[SEC-082]** Size caps. A request body is at most 8 MiB. A buffered response body is at most `http_response_mib` (default 8 MiB, at most 64 MiB at the tier 1 ceiling); a larger body ends with `quota-exceeded` and reason `response-size`. A stream delivers at most 256 MiB over its lifetime and 8 MiB per read; beyond that the stream ends with `quota-exceeded` and reason `stream-size`. The timeouts are those of the capability page.
 
 **[SEC-083]** Egress budget. Each plugin has a budget of 16 MiB of request and response bytes per minute, summed over all its requests, counted on the wire after TLS framing is removed. Above the budget calls return `rate-limited` with `retry-after-ms`. The budget is per plugin side.
 

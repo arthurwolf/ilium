@@ -55,7 +55,7 @@ The level is padded to five characters and the side to six. The side is `server`
 | Refused call | `warn` | Names the capability, the function and the reason, one word from the closed list in [Errors and limits](/pages/reference-errors-and-limits/#refusal-reasons). A call the manifest never requested is a trap, `host.capability-not-requested`, not a refusal. |
 | Grant-sensitive action | `info` | File writes outside `data` and `cache`, and every process run, with the scope or program and the arguments. |
 | Trap | `error` | `trap in <export> (<view>): <reason>`, followed by frame entries (see Traps). |
-| Deadline breach | `error` | `deadline breach in <export>: limit <n> ms`. |
+| Deadline breach | `error` | `<export> <elapsed> ms (limit <n> ms)`. |
 | Restart | `warn` | `restarting in <1 or 5> s (failure <n> of 3 in 10 minutes)`. |
 | Dropped lines | `warn` | `<n> lines dropped in the last second`. |
 

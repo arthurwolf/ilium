@@ -165,18 +165,18 @@ An update is an install of a higher version of an installed id.
 | `package.version-reused` | The same version with a different hash |
 | `package.platform-unsupported` | T2 or T3 on a platform with no sandbox |
 
-Each step prints one JSONL line with `type` `progress`, `step` (the step name, one of `acquire`, `fetch`, `validate`, `review`, `stage`, `commit`, `notify`), `message` (human text), `current` (the number of the step, from 1) and `total` (the number of steps, 7). The final line has `type` `result` with `id`, `version`, `previous`, `state`, `tier`, `action` (`installed`, `updated`, `downgraded`, `rolled-back`, `uninstalled`) and `active_from` (`now` or `restart`). Exit codes are in [Plugin command line](/pages/reference-plugin-cli/#exit-codes) and [Distribution commands](/pages/reference-plugin-distribution-cli/).
+Each step prints one JSONL line with `type` `progress`, `step` (the step name, one of `acquire`, `fetch`, `validate`, `review`, `stage`, `commit`, `notify`; these progress steps are their own scheme, not the seven rows of the install pipeline table in [Install, update and uninstall](/pages/reference-install-update-uninstall/), where row 5 is the rename and row 6 the `installed.json` update), `message` (human text), `current` (the number of the step, from 1) and `total` (the number of steps, 7). The final line has `type` `result` with `id`, `version`, `previous`, `state`, `tier`, `action` (`installed`, `updated`, `downgraded`, `rolled-back`, `uninstalled`) and `active_from` (`now` or `restart`). Exit codes are in [Plugin command line](/pages/reference-plugin-cli/#exit-codes) and [Distribution commands](/pages/reference-plugin-distribution-cli/).
 
 ## Worked example: a crash during an update
 
-The user updates `example.notes` from 1.2.0 to 1.3.0 and the machine loses power at step 5, while the new folder is being written.
+The user updates `example.notes` from 1.2.0 to 1.3.0 and the machine loses power at progress step 5 (`stage`), while the new folder is being written.
 
-1. `installed.json` still says `active: 1.2.0`, because step 6 did not run.
+1. `installed.json` still says `active: 1.2.0`, because progress step 6 (`commit`) did not run.
 2. `staging/<uuid>/` exists.
 3. At the next start, the host deletes the orphan, loads 1.2.0, and shows no error.
 4. The user repeats the update. It succeeds.
 
-If the power fails after step 6, `installed.json` says 1.3.0 and `store/example.notes/1.3.0/` is complete, because the rename of the folder came first. The server loads 1.3.0.
+If the power fails after progress step 6, `installed.json` says 1.3.0 and `store/example.notes/1.3.0/` is complete, because the rename of the folder came first. The server loads 1.3.0.
 
 ## Edge cases
 

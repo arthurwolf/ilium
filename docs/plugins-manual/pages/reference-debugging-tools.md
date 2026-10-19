@@ -221,7 +221,7 @@ A `trace` record in JSON:
 
 A plugin `example.notes` restarts every few minutes. The steps use only the tools on this page.
 
-1. Read the log: `ilium plugin logs example.notes --level warn`. It shows `restarting in 1 s (failure 1 of 3 in 10 minutes)` and an `error` line `trap in on-events: deadline 20 ms`.
+1. Read the log: `ilium plugin logs example.notes --level warn`. It shows `restarting in 1 s (failure 1 of 3 in 10 minutes)` and an `error` line `on-events 34 ms (limit 20 ms)`.
 2. Read the trace: `ilium plugin trace example.notes --last 20 --kinds event,trap`. The trap follows a batch that holds 256 `node-renamed` events.
 3. Profile: `ilium plugin profile example.notes --duration 30`. `on-events` shows `p95_ms` 14.8 and `max_ms` 31.2 with `over_budget` 2.
 4. Inspect memory: `ilium plugin inspect example.notes --memory`. The peak is 9.8 MiB of 32 MiB, so memory is not the cause.

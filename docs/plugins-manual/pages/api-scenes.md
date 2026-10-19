@@ -73,7 +73,7 @@ The host constructs the renderer when the scene is shown, and again after a rest
 
 The host reads `readiness` before each frame. `Preparing` frames are not presented, and `Failed` stops drawing. The frame rate is read once after construction and after each `reconfigure` that returns `true`, never per frame. A palette change calls `set_palette` before the next frame. A setting change is validated against `settings_schema` first, then sent to `reconfigure`.
 
-In `pre-rendered` mode the host calls `render` for `clip_seconds` of frames, stores the clip in host memory and loops it without calling `render` again. A change to the palette or the settings rebuilds the clip. A single clip is limited to 64 MiB (the one clip size limit); the 256 MiB figure in [host rendering](/pages/reference-host-rendering/) is the separate total clip memory the host holds across clips. A longer clip is shortened to fit, with a minimum of one second.
+In `pre-rendered` mode the host calls `render` for `clip_seconds` of frames, stores the clip in host memory and loops it without calling `render` again. A change to the palette or the settings rebuilds the clip. A single clip is limited to 128 MiB (the one clip size limit, the `cache_mib` ceiling); the 256 MiB figure in [host rendering](/pages/reference-host-rendering/) is the separate total clip memory the host holds across clips. A longer clip is shortened to fit, with a minimum of one second.
 
 <figure>
 <svg viewBox="0 0 400 200" role="img" aria-label="Scene frame flow from host to scene and back to the panel">
@@ -298,7 +298,7 @@ Scenes can now use a glyph plane for text, owner ids and frame receipts for hit 
 | Labels over the picture | `write-glyphs` (131,072 cells per frame) |
 | Which object is under the pointer | `set-owner-ids` and `last-receipt().pointer-owner` |
 | Text as pixels | `Font::rasterize` into `mask8` |
-| A loop that costs no plugin calls | `prerender` (up to 3,600 frames at 30 fps, within the 64 MiB clip limit) |
+| A loop that costs no plugin calls | `prerender` (up to 3,600 frames at 30 fps, within the 128 MiB clip limit) |
 
 **Rust**
 

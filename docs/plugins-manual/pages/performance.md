@@ -23,8 +23,8 @@ The values below are the defaults, copied from the single table in [Scheduling, 
 |---|---|---|
 | `on-events` | 20 ms | One batch of up to 256 events. The host splits a larger batch. |
 | `on-events` with a command | 50 ms | A batch that contains a `command-invoked` event runs under `command_deadline_ms` instead of 20 ms. |
-| `views.render` | 10 ms | Called on open, on `ui.invalidate` and on resize only. |
-| `annotate` | 10 ms | At most once per 100 ms per buffer. A breach skips the annotation; the third in a row traps. |
+| `views.render` | 10 ms | Called on open, on `ui.invalidate`, on resize and after a theme or font change only. |
+| `annotate` | 10 ms | At most once per 100 ms per view. A breach skips the annotation; the third in a row traps. |
 | `activate` | 2 s | May yield. |
 | `deactivate` | 500 ms | Returned bytes are kept, up to 1 MiB. A breach drops the instance and the bytes, and does not count as a failure. |
 | Scene `render` (frame) | The frame budget, at most 50 ms | Breached frames are skipped. |

@@ -229,7 +229,7 @@ A core plugin can be off for four reasons: the user turned it off, the restart r
 | Compaction | No compact action, no Optimization tab behaviour | Stored technique settings stay |
 | Cost | No spend or quota decorations, no cost sort key. The Agent Cost and Reset planning tabs are read-only | Stored prices stay |
 | Diagnostics | No report builder, no warnings panel | The kernel still writes the log file when the Debug switch is on |
-| Editor | Files open through `open-external` | In v1 the editor is native and cannot be off |
+| Editor | Files open through `open-external` | The editor is native in v1; its Plugins switch still works and the file opens externally |
 | Fleet | `ilium panes`, `ilium broadcast` and `POST /create_agent` fail | `ilium new-pane` is a kernel command and stays |
 | Inference | AI features report `inference.unavailable` and use their non-AI path | Provider settings stay |
 | Kanban | Board panes show a placeholder. No new board | Board files stay on disk. In v1 the board is native |
@@ -260,7 +260,7 @@ The tree and the Settings screen are the only two core plugins whose absence cha
 
 Two properties are different.
 
-- **Disableable.** The user can turn the plugin off in the Plugins screen. Every core plugin is disableable, including Sessions, Settings and Tree, because the kernel has a fallback for them. The one exception is Editor: it is native in v1 and cannot be turned off (see the table above).
+- **Disableable.** The user can turn the plugin off in the Plugins screen. Every core plugin is disableable except the four essential plugins `ilium.core.tree`, `ilium.core.layout`, `ilium.core.settings` and `ilium.core.sessions` (LIF-183, LIF-276); Editor is disableable too, though it is native in v1 (see the table above).
 - **Replaceable.** Another package may list the plugin id in `replaces` and provide its whole surface (see [Extending core plugins](/pages/extending-core-plugins/#replacing-a-core-plugin)). The manifest says `replaceable: true` and carries a `surface`.
 
 Replaceable is stricter than disableable, because a replacement takes over stored data and a surface that other plugins call. Sessions and Settings are not replaceable (`replaceable: false`) because they own the stored sections and the settings screen that every other plugin depends on. The rest are replaceable. The rule for thin plugins that mostly drive a kernel part (Terminal, Tree, Layout) is: they are replaceable only if the replacement provides every service and point in their `surface`. A replacement that omits one is refused with `manifest.replaces-surface-incomplete`.

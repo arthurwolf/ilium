@@ -314,7 +314,7 @@ A lazy plugin that is not active receives no topic events. Use `startup` for a p
 | `http_routes` | `method`, `path` | Loopback routes |
 | `services` | `provides` | Service names offered |
 | `topics` | `publishes`, `subscribes` | Publish only under the plugin's own id prefix |
-| `jobs` | `kind`, `deadline_ms`, `memory_mib` | Override the job limits, within the ceilings. `deadline_ms` is the CPU-time limit of the job (the `job-runner.run` CPU row of the scheduling table); the wall-time limit is not a manifest key |
+| `jobs` | `kind`, `deadline_ms`, `memory_mib` | Override the job limits, within the ceilings. `deadline_ms` is the CPU-time limit of the job (the `job-runner.run` CPU row of the scheduling table); the wall-time limit is the `limits` key `job_wall_ms` (see the Limits object), not a `jobs` key |
 | `onboarding_steps` | `id`, `title`, `order` | Target `onboarding-step("<id>")` |
 | `extension_points` | `id`, `kind`, `mode`, `title`, `entry_schema`, `payload_schema`, `reply_schema`, `risk`, `deadline_ms`, `max_handlers`, `max_entries`, `dynamic`, `version` | Points other plugins fill. Cap 16. Needs `extensions.provide`. See [Extension points and replacement](#extension-points-and-replacement) |
 | `extensions` | `point`, `id`, `priority`, `entry`, `handler` | Entries or handlers added to a point. Cap 64. Needs `extensions.contribute` |

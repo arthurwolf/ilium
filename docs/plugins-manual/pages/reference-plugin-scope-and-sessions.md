@@ -47,7 +47,7 @@ A global change reaches running sessions within 2 seconds. Each session server w
 
 ### Locks
 
-Writes to `installed.json` take the lock `<data>/plugins/.lock`. A second writer waits up to 5 seconds, then fails with `conflict`. An update that is in progress holds a per-plugin lock, so two sessions never run the same trial.
+Writes to `installed.json` take the lock `<data>/plugins/installed.lock`. A second writer polls every 100 ms for up to 30 seconds, then fails with `install.locked` (exit code 4). An update that is in progress holds a per-plugin lock, so two sessions never run the same trial.
 
 ### Failure scope
 

@@ -90,7 +90,7 @@ The `row` of a match is the zero-based number of the line since the pane started
 
 A highlight layer has a name of 1 to 32 characters from `[a-z0-9-]`. Layer names are scoped to the calling plugin, so two plugins can both use `search`. Regions of one layer are painted in list order. Where two regions overlap, the later region sets the foreground and background, and the modifiers of all overlapping regions are combined. A region outside the screen is clipped without an error. A region whose first position is after its last is `invalid-argument`.
 
-A `label` is not drawn in the pane. It appears as a tooltip after the pointer rests on the region for 500 ms. A label over 128 characters is `invalid-argument`. Highlights survive `release_pointer`. They are withdrawn when the plugin is disabled, its grant is revoked, or the pane is removed.
+A `label` is not drawn in the pane. It appears as a tooltip after the pointer rests on the region for 500 ms. A label over 200 characters is cut to 199 plus an ellipsis, with no error, like any tooltip. Highlights survive `release_pointer`. They are withdrawn when the plugin is disabled, its grant is revoked, or the pane is removed.
 
 A claim gives the plugin the pointer of one pane. While it holds the claim, the host stops forwarding mouse events to the program in the pane, and its own selection and wheel scrollback are off there. Wheel events reach the plugin as `pointer` events with kind `wheel-up`, `wheel-down`, `wheel-left` or `wheel-right`. Typing is not affected, because typing needs `terminal.write`, not a claim. The plugin that already holds a claim can call `claim_pointer` again and gets `ok`. `release_pointer` without a claim does nothing.
 
@@ -298,7 +298,7 @@ Store `epoch_at_idle` when the agent becomes idle, and return the submission fro
 | `add_output_filter` | `quota-exceeded` | The plugin has its limit of filters, or the session has 512 runtime filters. |
 | `claim_pointer` | `conflict` | Another plugin holds the claim. |
 | `claim_pointer`, `set_highlights` | `unsupported` | The node exists but is not a terminal pane. |
-| `set_highlights` | `invalid-argument` | Layer name not `[a-z0-9-]{1,32}`, over 4,096 regions, a region with first after last, or a label over 128 characters. |
+| `set_highlights` | `invalid-argument` | Layer name not `[a-z0-9-]{1,32}`, over 4,096 regions, a region with first after last. |
 | `set_highlights` | `quota-exceeded` | The plugin already has 16 layers on this pane. |
 | `send-input` | `refused(pane-not-ready)` | The pane is restored but its process has not started. Retry after `pane-created` or `tree-changed` for the pane. Check the pane's `is-restored` flag before each write. |
 | `send-input` | `refused(conflict)` | The prompt epoch is stale. Do not retry with the same epoch. |
