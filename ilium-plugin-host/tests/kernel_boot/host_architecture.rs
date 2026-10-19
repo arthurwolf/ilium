@@ -813,7 +813,7 @@ fn hst_028_a_provider_activates_before_its_consumer() {
 
 /// REQ: HST-028
 #[test]
-fn hst_028_a_two_plugin_cycle_leaves_both_disabled_with_requires_cycle() {
+fn hst_028_a_two_plugin_cycle_leaves_both_disabled_with_dependency_cycle() {
     let mut run = BootHarness::new(ProcessKind::Server)
         .plugin(startup_plugin("ilium.core.alpha").requires(&["ilium.core.beta"]))
         .plugin(startup_plugin("ilium.core.beta").requires(&["ilium.core.alpha"]))
@@ -822,14 +822,14 @@ fn hst_028_a_two_plugin_cycle_leaves_both_disabled_with_requires_cycle() {
     for plugin in ["ilium.core.alpha", "ilium.core.beta"] {
         assert_eq!(
             run.disabled_reason(plugin).as_deref(),
-            Some("manifest.requires-cycle"),
+            Some("dependency.cycle"),
             "{plugin}"
         );
         assert_eq!(run.instantiations(plugin), 0);
         assert!(report
             .failed
             .iter()
-            .any(|(id, code)| id == plugin && code == "manifest.requires-cycle"));
+            .any(|(id, code)| id == plugin && code == "dependency.cycle"));
     }
 }
 
@@ -858,7 +858,7 @@ fn hst_028_a_three_plugin_cycle_disables_all_three() {
     for plugin in ["ilium.core.a1", "ilium.core.a2", "ilium.core.a3"] {
         assert_eq!(
             run.disabled_reason(plugin).as_deref(),
-            Some("manifest.requires-cycle")
+            Some("dependency.cycle")
         );
     }
 }

@@ -10,7 +10,7 @@ pub struct ResolutionPlan {
     pub activation_order: Vec<String>,
 }
 
-/// Resolves requirements; a cycle is `manifest.requires-cycle` (PKG-654).
+/// Resolves requirements; a cycle is `dependency.cycle` (PKG-335).
 pub fn resolve(
     _packages: &[Manifest],
     _installed: &[InstalledSummary],

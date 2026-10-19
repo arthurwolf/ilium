@@ -252,8 +252,6 @@ pub mod manifest {
     pub const REPLACES_TIER: &str = "manifest.replaces-tier";
     /// `manifest.secret-scope`.
     pub const SECRET_SCOPE: &str = "manifest.secret-scope";
-    /// `manifest.requires-cycle`.
-    pub const REQUIRES_CYCLE: &str = "manifest.requires-cycle";
     /// `manifest.service-name`.
     pub const SERVICE_NAME: &str = "manifest.service-name";
     /// `manifest.service-version`.
@@ -899,7 +897,6 @@ pub const ALL: &[&str] = &[
     dependency::IN_USE,
     dependency::LOCK_MISMATCH,
     dependency::UNSATISFIED,
-    manifest::REQUIRES_CYCLE,
     manifest::SERVICE_NAME,
     manifest::SERVICE_VERSION,
     manifest::SERVICE_CYCLE,
