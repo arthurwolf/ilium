@@ -14,10 +14,10 @@ interface editor {
 
   buffers: func() -> list<buffer-ref>;
   buffer-for-pane: func(pane: node-id) -> option<buffer-ref>;
-  /// count at most 1,000.
+  /// count at most 10,000.
   read-lines: func(buffer: buffer-id, first-line: u32, count: u32) -> result<list<string>, plugin-error>;
   selections: func(buffer: buffer-id) -> list<text-range>;
-  /// At most 4,096 items per layer.
+  /// At most 10,000 items per layer, 65,536 per session (PRI-024).
   set-decorations: func(buffer: buffer-id, layer: string, items: list<range-decoration>) -> result<_, plugin-error>;
   set-gutter: func(buffer: buffer-id, layer: string, marks: list<gutter-mark>) -> result<_, plugin-error>;
   /// editor.edit. For a code-view widget.

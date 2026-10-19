@@ -97,13 +97,13 @@ pub struct TableRow {
     pub risk_text: String,
 }
 
-/// The rows between `## Table` and `### Newer grants`.
+/// The rows between `## Table` and the next level-two heading.
 pub fn table_rows() -> Vec<TableRow> {
     let page = manual_page("reference-capabilities.md");
     let section = page
         .split("\n## Table\n")
         .nth(1)
-        .and_then(|rest| rest.split("### Newer grants").next())
+        .and_then(|rest| rest.split("\n## ").next())
         .expect("the capability table section");
     let mut rows = Vec::new();
     for line in section.lines().filter(|line| line.starts_with("| `")) {
