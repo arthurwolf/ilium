@@ -13,7 +13,13 @@ development period. Dates are commit dates (`YYYY-MM-DD`).
 
 ## [Unreleased]
 
+### Added
+
+- Settings -> Titles has a new On/Off row, "For Codex, use the official thread name". When on, Codex panes are titled from the thread name Codex saved in `~/.codex/session_index.jsonl` instead of an AI call, so they cost no title requests; titles you set yourself still win. Also settable as `inference.codex_official_thread_names` through the control API.
+- The F9 "Full diagnostic" overlay, which every dialog and error popover opens for its full text, now has a clickable `[ Copy ]` button and a `c` key that copy the whole diagnostic to the clipboard.
+
 ### Fixed
+- Codex agents with large transcripts are auto-named again: the title-eligibility scan no longer gives up at 1 MiB per line or 16 MiB in total, it skips oversized records and streams up to 2 GiB.
 - Closing a pane that is already gone (a duplicate close racing a restructure) is now a quiet no-op, and a failed request aimed at a removed node no longer becomes a session-wide blocking error that put the yellow warning triangle on every agent until the server restarted.
 - A window the server drops while it is running (for example after a failed lag resynchronization) is relaunched automatically when the session server is still live, at most five times per ten minutes, instead of leaving a dead terminal. The exit error now reads "lost the connection to the ilium server" rather than "failed to enter raw/alternate-screen terminal mode".
 - When a state resynchronization gives up, the server log lists why each of the eight attempts was discarded (tree changed, pane output moved, pane session replaced, tree grew).

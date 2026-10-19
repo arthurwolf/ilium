@@ -15499,7 +15499,7 @@ impl App {
 
     /// Uses the host clipboard for terminal text while keeping UI feedback at
     /// the terminal interaction boundary.
-    fn copy_terminal_text_to_clipboard(&mut self, text: String, success_message: &str) {
+    pub(crate) fn copy_terminal_text_to_clipboard(&mut self, text: String, success_message: &str) {
         if success_message.len() > 1024 {
             self.status_message =
                 Some("Clipboard acknowledgement label exceeds its admission limit".into());

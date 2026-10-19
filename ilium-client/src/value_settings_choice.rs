@@ -32,6 +32,7 @@ pub enum SettingsChoice {
     SoundSource,
     SoundFile,
     TitleStyle,
+    CodexThreadNames,
     ResetTimeDisplay,
     InferenceProvider,
     KiloModel,
@@ -147,7 +148,7 @@ fn catalog<T: Copy + std::fmt::Debug + PartialEq>(
 }
 
 impl SettingsChoice {
-    pub const ALL: [Self; 37] = [
+    pub const ALL: [Self; 38] = [
         Self::TerminalDirectory,
         Self::EditorLineDisplay,
         Self::EditorMarkdown,
@@ -169,6 +170,7 @@ impl SettingsChoice {
         Self::SoundSource,
         Self::SoundFile,
         Self::TitleStyle,
+        Self::CodexThreadNames,
         Self::ResetTimeDisplay,
         Self::InferenceProvider,
         Self::KiloModel,
@@ -263,6 +265,7 @@ impl SettingsChoice {
                 Some(Self::TerminalDirectory)
             }
             SettingsTab::Titles if row == 0 => Some(Self::TitleStyle),
+            SettingsTab::Titles if row == 1 => Some(Self::CodexThreadNames),
             SettingsTab::Editor => match EditorRow::ALL.get(row) {
                 Some(EditorRow::LineDisplay) => Some(Self::EditorLineDisplay),
                 Some(EditorRow::MarkdownDefault) => Some(Self::EditorMarkdown),
@@ -312,6 +315,7 @@ impl SettingsChoice {
             Self::SoundSource => "Sound source",
             Self::SoundFile => "Sound file",
             Self::TitleStyle => "Title style",
+            Self::CodexThreadNames => "For Codex, use the official thread name",
             Self::VoiceModel => "Model",
             Self::VoiceName => "Voice",
             Self::VoiceReasoning => "Reasoning effort",
@@ -457,6 +461,11 @@ impl SettingsChoice {
                     ilium_inference::TitleStyle::Labeling => "Labeling".into(),
                     ilium_inference::TitleStyle::Summarization => "Summarization".into(),
                 },
+            ),
+            Self::CodexThreadNames => catalog(
+                &[true, false],
+                app.inference_settings.codex_official_thread_names,
+                |value| if value { "☑ On" } else { "☐ Off" }.into(),
             ),
             Self::VoiceModel => catalog(
                 &ilium_voice::VoiceModel::ALL,
@@ -776,6 +785,7 @@ impl App {
             field,
             SettingsChoice::InferenceProvider
                 | SettingsChoice::TitleStyle
+                | SettingsChoice::CodexThreadNames
                 | SettingsChoice::KiloModel
                 | SettingsChoice::OllamaModel
                 | SettingsChoice::OpenAiModel
@@ -797,6 +807,13 @@ impl App {
                     .into_iter()
                     .find(|value| format!("{value:?}") == id)
                     .ok_or("Title style is unavailable")?;
+                }
+                SettingsChoice::CodexThreadNames => {
+                    desired.codex_official_thread_names = match id {
+                        "true" => true,
+                        "false" => false,
+                        _ => return Err("Codex thread name option is unavailable".into()),
+                    };
                 }
                 SettingsChoice::KiloModel => desired.kilo_gateway.model = id.into(),
                 SettingsChoice::OllamaModel => desired.ollama.model = id.into(),
@@ -847,6 +864,7 @@ impl App {
             ),
             SettingsChoice::InferenceProvider
             | SettingsChoice::TitleStyle
+            | SettingsChoice::CodexThreadNames
             | SettingsChoice::KiloModel
             | SettingsChoice::OllamaModel
             | SettingsChoice::OpenAiModel

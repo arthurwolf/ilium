@@ -5,6 +5,9 @@ use crate::session::{PtyCommand, PtySession};
 use std::time::{Duration, Instant};
 
 const RETAINED_TARGET_BYTES: usize = 32 * 1024 * 1024;
+// The journal trims whole chunks from its start, so retained bytes can sit a
+// little under the cap. The journal is never complete once trimming begins.
+const SLACK_BYTES: usize = 64 * 1024;
 
 #[test]
 #[ignore = "measurement only; prints attach timings for a 32 MiB pane"]
@@ -19,12 +22,13 @@ fn attach_cost_for_a_pane_holding_thirty_two_mib() {
     let fill_started = Instant::now();
     loop {
         let estimate = session.output_replay_estimate();
-        if estimate.byte_len >= RETAINED_TARGET_BYTES && estimate.is_complete {
+        let marker_on_screen = session.screen_snapshot().text.contains("end-of-output");
+        if marker_on_screen && estimate.byte_len >= RETAINED_TARGET_BYTES - SLACK_BYTES {
             break;
         }
         assert!(
             fill_started.elapsed() < Duration::from_secs(120),
-            "fixture did not retain 32 MiB within two minutes"
+            "fixture did not reach its end marker with 32 MiB retained within two minutes"
         );
         std::thread::sleep(Duration::from_millis(50));
     }
@@ -63,6 +67,9 @@ fn attach_cost_for_a_pane_holding_thirty_two_mib() {
         snapshot_build.as_secs_f64() * 1e3,
         client_apply.as_secs_f64() * 1e3
     );
-    assert!(snapshot.is_complete);
+    assert!(
+        old_replay.bytes.len() >= RETAINED_TARGET_BYTES - SLACK_BYTES,
+        "old full replay must carry the retained 32 MiB"
+    );
     assert!(client_parser.screen().contents().contains("end-of-output"));
 }

@@ -35,6 +35,10 @@ use crate::terminal_activity::{VisibleRowEvidence, VisibleTextEvidence};
 #[path = "terminal_view_parser_pressure_regressions.rs"]
 mod parser_pressure_regressions;
 
+#[cfg(test)]
+#[path = "terminal_history_paging_regressions.rs"]
+mod history_paging_regressions;
+
 /// Starting geometry for a freshly created pane, before the first real
 /// `ResizePane` request (sent once the client knows the pane's actual
 /// on-screen content box) corrects it.
@@ -2460,8 +2464,14 @@ impl HistoryPaging {
         self.retained_bytes = self.retained_bytes.saturating_add(byte_len);
     }
 
-    pub(crate) fn history_applied(&mut self, first_sequence: u64, byte_len: usize, reaches_journal_start: bool) {
-        self.next_before_sequence = (!reaches_journal_start && byte_len > 0).then_some(first_sequence);
+    pub(crate) fn history_applied(
+        &mut self,
+        first_sequence: u64,
+        byte_len: usize,
+        reaches_journal_start: bool,
+    ) {
+        self.next_before_sequence =
+            (!reaches_journal_start && byte_len > 0).then_some(first_sequence);
         self.retained_bytes = self.retained_bytes.saturating_add(byte_len);
         self.request_in_flight = false;
     }

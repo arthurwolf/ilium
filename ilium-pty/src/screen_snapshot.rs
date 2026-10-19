@@ -65,7 +65,13 @@ mod tests {
         let (row, col) = screen.cursor_position();
         let (rows, cols) = screen.size();
         let wrapped: String = (0..rows)
-            .map(|row_index| if screen.row_wrapped(row_index) { 'w' } else { '.' })
+            .map(|row_index| {
+                if screen.row_wrapped(row_index) {
+                    'w'
+                } else {
+                    '.'
+                }
+            })
             .collect();
         format!(
             "contents={:?}\ncursor=({row},{col}) hide={} alt={} keypad={} appcursor={} paste={} mouse={:?}/{:?}\nsize={rows}x{cols} wrapped={wrapped} scroll_region={:?} origin={} saved_cursor={:?} saved_origin={}",
@@ -90,10 +96,18 @@ mod tests {
         live.process(stream);
         let mut rebuilt = vt100::Parser::new(rows, cols, 0);
         rebuilt.process(&snapshot_bytes(live.screen()));
-        assert_eq!(observable(&live), observable(&rebuilt), "[{name}] at snapshot");
+        assert_eq!(
+            observable(&live),
+            observable(&rebuilt),
+            "[{name}] at snapshot"
+        );
         live.process(after);
         rebuilt.process(after);
-        assert_eq!(observable(&live), observable(&rebuilt), "[{name}] after continuation");
+        assert_eq!(
+            observable(&live),
+            observable(&rebuilt),
+            "[{name}] after continuation"
+        );
     }
 
     #[test]

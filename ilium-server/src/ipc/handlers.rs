@@ -227,9 +227,11 @@ async fn handle_scoped_request(
             let history = {
                 let panes = state.panes.read().await;
                 match panes.get(&pane_id) {
-                    Some(PaneResource::Terminal(runtime)) => {
-                        Some(runtime.session.output_history_before(before_sequence, max_bytes))
-                    }
+                    Some(PaneResource::Terminal(runtime)) => Some(
+                        runtime
+                            .session
+                            .output_history_before(before_sequence, max_bytes),
+                    ),
                     _ => None,
                 }
             };
@@ -1894,9 +1896,15 @@ pub(crate) async fn admitted_terminal_recovery_prefix(
                         sequence: chunk.sequence,
                         bytes: chunk.bytes.to_vec(),
                     }),
-                    Some(PtyOutputRecovery::Replay(replay)) => {
-                        Some(terminal_replay_event(pane_id, replay))
-                    }
+                    // A replay rebuilds the whole journal on the client; the
+                    // current screen snapshot shows the same state at once.
+                    // The journal replay remains only when no snapshot exists.
+                    Some(PtyOutputRecovery::Replay(replay)) => Some(
+                        match runtime.session.attach_snapshot() {
+                            Some(snapshot) => terminal_snapshot_event(pane_id, snapshot),
+                            None => terminal_replay_event(pane_id, replay),
+                        },
+                    ),
                     None => None,
                 }
             }
@@ -3290,6 +3298,12 @@ async fn idempotent_install_progress_monitor(
     request_id: u64,
     identity: ProgressSetRequestIdentity,
 ) -> Result<ilium_ipc::ProgressMonitorAccepted, ilium_ipc::ProgressMonitorRejection> {
+    // Cold path, one value per progress registration: boxing would only add
+    // indirection at every match site.
+    #[allow(clippy::large_enum_variant)]
+    // Cold path, one value per progress registration: boxing would only add
+    // indirection at every match site.
+    #[allow(clippy::large_enum_variant)]
     enum Decision {
         Lead,
         Wait(tokio::sync::watch::Receiver<Option<ProgressSetResult>>),
@@ -6391,7 +6405,10 @@ async fn handle_close_pane_with_spawn_guard(
         // Closing is idempotent: the pane is already gone, which is the
         // requested outcome. Re-broadcasting the tree ends the client's
         // pending "Closing" spinner.
-        tracing::info!(?pane_id, "close requested for a pane that is already removed");
+        tracing::info!(
+            ?pane_id,
+            "close requested for a pane that is already removed"
+        );
         broadcast_and_persist(state).await;
         return;
     }
@@ -8443,6 +8460,8 @@ async fn handle_kill_session(state: &Arc<ServerState>) -> crate::recovery::Resol
 
 #[cfg(test)]
 mod tests {
+    // The `unwrap`s sit inside closures that are only sized, never called.
+    #[allow(clippy::unnecessary_literal_unwrap)]
     #[test]
     fn request_future_stack_budget() {
         fn future_bytes<F: std::future::Future>(_: impl FnOnce() -> F) -> usize {

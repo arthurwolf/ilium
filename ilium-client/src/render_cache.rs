@@ -190,9 +190,7 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
                 }
             }
             #[cfg(test)]
-            if app.terminal_parsing.is_none() {
-                return None;
-            }
+            app.terminal_parsing.as_ref()?;
             if let Err(event) = app.submit_terminal_event(event) {
                 app.pending_terminal_events.push_front(
                     crate::connection::Received::with_retention(

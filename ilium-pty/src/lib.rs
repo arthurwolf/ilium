@@ -22,9 +22,9 @@
 //! detection concerns, so they belong behind the same boundary as the pty
 //! itself.
 
+mod admission;
 #[cfg(test)]
 mod attach_measurement_tests;
-mod admission;
 mod delivery;
 mod error;
 mod mouse;

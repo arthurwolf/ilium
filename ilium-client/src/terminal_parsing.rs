@@ -1264,9 +1264,14 @@ impl Job for ParserJob {
                                     },
                                 )?;
                             }
-                            PaneCommand::Replay { sequence, bytes, .. }
-                            | PaneCommand::Snapshot { sequence, bytes, .. } => {
-                                let is_snapshot = matches!(&command.body, PaneCommand::Snapshot { .. });
+                            PaneCommand::Replay {
+                                sequence, bytes, ..
+                            }
+                            | PaneCommand::Snapshot {
+                                sequence, bytes, ..
+                            } => {
+                                let is_snapshot =
+                                    matches!(&command.body, PaneCommand::Snapshot { .. });
                                 engine.state.apply_ordered_replay(
                                     bytes,
                                     *sequence,
@@ -1297,9 +1302,9 @@ impl Job for ParserJob {
                                         Ok(())
                                     },
                                 )?;
-                                engine
-                                    .state
-                                    .set_history_base(is_snapshot.then(|| sequence.saturating_add(1)));
+                                engine.state.set_history_base(
+                                    is_snapshot.then(|| sequence.saturating_add(1)),
+                                );
                             }
                             PaneCommand::PrependHistory {
                                 before_sequence,
