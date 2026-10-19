@@ -919,7 +919,16 @@ pub fn adjust_control(
             Value::Number(number)
         }
         PluginControlKind::Text { .. } => {
-            return Ok(PluginControlEdit::TextPrompt);
+            return Ok(PluginControlEdit::TextPrompt {
+                id: control.id.clone(),
+                label: control.label.clone(),
+                current: control
+                    .value
+                    .as_ref()
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_owned(),
+            });
         }
     };
     Ok(PluginControlEdit::Values(apply_control_value(

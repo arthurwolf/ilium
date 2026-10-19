@@ -1566,9 +1566,9 @@ impl InputShutdownReport {
         {
             return Ok(());
         }
-        Err(Box::new(InputFailure {
+        Err(InputFailure {
             kind: InputFailureKind::Shutdown(Box::new(self)),
-        }))
+        })
     }
 }
 impl fmt::Debug for InputShutdownReport {

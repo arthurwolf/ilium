@@ -9298,7 +9298,7 @@ impl App {
                         Ok(true)
                     });
                 }
-                Ok(PluginControlEdit::TextPrompt) => {}
+                Ok(PluginControlEdit::TextPrompt { .. }) => {}
                 Err(error) => self.status_message = Some(error),
             },
             _ => {}
@@ -17763,21 +17763,17 @@ impl App {
         &mut self,
         pane_id: NodeId,
         event: crate::terminal_input_owner::InputEvent,
-    ) -> Result<(), Box<crate::terminal_input_owner::InputFailure>> {
+    ) -> Result<(), crate::terminal_input_owner::InputFailure> {
         if self.pending_native_paste.is_some() {
-            return Err(Box::new(
-                crate::terminal_input_owner::InputFailure::refused(
-                    ilium_execution::RejectReason::QueueFull,
-                    event,
-                ),
+            return Err(crate::terminal_input_owner::InputFailure::refused(
+                ilium_execution::RejectReason::QueueFull,
+                event,
             ));
         }
         let Some(PaneRuntime::Terminal(view)) = self.panes.get(&pane_id) else {
-            return Err(Box::new(
-                crate::terminal_input_owner::InputFailure::refused(
-                    ilium_execution::RejectReason::Closed,
-                    event,
-                ),
+            return Err(crate::terminal_input_owner::InputFailure::refused(
+                ilium_execution::RejectReason::Closed,
+                event,
             ));
         };
         self.last_tree_click = None;
@@ -17794,9 +17790,9 @@ impl App {
     #[allow(clippy::result_large_err)] // The refusal hands the original value back unchanged; boxing would allocate on that path.
     pub(crate) fn retry_native_terminal_paste(
         &mut self,
-    ) -> Result<(), Box<crate::terminal_input_owner::InputFailure>> {
+    ) -> Result<(), crate::terminal_input_owner::InputFailure> {
         if let Some(failure) = self.native_paste_failure.take() {
-            return Err(Box::new(failure));
+            return Err(failure);
         }
         let Some(pending) = self.pending_native_paste.take() else {
             return Ok(());
@@ -17828,20 +17824,16 @@ impl App {
         if bytes > crate::terminal_input::MAX_BYTES
             || wire_bytes > ilium_ipc::MAX_FRAME_LEN as usize
         {
-            return Err(Box::new(
-                crate::terminal_input_owner::InputFailure::refused(
-                    ilium_execution::RejectReason::InputBytes,
-                    pending.event,
-                ),
+            return Err(crate::terminal_input_owner::InputFailure::refused(
+                ilium_execution::RejectReason::InputBytes,
+                pending.event,
             ));
         }
         if self.terminal_parsing.is_none() {
             let Some(client) = &self.outbound_admission else {
-                return Err(Box::new(
-                    crate::terminal_input_owner::InputFailure::refused(
-                        ilium_execution::RejectReason::Closed,
-                        pending.event,
-                    ),
+                return Err(crate::terminal_input_owner::InputFailure::refused(
+                    ilium_execution::RejectReason::Closed,
+                    pending.event,
                 ));
             };
             let reservation = match crate::ipc_preparation::reserve_request(
@@ -17856,11 +17848,9 @@ impl App {
                             | ilium_execution::RejectReason::InvalidCost
                             | ilium_execution::RejectReason::AccountingPoisoned
                     ) {
-                        return Err(Box::new(
-                            crate::terminal_input_owner::InputFailure::refused(
-                                reason,
-                                pending.event,
-                            ),
+                        return Err(crate::terminal_input_owner::InputFailure::refused(
+                            reason,
+                            pending.event,
                         ));
                     }
                     self.pending_native_paste = Some(pending);
@@ -17870,11 +17860,9 @@ impl App {
             let placeholder = match reservation.retain(()) {
                 Ok(placeholder) => placeholder,
                 Err(_) => {
-                    return Err(Box::new(
-                        crate::terminal_input_owner::InputFailure::refused(
-                            ilium_execution::RejectReason::InvalidCost,
-                            pending.event,
-                        ),
+                    return Err(crate::terminal_input_owner::InputFailure::refused(
+                        ilium_execution::RejectReason::InvalidCost,
+                        pending.event,
                     ));
                 }
             };
