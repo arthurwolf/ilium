@@ -1207,39 +1207,19 @@ mod tests {
     #[tokio::test]
     async fn slow_subscriber_detects_lag_then_receives_latest_state_and_prompt() {
         let events = ServerEvents::new();
-        let quota = ilium_execution::QuotaGroup::new(ilium_execution::QuotaLimits {
-            clients: 0,
-            jobs: 0,
-            service_jobs: 0,
-            input_bytes: 0,
-            result_bytes: 0,
-            worker_threads: 0,
-            worker_bytes: 8 * 1024 * 1024,
-        });
-        assert!(events.initialize_journal(quota));
-        let subscriber = events.subscribe_ordered().expect("ordered subscription");
+        let mut subscriber = events.subscribe_shared();
         let pane_id = NodeId(19);
 
         for activity_revision in 1..=(EVENT_CHANNEL_CAPACITY as u64 + 1) {
-            events
-                .try_publish_ordered(
-                    ServerEvent::NodeActivityChanged {
-                        node_id: pane_id,
-                        activity_revision,
-                    },
-                    128,
-                )
-                .expect("journal accepts the state burst");
+            events.publish(ServerEvent::NodeActivityChanged {
+                node_id: pane_id,
+                activity_revision,
+            });
         }
-        events
-            .try_publish_ordered(
-                ServerEvent::PanePromptSubmitted {
-                    pane_id,
-                    source: ilium_ipc::PromptSubmissionSource::Keyboard,
-                },
-                128,
-            )
-            .expect("journal accepts the prompt");
+        events.publish(ServerEvent::PanePromptSubmitted {
+            pane_id,
+            source: ilium_ipc::PromptSubmissionSource::Keyboard,
+        });
 
         assert!(
             matches!(
