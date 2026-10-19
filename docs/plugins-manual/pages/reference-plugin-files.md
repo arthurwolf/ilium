@@ -62,7 +62,7 @@ Paths start at `<config>`, `<data>`, `<cache>`, `<state>` or `<project>`. The pl
 | Plugin limits | `<config>/config.toml`, table `[plugins.limits]` | TOML | The user | The user |
 | Plugin cache | `<cache dir>/ilium/plugins/<id>/` | Whatever the plugin writes | The plugin, through `fs.write:cache` | The host may evict it at any time. Removed on every uninstall (USR-208) |
 | Compile cache | `<cache dir>/ilium/plugins/compile/` | Compiled components | Install of a T2 or T3 plugin | The host, when space is low |
-| Plugin log | `<data>/plugins/logs/<id>.log` and rotated files | Text, four columns | The plugin and the host | Rotation. See below |
+| Plugin log | `<state>/plugins/logs/<session-slug>/<id>.log` and rotated files | Text, four columns | The plugin and the host | Rotation. See below |
 | User extension order and toggles | `<config>/config.toml`, table `[plugins.extensions]` | TOML | The Extensions tab | Every uninstall of the owner |
 | Replacement record | `<config>/config.toml`, table `[plugins.replaces]` | TOML | The replace confirmation | Undoing the replacement |
 | Administrator policy | See [Plugin policy](/pages/reference-plugin-policy/) | TOML | The administrator | The administrator |
@@ -101,10 +101,10 @@ Each plugin has one log, shared by all its sides. The host writes refusals, trap
 
 | Property | Value |
 |---|---|
-| File | `<data>/plugins/logs/<id>.log`, with rotated files `<id>.log.1` to `<id>.log.4` |
+| File | `<state>/plugins/logs/<session-slug>/<id>.log`, with rotated files `<id>.log.1` to `<id>.log.4` |
 | Line format | Four columns: local timestamp `YYYY-MM-DD HH:mm:ss`, level padded to five characters, plugin id, message |
 | Rotation | When the file passes 4 MiB it becomes `.1`, `.1` becomes `.2`, `.2` becomes `.3`, `.3` becomes `.4`, and the old `.4` is deleted |
-| Retention | At most 4 files per plugin. Rotated files older than 14 days are deleted at server start |
+| Retention | The active file plus at most 4 rotated files (5 files per plugin). Rotated files older than 14 days are deleted at server start |
 | Rate limit | 200 lines per second for a standard plugin. Extra lines are dropped and counted in one `warn` summary line |
 | Who can read it | The user who owns the folder. A plugin cannot read its own log |
 | After uninstall | Kept for 7 days, then deleted. `--purge` deletes it at once |

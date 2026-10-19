@@ -390,7 +390,7 @@ export async function pollLog(name: string): Promise<void> {
 
 #### Write the plugin's own diary
 
-Every plugin has a diary that the host keeps for it. It is separate from the Ilium log file. The plugin writes lines at five levels with the host log, at most 200 lines for each second. The user reads them with `ilium plugin logs ilium.core.diagnostics`. No import reads the diary back, so the plugin keeps what it needs itself. See [log](/pages/api-log/).
+Every plugin has a diary that the host keeps for it. It is separate from the Ilium log file. The plugin writes lines at five levels with the host log, at most 1,000 lines for each second, because it is a trusted T1 plugin (an ordinary plugin gets 200). The user reads them with `ilium plugin logs ilium.core.diagnostics`. No import reads the diary back, so the plugin keeps what it needs itself. See [log](/pages/api-log/).
 
 **Rust**
 

@@ -94,8 +94,8 @@ An export is named in the manifest `exports` list unless the Required column say
 | 3 | `views` | no | yes | no | no | `views` | none | 10 ms |
 | 4 | `detector` | yes | no | no | no | `detector` | `agent.read` | 20 ms |
 | 5 | `job-runner` | yes | yes | yes | no | `job-runner` | none (kind in `contributes.jobs`) | 2 s CPU, 20 s wall |
-| 6 | `service-provider` | yes | yes | no | no | `service-provider` | `services.provide:<name>` | 20 ms |
-| 7 | `inference-provider` | yes | yes | no | no | `inference-provider` | `inference.provide` | 20 ms to call, 120 s reply |
+| 6 | `service-provider` | yes | yes | no | no | `service-provider` | `services.provide:<name>` | `command_deadline_ms`, 50 ms (T1 ceiling 100 ms, T2/T3 ceiling 50 ms) |
+| 7 | `inference-provider` | yes | yes | no | no | `inference-provider` | `inference.provide` | `command_deadline_ms`, 50 ms to call (T1 ceiling 100 ms, T2/T3 ceiling 50 ms), 120 s reply |
 | 8 | `annotator` | no | yes | no | no | `annotator` | `editor.read` | 10 ms |
 | 9 | `settings-validate` | yes | yes | no | no | `settings-validate` | none | 100 ms |
 | 10 | `renderer` | no | no | yes | yes | none | none | frame budget, at most 50 ms |

@@ -324,7 +324,7 @@ Further edge cases:
 - Two calls to the same service return two request ids. Each completion carries its own request, so take each reply by its id.
 - `take-reply` gives the JSON once. A second call for the same request returns `None` or `undefined`.
 - A deferred reply that arrives after 30 seconds returns `not-found`. The provider should log it and drop the work.
-- A provider that restarts after a failure (see the restart and disable rule) loses its deferred calls. Their callers receive `failed(cancelled)`. If the restart was caused by the provider breaching its per-export call deadline (20 ms, or 10 ms for `tokens`), the caller of the breaching call receives `failed(internal)` (the deadline breach is a trap, not a missing reply, so it is never `timed-out`) and every other deferred caller receives `failed(cancelled)`.
+- A provider that restarts after a failure (see the restart and disable rule) loses its deferred calls. Their callers receive `failed(cancelled)`. If the restart was caused by the provider breaching its call deadline (`command_deadline_ms`: 50 ms by default, 100 ms at the T1 ceiling), the caller of the breaching call receives `failed(internal)` (the deadline breach is a trap, not a missing reply, so it is never `timed-out`) and every other deferred caller receives `failed(cancelled)`.
 
 ### When to use extension points instead
 

@@ -351,7 +351,8 @@ Failures older than 10 minutes drop out of the count on their own, so a plugin t
 | `activate` misses its deadline | yes | |
 | `handler.on-events`, `views.render` or another export misses its deadline | hard breach: yes; soft breach: only at the streak limit (3, or 30 for scene frames) or 100 ms past the deadline | |
 | `deactivate` misses its deadline, any reason | no | The miss is logged and dropped: the instance is dropped, its restore bytes are discarded and a warn line is logged [HST-191]. |
-| Event queue overflow (more than 1,024 events by default) | yes | |
+| Stuck event queue (a never-dropped event arrives while the queue is full and no drop-oldest event is pending) | yes | |
+| Event queue overflow of drop-oldest events | no | The oldest event is evicted and counted as `events-dropped`. |
 | Memory limit of the instance reached | yes | A trap. |
 | Instantiation refused because the session memory pool is full | no | Host capacity, see below. |
 | Service provider fails to start when a call needs it | yes | It is an `activate` failure. The caller gets `busy` or `not-found`. |
@@ -483,7 +484,7 @@ The command prints JSON lines. Every line has a `type`.
 {"type":"reload","plugin":"<id>","version":"<version>","restored_bytes":<n>,"sides":["server","client"]}
 ```
 
-A development package carries a `dev` badge in Settings, and it uses the T2 sandbox and ceilings. Plugin logs appear in `ilium plugin logs <id>`.
+A development package carries a `dev` badge in Settings, and it uses the T3 sandbox and ceilings (T2 and T3 share the same ceilings). Plugin logs appear in `ilium plugin logs <id>`.
 
 ## What `activate` does not tell you
 

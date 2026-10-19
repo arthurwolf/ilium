@@ -238,7 +238,7 @@ Publishing is the only part of the protocol that needs a server. The upload API 
 | Id | Rule |
 |---|---|
 | [PKG-392] | `ilium plugin publish <file> --registry <url> [--channel stable\|beta]` sends the package with `PUT <base>/publish/<id>/<version>` over HTTPS. The body is the package. The `Authorization` header holds a registry token from `ILIUM_REGISTRY_TOKEN` or the credential file of the registry. Tokens are never written to a log. |
-| [PKG-393] | The server runs install stages 1 to 7 on the upload, including the signature check (stage 4) and key trust (stage 7), and a policy check. It refuses the publish with the same codes as the client would, plus the registry codes. |
+| [PKG-393] | The server runs install stages 1 to 8 on the upload, including the signature check (stage 7) and key trust (stage 8), and a policy check. It refuses the publish with the same codes as the client would, plus the registry codes. |
 | [PKG-394] | A version number is **immutable**. A publish of an existing `id@version` is refused with `registry.version-exists`, even when the content is identical. A fixed package needs a new version. |
 | [PKG-395] | On success the server adds the version to `plugins/<id>.json`, stores `blobs/<sha256>.iliumpkg`, adds a registry countersignature to a copy of the signature document (a second entry of `signatures`, see [PKG-207]), recomputes `snapshot.json` and `timestamp.json`, and answers `201` with a JSON body `{ "id", "version", "sha256", "url" }`. |
 | [PKG-396] | **Yank.** `ilium plugin yank <id>@<version> --reason <text>` marks a version as yanked. Clients do not choose it for a new install or update. Installed copies keep working. `unyank` reverses it. |

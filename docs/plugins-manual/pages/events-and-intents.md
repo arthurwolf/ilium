@@ -259,7 +259,7 @@ Every intent needs its grant. The outcome column lists the codes beyond `ok`.
 | `clear-decoration` | `node`, `slot` | `tree.decorate` | As `set-decoration` |
 | `set-virtual-rows` | `row-kind`, `rows` | `tree.decorate` | `refused(invalid-argument)` for an undeclared row kind |
 | `play-sound` | sound id | `sound.play` | `refused(not-found)`, `refused(rate-limited)` (4 per second) |
-| `notify` | `title`, `body`, `urgency` (low, normal, high), `sound` | `notify.desktop` | `refused(not-found)`, `refused(rate-limited)` (6 per minute) |
+| `notify` | `title`, `body`, `urgency` (low, normal, high), `sound` | `notify.desktop` | `refused(rate-limited)` (6 per minute) |
 | `open-view`, `close-view` | `view-target`, `focus` | `ui.panels` | `refused(not-found)` |
 | `invoke-command` | `command`, `arguments-json` | `commands.invoke` | `refused(not-found)`, `failed(timed-out)` after 30 s |
 | `message` | `to`, `channel`, `payload` | `messages.peer:<plugin-id>` | `refused(not-found)`, `refused(invalid-argument)` over 1 MiB |

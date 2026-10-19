@@ -242,7 +242,7 @@ The capture is hand-composed to show the format of the plugin log lines. The `em
 | Size of one text | 8 KiB | | | `invalid-argument` |
 | `k` of `top-k` | 100 | | | `invalid-argument` |
 
-The default applies unless the manifest asks for more, up to the ceiling of the tier. A plugin with `limits_tier: first-party` follows the T1 column.
+The default applies unless the manifest asks for more, up to the ceiling of the tier. A plugin with `limits_tier: first-party` (bundled `ilium.*` T1 plugins only) raises only the settings caps (the list-editor and check-list caps under WID-020); all other limits keep the default and ceiling of its tier.
 
 ### Edge cases
 

@@ -186,7 +186,7 @@ The installer validates in a fixed order. The full pipeline has eleven stages. A
 | Stage | Name | What it checks | Codes (families) | Collects errors |
 |---|---|---|---|---|
 | 1 | archive | The container, paths, caps ([PKG-100] to [PKG-132]) | `package.*` | yes |
-| 2 | manifest-parse | UTF-8, size, JSON syntax, duplicate keys | `manifest.json-*` | no (first error) |
+| 2 | manifest-parse | UTF-8, JSON syntax, duplicate keys | `manifest.json-*` | no (first error) |
 | 3 | schema | Keys, types, ranges, grammars of [Manifest reference](/pages/reference-manifest/) | `manifest.*` | yes |
 | 4 | semantic | Cross references, uniqueness, side and export rules | `manifest.*` | yes |
 | 5 | inventory | `files` against the entries; lengths and hashes ([PKG-133] to [PKG-137]) | `manifest.file-*` | yes |

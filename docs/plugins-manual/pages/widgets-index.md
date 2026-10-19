@@ -171,7 +171,7 @@ The host calls the `views` export when a view first opens, after the plugin call
 - **Text and width.** Labels are `styled-text`, a list of spans. Colours come from theme roles, so one plugin works in dark and light themes. Use `display-width` when a label holds icons or wide glyphs.
 - **Common node props.** Any node can carry `tooltip`, `tab-index` and `disabled-reason`, and the flags `focusable`, `draggable`, `drop-target`, `hidden`, `hover-events` and `pointer-events`.
 - **Disabled widgets** use the `muted` role, and `disabled-reason` shows as a tooltip.
-- **Limits.** The default is 4,096 nodes and 1 MiB for every tier; a T1 plugin may request up to 16,384 nodes and 4 MiB in `limits`. A render has a default deadline of 10 ms and a ceiling of 20 ms.
+- **Limits.** The default is 4,096 nodes and 1 MiB for every tier; a T1 plugin may request up to 16,384 nodes and 4 MiB in `limits`. A render has a default deadline of 10 ms. The ceiling is 20 ms for a T1 plugin and 10 ms for T2 and T3 plugins.
 - **Settings views** accept a widened subset of widgets. every widget outside the allowed subset is refused there, among them `popup`, `dialog`, `menu`, `video`, `terminal-view`, `calendar`, `clear`, `scrollbar`, an editable `code-view` and every input widget except `button`, `schema-form` and `location-picker`. See [The UI model](/pages/ui-model/).
 
 ### Host-owned state values

@@ -303,7 +303,7 @@ Store `epoch_at_idle` when the agent becomes idle, and return the submission fro
 | `send-input` | `refused(pane-not-ready)` | The pane is restored but its process has not started. Retry after `pane-created` or `tree-changed` for the pane. Check the pane's `is-restored` flag before each write. |
 | `send-input` | `refused(conflict)` | The prompt epoch is stale. Do not retry with the same epoch. |
 | `send-input` | `refused(rate-limited)` | More than 20 per second. Retry after `retry-after-ms`: the `u32` field of the error record, in milliseconds, set for `rate-limited` to the time until the oldest counted send leaves the 1 s window (see [errors and limits](/pages/reference-errors-and-limits/)). |
-| `send-input` | `duplicate(original)` | The dedup key was reserved in the last 24 hours. The input was not sent twice. |
+| `send-input` | `duplicate(original)` | The dedup key was reserved in the last 10 minutes (the dedup window, separate from the 24-hour journal). The input was not sent twice. |
 
 ### What the user sees
 
