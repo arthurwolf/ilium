@@ -331,7 +331,7 @@ A segment never grows past its `max_width`. Longer text is cut with `…`. When 
 |---|---|---|
 | Same finish delivered twice | The second toast is skipped | `duplicate(original)` |
 | Four toasts within 10 seconds | The fourth is dropped | `refused(rate-limited)` |
-| More than 10 segment updates in a second | The extra updates are dropped | `refused(rate-limited)` with `retry-after-ms` |
+| More than 10 updates per second to one status segment or frame slot | The extra updates are dropped | `refused(rate-limited)` with `retry-after-ms` |
 | Segment id not declared in the manifest | The update is refused | `refused(invalid-argument)` |
 | `ui.chrome` declined | The segment is not drawn | `refused(not-permitted)` |
 | `notify.toast` declined | The toast is refused | `refused(not-permitted)` |

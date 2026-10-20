@@ -42,7 +42,7 @@ A report should say: the version (`ilium --version --verbose`), the platform, wh
 
 ## Takedown
 
-**[SEC-327]** When a blocklist entry matches an installed plugin, the plugin is disabled at the next load, its data is kept, the user sees `Blocked: <reason>`, and the audit log records `blocklist-hit` ([SEC-149]). The user can uninstall it. The user cannot re-enable it.
+**[SEC-327]** When a blocklist entry matches an installed plugin, the plugin is disabled at the next load, its data is kept, the user sees `Blocked: <reason>`, and the audit log records `blocklist-hit` ([SEC-149]). The user can uninstall it. The user can turn it on again only with `ilium plugin enable <id> --accept-risk`, or by installing an update signed by another trusted key of the same publisher.
 
 ## Safe mode
 

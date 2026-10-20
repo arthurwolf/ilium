@@ -390,7 +390,7 @@ The review dialog lists the grant in plain words. The grant `settings.contribute
 │ By Example. Keeps a searchable history of copied text.     │
 │                                                            │
 │ Permissions                                                │
-│   Adds settings to the Terminal tab            low risk    │
+│   Adds settings to the Terminal tab         normal risk    │
 │   Always granted: settings of this plugin.                 │
 │                                                            │
 │                          [ Cancel ]  [ Install ]           │

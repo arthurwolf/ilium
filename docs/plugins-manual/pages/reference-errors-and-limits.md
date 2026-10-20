@@ -449,7 +449,8 @@ No new `error-code` case exists. The extended functions reuse the 15 codes. Code
 | `http.open-stream` | `not-permitted`, `quota-exceeded` | `network`, `timed-out`, `rate-limited` (in `http-stream-closed`) |
 | `vector.embed` | `unsupported`, `invalid-argument` | `network`, `rate-limited`, `timed-out` |
 | `vector.upsert`, `create-index` | `quota-exceeded`, `invalid-argument` | none |
-| `vector.top-k`, `remove-entries`, `drop-index` | `not-found` (unknown index id), `invalid-argument` | none |
+| `vector.top-k`, `remove-entries` | `not-found` (unknown index id), `invalid-argument` | none |
+| `vector.drop-index` | none; the call returns nothing, so an unknown index id is ignored | none |
 | `process.spawn` | `not-permitted`, `quota-exceeded` (`children`), `not-found` | exit status in `child-exited` |
 | `timers.at` | `invalid-argument` (past by more than 1 s), `quota-exceeded` | none |
 | `journal.log-event` | `rate-limited` | none |

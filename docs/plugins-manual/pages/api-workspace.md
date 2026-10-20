@@ -271,7 +271,7 @@ fn ask_all() -> Vec<(String, Result<RequestId, PluginError>)> {
                 command: "report-busy".into(),
                 arguments_json: "{}".into(),
             };
-            (session.name, sessions::send(&request))
+            (session.name, sessions::send(request))
         })
         .collect()
 }

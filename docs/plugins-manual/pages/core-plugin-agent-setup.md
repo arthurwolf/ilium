@@ -126,7 +126,7 @@ The plugin is replaceable. A replacement must provide the service and the three 
       "fs.read:agent-config:claude", "agent-config.propose:claude",
       "fs.read:agent-config:codex", "agent-config.propose:codex",
       "fs.read:project", "fs.write:project",
-      "projects.read", "settings.read-kernel:agent-setup",
+      "projects.read", "settings.read-kernel:setup",
       "services.provide:ilium.core.agent-setup/install",
       "extensions.provide:ilium.core.agent-setup/instruction-blocks",
       "extensions.provide:ilium.core.agent-setup/targets",
@@ -206,7 +206,7 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "fs.read:project",
       "fs.write:project",
       "projects.read",
-      "settings.read-kernel:agent-setup",
+      "settings.read-kernel:setup",
       "services.provide:ilium.core.agent-setup/install",
       "extensions.provide:ilium.core.agent-setup/instruction-blocks",
       "extensions.provide:ilium.core.agent-setup/targets",
@@ -694,7 +694,7 @@ export function onAttach(): void {
 
 #### Owner side: the veto hook before an install
 
-`before-install` is a veto hook with high risk. The plugin runs it before every write or proposal with the target, the block and the path. A handler may refuse, for example a policy plugin that forbids edits to a shared team file. A refusal completes the request as `refused` with the code `extension.vetoed`. The plugin then shows the reason and writes nothing. See [events](/pages/api-events/) and [requests and outcomes](/pages/requests-and-outcomes/).
+`before-install` is a veto hook with high risk. The plugin runs it before every write or proposal with the target, the block and the path. A handler may refuse, for example a policy plugin that forbids edits to a shared team file. A refusal completes the request as `refused(conflict)` whose message starts with the prefix `extension.vetoed`. The plugin then shows the reason and writes nothing. See [events](/pages/api-events/) and [requests and outcomes](/pages/requests-and-outcomes/).
 
 **Rust**
 
@@ -713,7 +713,7 @@ fn on_hook_done(&mut self, done: RequestResult) -> Vec<Submission> {
     let Some((target, block)) = self.pending.remove(&done.request) else { return Vec::new() };
     match done.outcome {
         Outcome::Ok => self.write_block(&target, &block),
-        Outcome::Refused(refusal) if refusal.code == "extension.vetoed" => {
+        Outcome::Refused(refusal) if refusal.code == "conflict" && refusal.message.starts_with("extension.vetoed") => {
             self.show_notice(format!("Install stopped: {}", refusal.message)); // no write happens
             Vec::new()
         }
@@ -741,7 +741,7 @@ export function onHookDone(request: bigint, outcome: { tag: string; val?: { code
   if (item === undefined) return [];
   pending.delete(request);
   if (outcome.tag === 'ok') return writeBlock(item.target, item.block);
-  if (outcome.tag === 'refused' && outcome.val?.code === 'extension.vetoed') {
+  if (outcome.tag === 'refused' && outcome.val?.code === 'conflict' && outcome.val?.message?.startsWith('extension.vetoed')) {
     showNotice(`Install stopped: ${outcome.val.message}`); // no write happens
     return [];
   }

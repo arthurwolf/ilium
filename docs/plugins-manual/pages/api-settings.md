@@ -146,7 +146,7 @@ The call has a deadline of 100 ms. A timeout, a trap or a stopped plugin refuses
 
 ### Dynamic content
 
-These calls change a row while the plugin runs. They need no grant, because they cover only the plugin's own rows. They are limited to 10 calls per second per plugin, in total, and they are coalesced per row. A call over the limit returns `rate-limited`. A call that names an unknown key or id returns `not-found`.
+These calls change a row while the plugin runs. They need no grant, because they cover only the plugin's own rows. They are limited to 10 calls per second per plugin, all kinds together, and nothing is coalesced. A call over the limit returns `rate-limited`. A call that names an unknown key or id returns `not-found`.
 
 | Call | Rust | TypeScript | Applies to | Effect |
 |---|---|---|---|---|

@@ -229,7 +229,7 @@ The capture is hand-composed to show the format of the plugin log lines. The `em
 | `create-index` | `invalid-argument` | `dimensions` is 0 |
 | `upsert` | `quota-exceeded` | The entry count over all indexes reaches `vector_entries` |
 | `upsert` | `invalid-argument` | A vector length differs from the dimensions of the index |
-| `upsert`, `top-k`, `remove-entries`, `drop-index` | `not-found` | The `index-id` does not exist (never created, already dropped or owned by another plugin). `remove-entries` ignores an id that is not in the index. `drop-index` has no error channel, so an unknown id is ignored |
+| `top-k`, `remove-entries` | `not-found` | The `index-id` does not exist (never created, already dropped or owned by another plugin). `remove-entries` ignores an id that is not in the index. `drop-index` has no error channel, so an unknown id is ignored |
 | `top-k` | `invalid-argument` | The query length differs from the dimensions, or `k` is 0 or above 100 |
 
 ### Limits

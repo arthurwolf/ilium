@@ -154,7 +154,7 @@ write returns unsupported and a read returns nothing.</figcaption>
 | Grant held, text on the clipboard | Writes the text. Returns `ok`. | Returns the text. |
 | Clipboard holds no text (an image, or nothing) | Not applicable. | Returns `none`. No error. |
 | Empty string written | Accepted. Replaces the clipboard text with an empty text. Returns `ok`. | Returns an empty string. |
-| Text larger than 1 MiB (1,048,576 UTF-8 bytes) | `invalid-argument`. Nothing is written. The text is never truncated. | Not applicable. |
+| Text larger than 64 KiB (65,536 UTF-8 bytes) | `invalid-argument`. Nothing is written. The text is never truncated. | Not applicable. |
 | No route on this client | `unsupported`. | Returns `none`. |
 | Grant declined by the user | `not-permitted`. | Returns `none`. A warn line goes to the plugin log. |
 | Grant revoked during the call | `revoked`. The plugin is re-activated with the reduced grant set. | Returns `none`, because `read-text` has no error result. A warn line goes to the plugin log. |
@@ -165,7 +165,7 @@ Rules that follow from the table:
 - A declined or revoked read is not reported as an error. The plugin cannot tell "no text" from
   "not allowed" by the return value alone. The warn line in the plugin log is the only record of
   a refused read.
-- `write-text` counts the 1 MiB limit in UTF-8 bytes, not in characters. A text of 300,000
+- `write-text` counts the 64 KiB limit in UTF-8 bytes, not in characters. A text of 300,000
   characters that take four bytes each is 1.2 MB, so it is refused.
 - A revoked grant does not make the plugin fail. Revocation re-activates the plugin, as described
   in the grant lifecycle.

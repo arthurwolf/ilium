@@ -429,9 +429,9 @@ The extended contract adds limits whose purpose is safety. They are fixed by the
 | Status segments and frame slots | 10 updates per second per slot (a status segment id is a slot) | Updates are coalesced |
 | Geocoding | 1 request per second per plugin, 10 s timeout, 24 h cache | `rate-limited` with `retry-after-ms` |
 | Open HTTP streams | `http_streams` (default 4, T1 up to 16) and `session_http_streams` (64); see [Errors and limits](/pages/reference-errors-and-limits/#requestable-limits) | `quota-exceeded` |
-| Pending HTTP requests | `pending_requests` (default 64, T1 up to 256, ABI-013) | `busy` with `retry-after-ms` |
+| Pending HTTP requests | `pending_requests` (default 64, T1 up to 256, ABI-013) | `busy` |
 | Spawned children | `children` (default 2, T1 up to 8) and the shared `session_processes` (16) | `quota-exceeded` |
-| Concurrent `process.run` | the shared `session_processes` (16) | `busy` with `retry-after-ms` |
+| Concurrent `process.run` | the shared `session_processes` (16) | `busy` |
 | Durable timers | `durable_timers`: 64 (T1 up to 256) | `quota-exceeded` |
 | Package assets | `package_assets_mib`: 64, T1 up to 256 | `manifest.asset-size` at install |
 | `restructure` batch | 256 operations | The batch is refused |
