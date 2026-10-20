@@ -3572,6 +3572,18 @@
     ]
   },
   {
+    "id": "TITLE-02",
+    "title": "For Codex, use the official thread name",
+    "explanation": "“Name Codex panes with the thread name Codex saved on disk instead of asking the AI, so those panes make no title calls.”",
+    "specimen": "`For Codex, use the official thread name · ☑ On` versus `☐ Off`.",
+    "states": "on reads the name from `~/.codex/session_index.jsonl`; off keeps AI titles for Codex panes.",
+    "motion": "static.",
+    "caveat": "titles you set yourself always win; Codex names a thread some time after the first turn, so a new pane stays untitled until then.",
+    "frames": [
+      "`For Codex, use the official thread name · ☑ On` versus `☐ Off`."
+    ]
+  },
+  {
     "id": "TRIGGER-01",
     "title": "Startup complete",
     "explanation": "“Choose whether Ilium may restructure all projects after initial tree, pane, transcript, and terminal replay load.”",

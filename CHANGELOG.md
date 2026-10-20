@@ -13,11 +13,27 @@ development period. Dates are commit dates (`YYYY-MM-DD`).
 
 ## [Unreleased]
 
+### Added
+
+- Settings -> Titles has a new On/Off row, "For Codex, use the official thread name". When on, Codex panes are titled from the thread name Codex saved in `~/.codex/session_index.jsonl` instead of an AI call, so they cost no title requests; titles you set yourself still win. Also settable as `inference.codex_official_thread_names` through the control API.
+- The F9 "Full diagnostic" overlay, which every dialog and error popover opens for its full text, now has a clickable `[ Copy ]` button and a `c` key that copy the whole diagnostic to the clipboard.
+
 ### Fixed
+- Codex agents with large transcripts are auto-named again: the title-eligibility scan no longer gives up at 1 MiB per line or 16 MiB in total, it skips oversized records and streams up to 2 GiB.
+- Closing a pane that is already gone (a duplicate close racing a restructure) is now a quiet no-op, and a failed request aimed at a removed node no longer becomes a session-wide blocking error that put the yellow warning triangle on every agent until the server restarted.
+- A window the server drops while it is running (for example after a failed lag resynchronization) is relaunched automatically when the session server is still live, at most five times per ten minutes, instead of leaving a dead terminal. The exit error now reads "lost the connection to the ilium server" rather than "failed to enter raw/alternate-screen terminal mode".
+- When a state resynchronization gives up, the server log lists why each of the eight attempts was discarded (tree changed, pane output moved, pane session replaced, tree grew).
 - Keep the terminal parser's bounded metadata buffer on the heap so pane startup does not exhaust debug worker stacks.
 - Scanner recommendations require at least one correctly solved agentic task that used a native tool call. Visual recommendations accept at least 80% correct image answers despite unavailable requests, while checking completion and score bounds.
 
 ### Changed
+- Voxel Landscape saved Minecraft worlds: the first viewport step, which collects the model requirements of every chunk in view, runs on several worker threads with one model compiler each (it ran on one thread), so the first frame of a large camera view starts sooner. Results are merged in chunk order and the rendered output is unchanged.
+- Voxel Landscape saved Minecraft worlds: camera-route windows span up to 15 by 15 chunks, one saved map merges up to three windows (1,152 chunks), and the storage charge per window is 64 MiB. A save with no window of the requested size falls back to 11 by 11 chunks.
+- Voxel Landscape saved-world routes may pass through chunks that were never generated; those cells draw as holes instead of refusing the route.
+- Voxel Landscape saved Minecraft worlds: a camera view may cover up to 1,024 saved chunks (was 512), and its projected route read loads all of them (retained-storage charge 384 MiB, was 192 MiB; the saved-scene working budget and the shared Voxel Landscape working-bytes ceiling are 2 GiB, were 1 GiB), so larger terminals (for example 160 by 50 cells) find routes instead of failing with no candidate.
+- The Voxel Landscape saved-maps route builds its viewport tiles on up to eight worker threads, each with its own model compiler; tiles are merged in chunk order, so the rendered output is unchanged while the first frame of a large save arrives sooner.
+- A resource-pack folder selected in the Voxel Landscape animation is snapshotted when it loads: Ilium reads every file once into memory and renders from that copy, so edits made to the folder during a route no longer change the route, and the immutable definition cache applies to folders as it already did to ZIPs. A folder larger than the 256 MiB archive cap now fails to load with a limit error instead of loading partly.
+- Attaching to a terminal or agent pane shows its current screen at once. The server sends a snapshot of the visible screen instead of replaying the whole retained output, so long-idle panes no longer fast-forward through their history. Older output loads on demand when you scroll up, in bounded pages, and the server keeps the retained output as before.
 - Scanner readers accept the 50-question agentic benchmark and require 15 graded agentic answers, a positive measured score and consistent published totals before selecting a model. Previous benchmark publications remain readable during atomic rollout.
 - Progress diagnostics distinguish successful checks from reported task progress, retain a bounded check timeline, and show the latest successful report as a structured tree beside timing and health details. Quiet tasks say “no progress reported”; probe guidance requires actual local/remote job identity and final results.
 - Scanner readers accept the expanded versioned 20-text/10-image benchmark; large-context selection requires five completed questions with measured inputs of at least 200,000 tokens. Previous scanner publications remain readable during rollout.
@@ -32,6 +48,7 @@ development period. Dates are commit dates (`YYYY-MM-DD`).
 - Padding settings tab with Disabled, Size dependent (default threshold 200 columns, minimum 11) and Enabled cards, plus a Padding fine-tuning dialog with a live preview. Tree and right panels (terminals and agents, editors, boards) get independent 0 to 3 cell padding per side, optionally linked, saved under `[padding]`. Padding moves only the content inward; toolbars, banners and the progress footer stay full width.
 
 ### Fixed
+- Closing a pane whose worktree is being inspected no longer fails when a process exits during the scan; the scan treats a vanished process as gone, as it already did for missing `/proc` entries.
 - Agent-launcher errors wrap and grow above the footer. Worktree and message dialogs grow for diagnostics; choice and plugin errors keep their complete text. F9 opens a scrollable full diagnostic from compact status rows, settings, tooltips and dialogs without losing the underlying draft.
 - Terminal output reclaims oldest raw and visual history before allocation admission. History reclamation preserves the live screen, cursor, terminal modes and incomplete escape/UTF-8 sequences; optional oversized history operations no longer leave a permanent pane command fence. Raw history uses bounded segments and parser control-string storage is finite.
 - Idle Claude panes no longer appear busy because a truncated custom footer contains an elapsed time and ellipsis. Agent activity indicators now warn when successful background observations are stale; busy or oversized terminal evidence cannot refresh the warning or block checks of other panes.
@@ -67,6 +84,7 @@ development period. Dates are commit dates (`YYYY-MM-DD`).
 - `ilium recap` writes a short (at most 40 words) and a long (at most 250 words) factual recap of each selected agent or shell pane, using the same selection options as `ilium panes` and `ilium broadcast`. Agent recaps read only the transcript bound to the pane's own session and project; shell recaps read bounded screen text. Output is JSONL or Markdown, with explicit states (`summarized`, `idle`, `denied`, `unavailable`, `stale`, `failed`), evidence age, validated file pointers, and goal state read from the transcript rather than written by the model.
 
 ### Changed
+- The Beach animation's V8 render deadline is 250 ms instead of 100 ms, and the host ceiling for every V8 render moved with it. The cold first frame of Beach Rich took 119.6 ms, so the old budget aborted it with a deadline error; steady frames stay near 33 ms.
 
 - Client startup retries transient accounting contention without enlarging capacity limits. Terminal keys wait in the bounded per-pane queue, bulk paste remains atomic, board detail edits retain native input while snapshots are saved, and typed voice offers wait for asynchronous startup before reporting failure. Icon arrows traverse the complete picker catalogue. Joined icon-search observation tickets no longer retain the retired native worker's memory charge. Successful board reloads replace stale reload guidance with confirmation. Wind declares its pointer-sensitive rendering contract so mouse force invalidates cached frames.
 - Pointer input consumes ready terminal emission acknowledgements before hit testing and retains complete mouse gestures while matching geometry is pending, while horizontally entering live tree rows retain their exact emitted semantic targets. Shutdown retains accepted filesystem writes beyond its warning deadline, and retained-key error messages keep typed characters private. Accepted terminal submissions prepare never-displayed targets without changing focus, and emitted virtual folder/chatroom rows remain actionable only while their current owners resolve. Path pastes validate in bounded turns before inserting any text; narrow copy previews keep their identifying title visible.
@@ -144,6 +162,8 @@ development period. Dates are commit dates (`YYYY-MM-DD`).
 - `ilium close-pane` closes the pane it runs in (or `--pane <id>` in the same session) as JSONL. `--worktree remove` and `remove-and-branch` also remove the pane's Ilium-created worktree through the same checks as the worktree manager, so a worktree agent can wrap up with one command after it commits and merges.
 
 ### Fixed
+- Saved Java worlds in the Voxel Landscape animation: camera-route search keeps a margin inside the saved area, and tiny saves keep their full area so they still propose routes.
+- Saved Java worlds in the Voxel Landscape animation: the camera-route survey no longer stops at the first unfinished chunks, so it keeps searching for routes that qualify.
 - The "Unfreezing agent…" status line now clears once the unfrozen agent's pane takes its tree slot, instead of staying on screen.
 - Closing a resumed agent pane with worktree removal no longer blocks on the pane's own process. Processes whose working directory another user cannot read (for example `systemd --user`) no longer block removal, while any readable process still using the worktree does.
 - `ilium new-pane --worktree` now places new worktrees at the Settings -> Git "Worktree location" template, as the TUI dialog already did, instead of always using a sibling `<repo>.worktrees` directory.

@@ -281,6 +281,21 @@ pub(crate) enum PaneCommand {
         bytes: Vec<u8>,
         complete: bool,
     },
+    /// A complete screen at `sequence`, from attach. Applied like a replay, but
+    /// it also starts the older-history chain that `PrependHistory` extends.
+    Snapshot {
+        sequence: u64,
+        bytes: Vec<u8>,
+        complete: bool,
+    },
+    /// Older journal output that continues the engine's history exactly where
+    /// `before_sequence` points. Stale replies are ignored by the engine.
+    PrependHistory {
+        before_sequence: u64,
+        first_sequence: u64,
+        bytes: Vec<u8>,
+        reaches_journal_start: bool,
+    },
     Resize(u16, u16),
     Budget(u16),
     ScrollUp(u16),
@@ -307,7 +322,10 @@ pub(crate) enum PaneCommand {
 impl PaneCommand {
     fn bytes(&self) -> usize {
         match self {
-            Self::Output { bytes, .. } | Self::Replay { bytes, .. } => bytes.capacity(),
+            Self::Output { bytes, .. }
+            | Self::Replay { bytes, .. }
+            | Self::Snapshot { bytes, .. }
+            | Self::PrependHistory { bytes, .. } => bytes.capacity(),
             _ => std::mem::size_of::<Self>(),
         }
     }
@@ -692,7 +710,10 @@ impl PaneFrontend {
     pub(crate) fn submit(&mut self, body: PaneCommand) -> Result<u64, PaneCommand> {
         let output = matches!(
             body,
-            PaneCommand::Output { .. } | PaneCommand::Replay { .. }
+            PaneCommand::Output { .. }
+                | PaneCommand::Replay { .. }
+                | PaneCommand::Snapshot { .. }
+                | PaneCommand::PrependHistory { .. }
         );
         if !(self.pending.is_empty()
             || output && self.output_backpressure && self.older_intents == 0)
@@ -1245,7 +1266,12 @@ impl Job for ParserJob {
                             }
                             PaneCommand::Replay {
                                 sequence, bytes, ..
+                            }
+                            | PaneCommand::Snapshot {
+                                sequence, bytes, ..
                             } => {
+                                let is_snapshot =
+                                    matches!(&command.body, PaneCommand::Snapshot { .. });
                                 engine.state.apply_ordered_replay(
                                     bytes,
                                     *sequence,
@@ -1276,6 +1302,29 @@ impl Job for ParserJob {
                                         Ok(())
                                     },
                                 )?;
+                                engine.state.set_history_base(
+                                    is_snapshot.then(|| sequence.saturating_add(1)),
+                                );
+                            }
+                            PaneCommand::PrependHistory {
+                                before_sequence,
+                                first_sequence,
+                                bytes,
+                                ..
+                            } => {
+                                // Stale replies (base moved since the request) are dropped here.
+                                if engine.state.history_base_sequence() == Some(*before_sequence) {
+                                    let peak = engine.state.prepend_peak_bytes(bytes.len());
+                                    try_state_budget(
+                                        &mut engines,
+                                        peak,
+                                        &shared,
+                                        &context,
+                                        &command.target,
+                                        &mut command.blocked,
+                                    )?;
+                                    engine.state.prepend_history(bytes, *first_sequence);
+                                }
                             }
                             PaneCommand::Resize(rows, cols) => {
                                 validate_geometry(*rows, *cols)?;
@@ -1428,7 +1477,9 @@ impl Job for ParserJob {
                     .store(true, Ordering::Release);
                 if matches!(
                     &command.body,
-                    PaneCommand::Replay { .. } | PaneCommand::Output { .. }
+                    PaneCommand::Replay { .. }
+                        | PaneCommand::Snapshot { .. }
+                        | PaneCommand::Output { .. }
                 ) && (command.previewed_bytes == 0
                     || command
                         .cursor
@@ -1457,6 +1508,8 @@ impl Job for ParserJob {
                     command.body,
                     PaneCommand::Output { .. }
                         | PaneCommand::Replay { .. }
+                        | PaneCommand::Snapshot { .. }
+                        | PaneCommand::PrependHistory { .. }
                         | PaneCommand::Resize(..)
                 )
             {
@@ -1469,7 +1522,9 @@ impl Job for ParserJob {
                     .store(blocked.pressure as usize, Ordering::Release);
                 if matches!(
                     command.body,
-                    PaneCommand::Output { .. } | PaneCommand::Replay { .. }
+                    PaneCommand::Output { .. }
+                        | PaneCommand::Replay { .. }
+                        | PaneCommand::Snapshot { .. }
                 ) {
                     command
                         .target

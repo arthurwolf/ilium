@@ -135,6 +135,8 @@ impl ProjectionRetention {
             PaneRecapScreen { .. }
             | ScreenUpdate { .. }
             | TerminalReplay { .. }
+            | TerminalSnapshot { .. }
+            | TerminalHistory { .. }
             | VoiceTextOffered { .. }
             | VoiceTextResult { .. }
             | ProgressMonitorCheckCompleted { .. }

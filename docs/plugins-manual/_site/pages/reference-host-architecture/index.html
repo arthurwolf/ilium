@@ -1,0 +1,1060 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Host architecture | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details open><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/" aria-current="page">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Reference</b></p>
+<h1>Host architecture</h1>
+
+<p>This page is the normative description of the plugin host: which crates it is made of, which operating system processes run plugin code, which side and tier each process hosts, who owns each registry, how the host starts and stops, and what a failure takes down. A developer who implements the host builds it from this page and the pages it links. A test author derives the structural tests from the requirement ids in square brackets, for example <code>[HST-001]</code>.</p>
+<p>The words MUST, SHOULD and MAY have their usual meaning in a specification. MUST is a requirement that a test checks. SHOULD is a default that an implementation may change with a stated reason. MAY is an option. The ids are collected, with a test method for each, in <a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a>.</p>
+<p>Terms used here are defined once. A <strong>host</strong> is the code that loads plugin components, calls their exports and serves their imports in one process for one side. A <strong>side</strong> is one of <code>server</code>, <code>client</code> or <code>scene</code> (see <a href="/pages/worlds-and-sides/">Worlds and sides</a>). A <strong>tier</strong> is T0 to T3 (see <a href="/pages/architecture/">Architecture</a>). A <strong>Store</strong> is the Wasmtime object that owns the memory and state of one component instance. An <strong>Engine</strong> is the Wasmtime object that holds the compiler and its configuration. The <strong>dispatcher</strong> is the host component that turns kernel events into batches for plugin queues and turns returned submissions into kernel work. The <strong>sandbox helper</strong> is the separate process that runs T2 and T3 components.</p>
+<h2 id="you-will-need">You will need</h2>
+<ul>
+<li>The concept pages <a href="/pages/architecture/">Architecture</a>, <a href="/pages/worlds-and-sides/">Worlds and sides</a> and <a href="/pages/lifecycle/">Lifecycle</a>.</li>
+<li>For the numbers that this page refers to, <a href="/pages/reference-host-runtime/">Host runtime</a>, <a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a> and <a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a>.</li>
+</ul>
+<h2 id="crate-layout">Crate layout</h2>
+<p>The platform adds four crates to the workspace and changes the boundaries of two existing ones. The rule that governs the layout is the existing layering rule of the repository: a pure crate has no I/O, an adapter crate owns one external system, and no crate reaches around the crate that owns a concern.</p>
+<table>
+<thead>
+<tr>
+<th>Crate</th>
+<th>Kind</th>
+<th>Contents</th>
+<th>Must not contain</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ilium-plugin-api</code></td>
+<td>pure</td>
+<td>Manifest types, capability names and risk classes, contribution types, event, intent, outcome and error types mirrored from the WIT package <code>ilium:plugin@0.1.0</code>, limit keys and ceilings, requirement-neutral constants such as epoch period</td>
+<td>Wasmtime, V8, tokio, file or socket access</td>
+</tr>
+<tr>
+<td><code>ilium-plugin-host</code></td>
+<td>adapter</td>
+<td>The Wasmtime embedding, linker construction, instantiation, the dispatcher, call classes and deadlines, quota accounting, the helper client, the telemetry registry, the conformance harness hooks</td>
+<td>Terminal, tree or UI logic; direct <code>libc</code>, <code>std::os::unix</code> or <code>windows-sys</code> use</td>
+</tr>
+<tr>
+<td><code>ilium-plugin-helper</code></td>
+<td>binary</td>
+<td>The sandbox helper: a small <code>main</code> that confines itself, owns one Engine and one Store set, and speaks the parent-helper protocol</td>
+<td>Any path to the session server or the user's files except granted scopes</td>
+</tr>
+<tr>
+<td><code>ilium-plugin-sdk</code></td>
+<td>library for plugins</td>
+<td>The Rust SDK that plugins depend on, generated from the WIT package, plus the <code>#[ilium_plugin]</code> macro (<code>@ilium/plugin-sdk</code> is the TypeScript counterpart)</td>
+<td>Any Ilium crate dependency</td>
+</tr>
+<tr>
+<td><code>ilium-plugin-conformance</code></td>
+<td>test only</td>
+<td>Language-neutral fixtures and the Rust and TypeScript guest components that exercise each interface</td>
+<td>Production code</td>
+</tr>
+<tr>
+<td><code>ilium-plugin-bench</code></td>
+<td>test only</td>
+<td>The benchmark programs B1 to B24 of <a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></td>
+<td>Production code</td>
+</tr>
+</tbody>
+</table>
+<p>The helper binary is installed beside the <code>ilium</code> and <code>ilium-server</code> binaries by the same installer, and the host finds it by looking in the directory of its own executable. A missing helper is not an error for T1-only installs: T2 and T3 packages are refused with <code>host.helper-missing</code> (see <a href="/pages/reference-host-helper/">Sandbox helper</a>).</p>
+<h3 id="dependency-edges">Dependency edges</h3>
+<p>The table lists every allowed edge that involves a plugin crate. Any edge not listed is forbidden.</p>
+<table>
+<thead>
+<tr>
+<th>From</th>
+<th>To</th>
+<th>Allowed</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ilium-plugin-host</code></td>
+<td><code>ilium-plugin-api</code></td>
+<td>yes</td>
+<td>The host serves the types the API crate defines</td>
+</tr>
+<tr>
+<td><code>ilium-plugin-host</code></td>
+<td><code>ilium-execution</code></td>
+<td>yes</td>
+<td>Quota groups and the job worker bank</td>
+</tr>
+<tr>
+<td><code>ilium-plugin-host</code></td>
+<td><code>ilium-platform</code></td>
+<td>yes</td>
+<td>Process control, secure file access, file locks, thread priority</td>
+</tr>
+<tr>
+<td><code>ilium-plugin-host</code></td>
+<td><code>ilium-logging</code></td>
+<td>yes</td>
+<td>The plugin log and host log</td>
+</tr>
+<tr>
+<td><code>ilium-plugin-host</code></td>
+<td><code>ilium-transport</code></td>
+<td>no</td>
+<td>The host does not own a connection to clients</td>
+</tr>
+<tr>
+<td><code>ilium-plugin-host</code></td>
+<td><code>ilium-core</code></td>
+<td>no</td>
+<td>The host sees the tree only through a trait that the server and client implement (the <strong>kernel facade</strong>)</td>
+</tr>
+<tr>
+<td><code>ilium-server</code></td>
+<td><code>ilium-plugin-host</code></td>
+<td>yes</td>
+<td>Owns the server host and implements the kernel facade</td>
+</tr>
+<tr>
+<td><code>ilium-client</code></td>
+<td><code>ilium-plugin-host</code></td>
+<td>yes, through one module</td>
+<td>Owns the client host and scene host</td>
+</tr>
+<tr>
+<td><code>ilium-client</code> UI modules (<code>ui</code>, <code>tree_ui</code>, <code>modal</code> and the other presentation modules)</td>
+<td>Wasmtime types</td>
+<td>no</td>
+<td>UI code sees plugin output only as <code>ilium-plugin-api</code> values</td>
+</tr>
+<tr>
+<td><code>ilium-ipc</code></td>
+<td><code>ilium-plugin-api</code></td>
+<td>yes</td>
+<td>Carries typed plugin records</td>
+</tr>
+<tr>
+<td><code>ilium-ipc</code></td>
+<td><code>ilium-plugin-host</code></td>
+<td>no</td>
+<td>IPC never carries Wasmtime values</td>
+</tr>
+<tr>
+<td><code>ilium-core</code></td>
+<td>any plugin crate</td>
+<td>no</td>
+<td>Core stays pure domain</td>
+</tr>
+<tr>
+<td><code>ilium-detect</code></td>
+<td>any plugin crate</td>
+<td>no</td>
+<td>Detection stays a pure function</td>
+</tr>
+<tr>
+<td><code>ilium-pty</code></td>
+<td>any plugin crate</td>
+<td>no</td>
+<td>PTY code never learns about plugins</td>
+</tr>
+<tr>
+<td><code>ilium</code> (the bin)</td>
+<td><code>ilium-plugin-host</code></td>
+<td>yes</td>
+<td>The CLI process host (<code>requires_server: false</code>)</td>
+</tr>
+<tr>
+<td>plugin source</td>
+<td>any Ilium crate</td>
+<td>no</td>
+<td>Plugins depend only on <code>ilium-plugin-sdk</code></td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>[HST-001]</strong> The workspace MUST contain the crates <code>ilium-plugin-api</code>, <code>ilium-plugin-host</code> and <code>ilium-plugin-helper</code>, and <code>ilium-plugin-api</code> MUST NOT depend on Wasmtime, V8, tokio or any I/O crate.</li>
+<li><strong>[HST-002]</strong> The dependency edges in the table above MUST hold, and a workspace test MUST fail when <code>cargo metadata</code> shows a forbidden edge.</li>
+<li><strong>[HST-003]</strong> <code>ilium-core</code> MUST NOT depend on any plugin crate.</li>
+<li><strong>[HST-004]</strong> <code>ilium-ipc</code> MUST carry plugin traffic as typed records from <code>ilium-plugin-api</code> and MUST NOT carry or link Wasmtime values.</li>
+<li><strong>[HST-005]</strong> Client presentation modules MUST NOT name Wasmtime types. Only one client module, <code>plugin_host</code>, MAY depend on <code>ilium-plugin-host</code>.</li>
+<li><strong>[HST-006]</strong> <code>ilium-plugin-host</code> MUST reach the tree, panes, settings and commands only through the kernel facade trait, so that the host can be tested with a fake kernel and no PTY.</li>
+</ul>
+<p>The kernel facade is a Rust trait with one method per intent family and one per host import family. Its shape is an implementation choice, but it MUST be object safe and MUST return the outcome types of <code>ilium-plugin-api</code>.</p>
+<pre><code class="language-rust">// ilium-plugin-host/src/facade.rs (illustration of the contract, not generated)
+pub trait KernelFacade: Send + Sync {
+    /// Apply one intent that the caller already authorised. The facade
+    /// never sees Wasmtime values; it sees api-crate types only.
+    fn apply_intent(&amp;self, origin: &amp;Origin, intent: Intent) -&gt; IntentResult;
+    /// Read-only views of the tree, panes and agents for host imports.
+    fn tree(&amp;self) -&gt; &amp;dyn TreeRead;
+    fn panes(&amp;self) -&gt; &amp;dyn PaneRead;
+    /// Which side this facade serves (server, client or cli).
+    fn process_kind(&amp;self) -&gt; ProcessKind;
+}
+</code></pre>
+<h2 id="process-map">Process map</h2>
+<p>Four kinds of operating system process can run plugin code. The table is the complete list.</p>
+<table>
+<thead>
+<tr>
+<th>Process</th>
+<th>How many</th>
+<th>Hosts which sides</th>
+<th>Hosts which tiers</th>
+<th>Thread that owns the host</th>
+<th>When the process exits</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Session server (<code>ilium-server</code>)</td>
+<td>one per session</td>
+<td><code>server</code></td>
+<td>T1 in process; T2 and T3 through helpers</td>
+<td>The server runtime: the dispatcher task runs on the server's tokio runtime, calls run on the plugin executor</td>
+<td>Shutdown sequence below; every helper it spawned is terminated; clients see the connection close</td>
+</tr>
+<tr>
+<td>Client (<code>ilium</code>, attached)</td>
+<td>one per attached client</td>
+<td><code>client</code>, <code>scene</code></td>
+<td>T1 in process; T2 and T3 through helpers</td>
+<td>The client event loop owns the host object; calls run on the client plugin executor and the scene thread</td>
+<td>The client host stops; the server and other clients are unaffected</td>
+</tr>
+<tr>
+<td>CLI process (<code>ilium &lt;subcommand&gt;</code> for a <code>cli</code> entry with <code>requires_server: false</code>)</td>
+<td>one per invocation</td>
+<td><code>server</code> component only</td>
+<td>T1 in process; T2 and T3 through helpers</td>
+<td>The CLI main thread owns the host; calls run on a one-thread executor</td>
+<td>The host deactivates the plugin with <code>shutdown</code> and drops everything</td>
+</tr>
+<tr>
+<td>Sandbox helper (<code>ilium-plugin-helper</code>)</td>
+<td>one per T2 or T3 plugin per side per hosting process</td>
+<td>the side of its plugin</td>
+<td>T2 and T3 only</td>
+<td>The helper main thread runs a single-instance call loop; the parent owns the helper</td>
+<td>The parent counts a failure for that plugin side and restarts it under the restart rule</td>
+</tr>
+</tbody>
+</table>
+<p>A CLI process that connects to a running server (<code>requires_server: true</code>, the default) hosts nothing. It sends its request to the server, and the server host runs the plugin's <code>cli-invoked</code> handler.</p>
+<ul>
+<li><strong>[HST-007]</strong> A plugin side MUST be hosted by exactly one process at a time: the session server for <code>server</code>, an attached client for <code>client</code> and <code>scene</code>, or a CLI process for a <code>server</code> component that is run for a <code>requires_server: false</code> entry.</li>
+<li><strong>[HST-008]</strong> T1 components MUST run inside the process of their side and MUST NOT run in a helper.</li>
+<li><strong>[HST-009]</strong> T2 and T3 components MUST run only inside a sandbox helper, and the parent process MUST NOT instantiate a T2 or T3 component in its own Engine.</li>
+<li><strong>[HST-010]</strong> The exit of a client process, a CLI process or a helper MUST NOT stop the session server or any other plugin side.</li>
+</ul>
+<p>The server does not run <code>client</code> or <code>scene</code> components, and a client does not run <code>server</code> components. This corrects the loose phrase "the Ilium process" that earlier pages used: wherever a page says that a T1 plugin runs "in the Ilium process", it means the process that hosts that plugin's side, as this table defines.</p>
+<h3 id="diagram-processes-hosts-and-links">Diagram: processes, hosts and links</h3>
+<figure>
+<svg viewBox="0 0 440 330" role="img" aria-label="Session server, two clients, a CLI process and sandbox helpers with their plugin hosts and links" width="660" height="495">
+<title>Processes, hosts and IPC links</title>
+<desc>The session server holds the kernel and the server host. Two client processes each hold a client host and a scene host. A CLI process holds a one-shot server host. Helpers are child processes of whichever process owns the plugin side. Solid lines are the session socket. Dashed lines are helper pipes.</desc>
+<defs>
+<marker id="ha-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+<path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+</marker>
+</defs>
+<rect x="150" y="8" width="150" height="104" rx="6" fill="none" stroke="currentColor" stroke-width="2"/>
+<text x="225" y="26" font-size="11" text-anchor="middle" fill="currentColor">Session server</text>
+<rect x="162" y="36" width="126" height="28" rx="4" fill="none" stroke="currentColor"/>
+<text x="225" y="54" font-size="10" text-anchor="middle" fill="currentColor">Kernel and tree</text>
+<rect x="162" y="72" width="126" height="32" rx="4" fill="none" stroke="currentColor" stroke-dasharray="6 4"/>
+<text x="225" y="86" font-size="10" text-anchor="middle" fill="currentColor">Server host</text>
+<text x="225" y="98" font-size="9" text-anchor="middle" fill="currentColor">T1 in process</text>
+<rect x="8" y="150" width="150" height="86" rx="6" fill="none" stroke="currentColor" stroke-width="2"/>
+<text x="83" y="168" font-size="11" text-anchor="middle" fill="currentColor">Client A</text>
+<rect x="18" y="176" width="130" height="24" rx="4" fill="none" stroke="currentColor" stroke-dasharray="6 4"/>
+<text x="83" y="192" font-size="10" text-anchor="middle" fill="currentColor">Client host (T1)</text>
+<rect x="18" y="204" width="130" height="24" rx="4" fill="none" stroke="currentColor" stroke-dasharray="6 4"/>
+<text x="83" y="220" font-size="10" text-anchor="middle" fill="currentColor">Scene host (T1)</text>
+<rect x="292" y="150" width="140" height="86" rx="6" fill="none" stroke="currentColor" stroke-width="2"/>
+<text x="362" y="168" font-size="11" text-anchor="middle" fill="currentColor">Client B</text>
+<rect x="302" y="176" width="120" height="24" rx="4" fill="none" stroke="currentColor" stroke-dasharray="6 4"/>
+<text x="362" y="192" font-size="10" text-anchor="middle" fill="currentColor">Client host (T1)</text>
+<rect x="302" y="204" width="120" height="24" rx="4" fill="none" stroke="currentColor" stroke-dasharray="6 4"/>
+<text x="362" y="220" font-size="10" text-anchor="middle" fill="currentColor">Scene host (T1)</text>
+<line x1="160" y1="112" x2="100" y2="150" stroke="currentColor" marker-end="url(#ha-arrow)" marker-start="url(#ha-arrow)"/>
+<line x1="290" y1="112" x2="350" y2="150" stroke="currentColor" marker-end="url(#ha-arrow)" marker-start="url(#ha-arrow)"/>
+<text x="106" y="124" font-size="9" fill="currentColor">session socket</text>
+<rect x="170" y="150" width="112" height="56" rx="6" fill="none" stroke="currentColor" stroke-width="2"/>
+<text x="226" y="168" font-size="10" text-anchor="middle" fill="currentColor">CLI process</text>
+<text x="226" y="182" font-size="9" text-anchor="middle" fill="currentColor">requires_server: false</text>
+<text x="226" y="196" font-size="9" text-anchor="middle" fill="currentColor">one-shot server host</text>
+<rect x="8" y="270" width="120" height="44" rx="4" fill="none" stroke="currentColor"/>
+<text x="68" y="288" font-size="10" text-anchor="middle" fill="currentColor">Helper (T2/T3)</text>
+<text x="68" y="302" font-size="9" text-anchor="middle" fill="currentColor">one per plugin side</text>
+<rect x="160" y="270" width="120" height="44" rx="4" fill="none" stroke="currentColor"/>
+<text x="220" y="288" font-size="10" text-anchor="middle" fill="currentColor">Helper (T2/T3)</text>
+<text x="220" y="302" font-size="9" text-anchor="middle" fill="currentColor">child of the server</text>
+<rect x="312" y="270" width="120" height="44" rx="4" fill="none" stroke="currentColor"/>
+<text x="372" y="288" font-size="10" text-anchor="middle" fill="currentColor">Helper (T2/T3)</text>
+<text x="372" y="302" font-size="9" text-anchor="middle" fill="currentColor">child of client B</text>
+<line x1="83" y1="236" x2="68" y2="270" stroke="currentColor" stroke-dasharray="4 3" marker-end="url(#ha-arrow)"/>
+<line x1="372" y1="236" x2="372" y2="270" stroke="currentColor" stroke-dasharray="4 3" marker-end="url(#ha-arrow)"/>
+<path d="M225 112 L225 130 L440 130 L440 252 L230 252 L220 270" stroke="currentColor" stroke-dasharray="4 3" fill="none" marker-end="url(#ha-arrow)"/>
+</svg>
+<figcaption>The server and every client own their own host. A helper is a child of the process that owns its plugin side. The only link between server and client is the session socket.</figcaption>
+</figure>
+
+<h2 id="per-side-hosting">Per-side hosting</h2>
+<h3 id="server-host">Server host</h3>
+<p>There is one server host per session server. It owns the Engine of the server process, the plugin executor of the server, the dispatcher, the quota accounting for server-side plugin sides and the telemetry registry of the server. It hosts every <code>server</code> side of every enabled plugin, and the server side of a two-sided package. It is the only host that subscribes to the event journal (see <a href="/pages/api-events/">Events</a>).</p>
+<ul>
+<li><strong>[HST-011]</strong> A session MUST have exactly one server host, and the dispatcher MUST be the only subscriber of the kernel event journal on behalf of plugins.</li>
+<li><strong>[HST-012]</strong> Server-side plugin state (queues, failure counts, restart timers, quota buckets) MUST be kept per plugin per side in the server host and MUST survive the detach and attach of clients.</li>
+</ul>
+<h3 id="client-host">Client host</h3>
+<p>There is one client host per attached client process. Two clients attached to the same session have separate client hosts, separate Stores, separate widget state, separate failure counts and separate restart timers. A plugin that fails in client A keeps running in client B.</p>
+<ul>
+<li><strong>[HST-013]</strong> Each attached client MUST own its client host, and a failure in one client host MUST NOT change the failure count, restart timer or enabled state of the same plugin in another client.</li>
+<li><strong>[HST-014]</strong> A plugin disabled by the restart rule in one client MUST stay enabled in other clients, and the notice MUST be shown only to the client that disabled it.</li>
+</ul>
+<h3 id="scene-host">Scene host</h3>
+<p>The scene host runs inside the client process. It is a separate set of Stores (one per running scene instance) that share the client's Engine and epoch ticker. It has its own thread, the scene thread, so a slow frame never delays the client's render or input thread. The scene thread produces frames into a double buffer, and the compositor reads the newest complete frame at each client frame. The details are in <a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a> and <a href="/pages/reference-host-rendering/">Host rendering pipeline</a>.</p>
+<ul>
+<li><strong>[HST-015]</strong> Scene instances MUST live in Stores that are separate from the client host's Stores, and scene frame calls MUST run on a thread that is neither the client UI thread nor a client plugin executor thread.</li>
+<li><strong>[HST-016]</strong> A scene frame that is not ready when the compositor needs it MUST NOT delay the client frame. The compositor MUST reuse the previous complete frame.</li>
+</ul>
+<h3 id="job-instances">Job instances</h3>
+<p>A plugin that uses <code>jobs.run</code> gets a second kind of instance: a <strong>job instance</strong> of the same component, created for one job from the <code>InstancePre</code> of the plugin side (design decision A21 in <a href="/pages/background-jobs/">Background jobs</a>). Job instances are not the plugin's main instance. They have their own Store, their own memory limit (<code>job_memory_mib</code>) and no access to the plugin's main instance state. The number running at once is the plugin's <code>concurrent_jobs</code>. They run on the job worker bank of <code>ilium-execution</code>, not on the plugin executor. See <a href="/pages/api-jobs/">Jobs</a>.</p>
+<ul>
+<li><strong>[HST-017]</strong> A job MUST run in its own Store, MUST NOT share linear memory with the plugin's main instance, and MUST run on the job worker bank.</li>
+<li><strong>[HST-018]</strong> The count of live job instances of one plugin side MUST NOT exceed <code>concurrent_jobs</code>; further jobs wait in the job queue.</li>
+</ul>
+<h3 id="cli-process-host">CLI-process host</h3>
+<p>A <code>cli</code> entry with <code>requires_server: false</code> runs the plugin's <code>server</code> component in the CLI process. The host starts when the plugin is first needed for the command, activates the plugin with the trigger <code>cli:&lt;name&gt;</code>, delivers one <code>cli-invoked</code> event, waits until the plugin has returned its exit status (or the command deadline expires), and then deactivates with <code>shutdown</code> and exits. No tree exists in that process. Host imports that need the tree, panes or agents return <code>unavailable</code> with the message <code>no session</code>.</p>
+<ul>
+<li><strong>[HST-019]</strong> A CLI-process host MUST host only the plugin named by the entry plus the services it <code>requires</code>, and MUST NOT activate any other plugin.</li>
+<li><strong>[HST-020]</strong> In a CLI-process host, imports that need a session MUST return <code>unavailable</code> and MUST NOT start a server.</li>
+</ul>
+<h2 id="ownership">Ownership</h2>
+<p>One Engine per process. One Store per plugin instance. The table assigns each registry to exactly one owner and says how others see it.</p>
+<table>
+<thead>
+<tr>
+<th>Registry</th>
+<th>Owner</th>
+<th>Persisted where</th>
+<th>How other processes see it</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Package store (installed packages, content-addressed)</td>
+<td>The package directory under the Ilium data directory, written by <code>ilium plugin install</code></td>
+<td><code>&lt;data dir&gt;/plugins/packages/&lt;id&gt;/&lt;version&gt;/</code></td>
+<td>Every host reads it at start; the handshake carries id, version and content hash (see <a href="/pages/reference-host-ipc/">Host IPC protocol</a>)</td>
+</tr>
+<tr>
+<td>Grant store</td>
+<td>The server host (single writer, file lock from <code>ilium-platform</code>)</td>
+<td><code>$XDG_STATE_HOME/ilium/grants.json</code> (mode 0600), written atomically</td>
+<td>The server pushes <code>grants-changed</code> control records to clients; a CLI-process host reads the file under a shared lock</td>
+</tr>
+<tr>
+<td>Contribution registry (commands, settings tabs, decoration slots, panes, toolbar items, keys, scenes)</td>
+<td>Static part: each host for the sides it hosts. Retained part (decorations, virtual rows, status segments, frame slots, attention): the server host</td>
+<td>Not persisted except what the plugin saves</td>
+<td>Retained server contributions replicate to every client as <code>ContributionDelta</code></td>
+</tr>
+<tr>
+<td>Extension-point registry</td>
+<td>The host of the side that owns the point</td>
+<td>Not persisted</td>
+<td>A client-owned point exists only in that client; a server-owned point only on the server (see <a href="/pages/api-extension-points/">Extension points</a>)</td>
+</tr>
+<tr>
+<td>Service registry</td>
+<td>The server host for <code>server</code> providers, each client host for <code>client</code> providers</td>
+<td>Not persisted</td>
+<td>A service call is routed to the side that the manifest names; a cross-side call travels as a message</td>
+</tr>
+<tr>
+<td>Plugin enable state and failure counters</td>
+<td>The host of the side, in memory; the enable flag is stored in the user config</td>
+<td><code>config.toml</code> <code>[plugins.&lt;id&gt;]</code> for the flag only</td>
+<td>The flag is read at start; counters never leave the process</td>
+</tr>
+<tr>
+<td>Quota groups</td>
+<td><code>ilium-execution</code>, one group per plugin side per process</td>
+<td>Not persisted</td>
+<td>Telemetry only</td>
+</tr>
+<tr>
+<td>Telemetry registry</td>
+<td>Each host</td>
+<td>Not persisted</td>
+<td><code>ilium plugin stats</code> reads the server's registry and each client's through the <code>Control</code> envelope (see <a href="/pages/reference-host-telemetry/">Host telemetry</a>)</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>[HST-021]</strong> A process MUST create exactly one Wasmtime <code>Engine</code> for plugin use, and every Store in that process MUST be created from it.</li>
+<li><strong>[HST-022]</strong> Each plugin instance, including each job instance, MUST have its own <code>Store</code>.</li>
+<li><strong>[HST-023]</strong> The grant store MUST have a single writer at any time and MUST be replaced atomically, so a reader never sees a partial file.</li>
+<li><strong>[HST-024]</strong> The retained contribution registry for server-side plugins MUST be owned by the server host, and a client MUST hold only a replica built from <code>ContributionDelta</code> records.</li>
+<li><strong>[HST-025]</strong> The extension-point registry and the service registry MUST be per hosting process. A point or service owned by a client side MUST NOT be visible to server-side plugins.</li>
+</ul>
+<h2 id="startup-and-shutdown">Startup and shutdown</h2>
+<h3 id="server-start">Server start</h3>
+<ol>
+<li>The kernel boots and loads the configuration (<code>config.toml</code>, including <code>[plugins]</code> and <code>[plugins.limits]</code>).</li>
+<li>The kernel restores the snapshot (<code>restore_snapshot</code>). No plugin exists yet, so no plugin sees the restore as a series of events.</li>
+<li>The host creates the Engine, starts the epoch ticker and the plugin executor (see <a href="/pages/reference-host-runtime/">Host runtime</a>).</li>
+<li>The host loads the package store. For every installed and enabled package it verifies the manifest, the signature and the content hash, checks the API version, validates the component, and registers static contributions. These are the eager steps. Nothing is instantiated.</li>
+<li>The host builds the service graph. A cycle in <code>requires</code> is refused; the plugin stays disabled with <code>manifest.requires-cycle</code>.</li>
+<li>The host activates every plugin whose <code>activation</code> list contains <code>startup</code>, in dependency order: a service provider before its consumers. Other plugins stay inactive until their trigger fires. These are the lazy steps.</li>
+<li>The dispatcher delivers exactly one <code>tree-changed</code> batch for the restored tree to each activated plugin that subscribes to it. The restore is never replayed.</li>
+<li>The server accepts client connections. (Clients that connect earlier than step 6 completes are refused with the retriable error <code>server.starting</code>; a client retries for 5 seconds.)</li>
+</ol>
+<p>Steps 3 to 7 have the time budget <code>HOST-START</code> in <a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a>.</p>
+<h3 id="server-shutdown">Server shutdown</h3>
+<ol>
+<li>The server stops accepting new clients and stops the services that depend on plugins in their declared order.</li>
+<li>The host refuses new submissions. They complete as <code>cancelled</code>.</li>
+<li>Each active plugin side receives <code>deactivate(shutdown)</code> in reverse activation order, each within <code>deactivate_deadline_ms</code>. The total for all plugins is bounded by 5 seconds; plugins not reached in that time are dropped without a call.</li>
+<li>Pending requests are cancelled, helpers are terminated, instances are dropped and quota groups are released.</li>
+<li>The server runs <code>drain_session_work</code> and writes the final snapshot. The plugin host has stopped, so no plugin intent can reach the snapshot after the writer starts.</li>
+</ol>
+<h3 id="client-start-and-stop">Client start and stop</h3>
+<p>On start, the client connects, completes the handshake, receives the full retained contribution replica, starts its <code>startup</code> client plugins, renders the first frame and activates other plugins when their trigger fires. On stop, the client host deactivates its plugins with <code>shutdown</code> (total bound 2 seconds), cancels in-flight submissions locally and disconnects. The server learns of the detach from the closed connection (see <a href="/pages/reference-host-ipc/">Host IPC protocol</a>).</p>
+<h3 id="cli-process">CLI process</h3>
+<p>The CLI process creates an Engine, loads only the needed package, activates it, delivers the event, deactivates it and exits. Its time to first plugin call has the budget <code>CLI-COLD</code> in <a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a>.</p>
+<ul>
+<li><strong>[HST-026]</strong> The server host MUST start after <code>restore_snapshot</code> and MUST deliver exactly one <code>tree-changed</code> batch for the restored tree to each plugin that subscribes to it, and no replay of restore steps.</li>
+<li><strong>[HST-027]</strong> Manifest verification, signature verification, component validation and static contribution registration MUST be completed eagerly before any plugin is activated. Instantiation MUST be lazy except for plugins with the <code>startup</code> trigger.</li>
+<li><strong>[HST-028]</strong> A service provider MUST be activated before the plugins that <code>requires</code> it, and a cycle in <code>requires</code> MUST leave the plugins in the cycle disabled with <code>manifest.requires-cycle</code>.</li>
+<li><strong>[HST-029]</strong> On server shutdown the host MUST stop after the services stop and before <code>drain_session_work</code> and the final snapshot, and MUST refuse new submissions as <code>cancelled</code> before the first <code>deactivate</code>.</li>
+<li><strong>[HST-030]</strong> <code>deactivate(shutdown)</code> MUST be called in reverse activation order, and the total shutdown time spent in plugin calls MUST NOT exceed 5 seconds.</li>
+<li><strong>[HST-031]</strong> A client that connects before the server host finished step 6 MUST be refused with the retriable error <code>server.starting</code>.</li>
+<li><strong>[HST-032]</strong> The client host MUST bound its own shutdown at 2 seconds in total, and a client that exits MUST NOT prevent the server from delivering outcomes for other clients.</li>
+</ul>
+<figure>
+<svg viewBox="0 0 440 150" role="img" aria-label="Server start steps in order and server shutdown steps in order" width="660" height="225">
+<title>Start and stop order</title>
+<desc>Start runs boot, restore, engine, verify, activate, one tree-changed, accept clients. Stop runs services, refuse, deactivate, cancel, drain and final snapshot.</desc>
+<defs>
+<marker id="hb-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+<path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+</marker>
+</defs>
+<text x="8" y="16" font-size="11" fill="currentColor">Start</text>
+<rect x="8" y="22" width="56" height="30" rx="4" fill="none" stroke="currentColor"/>
+<text x="36" y="41" font-size="9" text-anchor="middle" fill="currentColor">Boot</text>
+<rect x="76" y="22" width="56" height="30" rx="4" fill="none" stroke="currentColor"/>
+<text x="104" y="41" font-size="9" text-anchor="middle" fill="currentColor">Restore</text>
+<rect x="144" y="22" width="56" height="30" rx="4" fill="none" stroke="currentColor" stroke-dasharray="6 4"/>
+<text x="172" y="41" font-size="9" text-anchor="middle" fill="currentColor">Engine</text>
+<rect x="212" y="22" width="56" height="30" rx="4" fill="none" stroke="currentColor" stroke-dasharray="6 4"/>
+<text x="240" y="41" font-size="9" text-anchor="middle" fill="currentColor">Verify</text>
+<rect x="280" y="22" width="56" height="30" rx="4" fill="none" stroke="currentColor" stroke-dasharray="6 4"/>
+<text x="308" y="41" font-size="9" text-anchor="middle" fill="currentColor">Activate</text>
+<rect x="348" y="22" width="84" height="30" rx="4" fill="none" stroke="currentColor" stroke-dasharray="6 4"/>
+<text x="390" y="41" font-size="9" text-anchor="middle" fill="currentColor">One tree-changed</text>
+<line x1="64" y1="37" x2="76" y2="37" stroke="currentColor" marker-end="url(#hb-arrow)"/>
+<line x1="132" y1="37" x2="144" y2="37" stroke="currentColor" marker-end="url(#hb-arrow)"/>
+<line x1="200" y1="37" x2="212" y2="37" stroke="currentColor" marker-end="url(#hb-arrow)"/>
+<line x1="268" y1="37" x2="280" y2="37" stroke="currentColor" marker-end="url(#hb-arrow)"/>
+<line x1="336" y1="37" x2="348" y2="37" stroke="currentColor" marker-end="url(#hb-arrow)"/>
+<text x="8" y="86" font-size="11" fill="currentColor">Stop</text>
+<rect x="8" y="92" width="68" height="30" rx="4" fill="none" stroke="currentColor"/>
+<text x="42" y="111" font-size="9" text-anchor="middle" fill="currentColor">Services</text>
+<rect x="88" y="92" width="68" height="30" rx="4" fill="none" stroke="currentColor" stroke-dasharray="6 4"/>
+<text x="122" y="111" font-size="9" text-anchor="middle" fill="currentColor">Refuse</text>
+<rect x="168" y="92" width="80" height="30" rx="4" fill="none" stroke="currentColor" stroke-dasharray="6 4"/>
+<text x="208" y="111" font-size="9" text-anchor="middle" fill="currentColor">Deactivate</text>
+<rect x="260" y="92" width="68" height="30" rx="4" fill="none" stroke="currentColor" stroke-dasharray="6 4"/>
+<text x="294" y="111" font-size="9" text-anchor="middle" fill="currentColor">Cancel, drop</text>
+<rect x="340" y="92" width="92" height="30" rx="4" fill="none" stroke="currentColor"/>
+<text x="386" y="111" font-size="9" text-anchor="middle" fill="currentColor">Drain, snapshot</text>
+<line x1="76" y1="107" x2="88" y2="107" stroke="currentColor" marker-end="url(#hb-arrow)"/>
+<line x1="156" y1="107" x2="168" y2="107" stroke="currentColor" marker-end="url(#hb-arrow)"/>
+<line x1="248" y1="107" x2="260" y2="107" stroke="currentColor" marker-end="url(#hb-arrow)"/>
+<line x1="328" y1="107" x2="340" y2="107" stroke="currentColor" marker-end="url(#hb-arrow)"/>
+</svg>
+<figcaption>Dashed boxes are plugin host steps. The host starts after the snapshot restore and stops before the drain and the final snapshot.</figcaption>
+</figure>
+
+<h2 id="safe-start">Safe start</h2>
+<p>A user who cannot start a session because of a plugin has two switches. Both apply to the process that hosts plugins and are passed by the <code>ilium</code> launcher to the server it starts.</p>
+<table>
+<thead>
+<tr>
+<th>Switch</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ilium --safe-plugins</code> (or <code>ILIUM_SAFE_PLUGINS=1</code>)</td>
+<td>Loads only the bundled T1 plugins with their default grants. All T2 and T3 packages stay installed but are not loaded. Every <code>replaces</code> entry is ignored, so the built-in core plugin runs. The footer shows <code>Safe plugin mode: third-party plugins are off.</code></td>
+</tr>
+<tr>
+<td><code>ilium --no-plugins</code> (or <code>ILIUM_NO_PLUGINS=1</code>)</td>
+<td>The plugin host does not start. The session boots with the kernel only: terminal panes, the tree with kernel-drawn plain rows, the layout, the keymap defaults and the recovery page work. Features that live in core plugins are absent.</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>[HST-033]</strong> <code>--safe-plugins</code> MUST load no T2 or T3 package and MUST ignore <code>replaces</code>, and <code>--no-plugins</code> MUST start no plugin host. Neither switch MUST change installed packages, grants or stored plugin data.</li>
+<li><strong>[HST-034]</strong> A session MUST boot to a usable terminal, tree and recovery page with <code>--no-plugins</code>.</li>
+</ul>
+<h2 id="failure-containment">Failure containment</h2>
+<p>The host contains each failure at the smallest unit that owns the broken state. The table states what each failure takes down and what must keep running.</p>
+<table>
+<thead>
+<tr>
+<th>Failure</th>
+<th>What stops</th>
+<th>What must keep running</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A guest trap (panic, unreachable, out-of-bounds, stack overflow)</td>
+<td>That plugin side's instance. Pending requests it owned complete as <code>cancelled</code>; its retained contributions are marked stale.</td>
+<td>Every other plugin, the kernel, other sides of the same plugin</td>
+</tr>
+<tr>
+<td>A stuck queue (queue full with a never-dropped event)</td>
+<td>That plugin side is restarted as a failure</td>
+<td>Everything else</td>
+</tr>
+<tr>
+<td>A deadline breach (hard)</td>
+<td>The call traps, as above</td>
+<td>Everything else</td>
+</tr>
+<tr>
+<td>A helper crash or kill</td>
+<td>The one plugin side in that helper</td>
+<td>The parent process, other helpers, other plugins</td>
+</tr>
+<tr>
+<td>A Rust panic inside a host import implementation</td>
+<td>The call is caught at the import boundary (<code>catch_unwind</code>), the instance traps with <code>host.import-panic</code>, and the panic is logged with the import name</td>
+<td>The parent process and every other plugin. The kernel facade is never left holding a lock across an import (see requirement HST-038)</td>
+</tr>
+<tr>
+<td>A Wasmtime <code>Engine</code>-level error (for example an internal compilation error)</td>
+<td>The affected load or instantiation fails with <code>host.engine-error</code>; the plugin is not activated</td>
+<td>The Engine and other plugins. If creating the Engine itself fails, the host does not start: the server logs <code>host.engine-failed</code> and continues in <code>--no-plugins</code> mode</td>
+</tr>
+<tr>
+<td>Out of memory in one Store (linear memory limit)</td>
+<td>The growth traps the instance (the guest never observes -1) and logs <code>memory limit &lt;N&gt; MiB reached</code>; the plugin side restarts under the restart rule</td>
+<td>Other Stores; the process</td>
+</tr>
+<tr>
+<td>Session memory budget reached</td>
+<td>A new instance is refused and logged, not counted as a failure</td>
+<td>Existing instances</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>[HST-035]</strong> A guest trap MUST end only the instance that trapped. Pending requests of that instance MUST complete as <code>cancelled</code>, and its retained contributions MUST be kept and marked stale.</li>
+<li><strong>[HST-036]</strong> A panic in a host import implementation MUST be caught at the import boundary, MUST trap only the calling instance with the error <code>host.import-panic</code>, and MUST NOT unwind into the dispatcher or the kernel.</li>
+<li><strong>[HST-037]</strong> If the Engine cannot be created, the process MUST continue without a plugin host as if started with <code>--no-plugins</code>, and MUST log <code>host.engine-failed</code>.</li>
+<li><strong>[HST-038]</strong> The host MUST NOT hold a kernel lock while a guest call is running, and an import MUST take kernel locks only for the duration of its own work.</li>
+<li><strong>[HST-039]</strong> A helper process failure MUST NOT crash or hang the parent process.</li>
+</ul>
+<h3 id="a-core-plugin-that-the-restart-rule-disables">A core plugin that the restart rule disables</h3>
+<p>The 30 core plugins (see <a href="/pages/core-plugins/">Core plugins</a>) carry features of Ilium. The restart rule applies to them like to any plugin, with one change: a core plugin that the rule disables makes the host show the <strong>kernel recovery page</strong>. The page belongs to the kernel, not to a plugin, so it works with every plugin off. It lists every plugin with its tier, state, last failure and an on or off switch, and it shows how to start with <code>--safe-plugins</code>.</p>
+<ul>
+<li>The session still boots. The disabled state is stored, so the plugin stays off at the next start until the user turns it on.</li>
+<li>The kernel recovery page opens once, automatically, in the client that is attached when the failure happens, and later through the kernel command <code>kernel.open-recovery</code>, which has the default key <code>Ctrl+Alt+R</code> in the kernel keymap and cannot be removed by a keymap plugin.</li>
+<li>A kernel fallback covers the features that would leave the screen unusable. If <code>ilium.core.tree</code> is disabled, the kernel draws tree rows as the node name and a status glyph only, with no decorations, virtual rows or toolbar. If <code>ilium.core.layout</code> is disabled, the kernel keeps the last split geometry. If <code>ilium.core.settings</code> is disabled, the Settings screen shows only the recovery page. Other features are simply absent until the plugin is turned on.</li>
+<li>
+<p>A failure of <code>ilium.core.sessions</code> does not stop the final snapshot: the kernel snapshot writer runs without the plugin and writes the plugin's last stored sections unchanged.</p>
+</li>
+<li>
+<p><strong>[HST-040]</strong> When the restart rule disables a core plugin, the session MUST keep running, the disabled state MUST persist across restarts, and the kernel recovery page MUST open once in the affected client.</p>
+</li>
+<li><strong>[HST-041]</strong> The kernel recovery page and the command <code>kernel.open-recovery</code> MUST work with every plugin disabled and MUST NOT be removable by a plugin.</li>
+<li><strong>[HST-042]</strong> With <code>ilium.core.tree</code> disabled, the kernel MUST draw tree rows from node names and status only.</li>
+</ul>
+<h2 id="errors-and-edge-cases">Errors and edge cases</h2>
+<table>
+<thead>
+<tr>
+<th>Situation</th>
+<th>Result</th>
+<th>Id</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Helper binary missing and a T2 or T3 package is installed</td>
+<td>The package stays disabled with <code>host.helper-missing</code>; T1 plugins run</td>
+<td><code>host.helper-missing</code></td>
+</tr>
+<tr>
+<td>Engine cannot be created</td>
+<td>Server continues without plugins</td>
+<td><code>host.engine-failed</code></td>
+</tr>
+<tr>
+<td>A client connects while the server host is still starting</td>
+<td>Retriable refusal</td>
+<td><code>server.starting</code></td>
+</tr>
+<tr>
+<td>CLI-process host needs the tree</td>
+<td><code>unavailable</code>, message <code>no session</code></td>
+<td><code>unavailable</code></td>
+</tr>
+<tr>
+<td>Two clients disable the same plugin at different times</td>
+<td>Each client disables it independently</td>
+<td>none</td>
+</tr>
+<tr>
+<td>Server host shutdown takes longer than 5 s</td>
+<td>Remaining plugins are dropped without <code>deactivate</code>; their restore bytes are not kept</td>
+<td><code>host.shutdown-timeout</code> (logged)</td>
+</tr>
+<tr>
+<td>Panic inside an import</td>
+<td>The calling instance traps</td>
+<td><code>host.import-panic</code></td>
+</tr>
+<tr>
+<td>The grant store file is unreadable at start</td>
+<td>The host starts with default grants for T1 only and refuses T2 and T3 packages until the file is repaired</td>
+<td><code>host.grants-unreadable</code></td>
+</tr>
+<tr>
+<td><code>--safe-plugins</code> and <code>--no-plugins</code> both given</td>
+<td><code>--no-plugins</code> wins</td>
+<td>none</td>
+</tr>
+<tr>
+<td>A package on disk is changed after install</td>
+<td>The content hash check fails and the plugin stays disabled</td>
+<td><code>package.corrupt</code></td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>[HST-043]</strong> When both safe-start switches are given, <code>--no-plugins</code> MUST win.</li>
+<li><strong>[HST-044]</strong> An unreadable grant store MUST NOT start T2 or T3 plugins and MUST NOT grant a T1 plugin more than its default grants.</li>
+<li><strong>[HST-045]</strong> A package whose content hash differs from the recorded hash MUST NOT be loaded.</li>
+</ul>
+<h2 id="see-also">See also</h2>
+<ul>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a> for the Wasmtime configuration.</li>
+<li><a href="/pages/reference-host-ipc/">Host IPC protocol</a> for the traffic between server and client.</li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper</a> for T2 and T3.</li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a> for threads and call classes.</li>
+<li><a href="/pages/reference-host-rendering/">Host rendering pipeline</a> and <a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a>.</li>
+<li><a href="/pages/reference-platform-support/">Platform support</a> and <a href="/pages/reference-host-telemetry/">Host telemetry</a>.</li>
+<li><a href="/pages/architecture/">Architecture</a>, <a href="/pages/lifecycle/">Lifecycle</a> and <a href="/pages/security/">Security</a> for the concepts.</li>
+</ul>
+<p>API version checked: <code>ilium:plugin@0.1.0</code>.</p>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/reference-health-and-watchdog/"><small>Previous</small>Reference, health and watchdog</a><a class="next" href="/pages/reference-host-budgets/"><small>Next</small>Performance budgets and benchmarks</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#you-will-need">You will need</a></li><li class="l2"><a href="#crate-layout">Crate layout</a></li><li class="l3"><a href="#dependency-edges">Dependency edges</a></li><li class="l2"><a href="#process-map">Process map</a></li><li class="l3"><a href="#diagram-processes-hosts-and-links">Diagram: processes, hosts and links</a></li><li class="l2"><a href="#per-side-hosting">Per-side hosting</a></li><li class="l3"><a href="#server-host">Server host</a></li><li class="l3"><a href="#client-host">Client host</a></li><li class="l3"><a href="#scene-host">Scene host</a></li><li class="l3"><a href="#job-instances">Job instances</a></li><li class="l3"><a href="#cli-process-host">CLI-process host</a></li><li class="l2"><a href="#ownership">Ownership</a></li><li class="l2"><a href="#startup-and-shutdown">Startup and shutdown</a></li><li class="l3"><a href="#server-start">Server start</a></li><li class="l3"><a href="#server-shutdown">Server shutdown</a></li><li class="l3"><a href="#client-start-and-stop">Client start and stop</a></li><li class="l3"><a href="#cli-process">CLI process</a></li><li class="l2"><a href="#safe-start">Safe start</a></li><li class="l2"><a href="#failure-containment">Failure containment</a></li><li class="l3"><a href="#a-core-plugin-that-the-restart-rule-disables">A core plugin that the restart rule disables</a></li><li class="l2"><a href="#errors-and-edge-cases">Errors and edge cases</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

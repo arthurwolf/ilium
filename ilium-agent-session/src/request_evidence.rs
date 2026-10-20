@@ -3,7 +3,7 @@
 //! title eligibility. An unreadable or incomplete history is indeterminate,
 //! never proof that a conversation was empty.
 
-use std::io::{self, BufReader};
+use std::io::{self, BufRead, BufReader};
 use std::path::Path;
 
 use ilium_core::AgentClass;
@@ -21,28 +21,67 @@ pub enum GenuineRequestEvidence {
     Present { last_record_end: u64 },
 }
 
+/// Longest record that is parsed for evidence. Codex writes `world_state`,
+/// base instructions and tool output as single lines of several MiB, so the
+/// discovery-sized 1 MiB line cap would make long Codex sessions unnameable.
+const EVIDENCE_PARSED_LINE_BYTES: usize = 16 * 1024 * 1024;
+/// Upper bound on bytes streamed from one transcript. Oversized lines are
+/// skipped without being buffered, so this bounds I/O time, not memory.
+const EVIDENCE_TOTAL_READ_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+
+/// One record of a transcript scan: parsed bytes, or the length of a record
+/// too large to buffer that was skipped.
+enum EvidenceLine {
+    Record(Vec<u8>),
+    Skipped(u64),
+}
+
+fn next_evidence_line(reader: &mut impl BufRead) -> io::Result<Option<EvidenceLine>> {
+    let mut line = Vec::new();
+    let mut length = 0_u64;
+    let mut oversized = false;
+    loop {
+        let available = reader.fill_buf()?;
+        if available.is_empty() {
+            return Ok(match (length, oversized) {
+                (0, _) => None,
+                (_, true) => Some(EvidenceLine::Skipped(length)),
+                _ => Some(EvidenceLine::Record(line)),
+            });
+        }
+        let count = available
+            .iter()
+            .position(|byte| *byte == b'\n')
+            .map_or(available.len(), |position| position + 1);
+        let ends_line = available[count - 1] == b'\n';
+        length = length.saturating_add(count as u64);
+        if !oversized && line.len().saturating_add(count) > EVIDENCE_PARSED_LINE_BYTES {
+            oversized = true;
+            line = Vec::new();
+        }
+        if !oversized {
+            line.extend_from_slice(&available[..count]);
+        }
+        reader.consume(count);
+        if ends_line {
+            return Ok(Some(if oversized {
+                EvidenceLine::Skipped(length)
+            } else {
+                EvidenceLine::Record(line)
+            }));
+        }
+    }
+}
+
 /// Reads complete parseable JSONL records. An invalid trailing row cannot
-/// prove emptiness; a completed earlier genuine request remains positive. The caller must first
-/// verify the path, session ID, and cwd through TranscriptLocator.
+/// prove emptiness; a completed earlier genuine request remains positive. The
+/// caller must first verify the path, session ID, and cwd through
+/// TranscriptLocator. Records too large to buffer are skipped: they keep the
+/// byte offsets exact but can never prove the conversation empty.
 pub(crate) fn request_evidence_from_path(
     class: &AgentClass,
     transcript_path: &Path,
     session_id: &str,
-) -> io::Result<GenuineRequestEvidence> {
-    let budget = super::TranscriptReadBudget::new(super::TranscriptReadLimits {
-        line_bytes: 1024 * 1024,
-        total_read_bytes: 16 * 1024 * 1024,
-        scanned_entries: usize::MAX,
-        retained_path_bytes: usize::MAX,
-    });
-    request_evidence_from_path_with_budget(class, transcript_path, session_id, &budget)
-}
-
-pub(crate) fn request_evidence_from_path_with_budget(
-    class: &AgentClass,
-    transcript_path: &Path,
-    session_id: &str,
-    budget: &super::TranscriptReadBudget,
 ) -> io::Result<GenuineRequestEvidence> {
     if matches!(class, AgentClass::Other(_)) {
         return Ok(GenuineRequestEvidence::Unavailable);
@@ -59,16 +98,25 @@ pub(crate) fn request_evidence_from_path_with_budget(
     let mut reader = BufReader::new(file);
     let mut end_offset = 0_u64;
     let mut latest_request = None;
+    let mut skipped_record = false;
     loop {
-        let record = match super::bounded_line(&mut reader, budget) {
-            Ok(Some(record)) => record,
-            Ok(None) => break,
-            Err(_) if budget.exhausted.load(std::sync::atomic::Ordering::Acquire) => {
-                return Ok(GenuineRequestEvidence::Unavailable);
+        let record = match next_evidence_line(&mut reader)? {
+            Some(EvidenceLine::Record(record)) => record,
+            Some(EvidenceLine::Skipped(length)) => {
+                end_offset = end_offset.saturating_add(length);
+                skipped_record = true;
+                if end_offset > EVIDENCE_TOTAL_READ_BYTES {
+                    break;
+                }
+                continue;
             }
-            Err(error) => return Err(error),
+            None => break,
         };
         end_offset = end_offset.saturating_add(record.len() as u64);
+        if end_offset > EVIDENCE_TOTAL_READ_BYTES {
+            skipped_record = true;
+            break;
+        }
         // An append in progress can neither revoke earlier positive proof
         // nor establish that an otherwise empty conversation has no task.
         let Ok(entry) = serde_json::from_slice::<Value>(&record) else {
@@ -102,6 +150,7 @@ pub(crate) fn request_evidence_from_path_with_budget(
     }
     Ok(match latest_request {
         Some(last_record_end) => GenuineRequestEvidence::Present { last_record_end },
+        None if skipped_record => GenuineRequestEvidence::Unavailable,
         None => GenuineRequestEvidence::VerifiedEmpty,
     })
 }
@@ -405,6 +454,29 @@ mod tests {
 #[cfg(test)]
 mod partial_history_tests {
     use super::*;
+    #[test]
+    fn oversized_records_are_skipped_not_fatal() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("rollout.jsonl");
+        let huge = format!(
+            "{{\"type\":\"world_state\",\"payload\":\"{}\"}}\n",
+            "x".repeat(EVIDENCE_PARSED_LINE_BYTES + 10)
+        );
+        let prompt = "{\"type\":\"event_msg\",\"payload\":{\"type\":\"user_message\",\"message\":\"fix naming\"}}\n";
+        std::fs::write(&path, format!("{huge}{prompt}")).unwrap();
+        assert_eq!(
+            request_evidence_from_path(&AgentClass::Codex, &path, "session").unwrap(),
+            GenuineRequestEvidence::Present {
+                last_record_end: (huge.len() + prompt.len()) as u64
+            }
+        );
+        std::fs::write(&path, &huge).unwrap();
+        assert_eq!(
+            request_evidence_from_path(&AgentClass::Codex, &path, "session").unwrap(),
+            GenuineRequestEvidence::Unavailable
+        );
+    }
+
     #[test]
     fn complete_authored_request_survives_an_incomplete_later_append() {
         let directory = tempfile::tempdir().unwrap();

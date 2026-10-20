@@ -1,0 +1,815 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>clipboard | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details open><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/" aria-current="page">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Host API</b></p>
+<h1>clipboard</h1>
+
+<p>The <code>clipboard</code> import reads and writes plain text on the system clipboard. The clipboard belongs to the user's desktop session, so the client runs this import and a server-side plugin cannot call it. Writing is common and low risk. Reading is high risk: the clipboard often holds passwords and other secrets that the user copied from another program. A plugin must therefore hold the <code>clipboard.read</code> grant before it can read, and every read is logged.</p>
+<p>Two functions cover the whole import. <code>read-text</code> returns the clipboard text. <code>write-text</code> replaces it. Both are synchronous: they return at once and never return a <code>request-id</code>.</p>
+<h3 id="you-will-need">You will need</h3>
+<table>
+<thead>
+<tr>
+<th>Need</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Side</td>
+<td>Client. The import belongs to the client world, <code>ilium:client/base</code>.</td>
+</tr>
+<tr>
+<td>Grant to write</td>
+<td><code>clipboard.write</code>, normal risk.</td>
+</tr>
+<tr>
+<td>Grant to read</td>
+<td><code>clipboard.read</code>, high risk. The user allows it once in the review dialog.</td>
+</tr>
+<tr>
+<td>Rust</td>
+<td>Crate <code>ilium-plugin-sdk</code>, Rust stable 1.90 or later, target <code>wasm32-wasip2</code>.</td>
+</tr>
+<tr>
+<td>TypeScript</td>
+<td>Package <code>@ilium/plugin-sdk</code>, Bun 1.2 or later. <code>bun install</code> adds the toolchain.</td>
+</tr>
+<tr>
+<td>Text format</td>
+<td>UTF-8 plain text only.</td>
+</tr>
+</tbody>
+</table>
+<p>Import the module in each language:</p>
+<pre><code class="language-rust">use ilium_plugin_sdk::host::clipboard;
+</code></pre>
+<pre><code class="language-ts">import * as clipboard from '@ilium/plugin-sdk/host/clipboard';
+</code></pre>
+<h3 id="interface">Interface</h3>
+<pre><code class="language-wit">// Excerpt of ilium:host/clipboard in reference-wit
+read-text: func() -&gt; option&lt;string&gt;;                        // clipboard.read
+write-text: func(text: string) -&gt; result&lt;_, plugin-error&gt;;  // clipboard.write
+</code></pre>
+<h3 id="functions">Functions</h3>
+<table>
+<thead>
+<tr>
+<th>WIT function</th>
+<th>Rust</th>
+<th>TypeScript</th>
+<th>Grant</th>
+<th>Result</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>read-text</code></td>
+<td><code>clipboard::read_text() -&gt; Option&lt;String&gt;</code></td>
+<td><code>clipboard.readText(): string \| undefined</code></td>
+<td><code>clipboard.read</code></td>
+<td><code>option&lt;string&gt;</code></td>
+<td>Returns the plain text on the clipboard. Returns nothing when the clipboard holds no text, for example an image.</td>
+</tr>
+<tr>
+<td><code>write-text</code></td>
+<td><code>clipboard::write_text(text: &amp;str) -&gt; Result&lt;(), PluginError&gt;</code></td>
+<td><code>clipboard.writeText(text: string): void</code>, throws <code>PluginError</code></td>
+<td><code>clipboard.write</code></td>
+<td><code>result&lt;_, plugin-error&gt;</code></td>
+<td>Replaces the clipboard text with <code>text</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>The names follow the binding rules (S5): kebab-case becomes snake_case in Rust and camelCase in TypeScript.</p>
+<h3 id="how-the-import-behaves">How the import behaves</h3>
+<ul>
+<li><strong>Plain text only.</strong> Only UTF-8 text is covered. Images and other formats are not part of the contract. <code>read-text</code> returns nothing for an image.</li>
+<li><strong>Write limit.</strong> <code>write-text</code> accepts at most 1 MiB, counted in UTF-8 bytes. A larger text returns <code>invalid-argument</code>, nothing is written, and the text is never truncated.</li>
+<li><strong>Route.</strong> The client writes through the system clipboard when it runs on the user's desktop. When it runs in a terminal that supports OSC 52, it writes through an OSC 52 sequence. With neither route, <code>write-text</code> returns <code>unsupported</code> and <code>read-text</code> returns nothing.</li>
+<li><strong>Logging.</strong> Every successful read writes an info line to the plugin log that records only the length, never the text. The same line goes to the privacy log. The user is not asked before each read.</li>
+<li><strong>Footer.</strong> After each read, the client footer shows <code>clipboard read by &lt;plugin name&gt;</code> for 3 s.</li>
+<li><strong>Prompts.</strong> The review dialog lists <code>Read the clipboard</code> for <code>clipboard.read</code> and <code>Write to the clipboard</code> for <code>clipboard.write</code>. The high-risk grant is asked once, when the plugin first activates. There is no prompt per call.</li>
+</ul>
+<figure>
+<svg viewBox="0 0 400 200" role="img" aria-label="Copy flow from terminal selection to the clipboard" width="600" height="300">
+<defs>
+<marker id="arrow-flow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+<path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+</marker>
+</defs>
+<title>Copy selection flow</title>
+<desc>The terminal primitive holds the selection. The plugin reads it and writes the text to the desktop clipboard, which only the client owns.</desc>
+<rect x="40" y="8" width="320" height="34" rx="6" fill="none" stroke="currentColor"/>
+<text x="200" y="30" font-size="12" text-anchor="middle" fill="currentColor">Terminal primitive (kernel)</text>
+<line x1="200" y1="42" x2="200" y2="78" stroke="currentColor" marker-end="url(#arrow-flow)"/>
+<text x="212" y="64" font-size="11" fill="currentColor">terminal.selection</text>
+<rect x="40" y="80" width="320" height="34" rx="6" fill="none" stroke="currentColor" stroke-dasharray="4 3"/>
+<text x="200" y="102" font-size="12" text-anchor="middle" fill="currentColor">Plugin: copy handler</text>
+<line x1="200" y1="114" x2="200" y2="150" stroke="currentColor" marker-end="url(#arrow-flow)"/>
+<text x="212" y="136" font-size="11" fill="currentColor">clipboard.write-text</text>
+<rect x="40" y="152" width="320" height="34" rx="6" fill="none" stroke="currentColor"/>
+<text x="200" y="174" font-size="12" text-anchor="middle" fill="currentColor">Desktop clipboard (client)</text>
+</svg>
+<figcaption>Copying a selection. The plugin reads the selection through the terminal primitive and never reads the clipboard.</figcaption>
+</figure>
+
+<figure>
+<svg viewBox="0 0 400 230" role="img" aria-label="Route chosen by the client for a clipboard write" width="600" height="345">
+<defs>
+<marker id="arrow-route" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+<path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+</marker>
+</defs>
+<title>Clipboard write route</title>
+<desc>The client checks for a local desktop first, then for OSC 52 support. If neither exists, the write is unsupported.</desc>
+<rect x="20" y="40" width="150" height="30" rx="4" fill="none" stroke="currentColor"/>
+<text x="95" y="60" font-size="11" text-anchor="middle" fill="currentColor">Client runs locally?</text>
+<line x1="170" y1="55" x2="228" y2="55" stroke="currentColor" marker-end="url(#arrow-route)"/>
+<text x="199" y="48" font-size="10" text-anchor="middle" fill="currentColor">yes</text>
+<rect x="230" y="40" width="150" height="30" rx="4" fill="none" stroke="currentColor"/>
+<text x="305" y="60" font-size="11" text-anchor="middle" fill="currentColor">System clipboard</text>
+<line x1="95" y1="70" x2="95" y2="108" stroke="currentColor" marker-end="url(#arrow-route)"/>
+<text x="106" y="92" font-size="10" fill="currentColor">no</text>
+<rect x="10" y="110" width="170" height="30" rx="4" fill="none" stroke="currentColor"/>
+<text x="95" y="130" font-size="11" text-anchor="middle" fill="currentColor">Terminal supports OSC 52?</text>
+<line x1="180" y1="125" x2="228" y2="125" stroke="currentColor" marker-end="url(#arrow-route)"/>
+<text x="204" y="118" font-size="10" text-anchor="middle" fill="currentColor">yes</text>
+<rect x="230" y="110" width="150" height="30" rx="4" fill="none" stroke="currentColor"/>
+<text x="305" y="130" font-size="11" text-anchor="middle" fill="currentColor">OSC 52 sequence</text>
+<line x1="95" y1="140" x2="95" y2="178" stroke="currentColor" marker-end="url(#arrow-route)"/>
+<text x="106" y="162" font-size="10" fill="currentColor">no</text>
+<rect x="10" y="180" width="170" height="30" rx="4" fill="none" stroke="currentColor" stroke-dasharray="4 3"/>
+<text x="95" y="200" font-size="11" text-anchor="middle" fill="currentColor">Result: unsupported</text>
+</svg>
+<figcaption>The write route. With no route, a write returns unsupported and a read returns nothing.</figcaption>
+</figure>
+
+<h3 id="grants-and-refusals">Grants and refusals</h3>
+<table>
+<thead>
+<tr>
+<th>Situation</th>
+<th><code>write-text</code></th>
+<th><code>read-text</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Grant held</td>
+<td>Writes the text.</td>
+<td>Returns the text, or nothing when the clipboard has no text.</td>
+</tr>
+<tr>
+<td>Grant declined by the user</td>
+<td><code>not-permitted</code>.</td>
+<td>Returns nothing. A warn line is written to the plugin log.</td>
+</tr>
+<tr>
+<td>Grant revoked during the call</td>
+<td><code>revoked</code>. The plugin is re-activated.</td>
+<td>Returns nothing, because <code>read-text</code> has no error result.</td>
+</tr>
+<tr>
+<td>Grant never requested in the manifest</td>
+<td>Traps. The plugin fails and is restarted under the rules in <a href="/pages/errors-and-limits/">errors and limits</a>.</td>
+<td>Traps, the same as an audio call without an audio grant.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="using-the-clipboard-from-the-server-side">Using the clipboard from the server side</h3>
+<p>The clipboard belongs to the client, so a server-side plugin cannot call this import. The server side has a typed way to ask its own client side: a client request (see <a href="/pages/api-client-requests/">client requests</a>). The client side holds the clipboard grant, reads the text, and answers. The server side never gets a grant for the clipboard, and the read is logged on the client as usual.</p>
+<figure>
+<svg viewBox="0 0 440 190" role="img" aria-label="Server side asks the client side to read the clipboard" width="660" height="285">
+  <title>Clipboard read through a client request</title>
+  <defs>
+    <marker id="clipboard-creq-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <text x="70" y="16" font-size="12" text-anchor="middle" fill="currentColor">Server side</text>
+  <text x="370" y="16" font-size="12" text-anchor="middle" fill="currentColor">Client side</text>
+  <line x1="70" y1="24" x2="70" y2="180" stroke="currentColor" stroke-dasharray="3 3"/>
+  <line x1="370" y1="24" x2="370" y2="180" stroke="currentColor" stroke-dasharray="3 3"/>
+  <line x1="72" y1="46" x2="368" y2="46" stroke="currentColor" marker-end="url(#clipboard-creq-arrow)"/>
+  <text x="220" y="40" font-size="10" text-anchor="middle" fill="currentColor">request(client, "clipboard-text")</text>
+  <rect x="270" y="62" width="200" height="22" rx="4" fill="none" stroke="currentColor"/>
+  <text x="370" y="77" font-size="10" text-anchor="middle" fill="currentColor">clipboard.read-text()</text>
+  <line x1="368" y1="110" x2="72" y2="110" stroke="currentColor" marker-end="url(#clipboard-creq-arrow)"/>
+  <text x="220" y="104" font-size="10" text-anchor="middle" fill="currentColor">respond(call, ok(json))</text>
+  <text x="70" y="142" font-size="10" fill="currentColor">take-answer(request) returns the JSON text.</text>
+  <text x="70" y="160" font-size="10" fill="currentColor">The grant clipboard.read stays on the client side only.</text>
+</svg>
+<figcaption>The server side gets clipboard text through the client side, which owns the desktop clipboard and the grant.</figcaption>
+</figure>
+
+<p>The full code for this exchange, in Rust and TypeScript, is the second worked example on the <a href="/pages/api-client-requests/">client requests</a> page.</p>
+<h3 id="example-1-copy-the-selected-text-of-a-pane">Example 1: copy the selected text of a pane</h3>
+<p>A context-menu item named <code>copy-selection</code> copies the selected text of a pane. The plugin reads the selection through the terminal primitive and writes it to the clipboard. It never reads the clipboard. The pane comes from the <code>context</code> field of the <code>command-invoked</code> event.</p>
+<p><strong>Grants:</strong> <code>terminal.read-screen</code>, <code>clipboard.write</code></p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::host::clipboard;
+use ilium_plugin_sdk::prelude::*;
+use ilium_plugin_sdk::primitives::terminal;
+
+/// Called from the handler of the `copy-selection` command.
+fn copy_selection(pane: NodeId) -&gt; Result&lt;(), PluginError&gt; {
+    let Some(selection) = terminal::selection(pane) else {
+        return Ok(());
+    };
+    if selection.text.is_empty() {
+        return Ok(());
+    }
+    clipboard::write_text(&amp;selection.text)
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import * as clipboard from '@ilium/plugin-sdk/host/clipboard';
+import * as terminal from '@ilium/plugin-sdk/primitives/terminal';
+
+/** Called from the handler of the `copy-selection` command. */
+export function copySelection(pane: bigint): void {
+  const selection = terminal.selection(pane);
+  if (selection === undefined || selection.text.length === 0) {
+    return;
+  }
+  clipboard.writeText(selection.text);
+}
+</code></pre>
+<p>Outcome: after the menu item runs, the clipboard holds the selected text. Pasting it into another pane gives the same characters. A pane with no selection writes nothing and shows no error.</p>
+<h3 id="example-2-paste-the-clipboard-into-a-pane">Example 2: paste the clipboard into a pane</h3>
+<p>A command named <code>paste-clipboard</code> sends the clipboard text to a pane as a paste. It needs two grants: <code>clipboard.read</code> for the text and <code>terminal.write</code> for the send. The <code>send-input</code> intent requires a <code>dedup-key</code>, and its text is limited to 64 KiB. A clipboard text over 64 KiB is therefore skipped with a warn line. It is never truncated.</p>
+<p><strong>Grants:</strong> <code>clipboard.read</code>, <code>terminal.write</code></p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::host::clipboard;
+use ilium_plugin_sdk::host::clock;
+use ilium_plugin_sdk::host::log::{self, Level};
+use ilium_plugin_sdk::prelude::*;
+use ilium_plugin_sdk::types::intents::{Delivery, SendInputSpec};
+
+const MAX_PASTE_BYTES: usize = 64 * 1024;
+
+/// Builds the paste submission for `pane`, or nothing when there is nothing to paste.
+fn paste_clipboard(pane: NodeId) -&gt; Option&lt;Submission&gt; {
+    let text = clipboard::read_text()?;
+    if text.is_empty() {
+        return None;
+    }
+    if text.len() &gt; MAX_PASTE_BYTES {
+        log::log(Level::Warn, &quot;clipboard text over 64 KiB, paste skipped&quot;);
+        return None;
+    }
+    let intent = Intent::SendInput(SendInputSpec {
+        pane,
+        text,
+        delivery: Delivery::Pasted,
+        prompt_epoch: None,
+    });
+    let dedup_key = format!(&quot;paste:{}&quot;, clock::now_unix_millis());
+    Some(Submission::keyed(intent, dedup_key))
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import * as clipboard from '@ilium/plugin-sdk/host/clipboard';
+import * as clock from '@ilium/plugin-sdk/host/clock';
+import { log } from '@ilium/plugin-sdk/host/log';
+import type { Submission } from '@ilium/plugin-sdk/types';
+
+const MAX_PASTE_BYTES = 64 * 1024;
+
+/** Builds the paste submission for `pane`, or nothing when there is nothing to paste. */
+export function pasteClipboard(pane: bigint): Submission | undefined {
+  const text = clipboard.readText();
+  if (text === undefined || text.length === 0) {
+    return undefined;
+  }
+  if (new TextEncoder().encode(text).length &gt; MAX_PASTE_BYTES) {
+    log('warn', 'clipboard text over 64 KiB, paste skipped');
+    return undefined;
+  }
+  return {
+    intent: {
+      tag: 'send-input',
+      val: { pane, text, delivery: 'pasted', promptEpoch: undefined },
+    },
+    correlation: 0n,
+    dedupKey: `paste:${clock.nowUnixMillis()}`,
+  };
+}
+</code></pre>
+<p>The caller returns the submission from <code>on-events</code> (Rust) or <code>onEvents</code> (TypeScript). The key is built from the current millisecond, so a paste of new text is not swallowed as a duplicate. Two pastes in the same millisecond share a key, and the second completes as <code>duplicate(original)</code>.</p>
+<p>Outcome: the <code>send-input</code> submission completes as <code>ok</code> in the next batch, and the text appears at the prompt of the pane as a paste. If the pane is still restoring, the submission completes as <code>refused(pane-not-ready)</code>. A refused submission does not reserve its key, so the same key is valid for a retry.</p>
+<h3 id="what-the-user-sees">What the user sees</h3>
+<p>The plugin log shows one line per call. The footer confirms each read.</p>
+<pre class="term">
+<span class="t-prompt">$</span> ilium plugin logs clipboard-helper
+2026-10-11 12:04:11 <span class="t-ok">ok</span> clipboard.write 12 chars
+2026-10-11 12:04:19 <span class="t-ok">ok</span> clipboard.read 42 chars
+2026-10-11 12:04:27 <span class="t-warn">warn</span> clipboard.read declined
+2026-10-11 12:04:33 <span class="t-err">error</span> clipboard.write too big
+</pre>
+
+<p><em>Illustrative, not generated.</em> The log records lengths, never the clipboard text.</p>
+
+<pre class="term">
+<span class="t-dim">[work]  Pane 3  ~/dev/ai/ilium  main</span>
+<span class="t-prompt">$</span> git log --oneline -1
+<span class="t-hi">clipboard read by clipboard-helper</span>
+<span class="t-prompt">$</span>
+</pre>
+
+<p><em>Illustrative, not generated.</em> The footer line stays for 3 s after each read.</p>
+
+<h3 id="errors">Errors</h3>
+<table>
+<thead>
+<tr>
+<th>Function</th>
+<th>Code</th>
+<th>When</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>write-text</code></td>
+<td><code>invalid-argument</code></td>
+<td>The text is over 1 MiB in UTF-8 bytes. Nothing is written.</td>
+</tr>
+<tr>
+<td><code>write-text</code></td>
+<td><code>unsupported</code></td>
+<td>Neither the system clipboard nor OSC 52 is available.</td>
+</tr>
+<tr>
+<td><code>write-text</code></td>
+<td><code>not-permitted</code></td>
+<td>The user declined <code>clipboard.write</code>.</td>
+</tr>
+<tr>
+<td><code>write-text</code></td>
+<td><code>revoked</code></td>
+<td>The grant was revoked during the call.</td>
+</tr>
+<tr>
+<td><code>write-text</code></td>
+<td><code>internal</code></td>
+<td>A host bug.</td>
+</tr>
+<tr>
+<td><code>read-text</code></td>
+<td>none</td>
+<td>The clipboard has no text, the grant is declined or revoked, or there is no route. <code>read-text</code> has no error result.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="limits">Limits</h3>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Value</th>
+<th>Error</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>write-text</code> size</td>
+<td>1 MiB in UTF-8 bytes</td>
+<td><code>invalid-argument</code>, nothing written</td>
+</tr>
+<tr>
+<td>Text format</td>
+<td>UTF-8 plain text</td>
+<td>an image reads as nothing</td>
+</tr>
+<tr>
+<td>Read frequency</td>
+<td>no limit; every read is logged</td>
+<td>none</td>
+</tr>
+<tr>
+<td>Prompt for the high-risk grant</td>
+<td>once, at first activation</td>
+<td>none</td>
+</tr>
+</tbody>
+</table>
+<h3 id="used-by">Used by</h3>
+<ul>
+<li>Text selection and right-click menu (feature 16) writes the selection with <code>clipboard.write-text</code>.</li>
+<li>Smart Copy light (feature 65) writes the selection on key release. It uses <code>clipboard.write-text</code> with a grab from the keys import.</li>
+<li>Agent toolbar (feature 35) copies text with <code>clipboard.write</code>.</li>
+</ul>
+<h3 id="see-also">See also</h3>
+<ul>
+<li><a href="/pages/api-keys/">keys</a> for the grab used by Smart Copy light.</li>
+<li><a href="/pages/primitives-terminal/">terminal primitive</a> for the selection, the screen and <code>send-input</code>.</li>
+<li><a href="/pages/api-intents/">intents</a> for <code>send-input</code> and the submission rules.</li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a> for <code>now-unix-millis</code>.</li>
+<li><a href="/pages/api-client-requests/">client requests</a> for reading the clipboard from the server side.</li>
+<li><a href="/pages/capability-clipboard/">capability: clipboard</a> for the grants, the logging and the review dialog.</li>
+<li><a href="/pages/errors-and-limits/">errors and limits</a> for the trap and restart rules.</li>
+</ul>
+<p>Contract: <code>ilium:host/clipboard</code>. The server side reaches it through client requests.</p>
+<h3 id="security">Security</h3>
+<p><strong>[SEC-044]</strong> Clipboard reads need the high-risk <code>clipboard.read</code> grant. See <a href="/pages/reference-secrets/">Secrets</a>.</p>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/api-cli/"><small>Previous</small>cli</a><a class="next" href="/pages/api-clock-and-timers/"><small>Next</small>clock and timers</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#you-will-need">You will need</a></li><li class="l2"><a href="#interface">Interface</a></li><li class="l2"><a href="#functions">Functions</a></li><li class="l2"><a href="#how-the-import-behaves">How the import behaves</a></li><li class="l2"><a href="#grants-and-refusals">Grants and refusals</a></li><li class="l2"><a href="#using-the-clipboard-from-the-server-side">Using the clipboard from the server side</a></li><li class="l2"><a href="#example-1-copy-the-selected-text-of-a-pane">Example 1: copy the selected text of a pane</a></li><li class="l2"><a href="#example-2-paste-the-clipboard-into-a-pane">Example 2: paste the clipboard into a pane</a></li><li class="l2"><a href="#what-the-user-sees">What the user sees</a></li><li class="l2"><a href="#errors">Errors</a></li><li class="l2"><a href="#limits">Limits</a></li><li class="l2"><a href="#used-by">Used by</a></li><li class="l2"><a href="#see-also">See also</a></li><li class="l2"><a href="#security">Security</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

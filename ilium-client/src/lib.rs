@@ -434,12 +434,13 @@ fn server_event_damage(app: &App, event: &ilium_ipc::ServerEvent) -> ServerEvent
                 needs_immediate_redraw: is_visible,
             }
         }
-        ServerEvent::TerminalReplay { pane_id, .. } | ServerEvent::ScreenUpdate { pane_id, .. } => {
-            ServerEventDamage {
-                needs_redraw: app.is_pane_displayed(*pane_id),
-                needs_immediate_redraw: false,
-            }
-        }
+        ServerEvent::TerminalReplay { pane_id, .. }
+        | ServerEvent::TerminalSnapshot { pane_id, .. }
+        | ServerEvent::TerminalHistory { pane_id, .. }
+        | ServerEvent::ScreenUpdate { pane_id, .. } => ServerEventDamage {
+            needs_redraw: app.is_pane_displayed(*pane_id),
+            needs_immediate_redraw: false,
+        },
         // Per-pane state that background panes report continuously. With
         // hundreds of agents these arrive many times a second; each one used
         // to force an immediate full redraw, bypassing the output frame cap.
@@ -2168,8 +2169,9 @@ async fn run_inner(
                 _ = tokio::time::sleep(Duration::from_millis(1)), if owner.is_none() || app.has_pending_exact_prompt_reports() || app.terminal_baselines.as_ref().is_some_and(|files| files.needs_retry()) => {},
             }
         }
-        connection.finish_read_shutdown().await.map_err(|error|
-            ClientError::TerminalSetup(std::io::Error::other(error)))
+        // The reader task ends with the error that closed the connection; it
+        // is a lost server connection, not a terminal setup failure.
+        connection.finish_read_shutdown().await.map_err(ClientError::ServerConnectionLost)
     };
     tokio::time::timeout(Duration::from_secs(5), terminal_drain).await
         .map_err(|_| {
