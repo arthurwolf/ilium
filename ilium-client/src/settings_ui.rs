@@ -304,16 +304,15 @@ fn compute_layout_with_attribution(area: Rect, shows_osm: bool) -> SettingsLayou
     let content_inner = theme::block(true).inner(content_frame_area);
     let scrollbar_width = u16::from(content_inner.width >= 4);
     let help_width = if content_inner.width >= 12 { 3 } else { 0 };
-    // Labels and wrapped help text keep one breathing cell from the frame on
-    // each side of the text column; narrow frames give that cell back.
-    let content_padding = u16::from(content_inner.width >= 16);
     let scrollbar_x = content_inner
         .right()
         .saturating_sub(scrollbar_width + help_width);
+    // The scrollbar track is painted at `content_area.right()`, so the content
+    // column must end exactly where the reserved scrollbar column starts.
     let content_area = Rect::new(
-        content_inner.x + content_padding,
+        content_inner.x,
         content_inner.y,
-        scrollbar_x.saturating_sub(content_inner.x + content_padding * 2),
+        scrollbar_x.saturating_sub(content_inner.x),
         content_inner.height,
     );
     let content_scrollbar_area = Rect::new(
