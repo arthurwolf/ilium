@@ -166,7 +166,7 @@ The SDK helper `dedup::key_for(&["finish", &node.to_string()])` joins its parts 
 | `open-view` | `view-target`, `focus: bool` | `ui.panels` | `refused(not-found)` for an undeclared view |
 | `close-view` | `view-target` | `ui.panels` | none beyond the universal codes |
 | `invoke-command` | `command: string`, `arguments-json: string` | `commands.invoke:<pattern>` | `ok` once the command has run; `refused(not-found)`; the command's own `failed` code; `failed(timed-out)` after 30 s |
-| `message` | `to: string` (plugin id), `channel: string`, `payload: list<u8>` | `messages.peer:<plugin-id>` | `ok` when queued; `refused(not-found)` when the target is not installed; `refused(invalid-argument)` over 1 MiB |
+| `message` | `to: message-target` (the plugin id, its side and an optional client id), `channel: string`, `payload: list<u8>` | `messages.peer:<plugin-id>` | `ok` when queued; `refused(not-found)` when the target is not installed; `refused(invalid-argument)` over 1 MiB |
 | `editor-apply-edits` | `buffer`, `base-revision: u64`, `edits: list<text-edit>` | `editor.edit` | `refused(conflict)` on a stale revision; `refused(invalid-argument)` for overlapping edits |
 | `editor-open` | `path: fs-path`, `line: option<u32>`, `placement` (new-pane, split, replace) | `editor.edit` and `fs.read` for the path | `ok-node(node-id)`; `failed(not-found)`; `failed(io)` |
 

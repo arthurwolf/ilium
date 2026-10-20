@@ -14,7 +14,7 @@ The always-granted set covers the plugin's own state and its basic tools:
 - timers that fire back into the plugin,
 - a key-value store in four buckets (`global`, `project`, `session` and `shared`), and the plugin's own settings values,
 - compression, image decoding, hashing and text rasterizing,
-- read and write access to three folders (package, data, cache) that belong to the plugin,
+- read and write access to the data and cache folders that belong to the plugin, and read access to its package `assets/` folder,
 - messages between the plugin's server side and client side,
 - asking the host to render again a view the plugin declares.
 

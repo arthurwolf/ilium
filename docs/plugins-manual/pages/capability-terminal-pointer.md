@@ -8,7 +8,7 @@ permalink: /pages/capability-terminal-pointer/
 
 The `terminal.pointer` grant lets a client-side plugin take the mouse in a terminal pane. The plugin claims a pane, receives every pointer event for that pane, and draws highlight regions over its text. Copy features use it so the user can select a block of output with the mouse. The grant never changes the text in the pane.
 
-A claim belongs to one plugin per pane. While it is held, the host stops sending mouse input to the pane's program, stops its own text selection on that pane, and stops the wheel from scrolling the scrollback. All three return when the claim ends.
+A whole claim belongs to one plugin per pane, and gesture claims with different modifier sets may be held by other plugins on the same pane (see [pointer primitive](/pages/primitives-terminal-pointer/)). While a whole claim is held, the host stops sending mouse input to the pane's program, stops its own text selection on that pane, and stops the wheel from scrolling the scrollback. All three return when the claim ends.
 
 <figure>
 <svg viewBox="0 0 400 150" role="img" aria-label="Pointer events go from the pane to the claiming plugin, and the plugin sends highlights back to the pane">
@@ -167,7 +167,7 @@ When a plugin asks for the grant, the review dialog lists it in a 70-column box.
   <text x="200" y="44" text-anchor="middle" fill="currentColor" font-size="10">claim-pointer: ok</text>
   <line x1="258" y1="84" x2="142" y2="84" stroke="currentColor" marker-end="url(#arr-pointer-life)"/>
   <text x="200" y="108" text-anchor="middle" fill="currentColor" font-size="10">release, deactivate, revoke</text>
-  <text x="200" y="140" text-anchor="middle" fill="currentColor" font-size="10">Only one plugin holds a claim per pane.</text>
+  <text x="200" y="140" text-anchor="middle" fill="currentColor" font-size="10">Only one whole claim per pane.</text>
 </svg>
 <figcaption>A claim is held until the plugin releases it or the plugin stops. Highlights stay on screen after a release.</figcaption>
 </figure>

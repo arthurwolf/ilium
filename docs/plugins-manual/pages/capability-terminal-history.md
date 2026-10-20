@@ -143,7 +143,7 @@ The regular expression runs in the host, so the plugin never receives the whole 
 | Situation | Outcome | What the plugin does |
 |---|---|---|
 | Grant missing, declined or not explicit | `not-permitted` | Explain in the UI that history needs the grant. |
-| `max-bytes` above 4 MiB | `invalid-argument` | Ask for less. |
+| `max-bytes` above 4 MiB | `none`: the value is clamped to 4 MiB and the call does not fail | Nothing needed; the newest 4 MiB is returned. |
 | Invalid regular expression | `invalid-argument` with the position in the message | Fix the pattern. |
 | Pane closed while the request runs | `take-` returns none, then `not-found` | Drop the request. |
 | Too many open requests | `busy` | Retry after the previous request finished. |
