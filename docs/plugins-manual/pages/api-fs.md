@@ -44,7 +44,7 @@ Manifest example for a server side that reads and writes the project and watches
 | `data` | `/data` | the plugin's private data folder | always, read and write |
 | `cache` | `/cache` | the plugin's private cache folder, may be evicted | always, read and write |
 | `project` | `/project` | the session's canonical project folder | grant |
-| `worktrees` | `/worktrees` | the worktree folder set by `workspace.worktree_root` | grant, high risk for read and for write |
+| `worktrees` | `/worktrees` | the worktree folder set by `workspace.worktree_root` | grant, high risk for write only |
 | `picked` | `/picked/<n>` | each path the user chose in the picker | grant per pick |
 | `agent-sessions:claude`, `agent-sessions:codex`, `agent-sessions:antigravity`, `agent-sessions:gemini` | `/agent-sessions/<agent>` | the agent's transcript folder | grant, high risk |
 | `agent-config:claude`, `agent-config:codex`, `agent-config:gemini`, `agent-config:antigravity` | `/agent-config/<agent>` | the agent's configuration folder | grant, high risk for read; no write grant (changes are proposed with `agent-config.propose:<agent>`) |

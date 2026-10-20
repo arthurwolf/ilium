@@ -446,7 +446,7 @@ Edge cases to design for:
   are read only.
 - An `inference-provider` export needs `inference.provide`. Without the grant the plugin installs
   but is never selected as a provider.
-- A `process.run` call for a program outside its grant fails with `invalid-argument` before the
+- A `process.run` call for a program outside its grant fails with `not-permitted` before the
   process starts. A `cwd` that the plugin cannot read is `not-permitted`.
 - A `http:*` grant, or any other bare wildcard, is refused. A redirect follows the same host rule
   on each hop.
