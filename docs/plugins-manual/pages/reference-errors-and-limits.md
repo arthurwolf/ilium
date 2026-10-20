@@ -501,7 +501,7 @@ Run codes, returned by the `extensions` host functions or written to the plugin 
 | `extension.not-granted` | The matching `extensions.provide` or `extensions.contribute` grant is missing |
 | `extension.schema-mismatch` | A payload, entry (including a priority outside 0 to 100, EXT-047) or reply failed its schema. A bad reply counts as "no change" |
 | `extension.cap-exceeded` | A point is full |
-| `extension.reentrant` | A handler called `run-hook` on the point that is running it |
+| `extension.reentrant` | A handler called `run-hook` on a point already on the running chain, directly or through other points |
 | `extension.not-dynamic` | `register` or `unregister` on a point without `dynamic: true` |
 | `extension.handler-timeout` | A handler missed its deadline. It counts as "no change" |
 | `extension.reply-not-allowed` | The reply does not fit the mode. It counts as "no change" |

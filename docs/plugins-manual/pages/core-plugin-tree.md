@@ -69,7 +69,7 @@ This block is a fragment. It lists the contributions. The whole manifest is in [
 }
 ```
 
-`tree.restructure` is a high risk grant; see [tree.restructure](/pages/capability-tree-restructure/). The bundled plugin carries it by default.
+`tree.restructure` is a high risk grant; see [tree.restructure](/pages/capability-tree-restructure/). The bundled plugin gets it only as a high-risk grant asked at first activation, with `Allow selected` and `Not now` ([lifecycle](/pages/lifecycle/)).
 
 ### Complete manifest
 

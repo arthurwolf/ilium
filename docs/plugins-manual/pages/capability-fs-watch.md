@@ -12,7 +12,7 @@ A watch names a scope and a path relative to that scope. It never names a path o
 
 **You will need:**
 
-- A manifest grant `fs.watch:<scope>` on the side that calls `watch`. Grants are recorded per side.
+- A manifest grant `fs.watch:<scope>` on the side that calls `watch`, unless the scope is `data` or `cache`, which are always granted. Grants are recorded per side.
 - The `fs.read:<scope>` grant, when the plugin reads the changed files. See [fs.read](/pages/capability-fs-read/).
 - The SDK for your language: `ilium-plugin-sdk` for Rust, or `@ilium/plugin-sdk` for TypeScript. Both sides can watch.
 - An active plugin instance. A watch belongs to the instance that started it.

@@ -160,7 +160,7 @@ Use the same model and dimension for the index and the queries. Changing the pro
 | `top-k`, `remove-entries` or `drop-index` names an index id that does not exist (never created, already dropped or owned by another plugin) | `not-found` | Create the index again and re-embed. |
 | `top-k` query vector has the wrong dimension | `invalid-argument` | Fix the call. |
 | `remove-entries` lists an id that is not in the index | Ignored, the other ids are removed | Nothing. |
-| `drop-index` on an index twice | `not-found` on the second call | Treat as done. |
+| `drop-index` on an index twice | Nothing happens; the call returns no error | Treat as done. |
 
 Index files count against the plugin storage quota.
 

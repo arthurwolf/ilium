@@ -177,7 +177,7 @@ seq  time(ms)  kind        detail
 <figcaption>Rendered at 48 columns. Illustrative. The memory view of one plugin side.</figcaption>
 </figure>
 
-- **[DEV-700]** The memory view MUST show linear memory now, the peak since the instance started, the limit, storage used against the 1 MiB quota, the instance count and the restart count.
+- **[DEV-700]** The memory view MUST show linear memory now, the peak since the instance started, the limit, storage used against the plugin's storage quota (`storage_bucket_mib`, 16 MiB by default), the instance count and the restart count.
 - **[DEV-701]** A peak of more than 80 percent of the limit MUST add the line `warning: peak above 80 percent of memory_mib`.
 - **[DEV-702]** Values MUST use binary units (KiB, MiB).
 

@@ -88,7 +88,7 @@ A core plugin is the plugin form of a feature Ilium has today. Ilium ships and m
 
 ### Which core plugins can be disabled
 
-All 30 core plugins can be disabled except the essential set: `ilium.core.tree`, `ilium.core.layout`, `ilium.core.settings` and `ilium.core.sessions`. Safe mode keeps the essential set running ([Safe mode and recovery](/pages/user-safe-mode-and-troubleshooting/)). The Plugins screen shows a lock in the "Can you turn it off" column for them. Failures never disable an essential plugin: its third and later failures restart it after 5 s and raise the essential-failure banner ([LIF-042]). [LIF-276]
+26 of the 30 core plugins can be disabled. The four essential plugins cannot be: `ilium.core.tree`, `ilium.core.layout`, `ilium.core.settings` and `ilium.core.sessions`. Safe mode keeps the essential set running ([Safe mode and recovery](/pages/user-safe-mode-and-troubleshooting/)). The Plugins screen shows a lock in the "Can you turn it off" column for them. Failures never disable an essential plugin: its third and later failures restart it after 5 s and raise the essential-failure banner ([LIF-042]). [LIF-276]
 
 - [LIF-276] The Plugins screen MUST not offer a disable switch for the four essential plugins, and MUST offer one for every other core plugin, including `ilium.core.editor`. Test: render the list and press Space on each.
 

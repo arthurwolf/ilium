@@ -12,7 +12,7 @@ Two parts make up the import. `embed` sends texts through the inference provider
 
 **You will need:**
 
-- The `inference.embed` grant, on the server or the client side that calls the import. The grant takes no argument and has ordinary risk. The user reviews it at install. See [Capability: inference.embed](/pages/capability-inference/) for the related `inference` grant; there is no separate page for `inference.embed`.
+- The `inference.embed` grant, on the server or the client side that calls the import. The grant takes no argument and has ordinary risk. The user reviews it at install. See [Capability: inference.embed](/pages/capability-inference-embed/) for the grant's own page, and [Capability: inference](/pages/capability-inference/) for the related `inference` grant.
 - A selected inference provider that offers embeddings. Without one, `embed` fails with `unsupported`. The index functions work without a provider, because they only store and compare vectors the plugin already holds.
 - Your own data scope. Indexes are persisted per plugin and are never shared with other plugins.
 

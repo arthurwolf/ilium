@@ -66,7 +66,7 @@ Use it when the server side needs one answer from one client now. Use [messages 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
 | `id` | string | required | The request kind. Used as `kind` in `request` and in the `client-request` event. |
-| `timeout_ms` | integer, 1 to 30,000 | none | A ceiling for this kind. This key has no default; the host reply deadline is 5,000 ms when the caller passes no `timeout-millis`, and the caller can set 1 to 30,000 ms. |
+| `timeout_ms` | integer, 1 to 30,000 | none | A ceiling for this kind, when set. This key has no default: without it, the caller's `timeout-millis` is limited only by the 1 to 30,000 ms range. |
 
 ### Surface
 
@@ -303,7 +303,7 @@ The user sees only the effect. A command such as `ilium voice say` is a server-s
 | Item | Value |
 |---|---|
 | Request kinds per plugin | 16 |
-| Timeout | 1 to 30,000 ms; the manifest default is 5,000 ms |
+| Timeout | 1 to 30,000 ms, passed by the caller as `timeout-millis`; the host default is 5,000 ms |
 | Answer hold time | 30 s, or until taken once |
 
 ### Edge cases

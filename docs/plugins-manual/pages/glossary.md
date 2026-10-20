@@ -349,7 +349,7 @@ Twenty-four grant rows are new. Twelve are high risk (H).
 | `gpu.kernels` | A | Host GPU kernels, `@unstable`, development builds only | |
 | `panes.create-command:<program>` | S C | Create a pane that runs one named program; needs `panes.create` | H |
 | `agent-config.propose:<agent>` | S C | Propose changes to one agent's configuration files; the user accepts the diff; needs `fs.read:agent-config:<agent>` | H |
-| `extensions.provide:<plugin-id>/<point>` | S C A | Own one extension point and receive its contributions | |
+| `extensions.provide:<plugin-id>/<point>` | S C | Own one extension point and receive its contributions | |
 | `extensions.contribute:<plugin-id>/<point>` | S C | Contribute to one extension point; high when the point declares `risk: "high"` | |
 
 New argument forms: `http:setting:<key>`, `fs.read:agent-sessions:gemini`, `fs.read:agent-config:gemini`, `fs.read:agent-config:antigravity`, `settings.read-kernel:<kernel-tab-id>` and `agent-config.propose:<agent>`.

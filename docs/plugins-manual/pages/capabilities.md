@@ -129,7 +129,7 @@ Sides: S is the server world, C is the client world and A is the animation (scen
 | `help.read` | none | C | normal | [page](/pages/capability-help-read/) | [api-help-and-plugins](/pages/api-help-and-plugins/) |
 | `journal.read` | none | S C | normal | [page](/pages/capability-journal-read/) | [api-clock-and-timers](/pages/api-clock-and-timers/) |
 | `gpu.kernels` | none; development builds only | A | normal (unstable) | [page](/pages/capability-gpu-kernels/) | [api-scenes](/pages/api-scenes/) |
-| `extensions.provide:<plugin-id>/<point>` | one global point id of the plugin's own, no wildcard | S C A | normal | [page](/pages/capability-extensions-provide/) | [api-extension-points](/pages/api-extension-points/) |
+| `extensions.provide:<plugin-id>/<point>` | one global point id of the plugin's own, no wildcard | S C | normal | [page](/pages/capability-extensions-provide/) | [api-extension-points](/pages/api-extension-points/) |
 | `extensions.contribute:<plugin-id>/<point>` | one global point id, no wildcard | S C | normal; high when the point declares `risk: "high"` | [page](/pages/capability-extensions-contribute/) | [api-extension-points](/pages/api-extension-points/) |
 
 ### Extended grants

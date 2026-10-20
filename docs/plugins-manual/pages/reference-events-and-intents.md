@@ -222,7 +222,7 @@ record request-result { request: request-ref, outcome: outcome }
 |---|---|
 | `ok` | The intent was applied. For a call, the typed result is ready to take. |
 | `ok-node(node)` | The intent was applied and created this node. |
-| `duplicate(original)` | The dedup key was already reserved. Nothing happened. |
+| `duplicate(request-ref)` | The dedup key was already reserved. Nothing happened. |
 | `refused(error)` | A check before the kernel applied the intent failed. Nothing happened. |
 | `failed(error)` | The kernel accepted the intent but could not apply it. |
 | `ok-epoch(epoch)` | `send-input` on an agent pane was applied. The value is the new prompt epoch. |
