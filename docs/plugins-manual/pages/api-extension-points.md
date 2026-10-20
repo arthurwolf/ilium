@@ -116,7 +116,7 @@ interface extensions {
 
 // export fragment `with-hook-handler`, listed as "hook-handler" in `exports`
 variant hook-reply { pass, replace(string), refuse(string), answer(string) }
-record hook-call { call: u64, point: string, payload-json: string }
+record hook-call { call: u64, point: string, extension: string, payload-json: string }
 handle-hook: func(call: hook-call) -> result<hook-reply, plugin-error>;
 ```
 
@@ -347,7 +347,7 @@ The contributor's package needs the manifest shown above. A handler must stay un
 
 The same owner in TypeScript. `runHook` resolves with the final payload, or `undefined` when the mode returns none.
 
-`src/index.ts`:
+`src/server.ts`:
 
 ```ts
 import { definePlugin, PluginError, type Event, type Submission } from '@ilium/plugin-sdk';
@@ -401,7 +401,7 @@ export const { lifecycle, handler } = definePlugin({
 
 ### Example: TypeScript contributor
 
-`src/index.ts`:
+`src/server.ts`:
 
 ```ts
 import { definePlugin, type HookCall, type HookReply } from '@ilium/plugin-sdk';
@@ -595,7 +595,7 @@ Further edge cases:
 - **Contributor removed while a chain runs.** The chain skips its handler and logs `extension.disabled`.
 - **Equal priority.** Two extensions on one point with the same priority run in plugin id order, then in extension id order [EXT-007].
 - **Two contributors, same id.** The id is unique per contributor and point, so both stay. The user sees them as two rows.
-- **Version mismatch.** A contribution asks for `point@X.Y.Z`. The version is a caret range (PKG-317, PKG-318, PKG-328 in [Dependency resolution](/pages/reference-dependency-resolution/)): the owner must satisfy `>=X.Y.Z` within the same left-most non-zero part. Otherwise it stays dormant and the Plugins screen says why. A contribution without `@version` matches any owner version. Examples with an owner at `1.2.0`: `@1.0.0` accepted, `@1.2.0` accepted, `@1.3.0` dormant, `@2.0.0` dormant. With an owner at `0.1.2`: `@0.1.0` and `@0.1.9` accepted, `@0.2.0` dormant [EXT-006].
+- **Version mismatch.** A contribution asks for `point@X.Y.Z`. The version is a caret range (PKG-317, PKG-318, PKG-328 in [Dependency resolution](/pages/reference-dependency-resolution/)): the owner's major must equal the requested major, the owner's minor must be at least the requested minor, and the patch is ignored; for major 0 the owner's minor must equal the requested minor instead. Otherwise it stays dormant and the Plugins screen says why. A contribution without `@version` matches any owner version. Examples with an owner at `1.2.0`: `@1.0.0` accepted, `@1.2.0` accepted, `@1.3.0` dormant, `@2.0.0` dormant. With an owner at `0.1.2`: `@0.1.0` and `@0.1.9` accepted, `@0.2.0` dormant [EXT-006].
 - **Hook with no handlers.** `run-hook` resolves at once with outcome `ok` and no reply. The owner continues with its original data.
 - **Slow owner path.** The owner pays for the chain. The action waits for a `veto`, `transform` or `first` chain, at most the 100 ms cap plus one deadline. A handler that is skipped at the cap counts as `pass`, so a `veto` chain that never reached a refusal lets the action go on.
 - **No retry by the kernel.** The kernel never re-runs a failed chain. The owner decides.

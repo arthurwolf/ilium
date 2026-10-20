@@ -40,7 +40,7 @@ One space separates the parts. Example:
 
 ```text
 2030-01-01 09:14:02 info  server example.notes activate: ready
-2030-01-01 09:14:09 warn  server example.notes storage near quota: 912 KiB of 1 MiB
+2030-01-01 09:14:09 warn  server example.notes storage near quota: 15.2 MiB of 16 MiB
 2030-01-01 09:15:40 error host   example.notes restarting in 1 s (failure 1 of 3 in 10 minutes)
 ```
 
@@ -132,7 +132,7 @@ seq  time(ms)  kind        detail
 │     row  key=n1  "Inbox"                     │
 │     row  key=n2  "Plans"       <- selected   │
 │   button  key=add  "Add note"                │
-│ nodes 8 of 2000   depth 3 of 16              │
+│ nodes 8 of 4096   depth 3 of 32              │
 ╰──────────────────────────────────────────────╯
 </pre>
 <figcaption>Rendered at 48 columns. Illustrative. The inspector view of panel main.</figcaption>
@@ -170,7 +170,7 @@ seq  time(ms)  kind        detail
 ╭ Memory: example.notes (server) ──────────────╮
 │ linear memory   6.2 MiB of 32 MiB            │
 │ peak            9.8 MiB                      │
-│ storage         14 KiB of 1 MiB              │
+│ storage         14 KiB of 16 MiB             │
 │ instances       1   restarts 0               │
 ╰──────────────────────────────────────────────╯
 </pre>

@@ -150,7 +150,7 @@ Every grant is listed once. Capabilities with several grants share one row.
 | `workspace.manage` | none | S | **H** | [page](/pages/capability-workspace-manage/) | [api-workspace](/pages/api-workspace/) |
 | `settings.read-all`, `settings.write-all` | none (T1 only; `manifest.grant-tier` otherwise) | C | **H**, T1 only | [page](/pages/capability-settings-all/) | [api-settings](/pages/api-settings/) |
 | `settings.contribute:<kernel-tab-id>` | one kernel tab id, no wildcard | S C | normal | [page](/pages/capability-settings-contribute/) | [api-settings](/pages/api-settings/) |
-| `settings.write-kernel:<kernel-tab-id>` | one built-in tab id, no wildcard (`manifest.grant-argument` otherwise); T2 and T3 get `manifest.grant-tier`; at most one installed plugin holds each tab (`manifest.settings-owner` for a second) | S | **H**, T1 only | [page](/pages/capability-settings-write-kernel/) | [api-settings](/pages/api-settings/) |
+| `settings.write-kernel:<kernel-tab-id>` | one built-in tab id, no wildcard (`manifest.grant-wildcard`; `manifest.grant-argument-missing` for a missing id, `manifest.grant-argument` for an unknown one); T2 and T3 get `manifest.grant-tier`; at most one installed plugin holds each tab (`manifest.settings-owner` for a second) | S | **H**, T1 only | [page](/pages/capability-settings-write-kernel/) | [api-settings](/pages/api-settings/) |
 | `settings.read-kernel:<kernel-tab-id>` | one kernel tab id, no wildcard | S C | normal; H for api, at every tier | [page](/pages/capability-settings-read-kernel/) | [api-settings](/pages/api-settings/) |
 | `plugins.manage` | none (T1 only; `manifest.grant-tier` otherwise) | C | **H**, T1 only | [page](/pages/capability-plugins-manage/) | [api-help-and-plugins](/pages/api-help-and-plugins/) |
 | `help.read` | none | C | normal | [page](/pages/capability-help-read/) | [api-help-and-plugins](/pages/api-help-and-plugins/) |
@@ -168,7 +168,7 @@ Each capability has its own page with the full behaviour, for example [capabilit
 The risk tier decides how the user sees a capability.
 
 - **Normal.** Listed in the review dialog and checked by default. A T2 or T3 package installs with the grants the user leaves checked.
-- **High (H).** Listed but unchecked, so the user must tick each one. A T1 bundled plugin starts without its H capabilities. At its first activation the user sees one prompt, "Plugin <name> asks for: <list>", with the buttons `Allow selected` and `Not now`. `Not now` asks again at the next server start, at most three times, and the user can grant later from Settings > Plugins.
+- **High (H).** Listed but unchecked, so the user must tick each one. A T1 bundled plugin starts without its H capabilities. At its first activation the user sees one prompt, "Plugin <name> asks for: <list>", with the buttons `Allow selected` and `Not now`. `Not now` asks again at the next server start; the user sees at most three prompts in total, and can grant later from Settings > Plugins.
 
 There is no prompt for each call. A grant is a standing permission until it is revoked. The review dialog shows one row per capability, grouped by side, with the grant string at the end of the row:
 

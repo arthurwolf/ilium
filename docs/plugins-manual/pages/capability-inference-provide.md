@@ -36,7 +36,7 @@ The provider implements two exports. Both are required when the manifest lists `
 |---|---|---|---|
 | `inference-provider.complete` (export) | `fn complete(&mut self, call: ProviderCall) -> Result<(), PluginError>` | `complete(call)` | Accepts one request. `Ok` accepts it; an `Err` fails the caller's request with that error. The reply comes later. |
 | `inference-provider.models` (export) | `fn models(&mut self) -> Vec<String>` | `models()` | The model names the provider offers. Consumers read them with `inference.models`. |
-| `inference.provider-reply` (import) | `inference::provider_reply(call, outcome)` | `providerReply(call, outcome)` | Answers one call with `Ok(Completion)` or `Err(PluginError)`. It returns nothing and never blocks. |
+| `inference.provider-reply` (import) | `inference::provider_reply(call, outcome)` | `providerReply(call, outcome)` | Answers one call with `Ok(Completion)` or `Err(PluginError)`. It returns a result: `not-found` for an unknown call. It never blocks. |
 
 The Rust names come from `ilium_plugin_sdk::exports` (the export traits and records) and `ilium_plugin_sdk::host::inference` (the import and the records). The TypeScript names come from `@ilium/plugin-sdk` and `@ilium/plugin-sdk/host/inference`.
 

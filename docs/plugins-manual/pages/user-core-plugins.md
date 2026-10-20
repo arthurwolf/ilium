@@ -66,7 +66,7 @@ The column "Can you turn it off" lists the fixed set of plugins that your own sw
 
 | Plugin | What it does for you | If you turn it off | Can you turn it off | Replaceable |
 |---|---|---|---|---|
-| Inference providers (`ilium.core.inference`) | Connects Ilium to AI providers and models | Every feature that uses AI stops. Plugins that ask for `inference` get `unavailable` | yes | yes |
+| Inference providers (`ilium.core.inference`) | Connects Ilium to AI providers and models | Every feature that uses AI stops. Plugins that ask for `inference` get `not-permitted` with reason `unavailable` | yes | yes |
 | Notifications (`ilium.core.notifications`) | Sounds, desktop notifications, toasts, attention marks | No alerts | yes | yes |
 | Voice (`ilium.core.voice`) | Voice control and speech output | No voice features | yes | yes |
 | Scheduler (`ilium.core.scheduler`) | Scheduled input and the prompt queue | Scheduled items do not run | yes | yes |

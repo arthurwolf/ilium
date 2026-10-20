@@ -32,7 +32,7 @@ interface fs {
   read: func(path: fs-path, offset: u64, max-bytes: u32) -> result<list<u8>, plugin-error>;
   /// Async, take-bytes. At most 64 MiB.
   read-all: func(path: fs-path) -> result<request-id, plugin-error>;
-  /// Async, take-entries. glob follows the scope root. max-entries at most 100,000.
+  /// Async, take-entries. glob follows the scope root. max-entries at most 65,536.
   scan: func(path: fs-path, glob: string, max-entries: u32) -> result<request-id, plugin-error>;
   /// Async, take-written is not used: the answer is request-completed ok. replace is atomic.
   write: func(path: fs-path, data: list<u8>, mode: write-mode) -> result<request-id, plugin-error>;

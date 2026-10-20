@@ -37,6 +37,33 @@ const TAB_IDS: [&str; 25] = [
     "setup",
 ];
 
+const WRITE_GRANTS: &[&str] = &["settings.read-kernel:*", "settings.write-kernel:terminal"];
+
+/// REQ: WIT:ilium:host/kernel-settings.write
+#[test]
+fn wit_kernel_settings_write_sets_one_key_and_reads_it_back() {
+    let rig = rig(WRITE_GRANTS);
+    rig.kernel
+        .set_kernel_tab("terminal", "{\"scrollback\":5000}");
+    rig.host
+        .kernel_settings()
+        .write(
+            "terminal".to_owned(),
+            "scrollback".to_owned(),
+            "6000".to_owned(),
+        )
+        .expect("writes");
+    let json = rig
+        .host
+        .kernel_settings()
+        .read("terminal".to_owned())
+        .expect("reads");
+    assert!(
+        json.contains("\"scrollback\":6000") || json.contains("\"scrollback\": 6000"),
+        "{json}"
+    );
+}
+
 /// REQ: WIT:ilium:host/kernel-settings.read
 #[test]
 fn wit_kernel_settings_read_returns_a_json_object() {

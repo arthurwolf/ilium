@@ -57,7 +57,7 @@ The argument of `http` is a host pattern.
 |---|---|---|
 | Exact host, optional port | That host only | `http:api.example.com`, `http:api.example.com:8443` |
 | `*.` and a domain | Any subdomain at any depth, not the bare domain | `http:*.openstreetmap.org` |
-| Loopback | `localhost`, `127.0.0.1`, `[::1]`; plain HTTP allowed | `http:localhost` |
+| Loopback | `localhost`, `127.0.0.1`, `[::1]`; plain HTTP allowed, with a port | `http:localhost:<port>` |
 | Setting | The host currently stored in the plugin's own setting `<key>` | `http:setting:feed_host` |
 | Refused | A bare `*`, a wildcard anywhere else, a scheme or a path | `http:*`, `http:https://api.example.com/v1` |
 

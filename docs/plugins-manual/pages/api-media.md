@@ -297,8 +297,8 @@ seek: func(video: u64, millis: u64) -> result<_, plugin-error>;
 
 | Call | Rust | TypeScript | Error |
 |---|---|---|---|
-| `open-video-bytes` | `media::open_video_bytes(&bytes, "video/mp4")` | `openVideoBytes(bytes, 'video/mp4')` | `unsupported` (mime type or codec), `invalid-argument` (empty bytes, or more than 16 MiB) |
-| `open-video-range` | `media::open_video_range(path, start, end)` | `openVideoRange(path, start, end)` | `io`, `not-permitted` |
+| `open-video-bytes` | `media::open_video_bytes(&bytes, "video/mp4")` | `openVideoBytes(bytes, 'video/mp4')` | `invalid-argument` (empty bytes, or more than 16 MiB); `io` or `unsupported` (mime type or codec), returned by the call |
+| `open-video-range` | `media::open_video_range(path, start, end)` | `openVideoRange(path, start, end)` | `invalid-argument` (more than 16 MiB), `not-permitted`; on completion `io` |
 | `seek` | `media::seek(video, millis)` | `seek(video, millis)` | `invalid-argument` |
 
 The `video` widget plays the same sources inside views: `source` is `asset(string)`, `fs(fs-path)` or `range(fs-path, u64, option<u64>)`, with `autoplay`, `loop`, `muted`, `controls` and `fit`. It is always muted unless `audio.playback` is granted, and the shared look and dithering apply. The `image` widget gains `asset(string)` and `bytes(list<u8>, string)` sources (PNG, JPEG, GIF or WebP up to 16 MiB). Settings views do not allow `video`.

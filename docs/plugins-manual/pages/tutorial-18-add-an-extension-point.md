@@ -163,7 +163,7 @@ Points to notice:
 - The global ids are the plugin id, a slash and the point id: `example.linkpreview/renderers`. Each `extensions.provide` grant names one of them. A grant for a point that starts with another plugin's id is refused at install with `manifest.grant-missing-extension`, and a point without a grant fails the same way.
 - The owner does not list `hook-handler` in `exports`. It runs hooks and does not handle them.
 - `version` is the version of the point's schema. Bump the minor number when you add an optional field. Bump the major number when you remove a field or make a field required. Contributors can ask for a minimum, as step 3 shows.
-- `max_entries` caps the whole list at 32. A 33rd entry is refused with `extension.cap-exceeded`. The default is 64 and the limit is 256.
+- In this example the owner sets `max_entries` to 32, which caps the whole list. A 33rd entry is refused with `extension.cap-exceeded`. The default is 64 and the limit is 256.
 - The owner grants itself `services.use` for exactly one renderer service. An entry that names another service is listed, but the call fails with `not-permitted`. Step 2 turns that into a plain preview.
 
 ### Step 2: the owner code
@@ -291,7 +291,7 @@ fn plain_preview(url: &str) -> (String, String) {
 **TypeScript**
 
 ```ts
-// src/index.ts
+// src/server.ts
 import { definePlugin, type Event, type Submission } from '@ilium/plugin-sdk';
 import { list, runHook } from '@ilium/plugin-sdk/host/extensions';
 import { call } from '@ilium/plugin-sdk/host/services';
@@ -494,7 +494,7 @@ impl ServiceProvider for GithubRenderer {
 **TypeScript**
 
 ```ts
-// src/index.ts
+// src/server.ts
 import { definePlugin } from '@ilium/plugin-sdk';
 import type { ServiceCall, ServiceReply } from '@ilium/plugin-sdk';
 

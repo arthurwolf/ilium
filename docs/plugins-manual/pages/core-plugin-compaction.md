@@ -116,13 +116,13 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "fs.read:agent-config:claude",
       "agent-config.propose:claude",
       "fs.read:agent-config:codex",
-      "agent-config.propose:codex"
+      "agent-config.propose:codex",
+      "settings.write-kernel:optimization",
+      "settings.write-kernel:remote-compaction"
     ],
     "client": [
       "open-external",
-      "ui.panels",
-      "settings.write-kernel:optimization",
-      "settings.write-kernel:remote-compaction"
+      "ui.panels"
     ]
   },
   "activation": [

@@ -70,7 +70,7 @@ This block is a fragment. It lists the contributions. The whole manifest is in [
   },
   "capabilities": {
     "client": [
-      "editor.read", "editor.edit", "editor.provide", "fs.read:project",
+      "editor.read", "editor.edit", "fs.read:project",
       "panes.create", "terminal.write", "ui.panels"
     ]
   }
@@ -103,7 +103,6 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
     "client": [
       "editor.read",
       "editor.edit",
-      "editor.provide",
       "fs.read:project",
       "panes.create",
       "terminal.write",
@@ -395,7 +394,7 @@ use ilium_plugin_sdk::types::intents::CreatePaneSpec;
 
 fn on_pointer(event: Event) -> Option<Submission> {
     let Event::EditorPointer(pointer) = event else { return None };
-    let text = editor::read_lines(pointer.buffer, pointer.position.line)?;
+    let text = editor::read_lines(pointer.buffer, pointer.position.line, 1)?;
     if !text.trim_start().starts_with("TODO") { return None; }
     Some(Submission::keyed(
         Intent::CreatePane(CreatePaneSpec {
@@ -472,7 +471,7 @@ Other plugins change what `ilium.core.editor` does through the points below. The
 
 | Point | Kind | What it does | Payload | Risk |
 |---|---|---|---|---|
-| `before-save` | hook (transform) | Change buffer text just before it is written, for example to format it. | buffer, path, language, text; reply: text | standard |
+| `before-save` | hook (transform) | Change buffer text just before it is written, for example to format it. | buffer, path, language, text; reply: text | high |
 | `file-openers` | collect | Choose which pane kind opens files with certain extensions. | entry: id, extensions, pane_kind, priority | standard |
 | `line-badges` | collect | Add a marker in the editor gutter for lines that match. | entry: id, regex, glyph, tooltip | standard |
 

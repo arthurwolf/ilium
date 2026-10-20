@@ -220,7 +220,7 @@ The install runs the checks in the diagram order. Each failure prints one `error
 | `manifest.exports-mismatch` | The component exports differ from the manifest list. |
 | `manifest.export-grant` | An export needs a grant the manifest does not request. |
 | `manifest.grant-wildcard` | A grant argument is `*` where no wildcard is allowed. |
-| `manifest.grant-unknown`, `manifest.grant-tier`, `manifest.grant-dependency` | A grant is unknown, limited to bundled plugins, or missing a required companion grant. |
+| `manifest.grant-unknown`, `manifest.grant-tier`, `manifest.grant-dependency` | A grant is unknown, not available to the plugin's tier, or missing a required companion grant. |
 | `manifest.schema-keyword` | A settings schema uses a keyword outside the allowed subset. |
 | `manifest.settings-key-clash`, `manifest.settings-id-clash` | A settings key or tab or section id is declared twice. |
 | `manifest.cli-name-reserved` | The CLI name is a kernel command. |
@@ -246,7 +246,7 @@ This table lists the common codes. The complete list of `manifest.` and `package
 
 | Tier | Who | Install behaviour |
 |---|---|---|
-| T1 | Bundled first-party plugins | Grants up to the manifest ceiling. High-risk grants are asked once at first activation. |
+| T1 | Bundled first-party plugins | Grants up to the manifest ceiling. High-risk grants are asked at first activation, and again at later server starts after each **Not now**, at most three prompts in total. |
 | T2 | Signed by a publisher key the user trusts | The review dialog shows every grant. High-risk grants start unchecked. |
 | T3 | Unsigned local packages | Needs `--allow-unsigned` or `ilium plugin dev`. Shows a `dev` badge and runs under the T2 sandbox and ceilings. |
 
@@ -287,7 +287,7 @@ The rules for a person who installs packages are in [Install and manage plugins]
 - **Updates.** A newer version of an installed id is an update, and the dialog shows only new capabilities. A lower version needs `--allow-downgrade`.
 - **Keybinding conflicts.** The user's remap wins, then kernel keys, then T1, then T2 and T3 plugins. The losing binding is inactive and listed in Settings > Keys.
 - **Settings schema.** Allowed keywords are `type`, `properties`, `required`, `enum`, `title`, `description`, `default`, `minimum`, `maximum`, `pattern`, `maxLength`, `help`, `step`, `unit`, `secret`, `multiline`, `enum_titles` and `picker`.
-- **Process grants.** `process.run:*` is refused with `manifest.grant-wildcard`. `process.run:sh` is valid only in T1 packages.
+- **Process grants.** `process.run:*` is refused with `manifest.grant-program`. `process.run:sh` is valid only in T1 packages.
 
 ## What the user sees
 

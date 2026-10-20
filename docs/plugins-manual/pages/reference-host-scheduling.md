@@ -119,7 +119,7 @@ All defaults are the same for every tier. The T1 column is the ceiling that a bu
 | `catalog-provider.query-catalog` | client | 20 ms | 20 ms | 20 ms | soft, streak 3 | Cached page used | trap only |
 | `virtual-rows-provider.list-virtual-children` | server | 20 ms | 20 ms | 20 ms | soft, streak 3 | Spinner row stays | trap only |
 | `token-provider.tokens` | client | 10 ms | 10 ms | 10 ms | soft, streak 3 | Lines stay plain; the host retries | trap only |
-| `settings-validate` | client | 100 ms | 100 ms | 100 ms | soft, streak 3 | The save is refused, the previous value kept; the breach counts as a failure | yes |
+| `settings-validate` | server, client | 100 ms | 100 ms | 100 ms | soft, streak 3 | The save is refused, the previous value kept; the breach counts as a failure at a streak of 3 in a row, or 100 ms past the deadline | yes |
 | `service-provider` call | provider side | `command_deadline_ms` 50 ms | 100 ms | 50 ms | hard | Trap the provider; the caller's request completes `failed(internal)`; other deferred calls of the provider complete `failed(cancelled)` | yes |
 | `inference-provider` `complete` and `models` | server | `command_deadline_ms` 50 ms | 100 ms | 50 ms | hard | Trap; the request is `failed(internal)` | yes |
 | `job-runner.run`, CPU time | job instance | 2,000 ms | 60,000 ms | 10,000 ms | hard, own thread | `failed(timed-out)` | no |
@@ -249,7 +249,7 @@ A request is cancelled by one of seven causes. The outcome tells the plugin whic
 | Cause | Outcome | Notes |
 |---|---|---|
 | The plugin side stopped or trapped (instance dropped) | `cancelled` | Pending requests of that instance |
-| Grant revoked | Synchronous calls that need the grant return `err(revoked)` from the moment of revocation. Pending requests that need it complete `failed(revoked)`, delivered before `deactivate(revoked)` | The plugin is re-activated with the reduced grants. Other pending `call(id)` requests are cancelled with the instance and their completions are not delivered; pending submissions follow the trap-aftermath rule |
+| Grant revoked | Synchronous calls that start after the revocation return `err(not-permitted)` with reason `revoked`; a call already in flight returns `err(revoked)`. Pending requests that need it complete `failed(revoked)`, delivered before `deactivate(revoked)` | The plugin is re-activated with the reduced grants. Other pending `call(id)` requests are cancelled with the instance and their completions are not delivered; pending submissions follow the trap-aftermath rule |
 | The plugin asked for it (`cancel(request)`, `jobs.cancel`) | `cancelled` | A cancelled job completes with the outcome `cancelled`. `jobs.cancel` returns nothing: cancelling a completed, unknown or already cancelled id is a silent no-op and produces no further completion |
 | Server or client shutdown | `cancelled` | Submissions accepted but not yet applied at shutdown complete as `cancelled`. `refused(cancelled)` is used only for siblings of a refused batch |
 | The request deadline passed | `failed(timed-out)` | For example the 30 s command reply deadline, or a provider that does not reply to a deferred service call within 30 s. The earlier of the two events wins |

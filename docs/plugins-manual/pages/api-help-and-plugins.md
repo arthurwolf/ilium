@@ -63,7 +63,7 @@ Topic ids are global. A topic id is `<plugin-id>/<local-id>`, where `<local-id>`
 | `list()` | `plugins::list() -> Vec<PluginInfo>` | `list()`, returns `PluginInfo[]` | `list<plugin-info>` | Returns every installed plugin, including disabled and failed ones. |
 | `set-enabled(plugin, enabled, scope)` | `plugins::set_enabled(plugin: &str, enabled: bool, scope: &str) -> Result<(), PluginError>` | `setEnabled(plugin, enabled, scope)`, throws `PluginError` | `result<_, plugin-error>` | Turns a plugin on or off. The call returns once the change is recorded. |
 
-The record `plugin-info` has nineteen fields. The WIT in [Plugin lifecycle states](/pages/reference-plugin-lifecycle-states/) adds `state`, `side-states`, `scope`, `disabled-reason` and `health` to the six below, and eight distribution fields: `publisher`, `publisher-key`, `source`, `channel`, `pinned`, `update-available`, `deprecated` and `yanked`. `list()` never contacts a registry. `set-enabled` also takes a `scope`, which is `global` in contract 0.1.0 (project scope waits for project trust and is not in 0.1.0), and a global change reaches every running session within 2 seconds ([Plugin scope and sessions](/pages/reference-plugin-scope-and-sessions/)). The first six fields:
+The record `plugin-info` has nineteen fields. The WIT in [Plugin lifecycle states](/pages/reference-plugin-lifecycle-states/) adds `state`, `side-states`, `scope`, `disabled-reason` and `health` to the six below, and eight distribution fields: `publisher`, `publisher-key`, `source`, `channel`, `pinned`, `update-available`, `deprecated` and `yanked`. `list()` never contacts a registry. `set-enabled` also takes a `scope`: `global`, `project` or `session` (see [Plugin scope and sessions](/pages/reference-plugin-scope-and-sessions/)), and a global change reaches every running session within 2 seconds ([Plugin scope and sessions](/pages/reference-plugin-scope-and-sessions/)). The first six fields:
 
 | Field | Rust and TypeScript type | Meaning |
 |---|---|---|
@@ -221,7 +221,7 @@ Illustrative, not generated: the help pane for the quick start topic, and the Se
 | Topic of a removed plugin | `none`. |
 | `plugins.manage` declined or revoked | `list()` returns an empty list, and `set-enabled` returns `not-permitted`. |
 | `set-enabled` with an unknown plugin id | `not-found`. |
-| `set-enabled` with a scope other than `global` (only `global` exists in 0.1.0) | `invalid-argument`, and nothing changes. |
+| `set-enabled` with a scope other than `global`, `project` or `session` | `invalid-argument`, and nothing changes. |
 | `set-enabled` to the state a plugin already has | `ok`, and nothing changes. |
 | `set-enabled(id, true)` on a failed plugin | `ok`. The `failed` flag is cleared. |
 | Revocation during the call | `revoked`. The plugin is re-activated with the reduced grant set. |

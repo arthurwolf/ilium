@@ -145,7 +145,7 @@ Do not copy transcript text into the plugin's storage unless the user asked for 
 |---|---|---|
 | Grant missing or declined | `not-permitted` | Use `agent.read` data only. |
 | Signature has no known transcript format | `unsupported` | Hide the feature for that agent. |
-| `last-turns` above 512 or `max-bytes` above 4 MiB | `invalid-argument` | Ask for less. |
+| `last-turns` above 512 or `max-bytes` above 4 MiB | `ok`; the oldest turns are dropped | Nothing is refused. Ask for fewer turns if you need less. |
 | Pane is not an agent pane | `not-found` | Check the pane kind. |
 | Session file not written yet | empty list | Try again after the first turn. |
 | Grant revoked while a call is in flight | `revoked` | Discard cached turns. |

@@ -97,16 +97,16 @@ These caps do not change. A value over a per-call cap that the plugin can know i
 | Storage key / value | 256 bytes / 1 MiB | `invalid-argument` |
 | Storage bucket (default quota) | 16 MiB | `quota-exceeded` |
 | Node metadata value | 64 KiB per node | `quota-exceeded` |
-| `fs.read` per call | `max-bytes` up to 1 MiB, `max-entries` up to 4,096 | `invalid-argument` |
+| `fs.read` per call | `read`: `max-bytes` up to 1 MiB; `list-dir`: `max-entries` up to 4,096 | `invalid-argument` |
 | `fs.read-all` file (default limit) | 64 MiB | `failed(quota-exceeded)` |
 | HTTP response (default limit) | 8 MiB | `failed(quota-exceeded)` |
 | Topic payload | 64 KiB | `invalid-argument` |
 | Log line | 16 KiB, cut and marked | Line cut, not refused |
 | Log lines per second, third-party | 200 | Dropped and counted |
 | Dedup window for `dedup-key` | 10 minutes | A retry after the window is a new submission |
-| `check-list` items / `list-editor` items | 256 / 64 | Render traps with `ui.invalid-tree` |
+| `check-list` items / `list-editor` items | 256 / 64 | Render traps with `trap.invalid-ui-tree` (detail `ui.invalid-tree`) |
 | Popups per view | 4 | `quota-exceeded` |
-| Minimap marks per layer, meter segments | 4,096 / 8 | `invalid-argument` |
+| Minimap marks per layer, meter segments | 4,096 / 8 | `trap.invalid-ui-tree` (detail `ui.invalid-tree`) |
 | Catalogue page | 256 items | Clamped |
 | `read-cells` rows per call | 1,000 | `none`, and the host logs `quota-exceeded` |
 | `history-text` | 4 MiB, newest kept | Truncated |
@@ -123,7 +123,7 @@ New provider exports run under short deadlines. A breach counts like any other d
 |---|---|
 | `catalog-provider.query-catalog`, `menu-provider.menu-items`, `virtual-rows-provider.list-virtual-children` | 20 ms |
 | `token-provider.tokens` | 10 ms per call |
-| `settings-validate` (the optional export that checks a settings save) | 100 ms; a breach counts like any other deadline breach, and the save fails and keeps the previous value |
+| `settings-validate` (the optional export that checks a settings save) | 100 ms; a breach counts as a failure at a streak of 3 in a row or 100 ms past the deadline, and the save fails and keeps the previous value |
 | `client-requests.request` timeout | 1 to 30,000 ms, set per request |
 
 The host also limits how often a plugin may call some imports. A call over the rate is refused with `rate-limited` and `retry-after-ms`, so a plugin that updates a widget in a loop spends nothing on the refused calls.

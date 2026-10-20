@@ -189,7 +189,7 @@ The caller's manifest has `"requires": { "services": ["com.example.titles/sugges
 
 The same service in TypeScript. The provider uses the `handle` method of `definePlugin`, and the caller awaits `call`, which resolves with the reply string.
 
-Provider, `src/index.ts`:
+Provider, `src/server.ts`:
 
 ```ts
 import { definePlugin, type ServiceCall, type ServiceReply } from '@ilium/plugin-sdk';
@@ -221,7 +221,7 @@ function startLongTitle(callNumber: bigint): void {
 }
 ```
 
-Caller, `src/index.ts` of a second plugin:
+Caller, `src/server.ts` of a second plugin:
 
 ```ts
 import { definePlugin, type Event, type Submission } from '@ilium/plugin-sdk';

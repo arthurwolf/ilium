@@ -44,7 +44,7 @@ The container is a ZIP archive as described by the PKWARE APPNOTE 6.3.x, restric
 | [PKG-111] | The archive MUST consist of the local entries, then the central directory, then the end record, with no other bytes. Bytes before the first local header, between records or after the end record are refused with `package.zip-trailing`. |
 | [PKG-112] | The local entries MUST be adjacent and in the same order as the central directory, and their byte ranges MUST NOT overlap. A central directory entry whose local header offset does not point to the next unread byte is refused with `package.header-mismatch`. |
 | [PKG-113] | The count of entries in the end record MUST equal the count of central directory headers, and the central directory size and offset MUST match the real positions. A truncated or inconsistent central directory is refused with `package.zip-invalid`. |
-| [PKG-114] | The reader MUST locate the end record by reading the last 22 bytes of the file. Because the comment length is 0, the end record always starts exactly 22 bytes before the end. A file in which that position does not hold the signature `PK\x05\x06` is refused with `package.zip-invalid`. |
+| [PKG-114] | The reader MUST locate the end record by reading the last 22 bytes of the file. Because the comment length is 0, the end record always starts exactly 22 bytes before the end. A file in which that position does not hold the signature `PK\x05\x06` is refused with `package.zip-trailing` when the signature appears earlier in the file (bytes were appended after the end record), and with `package.zip-invalid` otherwise. |
 
 A reader MUST NOT fall back to a more lenient parse when one of these rules fails. A package either meets the subset or is refused.
 
@@ -129,7 +129,7 @@ The character set is deliberately ASCII. It removes Unicode normalisation (NFC a
 | [PKG-126] | Entries in the archive | 4,096 | `package.entry-limit` |
 | [PKG-127] | `manifest.json` | 1 MiB (1,048,576 bytes) | `package.manifest-size` |
 | [PKG-128] | One component, at the archive check (the component check later refuses a component over 32 MiB with `component.too-large`) | 64 MiB | `package.size-limit` |
-| [PKG-129] | One non-component entry | 64 MiB | `package.size-limit` |
+| [PKG-129] | One non-component entry that is not an asset | 64 MiB | `package.size-limit` |
 | [PKG-130] | The package file | 300 MiB | `package.size-limit` |
 | [PKG-131] | `signature` | 16 KiB | `package.size-limit` |
 | [PKG-132] | Asset bytes (`assets/**`, `help/*.md`, `sounds/*`, fonts) | 64 MiB, or 256 MiB for T1 (decision D24) | `manifest.asset-size` |
@@ -254,7 +254,6 @@ The install error catalogue in [Manifest schema](/pages/reference-manifest-schem
 <span class="t-dim">stage</span> 5 inventory        <span class="t-ok">ok</span>
 <span class="t-dim">stage</span> 6 components       <span class="t-ok">ok</span>
 <span class="t-dim">stage</span> 7 signature        <span class="t-ok">ok</span>
-<span class="t-dim">stage</span> 8 trust            <span class="t-warn">untrusted</span>
 <span class="t-hi">result</span> example.minimal 0.1.0 untrusted
 </pre>
 <figcaption>Rendered at 48 columns. Illustrative. Verification of a signed package whose key is not trusted yet.</figcaption>

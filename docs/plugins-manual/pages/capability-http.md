@@ -33,9 +33,9 @@ Declare grants in the manifest under the side that makes the request:
 | `http:api.example.com` | yes | one exact host |
 | `http:api.example.com:8443` | yes | one exact host and port |
 | `http:*.openstreetmap.org` | yes | any subdomain at any depth; not the bare domain |
-| `http:localhost` | yes | loopback; plain HTTP allowed |
-| `http:127.0.0.1` | yes | loopback IPv4 literal; plain HTTP allowed |
-| `http:[::1]` | yes | loopback IPv6 literal; plain HTTP allowed |
+| `http:localhost:8080` | yes | loopback with a port; plain HTTP allowed |
+| `http:127.0.0.1:8080` | yes | loopback IPv4 literal with a port; plain HTTP allowed |
+| `http:[::1]:8080` | yes | loopback IPv6 literal with a port; plain HTTP allowed |
 | `http:*` | no | a bare `*` is refused |
 | `http:tile.*.org` | no | a wildcard in any position other than the leftmost label |
 | `http` | no | the host pattern is missing |
@@ -222,7 +222,7 @@ export const { lifecycle, handler } = definePlugin({
 
 ### Review dialog and tiers
 
-The install review dialog shows one row per capability. An `http` row reads `Connect to <host>` and shows the grant string at the right edge. Rows that are not `HIGH` start checked. `http` is not a `HIGH` capability, so it does not need a separate opt-in.
+The install review dialog shows one row per capability. An `http` row reads `Connect to <host>` and shows the grant string at the right edge. Rows that are not `HIGH` start checked. `http` is not a `HIGH` capability for an ordinary host, so it does not need a separate opt-in. A loopback or private-address grant is `H` (see [reference capabilities](/pages/reference-capabilities/)), so its row starts unchecked and needs an opt-in.
 
 <figure>
 

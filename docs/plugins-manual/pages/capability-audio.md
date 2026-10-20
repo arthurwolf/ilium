@@ -107,8 +107,8 @@ Any sample rate from 8,000 to 192,000 Hz is accepted. The host resamples to and 
 
 | Grant | Risk | T1 bundled plugin | T2 and T3 install |
 |---|---|---|---|
-| `audio.capture` | H | asked once at first activation | unchecked, marked HIGH |
-| `audio.loopback` | H | asked once at first activation | unchecked, marked HIGH |
+| `audio.capture` | H | asked at first activation, and again at later server starts after each **Not now**, at most three prompts in total | unchecked, marked HIGH |
+| `audio.loopback` | H | asked at first activation, and again at later server starts after each **Not now**, at most three prompts in total | unchecked, marked HIGH |
 | `audio.playback` | normal | granted up to the manifest ceiling | checked by default |
 
 A T1 bundled plugin with H capabilities starts without them. The first activation shows one prompt per plugin, listing each H capability with a checkbox. The user can decline and be asked again at the next server start, at most three times. Settings > Plugins grants a capability at any time. There is no prompt per call. A grant stays until it is revoked.

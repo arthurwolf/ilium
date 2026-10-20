@@ -126,7 +126,7 @@ The server start in [Host architecture](/pages/reference-host-architecture/) has
 A command from a plugin that declares `requires_server: false` can run with no session. The `ilium` process then creates a transient host. The rules:
 
 - The transient host loads only the plugin that owns the command and the services that plugin `requires` (HST-019). It never activates another core plugin.
-- Imports that need a session (`tree`, `panes` of the local session, `terminal`) return `unavailable` with the message `no session`. The command decides how to report that.
+- Imports that need a session (`tree`, `panes` of the local session, `terminal`) return `not-permitted` with reason `unavailable` and the message `no session`. The command decides how to report that.
 - Commands that look across sessions (`ilium panes`, `ilium broadcast`, `ilium recap`) list live sockets with `sessions.cross` and talk to each running server themselves. They do not need a local session.
 - The transient host starts no server, takes no session lock and writes no snapshot.
 - The host exits when the command finishes. Its time to first plugin call has the budget `CLI-COLD` in the performance budgets of the host.
@@ -217,7 +217,7 @@ When a safe switch is on, the footer shows `Safe mode: third-party plugins are o
 
 ### What the user keeps when a plugin is off
 
-A core plugin can be off for four reasons: the user turned it off, the restart rule turned it off after three failures within 10 minutes (see [Health and watchdog](/pages/reference-health-and-watchdog/)), a policy turned it off, or a safe switch is on. The effect is the same in all four. The kernel fallback column is what the user still has. Stored values, files and snapshot sections of an off plugin are never deleted.
+A core plugin can be off for four reasons: the user turned it off, the restart rule turned it off after three failures within 10 minutes (see [Health and watchdog](/pages/reference-health-and-watchdog/); never for an essential plugin), a policy turned it off, or a safe switch is on. The effect is the same in all four. The kernel fallback column is what the user still has. Stored values, files and snapshot sections of an off plugin are never deleted.
 
 | Core plugin | When it is off | Kernel fallback or what stays |
 |---|---|---|
@@ -267,7 +267,7 @@ Replaceable is stricter than disableable, because a replacement takes over store
 
 | Property | Sessions | Settings | Tree | All other core plugins |
 |---|---|---|---|---|
-| Disableable | yes | yes | yes | yes |
+| Disableable | no | no | no | yes |
 | Replaceable | no | no | yes | yes |
 | Kernel fallback when off | snapshot writer | recovery page | plain rows | see the table above |
 
@@ -330,7 +330,7 @@ Code that reads a restart-only value gets the value that was current at the star
 |---|---|---|
 | A command of an off core plugin runs | Kernel prints the owner error and exits 1 | `cli.owner-disabled` |
 | A client side activates with no server side of the same plugin | The client side runs with `unavailable` for server requests | `client-request.unavailable` |
-| Two startup plugins require each other's services | Both stay off | `manifest.service-cycle` |
+| A cycle of non-optional `requires.services` entries | Install is refused at stage 10, so the cycle never reaches boot | `manifest.service-cycle` |
 | `snapshot-sections` entry has an unknown `schema_version` | Section kept unchanged | `section-unsupported` |
 | A route for `/create_agent` is registered twice | The second registration is refused | `http-api.route-taken` |
 | `config.toml` fails to parse at boot | Moved aside, defaults used, recovery page opens | `config.parse-error` |
@@ -341,7 +341,7 @@ Code that reads a restart-only value gets the value that was current at the star
 
 - [COR-020] The server MUST restore the snapshot before any plugin is instantiated, MUST activate plugins with the `startup` trigger in dependency order, and MUST bind the client socket last. Test: install a spy plugin with `startup` that records the tree on `activate`. The tree is already restored, and a client that connects before step 8 gets `server.starting`.
 - [COR-021] Exactly the core plugins marked `startup` in the activation table MUST be active within `HOST-START` of boot, and every other core plugin MUST stay inactive until its trigger fires. Test: boot with no client, list active plugin sides through the Plugins screen, compare with the table.
-- [COR-022] Disabling a core plugin MUST have the effect in the table "What the user keeps when a plugin is off", MUST NOT delete its stored data, and MUST leave the kernel fallback and the recovery page working. Test: for each of the 30 plugins, disable it, run the check listed in its row, enable it and compare stored data byte for byte.
+- [COR-022] Disabling a core plugin MUST have the effect in the table "What the user keeps when a plugin is off", MUST NOT delete its stored data, and MUST leave the kernel fallback and the recovery page working. Test: for each of the 26 plugins that can be disabled (all except the four essential ones), disable it, run the check listed in its row, enable it and compare stored data byte for byte.
 - [COR-023] The scene world MUST NOT import `extensions`, and `capabilities.scene` MUST NOT contain `extensions.provide` or `extensions.contribute`. Test: a manifest with `extensions.contribute:…` under `capabilities.scene` fails with `manifest.grant-side`.
 - [COR-024] Each change in the table "Live reload and restart" MUST apply as stated. Test: change one value of each kind with a client attached, and check whether the running side sees it without a restart.
 

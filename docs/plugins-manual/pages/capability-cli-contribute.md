@@ -81,7 +81,7 @@ TypeScript it is `@ilium/plugin-sdk/host/cli`.
 | Function | Rust | TypeScript | Meaning | Errors beyond the universal set |
 |---|---|---|---|---|
 | `write-line` | `cli::write_line(invocation: u64, jsonl: &str) -> Result<(), PluginError>` | `writeLine(invocation: bigint, jsonl: string): void` | Writes one JSON object and a newline to the caller's standard output. | `not-found` (finished or cancelled), `invalid-argument` (not one object with a string `type`, a raw newline, or over 64 KiB) |
-| `write-text` | `cli::write_text(invocation: u64, text: &str) -> Result<(), PluginError>` | `writeText(invocation: bigint, text: string): void` | Writes plain text to the caller's standard output. Allowed only when the subcommand's `output` is `"text"` or `"mixed"`. | `not-found`, `not-permitted` (output form is `"jsonl"`), `invalid-argument` (over 64 KiB) |
+| `write-text` | `cli::write_text(invocation: u64, text: &str) -> Result<(), PluginError>` | `writeText(invocation: bigint, text: string): void` | Writes plain text to the caller's standard output. Allowed only when the subcommand's `output` is `"text"` or `"mixed"`. | `not-found`, `invalid-argument` (output form is `"jsonl"`, or over 64 KiB) |
 | `write-error` | `cli::write_error(invocation: u64, text: &str) -> Result<(), PluginError>` | `writeError(invocation: bigint, text: string): void` | Writes plain text and a newline to standard error. | `not-found`, `invalid-argument` (over 64 KiB) |
 | `finish` | `cli::finish(invocation: u64, exit_code: u8)` | `finish(invocation: bigint, exitCode: number): void` | Ends the invocation. `exit_code` becomes the process exit status. | none; an unknown invocation is ignored |
 

@@ -237,11 +237,11 @@ Two kinds of deadline exist. A **hard** deadline traps the instance when it fire
 
 The host validates a component when a package is installed and again when the package is loaded. T2 and T3 validation runs inside the helper, because parsing is done by `Component::new` there.
 
-1. The bytes are a valid component (`wasmparser` validation with the features of the Config). Failure: `component.invalid`.
+1. The bytes are a valid component (`wasmparser` validation with the features of the Config). Failure: `package.component-invalid`.
 2. The component size is at most 32 MiB. Failure: `component.too-large`.
 3. The component targets the world named in the manifest (`world`) of the right side. Failure: `component.world-mismatch`.
 4. The export set equals the required exports of the world plus the optional exports listed in the manifest. Failure: `manifest.exports-mismatch`.
-5. The custom section `ilium:api-version` exists and holds three big-endian unsigned 16-bit integers (major, minor, patch) equal to the manifest `api`. For contract version one the bytes are `00 00 00 01 00 00`. Failure: `manifest.api-version`.
+5. The custom section `ilium:api-version` exists and holds three big-endian unsigned 16-bit integers (major, minor, patch) equal to the manifest `api`. For contract version one the bytes are `00 00 00 01 00 00`. Failure: `package.api-section-missing` when the section is absent, `manifest.api-version` when it differs from the manifest.
 6. No single custom section is larger than 4 MiB and the custom sections together are at most 8 MiB. The `name` section MAY be stripped by `ilium plugin build --release`. Failure: `component.custom-section-too-large`.
 7. Every import is an interface that the host can link under the rules above. Failures: `manifest.import-not-requested`, `component.wasi-forbidden`, or `component.import-unknown` for an interface that does not exist in `ilium:plugin@0.1.0`.
 
@@ -297,7 +297,8 @@ pub fn runtime_config() -> wasmtime::Config {
 | Component uses `wasm_component_model_async` | Refused | `component.invalid` |
 | Compile cache unavailable | Compile in memory, log once | `host.cache-unavailable` |
 | System clock jumps during a call | No deadline decision on the jump tick | none |
-| API version section missing or wrong | Refused | `manifest.api-version` |
+| API version section missing | Refused | `package.api-section-missing` |
+| API version section wrong | Refused | `manifest.api-version` |
 
 - **[HST-088]** When the config fingerprint of an embedded `.cwasm` differs from the host's, the host MUST NOT call `Component::deserialize` on it, MUST fall back to `Component::new` on the embedded `.wasm`, and MUST log `host.cwasm-incompatible`. A release-build test MUST fail if any bundled plugin takes this path.
 - **[HST-089]** A stack overflow in guest code MUST trap the instance with `host.stack-overflow` and MUST NOT crash the process.

@@ -48,7 +48,7 @@ Events (defined in the [WIT reference](/pages/reference-wit/#412-events)):
 | `http::open_websocket(&url, &protocols)?` (unstable) | `openWebsocket(url, protocols)` (unstable) |
 | `http::send_websocket(stream, &text)?` (unstable) | `sendWebsocket(stream, text)` (unstable) |
 
-`open-stream` returns at once with the id; connecting, status and data all arrive as events. A stream is owned by the plugin that opened it. It closes when the server ends the body, when the plugin calls `close-stream`, when the connection fails, or when the plugin deactivates, traps or loses the grant. On those last three the host does not deliver `http-stream-closed` to the dead instance.
+`open-stream` returns at once with the id; connecting, status and data all arrive as events. A stream is owned by the plugin that opened it. It closes when the server ends the body, when the plugin calls `close-stream`, when the connection fails, or when the plugin deactivates, traps or loses the grant. On a trap or a deactivation the host does not deliver `http-stream-closed` to the dead instance. A lost grant is different: the plugin is re-activated with the reduced grant set and receives `http-stream-closed` with outcome `revoked`.
 
 ### Framing
 
@@ -307,7 +307,7 @@ The setting row itself looks like any text row, with leaders:
 | `unsupported` | `open-websocket` | The feature `websocket` is off. |
 | `network` | `http-stream-closed` | DNS, TLS or connect failure, or a dropped connection. |
 | `timed-out` | `http-stream-closed` | No byte arrived before `timeout_millis`. |
-| `rate-limited` | `http-stream-closed` or at once | The per-host limiter or a `Retry-After`; `retry-after-ms` is set. |
+| `rate-limited` | `http-stream-closed` | The per-host limiter or a `Retry-After`; `retry-after-ms` is set. |
 | `revoked` | `http-stream-closed` | The grant changed while the stream was open. |
 
 | Limit | Value |

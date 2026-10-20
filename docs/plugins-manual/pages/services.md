@@ -303,7 +303,7 @@ async fn ask_for_title(note: String) {
 
 The same pair in TypeScript. The provider returns the `ServiceReply` union in the jco form. The caller awaits `call`, which resolves with the reply text or throws the completion code.
 
-Provider, `src/index.ts`:
+Provider, `src/server.ts`:
 
 ```ts
 import { definePlugin, type Event, type ServiceCall, type ServiceReply } from '@ilium/plugin-sdk';
@@ -338,7 +338,7 @@ function answerLater(callNumber: bigint): void {
 }
 ```
 
-Caller, `src/index.ts` of the second plugin:
+Caller, `src/server.ts` of the second plugin:
 
 ```ts
 import { definePlugin, type Event, type Submission } from '@ilium/plugin-sdk';
@@ -384,7 +384,7 @@ A plugin service is for two different plugins. Two other channels cover the case
 |---|---|---|
 | The server side asks its own client side a question only a client can answer (terminal size, clipboard, theme) | `client-requests` | None for own sides |
 | One plugin runs a command in another running Ilium session | `sessions.list-live`, `sessions.send` | `sessions.cross`, high risk |
-| Choose from a list that a plugin provides | A plugin catalogue, see [Catalogs](/pages/api-catalogs/) | `catalogs.provide` |
+| Choose from a list that a plugin provides | A plugin catalogue, see [Catalogs](/pages/api-catalogs/) | None (the `catalog-provider` export) |
 
 `client-requests` needs the request `kind` declared in `contributes.client_requests`, with an optional `timeout_ms` from 1 to 30,000 and 5,000 by default. The client side receives a `client-request` event and answers with `respond`. A client that is detached completes the request with `not-found`. No answer in time completes it with `timed-out`.
 
@@ -445,7 +445,7 @@ complete: func(call: provider-call) -> result<_, plugin-error>;
 models: func() -> list<string>;
 
 // Provider import, needs inference.provide
-provider-reply: func(call: u64, outcome: result<completion, plugin-error>);
+provider-reply: func(call: u64, outcome: result<completion, plugin-error>) -> result<_, plugin-error>;
 ```
 
 `complete` accepts the call and returns at once. Network work runs in a task that answers through `provider-reply` with the same call number. A consumer that must wait for a provider declares `requires.services` with `ilium:inference/provider@0.1.0`. The full contract is in [Inference provider](/pages/capability-inference-provide/).

@@ -203,7 +203,7 @@ impl Handler for ClipboardHistory {
 **TypeScript**
 
 ```ts
-// src/index.ts. Client side of clipboard-history 1.3.0: the Terminal section.
+// src/client.ts. Client side of clipboard-history 1.3.0: the Terminal section.
 import { definePlugin, type Event } from '@ilium/plugin-sdk';
 import { log } from '@ilium/plugin-sdk/host/log';
 import { getJson } from '@ilium/plugin-sdk/host/settings';
@@ -355,7 +355,7 @@ The kernel enforces these limits for sections in built-in tabs. Install refuses 
 |---|---|
 | Plugin sections per kernel tab, one plugin | 2 |
 | Plugin sections per kernel tab, all plugins | 6 |
-| Rows per section (a `group` counts its children) | 24 |
+| Rows per section (a `group` counts as one row plus its children) | 24 |
 | Value keys per plugin | 128 |
 | Choice options | 64 |
 | Text value | 4,096 characters |

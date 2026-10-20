@@ -30,7 +30,7 @@ prompt-epoch: func(pane: node-id) -> option<u64>;
 enum turn-role { user, assistant, tool, system }
 record transcript-turn { role: turn-role, text: string, tool: option<string>, at: option<epoch-ms>, tokens: option<u32> }
 record transcript-query { pane: node-id, last-turns: u32, max-bytes: u32 }
-transcript: func(q: transcript-query) -> result<request-id, plugin-error>;
+transcript: func(query: transcript-query) -> result<request-id, plugin-error>;
 take-transcript: func(request: request-id) -> option<list<transcript-turn>>;
 ```
 

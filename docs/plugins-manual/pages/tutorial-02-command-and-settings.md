@@ -303,12 +303,12 @@ Points to notice:
 
 ### Host glue, TypeScript
 
-The TypeScript version has the same manifest and the same behaviour. It lives in `src/index.ts`. The badge table is the same as `badge.rs`, written as a small `switch`. The module names are the subpaths of `@ilium/plugin-sdk`.
+The TypeScript version has the same manifest and the same behaviour. It lives in `src/server.ts`. The badge table is the same as `badge.rs`, written as a small `switch`. The module names are the subpaths of `@ilium/plugin-sdk`.
 
 **TypeScript**
 
 ```ts
-// src/index.ts. Server side of agent-tools, step 2, in TypeScript.
+// src/server.ts. Server side of agent-tools, step 2, in TypeScript.
 import { definePlugin, PluginError, type Event, type Submission } from '@ilium/plugin-sdk';
 import type { AgentActivity } from '@ilium/plugin-sdk/types';
 import { log } from '@ilium/plugin-sdk/host/log';

@@ -210,7 +210,7 @@ The kernel publishes `ilium.progress/finished` when a background job ends. The p
 
 ### What the user sees
 
-The review dialog shows one row per grant. A normal grant is checked by default. A bare `*` is a high-risk row: it is unchecked on a T2 or T3 install, and a T1 bundled plugin asks once at first activation.
+The review dialog shows one row per grant. A normal grant is checked by default. A bare `*` is a high-risk row: it is unchecked on a T2 or T3 install, and a T1 bundled plugin asks at first activation, and again at later server starts after each **Not now**, up to three times.
 
 <figure>
 <pre class="term">╭─<span class="t-hi"> Review permissions </span>───────────────────────────────────────────────────────╮

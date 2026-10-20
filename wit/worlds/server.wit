@@ -25,7 +25,6 @@ world base {
   import ilium:host/http-api@0.1.0;
   import ilium:host/workspace@0.1.0;
   import ilium:host/catalogs@0.1.0;
-  import ilium:host/geocode@0.1.0;
   import ilium:host/sessions@0.1.0;
   import ilium:host/kernel-settings@0.1.0;
   import ilium:host/client-requests@0.1.0;

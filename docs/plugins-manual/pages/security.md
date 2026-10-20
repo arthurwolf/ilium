@@ -205,7 +205,7 @@ Four argument forms deserve a note: `http:setting:<key>`, `settings.read-kernel:
 
 Grants without an argument, such as `tree.read` or `agent.read`, take none. The [Capability table](/pages/reference-capabilities/) lists every grant.
 
-Each grant has a risk mark. `always` grants are always on. `normal` grants are checked by default in the review dialog. High-risk (H) grants start unchecked, and the user checks each one. H grants include `panes.signal`, `terminal.write`, `agent.read-prompts`, `agent.control`, `process.run`, `panes.create-command`, `inference.provide`, `clipboard.read`, `location.observer`, file writes outside `data` and `cache`, file reads that reach a sensitive path ([SEC-061]), and the twelve grants in the next section (ten in its table, plus `settings.write-kernel:<tab-id>`, which is T1 only and listed after it, and `panes.create-command`, already named in this list). Grants are recorded per plugin and per side in the grant store ([SEC-112]).
+Each grant has a risk mark. `always` grants are always on. `normal` grants are checked by default in the review dialog. High-risk (H) grants start unchecked, and the user checks each one. H grants include `panes.signal`, `terminal.write`, `agent.read-prompts`, `agent.control`, `process.run`, `panes.create-command`, `clipboard.read`, `location.observer`, file writes outside `data` and `cache`, file reads that reach a sensitive path ([SEC-061]), and the twelve grants in the next section (ten in its table, plus `settings.write-kernel:<tab-id>`, which is T1 only and listed after it, and `panes.create-command`, already named in this list). Grants are recorded per plugin and per side in the grant store ([SEC-112]).
 
 ## More high-risk grants
 
@@ -226,7 +226,7 @@ These twelve grants are high risk: the ten in the table, `settings.write-kernel:
 
 Four more grants are high risk and available to T1 bundled plugins only: `settings.read-all`, `settings.write-all`, `plugins.manage` and `settings.write-kernel:<tab-id>`. A T1 plugin gets each of them through the first-start prompt like any other H grant, and a T2 or T3 install that lists one fails with `manifest.grant-tier`. `settings.read-kernel:api` is high risk at every tier: T1 is asked at first activation, T2 and T3 see it unchecked in the review dialog, and no tier refuses it at install.
 
-These grants are normal risk: `tree.attention`, `ui.chrome`, `open-external`, `keymap.read`, `location.geocode`, `inference.embed`, `extensions.provide:<point>`, `extensions.contribute:<point>` for a point with `risk: "standard"`, `notify.toast`, `journal.read`, `settings.read-kernel:<tab>` for a tab other than `api`, and `terminal.read-cells`. Two further grants are high risk because of what they receive or start: `panes.create-command:<program>` starts an unconfined program in a terminal pane ([SEC-040]), and `inference.provide` receives every prompt that other plugins send to the AI model ([SEC-007]). The development-only grant `gpu.kernels` is `@unstable(feature = gpu-kernels)` and appears only in development builds (D18).
+These grants are normal risk: `tree.attention`, `ui.chrome`, `open-external`, `keymap.read`, `location.geocode`, `inference.embed`, `extensions.provide:<point>`, `extensions.contribute:<point>` for a point with `risk: "standard"`, `notify.toast`, `journal.read`, `settings.read-kernel:<tab>` for a tab other than `api`, and `terminal.read-cells`. One further grant is high risk because of what it starts: `panes.create-command:<program>` starts an unconfined program in a terminal pane ([SEC-040]). `inference.provide` is normal risk, but the install dialog states that it receives every prompt that other plugins send to the AI model ([SEC-007]). The development-only grant `gpu.kernels` is `@unstable(feature = gpu-kernels)` and appears only in development builds (D18).
 
 ### Consent that is not a grant
 
@@ -426,7 +426,7 @@ The extended contract adds limits whose purpose is safety. They are fixed by the
 |---|---|---|
 | Input lock | 2 s per lock, one per pane | The lock ends. The user's keys were queued, not lost |
 | Toasts | 3 per 10 s per plugin, 3 pending | The oldest pending toast is replaced |
-| Status segments and frame slots | 10 updates per second per slot (a status segment id is a slot) | Updates are coalesced |
+| Status segments and frame slots | 10 updates per second per slot (a status segment id is a slot) | Extra updates are refused with `rate-limited`; the earlier update stays |
 | Geocoding | 1 request per second per plugin, 10 s timeout, 24 h cache | `rate-limited` with `retry-after-ms` |
 | Open HTTP streams | `http_streams` (default 4, T1 up to 16) and `session_http_streams` (64); see [Errors and limits](/pages/reference-errors-and-limits/#requestable-limits) | `quota-exceeded` |
 | Pending HTTP requests | `pending_requests` (default 64, T1 up to 256, ABI-013) | `busy` |

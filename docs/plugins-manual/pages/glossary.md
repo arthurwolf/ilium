@@ -209,7 +209,7 @@ A plugin is a WebAssembly component that the host loads, checks and runs. It rea
 
 **Near-miss.** A call that ended within its deadline but used at least 80% of it. See [Health and watchdog](/pages/reference-health-and-watchdog/).
 
-**retry-after-ms.** A field of the `plugin-error` record. On `quota-exceeded` and `rate-limited` it says how long to wait before the same call can succeed. See [Errors and limits reference](/pages/reference-errors-and-limits/).
+**retry-after-ms.** A field of the `plugin-error` record. On `rate-limited`, and on the CPU-budget case of `quota-exceeded`, it says how long to wait before the same call can succeed. See [Errors and limits reference](/pages/reference-errors-and-limits/).
 
 **Soft deadline.** A deadline that does not interrupt the call. The call finishes, the host discards a late result, and the breach counts toward the streak limit. See [Host scheduling](/pages/reference-host-scheduling/).
 

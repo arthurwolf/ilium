@@ -50,7 +50,7 @@ Some abilities cannot reach anything that is yours, so they need no permission a
 - Sending messages between its own server side and client side.
 - Asking Ilium to draw one of its own views again.
 
-Limits apply even to these: a plugin may write at most 200 log lines per second (extra lines are dropped), and at most 16 MiB to each storage bucket. See [Always-granted capabilities](/pages/capability-always-granted/).
+Limits apply even to these: by default a plugin may write at most 200 log lines per second (extra lines are dropped), and at most 16 MiB to each storage bucket. A bundled T1 plugin may ask its manifest for up to 1,000 lines per second and 256 MiB per bucket; third-party plugins stay at the defaults. See [Always-granted capabilities](/pages/capability-always-granted/).
 
 ### Risk levels
 
@@ -229,7 +229,7 @@ Turning a permission off takes effect at once. A call that is running when you t
 
 ### What happens when a call is refused
 
-The plugin keeps running. The call returns `not-permitted` (declined), or `revoked` (you turned it off). The host writes one line into the plugin's log:
+The plugin keeps running. The call returns `not-permitted`, whether you declined the permission or turned it off. The host writes one line into the plugin's log:
 
 ```text
 2026-10-12 09:14:02 warn  com.example.notes refused tree.restructure by restructure (declined)

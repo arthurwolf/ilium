@@ -126,7 +126,7 @@ impl MenuProvider for Plugin {
         let (Some(buffer), Some(line)) = (context.buffer, context.line) else {
             return Vec::new();
         };
-        let text = editor::read_lines(buffer, line).unwrap_or_default();
+        let text = editor::read_lines(buffer, line, 1).unwrap_or_default();
         let has_path = looks_like_path(&text);
         vec![
             MenuEntry::new("open", "Open referenced path")

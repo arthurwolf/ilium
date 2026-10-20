@@ -131,7 +131,7 @@ A trap ends the instance. The plugin is restarted under the restart rule below. 
 
 ### Trap codes
 
-A trap carries one code: the seven in the table below, plus `host.capability-not-requested` and `host.import-panic`, which are defined in the fault table and in [Host architecture](/pages/reference-host-architecture/). The codes are diagnostics of the host, the harness and `ilium plugin logs`. They are never a value of `plugin-error.code`, which is always one of the 15 values of the error-code enum above.
+A trap carries one code: the seven in the table below, plus `host.capability-not-requested`, `host.import-panic` and `host.stack-overflow`, which are defined in the fault table and in [Host architecture](/pages/reference-host-architecture/). The codes are diagnostics of the host, the harness and `ilium plugin logs`. They are never a value of `plugin-error.code`, which is always one of the 15 values of the error-code enum above.
 
 | Code | Raised when |
 |---|---|
@@ -143,7 +143,7 @@ A trap carries one code: the seven in the table below, plus `host.capability-not
 | `trap.abi` | An ABI fault: the bytes cannot be a value of the type |
 | `trap.panic` | A Rust panic or an uncaught TypeScript exception in an export |
 
-- **[API-081]** A trap MUST carry exactly one of the seven trap codes `trap.deadline`, `trap.memory`, `trap.table`, `trap.submission-batch`, `trap.invalid-ui-tree`, `trap.abi` and `trap.panic`, or, for the two host-side faults, `host.capability-not-requested` (a call of a never-requested capability) or `host.import-panic` (a panic in a host import), and the log line of the trap MUST name it.
+- **[API-081]** A trap MUST carry exactly one of the seven trap codes `trap.deadline`, `trap.memory`, `trap.table`, `trap.submission-batch`, `trap.invalid-ui-tree`, `trap.abi` and `trap.panic`, or, for the three host-side faults, `host.capability-not-requested` (a call of a never-requested capability), `host.import-panic` (a panic in a host import) or `host.stack-overflow` (a stack overflow in guest code), and the log line of the trap MUST name it.
 
 Every `not-permitted` result and every trap is logged with the plugin id, the interface and the function, and shown in `ilium plugin logs`. Release builds show function names in trap backtraces only. Build with `ilium plugin build --debug` to see `file:line` for each frame.
 
@@ -244,7 +244,7 @@ The table lists the per-plugin limits. The values belong to API version `ilium:p
 | `job_deadline_ms` (CPU) | 2,000 | 60,000 | 10,000 | `failed(timed-out)` |
 | `job_wall_ms` | 20,000 | 600,000 | 100,000 | `failed(timed-out)` |
 | `job_memory_mib` | 64 | 512 | 256 | `failed(quota-exceeded)` |
-| `job_io_mib` (input and output, each) | 16 | 64 | 16 | `invalid-argument` |
+| `job_io_mib` (input and output, each) | 16 | 64 | 16 | Input: `invalid-argument` at the call. Output: `failed(invalid-argument)` |
 | `concurrent_jobs` | 2 | 8 | 2 | Queued |
 | `job_queue` | 16 | 64 | 16 | `busy` |
 | `event_queue` | 1,024 | 4,096 | 1,024 | Stuck plugin is restarted |
@@ -280,8 +280,10 @@ Some caps are fixed and no manifest or user setting changes them: 256 submission
 | Menu entries over 64 | Shows 64 and a final `… N more` entry |
 | Tooltip over 200 characters | Cuts it and ends it with `…` |
 | `history-text` over 4 MiB | Keeps the newest 4 MiB |
+| `clipboard.read-text` over 1 MiB | Cuts the text at a character boundary within 1 MiB |
 | Transcript over 512 turns or 4 MiB | Drops the oldest turns |
-| Catalogue page over 256 items, geocode results over 8 | Clamps the count |
+| Catalogue results over 256 items, geocode results over 8 | Clamps the count |
+| Virtual-rows page over 256 children | Cuts the page to 256 |
 | A `debounce-ms` field of a widget outside 0 to 2,000 ms, or a settings row `debounce_ms` outside 300 to 2,000 ms | Clamps the value to the nearest bound of that range |
 | Layout percentage above 100 | Clamps it to 100 |
 | `limits` request above the tier ceiling | Clamps it and logs it; the install never fails |
@@ -440,12 +442,13 @@ No new `error-code` case exists. The extended functions reuse the 15 codes. Code
 | `catalogs.query`, `query-async` | `not-found` (catalogue), `invalid-argument` (limit) | `timed-out`, `internal` |
 | `geocode.search`, `reverse` | `not-permitted` (no consent), `rate-limited`, `invalid-argument` | `network`, `timed-out`, `not-found` |
 | `cli.write-text`, `read-stdin` | `invalid-argument`, `unsupported` (stdin `none`), `quota-exceeded` (4 MiB) | `cancelled` |
-| `sessions.send` | `not-found`, `not-permitted` | `timed-out`, `network` |
+| `sessions.send` | `not-found`, `not-permitted`, `invalid-argument` | `timed-out`, `network` |
 | `surface.write-glyphs`, `set-owner-ids` | `invalid-argument`, `quota-exceeded`, `unsupported` | none |
-| `media.open-video-bytes`, `open-video-range` | `invalid-argument` (including more than 16 MiB) | `io` |
+| `media.open-video-bytes` | `invalid-argument` (including more than 16 MiB), `io`, `unsupported` (mime type or codec) | none |
+| `media.open-video-range` | `invalid-argument` (including more than 16 MiB), `io` | none |
 | `fs.write-atomic` | `not-permitted` | `conflict`, `io` |
 | `fs.propose-agent-config` | `not-permitted` (`scope`: a path outside the folder, a credential file or the deny set), `invalid-argument` (an empty list, two changes to one path, more than 32 changes, more than 16 MiB of new content in total, a title over 80 or a summary over 200 characters), `busy`, `rate-limited` | `not-permitted` (`declined`), `timed-out`, `conflict`, `quota-exceeded` (history entry), `io`, `cancelled` |
-| `fs.tail` | `not-found`, `io` | none |
+| `fs.tail` | `not-permitted`, `not-found`, `invalid-argument` (`max-bytes` over 1 MiB), `io` | none |
 | `http.open-stream` | `not-permitted`, `quota-exceeded` | `network`, `timed-out`, `rate-limited` (in `http-stream-closed`) |
 | `vector.embed` | `unsupported`, `invalid-argument` | `network`, `rate-limited`, `timed-out` |
 | `vector.upsert`, `create-index` | `quota-exceeded`, `invalid-argument` | none |
@@ -535,7 +538,7 @@ Fixed caps. They are the same for every tier unless `limits_tier` is `first-part
 
 | Cap | Value | Effect |
 |---|---|---|
-| Catalogue page | 256 items | clamped |
+| Catalogue `limit` (caller request) | 256 items | `invalid-argument` above 256 |
 | Catalogues, client request kinds, languages | 8, 16, 8 | `manifest.contribution-limit` |
 | Points per plugin, extensions per plugin | 16, 64 | `manifest.extension-limit` |
 | Entries per collect point, handlers per hook point | `max_entries` (at most 256), `max_handlers` (at most 8) | `extension.cap-exceeded` |
@@ -568,7 +571,8 @@ Fixed caps. They are the same for every tier unless `limits_tier` is `first-part
 | `vector.embed` | 256 texts of at most 8 KiB | `invalid-argument` |
 | Journal bytes per plugin, own entries | 4 MiB | oldest trimmed |
 | Pre-rendered scene loop | 30 fps, 3,600 frames, 128 MiB | `manifest.scene-prerender` |
-| Video from bytes, font asset | 16 MiB, 4 MiB | `quota-exceeded`, `manifest.asset-size` |
+| Video from bytes | 16 MiB | `invalid-argument` |
+| Font asset | 4 MiB | `quota-exceeded`, `manifest.asset-size` |
 | `status_segments`, `pane_frame_slots`, `tree_toolbar`, `row_actions`, `tree_orderings`, `display_modes` | 2, 4, 4, 4, 4, 2 | `manifest.contribution-limit` |
 | Geocode results | 8 | clamped |
 | Popup stack per view | 4 | `quota-exceeded` |
@@ -698,7 +702,7 @@ Older drafts used other spellings for these codes. The current names are `manife
 | `manifest.grant-argument` | A grant argument is malformed, or `http:setting:<key>` names a setting the plugin lacks | [Capabilities](/pages/capabilities/) |
 | `manifest.grant-argument-missing` | A grant that needs an argument has none | [Capabilities](/pages/capabilities/) |
 | `manifest.grant-dependency` | A grant needs another grant that is not requested, for example `fs.pick` without `fs.read:picked` | [fs](/pages/api-fs/) |
-| `manifest.grant-program` | A `process.run` grant has a space in the program name | [process.run](/pages/capability-process-run/) |
+| `manifest.grant-program` | A `process.run` grant has arguments, a wildcard or a relative path with a separator in the program name | [process.run](/pages/capability-process-run/) |
 | `manifest.grant-scope` | The file scope is unknown or does not accept that access | [Capabilities](/pages/capabilities/) |
 | `manifest.grant-side` | The capability is not available on the side that requests it | [Capabilities](/pages/capabilities/) |
 | `manifest.grant-tier` | The tier of the package may not hold the grant | [Capabilities](/pages/capabilities/) |

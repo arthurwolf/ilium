@@ -69,7 +69,7 @@ The native crates behind the import are flate2, the image decoders, sha2 and cos
 |---|---|---|
 | Input of any function except `sha256` | 16 MiB | `invalid-argument` |
 | `inflate` `max-output` | at most 64 MiB | `invalid-argument` |
-| Pixels in `decode-image` | `max-pixels`, and never more than 67,108,864 | `invalid-argument` |
+| Pixels in `decode-image` | `max-pixels`, and never more than 67,108,864 | `invalid-argument` above 67,108,864; `quota-exceeded` for an image over `max-pixels` |
 | `rasterize-text` text | 64 KiB | `invalid-argument` |
 | `rasterize-text` `size-px` | 1 to 512 | `invalid-argument` |
 | `rasterize-text` `max-width-px` | 1 to 16,384 | `invalid-argument` |
@@ -237,9 +237,11 @@ Illustrative, not generated. The numbers follow the 640 by 480 example above.
 | Code | Raised by | When |
 |---|---|---|
 | `invalid-argument` | every function except `sha256` | Input over 16 MiB. |
-| `invalid-argument` | `inflate` | `max-output` over 64 MiB, output longer than `max-output`, or corrupt data. |
+| `invalid-argument` | `inflate` | `max-output` over 64 MiB, or corrupt data. |
+| `quota-exceeded` | `inflate` | Output longer than `max-output`. |
 | `invalid-argument` | `deflate` | `level` over 9. |
-| `invalid-argument` | `image-info`, `decode-image` | Corrupt data, `frame` out of range, or more pixels than `max-pixels` or 67,108,864. |
+| `invalid-argument` | `image-info`, `decode-image` | Corrupt data, `frame` out of range, or `max-pixels` over 67,108,864. |
+| `quota-exceeded` | `decode-image` | Width times height is more than `max-pixels`. |
 | `invalid-argument` | `rasterize-text` | Text over 64 KiB, `size-px` of 0 or over 512, or `max-width-px` of 0 or over 16,384. |
 | `unsupported` | `image-info`, `decode-image` | The format is not PNG, JPEG, GIF, WebP or BMP. |
 

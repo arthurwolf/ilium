@@ -98,17 +98,17 @@ Each area page below lists its requirements with an id, a rule and a test.
 
 | Area | Prefix | Page | Rows |
 |---|---|---|---|
-| Host API | `API` | [Host API](/pages/reference-requirements-api-host/) | 27 |
-| Capabilities | `CAP` | [Capabilities](/pages/reference-requirements-capabilities/) | 18 |
-| Widgets | `WID` | [Widgets](/pages/reference-requirements-widgets/) | 25 |
+| Host API | `API` | [Host API](/pages/reference-requirements-api-host/) | 29 |
+| Capabilities | `CAP` | [Capabilities](/pages/reference-requirements-capabilities/) | 30 |
+| Widgets | `WID` | [Widgets](/pages/reference-requirements-widgets/) | 30 |
 | Pane primitives | `PRI` | [Pane primitives](/pages/reference-requirements-primitives/) | 21 |
-| Events and intents | `EVT` | [Events and intents](/pages/reference-requirements-events-intents/) | 19 |
+| Events and intents | `EVT` | [Events and intents](/pages/reference-requirements-events-intents/) | 27 |
 | Requests and outcomes | `RQO` | [Requests and outcomes](/pages/reference-requirements-requests-outcomes/) | 17 |
-| Services and topics | `SVC` | [Services and topics](/pages/reference-requirements-services-topics/) | 24 |
-| Extension points | `EXT` | [Extension points](/pages/reference-requirements-extension-points/) | 25 |
-| Settings | `SET` | [Settings](/pages/reference-requirements-settings/) | 20 |
+| Services and topics | `SVC` | [Services and topics](/pages/reference-requirements-services-topics/) | 25 |
+| Extension points | `EXT` | [Extension points](/pages/reference-requirements-extension-points/) | 41 |
+| Settings | `SET` | [Settings](/pages/reference-requirements-settings/) | 21 |
 | Panes | `PAN` | [Panes](/pages/reference-requirements-panes/) | 21 |
-| Rendering | `RND` | [Rendering](/pages/reference-requirements-rendering/) | 18 |
+| Rendering | `RND` | [Rendering](/pages/reference-requirements-rendering/) | 20 |
 
 ### Coverage rule
 

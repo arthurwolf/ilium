@@ -22,7 +22,7 @@ Installing verifies the package and records the grants the user accepts.
 - `ilium plugin install <file.iliumpkg> [--allow-unsigned]` installs a package. The check covers the layout, the file inventory, the `api` field and the `ilium:api-version` section of each component. A component built for a newer minor version than the host is refused, and the error names both versions.
 - Tier T2 needs a signature from a publisher key the user trusts. `ilium plugin trust add <publisher.pub>` adds a key. An unknown key is offered for trust with its fingerprint, and declining refuses the install. T3 packages install only with `--allow-unsigned` or through `ilium plugin dev`.
 - For a T2 or T3 package, the review dialog lists every capability with its risk. Normal capabilities are checked by default, high-risk ones are unchecked. An unchecked capability is not granted.
-- A T1 bundled plugin receives its manifest ceiling automatically. Its high-risk capabilities are asked once, at first activation, with `Allow selected` and `Not now`. `Not now` asks again at the next server start, at most three times. The counter is stored with the grants record and is reset by an update ([LIF-275]).
+- A T1 bundled plugin receives its manifest ceiling automatically. Its high-risk capabilities are asked at first activation, with `Allow selected` and `Not now`. `Not now` asks again at the next server start, at most three times. The counter is stored with the grants record and is reset by an update ([LIF-275]).
 - Installing a newer version is an update, and the dialog shows only the new capabilities. A lower version is refused unless you pass `--allow-downgrade`. The full pipeline, rollback and uninstall are specified in [Install, update and uninstall](/pages/reference-install-update-uninstall/).
 - On Windows and macOS, T2 and T3 packages are refused with `Cannot install <name> <version>.` and the sandbox message. Bundled plugins keep working.
 
@@ -157,7 +157,7 @@ The client handshake carries the plugin id, version and API version of every ins
 
 ## Core plugins at boot
 
-The `startup` trigger applies per side: a server side with `startup` starts when the server host starts, and a client side with `startup` starts when the client host starts. The core plugins that start at boot and those that start on first use are listed in [startup and lazy activation](/pages/reference-kernel-and-boot/#startup-and-lazy-activation-of-the-30-core-plugins). Safe start (`--safe-plugins`) loads only the essential set, and `--no-plugins` loads none. [COR-020] [COR-021]
+The `startup` trigger applies per side: a server side with `startup` starts when the server host starts, and a client side with `startup` starts when the client host starts. The core plugins that start at boot and those that start on first use are listed in [startup and lazy activation](/pages/reference-kernel-and-boot/#startup-and-lazy-activation-of-the-30-core-plugins). Safe start (`--safe-plugins`) loads only the bundled T1 plugins with their default grants, and `--no-plugins` loads none. [COR-020] [COR-021]
 
 ## Running
 

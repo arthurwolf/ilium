@@ -13,4 +13,8 @@ impl HostKernelSettings for KernelSettingsImport {
     fn read(&mut self, _tab: String) -> Result<String, PluginError> {
         unimplemented!("host::imports::kernel_settings::read")
     }
+
+    fn write(&mut self, _tab: String, _key: String, _value: String) -> Result<(), PluginError> {
+        unimplemented!("host::imports::kernel_settings::write")
+    }
 }

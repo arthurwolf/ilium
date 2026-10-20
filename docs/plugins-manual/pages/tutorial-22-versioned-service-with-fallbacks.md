@@ -174,7 +174,7 @@ impl ServiceProvider for Glossary {
 **TypeScript**
 
 ```ts
-// example-glossary/src/index.ts
+// example-glossary/src/server.ts
 import { definePlugin, type ServiceCall, type ServiceReply } from '@ilium/plugin-sdk';
 
 const TERMS: Record<string, string> = {
@@ -284,7 +284,7 @@ impl GlossaryV11 {
 **TypeScript**
 
 ```ts
-// example-glossary/src/index.ts, version 1.1.0
+// example-glossary/src/server.ts, version 1.1.0
 import { reply } from '@ilium/plugin-sdk/host/services';
 
 const GERMAN: Record<string, string> = {
@@ -472,7 +472,7 @@ fn show(term: &str, outcome: Result<String, String>) {
 **TypeScript**
 
 ```ts
-// example-glossary-hover/src/index.ts
+// example-glossary-hover/src/server.ts
 import { definePlugin, type Event, type Submission } from '@ilium/plugin-sdk';
 import { callRequest, takeReply } from '@ilium/plugin-sdk/host/services';
 import { publish } from '@ilium/plugin-sdk/host/topics';

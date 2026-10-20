@@ -18,7 +18,7 @@ The host keeps the hard parts to itself: starting and signalling processes, the 
 - `tree.attention` for `mark-attention` and `ack-attention`.
 - `open-external` for the intent of the same name.
 - `panes.read` to observe the result through `pane-lifecycle-changed`.
-- Both sides of a plugin can submit these intents. The grants are listed in the [capability reference](/pages/reference-capabilities/); related grants are [panes.create](/pages/capability-panes-create/), [panes.signal](/pages/capability-panes-signal/) and [tree.write](/pages/capability-tree-write/).
+- Only the server side of a plugin can submit these intents, because `panes.lifecycle` is a server-only grant. The grants are listed in the [capability reference](/pages/reference-capabilities/); related grants are [panes.create](/pages/capability-panes-create/), [panes.signal](/pages/capability-panes-signal/) and [tree.write](/pages/capability-tree-write/).
 
 ### States of a pane process
 

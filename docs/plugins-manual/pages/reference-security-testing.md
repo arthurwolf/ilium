@@ -22,7 +22,7 @@ A **fuzz target** is a function that takes arbitrary bytes and must never crash,
 
 | Target | Seeds | Extra invariant |
 |---|---|---|
-| `.iliumpkg` reader | Valid packages; zip-slip names; duplicate names; ZIP64; header mismatch; overlapping entries; symlink entries; decompression bombs | Nothing is written outside the staging folder; errors are `manifest.zip-*` |
+| `.iliumpkg` reader | Valid packages; zip-slip names; duplicate names; ZIP64; header mismatch; overlapping entries; symlink entries; decompression bombs | Nothing is written outside the staging folder; errors use the `package.*` codes of [Trust and supply chain](/pages/reference-trust-and-supply-chain/) |
 | Manifest parser and validator | Valid manifests; duplicate keys; depth 1,000; 10 MiB strings; unknown keys; bad grant strings | Duplicate keys refused; unknown keys give `manifest.unknown-key` |
 | Grant string and host-pattern matcher | Valid and invalid grants | Property test against a reference implementation: the matcher and the reference agree on every input |
 | Path canonicaliser and scope resolver | Traversal corpus (`..`, encoded dots, backslashes, long names), symlink loops | A result is always below the scope root, or an error |

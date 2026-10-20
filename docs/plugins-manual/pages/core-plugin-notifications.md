@@ -421,7 +421,7 @@ Other plugins change what `ilium.core.notifications` does through the points bel
 | Point | Kind | What it does | Payload | Risk |
 |---|---|---|---|---|
 | `before-notify` | hook (veto) | Mute or refuse a notification, for example at night. | event, pane, title, urgency, channels | standard |
-| `channels` | collect | Add a delivery channel such as a chat webhook. | entry: id, title, service (a service the plugin provides that delivers one notice) | standard |
+| `channels` | collect | Add a delivery channel such as a chat webhook. | entry: id, title, service (a service the plugin provides that delivers one notice) | high |
 
 **Services** (grant `services.use:<name>`):
 

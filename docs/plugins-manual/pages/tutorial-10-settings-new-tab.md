@@ -320,7 +320,7 @@ impl Handler for ClipboardHistory {
 **TypeScript**
 
 ```ts
-// src/index.ts. Client side of clipboard-history, 0.1.0.
+// src/client.ts. Client side of clipboard-history, 0.1.0.
 import { definePlugin, type Event } from '@ilium/plugin-sdk';
 import { log } from '@ilium/plugin-sdk/host/log';
 import { getJson } from '@ilium/plugin-sdk/host/settings';

@@ -282,7 +282,7 @@ impl Handler for TeamPack {
 **TypeScript**
 
 ```ts
-// src/index.ts
+// src/server.ts
 import { definePlugin, type Event, type Submission } from '@ilium/plugin-sdk';
 import { register } from '@ilium/plugin-sdk/host/extensions';
 import { readAll } from '@ilium/plugin-sdk/host/fs';

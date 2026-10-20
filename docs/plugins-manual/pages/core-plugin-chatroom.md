@@ -440,7 +440,7 @@ Other plugins change what `ilium.core.chatroom` does through the points below. T
 
 | Point | Kind | What it does | Payload | Risk |
 |---|---|---|---|---|
-| `before-post` | hook (transform) | Change a message before it is written to the room. | author, text, kind; reply: text | standard |
+| `before-post` | hook (transform) | Change a message before it is written to the room. | author, text, kind; reply: text | high |
 | `message-renderers` | collect | Draw a message kind in a special way, such as a task claim. | entry: id, kind, view (a plugin view that draws the message) | standard |
 
 **Services** (grant `services.use:<name>`):

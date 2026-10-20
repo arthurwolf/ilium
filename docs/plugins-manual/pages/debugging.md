@@ -283,7 +283,7 @@ The contract includes surfaces that fail in ways the earlier sections do not cov
 
 | Symptom | Likely cause | What to check |
 |---|---|---|
-| The render traps, the previous view stays and the plugin log has `ui.invalid-tree` or another `ui.*` code | A tree or widget cap: 4,096 nodes, 1,024 KiB, 256 `check-list` items, 64 `list-editor` items, 4 popups | The log entry names the cap. Page the data with a virtual-row or catalogue provider. |
+| The render traps, the previous view stays and the plugin log has `ui.invalid-tree` or another `ui.*` code | A tree or widget cap: 4,096 nodes, 1,024 KiB, 256 `check-list` items, 64 `list-editor` items | The log entry names the cap. Page the data with a virtual-row or catalogue provider. |
 | `rate-limited` with `retry-after-ms` | More than 10 widget updates per second, or 3 toasts in 10 s | Update when a value changes by a visible step. The entry shows the retry delay. |
 | A menu or a token list shows static content | A `menu-items` or `tokens` provider missed its 10 or 20 ms deadline | Time the provider with `clock.monotonic-millis` and cache the result. |
 | `quota-exceeded` on `http.stream`, `process.spawn` or `vector` | A requestable limit (`limits` in the manifest) is at its ceiling | Raise the key in the manifest within the tier ceiling, or close what you opened. |

@@ -2,7 +2,7 @@ package ilium:exports@0.1.0;
 
 interface hook-handler {
   use ilium:types/errors@0.1.0.{plugin-error};
-  record hook-call { call: u64, point: string, payload-json: string }
+  record hook-call { call: u64, point: string, extension: string, payload-json: string }
   variant hook-reply { pass, replace(string), refuse(string), answer(string) }
   /// The owner of the point calls it through extensions.run-hook.
   handle-hook: func(call: hook-call) -> result<hook-reply, plugin-error>;

@@ -18,7 +18,7 @@ impl HostStorage for StorageImport {
         unimplemented!("host::imports::storage::put")
     }
 
-    fn remove(&mut self, _bucket: Bucket, _key: String) {
+    fn remove(&mut self, _bucket: Bucket, _key: String) -> Result<(), PluginError> {
         unimplemented!("host::imports::storage::remove")
     }
 

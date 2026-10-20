@@ -218,7 +218,7 @@ fn strip_keys(payload: &Value) -> HookReply {
 **TypeScript**
 
 ```ts
-// src/index.ts
+// src/server.ts
 import { definePlugin, type HookCall, type HookReply } from '@ilium/plugin-sdk';
 import { nowUnixMillis } from '@ilium/plugin-sdk/host/clock';
 import { log } from '@ilium/plugin-sdk/host/log';

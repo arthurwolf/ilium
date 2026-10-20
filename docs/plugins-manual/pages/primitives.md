@@ -149,7 +149,7 @@ impl NotesPanes {
 |---|---|---|
 | `read_screen(pane, part, max_rows)` / `readScreen` | `terminal.read-screen` | `option<Screen>`. `part` is `visible` or `scrollback`. `max_rows` above 10,000 is clamped. |
 | `selection(pane)` / `selection` | `terminal.read-screen` | `option<Selection>`: text, first and last row and column. |
-| `add_output_filter(pane, filter)` / `addOutputFilter` | `terminal.output-filter` (S) | `result`. Regex at most 1 KiB, rate 1 to 100 per second. An existing id on the pane is replaced. |
+| `add_output_filter(pane, filter)` / `addOutputFilter` | `terminal.output-filter` (S) | `result`. Regex at most 512 bytes, rate 1 to 100 per second. An existing id on the pane is replaced. |
 | `remove_output_filter(pane, id)` / `removeOutputFilter` | `terminal.output-filter` (S) | No result. |
 | `claim_pointer(pane)` / `claimPointer` | `terminal.pointer` (C) | `result`. `conflict` when another plugin holds the claim. |
 | `release_pointer(pane)` / `releasePointer` | `terminal.pointer` (C) | No result. |

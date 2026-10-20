@@ -95,11 +95,11 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "panes.create",
       "panes.read",
       "fs.read:project",
-      "fs.write:worktrees"
+      "fs.write:worktrees",
+      "settings.write-kernel:git"
     ],
     "client": [
-      "ui.panels",
-      "settings.write-kernel:git"
+      "ui.panels"
     ]
   },
   "activation": [
@@ -364,7 +364,7 @@ Other plugins change what `ilium.core.worktrees` does through the points below. 
 | Point | Kind | What it does | Payload | Risk |
 |---|---|---|---|---|
 | `before-create` | hook (transform) | Choose the branch name or refuse a new worktree. | repo, branch, base, agent; reply: branch | standard |
-| `post-create-steps` | collect | Add a step that runs after a worktree is created. | entry: id, title, command, working_directory | standard |
+| `post-create-steps` | collect | Add a step that runs after a worktree is created. | entry: id, title, command, working_directory | high |
 | `before-remove` | hook (veto) | Refuse removing a worktree. | path, branch, dirty, merged | standard |
 
 **Post-create failure.** Post-create steps (the `post_create` setting and every `post-create-steps` entry) run in priority order inside the new worktree. When a step exits non-zero, later steps are skipped, the worktree is kept, the create call still succeeds with a warning naming the failed step and its exit code, and the user sees that warning as a notice in the Git settings and the pane. The worktree is never deleted because a step failed.

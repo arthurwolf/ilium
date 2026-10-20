@@ -426,7 +426,7 @@ impl Swarm {
 **TypeScript**
 
 ```ts
-// src/index.ts
+// src/server.ts
 import { definePlugin, type Event, type Submission } from '@ilium/plugin-sdk';
 import { nowUnixMillis } from '@ilium/plugin-sdk/host/clock';
 import { startJson, takeOutput } from '@ilium/plugin-sdk/host/jobs';

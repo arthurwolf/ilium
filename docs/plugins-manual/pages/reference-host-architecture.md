@@ -183,10 +183,10 @@ A plugin that uses `jobs.run` gets a second kind of instance: a **job instance**
 
 ### CLI-process host
 
-A `cli` entry with `requires_server: false` runs the plugin's `server` component in the CLI process. The host starts when the plugin is first needed for the command, activates the plugin with the trigger `cli:<name>`, delivers one `cli-invoked` event, waits until the plugin has returned its exit status (or the command deadline expires), and then deactivates with `shutdown` and exits. No tree exists in that process. Host imports that need the tree, panes or agents return `unavailable` with the message `no session`.
+A `cli` entry with `requires_server: false` runs the plugin's `server` component in the CLI process. The host starts when the plugin is first needed for the command, activates the plugin with the trigger `cli:<name>`, delivers one `cli-invoked` event, waits until the plugin has returned its exit status (or the command deadline expires), and then deactivates with `shutdown` and exits. No tree exists in that process. Host imports that need the tree, panes or agents return `not-permitted` with reason `unavailable` and the message `no session`.
 
 - **[HST-019]** A CLI-process host MUST host only the plugin named by the entry plus the services it `requires`, and MUST NOT activate any other plugin.
-- **[HST-020]** In a CLI-process host, imports that need a session MUST return `unavailable` and MUST NOT start a server.
+- **[HST-020]** In a CLI-process host, imports that need a session MUST return `not-permitted` with reason `unavailable` and the message `no session`, and MUST NOT start a server.
 
 ## Ownership
 
@@ -199,7 +199,7 @@ One Engine per process. One Store per plugin instance. The table assigns each re
 | Contribution registry (commands, settings tabs, decoration slots, panes, toolbar items, keys, scenes) | Static part: each host for the sides it hosts. Retained part (decorations, virtual rows, status segments, frame slots, attention): the server host | Not persisted except what the plugin saves | Retained server contributions replicate to every client as `ContributionDelta` |
 | Extension-point registry | The host of the side that owns the point | Not persisted | A client-owned point exists only in that client; a server-owned point only on the server (see [Extension points](/pages/api-extension-points/)) |
 | Service registry | The server host for `server` providers, each client host for `client` providers | Not persisted | A service call is routed to the side that the manifest names; a cross-side call travels as a message |
-| Plugin enable state and failure counters | The host of the side, in memory; the enable flag is stored in the user config | `config.toml` `[plugins.<id>]` for the flag only | The flag is read at start; counters never leave the process |
+| Plugin enable state and failure counters | The host of the side, in memory; the enable flag is stored in the shared registry | `<data>/plugins/installed.json` for the flag; a failure disable is also noted there | The flag is read at start; counters never leave the process |
 | Quota groups | `ilium-execution`, one group per plugin side per process | Not persisted | Telemetry only |
 | Telemetry registry | Each host | Not persisted | `ilium plugin stats` reads the server's registry and each client's through the `Control` envelope (see [Host telemetry](/pages/reference-host-telemetry/)) |
 
@@ -313,7 +313,7 @@ The host contains each failure at the smallest unit that owns the broken state. 
 | Failure | What stops | What must keep running |
 |---|---|---|
 | A guest trap (panic, unreachable, out-of-bounds, stack overflow) | That plugin side's instance. Pending requests it owned complete as `cancelled`; its retained contributions are marked stale. | Every other plugin, the kernel, other sides of the same plugin |
-| A stuck queue (queue full with a never-dropped event) | That plugin side is restarted as a failure | Everything else |
+| A stuck queue (queue full with a never-dropped event) | The message intent completes `refused(busy)` and queues nothing; the receiver is not restarted (SVC-030) | Everything else |
 | A deadline breach (hard) | The call traps, as above | Everything else |
 | A helper crash or kill | The one plugin side in that helper | The parent process, other helpers, other plugins |
 | A Rust panic inside a host import implementation | The call is caught at the import boundary (`catch_unwind`), the instance traps with `host.import-panic`, and the panic is logged with the import name | The parent process and every other plugin. The kernel facade is never left holding a lock across an import (see requirement HST-038) |
@@ -347,7 +347,7 @@ The 30 core plugins (see [Core plugins](/pages/core-plugins/)) carry features of
 | Helper binary missing and a T2 or T3 package is installed | The package stays disabled with `host.helper-missing`; T1 plugins run | `host.helper-missing` |
 | Engine cannot be created | Server continues without plugins | `host.engine-failed` |
 | A client connects while the server host is still starting | Retriable refusal | `server.starting` |
-| CLI-process host needs the tree | `unavailable`, message `no session` | `unavailable` |
+| CLI-process host needs the tree | `not-permitted` with reason `unavailable`, message `no session` | `not-permitted` |
 | Two clients disable the same plugin at different times | Each client disables it independently | none |
 | Server host shutdown takes longer than 5 s | Remaining plugins are dropped without `deactivate`; their restore bytes are not kept | `host.shutdown-timeout` (logged) |
 | Panic inside an import | The calling instance traps | `host.import-panic` |

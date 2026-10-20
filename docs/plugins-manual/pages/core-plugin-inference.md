@@ -486,7 +486,7 @@ Other plugins change what `ilium.core.inference` does through the points below. 
 |---|---|---|---|---|
 | `before-request` | hook (transform) | Rewrite or refuse an outgoing model request, for example to remove private text. | purpose, provider, model, messages_length, text; reply: text | high |
 | `after-response` | hook (observe) | Learn that a request finished, with its token counts. | purpose, provider, model, input_tokens, output_tokens, millis | standard |
-| `provider-profiles` | collect | Offer a ready-made provider setup in the provider chooser. | entry: id, title, base_url, models_path, key_name | standard |
+| `provider-profiles` | collect | Offer a ready-made provider setup in the provider chooser. | entry: id, title, base_url, models_path, key_name | high |
 
 **Services** (grant `services.use:<name>`):
 

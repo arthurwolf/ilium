@@ -218,14 +218,14 @@ All caps are below the 64 MiB frame limit. The host checks them before encoding.
 
 | Payload | Cap | Error |
 |---|---|---|
-| Plugin message body | 1 MiB | `ipc.payload-too-large` |
-| Topic payload | 64 KiB | `ipc.payload-too-large` |
+| Plugin message body | 1 MiB | `invalid-argument` (the plugin call; see the limits table) |
+| Topic payload | 64 KiB | `invalid-argument` (the plugin call; see the limits table) |
 | `ui-tree` of a view | 1 MiB, 4 MiB with the T1 ceiling | `ipc.payload-too-large` |
 | Surface write | 16 MiB | `ipc.payload-too-large` |
 | Whole envelope | about 17 MiB | `ipc.payload-too-large` |
 | Contribution delta | 4 MiB | `ipc.payload-too-large` |
 
-An oversized item is refused at the sender. The sender's call returns `ipc.payload-too-large`.
+An oversized item is refused at the sender. The sender's call returns `ipc.payload-too-large`, except a plugin message or topic over its cap: the plugin call returns `invalid-argument`, as in the limits table.
 
 - **[HST-124]** The sender MUST check the caps above and refuse an oversized item with `ipc.payload-too-large` before it is encoded.
 - **[HST-125]** A receiver MUST drop an envelope above 17 MiB and close the connection with `ipc.payload-too-large`.

@@ -21,7 +21,7 @@ Requirement ids of this page are in the range `AUT-001` to `AUT-099`. The comple
 | Limit | Value | Page |
 |---|---|---|
 | Timer minimum, timers per plugin | 50 ms, 64 | [Clock and timers](/pages/api-clock-and-timers/) |
-| `on-events` deadline | 20 ms (50 ms for tier 1) | [Performance](/pages/performance/) |
+| `on-events` deadline | 20 ms by default (a tier 1 plugin may ask for up to 50 ms) | [Performance](/pages/performance/) |
 | Storage key, value, bucket | 256 bytes, 1 MiB, 16 MiB (`storage_bucket_mib`) | [Storage](/pages/api-storage/) |
 | Restore bytes from `deactivate` | 1 MiB | [Lifecycle](/pages/lifecycle/) |
 | Dedup window | 10 minutes | [Requests and outcomes](/pages/requests-and-outcomes/) |
@@ -412,7 +412,8 @@ fn window_is_clamped_to_the_list() {
 
 | Code | Retry? | Why |
 |---|---|---|
-| `timed-out`, `busy`, `network`, `rate-limited`, `io` | Yes, with backoff | The cause can pass. For `rate-limited`, wait at least `retry-after-ms`. |
+| `timed-out`, `busy`, `network`, `rate-limited` | Yes, with backoff | The cause can pass. For `rate-limited`, wait at least `retry-after-ms`. |
+| `io` | Maybe, with backoff | The error can pass or repeat. Stop after a few tries. |
 | `quota-exceeded` | After freeing space | A retry fails the same way until something is removed. |
 | `not-permitted`, `revoked`, `unsupported` | No | The user or the host decided. A retry cannot change it. |
 | `invalid-argument`, `not-found`, `conflict` | No | The request is wrong. Change it. |

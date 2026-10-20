@@ -81,7 +81,7 @@ This block is a fragment. It lists the contributions. The whole manifest is in [
     ]
   },
   "capabilities": {
-    "server": ["agent.read", "agent.signatures", "tree.decorate", "panes.read"],
+    "server": ["agent.read", "agent.signatures", "tree.decorate", "panes.read", "terminal.write"],
     "client": ["agent.read", "ui.panels"]
   }
 }
@@ -119,7 +119,8 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "agent.read",
       "agent.signatures",
       "tree.decorate",
-      "panes.read"
+      "panes.read",
+      "terminal.write"
     ],
     "client": [
       "agent.read",
@@ -624,7 +625,7 @@ Other plugins change what `ilium.core.agent-detect` does through the points belo
 | Point | Kind | What it does | Payload | Risk |
 |---|---|---|---|---|
 | `activity-rules` | collect | Add screen patterns that mean working, idle or awaiting approval for one signature. | entry: id, signature, state, regex, region (last-lines, status-row, whole-screen) | standard |
-| `classify` | hook (transform) | Adjust the detected activity before it is published. | pane, signature, state, reason; reply: state | standard |
+| `classify` | hook (transform) | Adjust the detected activity before it is published. | pane, signature, state, reason; reply: state | high |
 
 **Services** (grant `services.use:<name>`):
 

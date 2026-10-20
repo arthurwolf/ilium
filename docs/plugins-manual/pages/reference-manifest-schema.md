@@ -529,7 +529,8 @@ The schema describes a source manifest and a packed manifest. In a source manife
               "name": {"type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"},
               "summary": {"type": "string", "minLength": 1, "maxLength": 120},
               "arguments_schema": {"type": "object"},
-              "output": {"enum": ["jsonl", "text"]},
+              "aliases": {"type": "array", "items": {"type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"}},
+              "output": {"enum": ["jsonl", "text", "mixed"]},
               "requires_server": {"type": "boolean"},
               "stdin": {"enum": ["none", "optional", "required"]},
               "argument_groups": {"type": "array", "items": {"enum": ["pane-selector"]}, "maxItems": 4}
@@ -931,7 +932,7 @@ Exit codes are those of [Distribution commands](/pages/reference-plugin-distribu
 
 ## Error catalogue
 
-This catalogue has 253 codes, of which 94 are in the `manifest.*` family. A code that appears in an older page and is not here is in the table of retired codes below.
+This catalogue has 252 codes, of which 93 are in the `manifest.*` family. A code that appears in an older page and is not here is in the table of retired codes below.
 
 | Id | Rule |
 |---|---|

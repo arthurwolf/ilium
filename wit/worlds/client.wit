@@ -33,7 +33,6 @@ world base {
   import ilium:host/geocode@0.1.0;
   import ilium:host/kernel-settings@0.1.0;
   import ilium:host/keymap@0.1.0;
-  import ilium:host/gpu@0.1.0;
   import ilium:host/client-requests@0.1.0;
   import ilium:host/extensions@0.1.0;
   import ilium:primitives/terminal@0.1.0;

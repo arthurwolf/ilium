@@ -51,7 +51,7 @@ tokens: func(buffer: buffer-id, first-line: u32, lines: list<string>, state-in: 
 
 ### How the call behaves
 
-- **Which lines.** The host calls for the visible lines plus a margin of 40 lines above and below (one block, as in the figure below), not for the whole file. It passes the carried state of the previous block, so the plugin keeps no cursor of its own.
+- **Which lines.** The host calls for the visible lines plus a margin of 20 lines above and below (one block, as in the figure below), not for the whole file. It passes the carried state of the previous block, so the plugin keeps no cursor of its own.
 - **Deadline.** 10 ms per call. On a timeout the lines stay plain and the host retries later. The breach counts toward the deadline rule.
 - **Colours.** Colours come from the theme by `token-kind`. `plain` draws in the normal text colour. A plugin cannot pick a colour, so a theme change recolours every language at once.
 

@@ -6,7 +6,7 @@ permalink: /pages/api-storage/
 
 ## storage
 
-The `storage` import keeps small key-value data for a plugin. Every value lives in one of three buckets: `global`, `project` or `session`. The bucket decides which projects or sessions can see the value and how long it lasts. Each `put` replaces one value atomically, so a reader never sees half of a write. Storage is for small state such as counters, cursors and settings-like flags. For large data, use [fs](/pages/api-fs/).
+The `storage` import keeps small key-value data for a plugin. Every value lives in one of four buckets: `global`, `project`, `session` or `shared`. The bucket decides which projects or sessions can see the value and how long it lasts. Each `put` replaces one value atomically, so a reader never sees half of a write. Storage is for small state such as counters, cursors and settings-like flags. For large data, use [fs](/pages/api-fs/).
 
 **You need:**
 
@@ -19,10 +19,10 @@ The `storage` import keeps small key-value data for a plugin. Every value lives 
 
 ```wit
 // Excerpt of ilium:host/storage in reference-wit
-enum bucket { global, project, session }
+enum bucket { global, project, session, shared }
 get: func(bucket: bucket, key: string) -> option<list<u8>>;
 put: func(bucket: bucket, key: string, value: list<u8>) -> result<_, plugin-error>;
-remove: func(bucket: bucket, key: string);
+remove: func(bucket: bucket, key: string) -> result<_, plugin-error>;
 keys: func(bucket: bucket, prefix: string) -> list<string>;
 record entry { key: string, value: option<list<u8>> }   // none removes the key
 write-batch: func(bucket: bucket, entries: list<entry>) -> result<_, plugin-error>;

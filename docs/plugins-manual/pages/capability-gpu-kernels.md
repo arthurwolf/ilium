@@ -115,7 +115,7 @@ Call the helper from the scene's frame function. Keep the original buffer: a fai
 | Grant declined | `not-permitted` | Draw without the effect. |
 | Unknown kernel name | `invalid-argument` | Use the enum. |
 | Pixel buffer size mismatch | `invalid-argument` | Match width, height and format (4 bytes per pixel, RGBA, 8 bits per channel, so the buffer is exactly `width * height * 4` bytes). |
-| Buffer too large | `quota-exceeded` | Process tiles. |
+| Buffer too large | `invalid-argument` | Process tiles. |
 | No GPU | CPU fallback with the same result | Nothing. |
 
 Because the feature is unstable, kernels and parameters may change between development builds.

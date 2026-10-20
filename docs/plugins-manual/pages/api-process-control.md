@@ -12,7 +12,7 @@ A second capability lives in the `signal-pane` intent. It sends an interrupt, te
 
 ### What you need
 
-- **Grant `process.run:<program>`** for each program, for example `process.run:git`. The argument is a program name, resolved through `PATH`, or an absolute path, which runs exactly that file. Wildcards are refused with `manifest.grant-wildcard`. `process.run:sh` is valid, but only bundled plugins use it, such as the progress monitor.
+- **Grant `process.run:<program>`** for each program, for example `process.run:git`. The argument is a program name, resolved through `PATH`, or an absolute path, which runs exactly that file. Wildcards are refused with `manifest.grant-program`. `process.run:sh` is valid, but only bundled plugins use it, such as the progress monitor.
 - **Grant `fs.read`** for the scope that holds the `cwd` you pass. No separate grant exists per folder.
 - **Grant `panes.signal`** for `signal-pane`. Also hold `panes.read` to receive `pane-focused` events.
 - **Risk.** `process.run` and `panes.signal` are both high risk (H). The user checks each one in the review dialog. A bundled T1 plugin is asked once, at first activation.

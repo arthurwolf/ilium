@@ -367,7 +367,7 @@ impl ServiceProvider for TitlesLite {
 **TypeScript**
 
 ```ts
-// src/index.ts
+// src/server.ts
 import { definePlugin, type Event, type Submission } from '@ilium/plugin-sdk';
 import type { ServiceCall, ServiceReply } from '@ilium/plugin-sdk';
 import { list, runHookRequest, takeReply } from '@ilium/plugin-sdk/host/extensions';

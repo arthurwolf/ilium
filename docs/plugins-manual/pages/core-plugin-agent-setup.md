@@ -810,8 +810,8 @@ Other plugins change what `ilium.core.agent-setup` does through the points below
 
 | Point | Kind | What it does | Payload | Risk |
 |---|---|---|---|---|
-| `instruction-blocks` | collect | Add a marker-delimited instruction block that Setup installs. | entry: id, title, marker, file (text under the plugin's `help/` folder) | standard |
-| `targets` | collect | Add a file that Setup can edit, such as a new agent config file. A global target is changed through a proposal, so it must lie in an `agent-config:<agent>` scope this plugin can propose for. | entry: id, title, path_template, scope (global, project) | standard |
+| `instruction-blocks` | collect | Add a marker-delimited instruction block that Setup installs. | entry: id, title, marker, file (text under the plugin's `help/` folder) | high |
+| `targets` | collect | Add a file that Setup can edit, such as a new agent config file. A global target is changed through a proposal, so it must lie in an `agent-config:<agent>` scope this plugin can propose for. | entry: id, title, path_template, scope (global, project) | high |
 | `before-install` | hook (veto) | Refuse writing a block to a file. | target, block, path | high |
 
 **Services** (grant `services.use:<name>`):

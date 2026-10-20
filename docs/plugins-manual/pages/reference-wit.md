@@ -58,7 +58,7 @@ These rules apply to every interface below. Limit tables on other pages link her
 | `mark-attention` reason | 80 | characters |
 | Message channel | 1 to 64 | characters from `[a-z0-9.-]` |
 | Message payload | 1,048,576 | bytes |
-| Clipboard text | 1,048,576 | bytes |
+| Clipboard text | 65,536 | bytes |
 | `arguments-json` of a command | 65,536 | bytes |
 | Payload and reply of a service call | 1,048,576 | bytes |
 | Journal payload | 4,096 | bytes |
@@ -143,7 +143,7 @@ interface errors {
     code: error-code,
     /// Plain text for logs. At most 256 characters. Never parsed by the SDK.
     message: string,
-    /// Present with rate-limited and busy: wait at least this long before a retry.
+    /// Present with rate-limited, and with quota-exceeded from the CPU budget: wait at least this long before a retry.
     retry-after-ms: option<u32>,
   }
 }
@@ -564,7 +564,7 @@ interface ui {
     /// The node is drawn muted, ignores input, stays in the focus order and the reason shows as its tooltip.
     disabled-reason: option<string>,
   }
-  /// root MUST be 0. At most 4,096 nodes and 1 MiB. A tree deeper than 32 levels (root = 1) traps
+  /// root MUST be 0. At most `ui_tree_nodes` nodes (4,096 by default) and `ui_tree_kib` KiB (1,024 by default). A tree deeper than 32 levels (root = 1) traps
   /// ui.too-deep. Any invalid tree traps with a ui.* code; views.render has no result type.
   record ui-tree { version: u32, nodes: list<ui-node>, root: u32 }
 
@@ -1131,7 +1131,7 @@ interface journal {
   record journal-entry { at: epoch-ms, pane: option<node-id>, source: string, kind: string, payload-json: string }
   /// payload-json is at most 4 KiB. The oldest entries are trimmed at limits.journal_entries.
   log-event: func(pane: option<node-id>, kind: string, payload-json: string) -> result<_, plugin-error>;
-  /// Own entries, newest last. limit is at most 1,000; a larger limit is clamped to 1,000.
+  /// Own entries, newest last; with the journal.read grant, host and other plugins' entries too. limit is at most 1,000; a larger limit is clamped to 1,000.
   read: func(pane: option<node-id>, since: epoch-ms, limit: u32) -> list<journal-entry>;
 }
 ```
@@ -1201,7 +1201,7 @@ interface storage {
   /// key is 1 to 256 bytes. A value is at most 1 MiB. A bucket holds 16 MiB by default (limits.storage_bucket_mib).
   get: func(bucket: bucket, key: string) -> option<list<u8>>;
   put: func(bucket: bucket, key: string, value: list<u8>) -> result<_, plugin-error>;
-  remove: func(bucket: bucket, key: string);
+  remove: func(bucket: bucket, key: string) -> result<_, plugin-error>;
   keys: func(bucket: bucket, prefix: string) -> list<string>;
   /// none removes the key.
   record entry { key: string, value: option<list<u8>> }
@@ -1325,7 +1325,7 @@ interface fs {
   read: func(path: fs-path, offset: u64, max-bytes: u32) -> result<list<u8>, plugin-error>;
   /// Async, take-bytes. At most 64 MiB.
   read-all: func(path: fs-path) -> result<request-id, plugin-error>;
-  /// Async, take-entries. glob follows the scope root. max-entries at most 100,000.
+  /// Async, take-entries. glob follows the scope root. max-entries at most 65,536.
   scan: func(path: fs-path, glob: string, max-entries: u32) -> result<request-id, plugin-error>;
   /// Async, take-written is not used: the answer is request-completed ok. replace is atomic.
   write: func(path: fs-path, data: list<u8>, mode: write-mode) -> result<request-id, plugin-error>;
@@ -1397,7 +1397,7 @@ S C A. Grant: `jobs.run`. API page: [Jobs](/pages/api-jobs/).
 interface jobs {
   use ilium:types/ids@0.1.0.{request-id};
   use ilium:types/errors@0.1.0.{plugin-error};
-  /// kind must be in contributes.jobs. input at most 4 MiB. Fires job-progress, then request-completed.
+  /// kind must be in contributes.jobs. input at most job_io_mib (default 16 MiB, ceiling 64 MiB). Fires job-progress, then request-completed.
   start: func(kind: string, input: list<u8>) -> result<request-id, plugin-error>;
   cancel: func(job: request-id);
   take-output: func(job: request-id) -> option<list<u8>>;
@@ -1424,7 +1424,7 @@ interface process {
     program: string, arguments: list<string>, cwd: option<fs-path>, stdin: option<list<u8>>,
     environment: list<tuple<string, string>>, timeout-millis: u32,
   }
-  /// status none when the process was killed by a signal. stdout and stderr are each cut at 4 MiB.
+  /// status none when the process was killed by a signal. stdout and stderr are each capped at 4 MiB by default (`process_output_mib`); more output fails the call with `quota-exceeded`.
   record process-exit { status: option<s32>, signal: option<string>, stdout: list<u8>, stderr: list<u8> }
   record spawn-spec { process: process-spec, stdin-open: bool, line-mode: bool }
   /// Async, take-exit.
@@ -1836,13 +1836,15 @@ interface sessions {
 
 ### 5.35 kernel-settings
 
-S C. Grant: `settings.read-kernel:<tab-id>`. API page: [Kernel settings and keymap](/pages/api-kernel-settings-and-keymap/).
+S C. Grants: `settings.read-kernel:<tab-id>` for `read`, and `settings.write-kernel:<tab-id>` for `write` (T1 only). API page: [Kernel settings and keymap](/pages/api-kernel-settings-and-keymap/).
 
 ```wit
 interface kernel-settings {
   use ilium:types/errors@0.1.0.{plugin-error};
   /// A JSON object of that tab's values. Secrets are "<redacted>".
   read: func(tab: string) -> result<string, plugin-error>;
+  /// Writes one key of that tab. `value` is JSON. Needs settings.write-kernel:<tab-id>.
+  write: func(tab: string, key: string, value: string) -> result<_, plugin-error>;
 }
 ```
 
@@ -1861,7 +1863,7 @@ interface keymap {
 
 ### 5.37 gpu
 
-C A. Grant: `gpu.kernels`. Unstable feature `gpu-kernels`. API page: [GPU](/pages/api-gpu/).
+A. Grant: `gpu.kernels`. Unstable feature `gpu-kernels`. API page: [GPU](/pages/api-gpu/).
 
 ```wit
 interface gpu {
@@ -2249,7 +2251,7 @@ interface detector {
 ```wit
 interface job-runner {
   use ilium:types/errors@0.1.0.{plugin-error};
-  /// Runs in a job instance, see Runtime model. The output is at most 4 MiB.
+  /// Runs in a job instance, see Runtime model. The output is at most job_io_mib (default 16 MiB, ceiling 64 MiB).
   run: func(kind: string, input: list<u8>) -> result<list<u8>, plugin-error>;
 }
 ```
@@ -2370,7 +2372,7 @@ interface token-provider {
 ```wit
 interface hook-handler {
   use ilium:types/errors@0.1.0.{plugin-error};
-  record hook-call { call: u64, point: string, payload-json: string }
+  record hook-call { call: u64, point: string, extension: string, payload-json: string }
   variant hook-reply { pass, replace(string), refuse(string), answer(string) }
   /// The owner of the point calls it through extensions.run-hook.
   handle-hook: func(call: hook-call) -> result<hook-reply, plugin-error>;
@@ -2443,7 +2445,6 @@ world base {
   import ilium:host/http-api@0.1.0;
   import ilium:host/workspace@0.1.0;
   import ilium:host/catalogs@0.1.0;
-  import ilium:host/geocode@0.1.0;
   import ilium:host/sessions@0.1.0;
   import ilium:host/kernel-settings@0.1.0;
   import ilium:host/client-requests@0.1.0;
@@ -2501,7 +2502,6 @@ world base {
   import ilium:host/geocode@0.1.0;
   import ilium:host/kernel-settings@0.1.0;
   import ilium:host/keymap@0.1.0;
-  import ilium:host/gpu@0.1.0;
   import ilium:host/client-requests@0.1.0;
   import ilium:host/extensions@0.1.0;
   import ilium:primitives/terminal@0.1.0;

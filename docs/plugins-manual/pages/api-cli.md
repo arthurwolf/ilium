@@ -56,7 +56,7 @@ The interface provides a JSON-lines output form, a plain text form, a separate s
 
 ### Manifest
 
-The `cli` key under `contributes` declares the subcommands. It holds one object, or a list of at most 8 objects, and the names MUST be unique inside the plugin. A name in the reserved kernel list (see [CLI compatibility](/pages/reference-cli-compatibility/)) is refused with `manifest.cli-name-reserved`. Each entry has these fields; six are optional.
+The `cli` key under `contributes` declares the subcommands. It holds one object, or a list of at most 16 objects, and the names MUST be unique inside the plugin. A name in the reserved kernel list (see [CLI compatibility](/pages/reference-cli-compatibility/)) is refused with `manifest.cli-name-reserved`. Each entry has these fields; six are optional.
 
 ```json
 {

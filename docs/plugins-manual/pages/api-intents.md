@@ -210,7 +210,7 @@ For `send-input`, two checks run at batch level before the list below, over the 
 
 1. Dedup key. A reserved key gives `duplicate(<original>)`.
 2. The pane exists and is a terminal pane. Otherwise `not-found` or `unsupported`.
-3. The pane is restored, which means its process has started. Otherwise `pane-not-ready`.
+3. The pane is not waiting to start: `is-restored` is false, which means its process has started. Otherwise `pane-not-ready`.
 4. The rate limit has room: 20 per second per pane and plugin. Otherwise `rate-limited`.
 5. The epoch, if given, equals the pane's current prompt epoch. Otherwise `conflict`.
 6. The `if-current` precondition, if given, matches the pane. Otherwise `conflict` with the message `precondition: <field>`.
@@ -513,7 +513,7 @@ The log of the test harness for this batch, when the pane is already frozen:
 <pre class="term"><span class="t-prompt">$</span> ilium plugin test ./freezer --fixture freeze-twice.json
 <span class="t-ok">{"type":"outcome","i":0,"intent":"freeze-pane","outcome":"ok"}</span>
 <span class="t-ok">{"type":"outcome","i":1,"intent":"toast","outcome":"ok"}</span>
-{"type":"outcome","i":2,"intent":"freeze-pane","outcome":"duplicate(0)"}
+{"type":"outcome","i":2,"intent":"freeze-pane","outcome":"duplicate(submission(0))"}
 <span class="t-ok">{"type":"outcome","i":3,"intent":"toast","outcome":"ok"}</span>
 <span class="t-dim">{"type":"summary","ok":3,"duplicate":1,"refused":0}</span>
 </pre>

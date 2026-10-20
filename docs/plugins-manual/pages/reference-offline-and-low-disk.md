@@ -31,7 +31,7 @@ The host checks free space on the data volume before an install or an update. It
 
 | Event | Result |
 |---|---|
-| Disk full during install | The staging folder is removed. Nothing is registered. `install.io`. |
+| Disk full during install | The staging folder is removed. Nothing is registered. `install.no-space`, with the free space. |
 | Disk full during update | The trial is abandoned. The old version stays. |
 | Disk full when a plugin writes | The write returns `io` with the message `no-space`, never `quota-exceeded` ([LIF-119]). Storage writes in a batch roll back. |
 | Disk full when the host writes a log | Lines are dropped. A count is kept. |

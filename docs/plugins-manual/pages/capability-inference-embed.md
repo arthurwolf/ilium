@@ -157,7 +157,7 @@ Use the same model and dimension for the index and the queries. Changing the pro
 | Wrong vector dimension for the index | `invalid-argument` | Create a new index. |
 | Index over the entry limit | `quota-exceeded` | Remove old entries. |
 | Provider unreachable | `network` | Retry later. |
-| `top-k`, `remove-entries` or `drop-index` names an index id that does not exist (never created, already dropped or owned by another plugin) | `not-found` | Create the index again and re-embed. |
+| `top-k` or `remove-entries` names an index id that does not exist (never created, already dropped or owned by another plugin) | `not-found` | Create the index again and re-embed. `drop-index` returns no error, so an unknown id is ignored. |
 | `top-k` query vector has the wrong dimension | `invalid-argument` | Fix the call. |
 | `remove-entries` lists an id that is not in the index | Ignored, the other ids are removed | Nothing. |
 | `drop-index` on an index twice | Nothing happens; the call returns no error | Treat as done. |

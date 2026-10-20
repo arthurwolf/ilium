@@ -6,6 +6,6 @@ interface journal {
   record journal-entry { at: epoch-ms, pane: option<node-id>, source: string, kind: string, payload-json: string }
   /// payload-json is at most 4 KiB. The oldest entries are trimmed at limits.journal_entries.
   log-event: func(pane: option<node-id>, kind: string, payload-json: string) -> result<_, plugin-error>;
-  /// Own entries, newest last. limit is at most 1,000; a larger limit is clamped to 1,000.
+  /// Own entries, newest last; with the journal.read grant, host and other plugins' entries too. limit is at most 1,000; a larger limit is clamped to 1,000.
   read: func(pane: option<node-id>, since: epoch-ms, limit: u32) -> list<journal-entry>;
 }

@@ -310,7 +310,7 @@ A lazy plugin that is not active receives no topic events. Use `startup` for a p
 | `link_detectors` | `id`, `regex`, `command` | Terminal primitive |
 | `editor_line_actions` | `id`, `title`, `regex`, `command` | Editor primitive |
 | `sounds` | `id`, `file` | Files under `sounds/`. The id `chirping` is reserved |
-| `cli` | `name`, `summary`, `arguments_schema`, `output`, plus `aliases` | One object, or a list of at most 8 objects, one per subcommand. Names are unique inside the plugin. `aliases` lists further names. `output` is `jsonl`, `text` or `mixed` |
+| `cli` | `name`, `summary`, `arguments_schema`, `output`, plus `aliases` | One object, or a list of at most 16 objects, one per subcommand. Names are unique inside the plugin. `aliases` lists further names. `output` is `jsonl`, `text` or `mixed` |
 | `http_routes` | `method`, `path` | Loopback routes |
 | `services` | `provides` | Service names offered |
 | `topics` | `publishes`, `subscribes` | Publish only under the plugin's own id prefix |

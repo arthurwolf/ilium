@@ -16,7 +16,7 @@ The `gpu` import lets a scene run a small fixed set of image kernels on the grap
 
 ### What you need
 
-- The grant `gpu.kernels`, in the `capabilities.scene` list of a scene plugin. The interface is imported by the scene world (`ilium:anim/base`) and by the client world (`ilium:client/base`).
+- The grant `gpu.kernels`, in the `capabilities.scene` list of a scene plugin. The interface is imported by the scene world (`ilium:anim/base`) only.
 - A host build with the feature `gpu-kernels` enabled. A package that asks for the grant installs on such a build only.
 - Nothing else: the call needs no filesystem or network access.
 

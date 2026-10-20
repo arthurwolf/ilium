@@ -102,7 +102,7 @@ A `cell` holds the grapheme cluster at that position in `text`, the resolved for
 
 ### History text and search
 
-`history-text` returns the scrollback and the visible screen as one string, newest text kept when the pane holds more than `max-bytes`. The limit is 4 MiB per call: a larger `max-bytes` is clamped to 4 MiB and the call does not fail. For `search-history`, a `max-matches` of 0 is `invalid-argument`, and a value over 10,000 is clamped to 10,000 without a failure. Lines are joined with a newline and trailing blanks are removed. `search-history` runs a regular expression of the Rust `regex` dialect over the same text and returns at most `max-matches` positions, each as row, column and length in cells, counted from the oldest retained row. Both are high risk because scrollback can hold secrets the user typed or pasted long ago. The host removes the regions that a program marked as a hidden password prompt.
+`history-text` returns the scrollback and the visible screen as one string, newest text kept when the pane holds more than `max-bytes`. The limit is 4 MiB per call: a larger `max-bytes` is clamped to 4 MiB and the call does not fail. For `search-history`, a `max-matches` of 0 is `invalid-argument`, and a value over 10,000 is refused with `invalid-argument`. Lines are joined with a newline and trailing blanks are removed. `search-history` runs a regular expression of the Rust `regex` dialect over the same text and returns at most `max-matches` positions, each as row, column and length in cells, counted from the oldest retained row. Both are high risk because scrollback can hold secrets the user typed or pasted long ago. The host removes the regions that a program marked as a hidden password prompt.
 
 ### Events
 
@@ -212,7 +212,7 @@ for (const match of found ?? []) { /* match.row, match.column, match.length */ }
 | `freeze-snapshot` | `pane-not-ready` | the pane has no process yet |
 | `freeze-snapshot` | `not-found` | no such pane |
 | `freeze-snapshot` | `quota-exceeded` | more than 4 live snapshots held by this plugin across all panes |
-| `search-history` | `invalid-argument` | the regex does not compile in the `regex` dialect, or is over 1 KiB, or `max-matches` is 0 |
+| `search-history` | `invalid-argument` | the regex does not compile in the `regex` dialect, or is over 512 bytes, or `max-matches` is 0 |
 | `history-text`, `search-history` | completion `timed-out` | the host gave up after its deadline |
 | any call | `not-permitted` | the grant is missing or revoked |
 

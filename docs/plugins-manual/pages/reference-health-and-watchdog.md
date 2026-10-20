@@ -49,16 +49,16 @@ Every export call and every instance start runs under a deadline. The host enfor
 - Before an export call the host sets the epoch deadline to `ceil(D / 10) + 1` ticks after the call starts, where `D` is the deadline in milliseconds. When the epoch passes the deadline, the running Wasm code traps at its next safe point.
 - Fuel metering is not used. Epoch interruption costs less, and the CPU budget is measured by thread time instead (see [Resource accounting](/pages/reference-resource-accounting/)).
 
-Accuracy. An epoch tick is not a precise timer. A call that spins is interrupted no earlier than `D` and no later than `D + 20` ms of wall time on a host that is not overloaded.
+Accuracy. An epoch tick is not a precise timer. A hard-deadline call that spins is interrupted no earlier than `D` and no later than `D + 20` ms of wall time on a host that is not overloaded. Soft deadlines do not trap at `D`; they follow the call classes in [Host scheduling](/pages/reference-host-scheduling/).
 
-| Side | Tick | A deadline of `D` traps between |
+| Side | Tick | A hard deadline of `D` traps between |
 |---|---|---|
 | Server | 10 ms | `D` and `D` plus 20 ms |
 | Client and scene | 10 ms | `D` and `D` plus 20 ms |
 
 For example, `render_deadline_ms` of 10 ms on the client traps a slow render between 10 ms and 30 ms after it began. A plugin must not depend on a deadline being exact. A call that ends before `D` never traps.
 
-- [LIF-125] The host MUST interrupt a call that runs longer than its deadline `D` at a time `t` with `D <= t <= D + 20 ms` of wall time measured from the start of the call, on a host that is not overloaded. Test: a plugin that loops forever; assert the trap time is in [D, D + 20] ms, and that a call that returns at D - 1 ms never traps.
+- [LIF-125] The host MUST interrupt a hard-deadline call that runs longer than its deadline `D` at a time `t` with `D <= t <= D + 20 ms` of wall time measured from the start of the call, on a host that is not overloaded. Test: a plugin that loops forever; assert the trap time is in [D, D + 20] ms, and that a call that returns at D - 1 ms never traps.
 - [LIF-126] The host MUST NOT interrupt a call before its deadline. Test: a call that takes 0.9 times `D` completes.
 - [LIF-127] The host MUST NOT use fuel to enforce deadlines. Test: build the engine configuration and assert that fuel is off.
 - [LIF-128] The tick MUST be 10 ms in every process and the instance deadline MUST be `ceil(D / 10) + 1` ticks after the call starts. Test: read the engine configuration.
@@ -90,7 +90,7 @@ Third-party plugins run in a helper process. Each T2 or T3 plugin side runs in i
 | Idle helper crash (no export running) | no counted failure for anyone |
 
 - [LIF-132] A hung helper MUST be killed after 3 missed heartbeats or 500 ms past a deadline, whichever is first. Test: a helper that stops answering.
-- [LIF-133] After a helper dies, the host MUST count one failure for the plugin that was running and none for the others, and MUST restart the others at once in a new helper. Test: crash a helper hosting three plugins and read the three windows.
+- [LIF-133] After a helper dies, the host MUST count one failure for the plugin side that was running and MUST restart that side at once in a new helper. Test: crash a helper and read the failure window of its plugin side.
 - [LIF-134] The host MUST restart a helper after a crash at most 5 times in 10 minutes. After that, the T2 and T3 plugins of the session MUST move to the instance state `stopped-by-failure` on the server side with the reason `helper.unstable`. Test: kill the helper six times.
 
 ### Metrics

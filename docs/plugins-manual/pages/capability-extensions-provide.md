@@ -13,7 +13,7 @@ A plugin may own only points whose name starts with its own plugin id. The grant
 ### What you need
 
 - **One grant for each point.** The grant goes in `capabilities.server` or `capabilities.client`, on the side that calls `list` or `run-hook`.
-- **A declaration.** The point is listed in `contributes.extension_points` with its id, kind and schemas. A grant without a declaration, or a declaration without a grant, is refused at install with `manifest.grant-missing-extension`.
+- **A declaration.** The point is listed in `contributes.extension_points` with its id, kind and schemas. A grant that names a point without a declaration is refused at install with `manifest.extension-point-invalid`. A declaration without a grant is refused with `manifest.grant-missing-extension`.
 - **A language SDK.** Rust: crate `ilium-plugin-sdk`, module `ilium_plugin_sdk::host::extensions`. TypeScript: `@ilium/plugin-sdk/host/extensions`.
 - **Nothing on the contributors.** The owner does not need to know who the contributors are. The kernel orders them.
 
@@ -27,7 +27,7 @@ The argument is the global point name: the plugin id, a slash, and the point id.
 | `extensions.provide:com.example.notes` | refused, `manifest.grant-argument-missing` | the point id is required |
 | `extensions.provide:com.example.notes/*` | refused, `manifest.grant-wildcard` | wildcards are refused |
 | `extensions.provide:com.example.other/before-export` | refused, `manifest.extension-point-invalid` | the prefix is not this plugin's id |
-| `extensions.provide:com.example.notes/missing` | refused, `manifest.grant-missing-extension` | no declared point has that id |
+| `extensions.provide:com.example.notes/missing` | refused, `manifest.extension-point-invalid` | no declared point has that id |
 | `extensions.provide:com.example.notes/before-export@0.1.0` | refused, `manifest.grant-unknown` | a version is never part of a grant |
 
 ### What it allows

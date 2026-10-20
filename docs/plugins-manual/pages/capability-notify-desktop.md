@@ -61,7 +61,7 @@ The grant unlocks one intent and one related host function from the sound module
 | Name | Kind | Type and meaning |
 |---|---|---|
 | `notify` | intent | Submits a notice. Payload is `notify-spec`. Rust: `Intent::Notify(NotifySpec)`. |
-| `notify-spec.title` | field | `string`, 1 to 256 characters. The first line of the notice. |
+| `notify-spec.title` | field | `string`, 1 to 80 characters. The first line of the notice. |
 | `notify-spec.body` | field | `option<string>`, 0 to 2,048 characters when present. The text below the title; none shows a title-only notice. Rust: `Option<String>`. TypeScript: `string \| undefined`. |
 | `notify-spec.urgency` | field | `enum urgency`: `low`, `normal` or `high`. Rust: `Urgency::Low` and so on. TypeScript: `'low'`, `'normal'`, `'high'`. |
 | `notify-spec.sound` | field | `option<string>`, a sound id, or none. Rust: `Option<String>`. TypeScript: `string \| undefined`. |
@@ -205,7 +205,7 @@ The `correlation` value is a `bigint` in TypeScript. It names the submission, so
 |---|---|---|
 | Grant missing, or declined by the user | `refused(not-permitted)`; the rest of the batch is `refused(cancelled)` | Keep the in-app status line. Do not retry. |
 | Sound id not in the catalogue | `refused(not-found)`; no notice is shown | Call `sound.catalog()` first, or omit the sound. |
-| `title` empty or over 256 characters | `refused(invalid-argument)` | Fix the text. |
+| `title` empty or over 80 characters | `refused(invalid-argument)` | Fix the text. |
 | `body` over 2,048 characters | `refused(invalid-argument)` | Shorten the text. |
 | `dedup-key` with a disallowed character or over 128 characters | `refused(invalid-argument)` for the lowest-index offender; every other submission completes as `refused(cancelled)` ([ABI-009]) | Fix the key. |
 | Same key within 10 minutes | `duplicate(original)`; no second notice | Nothing. The first notice stands. |

@@ -44,7 +44,7 @@ The table uses these side letters: `S` is the server side, `C` the client side a
 | `fs.read:package` | S C A | The read functions of `fs` (`read`, `read-all`, `list-dir`, `metadata`) | Read only, on the package's `assets/` directory. |
 | `fs.read:data`, `fs.write:data` | S C A | The read functions and the write functions (`write`, `remove`, `rename`, `create_dir`) | The plugin's private data directory. |
 | `fs.read:cache`, `fs.write:cache` | S C A | The same functions as `data` | The plugin's evictable cache directory. |
-| `fs.watch:data`, `fs.watch:cache` | S C A | The `watch` function of `fs` | Change events for the plugin's own data and cache directories. |
+| `fs.watch:data`, `fs.watch:cache` | S C | The `watch` function of `fs` | Change events for the plugin's own data and cache directories. |
 | `messages` (own side) | S C | Intent `message`, event `message` | Messages to and from the other side of the same plugin. |
 | `ui.invalidate` (own views) | C | `invalidate(view-target)` | Asks the host to render again a view the plugin declares. |
 
@@ -77,7 +77,7 @@ Storage, settings and codec signatures, in WIT form:
 enum bucket { global, project, session, shared }
 get: func(bucket: bucket, key: string) -> option<list<u8>>;
 put: func(bucket: bucket, key: string, value: list<u8>) -> result<_, plugin-error>;
-remove: func(bucket: bucket, key: string);
+remove: func(bucket: bucket, key: string) -> result<_, plugin-error>;
 keys: func(bucket: bucket, prefix: string) -> list<string>;
 write-batch: func(bucket: bucket, entries: list<entry>) -> result<_, plugin-error>;
 lease: func(key: string, ttl-millis: u32) -> bool;

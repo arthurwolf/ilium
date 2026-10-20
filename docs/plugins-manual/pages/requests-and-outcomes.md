@@ -13,7 +13,7 @@ Submissions follow the same pattern. Every submission that a handler returns com
 ## You will need
 
 - [Events and intents](/pages/events-and-intents/) for the event batch and for the submissions that a handler returns.
-- The grant for the call. `http.fetch` needs `http:<host-pattern>`, for example `http:api.example.com`. `fs.read-all` needs `fs.read:<path>`. Without the grant the call returns `not-permitted` at once.
+- The grant for the call. `http.fetch` needs `http:<host-pattern>`, for example `http:api.example.com`. `fs.read-all` needs `fs.read:<scope>` for a scope that contains the path. Without the grant the call returns `not-permitted` at once.
 - The grant for the intent of a submission. The `notify` intent needs `notify.desktop`. Without it the submission completes as `refused(not-permitted)`.
 - The Rust SDK (`ilium-plugin-sdk`) or the TypeScript SDK (`@ilium/plugin-sdk`).
 
@@ -358,7 +358,7 @@ export const { lifecycle, handler } = definePlugin({
 | More than 5 redirects | `failed(network)` | Yes |
 | Response body too large to hold | `failed(quota-exceeded)` | No |
 | Grant withdrawn during the call | `failed(revoked)`; the plugin is re-activated | No |
-| Plugin stopped, restarted or disabled | Pending requests are cancelled; a restarted instance does not receive their completions | Start the work again |
+| Plugin stopped, restarted or disabled | Pending requests are cancelled on disable or shutdown. After a trap, completions of submissions reach the new instance, and completions of `call(id)` requests are discarded | Start the work again |
 | Take after the 30-second hold, second take, or unknown id | `none`; wrapper returns `not-found` | Start the call again |
 | Refused submission retried with the same key | Valid; the refusal did not reserve the key | Yes |
 | Accepted submission retried with the same key | `duplicate`, no effect | Use a new key |

@@ -176,7 +176,7 @@ A field or parameter whose name ends in `-json` carries UTF-8 JSON text. The hos
 
 - **Grammar.** RFC 8259. A document that is not valid JSON is `invalid-argument`. A byte order mark, comments, trailing commas and `NaN` or `Infinity` are not allowed.
 - **Depth.** At most 64 levels of nesting. A deeper document is `invalid-argument`.
-- **Size.** The limit of the field applies. The default is 65,536 bytes for a service payload, a command argument or a topic payload, and 256 KiB for settings (all values of one plugin together). A larger document is `invalid-argument`, or `quota-exceeded` where the field's page says so.
+- **Size.** The limit of the field applies. The default is 65,536 bytes for a command argument or a topic payload, 1 MiB for a service call or reply, and 256 KiB for settings (all values of one plugin together). A larger document is `invalid-argument`, or `quota-exceeded` where the field's page says so.
 - **Numbers.** A JSON number is read as a 64-bit float. An integer beyond 2^53 loses exactness, so a value that may exceed 2^53 MUST be sent as a string. Ids (`node-id`, `request-id`, `buffer-id`) are `u64` and are written as JSON strings in every `*-json` field. A `bigint` in TypeScript is written as a string by the SDK.
 - **Keys.** Duplicate keys in one object are `invalid-argument`. Key order is not significant.
 - **Strings.** The text is UTF-8. An unpaired surrogate escape such as `\ud800` is `invalid-argument`.
@@ -219,7 +219,7 @@ A **failure** is a trap (deadline, memory, illegal instruction, invalid UTF-8, m
 |---|---|
 | First | 1 s |
 | Second | 5 s |
-| Third | Not restarted. The plugin is disabled on that side until the user turns it on again. |
+| Third | Not restarted. The plugin is disabled on that side until the user turns it on again, except an essential core plugin, which restarts after 5 s (LIF-042). |
 
 A restart that follows a 10-minute quiet period starts the count again at the first failure. A job failure never counts. `host-capacity` refusals never count. The `deactivation-reason` `crash-restart` is reserved and never delivered, because a crashed instance cannot be called [ABI-028].
 
@@ -231,7 +231,7 @@ The host links imports **per instance**, from the grants of the manifest. An int
 
 - A component that imports a function of a capability its manifest never requested traps when it first calls the function, with `host.capability-not-requested`. It counts as a failure.
 - A function whose grant the user declined returns `not-permitted`. The plugin keeps running.
-- A grant withdrawn during a call makes later calls that need it return `err(revoked)`. Pending requests follow the rule in section 6 [ABI-043]. The plugin is re-activated with the reduced grants.
+- A grant withdrawn during a call returns `err(revoked)` to that call; later calls that need it return `err(not-permitted)` with reason `revoked`. Pending requests follow the rule in section 6 [ABI-043]. The plugin is re-activated with the reduced grants.
 - A component whose `exports` differ from the required exports plus the manifest list is refused at install with `manifest.exports-mismatch` [ABI-023].
 
 ## 14. Determinism in tests

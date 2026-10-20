@@ -73,7 +73,7 @@ Payloads use the WIT types of the API. Names in the Rust and TypeScript SDKs fol
 | `input-submitted` | `node`, `text`, `source` (user, plugin, scheduled, voice), `epoch: u64` | `agent.read-prompts` | never dropped |
 | `output-matched` | `node`, `filter-id`, `line`, `row` | `terminal.output-filter` | drop oldest, counted |
 | `link-activated` | `node`, `detector-id`, `text` | own `link_detectors` | never dropped |
-| `pointer` | `node`, `row`, `column`, `kind` (down, up, move, drag, wheel-up, wheel-down, wheel-left, wheel-right), `button: option` | `terminal.pointer`, while claimed | coalesced (move and drag) |
+| `pointer` | `node`, `row`, `column`, `kind` (down, up, move, drag, wheel-up, wheel-down, wheel-left, wheel-right), `button`, `sub-x`, `sub-y`, `modifiers` | `terminal.pointer`, while claimed | coalesced (move and drag) |
 | `editor-opened`, `editor-closed` | `buffer-ref` | `editor.read` | never dropped |
 | `editor-changed` | `buffer`, `revision`, `first-line`, `last-line` | `editor.read` | coalesced by buffer, debounced 100 ms |
 | `editor-saved` | `buffer`, `path` | `editor.read` | never dropped |
@@ -262,7 +262,7 @@ A batch is refused as a whole in two cases: a malformed submission (wrong shape,
 | `invoke-command` | `command`, `arguments-json` | `commands.invoke` | `refused(conflict)` for a disabled command; `failed(timed-out)` after 30 s |
 | `message` | `to`, `channel`, `payload` | `messages.peer` | `refused(not-found)`; `refused(invalid-argument)` above 1 MiB |
 | `editor-apply-edits` | `buffer`, `base-revision`, `edits` | `editor.edit` | `refused(conflict)` on a stale revision |
-| `editor-open` | `path`, `line`, `placement` (new pane, split, replace) | `editor.edit` | `ok-node`; `failed(io)` |
+| `editor-open` | `path`, `line`, `placement` (new pane, split, replace) | `editor.edit`, `fs.read` | `ok-node`; `failed(io)` |
 
 The intent `message` replaces the removed `messages` host import. Sending is the intent, and receiving is the `message` event.
 

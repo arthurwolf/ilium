@@ -23,7 +23,7 @@ This is a high-risk capability (H). A plugin that can run programs can do nearly
 | Job code | A job instance may call `process.run` with the same grants as its plugin side. |
 | Rust | `ilium_plugin_sdk::host::process`, with `process::run`, `ProcessSpec` and `ProcessExit`. |
 | TypeScript | `@ilium/plugin-sdk/host/process`, with `run`, `ProcessSpec` and `ProcessExit`. |
-| Packages | T1 bundled plugins ask for the grant once, at first activation. T2 and T3 packages run the helper in a sandbox, and they are refused on Windows and macOS until a native sandbox exists. |
+| Packages | T1 bundled plugins ask for the grant at first activation, and again at later starts after each **Not now**, at most three prompts in total. T2 and T3 packages run the helper in a sandbox, and they are refused on Windows and macOS until a native sandbox exists. |
 
 The manifest lists each grant under the side that uses it:
 
@@ -45,7 +45,7 @@ The argument is either a program name, resolved through `PATH`, or an absolute p
 | `process.run:/usr/bin/git` | accepted | an absolute path; the grant names one file |
 | `process.run:sh` | accepted for T1 only, H | a shell can start any program, so the grant is very wide |
 | `process.run` | `manifest.grant-argument-missing` | a program is required |
-| `process.run:*` | `manifest.grant-wildcard` | wildcards are refused for this grant |
+| `process.run:*` | `manifest.grant-program` | wildcards are refused for this grant |
 | `process.run:git status` | `manifest.grant-program` | arguments belong in `arguments`; a program name has no spaces |
 
 A T2 or T3 package that asks for `process.run:sh` fails with `manifest.grant-tier`.

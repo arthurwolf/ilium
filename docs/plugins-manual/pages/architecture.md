@@ -78,7 +78,7 @@ The host sorts plugins into four tiers. The tier decides where a plugin runs and
 | T2 | A publisher key that the user trusts | The sandbox helper process | Review dialog; grants are remembered |
 | T3 | Nobody (unsigned local package) | The sandbox helper process | Only with `--allow-unsigned` or `ilium plugin dev`; shown with a `dev` badge |
 
-A T1 plugin that asks for a high-risk (H) capability runs without it until the user allows it in a single prompt at first activation.
+A T1 plugin that asks for a high-risk (H) capability runs without it until the user allows it. High-risk grants are asked at first activation, and again at later server starts after each **Not now**, at most three prompts in total.
 
 On Windows and macOS, T2 and T3 packages are refused until a native sandbox exists there. The refusal text is:
 

@@ -211,8 +211,8 @@ Call `hint_for` again when `keymap-changed` arrives, and redraw the hint. `chord
 The core plugin that owns a tab writes it with `kernel-settings.write`. The write goes through the same validation and auto-save path as a row edit in Settings, and the file on disk is the same `config.toml` key, so the kernel and the plugin never disagree. The owner of each of the 25 tabs is listed in [who owns each tab](/pages/reference-config-and-data-migration/#who-owns-each-tab).
 
 ```wit
-// Excerpt of ilium:host/fs in reference-wit
-// kernel-settings (S C, grant settings.write-kernel:<tab-id>, T1 only)
+// Excerpt of ilium:host/kernel-settings in reference-wit
+// write (grant settings.write-kernel:<tab-id>, T1 only)
 write: func(tab: string, key: string, value: string) -> result<_, plugin-error>;   // value is JSON; one key per call
 ```
 

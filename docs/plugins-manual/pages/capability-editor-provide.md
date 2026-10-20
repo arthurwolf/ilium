@@ -236,7 +236,7 @@ export const { lifecycle, handler, editorProvider } = definePlugin({
 
 | Code | Where it comes from | Meaning |
 |---|---|---|
-| `not-permitted` | Any call | The grant was declined or revoked during the call. |
+| `not-permitted` | Any call | The grant was declined, or revoked before the call started. A call in flight at revocation returns `revoked`. |
 | `revoked` | Any call | The authorization epoch changed. The plugin is re-activated. |
 | `not-found` | Buffer calls | The buffer id is unknown. |
 | `invalid-argument` | `read-lines`, `apply-edits` | A line past the end of the buffer, more than 10,000 lines, or overlapping edits. |

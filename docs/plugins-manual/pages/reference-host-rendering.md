@@ -37,10 +37,10 @@ A plugin replaces the whole contribution list of one kind per call, or sends per
 |---|---|
 | Decorations per plugin | `decorations` limit: 4,096 by default, 16,384 for T1 at most |
 | Decorations per node per plugin | 8 |
-| Status segments per plugin | 16 |
+| Status segments per plugin | 2 |
 | Virtual rows per parent | 1,024 |
 | Entry size | 16 KiB |
-| Contribution update rate | 10 updates per second per kind, burst 30 |
+| Contribution update rate | Status segments and frame slots: 10 per second per slot. Info, choices, row notes, row and item states, choice items, rich info and meters: 10 per second per plugin, shared together, burst 30 |
 
 Over a cap the update is refused with `contribution.too-many` (count) or `contribution.too-large` (entry size) or `rate-limited`. The earlier contributions stay.
 
@@ -90,7 +90,7 @@ A tree over a cap, or any other invalid tree, is a plugin bug. There is one outc
 | `ui.too-deep` | A node at depth 33 or deeper (root = 1) |
 | `ui.too-large` | More than 4,096 nodes (`ui_tree_nodes`) or more than 1 MiB (`ui_tree_kib`) |
 | `ui.widget-not-allowed` | A menu, list-editor or other input widget outside the allowed subset in a settings page |
-| `ui.render-timeout` | `views.render` exceeded its deadline |
+A `views.render` that exceeds its deadline is a hard deadline breach. The instance traps with `trap.deadline`, and the logged detail reason is `ui.render-timeout`.
 
 <figure>
 <svg viewBox="0 0 440 190" role="img" aria-label="View rendering: trigger, coalesce, render call, ui-tree, diff, paint">

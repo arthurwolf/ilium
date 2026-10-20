@@ -35,7 +35,7 @@ argument = 1*char                         everything after the first colon
 ```
 
 The grants `commands.invoke`, `fs.read`, `fs.write`, `fs.watch`, `http`, `process.run`,
-`services.use`, `services.provide`, `messages.peer`, `topics.subscribe` and `http-api.route` require
+`services.use`, `services.provide`, `messages.peer`, `topics.subscribe`, `http-api.route`, `settings.read-kernel`, `settings.contribute`, `settings.write-kernel`, `extensions.provide`, `extensions.contribute`, `agent-config`, `agent-config.propose`, `agent-sessions`, `panes.create-command`, `path` require
 an argument. Every other grant takes no argument, and `tree.read:x` is a manifest error. A service
 name has no version. The grant `services.use:ilium:inference/provider` has the name
 `services.use` and the argument `ilium:inference/provider`.
@@ -88,7 +88,7 @@ Sides: S is the server world, C is the client world and A is the animation (scen
 | `agent.transcript` | none | S C | **H** | [page](/pages/capability-agent-transcript/) | [primitives-agent](/pages/primitives-agent/) |
 | `editor.read` | none | C | normal | [page](/pages/capability-editor-read/) | [primitives-editor](/pages/primitives-editor/) |
 | `editor.edit` | none | C | normal | [page](/pages/capability-editor-edit/) | [primitives-editor](/pages/primitives-editor/) |
-| `editor.provide` | none | C | **H** | [page](/pages/capability-editor-provide/) | [primitives-editor](/pages/primitives-editor/) |
+| `editor.provide` | none (reserved, refused in 0.1.0) | C | **H** | [page](/pages/capability-editor-provide/) | [primitives-editor](/pages/primitives-editor/) |
 | `ui.panels` | none | C | normal | [page](/pages/capability-ui-panels/) | [api-ui](/pages/api-ui/), [widgets-index](/pages/widgets-index/) |
 | `ui.chrome` | none | S C | normal | [page](/pages/capability-ui-chrome/) | [api-ui](/pages/api-ui/), [api-intents](/pages/api-intents/) |
 | `keys.intercept` | none | C | **H** | [page](/pages/capability-keys-intercept/) | [api-keys](/pages/api-keys/) |
@@ -96,11 +96,11 @@ Sides: S is the server world, C is the client world and A is the animation (scen
 | `commands.invoke:<pattern>` | pattern; exact id, plugin-id/*, bare * (high) | S C | H if * | [page](/pages/capability-commands-invoke/) | [api-commands](/pages/api-commands/) |
 | `fs.read:<scope>` | scope, including agent-sessions:gemini, agent-config:gemini, agent-config:antigravity | S C A | normal; high for agent-sessions and agent-config | [page](/pages/capability-fs-read/) | [api-fs](/pages/api-fs/) |
 | `fs.write:<scope>` | scope; `agent-sessions` and `agent-config` are refused | S C A | H outside data and cache | [page](/pages/capability-fs-write/) | [api-fs](/pages/api-fs/) |
-| `fs.watch:<scope>` | scope; `agent-config` is refused | S C | normal | [page](/pages/capability-fs-watch/) | [api-fs](/pages/api-fs/) |
+| `fs.watch:<scope>` | scope; `agent-config` is refused | S C | normal; high for `agent-sessions` | [page](/pages/capability-fs-watch/) | [api-fs](/pages/api-fs/) |
 | `agent-config.propose:<agent>` | one agent; needs `fs.read:agent-config:<agent>` | S C | **H** | [page](/pages/capability-agent-config-propose/) | [api-fs](/pages/api-fs/) |
 | `fs.pick` | none | C | normal | [page](/pages/capability-fs-pick/) | [api-fs](/pages/api-fs/) |
 | `jobs.run` | none | S C A | normal | [page](/pages/capability-jobs-run/) | [api-jobs](/pages/api-jobs/) |
-| `http:<host-pattern>` | host pattern, or http:setting:<key> | S C A | normal | [page](/pages/capability-http/) | [api-http](/pages/api-http/) |
+| `http:<host-pattern>` | host pattern, or http:setting:<key> | S C A | normal; H for loopback and private-address literals | [page](/pages/capability-http/) | [api-http](/pages/api-http/) |
 | `process.run:<program>` | program name or absolute path | S C | **H** | [page](/pages/capability-process-run/) | [api-process-control](/pages/api-process-control/) |
 | `process.long-lived` | none; needs process.run:<program> | S C | **H** | [page](/pages/capability-process-long-lived/) | [api-process-control](/pages/api-process-control/) |
 | `inference` | none | S C | normal | [page](/pages/capability-inference/) | [api-inference](/pages/api-inference/) |
@@ -168,10 +168,10 @@ The always-granted set needs no entry in the manifest. See [Always granted](#alw
 - `commands.invoke:<pattern>` takes an exact global id, `<plugin-id>/*` for all commands of one
   plugin, or a bare `*` for all commands (H). A `*` never crosses `/`.
 - `http:<host>` takes an exact host, `*.<domain>` for any subdomain at any depth (not the bare
-  domain), and an optional port. `localhost`, `127.0.0.1` and `[::1]` allow plain HTTP. A bare `*`
-  is refused.
+  domain), and an optional port. The loopback hosts `localhost`, `127.0.0.1` and `[::1]` allow plain
+  HTTP only with a port, as `http:localhost:<port>`. A bare `*` is refused.
 - `topics.subscribe:<pattern>` takes an exact topic, `<prefix>/*` or a bare `*`. Exact and prefix patterns are normal risk; only the bare `*` is high risk (H).
-- `process.run:*` is refused with `manifest.grant-wildcard`. `process.run:sh` is valid and H.
+- `process.run:*` is refused with `manifest.grant-program`. `process.run:sh` is valid and H.
 - `messages.peer:<plugin-id>` takes one exact plugin id and no wildcard.
 - `extensions.provide` and `extensions.contribute` take one exact `<plugin-id>/<point>` and no wildcard. There is no `extensions.contribute-any`. List each point.
 
@@ -425,10 +425,10 @@ one line per error.
 | `manifest.grant-unknown` | The name is not a capability of this plugin API version. |
 | `manifest.grant-argument` | The grant has an argument, but the name takes none. |
 | `manifest.grant-argument-missing` | The name needs an argument and none was given. |
-| `manifest.grant-wildcard` | A wildcard was used where the name does not accept one, such as `process.run:*`. |
+| `manifest.grant-wildcard` | A wildcard was used where the name does not accept one. |
 | `manifest.grant-scope` | The file scope is unknown or does not accept that access. |
 | `manifest.grant-side` | The capability is not available on the side that requests it. |
-| `manifest.grant-tier` | The capability is for bundled plugins only. |
+| `manifest.grant-tier` | The capability is not available to this plugin's tier. |
 | `manifest.grant-dependency` | The capability also needs another capability. |
 | `manifest.export-grant` | An export needs a capability that the manifest does not request. |
 

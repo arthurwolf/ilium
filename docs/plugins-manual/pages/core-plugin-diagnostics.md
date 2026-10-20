@@ -622,7 +622,7 @@ Other plugins change what `ilium.core.diagnostics` does through the points below
 
 | Point | Kind | What it does | Payload | Risk |
 |---|---|---|---|---|
-| `log-sinks` | hook (observe) | Receive log records, for example to forward them. | level, plugin, target, message, time (records at warn and above only) | standard |
+| `log-sinks` | hook (observe) | Receive log records, for example to forward them. | level, plugin, target, message, time (records at warn and above only) | high |
 | `report-sections` | collect | Add a section to the diagnostics report. | entry: id, title, service (returns text, at most 64 KiB) | standard |
 
 **Services** (grant `services.use:<name>`):

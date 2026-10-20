@@ -482,7 +482,7 @@ Other plugins change what `ilium.core.voice` does through the points below. The 
 
 | Point | Kind | What it does | Payload | Risk |
 |---|---|---|---|---|
-| `transcript` | hook (transform) | Correct the transcript before commands are matched. | text, confidence, language; reply: text | standard |
+| `transcript` | hook (transform) | Correct the transcript before commands are matched. | text, confidence, language; reply: text | high |
 | `voice-intents` | collect | Add a spoken phrase that runs a command. | entry: id, phrases, command, confirm | standard |
 
 **Services** (grant `services.use:<name>`):

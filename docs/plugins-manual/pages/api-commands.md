@@ -78,7 +78,7 @@ A key that refers to no pane is false when no pane is in scope. An expression wi
 | Function | Grant | Sides | Rust | TypeScript | Result |
 |---|---|---|---|---|---|
 | `set-state` | none (own commands) | client | `commands::set_state(command, enabled, checked)` | `setState(command, enabled, checked)` | `Result<(), PluginError>`; throws in TypeScript |
-| `invoke` | `commands.invoke:<pattern>` | server, client | `commands::invoke(command, arguments_json).await` | `await invoke(command, argumentsJson)` | `Result<(), PluginError>`; `Promise<void>` |
+| `invoke` | `commands.invoke:<pattern>` | server, client | `commands::invoke(command, arguments_json).await` | `await invoke(command, argumentsJson)` | `Result<RequestId, PluginError>`; `Promise<bigint>` |
 | `invoke` request form | as `invoke` | server, client | `commands::invoke_request(...)` | `invokeRequest(...)` | `Result<RequestId, PluginError>`; `bigint` |
 
 `set-state` takes `enabled: bool` and `checked: Option<bool>` (`undefined` in TypeScript). A `None` leaves the checked mark as it is. A `Some(true)` or `Some(false)` sets the check mark that the palette and menus draw for the command.

@@ -50,7 +50,7 @@ A literal absolute path inside `path:` (for example `fs.write:path:/srv/logs/**`
 | `cache` | the plugin's private cache folder, which the host may evict | always granted | none |
 | `package`, `agent-sessions:*` | read only | not writable | refused at install |
 
-The placeholders for `path:<template>` are `{home}`, `{config}`, `{data}`, `{cache}`, `{project}` and `{worktrees}`. A template ends with a name, which covers that file or folder, or with `/**`, which covers the whole subtree. The wildcard `*` is refused in every position, so a manifest that needs both agent configuration folders lists both grants.
+The placeholders for `path:<template>` are `{home}`, `{config}`, `{data}`, `{cache}`, `{project}` and `{worktrees}`. A template ends with a name, which covers that file or folder, or with `/**`, which covers the whole subtree. A bare `*` is refused in every position; a trailing `/**` is the only wildcard form, so a manifest that needs both agent configuration folders lists both grants.
 
 ### Functions
 

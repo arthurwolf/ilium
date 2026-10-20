@@ -281,6 +281,7 @@ The user runs the plugin's own CLI command. The plugin writes one JSON line per 
 |---|---|---|
 | `list-live` | none | Returns an empty list when only this session runs. |
 | `send` | `not-permitted` | The grant is missing here, the target lacks the plugin or the grant, the target plugin is disabled, or the command is not declared by the plugin. |
+| `send` | `invalid-argument` | `arguments-json` is not valid JSON. |
 | `send` | `not-found` | No live session has the given name. |
 | completion | `timed-out` | The target did not answer in time. |
 | completion | `network` | The target session's socket closed before the reply. |

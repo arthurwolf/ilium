@@ -14,7 +14,7 @@ Contract version: `ilium:plugin@0.1.0`. The state names are in [Plugin lifecycle
 
 Y means the state is kept. N means it is lost. R means the plugin gets it back only if it asks (restore bytes). S means kept only for the open session.
 
-| State | Plugin restart (after a failure) | Disable then enable | Update | Server restart | Client reconnect | Session delete | Uninstall (no flags) | Uninstall with `--delete-data` |
+| State | Plugin restart (after a failure) | Disable then enable | Update | Server restart | Client reconnect | Session delete | Uninstall (no flags) | Uninstall with `--purge` |
 |---|---|---|---|---|---|---|---|---|
 | Linear memory and variables | N | N | N | N | N | N | N | N |
 | Restore bytes (server) | N | Y | Y | N | n/a | N | N | N |
@@ -23,10 +23,10 @@ Y means the state is kept. N means it is lost. R means the plugin gets it back o
 | Project storage bucket | Y | Y | Y (migrated) | Y | Y | Y | Y | N |
 | Session storage bucket | Y | Y | Y | S | Y | N | N | N |
 | `data` and `cache` folders | Y | Y | Y | Y | Y | Y | data Y, cache N | N |
-| Settings values | Y | Y | Y | Y | Y | Y | Y | Y |
+| Settings values | Y | Y | Y | Y | Y | Y | Y | N |
 | Grants | Y | Y | Y (new grants asked) | Y | Y | Y | N | N |
-| Node metadata | Y | Y | Y | Y | Y | N | Y | Y |
-| Durable timers and journal | Y | N | Y | Y | Y | N | N | N |
+| Node metadata | Y | Y | Y | Y | Y | N | Y | N |
+| Durable timers and journal | Y | Y | Y | Y | Y | N | N | N |
 | Pending requests | N | N | N | N | N | N | N | N |
 | Contributions (views, commands) | stale then replaced | withdrawn | replaced | rebuilt at start | replica resent | gone | withdrawn | withdrawn |
 | Failure window | Y | N (reset by enable) | N (reset) | S | Y | N | N | N |
@@ -53,9 +53,9 @@ Y means the state is kept. N means it is lost. R means the plugin gets it back o
 
 ### Node metadata
 
-A plugin stores metadata on tree nodes. After an activation, the plugin reads it through the tree API. The activation call does not carry it. Metadata is saved in the session snapshot with the node and lives as long as the node. A plugin that is uninstalled leaves its metadata in place; `--delete-data` does not remove it either, because it belongs to the node. Reinstalling the plugin finds it again.
+A plugin stores metadata on tree nodes. After an activation, the plugin reads it through the tree API. The activation call does not carry it. Metadata is saved in the session snapshot with the node and lives as long as the node. A plugin that is uninstalled without `--purge` leaves its metadata in place, and reinstalling the plugin finds it again. With `--purge` the host removes it from the live session and adds a tombstone [LIF-084].
 
-- [LIF-155] Node metadata MUST survive a plugin restart, an update, a server restart and an uninstall, and MUST be removed with its node. Test: set metadata, run each event, and read it.
+- [LIF-155] Node metadata MUST survive a plugin restart, an update, a server restart and an uninstall without `--purge`, and MUST be removed with its node. Test: set metadata, run each event, and read it.
 
 ### Order against the snapshot
 
@@ -77,7 +77,7 @@ stop:  deactivate(shutdown) -> drain_session_work
 
 | Situation | What happens |
 |---|---|
-| The snapshot file is corrupt at start | The kernel loads the last good backup and logs it. Plugin state in storage is not affected. |
+| The snapshot file is corrupt at start | The file is moved aside as `<name>.broken-<timestamp>`, the session starts with one empty shell pane, and the kernel logs it. Plugin state in storage is not affected. |
 | Two servers share a global bucket | See the lock rule in [Data migration](/pages/guide-data-migration/). |
 | A plugin writes during `deactivate` | The write is kept if it finishes within the deactivate deadline. |
 

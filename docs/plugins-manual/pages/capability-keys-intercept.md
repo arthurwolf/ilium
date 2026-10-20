@@ -50,7 +50,7 @@ The grant opens two functions and four event fields from the `keys` interface:
 | `GrabSpec.until_release` | field | `bool` | `boolean` | The grab ends when the matched key is released. |
 | `key-pressed` | event | `Event::KeyPressed(KeyEvent)` | `{ tag: 'key-pressed', val }` | A grabbed chord was pressed. Never dropped. |
 | `key-released` | event | `Event::KeyReleased(KeyEvent)` | `{ tag: 'key-released', val }` | A grabbed key was released. Arrives only with release reports. |
-| `KeyEvent.grab` | field | `Option<u64>` | `bigint \| undefined` | The grab that matched the key. |
+| `KeyEvent.grab` | field | `u64` | `bigint` | The grab that matched the key. |
 | `KeyEvent.pane` | field | `Option<NodeId>` | `bigint \| undefined` | The focused pane when the key arrived. |
 | `KeyEvent.chord` | field | `String` | `string` | The matched chord, as written in the grab. |
 | `KeyEvent.repeat` | field | `bool` | `boolean` | `true` for an auto-repeat while the key is held. |

@@ -4,4 +4,6 @@ interface kernel-settings {
   use ilium:types/errors@0.1.0.{plugin-error};
   /// A JSON object of that tab's values. Secrets are "<redacted>".
   read: func(tab: string) -> result<string, plugin-error>;
+  /// Writes one key of that tab. `value` is JSON. Needs settings.write-kernel:<tab-id>.
+  write: func(tab: string, key: string, value: string) -> result<_, plugin-error>;
 }

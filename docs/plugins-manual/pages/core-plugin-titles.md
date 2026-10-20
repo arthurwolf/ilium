@@ -81,7 +81,7 @@ This block is a fragment. It lists the contributions. The whole manifest is in [
 }
 ```
 
-`tree.restructure` is a high-risk grant: the user confirms it at install. Everything else is normal risk.
+`tree.restructure`, `agent.read-prompts`, and the `settings.write-kernel` grants for the Titles and Triggers tabs are high-risk grants: the user confirms them at install. Everything else is normal risk.
 
 ### Complete manifest
 
@@ -107,12 +107,12 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "tree.read",
       "tree.write",
       "tree.decorate",
-      "tree.restructure"
-    ],
-    "client": [
-      "ui.panels",
+      "tree.restructure",
       "settings.write-kernel:titles",
       "settings.write-kernel:triggers"
+    ],
+    "client": [
+      "ui.panels"
     ]
   },
   "activation": [

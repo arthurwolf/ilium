@@ -48,7 +48,7 @@ The current `cli` contract allows one subcommand per plugin and one output form 
 
 | Change | Before | After |
 |---|---|---|
-| Several commands per plugin | `cli` is one object | `cli` is an object or a list of at most 8 objects. Names MUST be unique inside the plugin. |
+| Several commands per plugin | `cli` is one object | `cli` is an object or a list of at most 16 objects. Names MUST be unique inside the plugin. |
 | Aliases | none | Each entry MAY set `aliases`, a list of names that follow the same name rule. `ilium wait` is an alias of `progress wait`. |
 | Mixed output | `jsonl` or `text` | `output` MAY also be `"mixed"`. Both `write-line` and `write-text` are allowed. `new-pane` uses it. |
 | Reserved names | none | The names the kernel owns (`plugin`, `session`, `kill-session`, `help`, `version`) are reserved. A manifest that uses one fails with `manifest.cli-name-reserved`. A name owned by a bundled core plugin (`recap`, `progress`, `wait`, `chat`, `panes`, `broadcast`, `new-pane`, `voice`) may be declared only by that plugin; any other plugin fails with `manifest.cli-name-taken`. |

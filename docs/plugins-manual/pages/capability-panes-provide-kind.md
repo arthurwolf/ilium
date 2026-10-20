@@ -101,7 +101,7 @@ plugin id is `example.tree-explorer`.
 | Value | Where the state lives | After a restart |
 |---|---|---|
 | `metadata` | Node metadata: the plugin's own byte map on the node, at most 64 KiB per node by default (`node_metadata_kib`: T1 ceiling 256 KiB, T2/T3 ceiling 64 KiB). | The node is restored with its metadata, and the view can read it. |
-| `storage` | The plugin's storage buckets. Keys under `pane/<node-id>/` are deleted when the pane is closed. | The node is restored empty, as with `none`. The plugin reads its own storage. |
+| `storage` | The plugin's storage buckets. The kernel does not delete keys under `pane/<node-id>/` when the pane is closed; the plugin removes them itself. | The node is restored empty, as with `none`. The plugin reads its own storage. |
 | `none` | Nothing is kept. | The node is recreated empty, and the view starts without state. |
 
 ### Grant syntax and tiers

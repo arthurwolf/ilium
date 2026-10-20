@@ -294,7 +294,7 @@ When the grant is declined, `agent-action` completes with `refused(not-permitted
 
 ## Risk and tier rules
 
-- The grant is high risk (H). A T1 bundled plugin does not receive it automatically. The user is asked once, at first activation, with one checkbox for each H grant.
+- The grant is high risk (H). A T1 bundled plugin does not receive it automatically. The user is asked at first activation, with one checkbox for each H grant. After **Not now**, the question comes back at the next server start, up to three times.
 - A T2 or T3 plugin lists the grant in the install review, unchecked by default. The line carries the H mark.
 - The plugin can trigger only actions that a signature declares. Sending arbitrary text needs [terminal.write](/pages/capability-terminal-write/), which is a separate high-risk grant.
 

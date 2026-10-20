@@ -46,9 +46,9 @@ Every grant name is in the [capability index](/pages/capabilities/). A slow call
 | 13 | `jobs` | yes | yes | yes | `jobs.run` | `start` (`take-output`) |
 | 14 | `process` | yes | yes | no | `process.run:<program>`, `process.long-lived` | `run` (`take-exit`) |
 | 15 | `inference` | yes | yes | no | `inference`, `inference.provide` | `complete` (`take-completion`), `models` (`take-models`) |
-| 16 | `vector` | yes | yes | no | `vector` | `embed` (`take-vectors`) |
+| 16 | `vector` | yes | yes | no | `inference.embed` | `embed` (`take-vectors`) |
 | 17 | `sounds` | yes | yes | no | none | none |
-| 18 | `topics` | yes | yes | no | `topics.publish`, `topics.subscribe` | none |
+| 18 | `topics` | yes | yes | no | `topics.subscribe` | none |
 | 19 | `commands` | yes | yes | no | none own, `commands.invoke:<pattern>` | `invoke` |
 | 20 | `services` | yes | yes | no | `services.use:<name>`, `services.provide:<name>` | `call` (`take-reply`) |
 | 21 | `ui-host` | no | yes | no | none for own views | none |
@@ -63,7 +63,7 @@ Every grant name is in the [capability index](/pages/capabilities/). A slow call
 | 30 | `help` | no | yes | no | `help.read` | none |
 | 31 | `plugins` | no | yes | no | `plugins.manage` | none |
 | 32 | `catalogs` | yes | yes | no | none | `query-async` (`take-page`) |
-| 33 | `geocode` | yes | yes | yes | `geocode` | `search`, `reverse` (`take-places`) |
+| 33 | `geocode` | no | yes | yes | `location.geocode` | `search`, `reverse` (`take-places`) |
 | 34 | `sessions` | yes | no | no | `sessions.cross` | `send` (`take-reply`) |
 | 35 | `kernel-settings` | yes | yes | no | `settings.read-kernel:<tab-id>` | none |
 | 36 | `keymap` | no | yes | no | `keymap.read` | none |

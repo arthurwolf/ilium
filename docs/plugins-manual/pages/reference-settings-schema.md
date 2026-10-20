@@ -86,7 +86,7 @@ Inline sections are drawn in declaration order. `collapsed: true` starts a secti
 | `order` | integer | no | 500 | 0 to 1000. Orders sections at one anchor |
 | `title` | string | no | none | At most 40 characters |
 | `scope` | string | no | `"client"` | `"client"` or `"server"`. Applies to every key in the section |
-| `rows` | list | yes | none | 1 to 24 rows. A group counts its children |
+| `rows` | list | yes | none | 1 to 24 rows. A group counts as one row plus its children |
 | `collapsed` | boolean | no | `false` | Plugin tabs only |
 
 ### Built-in tab ids
@@ -406,7 +406,7 @@ Keys: `id` (required), `segments` (initial, at most 8 of `{ label, value, tone }
 | Key | Rows | Rule |
 |---|---|---|
 | `key` | value rows | `[a-z][a-z0-9_]{0,63}`, unique in the plugin |
-| `id` | button, info, group | Same grammar and namespace as `key` |
+| `id` | button, info, group | `[a-z][a-z0-9-]{0,31}`, unique in the plugin |
 | `title` | all but unlabelled info | 1 to 48 characters. The label column |
 | `description` | all | At most 200 characters |
 | `default` | value rows | Required. Must pass the compiled schema |

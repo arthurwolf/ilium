@@ -220,7 +220,7 @@ The host writes its own lines into the same log. A refused call names the capabi
 
 ### Errors
 
-`log` returns no result and cannot fail, so it has no error code. A plugin that logs too fast loses lines, never the call. A message over 16 KiB is cut and marked. The `wasi:cli` writes obey the same rules.
+`log` returns no result and cannot fail, so it has no error code. A plugin that logs too fast loses lines, never the call. A message over 16 KiB is cut and marked. The `wasi:cli` writes are cut at 16 KiB too, but they are marked `[cut]` (see [Host runtime](/pages/reference-host-runtime/)).
 
 Two host-side conditions write to the log instead of returning an error to the plugin:
 

@@ -80,7 +80,7 @@ In TypeScript, a `result` that fails throws a `PluginError`. The functions that 
 
 ### Output filters
 
-A filter is a regular expression in the dialect of the Rust `regex` crate. It has no look-around and no back-references. Each completed line is matched after escape sequences are removed. A pattern is at most 1 KiB, and the compiled program at most 1 MiB. `rate_per_second` is 1 to 100.
+A filter is a regular expression in the dialect of the Rust `regex` crate. It has no look-around and no back-references. Each completed line is matched after escape sequences are removed. A pattern is at most 512 bytes, and the compiled program at most 1 MiB. `rate_per_second` is 1 to 100.
 
 Manifest entries need `panes`: `all` (every terminal pane), `agents` (panes whose agent is identified) or `terminals` (terminal panes with no identified agent). A missing or unknown value makes the package fail to install. A runtime filter applies to the one pane named in the call, and an existing id on that pane is replaced. The host removes runtime filters when the plugin deactivates or the pane closes, without an event.
 
@@ -90,7 +90,7 @@ The `row` of a match is the zero-based number of the line since the pane started
 
 A highlight layer has a name of 1 to 32 characters from `[a-z0-9-]`. Layer names are scoped to the calling plugin, so two plugins can both use `search`. Regions of one layer are painted in list order. Where two regions overlap, the later region sets the foreground and background, and the modifiers of all overlapping regions are combined. A region outside the screen is clipped without an error. A region whose first position is after its last is `invalid-argument`.
 
-A `label` is not drawn in the pane. It appears as a tooltip after the pointer rests on the region for 500 ms. A label over 200 characters is cut to 199 plus an ellipsis, with no error, like any tooltip. Highlights survive `release_pointer`. They are withdrawn when the plugin is disabled, its grant is revoked, or the pane is removed.
+A `label` is not drawn in the pane. It appears as a tooltip after the pointer rests on the region for 500 ms. A label is at most 128 characters; a longer label is refused with `invalid-argument`. Highlights survive `release_pointer`. They are withdrawn when the plugin is disabled, its grant is revoked, or the pane is removed.
 
 A claim gives the plugin the pointer of one pane. While it holds the claim, the host stops forwarding mouse events to the program in the pane, and its own selection and wheel scrollback are off there. Wheel events reach the plugin as `pointer` events with kind `wheel-up`, `wheel-down`, `wheel-left` or `wheel-right`. Typing is not affected, because typing needs `terminal.write`, not a claim. The plugin that already holds a claim can call `claim_pointer` again and gets `ok`. `release_pointer` without a claim does nothing.
 
@@ -294,7 +294,7 @@ Store `epoch_at_idle` when the agent becomes idle, and return the submission fro
 | any function with a pane, except `read_screen`, `selection` and `prompt_epoch` | `not-permitted` | The grant was declined or revoked. |
 | any function with a pane | `not-found` | The pane does not exist or has closed. |
 | `read_screen`, `selection`, `prompt_epoch` | none | Unknown pane, declined or revoked grant. A refusal line goes to the plugin log. |
-| `add_output_filter` | `invalid-argument` | Empty id, invalid regex, pattern over 1 KiB, compiled program over 1 MiB, rate 0 or above 100. |
+| `add_output_filter` | `invalid-argument` | Empty id, invalid regex, pattern over 512 bytes, compiled program over 1 MiB, rate 0 or above 100. |
 | `add_output_filter` | `quota-exceeded` | The plugin has its limit of filters, or the session has 512 runtime filters. |
 | `claim_pointer` | `conflict` | Another plugin holds the claim. |
 | `claim_pointer`, `set_highlights` | `unsupported` | The node exists but is not a terminal pane. |

@@ -12,7 +12,7 @@ Input to a terminal pane is an intent, `send-input`, not a function. The intent 
 
 | Grant | Risk | Unlocks |
 |---|---|---|
-| `terminal.write` | normal | `send-input` with `text` and `stages`, `prompt_epoch` |
+| `terminal.write` | high | `send-input` with `text` and `stages`, `prompt_epoch` |
 | `terminal.raw-input` | high | `raw` bytes, `mouse` events, `interactive: true` on `terminal-view` |
 | `terminal.input-lock` | high | `lock-input`, `unlock-input`, `lock-user-input` |
 

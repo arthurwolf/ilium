@@ -198,7 +198,7 @@ Removing a plugin has effects on other plugins. They stop being fed by it but th
 | What depended on the removed plugin | What happens |
 |---|---|
 | A plugin that fills an extension point owned by the removed plugin | It becomes dormant and shows "Waiting for <owner>". It wakes up when the owner is installed again |
-| A plugin that requires a service of the removed plugin | It shows "Waiting for <owner>" and its calls to the service return `unavailable` |
+| A plugin that requires a service of the removed plugin | It shows "Waiting for <owner>" and its calls to the service return `not-permitted` with reason `unavailable` |
 | An extension that the removed plugin filled in another plugin | It disappears from that point at once |
 | A core plugin that the removed plugin replaced | The core plugin turns back on. Its own data was never touched |
 | A pane of a kind the removed plugin provided | The pane stays in the tree and shows a placeholder: "Plugin <name> is not installed" with the kind and the plugin id |

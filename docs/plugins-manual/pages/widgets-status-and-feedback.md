@@ -286,8 +286,8 @@ render() {
 | Case | Result |
 |---|---|
 | A badge label longer than 12 cells | Truncated with `…`. |
-| A notice with more than 3 actions | The render traps the instance with `ui.invalid-tree` (render has no result; see [UI model](/pages/ui-model/)). |
-| A spinner with fewer than 2 or more than 16 custom frames | The render traps the instance with `ui.invalid-tree`. |
+| A notice with more than 3 actions | The render traps the instance with `trap.invalid-ui-tree` (detail reason `ui.invalid-tree`; render has no result; see [UI model](/pages/ui-model/)). |
+| A spinner with fewer than 2 or more than 16 custom frames | The render traps the instance with `trap.invalid-ui-tree` (detail reason `ui.invalid-tree`). |
 | A spinner `interval-ms` outside 80 to 1,000 | Clamped. |
 | Reduced motion | A spinner shows `⠿`. A tone keeps its colour. |
 | An icon slot that does not exist | The slot name is drawn as text. |

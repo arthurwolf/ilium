@@ -7,7 +7,7 @@ interface storage {
   /// key is 1 to 256 bytes. A value is at most 1 MiB. A bucket holds 16 MiB by default (limits.storage_bucket_mib).
   get: func(bucket: bucket, key: string) -> option<list<u8>>;
   put: func(bucket: bucket, key: string, value: list<u8>) -> result<_, plugin-error>;
-  remove: func(bucket: bucket, key: string);
+  remove: func(bucket: bucket, key: string) -> result<_, plugin-error>;
   keys: func(bucket: bucket, prefix: string) -> list<string>;
   /// none removes the key.
   record entry { key: string, value: option<list<u8>> }

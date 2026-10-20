@@ -236,7 +236,7 @@ Runs the install checks without installing. The rules are in [Check and lint rul
 
 The second form takes no directory or archive. It writes the manifest JSON Schema that ships with the host to standard output and exits with 0; it never reads the network ([reference-manifest-schema](/pages/reference-manifest-schema/), PKG-563).
 
-- **[DEV-070]** `check` MUST run offline and MUST report the same rule codes (`manifest.*`, `package.*`, `signature.*`) that the install path reports, plus the component rules (`component.*`).
+- **[DEV-070]** `check` MUST run offline and MUST report the same rule codes (`manifest.*`) that the install path reports, plus the component and signature rules (`component.*`, `signature.*`).
 - **[DEV-071]** `check` on a project directory MUST validate the source manifest and the built components in `dist/`. A missing `dist/` for a declared side MUST be reported as `component.missing`, not as an error of the command.
 - **[DEV-072]** `check` on a `.iliumpkg` file MUST validate the archive as the install path does, without checking trust.
 - **[DEV-073]** `check` MUST exit with 3 when any finding has severity `error`.

@@ -3,7 +3,7 @@ package ilium:host@0.1.0;
 interface jobs {
   use ilium:types/ids@0.1.0.{request-id};
   use ilium:types/errors@0.1.0.{plugin-error};
-  /// kind must be in contributes.jobs. input at most 4 MiB. Fires job-progress, then request-completed.
+  /// kind must be in contributes.jobs. input at most job_io_mib (default 16 MiB, ceiling 64 MiB). Fires job-progress, then request-completed.
   start: func(kind: string, input: list<u8>) -> result<request-id, plugin-error>;
   cancel: func(job: request-id);
   take-output: func(job: request-id) -> option<list<u8>>;

@@ -445,7 +445,7 @@ Other plugins change what `ilium.core.terminal` does through the points below. T
 | Point | Kind | What it does | Payload | Risk |
 |---|---|---|---|---|
 | `before-send-input` | hook (veto) | Refuse or end input that the user or a plugin sends to a terminal pane. | pane, length, source (user, paste, plugin:<id>), preview (first 120 characters) | high |
-| `open-link` | hook (first) | Decide how a clicked link opens. The first handler that answers wins. | pane, link_kind, text; reply: action (open-external, run-command, ignore) and optional command | standard |
+| `open-link` | hook (first) | Decide how a clicked link opens. The first handler that answers wins. | pane, link_kind, text; reply: action (open-external, run-command, ignore) and optional command | high |
 | `link-actions` | collect | Offer actions for a detected link kind in the terminal right-click menu. | entry: id, link_kind, title, command | standard |
 
 **Services** (grant `services.use:<name>`):

@@ -152,7 +152,7 @@ The snapshot is released in every path. A plugin that forgets `drop-snapshot` ke
 | Grant missing or declined | `not-permitted` | Fall back to [terminal.read-screen](/pages/capability-terminal-read-screen/) if that is granted. |
 | Unknown pane or pane closed | `none`, or `not-found` for `freeze-snapshot` | Drop the cached pane id. |
 | `count` above 1,000 | `none`; the host logs `quota-exceeded` and returns no rows | Read in chunks and compare the `revision` of each chunk. |
-| Pane has no screen yet | `pane-not-ready` | Wait for the next `screen-changed` event. |
+| Pane has no screen yet | `none` for `read-cells` (the host logs `pane-not-ready`); `pane-not-ready` for `freeze-snapshot` | Wait for the next `screen-changed` event. |
 | `freeze-snapshot` over the memory quota | `quota-exceeded` | Drop older snapshots, then retry. |
 | Snapshot id already dropped | `none` | Do not reuse a dropped snapshot. |
 | Grant revoked later | `revoked`, then `not-permitted` | Stop reading; the plugin is re-activated with the reduced set. |

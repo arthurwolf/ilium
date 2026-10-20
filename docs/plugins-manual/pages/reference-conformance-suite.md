@@ -98,7 +98,7 @@ Case ids have the form `CONF-<AREA>-<nn>`. The tables list the id, the claim, th
 | Id | Claim | Stimulus | Expected | Subject |
 |---|---|---|---|---|
 | CONF-STORE-01 | Storage survives a restart | Put, trap, restart, get | Value present | H |
-| CONF-STORE-02 | A value over 1 MiB is refused | Put a value of 1,048,576 bytes (passes), then 1,048,577 bytes | 1,048,576: `ok`; 1,048,577: `Err(quota-exceeded)` | S H |
+| CONF-STORE-02 | A value over 1 MiB is refused | Put a value of 1,048,576 bytes (passes), then 1,048,577 bytes | 1,048,576: `ok`; 1,048,577: `Err(invalid-argument)` | S H |
 | CONF-STORE-03 | A bucket over 16 MiB is refused | Fill a bucket to exactly 16 MiB (passes), then add 1 byte | 16 MiB: `ok`; one more byte: `Err(quota-exceeded)` | S H |
 | CONF-MEM-01 | Memory over `memory_mib` traps | The probe plugin stays just under the default 32 MiB (passes), then allocates 40 MiB | under: no trap; 40 MiB: `trap.memory` (see the trap code table of [Errors and limits](/pages/reference-errors-and-limits/#trap-codes)) | H |
 | CONF-MEM-02 | The ceiling is 128 MiB for T2 and T3 | Request 256 in the manifest | Install succeeds; the value is clamped to 128 MiB and the clamp is logged | H |
