@@ -7,6 +7,26 @@ pub struct Coverage {
 }
 
 impl Coverage {
+    /// Keeps only chunks whose square neighbourhood of `chunk_margin` chunks is
+    /// also covered. A view centred inside this set keeps every chunk its
+    /// source footprint reaches (vertical overhang and biome ring) saved.
+    pub fn eroded(&self, chunk_margin: i32) -> Coverage {
+        let chunks = self
+            .chunks
+            .iter()
+            .copied()
+            .filter(|&[x, z]| {
+                (-chunk_margin..=chunk_margin).all(|dz| {
+                    (-chunk_margin..=chunk_margin).all(|dx| {
+                        self.chunks
+                            .contains(&[x.saturating_add(dx), z.saturating_add(dz)])
+                    })
+                })
+            })
+            .collect();
+        Coverage { chunks }
+    }
+
     /// All chunks intersecting the conservative square viewport must be saved.
     pub fn contains_view(&self, center: [f64; 2], radius: f64) -> bool {
         if !radius.is_finite() || !(0.0..=4096.0).contains(&radius) {

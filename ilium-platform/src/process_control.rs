@@ -375,12 +375,12 @@ pub fn processes_using_directory_bounded(
         }
         let cwd_matches = match std::fs::read_link(entry.path().join("cwd")) {
             Ok(cwd) => cwd.starts_with(&root),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            Err(error) if process_vanished(&error) => {
                 // A vanished proc entry is normal; an existing live process
                 // with an unreadable cwd is not proof that the path is free.
                 match read_linux_process(process_id) {
                     Ok(process) if matches!(process.state, 'Z' | 'X') => {}
-                    Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                    Err(error) if process_vanished(&error) => {}
                     Ok(_) => {
                         return Err(io::Error::other(format!(
                             "cwd of live process {process_id} is unavailable"
@@ -456,6 +456,14 @@ pub fn processes_using_directory_bounded(
     ))
 }
 
+/// A process can exit between `/proc` listing and its per-process reads. procfs then
+/// answers `ENOENT` for some files and `ESRCH` ("No such process") for others, and both
+/// mean the same thing: the process is gone and cannot hold the path.
+#[cfg(target_os = "linux")]
+fn process_vanished(error: &io::Error) -> bool {
+    error.kind() == io::ErrorKind::NotFound || error.raw_os_error() == Some(libc::ESRCH)
+}
+
 /// Open descriptors matter even when a process changed its cwd out of the worktree.
 /// This remains an observation, not an exclusion of future external opens or mmap-only use.
 #[cfg(target_os = "linux")]
@@ -466,10 +474,10 @@ fn linux_process_has_worktree_fd(
 ) -> io::Result<bool> {
     let entries = match std::fs::read_dir(format!("/proc/{process_id}/fd")) {
         Ok(entries) => entries,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+        Err(error) if process_vanished(&error) => {
             return match read_linux_process(process_id) {
                 Ok(process) if matches!(process.state, 'Z' | 'X') => Ok(false),
-                Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+                Err(error) if process_vanished(&error) => Ok(false),
                 Ok(_) => Err(io::Error::other(format!(
                     "fds of live process {process_id} are unavailable"
                 ))),
@@ -1525,5 +1533,19 @@ mod tests {
         child.wait().unwrap();
         wait_for_group_exit(process_id, Duration::from_secs(3)).unwrap();
         assert!(!process_group_exists(process_id).unwrap());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn exited_process_errors_count_as_vanished_including_esrch() {
+        assert!(super::process_vanished(&io::Error::from_raw_os_error(
+            libc::ESRCH
+        )));
+        assert!(super::process_vanished(&io::Error::from(
+            io::ErrorKind::NotFound
+        )));
+        assert!(!super::process_vanished(&io::Error::from(
+            io::ErrorKind::PermissionDenied
+        )));
     }
 }

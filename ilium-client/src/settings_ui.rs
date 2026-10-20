@@ -470,6 +470,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
             layout.content_area,
             title_style_lines(
                 app.inference_settings.title_style,
+                app.inference_settings.codex_official_thread_names,
                 layout.content_area.width,
                 state.selected_row,
             ),
@@ -1105,7 +1106,22 @@ pub fn settings_help_anchors(
             }
         }
         SettingsTab::Titles => {
-            push_help_anchor(&mut anchors, layout, "TITLE-01", 8, state.scroll, true)
+            push_help_anchor(
+                &mut anchors,
+                layout,
+                "TITLE-01",
+                TITLE_STYLE_CONTROL_LINE as u16,
+                state.scroll,
+                state.selected_row == 0,
+            );
+            push_help_anchor(
+                &mut anchors,
+                layout,
+                "TITLE-02",
+                CODEX_THREAD_NAME_CONTROL_LINE as u16,
+                state.scroll,
+                state.selected_row == 1,
+            );
         }
         SettingsTab::Triggers => {
             for i in 0..crate::trigger_settings::TriggerEvent::ALL.len() {
@@ -1690,6 +1706,7 @@ pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area
         .len() as u16,
         SettingsTab::Titles => title_style_lines(
             app.inference_settings.title_style,
+            app.inference_settings.codex_official_thread_names,
             content_area.width,
             selected_row,
         )
@@ -2840,6 +2857,7 @@ pub fn icons_preview_mode_hit(
 /// rather than abstract promises about what each mode might do.
 fn title_style_lines(
     active: ilium_inference::TitleStyle,
+    use_codex_thread_names: bool,
     width: u16,
     _selected_row: usize,
 ) -> Vec<Line<'static>> {
@@ -2918,8 +2936,35 @@ fn title_style_lines(
             "  Your fixed titles stay yours.",
             Style::new().add_modifier(Modifier::DIM),
         )),
+        Line::from(""),
+        column(
+            "For Codex, use the official thread name",
+            if use_codex_thread_names {
+                "☑ On"
+            } else {
+                "☐ Off"
+            },
+            Style::new().add_modifier(Modifier::BOLD),
+        ),
+        Line::from(Span::styled(
+            if is_narrow {
+                "  Codex panes skip the AI call."
+            } else {
+                "  Codex panes read the name Codex saved on disk instead of calling the AI."
+            },
+            Style::new().add_modifier(Modifier::DIM),
+        )),
+        Line::from(Span::styled(
+            "  Panes without a saved Codex name stay untitled for now.",
+            Style::new().add_modifier(Modifier::DIM),
+        )),
     ]
 }
+
+/// Line index of the Title style control inside [`title_style_lines`].
+const TITLE_STYLE_CONTROL_LINE: usize = 8;
+/// Line index of the Codex thread-name control inside [`title_style_lines`].
+const CODEX_THREAD_NAME_CONTROL_LINE: usize = 15;
 
 /// Visible settings depend on the selected provider. This keeps Kilo's
 /// no-key configuration honest and prevents irrelevant empty fields.
@@ -4888,8 +4933,13 @@ fn settings_control_row(
             )
         }
         SettingsTab::Titles if row == 0 => (
-            8,
+            TITLE_STYLE_CONTROL_LINE,
             "Title style".into(),
+            LABEL_COLUMN_WIDTH.saturating_sub(1),
+        ),
+        SettingsTab::Titles if row == 1 => (
+            CODEX_THREAD_NAME_CONTROL_LINE,
+            "For Codex, use the official thread name".into(),
             LABEL_COLUMN_WIDTH.saturating_sub(1),
         ),
         _ => {
@@ -5123,7 +5173,7 @@ pub(crate) fn settings_choice_control(
 pub(crate) fn settings_number_row_count(app: &App, tab: SettingsTab) -> usize {
     match tab {
         SettingsTab::Inference => inference_rows(&app.inference_settings).len(),
-        SettingsTab::Titles => 1,
+        SettingsTab::Titles => 2,
         SettingsTab::VoiceControl => crate::voice_settings::VoiceRow::ALL.len(),
         SettingsTab::Sound => SoundRow::ALL.len(),
         SettingsTab::ResetPlanning => 3,
@@ -7425,7 +7475,7 @@ mod tests {
 
     #[test]
     fn title_style_control_row_shows_shared_choice_and_examples() {
-        let lines = title_style_lines(ilium_inference::TitleStyle::Summarization, 120, 1);
+        let lines = title_style_lines(ilium_inference::TitleStyle::Summarization, false, 120, 1);
         let rendered = lines
             .iter()
             .map(ToString::to_string)
@@ -7446,7 +7496,7 @@ mod tests {
             ),
             Some(crate::value_settings_choice::SettingsChoice::TitleStyle)
         );
-        let narrow = title_style_lines(ilium_inference::TitleStyle::Labeling, 49, 0);
+        let narrow = title_style_lines(ilium_inference::TitleStyle::Labeling, true, 49, 0);
         for line in &narrow[4..13] {
             assert!(UnicodeWidthStr::width(line.to_string().as_str()) <= 49);
         }

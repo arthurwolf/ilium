@@ -10,6 +10,7 @@ pub mod bedrock;
 pub mod block_state;
 pub mod budget;
 pub mod compatibility;
+pub mod directory_snapshot;
 pub mod error;
 pub mod identity;
 pub mod importer;

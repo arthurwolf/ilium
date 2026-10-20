@@ -606,6 +606,11 @@ fn set_setting(app: &mut App, path: &str, value: Value) -> Result<(), String> {
         "inference.title_style" => {
             app.settings_select_title_style(parse_title_style(string(&value)?)?);
         }
+        "inference.codex_official_thread_names" => {
+            let mut settings = app.inference_settings.clone();
+            settings.codex_official_thread_names = boolean(&value)?;
+            app.apply_and_persist_inference_settings(settings);
+        }
         "inference.kilo_gateway.model" => {
             let model = string(&value)?.trim();
             if !app

@@ -10,7 +10,7 @@ use super::{
     native_fluid::{self},
     native_fluid_assembly,
     native_render_layer::{self, Layer, RenderLayers},
-    native_tint::{self, ClimatePolicy, NativeRequest, NativeTint},
+    native_tint::{self, ClimatePolicy, NativeRequest, NativeTint, NativeTintMemo},
     saved_binding::SavedBinding,
     tours::PreparedMap,
 };
@@ -607,6 +607,8 @@ pub fn prepare_native_shared(
         return Err(Error::Limit("required native model textures missing"));
     }
     let mut tint = None::<NativeTint>;
+    // One memo per tile: blend windows of neighbouring blocks overlap heavily.
+    let mut tint_memo = NativeTintMemo::default();
     let mut instances = BTreeMap::<[i32; 3], Arc<BoundModel>>::new();
     let mut bound_cache = BTreeMap::<(ModelStateKey, Vec<(u16, [u8; 3])>), Arc<BoundModel>>::new();
     for (&position, state) in &normalized {
@@ -675,7 +677,7 @@ pub fn prepare_native_shared(
                     }
                     tint.as_ref()
                         .ok_or(Error::Source)?
-                        .sample_native(
+                        .sample_native_rgb(
                             &binding.map,
                             NativeRequest {
                                 source: binding.map.source(),
@@ -685,9 +687,9 @@ pub fn prepare_native_shared(
                                 world_seed: Some(world_seed),
                                 blend_radius,
                             },
+                            &mut tint_memo,
                             cancel,
                         )?
-                        .rgb
                 }
             };
             tints.insert(index, color.map(|channel| f32::from(channel) / 255.0));
