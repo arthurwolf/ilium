@@ -277,7 +277,7 @@ Neither import draws anything. The user sees the plugin adapt, and a log line wh
 | `kernel-settings.read` | `not-found` | The tab id is unknown |
 | manifest | `manifest.grant-argument-missing` | `settings.read-kernel` without a tab id |
 | manifest | `manifest.grant-wildcard` | `settings.read-kernel:*` |
-| manifest | `manifest.grant-tier` | `settings.read-kernel:api` in a package that may not hold high-risk grants, or `settings.write-kernel:<tab>` in any package that is not first-party (T1) |
+| manifest | `manifest.grant-tier` | `settings.write-kernel:<tab>` in any package that is not first-party (T1). `settings.read-kernel:api` is high risk but is not refused at install: T2 and T3 see it unchecked in the review dialog |
 | manifest | `manifest.settings-owner` | A second plugin declares `settings.write-kernel:<tab>` for a tab that already has an owner |
 | `kernel-settings.write` | `not-permitted` | No `settings.write-kernel:<tab>` grant for that tab, or the user revoked it |
 | `kernel-settings.write` | `not-found` | The tab id or the key is unknown |

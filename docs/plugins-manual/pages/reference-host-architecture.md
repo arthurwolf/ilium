@@ -300,7 +300,7 @@ A user who cannot start a session because of a plugin has two switches. Both app
 
 | Switch | Effect |
 |---|---|
-| `ilium --safe-plugins` (or `ILIUM_SAFE_PLUGINS=1`) | Loads only the bundled T1 plugins with their default grants. All T2 and T3 packages stay installed but are not loaded. Every `replaces` entry is ignored, so the built-in core plugin runs. The footer shows `Safe plugin mode: third-party plugins are off.` |
+| `ilium --safe-plugins` (or `ILIUM_SAFE_PLUGINS=1`) | Loads only the bundled T1 plugins with their default grants. All T2 and T3 packages stay installed but are not loaded. Every `replaces` entry is ignored, so the built-in core plugin runs. The footer shows `Safe mode: third-party plugins are off.` |
 | `ilium --no-plugins` (or `ILIUM_NO_PLUGINS=1`) | The plugin host does not start. The session boots with the kernel only: terminal panes, the tree with kernel-drawn plain rows, the layout, the keymap defaults and the recovery page work. Features that live in core plugins are absent. |
 
 - **[HST-033]** `--safe-plugins` MUST load no T2 or T3 package and MUST ignore `replaces`, and `--no-plugins` MUST start no plugin host. Neither switch MUST change installed packages, grants or stored plugin data.

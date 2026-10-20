@@ -366,7 +366,7 @@ Counts per plugin are fixed caps. A manifest above a cap is refused with `manife
 | `pane_frame_slots` | `id`, `placement`, `applies_to` | `ui.chrome` | 4 | A place in pane frames filled with `set-frame-slot`. `placement` is `header-icon`, `header-text`, `footer-row` or `banner`. `applies_to` is `all`, `agents`, `terminals`, `pane:<kind>` or a list of signature ids |
 | `display_modes` | `id`, `title`, `icon`, `slot`, `hide_unmarked` | `tree.decorate` | 2 | A tree display mode next to Normal and Attention. The tree shows the decorations of `slot` first and, with `hide_unmarked: true`, hides panes without one. Changes arrive as `display-mode-changed` |
 | `catalogs` | `id`, `title`, `item_kind` | none | 8 | An option catalogue served by the `catalog-provider` export. `item_kind` is `text`, `glyph`, `swatch` or `pattern`. Global id `<plugin-id>/<id>`. Usable as a `choice` source by the plugin's own rows and widgets |
-| `client_requests` | `id`, `timeout_ms` | none | 16 | Request kinds the plugin's client side answers for its own server side. `timeout_ms` is 1 to 30,000, default 5,000 |
+| `client_requests` | `id`, `timeout_ms` | none | 16 | Request kinds the plugin's client side answers for its own server side. `timeout_ms` is 1 to 30,000 and has no default; the host reply deadline is 5,000 ms when none is passed |
 | `languages` | `id`, `title`, `extensions`, `file_names` | `editor.read` | 8 | Languages whose tokens the `token-provider` export supplies to the host editor and to `code-view`. `extensions` are written without the dot |
 
 ### Fields added to existing entries

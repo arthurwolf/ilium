@@ -41,7 +41,7 @@ interface terminal {
   /// terminal.history. Async, take-history. max-bytes at most 4 MiB, the newest text is kept.
   history-text: func(pane: node-id, max-bytes: u32) -> result<request-id, plugin-error>;
   take-history: func(request: request-id) -> option<string>;
-  /// Async, take-matches. max-matches at most 1,000.
+  /// Async, take-matches. max-matches at most 10,000.
   search-history: func(pane: node-id, regex: string, max-matches: u16) -> result<request-id, plugin-error>;
   take-matches: func(request: request-id) -> option<list<history-match>>;
   /// terminal.input-lock. millis at most 2,000. User keys are queued, not lost.

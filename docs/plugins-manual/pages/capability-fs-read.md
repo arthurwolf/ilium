@@ -39,7 +39,7 @@ The scope is the text after the colon. Valid grants:
 | `fs.read:picked` | `/picked/<n>` | Each path the user chose in a picker. Granted per pick. | normal |
 | `fs.read:minecraft-saves` | `/minecraft-saves` | The platform's Minecraft saves directory. | normal |
 | `fs.read:agent-config:claude` | `/agent-config/claude` | The Claude configuration directory. Also `codex`. | high |
-| `fs.read:agent-sessions:claude` | `/agent-sessions/claude` | Claude transcript directory. Also `codex` and `antigravity`. | high |
+| `fs.read:agent-sessions:claude` | `/agent-sessions/claude` | Claude transcript directory. Also `codex`, `gemini` and `antigravity`. | high |
 | `fs.read:path:<template>` | `/paths/<n>` | A path template, see below. | normal, high if literal |
 
 A path template starts with a placeholder or a literal absolute path, and ends with a name or with `/**`:
@@ -58,7 +58,7 @@ Invalid grants are refused at install with `manifest.grant-scope`:
 
 ## Risk and review
 
-- Most scopes are normal risk. The three `agent-sessions` scopes are high risk, because they hold the user's private conversations.
+- Most scopes are normal risk. The `agent-sessions` scopes and the `agent-config` scopes are high risk: transcripts hold the user's private conversations, and configuration folders hold agent settings and credentials.
 - A T1 bundled plugin receives normal scopes automatically, up to its manifest ceiling. High-risk scopes are asked for once, at first activation.
 - A T2 or T3 plugin needs an explicit grant in the review dialog for each scope. The grant is remembered until it is revoked.
 

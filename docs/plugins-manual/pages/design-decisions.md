@@ -231,7 +231,7 @@ On 2026-10-11 the user overrode the earlier rule that a plugin cannot attach to 
 | SE11 | The grant `settings.contribute:<kernel-tab-id>` allows sections in that tab and nothing else |
 | SE12, SE13 | Limits are enforced at load time. Ordering is anchor, then `order`, then plugin id, then declaration order |
 | SE14 | Values are never deleted by disable, failure, upgrade or uninstall. Only `--purge` or "Forget settings" deletes them |
-| SE15 | Toggles and choices save at once. Number steps and text save 600 ms after the last change, and text areas after 1 s |
+| SE15 | Toggles and choices save at once. Number steps and text save 600 ms after the last change; text areas save 600 ms after the last change while the text is at most 10,000 bytes, and 1 s above that |
 | SE16, SE17 | `settings-changed` carries `keys`, `origin` and `side`. The optional export `settings-validate` has a 100 ms deadline |
 | SE18 to SE20 | Id grammar, a kernel search filter over kernel and plugin rows, and a kernel-owned settings registry |
 

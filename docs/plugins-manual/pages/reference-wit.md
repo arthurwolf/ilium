@@ -1682,7 +1682,7 @@ interface audio {
   record audio-device { id: string, name: string, is-input: bool, is-default: bool }
   /// Needs any audio grant; with none held it returns an empty list (no error code).
   devices: func() -> list<audio-device>;
-  /// Delivers audio-frames. sample-rate 8,000 to 48,000. channels 1 or 2.
+  /// Delivers audio-frames. sample-rate 8,000 to 192,000. channels 1 or 2.
   open-capture: func(device: option<string>, sample-rate: u32, channels: u8) -> result<u64, plugin-error>;
   open-loopback: func(sample-rate: u32, channels: u8) -> result<u64, plugin-error>;
   close-capture: func(capture: u64);
@@ -1990,7 +1990,7 @@ interface terminal {
   /// terminal.history. Async, take-history. max-bytes at most 4 MiB, the newest text is kept.
   history-text: func(pane: node-id, max-bytes: u32) -> result<request-id, plugin-error>;
   take-history: func(request: request-id) -> option<string>;
-  /// Async, take-matches. max-matches at most 1,000.
+  /// Async, take-matches. max-matches at most 10,000.
   search-history: func(pane: node-id, regex: string, max-matches: u16) -> result<request-id, plugin-error>;
   take-matches: func(request: request-id) -> option<list<history-match>>;
   /// terminal.input-lock. millis at most 2,000. User keys are queued, not lost.

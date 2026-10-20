@@ -158,7 +158,7 @@ Without the grant the whole `send-input` is refused with `not-permitted`; a plug
 | Pane already locked | `conflict` | Wait for the unlock; one lock per pane at a time. |
 | Plugin stops while locked | lock released, queue delivered | Nothing. |
 | Pane closed while locked | lock dropped with the pane | Nothing. |
-| Session limit on locks (one lock per pane, so at most the number of open panes; no other cap) | `busy` | Retry later. |
+| Session limit on locks (one lock per pane, so at most the number of open panes; no other cap) | `conflict` | Retry later. |
 
 Check order for `send-input` is: capability, stage and size rules, `if-current` precondition, then the lock. A failed precondition refuses the intent before any lock is taken.
 

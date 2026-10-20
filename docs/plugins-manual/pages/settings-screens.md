@@ -256,7 +256,7 @@ Input widgets send a `ui-action` event, and the host applies a debounce before t
 |---|---|---|
 | `toggle` | `changed` with `flag` | At once |
 | `choice` | `changed` with `index` | At once |
-| `number` | `changed` with `number` | At once for Up, Down, plus and minus; 600 ms after typed digits |
+| `number` | `changed` with `number` | 600 ms after the last change, whether from Up, Down, plus, minus or typed digits |
 | `text-input` | `changed` with `text` | 600 ms after the last key; `submitted` on Enter when `submit-on-enter` is set |
 | `text-area` | `changed` with `text` | 600 ms while the text is at most 10,000 bytes, 1 s above that |
 

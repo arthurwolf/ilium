@@ -213,7 +213,7 @@ Two switches exist. They are defined in [Host architecture](/pages/reference-hos
 
 Neither switch is written to `installed.json` (see [LIF-004](/pages/reference-plugin-lifecycle-states/)). The state shown on the Plugins screen is `disabled-by-policy` with the reason `safe-mode` while the switch is on. The flags apply to the server that the launcher starts. A running server keeps its mode, so a user who needs safe mode runs `ilium kill-session <name>` first, then `ilium --safe-plugins`.
 
-When a safe switch is on, the footer shows `Safe plugin mode: third-party plugins are off.` or `Plugins are off. Press Ctrl+Alt+R for recovery.`
+When a safe switch is on, the footer shows `Safe mode: third-party plugins are off.` or `Plugins are off. Press Ctrl+Alt+R for recovery.`
 
 ### What the user keeps when a plugin is off
 
