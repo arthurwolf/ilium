@@ -4,8 +4,11 @@ interface services {
   use ilium:types/ids@0.1.0.{request-id};
   use ilium:types/errors@0.1.0.{plugin-error};
   /// Async, take-reply. A call to the plugin's own service is queued, see Runtime model.
+  // @unstable(feature = plugin-services)
   call: func(service: string, method: string, payload-json: string) -> result<request-id, plugin-error>;
+  // @unstable(feature = plugin-services)
   take-reply: func(request: request-id) -> option<string>;
   /// Provider side, for deferred replies. Errors: not-found for an unknown call id.
+  // @unstable(feature = plugin-services)
   reply: func(call: u64, outcome: result<string, plugin-error>) -> result<_, plugin-error>;
 }

@@ -434,7 +434,14 @@ fn pkg_570_help_and_sound_files_named_by_a_contribution_must_exist() {
 fn pkg_571_catalogue_rows_have_a_stage_number_or_letter_and_an_exit_code() {
     let rows = catalogue();
     assert!(rows.len() > 50, "catalogue rows: {}", rows.len());
-    for row in &rows {
+    // Log-only lines (stage and exit both `-`) are not errors and print no JSONL error line.
+    let log_only: Vec<&str> = rows
+        .iter()
+        .filter(|row| row.stage == "-")
+        .map(|row| row.code.as_str())
+        .collect();
+    assert_eq!(log_only, ["migration.skipped"]);
+    for row in rows.iter().filter(|row| row.stage != "-") {
         assert!(!row.stage.is_empty(), "{}", row.code);
         assert!(
             row.exit.chars().all(|c| c.is_ascii_digit()) && !row.exit.is_empty(),

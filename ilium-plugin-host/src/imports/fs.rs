@@ -3,8 +3,8 @@
 //! Written once by the skeleton lane from the generated `HostFs` trait; hand-owned afterwards.
 
 use ilium_plugin_api::generated::host::fs::{
-    DirEntry, FsMetadata, HostFs, PickSpec, RevisionToken, Revisioned, ScannedEntry, ScopeRoot,
-    TailChunk, WriteMode,
+    ConfigChange, DirEntry, FsMetadata, HostFs, PickSpec, ProposalResult, RevisionToken,
+    Revisioned, ScannedEntry, ScopeRoot, TailChunk, WriteMode,
 };
 use ilium_plugin_api::generated::types::errors::PluginError;
 use ilium_plugin_api::generated::types::ids::{LockId, RequestId, WatchId};
@@ -139,5 +139,18 @@ impl HostFs for FsImport {
 
     fn take_written(&mut self, _request: RequestId) -> Option<RevisionToken> {
         unimplemented!("host::imports::fs::take_written")
+    }
+
+    fn propose_agent_config(
+        &mut self,
+        _agent: String,
+        _title: String,
+        _changes: Vec<ConfigChange>,
+    ) -> Result<RequestId, PluginError> {
+        unimplemented!("host::imports::fs::propose_agent_config")
+    }
+
+    fn take_proposal(&mut self, _request: RequestId) -> Option<ProposalResult> {
+        unimplemented!("host::imports::fs::take_proposal")
     }
 }

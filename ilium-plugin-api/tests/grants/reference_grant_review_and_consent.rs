@@ -69,7 +69,7 @@ fn sec_124_other_grants_stay_allowed_in_t3() {
 fn doc_sec_124_page_states_the_step_and_the_code() {
     let page = manual_page("reference-grant-review-and-consent.md");
     assert!(page.contains(
-        "`sessions.cross` in a T3 package is refused at step 8 with `manifest.grant-tier`"
+        "`sessions.cross` in a T3 package is refused at SEC-100 step 8 (grants fit the tier; validation stage 9) with `manifest.grant-tier`"
     ));
 }
 

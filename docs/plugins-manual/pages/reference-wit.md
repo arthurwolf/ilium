@@ -1290,7 +1290,7 @@ interface codec {
 
 ### 5.11 fs
 
-S C. Grant: `fs.read:<scope>`, `fs.write:<scope>`, `fs.watch:<scope>`, `fs.pick`. API pages: [Files](/pages/api-fs/) and [Atomic writes and tail](/pages/api-fs-atomic-and-tail/).
+S C. Grant: `fs.read:<scope>`, `fs.write:<scope>`, `fs.watch:<scope>`, `fs.pick`, `agent-config.propose:<agent>` (for `propose-agent-config`). API pages: [Files](/pages/api-fs/), [Atomic writes and tail](/pages/api-fs-atomic-and-tail/) and [Agent configuration proposals](/pages/capability-agent-config-propose/).
 
 ```wit
 interface fs {
@@ -1311,6 +1311,9 @@ interface fs {
   record revisioned { bytes: list<u8>, revision: revision-token }
   /// truncated: the file shrank or was replaced, and the next read restarts at 0.
   record tail-chunk { bytes: list<u8>, cursor: u64, truncated: bool }
+  /// The whole new file; none removes it. Revision none means the file must not exist yet.
+  record config-change { path: string, content: option<list<u8>>, revision: option<revision-token>, summary: string }
+  record proposal-result { applied: list<string>, rejected: list<string>, history: string }
 
   /// Granted scopes and whether each is writable.
   roots: func() -> list<scope-root>;
@@ -1346,6 +1349,9 @@ interface fs {
   write-atomic: func(path: fs-path, data: list<u8>, expected: option<revision-token>) -> result<request-id, plugin-error>;
   /// Sync. max-bytes at most 1 MiB.
   tail: func(path: fs-path, cursor: u64, max-bytes: u32) -> result<tail-chunk, plugin-error>;
+  /// Async, take-proposal. Grant agent-config.propose:<agent>. The host shows the diff and writes only accepted paths.
+  propose-agent-config: func(agent: string, title: string, changes: list<config-change>) -> result<request-id, plugin-error>;
+  take-proposal: func(request: request-id) -> option<proposal-result>;
 
   take-bytes: func(request: request-id) -> option<list<u8>>;
   take-entries: func(request: request-id) -> option<list<scanned-entry>>;
@@ -1532,9 +1538,12 @@ interface services {
   use ilium:types/ids@0.1.0.{request-id};
   use ilium:types/errors@0.1.0.{plugin-error};
   /// Async, take-reply. A call to the plugin's own service is queued, see Runtime model.
+  // @unstable(feature = plugin-services)
   call: func(service: string, method: string, payload-json: string) -> result<request-id, plugin-error>;
+  // @unstable(feature = plugin-services)
   take-reply: func(request: request-id) -> option<string>;
   /// Provider side, for deferred replies. Errors: not-found for an unknown call id.
+  // @unstable(feature = plugin-services)
   reply: func(call: u64, outcome: result<string, plugin-error>) -> result<_, plugin-error>;
 }
 ```

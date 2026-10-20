@@ -22,6 +22,7 @@ mod api_settings_p2;
 mod api_storage;
 mod api_timers;
 mod api_tree;
+mod capability_agent_config_propose;
 mod reference_requirements_settings;
 mod reference_settings_schema;
 mod support;
