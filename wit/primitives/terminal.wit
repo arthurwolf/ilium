@@ -20,7 +20,7 @@ interface terminal {
   /// terminal.read-screen. Sync. max-rows is clamped to 10,000.
   read-screen: func(pane: node-id, part: screen-part, max-rows: u32) -> option<screen>;
   selection: func(pane: node-id) -> option<selection>;
-  /// terminal.output-filter. regex is a bounded RE2-style expression. At most 8 filters per pane per plugin.
+  /// terminal.output-filter. regex is a bounded RE2-style expression. At most 32 filters per plugin, 128 for bundled plugins.
   add-output-filter: func(pane: node-id, filter: output-filter) -> result<_, plugin-error>;
   remove-output-filter: func(pane: node-id, filter-id: string);
   /// terminal.pointer. Errors: conflict when another plugin holds the claim.

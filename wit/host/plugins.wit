@@ -34,6 +34,6 @@ interface plugins {
     update-available: option<string>, deprecated: bool, yanked: bool,
   }
   %list: func() -> list<plugin-info>;
-  /// scope is "global" in 0.1.0.
+  /// scope is "global", "project" or "session".
   set-enabled: func(plugin: plugin-id, enabled: bool, scope: string) -> result<_, plugin-error>;
 }
