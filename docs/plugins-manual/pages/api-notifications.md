@@ -6,7 +6,7 @@ permalink: /pages/api-notifications/
 
 ## Notifications and sounds
 
-A plugin tells the user about an event in two ways. The `notify` intent shows a desktop notice, and the `play-sound` intent plays one sound from the sound catalogue. Both are submitted from the `handler` export, as the outcome of an event, and both are checked by the kernel before anything reaches the desktop or the speakers. The kernel checks the grant, the rate limit and the dedup window in that order. A repeat of a keyed submission inside the window completes as a duplicate and does nothing.
+A plugin tells the user about an event in two ways. The `notify` intent shows a desktop notice, and the `play-sound` intent plays one sound from the sound catalogue. Both are submitted from the `handler` export, as the outcome of an event, and both are checked by the kernel before anything reaches the desktop or the speakers. The kernel checks the grant, the dedup window and the rate limit in that order. A repeat of a keyed submission inside the window completes as a duplicate and does nothing.
 
 ### What you need
 

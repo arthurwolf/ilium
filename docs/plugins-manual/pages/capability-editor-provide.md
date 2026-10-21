@@ -51,7 +51,7 @@ Only one editor provider runs at a time.
 
 ## You will need
 
-- A T1 bundled plugin. A T2 or T3 package gets `manifest.grant-tier` at install.
+- A T1 bundled plugin. In `ilium:plugin@0.1.0` a package that names the grant, at any tier, is refused with `manifest.grant-unknown`.
 - The API string `ilium:plugin@0.1.0` in the manifest `api` key.
 - A client-side build. A grant or export on the server side gives `manifest.grant-side`.
 - The calls that the provider implements are described on [editor.read](/pages/capability-editor-read/) and [editor.edit](/pages/capability-editor-edit/). The provider needs no extra grant for them, because it is the implementation.

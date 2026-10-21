@@ -547,7 +547,7 @@ export const { handler, views } = definePlugin({
 
 | Case | Result |
 |---|---|
-| More than 256 `check-list` items, or more than `max-items` in a `list-editor` | The render traps with `ui.invalid-tree`; the previous tree stays, marked stale. |
+| More than 256 `check-list` items, or more than `max-items` in a `list-editor` | The render traps with `trap.invalid-ui-tree` (detail `ui.invalid-tree`); the previous tree stays, marked stale. |
 | More than 64 menu entries, or a submenu deeper than two levels | The menu is truncated with `… N more`. |
 | Two items with the same `id` | The tree is invalid and the render traps with `ui.duplicate-key`. |
 | An invalid item in a `list-editor` | Drawn with `✗` and the reason. It is not written and `changed` is not sent for it. |

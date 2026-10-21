@@ -705,7 +705,7 @@ export const { lifecycle, handler, views } = definePlugin({
 
 | Situation | Result |
 |---|---|
-| A `layout` has a different number of children from constraints | `ui.invalid-tree`. The instance traps. The builders stop the render first and name the layout key. |
+| A `layout` has a different number of children from constraints | `trap.invalid-ui-tree` (detail `ui.invalid-tree`). The instance traps. The builders stop the render first and name the layout key. |
 | A `ratio` has denominator 0 | `ui.invalid-tree`. The instance traps. |
 | The tree has more than 4,096 nodes or 1 MiB | `ui.too-large`. The instance traps. |
 | Two nodes anywhere in one tree share a `key` | `ui.duplicate-key`. The instance traps. |
