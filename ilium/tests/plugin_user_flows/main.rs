@@ -7,6 +7,7 @@ mod blocked_state_guidance;
 mod guide_administration;
 mod guide_admin_failure_runbook;
 mod lifecycle_and_security;
+mod production_gaps;
 mod reference_plugin_files;
 mod reference_plugin_policy;
 mod reference_plugin_policy_p2;

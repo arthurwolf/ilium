@@ -449,6 +449,7 @@ When a replacement plugin is disabled by failure, the built-in core plugin it re
 - [Services](/pages/services/), [services API](/pages/api-services/), [messages and topics](/pages/api-messages-and-topics/) and [menu provider](/pages/api-menu-provider/) for the other mechanisms.
 - [Capabilities](/pages/capabilities/), [security](/pages/security/), [packages](/pages/packages/) and [settings extension](/pages/settings-extension/) for grants, consent and settings.
 - [Testing](/pages/testing/) and [debugging](/pages/debugging/) for tools.
+- [Internationalisation](/pages/guide-internationalisation/) for the text of a built-in or replaced core plugin, and which parts of it stay in English.
 
 Checked against `ilium:plugin@0.1.0`.
 

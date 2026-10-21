@@ -98,6 +98,8 @@ The kernel sets these inside every terminal pane. Plugins read them through the 
 
 The kernel MUST pass only the listed variables to a plugin. A plugin cannot read other variables of the caller.
 
+See also: [Shell completion and man pages](/pages/reference-cli-completion/) for the completion scripts and offline man pages that cover these commands.
+
 ### Requirements
 
 [COR-040] and [COR-041] and [COR-042] above are collected, with their tests, in [core parity requirements](/pages/reference-requirements-core-parity/).

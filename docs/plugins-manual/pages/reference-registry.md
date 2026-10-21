@@ -358,8 +358,10 @@ The user sees the registry only through search results, plugin detail pages and 
 ## See also
 
 - [Signing and trust](/pages/reference-signing-and-trust/)
+- [Registry key compromise](/pages/reference-registry-key-compromise/)
 - [Versions and dependencies](/pages/reference-dependency-resolution/)
 - [Install, update and uninstall](/pages/reference-install-and-update/)
 - [Plugin command line](/pages/reference-plugin-cli/)
 - [Administrator guide](/pages/guide-plugin-administration/)
 - [Publishing guide](/pages/guide-publishing/)
+- [Release rollout](/pages/reference-release-rollout/)

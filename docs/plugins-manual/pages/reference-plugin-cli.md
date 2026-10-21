@@ -590,6 +590,7 @@ A person who runs `ilium plugin doctor` on a machine without the Rust target see
 ## See also
 
 - [Distribution commands](/pages/reference-plugin-distribution-cli/)
+- [CLI output stability](/pages/reference-cli-output-stability/)
 
 - [Set up a toolchain](/pages/getting-started-toolchain/)
 - [Packages and manifests](/pages/packages/)

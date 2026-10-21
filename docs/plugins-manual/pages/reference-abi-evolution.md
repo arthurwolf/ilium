@@ -196,5 +196,7 @@ The event catalogue shows 35 rows for the base events, because three rows each d
 - [WIT reference](/pages/reference-wit/)
 - [Versioning](/pages/versioning/)
 - [Compatibility and upgrades](/pages/guide-compatibility-and-upgrades/)
+- [ABI major versions](/pages/reference-abi-major-versions/): the 0.x to 1.0.0 transition
 - [Runtime model](/pages/reference-runtime-model/)
 - [Errors and limits](/pages/reference-errors-and-limits/)
+- [SDK deprecation](/pages/reference-sdk-deprecation/): the rules for SDK names that are not WIT features

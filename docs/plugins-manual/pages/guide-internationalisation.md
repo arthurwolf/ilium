@@ -212,6 +212,25 @@ fn wide_text_never_overflows() {
 | A badge over 12 cells | Cut with `…` |
 | A translated label longer than the row | The value is cut first, then the label |
 
+## Built-in and replaced core plugin text
+
+The 30 core plugins that ship with Ilium show their menu labels, settings tab titles, command titles and notices in English. The host has no locale and no catalogue, so the user's language setting does not change this text. Each kind of text has one owner.
+
+| Text | Who owns it | Who translates it |
+|---|---|---|
+| Id of a command, settings tab, pane kind, setting key, error code or event | The plugin that defines it | Nobody. Ids are never translated |
+| Title or notice of a built-in core plugin | The Ilium project | Not translated in this release. See the decision below |
+| Title or notice of a replacement's own tab, command or notice | The author of the replacement | The author, in any language the author chooses |
+
+A replacement takes over the surface of a core plugin. The rules below say what it keeps and what it writes itself. The install rules are in [Extending core plugins](/pages/extending-core-plugins/) and [Tutorial 21: replace a core plugin](/pages/tutorial-21-replace-a-core-plugin/).
+
+- [USR-239] A replacement MUST keep every command id and every settings tab id of the core plugin it replaces, with the same spelling, and MUST NOT translate them. A replacement MAY give its tab and command titles in another language. If a command id is missing from the replacement, install refuses with `manifest.replaces-surface-incomplete`, which names the missing item.
+- [USR-240] A replacement that takes over a settings tab, a command or a notice MUST supply the title and notice text of that item itself, in the language it chooses. The built-in English text of the replaced plugin returns only when the replacement is turned off, and the stored settings of the tab stay as they were.
+
+Decision needed: whether built-in core plugin text (menu labels, tab titles, command titles and notices) gets a translation catalogue owned by the Ilium project. Default: no catalogue in this release, so core text stays English. A catalogue needs a translator for each language and a locale setting that the host does not yet have.
+
+Decision needed: who translates the built-in core plugin text when a catalogue exists. Default: the Ilium project translates its own bundled text. Third-party replacements always translate their own text, as [USR-240] states.
+
 ## See also
 
 - [Text widgets](/pages/widgets-text/)

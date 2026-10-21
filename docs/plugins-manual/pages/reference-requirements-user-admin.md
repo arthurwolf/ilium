@@ -37,6 +37,7 @@ Contract version: `ilium:plugin@0.1.0`. The platform is not implemented yet, so 
 | USR-210 to USR-220 | Policy file and audit log | [Plugin policy](/pages/reference-plugin-policy/) |
 | USR-221 to USR-229 | Support bundle and crash records | [Plugin diagnostics](/pages/core-plugin-diagnostics/) |
 | USR-230 to USR-235 | Administrator failure runbook | [Administrator failure runbook](/pages/guide-admin-failure-runbook/) |
+| USR-236 to USR-238 | Crash records and pre-migration backups | [Plugin privacy](/pages/user-privacy/) |
 
 ### Requirements
 
@@ -151,6 +152,11 @@ Contract version: `ilium:plugin@0.1.0`. The platform is not implemented yet, so 
 | USR-233 | The runbook MUST state the time limits of the failure window, the helper kill sequence, the crash-loop guard and the install lock as the source pages define them. | compare each value in the time-limits table with its source page. | [Administrator failure runbook](/pages/guide-admin-failure-runbook/) |
 | USR-234 | The runbook MUST name the audit file path for Linux and each event it tells the administrator to search for, and every event name MUST appear in the source page that defines it. | run the `jq` command of the Bad plugin section on a fixture audit log and search each event name in the source pages. | [Administrator failure runbook](/pages/guide-admin-failure-runbook/) |
 | USR-235 | The runbook MUST name the escalation path in this order: the plugin's security contact, then the Ilium project's security contact, then the release blocklist, and MUST list the security contact address as an open decision while it is a placeholder. | check the page for the three steps and the open decision row. | [Administrator failure runbook](/pages/guide-admin-failure-runbook/) |
+| USR-236 | A crash record MUST be removed once it is more than 30 days old. When more than 200 records exist, the oldest records MUST be removed first until 200 remain. | [Plugin privacy](/pages/user-privacy/) | Doc check in ilium/tests/plugin_user_flows: check that this section and the storage table give the 30-day and 200-record limits. |
+| USR-237 | After each committed update, Ilium MUST keep only the newest pre-migration backup of that plugin and delete the older ones. `ilium plugin uninstall <id> --purge` MUST delete every pre-migration backup of that plugin. | [Plugin privacy](/pages/user-privacy/) | Doc check in ilium/tests/plugin_user_flows: check that the backup rule and the purge row of the delete table name the newest-copy rule and `--purge`. |
+| USR-238 | `ilium plugin uninstall <id>` without `--purge` MUST keep the pre-migration backups of that plugin, so that a reinstall finds them. | [Plugin privacy](/pages/user-privacy/) | Doc check in ilium/tests/plugin_user_flows: check that this rule matches the uninstall rules of the install and uninstall reference. |
+| USR-239 | A replacement MUST keep every command id and every settings tab id of the core plugin it replaces, with the same spelling, and MUST NOT translate them. | Doc check in ilium/tests/plugin_user_flows: install a replacement with a missing command id and assert `manifest.replaces-surface-incomplete`; install one with translated titles and assert the command and tab ids are unchanged. | [Internationalisation](/pages/guide-internationalisation/) |
+| USR-240 | A replacement that takes over a settings tab, a command or a notice MUST supply the title and notice text of that item itself, and the built-in English text returns only when the replacement is turned off. | Doc check in ilium/tests/plugin_user_flows: install a replacement with its own tab title, turn it off, and assert the built-in English title is shown and the stored tab values are unchanged. | [Internationalisation](/pages/guide-internationalisation/) |
 
 ### Pending decisions
 

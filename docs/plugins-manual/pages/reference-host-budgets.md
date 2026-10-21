@@ -108,5 +108,6 @@ The host keeps the counters that these budgets need: call durations per class, q
 
 - [Performance](/pages/performance/) for the guidance to plugin authors.
 - [Resource accounting](/pages/reference-resource-accounting/) and [Platform support](/pages/reference-platform-support/).
+- [Soak and endurance testing](/pages/reference-host-soak-and-load-testing/) for the long-run tests of memory, handles and helper processes.
 
 API version checked: `ilium:plugin@0.1.0`.

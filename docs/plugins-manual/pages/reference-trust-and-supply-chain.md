@@ -169,7 +169,9 @@ ilium plugin install ./dist/example.notes-1.2.0.iliumpkg
 - [Manifest reference](/pages/reference-manifest/)
 - [Grant review and consent](/pages/reference-grant-review-and-consent/)
 - [Admin policy](/pages/reference-admin-policy/)
+- [Host release verification](/pages/reference-host-release-verification/) for checking the downloaded host release.
 - [Security response](/pages/reference-security-response/)
+- [Release key compromise](/pages/reference-release-key-compromise/)
 - [Errors and limits](/pages/reference-errors-and-limits/)
 
 Contract: `ilium:plugin@0.1.0`.

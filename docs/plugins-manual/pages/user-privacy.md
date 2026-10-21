@@ -22,6 +22,7 @@ Contract version: `ilium:plugin@0.1.0`. Requirement ids have the form `[USR-nnn]
 - What Ilium itself sends
 - What is stored on your machine
 - Delete a plugin's data
+- Crash records and pre-migration backups
 - Core plugins and AI providers
 - Errors and edge cases
 - Requirements
@@ -97,6 +98,8 @@ Ilium's own features that use the network are unchanged: for example, AI provide
 | Plugin settings | your `config.toml` and the project's `.ilium` folder | you, and anyone who gets those files |
 | Plugin data and notes | one folder and database per plugin | you and that plugin |
 | Plugin logs | one file per plugin | you |
+| Crash records | the server state folder `<state>`, never a plugin's folder | you |
+| Pre-migration backups | `<data>/plugins/backups/<id>/<version>-<utc timestamp>/`, copies of the plugin's data and storage buckets | you |
 | Audit log | always on; nothing to enable | you and the administrator |
 
 A project's `.ilium` folder may hold plugin settings and the plugin's project storage. If you share or commit that folder, you share them. Permissions are never stored there. The exact paths are in [Plugin files on disk](/pages/reference-plugin-files/).
@@ -110,11 +113,28 @@ Plugin logs are plain text. Plugins are told not to write secrets there, but Ili
 | Everything of one plugin | `ilium plugin uninstall <id> --purge` |
 | A plugin's settings only | Recovery page > Forget settings |
 | A plugin's logs | `--purge` |
+| A plugin's pre-migration backups | `ilium plugin uninstall <id> --purge` |
+| A plugin's crash records | Decision needed, see [Crash records and pre-migration backups](#crash-records-and-pre-migration-backups) |
 | One project's plugin data | Delete the plugin's files in the project's `.ilium` folder, or use `--purge` while the project is open |
 | My trusted publisher keys | `ilium plugin trust remove <key_id>` |
 | Everything | Remove the plugin folders listed in [Plugin files on disk](/pages/reference-plugin-files/) with Ilium stopped |
 
 `--purge` also records a purge note in Ilium's data folder (`<data>/plugins/purged.json`, holding the plugin id and the purge time). The next time you open a project that holds data of that plugin, Ilium deletes the plugin's project and session data and then removes that project from the note. A project you never reopen keeps its data, and the note stays until every known project has been cleaned. A plugin that was uninstalled without `--purge` leaves its data inert: no other plugin can read it, and the same plugin reads it again if you reinstall.
+
+### Crash records and pre-migration backups
+
+Two kinds of plugin data are kept outside the plugin's own folder. Both appear in the tables above.
+
+Crash records are written to the server state folder `<state>` when a plugin helper crashes, is killed or runs out of memory. Each record holds the time in UTC, the plugin id and version, the side (`t1`, `t2` or `t3`), the reason (`crash`, `kill` or `out-of-memory`), the exit status and the name of the export that was running. A record holds no payloads, stack memory or file contents. Run `ilium plugin support-bundle <id> --out <file>` to copy the records into the bundle's `crashes.txt` before you remove anything.
+
+- [USR-236] A crash record MUST be removed once it is more than 30 days old. When more than 200 records exist, the oldest records MUST be removed first until 200 remain. Test: doc check in ilium/tests/plugin_user_flows that this section and the storage table give the 30-day and 200-record limits.
+
+Pre-migration backups are copies of a plugin's data and storage buckets, made before an update migrates them, so that a failed migration can be undone. They are kept in `<data>/plugins/backups/<id>/`. Set `migration_backup_mib = 0` in the `[plugins]` table of `config.toml`, or pass `--no-backup` to the update, and Ilium makes no copy. Without a copy, a failed migration cannot be undone.
+
+- [USR-237] After each committed update, Ilium MUST keep only the newest pre-migration backup of that plugin and delete the older ones. `ilium plugin uninstall <id> --purge` MUST delete every pre-migration backup of that plugin. Test: doc check in ilium/tests/plugin_user_flows that the backup rule and the purge row of the delete table name the newest-copy rule and `--purge`.
+- [USR-238] `ilium plugin uninstall <id>` without `--purge` MUST keep the pre-migration backups of that plugin, so that a reinstall finds them. Test: doc check in ilium/tests/plugin_user_flows that this rule matches the uninstall rules of the install and uninstall reference.
+
+Decision needed: should `uninstall --purge` also delete that plugin's crash records? The records name the plugin, but the manual names no command that removes them before the 30-day limit, so a full erase of one plugin leaves them behind. Default: yes. `--purge` is the command for erasing everything about one plugin, so it should delete that plugin's crash records and leave the records of other plugins alone.
 
 ### Core plugins and AI providers
 

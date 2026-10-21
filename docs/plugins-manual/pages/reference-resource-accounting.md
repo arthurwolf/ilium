@@ -113,6 +113,7 @@ disk         12 MiB   256 MiB  default
 - [Errors and limits](/pages/reference-errors-and-limits/)
 - [Reference, errors and limits](/pages/reference-errors-and-limits/)
 - [Performance](/pages/performance/)
+- [Host aggregate limits](/pages/reference-host-aggregate-limits/)
 - [Health and watchdog](/pages/reference-health-and-watchdog/)
 - [Requirements, lifecycle and operations](/pages/reference-requirements-lifecycle-ops/)
 
