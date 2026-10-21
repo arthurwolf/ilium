@@ -16,6 +16,7 @@ pub mod abi;
 pub mod codes;
 pub mod compat;
 pub mod dedup;
+pub mod deprecation;
 pub mod error;
 pub mod generated;
 pub mod grants;

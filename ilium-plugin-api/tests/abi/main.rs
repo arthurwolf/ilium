@@ -10,6 +10,7 @@ mod codes;
 mod compat;
 mod conformance;
 mod dedup;
+mod deprecation_notice;
 mod generated_roundtrip;
 mod manifest;
 mod naming;
