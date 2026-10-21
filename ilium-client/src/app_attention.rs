@@ -25,8 +25,9 @@ use crate::attention::state::{
     Arrival, ARRIVAL_VISIBLE_MS, RECONCILE_INTERVAL_MS, SAVE_DEBOUNCE_MS,
 };
 use crate::attention::{
-    derive_instant_item, fingerprint_parts, parse_attention, store, AttentionItem, AttentionKind,
-    AttentionCompletionClient, AttentionMode, AttentionQueue, KnownPane, LivePane, LlmReply, RefreshDecision, TurboRequest,
+    derive_instant_item, fingerprint_parts, parse_attention, store, AttentionCompletionClient,
+    AttentionItem, AttentionKind, AttentionMode, AttentionQueue, KnownPane, LivePane, LlmReply,
+    RefreshDecision, TurboRequest,
 };
 use crate::naming_workers::NamingWorkerEvent;
 
@@ -99,12 +100,16 @@ impl App {
         if !self.attention_settings.mode.uses_llm() {
             self.abandon_attention_refresh(unix_millis_now());
         }
+        if !self.briefing_enabled() {
+            self.attention.briefings.clear();
+        }
         if enabled {
             return;
         }
         self.attention.queue.clear();
         self.attention.known_kinds.clear();
         self.attention.arrival = None;
+        self.attention.briefings.clear();
         self.attention.pending_restore = None;
         self.attention.restore_deadline_ms = None;
         self.attention.last_reconcile_ms = None;
@@ -170,7 +175,7 @@ impl App {
 
     /// Brings the queue in line with the live panes. Returns true when the
     /// visible queue changed. `Off` does nothing at all.
-    fn reconcile_attention(&mut self, now_ms: u64) -> bool {
+    pub(super) fn reconcile_attention(&mut self, now_ms: u64) -> bool {
         if !self.attention_enabled() {
             return false;
         }
@@ -183,6 +188,9 @@ impl App {
         let is_first_pass = self.attention.last_reconcile_ms.is_none();
 
         self.restore_pending_attention(&live, now_ms);
+        // Before the queue changes: a finished agent's item can vanish the
+        // moment the user has read it, and the briefing keeps its snapshot.
+        self.detect_briefing_jump();
 
         let generation = self.attention.queue.generation();
         let mut instant: Vec<AttentionItem> = live_panes
@@ -215,10 +223,11 @@ impl App {
 
         self.note_attention_arrival(now_ms, is_first_pass);
         self.attention.last_reconcile_ms = Some(now_ms);
+        let briefing_changed = self.refresh_briefings(now_ms);
 
         let after = self.attention.queue.to_persisted();
-        let changed = before != after;
-        if changed && self.attention.last_saved.as_ref() != Some(&after) {
+        let changed = before != after || briefing_changed;
+        if before != after && self.attention.last_saved.as_ref() != Some(&after) {
             self.attention.dirty_since_ms.get_or_insert(now_ms);
         }
         let queue_len = self.attention.queue.len();
@@ -352,22 +361,16 @@ impl App {
 
     // --------------------------------------------------------------- press
 
-    /// The item the next press visits: the best one that is not the pane on
-    /// screen, preferring those not yet looked at since they arrived so
-    /// repeated presses walk the whole queue instead of ping-ponging between
-    /// the top two.
+    /// The item the next press visits: the first agent the user has not dealt
+    /// with yet, in priority order. Agents already visited sink to the back
+    /// until they change in a way that matters, and when everything has been
+    /// visited the queue rotates (longest-ago first), so a 25-long queue is
+    /// walked end to end before any agent is shown twice.
     fn next_attention_target(&self) -> Option<NodeId> {
-        let viewing = self.active_pane_id();
-        let queue = &self.attention.queue;
-        queue
-            .ordered()
-            .into_iter()
-            .find(|item| {
-                Some(item.pane_id) != viewing
-                    && item.created_ms > queue.last_looked_ms(item.pane_id).unwrap_or(0)
-            })
+        self.attention
+            .queue
+            .next_to_visit(self.active_pane_id(), unix_millis_now())
             .map(|item| item.pane_id)
-            .or_else(|| queue.next(viewing).map(|item| item.pane_id))
     }
 
     /// `Next: needs you`: jump to the agent that most needs the user, right
@@ -401,9 +404,43 @@ impl App {
     /// Focuses `pane_id`, reveals it in the tree and records that the user
     /// has now looked at it.
     fn open_attention_pane(&mut self, pane_id: NodeId, now_ms: u64) {
+        let was_centered = self.is_tree_row_centered(pane_id);
         self.focus_pane(pane_id);
+        self.center_and_blink_tree_row(pane_id, was_centered);
         self.attention.queue.mark_looked(pane_id, now_ms);
         self.attention.arrival = None;
+        self.note_briefing_visit(pane_id);
+    }
+
+    /// True when the row of `node_id` was drawn within one row of the
+    /// vertical middle of the tree list on the last frame.
+    pub(crate) fn is_tree_row_centered(&self, node_id: NodeId) -> bool {
+        let rows: Vec<(NodeId, u16, u16)> = self
+            .tree_state
+            .rendered_rows()
+            .filter_map(|(identifier, y, height)| identifier.last().map(|id| (*id, y, height)))
+            .collect();
+        let (Some(top), Some(bottom)) = (
+            rows.iter().map(|row| row.1).min(),
+            rows.iter().map(|row| row.1.saturating_add(row.2)).max(),
+        ) else {
+            return false;
+        };
+        let middle = (u32::from(top) + u32::from(bottom)) / 2;
+        rows.iter().any(|&(id, y, height)| {
+            id == node_id && (u32::from(y) + u32::from(height) / 2).abs_diff(middle) <= 1
+        })
+    }
+
+    /// Scrolls the tree so the row of `node_id` sits in the middle of the
+    /// list and, unless it already was there, makes it blink like a freshly
+    /// created row.
+    pub(crate) fn center_and_blink_tree_row(&mut self, node_id: NodeId, was_centered: bool) {
+        self.tree_state.center_selected_on_next_render();
+        if !was_centered {
+            let offset = self.started_at.elapsed().as_millis();
+            self.recently_created.insert(node_id, offset);
+        }
     }
 
     /// Asks for a background refresh of the attention queue through the
@@ -497,7 +534,10 @@ impl App {
 
     /// Where Turbo workers send their replies: the client's naming-event
     /// channel, drained by the event loop like every other background result.
-    pub fn attach_attention_events(&mut self, events: tokio::sync::mpsc::Sender<NamingWorkerEvent>) {
+    pub fn attach_attention_events(
+        &mut self,
+        events: tokio::sync::mpsc::Sender<NamingWorkerEvent>,
+    ) {
         self.attention.events = Some(events);
     }
 
@@ -739,7 +779,10 @@ impl App {
         let is_current = self.attention_settings.mode == AttentionMode::Turbo
             && self.attention.turbo.current_generation() == Some(reply.generation);
         if !is_current {
-            tracing::debug!(generation = reply.generation, "stale attention reply dropped");
+            tracing::debug!(
+                generation = reply.generation,
+                "stale attention reply dropped"
+            );
             return;
         }
         self.attention.turbo.finish_current();
@@ -793,7 +836,7 @@ impl App {
         let now_ms = unix_millis_now();
         let queue = &self.attention.queue;
         queue
-            .ordered()
+            .ordered_for_display(now_ms)
             .into_iter()
             .map(|item| PanelRow {
                 kind: item.kind,
@@ -892,14 +935,20 @@ impl App {
         crate::tree_ui::attention_button_area(self.layout.tree_area)
     }
 
-    /// The arrival block's content: the best queued item, while an arrival is
-    /// pending, the feature is on and the user is not already on that agent.
+    /// The arrival block's content: the item the next press would visit
+    /// (see [`Self::next_attention_target`]), while an arrival is pending, the
+    /// feature is on and the user is not already on that agent. Using the
+    /// rotation order keeps the block from advertising an agent the user has
+    /// already seen while the button goes somewhere else.
     pub fn attention_arrival_view(&self) -> Option<(AttentionKind, String, String)> {
         if !self.attention_enabled() {
             return None;
         }
         self.attention.arrival?;
-        let item = self.attention.queue.next(self.active_pane_id())?;
+        let item = self
+            .attention
+            .queue
+            .next_to_visit(self.active_pane_id(), unix_millis_now())?;
         let title = self
             .tree
             .get(item.pane_id)
@@ -1171,6 +1220,29 @@ mod tests {
     }
 
     #[test]
+    fn the_arrival_block_names_the_agent_the_next_press_visits() {
+        let mut app = app();
+        let seen = add_agent(&mut app, "seen", AgentActivity::Idle);
+        let fresh = add_agent(&mut app, "fresh", AgentActivity::Idle);
+        let viewing = add_agent(&mut app, "viewing", AgentActivity::Idle);
+        app.tick_attention();
+
+        set_activity(&mut app, seen, AgentActivity::WaitingApproval);
+        assert!(app.reconcile_attention(unix_millis_now()));
+        app.action_attention_press();
+        assert_eq!(app.active_pane_id(), Some(seen));
+
+        // `seen` is the best by priority, but the user has been there: the
+        // new arrival is what the next press visits and what the block shows.
+        set_activity(&mut app, fresh, AgentActivity::WaitingApproval);
+        app.focus_pane(viewing);
+        assert!(app.reconcile_attention(unix_millis_now()));
+        let (_, title, _) = app.attention_arrival_view().expect("an arrival");
+        assert_eq!(title, "fresh");
+        assert_eq!(app.next_attention_target(), Some(fresh));
+    }
+
+    #[test]
     fn items_already_present_at_start_up_do_not_announce_themselves() {
         let mut app = app();
         add_agent(&mut app, "asks", AgentActivity::WaitingApproval);
@@ -1312,8 +1384,10 @@ mod tests {
     impl AttentionCompletionClient for CountingClient {
         fn complete_attention_prompt(&self, _prompt: &str) -> Result<String, AttentionCallError> {
             self.calls.fetch_add(1, Ordering::SeqCst);
-            Ok(r#"{"kind":"stuck","reason":"keeps rerunning one failing test","priority":70}"#
-                .to_owned())
+            Ok(
+                r#"{"kind":"stuck","reason":"keeps rerunning one failing test","priority":70}"#
+                    .to_owned(),
+            )
         }
     }
 
@@ -1370,12 +1444,13 @@ mod tests {
         );
 
         let focus_before = app.active_pane_id();
-        let apply_plan = app.complete_shared_attention(
-            project,
-            SharedOutcome::Replied(Some(stuck_list(pane_id))),
-        );
+        let apply_plan = app
+            .complete_shared_attention(project, SharedOutcome::Replied(Some(stuck_list(pane_id))));
 
-        assert!(apply_plan, "the sort plan of the same reply is still applied");
+        assert!(
+            apply_plan,
+            "the sort plan of the same reply is still applied"
+        );
         let item = app.attention.queue.item(pane_id).expect("the list landed");
         assert_eq!(item.source, AttentionSource::Llm);
         assert_eq!(item.kind, AttentionKind::Stuck);
@@ -1408,10 +1483,8 @@ mod tests {
             "no sort job is shown for an attention-only call"
         );
 
-        let apply_plan = app.complete_shared_attention(
-            project,
-            SharedOutcome::Replied(Some(stuck_list(pane_id))),
-        );
+        let apply_plan = app
+            .complete_shared_attention(project, SharedOutcome::Replied(Some(stuck_list(pane_id))));
         assert!(!apply_plan, "the plan must not be applied");
         assert!(app.attention.queue.item(pane_id).is_some());
     }

@@ -50,6 +50,7 @@ pub enum SettingsChoice {
     AttentionMode,
     AttentionPressSorts,
     AttentionModel,
+    AttentionShowBriefing,
 }
 
 /// Model ids offered for the attention queue: the models of the provider that
@@ -178,7 +179,7 @@ fn catalog<T: Copy + std::fmt::Debug + PartialEq>(
 }
 
 impl SettingsChoice {
-    pub const ALL: [Self; 41] = [
+    pub const ALL: [Self; 42] = [
         Self::TerminalDirectory,
         Self::EditorLineDisplay,
         Self::EditorMarkdown,
@@ -220,6 +221,7 @@ impl SettingsChoice {
         Self::AttentionMode,
         Self::AttentionPressSorts,
         Self::AttentionModel,
+        Self::AttentionShowBriefing,
     ];
 
     pub fn at(app: &App, tab: SettingsTab, row: usize) -> Option<Self> {
@@ -275,6 +277,7 @@ impl SettingsChoice {
                 Some(AttentionRow::Mode) => Some(Self::AttentionMode),
                 Some(AttentionRow::PressSorts) => Some(Self::AttentionPressSorts),
                 Some(AttentionRow::Model) => Some(Self::AttentionModel),
+                Some(AttentionRow::ShowBriefing) => Some(Self::AttentionShowBriefing),
                 _ => None,
             },
             SettingsTab::Sound => match crate::app::SoundRow::ALL.get(row) {
@@ -354,6 +357,7 @@ impl SettingsChoice {
             Self::AttentionMode => "Attention mode",
             Self::AttentionPressSorts => "Sort refreshes attention",
             Self::AttentionModel => "Attention model",
+            Self::AttentionShowBriefing => "Show briefing on arrival",
             Self::SoundSource => "Sound source",
             Self::SoundFile => "Sound file",
             Self::TitleStyle => "Title style",
@@ -484,6 +488,11 @@ impl SettingsChoice {
             Self::AttentionPressSorts => catalog(
                 &[true, false],
                 app.attention_settings.press_sorts,
+                |value| if value { "☑ On" } else { "☐ Off" }.into(),
+            ),
+            Self::AttentionShowBriefing => catalog(
+                &[true, false],
+                app.attention_settings.show_briefing,
                 |value| if value { "☑ On" } else { "☐ Off" }.into(),
             ),
             Self::AttentionModel => {
@@ -952,6 +961,9 @@ impl App {
             SettingsChoice::AttentionPressSorts => {
                 select!([true, false], attention.press_sorts);
             }
+            SettingsChoice::AttentionShowBriefing => {
+                select!([true, false], attention.show_briefing);
+            }
             SettingsChoice::AttentionModel => {
                 attention.set_model_override((id != "none").then(|| id.to_owned()));
             }
@@ -1098,6 +1110,7 @@ impl App {
             }
             SettingsChoice::AttentionMode
             | SettingsChoice::AttentionPressSorts
+            | SettingsChoice::AttentionShowBriefing
             | SettingsChoice::AttentionModel => {
                 self.enqueue_configuration(
                     directory,
@@ -1725,6 +1738,7 @@ mod tests {
             2,
             // Depends on the selected provider; recomputed inside the loop below.
             0,
+            2,
         ];
         assert_eq!(expected.len(), SettingsChoice::ALL.len());
         for (field, expected) in SettingsChoice::ALL.into_iter().zip(expected) {

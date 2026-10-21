@@ -579,7 +579,7 @@ fn settings_snapshot(app: &App) -> Value {
             "voice.custom_prompt",
             "reset_planning.monitor_claude", "reset_planning.monitor_codex",
             "reset_planning.time_style",
-            "attention.mode", "attention.press_sorts", "attention.turbo_concurrency",
+            "attention.mode", "attention.press_sorts", "attention.show_briefing", "attention.turbo_concurrency",
             "attention.expiry_seconds", "attention.model_override",
             "debug.file_logging_enabled",
             "git.default_where", "git.branch_prefix", "git.worktree_location_template",
@@ -750,6 +750,7 @@ fn settings_snapshot(app: &App) -> Value {
         "attention": {
             "mode": app.attention_settings.mode.name(),
             "press_sorts": app.attention_settings.press_sorts,
+            "show_briefing": app.attention_settings.show_briefing,
             "turbo_concurrency": app.attention_settings.turbo_concurrency,
             "expiry_seconds": app.attention_settings.expiry_seconds,
             "model_override": app.attention_settings.model_override,
@@ -829,6 +830,7 @@ pub(crate) fn mode_label(mode: &Mode) -> &'static str {
         Mode::ConfirmClose(_) => "confirm_close",
         Mode::ConvertSession => "convert_session",
         Mode::RemoteCompaction => "remote_compaction",
+        Mode::AttentionOverview => "attention_overview",
         Mode::ConfirmRemoveWorkspace(_) => "confirm_remove_workspace",
         Mode::ConfirmSessionRecovery { .. } => "confirm_session_recovery",
         Mode::Settings(_) => "settings",
@@ -882,6 +884,7 @@ mod tests {
         let snapshot = settings_snapshot(&app);
         assert_eq!(snapshot["attention"]["mode"], "shared");
         assert_eq!(snapshot["attention"]["press_sorts"], true);
+        assert_eq!(snapshot["attention"]["show_briefing"], true);
         assert_eq!(snapshot["attention"]["turbo_concurrency"], 16);
         assert_eq!(snapshot["attention"]["expiry_seconds"], 1800);
         assert!(snapshot["attention"]["model_override"].is_null());
@@ -894,6 +897,7 @@ mod tests {
         for path in [
             "attention.mode",
             "attention.press_sorts",
+            "attention.show_briefing",
             "attention.turbo_concurrency",
             "attention.expiry_seconds",
             "attention.model_override",

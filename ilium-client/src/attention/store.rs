@@ -111,6 +111,12 @@ mod tests {
                 reason: "Waiting for your answer or approval".into(),
                 question: Some("Delete the folder?".into()),
                 waiting_on: None,
+                briefing: crate::attention::item::Briefing {
+                    status_summary: Some("Claude waits to delete a folder.".into()),
+                    why_here: Some("It needs a yes or no.".into()),
+                    suggested_action: None,
+                    from_llm: true,
+                },
                 priority: 90,
                 source: AttentionSource::Instant,
                 fingerprint: 0xfeed,
@@ -118,6 +124,13 @@ mod tests {
                 created_ms: 1_000,
             }],
             last_looked_ms: vec![(NodeId(7), 500)],
+            visited_as: vec![(
+                NodeId(7),
+                crate::attention::queue::VisitedAs {
+                    fingerprint: 9,
+                    kind: AttentionKind::Question,
+                },
+            )],
         }
     }
 
@@ -164,5 +177,22 @@ mod tests {
             first,
             store_path_for_session(Path::new("/run/user/1/ilium/a.sock"))
         );
+    }
+
+    #[test]
+    fn a_store_written_before_the_briefing_existed_still_loads() {
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("old.json");
+        std::fs::write(
+            &path,
+            br#"{"version":1,"queue":{"items":[{"pane_id":7,"project_id":1,"title":"t",
+            "kind":"question","reason":"r","question":null,"waiting_on":null,"priority":9,
+            "source":"instant","fingerprint":5,"generation":1,"created_ms":2}],
+            "last_looked_ms":[]}}"#,
+        )
+        .unwrap();
+        let loaded = load(&path).expect("an old store loads");
+        assert!(loaded.items[0].briefing.is_empty());
+        assert!(!loaded.items[0].briefing.from_llm);
     }
 }
