@@ -95,7 +95,7 @@ All functions are in the `ui` interface. Each one needs `ui.panels` or the `pane
 | `view-visibility` | `view`, `visible` | A view opens or closes. Coalesced. |
 | `theme-changed` | none | The user changes the theme. The host repaints the colour roles itself, so no new render is needed. |
 
-The `kind` of a `ui-action` is one of `activated`, `changed`, `submitted`, `selected`, `toggled`, `scrolled`, `dropped`, `context-requested`, `closed`, `focus-gained` or `focus-lost`. The `value` is one of `none`, `text(string)`, `index(u32)`, `number(f64)`, `flag(bool)`, `drop(source-key, target-key, index)` or `cell(cell-position)`. The widget `key` is the action id: the plugin matches on it.
+The `kind` of a `ui-action` is one of `activated`, `changed`, `submitted`, `selected`, `toggled`, `scrolled`, `dropped`, `context-requested`, `closed`, `focus-gained`, `focus-lost`, `hover-enter`, `hover-leave`, `pointer`, `drag-over`, `resized` or `filter-changed`. The `value` is one of `none`, `text(string)`, `index(u32)`, `number(f64)`, `flag(bool)`, `drop(source-key, target-key, index)` or `cell(cell-position)`. The widget `key` is the action id: the plugin matches on it.
 
 The host sends `changed` for a text widget 600 ms after the last keystroke, 1 s for a large editor, and immediately for a toggle or a choice. A `tabs` widget sends `selected` with the new index. A `schema-form` sends no `ui-action`: the host saves each change and the owning plugin receives `settings-changed`.
 

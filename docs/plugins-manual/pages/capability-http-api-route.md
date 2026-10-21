@@ -61,7 +61,7 @@ respond: func(call: u64, status: u16, headers: list<tuple<string, string>>,
               body: list<u8>) -> result<_, plugin-error>;
 
 record http-called-event { call: u64, method: string, path: string,
-                           headers: list<tuple<string, string>>, body: list<u8> }
+                           headers: list<header>, body: list<u8> }
 ```
 
 | Name | Rust | TypeScript | Meaning |
