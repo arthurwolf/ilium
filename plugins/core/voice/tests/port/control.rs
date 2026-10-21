@@ -95,8 +95,7 @@ fn tools_050_voice_self_stop_has_one_tool_without_arguments() {
     assert_eq!(schema["properties"], json!({}));
 }
 
-/// REQ: PORT:ilium-client/src/control/mod.rs::dedicated_stop_tool_disables_voice_and_finishes_after_its_result
-/// REQ: PORT:ilium-client/tests/voice_control_live.rs::stop_voice_request_calls_the_dedicated_tool_and_ends_the_session
+/// REQ: PORT:ilium-client/src/control/mod.rs::dedicated_stop_tool_disables_voice_and_finishes_after_its_result, PORT:ilium-client/tests/voice_control_live.rs::stop_voice_request_calls_the_dedicated_tool_and_ends_the_session
 #[test]
 fn tools_050_the_stop_tool_disables_voice_after_returning_its_result() {
     let mut host = enabled_client("semantic_vad");
@@ -143,8 +142,7 @@ fn tools_050_a_repeated_call_id_returns_the_first_output_and_runs_once() {
     assert_eq!(host.realtime().executions("call-1"), 1);
 }
 
-/// REQ: PORT:ilium-client/src/control/mod.rs::diagnostic_tool_arguments_redact_direct_and_path_addressed_credentials
-/// REQ: PORT:ilium-client/src/control/mod.rs::settings_results_redact_both_inference_and_voice_credentials
+/// REQ: PORT:ilium-client/src/control/mod.rs::diagnostic_tool_arguments_redact_direct_and_path_addressed_credentials, PORT:ilium-client/src/control/mod.rs::settings_results_redact_both_inference_and_voice_credentials
 #[test]
 fn tools_050_the_api_key_never_appears_in_logs_or_tool_results() {
     let mut host = enabled_client("semantic_vad");
@@ -163,8 +161,7 @@ fn tools_050_the_api_key_never_appears_in_logs_or_tool_results() {
     guide_has(&["API keys are never exposed to the settings tool."]);
 }
 
-/// REQ: PORT:ilium-client/src/control/mod.rs::built_in_agent_tool_can_request_a_server_derived_worktree
-/// REQ: PORT:ilium-client/src/control/mod.rs::built_in_agent_tool_uses_the_registered_provider_command
+/// REQ: PORT:ilium-client/src/control/mod.rs::built_in_agent_tool_can_request_a_server_derived_worktree, PORT:ilium-client/src/control/mod.rs::built_in_agent_tool_uses_the_registered_provider_command
 #[test]
 fn tools_050_the_agent_creation_tool_offers_claude_codex_antigravity_and_a_worktree() {
     guide_has(&[
@@ -245,9 +242,7 @@ fn live_050_text_goes_to_the_active_pane_unless_another_is_named() {
     assert_eq!(host.realtime().target_context(), None);
 }
 
-/// REQ: PORT:ilium-client/src/control/mod.rs::dictated_terminal_submission_sends_immediately_by_default
-/// REQ: PORT:ilium-client/src/control/policy.rs::terminal_submission_confirmation_defaults_to_immediate_execution
-/// REQ: PORT:ilium-client/src/control/mod.rs::voice_model_cannot_disable_enter_for_immediate_text
+/// REQ: PORT:ilium-client/src/control/mod.rs::dictated_terminal_submission_sends_immediately_by_default, PORT:ilium-client/src/control/policy.rs::terminal_submission_confirmation_defaults_to_immediate_execution, PORT:ilium-client/src/control/mod.rs::voice_model_cannot_disable_enter_for_immediate_text
 #[test]
 fn policy_051_confirm_terminal_submissions_is_off_and_text_is_sent_with_enter() {
     guide_has(&["By default an explicit request such as \"send this to the agent\" forwards the text and presses Enter immediately."]);
@@ -265,8 +260,7 @@ fn policy_051_confirm_terminal_submissions_is_off_and_text_is_sent_with_enter() 
     assert_eq!(host.realtime().last_submit_enter(), Some(true));
 }
 
-/// REQ: PORT:ilium-client/src/control/mod.rs::enabled_terminal_confirmation_stages_without_enter_then_submits_on_yes
-/// REQ: PORT:ilium-client/src/control/policy.rs::enabled_terminal_confirmation_stages_text_and_guards_only_enter
+/// REQ: PORT:ilium-client/src/control/mod.rs::enabled_terminal_confirmation_stages_without_enter_then_submits_on_yes, PORT:ilium-client/src/control/policy.rs::enabled_terminal_confirmation_stages_text_and_guards_only_enter
 #[test]
 fn policy_051_with_confirmation_on_text_is_staged_without_enter_and_enter_waits_for_yes() {
     guide_has(&[
@@ -314,8 +308,7 @@ fn policy_051_typing_without_enter_stays_unsubmitted_and_send_still_presses_ente
     assert_eq!(host.realtime().last_submit_enter(), Some(true));
 }
 
-/// REQ: PORT:ilium-client/src/control/policy.rs::enabled_terminal_confirmation_guards_forever_queued_prompts
-/// REQ: PORT:ilium-client/src/control/mod.rs::scheduled_voice_text_always_requests_enter_submission
+/// REQ: PORT:ilium-client/src/control/policy.rs::enabled_terminal_confirmation_guards_forever_queued_prompts, PORT:ilium-client/src/control/mod.rs::scheduled_voice_text_always_requests_enter_submission
 #[test]
 fn policy_051_with_confirmation_on_queued_and_scheduled_prompts_ask_first() {
     guide_has(&["With confirmation on, pressing Enter by voice, scheduling terminal input and queueing a prompt for automatic submission (once, several times or forever) also ask first"]);
@@ -356,8 +349,7 @@ fn policy_051_creating_a_terminal_is_not_in_the_always_confirm_list() {
     assert!(host.popups().is_empty());
 }
 
-/// REQ: PORT:ilium-client/src/control/policy.rs::killing_a_session_always_requires_confirmation
-/// REQ: PORT:ilium-client/src/control/mod.rs::high_impact_command_cannot_execute_without_one_time_confirmation
+/// REQ: PORT:ilium-client/src/control/policy.rs::killing_a_session_always_requires_confirmation, PORT:ilium-client/src/control/mod.rs::high_impact_command_cannot_execute_without_one_time_confirmation
 #[test]
 fn policy_051_killing_the_session_waits_for_one_confirmation_and_runs_once() {
     guide_has(&["Killing the Ilium session and every pane, and restarting the detached server."]);
@@ -383,8 +375,7 @@ fn policy_051_the_closing_target_is_fixed_before_asking() {
     assert!(text.contains("docs") && !text.contains("logs"), "{text}");
 }
 
-/// REQ: PORT:ilium-client/src/control/policy.rs::board_delete_confirmation_pins_the_board_and_names_the_card
-/// REQ: PORT:ilium-client/src/control/policy.rs::board_delete_confirmation_rejects_an_out_of_range_card_before_asking
+/// REQ: PORT:ilium-client/src/control/policy.rs::board_delete_confirmation_pins_the_board_and_names_the_card, PORT:ilium-client/src/control/policy.rs::board_delete_confirmation_rejects_an_out_of_range_card_before_asking
 #[test]
 fn policy_051_a_board_card_delete_names_the_exact_card_and_refuses_a_missing_one() {
     guide_has(&["Deleting a board card or column (the exact item is named in the question)."]);

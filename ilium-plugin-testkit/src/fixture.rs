@@ -72,7 +72,6 @@ mod spec_tests {
         path
     }
 
-    /// REQ: Fixtures and expectation files (a fixture is JSON with "schema": 1; empty input is a schema-only document)
     #[test]
     fn fixture_schema_1_loads_and_keeps_its_document() {
         let path = write_fixture("schema-only.json", r#"{"schema": 1}"#);
@@ -81,7 +80,7 @@ mod spec_tests {
         assert_eq!(fixture.document.as_object().map(|object| object.len()), Some(1));
     }
 
-    /// REQ: DEV-511 (the error names the JSON path of the first unknown key, for example $.events[2].foo)
+    /// REQ: DEV-511
     #[test]
     fn dev_511_unknown_key_error_names_its_json_path() {
         let body = r#"{"schema": 1, "events": [
@@ -92,7 +91,7 @@ mod spec_tests {
         assert!(error.message.contains("$.events[2].foo"), "message was: {}", error.message);
     }
 
-    /// REQ: DEV-511 (a wrong value reports the JSON path of the bad value, for example $.tree[2].parent)
+    /// REQ: DEV-511
     #[test]
     fn dev_511_bad_value_error_names_its_json_path() {
         let body = r#"{"schema": 1, "tree": [
@@ -105,7 +104,7 @@ mod spec_tests {
         assert!(error.message.contains("$.tree[2].parent"), "message was: {}", error.message);
     }
 
-    /// REQ: DEV-512 (a repeated node id in the tree fails with fixture.duplicate-id)
+    /// REQ: DEV-512
     #[test]
     fn dev_512_repeated_node_id_is_refused() {
         let body = r#"{"schema": 1, "tree": [
@@ -116,7 +115,7 @@ mod spec_tests {
         assert_eq!(error.code, codes::FIXTURE_DUPLICATE_ID);
     }
 
-    /// REQ: DEV-513 (integers above 2^53 are written as strings and load without loss)
+    /// REQ: DEV-513
     #[test]
     fn dev_513_large_integer_written_as_string_loads() {
         let body = r#"{"schema": 1, "tree": [
@@ -126,7 +125,7 @@ mod spec_tests {
         assert_eq!(fixture.document["tree"][0]["id"], "9007199254740993");
     }
 
-    /// REQ: DEV-514 (a scene fixture accepts only its own keys; tree is refused with fixture.unknown-key)
+    /// REQ: DEV-514
     #[test]
     fn dev_514_scene_fixture_refuses_a_server_only_key() {
         let path = write_fixture("scene-tree.json", r#"{"schema": 1, "side": "scene", "tree": []}"#);
@@ -134,7 +133,7 @@ mod spec_tests {
         assert_eq!(error.code, codes::FIXTURE_UNKNOWN_KEY);
     }
 
-    /// REQ: DEV-516, DEV-551 (run with no expectation file passes when the component does not trap)
+    /// REQ: DEV-516, DEV-551
     #[test]
     fn dev_516_run_without_expectation_file_passes() {
         let path = write_fixture("no-expect.json", r#"{"schema": 1, "events": []}"#);
@@ -142,7 +141,7 @@ mod spec_tests {
         assert_eq!(status, FixtureStatus::Pass);
     }
 
-    /// REQ: DEV-516 (run compares the expectation file next to the fixture and reports Fail on a mismatch)
+    /// REQ: DEV-516
     #[test]
     fn dev_516_run_reports_fail_when_expectation_differs() {
         let path = write_fixture("mismatch.json", r#"{"schema": 1, "events": []}"#);
@@ -155,7 +154,7 @@ mod spec_tests {
         assert!(matches!(status, FixtureStatus::Fail(_)), "status was: {status:?}");
     }
 
-    /// REQ: DEV-516 (a fixture that fails to load is an error, never a Pass)
+    /// REQ: DEV-516
     #[test]
     fn dev_516_run_propagates_fixture_load_error() {
         let path = write_fixture("run-unknown-key.json", r#"{"schema": 1, "bogus": true}"#);

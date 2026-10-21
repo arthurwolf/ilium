@@ -34,7 +34,6 @@ mod spec_tests {
         }
     }
 
-    /// REQ: [RQO-002] (a call that returns a request-id completes once with that id; the await takes that completion)
     #[test]
     fn take_from_returns_outcome_of_matching_call_and_removes_it() {
         let handle = pending_call(5001);
@@ -43,7 +42,6 @@ mod spec_tests {
         assert!(batch.is_empty());
     }
 
-    /// REQ: rust-sdk.md "Calls, requests and errors" and api-events.md "Events" (the SDK removes awaited completions from the batch; unawaited ones keep their order)
     #[test]
     fn take_from_leaves_other_completions_in_order() {
         let handle = pending_call(2);
@@ -60,7 +58,6 @@ mod spec_tests {
         );
     }
 
-    /// REQ: [RQO-006] (a request that stopped because the plugin or host stopped completes as cancelled, and the await returns that outcome)
     #[test]
     fn take_from_returns_cancelled_outcome_unchanged() {
         let handle = pending_call(77);
@@ -69,7 +66,6 @@ mod spec_tests {
         assert!(batch.is_empty());
     }
 
-    /// REQ: [RQO-001] (every request completes exactly once, so a second take of the same completion finds nothing)
     #[test]
     fn second_take_of_same_request_returns_none() {
         let handle = pending_call(9);
@@ -78,7 +74,6 @@ mod spec_tests {
         assert_eq!(handle.take_from(&mut batch), None);
     }
 
-    /// REQ: [RQO-002] (a completion for another request is never taken by this handle; the batch stays unchanged)
     #[test]
     fn take_from_returns_none_when_completion_is_absent() {
         let handle = pending_call(42);
@@ -87,7 +82,7 @@ mod spec_tests {
         assert_eq!(batch.len(), 1);
     }
 
-    /// REQ: [RQO-001] (empty input: an empty batch has no completion to take)
+    /// Manual: empty input: an empty batch has no completion to take
     #[test]
     fn take_from_empty_batch_returns_none() {
         let handle = pending_call(1);
@@ -95,7 +90,7 @@ mod spec_tests {
         assert_eq!(handle.take_from(&mut batch), None);
     }
 
-    /// REQ: rust-sdk.md "Values, submissions and outcomes" (`submission(n)` and `call(id)` are different requests even with the same number)
+    /// Manual: `submission(n)` and `call(id)` are different requests even with the same number
     #[test]
     fn submission_handle_does_not_take_call_with_same_number() {
         let handle = PendingRequest {

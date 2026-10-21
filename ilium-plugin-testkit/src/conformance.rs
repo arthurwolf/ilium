@@ -84,7 +84,7 @@ mod spec_tests {
             && parts[2].chars().all(|character| character.is_ascii_digit())
     }
 
-    /// REQ: DEV-610 (the catalogue is the minimum set of cases)
+    /// REQ: DEV-610
     #[test]
     fn suite_contains_every_catalogue_case() {
         let results = run_suite::<ServerPlugin>().unwrap();
@@ -94,7 +94,7 @@ mod spec_tests {
         }
     }
 
-    /// REQ: DEV-642 (case order follows the catalogue, area by area)
+    /// REQ: DEV-642
     #[test]
     fn results_follow_catalogue_order() {
         let results = run_suite::<ServerPlugin>().unwrap();
@@ -106,7 +106,7 @@ mod spec_tests {
         assert!(indices.windows(2).all(|pair| pair[0] <= pair[1]));
     }
 
-    /// REQ: DEV-604 (case ids are stable and unique, form CONF-<AREA>-<nn>)
+    /// REQ: DEV-604
     #[test]
     fn case_ids_are_unique_and_well_formed() {
         let results = run_suite::<ServerPlugin>().unwrap();
@@ -118,7 +118,7 @@ mod spec_tests {
         assert_eq!(seen_names.len(), count_before_dedup);
     }
 
-    /// REQ: DEV-605 (every case is deterministic, so two runs agree)
+    /// REQ: DEV-605
     #[test]
     fn repeated_runs_produce_equal_results() {
         let first_run = run_suite::<ServerPlugin>().unwrap();
@@ -126,7 +126,7 @@ mod spec_tests {
         assert_eq!(first_run, second_run);
     }
 
-    /// REQ: DEV-640 and DEV-613 (a passing case has no reason; a non-passing case must say why)
+    /// REQ: DEV-640
     #[test]
     fn non_passing_cases_always_carry_a_reason() {
         let results = run_suite::<ServerPlugin>().unwrap();
@@ -139,7 +139,7 @@ mod spec_tests {
         }
     }
 
-    /// REQ: DEV-613 (edge case: a scene-only plugin skips server and client cases with side-not-built)
+    /// REQ: DEV-613
     #[test]
     fn scene_only_plugin_skips_submission_cases_as_side_not_built() {
         let results = run_suite::<SceneOnlyPlugin>().unwrap();
@@ -151,7 +151,7 @@ mod spec_tests {
         assert_eq!(submission_case.reason, "side-not-built");
     }
 
-    /// REQ: DEV-613 (side-not-built is reserved for a missing side; a server plugin never gets it)
+    /// REQ: DEV-613
     #[test]
     fn server_plugin_never_skips_for_missing_side() {
         let results = run_suite::<ServerPlugin>().unwrap();

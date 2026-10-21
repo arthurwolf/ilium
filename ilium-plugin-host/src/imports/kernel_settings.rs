@@ -80,7 +80,6 @@ mod tests {
         assert!(values.is_object(), "read result must be a JSON object, got {text}");
     }
 
-    /// REQ: UNMAPPED
     #[test]
     fn read_accepts_every_frozen_tab_id() {
         let mut import = KernelSettingsImport;
@@ -109,7 +108,6 @@ mod tests {
         );
     }
 
-    /// REQ: UNMAPPED
     #[test]
     fn read_unknown_tab_is_not_found() {
         let mut import = KernelSettingsImport;
@@ -117,7 +115,6 @@ mod tests {
         assert_eq!(code, ErrorCode::NotFound);
     }
 
-    /// REQ: UNMAPPED
     #[test]
     fn read_empty_tab_id_is_not_found() {
         let mut import = KernelSettingsImport;
@@ -125,7 +122,6 @@ mod tests {
         assert_eq!(code, ErrorCode::NotFound);
     }
 
-    /// REQ: UNMAPPED
     #[test]
     fn read_wildcard_tab_id_is_not_found() {
         let mut import = KernelSettingsImport;
@@ -133,7 +129,6 @@ mod tests {
         assert_eq!(code, ErrorCode::NotFound);
     }
 
-    /// REQ: UNMAPPED
     #[test]
     fn read_tab_id_is_case_sensitive_kebab_case() {
         let mut import = KernelSettingsImport;
@@ -152,7 +147,6 @@ mod tests {
         ));
     }
 
-    /// REQ: UNMAPPED
     #[test]
     fn write_unknown_tab_is_not_found() {
         let mut import = KernelSettingsImport;
@@ -164,7 +158,6 @@ mod tests {
         assert_eq!(code, ErrorCode::NotFound);
     }
 
-    /// REQ: UNMAPPED
     #[test]
     fn write_unknown_key_is_not_found() {
         let mut import = KernelSettingsImport;
@@ -176,7 +169,6 @@ mod tests {
         assert_eq!(code, ErrorCode::NotFound);
     }
 
-    /// REQ: UNMAPPED
     #[test]
     fn write_empty_key_is_not_found() {
         let mut import = KernelSettingsImport;
@@ -188,7 +180,6 @@ mod tests {
         assert_eq!(code, ErrorCode::NotFound);
     }
 
-    /// REQ: UNMAPPED
     #[test]
     fn write_value_of_wrong_json_type_is_invalid_argument() {
         let mut import = KernelSettingsImport;
@@ -200,7 +191,6 @@ mod tests {
         assert_eq!(code, ErrorCode::InvalidArgument);
     }
 
-    /// REQ: UNMAPPED
     #[test]
     fn write_malformed_json_value_is_invalid_argument() {
         let mut import = KernelSettingsImport;
@@ -212,7 +202,6 @@ mod tests {
         assert_eq!(code, ErrorCode::InvalidArgument);
     }
 
-    /// REQ: UNMAPPED
     #[test]
     fn write_empty_value_is_invalid_argument() {
         let mut import = KernelSettingsImport;

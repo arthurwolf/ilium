@@ -839,8 +839,7 @@ mod tests {
     // Debouncer of `plugin dev` and `build --watch`
     // -----------------------------------------------------------------------------------------
 
-    /// REQ: DEV-853
-    /// REQ: DEV-185
+    /// REQ: DEV-853, DEV-185
     #[test]
     fn debounce_window_is_300_ms_and_reload_budget_is_one_second() {
         assert_eq!(DEBOUNCE, Duration::from_millis(300));
@@ -865,8 +864,7 @@ mod tests {
         assert_eq!(debouncer.due(301), 0);
     }
 
-    /// REQ: DEV-185
-    /// REQ: DEV-186
+    /// REQ: DEV-185, DEV-186
     #[test]
     fn debouncer_coalesces_a_burst_into_one_rebuild() {
         let mut debouncer = Debouncer::new(DEBOUNCE);
@@ -947,8 +945,7 @@ mod tests {
     // Build output helpers
     // -----------------------------------------------------------------------------------------
 
-    /// REQ: DEV-303
-    /// REQ: DEV-715
+    /// REQ: DEV-303, DEV-715
     #[test]
     fn source_map_path_is_dist_side_wasm_map() {
         assert_eq!(source_map_path(Side::Server), PathBuf::from("dist/server.wasm.map"));
@@ -984,8 +981,7 @@ mod tests {
         assert!(project_input_hash(scratch.path()).is_err());
     }
 
-    /// REQ: DEV-305
-    /// REQ: DEV-018
+    /// REQ: DEV-305, DEV-018
     #[test]
     fn input_hash_is_64_lowercase_hex_characters() {
         let scratch = scratch_root();
@@ -1033,10 +1029,7 @@ mod tests {
     // Output envelope, global flags, usage errors
     // -----------------------------------------------------------------------------------------
 
-    /// REQ: DEV-010
-    /// REQ: DEV-016
-    /// REQ: DEV-017
-    /// REQ: DEV-007
+    /// REQ: DEV-010, DEV-016, DEV-017, DEV-007
     #[test]
     fn unknown_flag_is_a_usage_error_that_writes_nothing() {
         let scratch = scratch_root();
@@ -1076,8 +1069,7 @@ mod tests {
         assert!(!any_stdout(&out).trim().is_empty());
     }
 
-    /// REQ: DEV-003
-    /// REQ: DEV-005
+    /// REQ: DEV-003, DEV-005
     #[test]
     fn offline_command_ignores_the_session_flag() {
         let scratch = scratch_root();
@@ -1107,8 +1099,7 @@ mod tests {
         assert_envelope(&quiet);
     }
 
-    /// REQ: DEV-016
-    /// REQ: DEV-017
+    /// REQ: DEV-016, DEV-017
     #[test]
     fn run_cli_returns_the_same_jsonl_lines_as_run() {
         let scratch = scratch_root();
@@ -1125,8 +1116,7 @@ mod tests {
         }
     }
 
-    /// REQ: API-080
-    /// REQ: DEV-070
+    /// REQ: API-080, DEV-070
     #[test]
     fn check_of_an_empty_directory_fails_with_a_manifest_code() {
         let scratch = scratch_root();
@@ -1141,8 +1131,7 @@ mod tests {
     // new
     // -----------------------------------------------------------------------------------------
 
-    /// REQ: DEV-040
-    /// REQ: DEV-010
+    /// REQ: DEV-040, DEV-010
     #[test]
     fn new_without_id_is_a_usage_error_and_writes_nothing() {
         let scratch = scratch_root();
@@ -1232,8 +1221,7 @@ mod tests {
         assert!(!target.exists());
     }
 
-    /// REQ: DEV-044
-    /// REQ: DEV-008
+    /// REQ: DEV-044, DEV-008
     #[test]
     fn new_reports_one_inventory_progress_record_per_written_file() {
         let scratch = scratch_root();
@@ -1315,9 +1303,7 @@ mod tests {
     // Sessions
     // -----------------------------------------------------------------------------------------
 
-    /// REQ: DEV-004
-    /// REQ: DEV-006
-    /// REQ: DEV-014
+    /// REQ: DEV-004, DEV-006, DEV-014
     #[test]
     fn session_command_without_a_session_reports_unreachable_once() {
         let scratch = scratch_root();
@@ -1419,8 +1405,7 @@ mod tests {
         assert!(has_error_code(&out, "plugin.not-found"));
     }
 
-    /// REQ: DEV-161
-    /// REQ: DEV-160
+    /// REQ: DEV-161, DEV-160
     #[test]
     fn disable_twice_succeeds_and_keeps_the_same_state() {
         let scratch = scratch_root();
@@ -1609,8 +1594,7 @@ mod tests {
         }
     }
 
-    /// REQ: DEV-013
-    /// REQ: DEV-800
+    /// REQ: DEV-013, DEV-800
     #[test]
     fn inspect_of_an_unknown_installed_id_is_not_found() {
         let scratch = scratch_root();

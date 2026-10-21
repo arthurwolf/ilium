@@ -39,7 +39,6 @@ mod tests {
         u64::try_from(elapsed.as_millis()).expect("current time in milliseconds fits in u64")
     }
 
-    /// REQ: none
     #[test]
     fn now_unix_millis_matches_system_clock_in_milliseconds() {
         let mut clock = ClockImport;
@@ -52,7 +51,6 @@ mod tests {
         );
     }
 
-    /// REQ: none
     #[test]
     fn now_unix_millis_is_after_the_unix_epoch_in_millisecond_scale() {
         let mut clock = ClockImport;
@@ -113,7 +111,6 @@ mod tests {
         }
     }
 
-    /// REQ: none
     #[test]
     fn monotonic_origin_is_shared_by_separate_import_instances() {
         let mut first_instance = ClockImport;

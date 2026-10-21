@@ -98,7 +98,7 @@ mod spec_tests {
         }
     }
 
-    /// REQ: DEV-520 (reference-test-harness.md "Property tests and fuzz hooks")
+    /// REQ: DEV-520
     #[test]
     fn dev_520_fuzz_events_returns_exactly_count_events() {
         assert_eq!(fuzz_events(1, 10).len(), 10);
@@ -112,7 +112,7 @@ mod spec_tests {
         assert_eq!(first, second);
     }
 
-    /// REQ: DEV-520 (invalid input: a zero count gives an empty batch, not an error)
+    /// REQ: DEV-520
     #[test]
     fn dev_520_zero_count_gives_an_empty_batch() {
         assert!(fuzz_events(1, 0).is_empty());
@@ -136,13 +136,13 @@ mod spec_tests {
         fuzz_run::<QuietPlugin>(4, 6).expect("a quiet plugin never fails");
     }
 
-    /// REQ: DEV-521 (invalid input: zero rounds deliver nothing and pass)
+    /// REQ: DEV-521
     #[test]
     fn dev_521_zero_rounds_pass_without_delivery() {
         fuzz_run::<QuietPlugin>(4, 0).expect("zero rounds never fail");
     }
 
-    /// REQ: DEV-521 (failure case: a trap fails the run and names the seed and round)
+    /// REQ: DEV-521
     #[test]
     fn dev_521_a_trap_fails_the_run_with_seed_and_round_in_the_message() {
         let failure = fuzz_run::<TrappingPlugin>(31, 5).expect_err("a trapping plugin fails");
@@ -153,7 +153,7 @@ mod spec_tests {
         assert!(text.contains(&failure.round.to_string()), "message was {text}");
     }
 
-    /// REQ: DEV-521 (replayable: the same seed fails in the same round)
+    /// REQ: DEV-521
     #[test]
     fn dev_521_the_same_seed_reproduces_the_same_failure() {
         let first = fuzz_run::<TrappingPlugin>(31, 5).expect_err("trap");

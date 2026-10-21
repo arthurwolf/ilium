@@ -81,7 +81,7 @@ mod spec_tests {
         regex::Regex::new(pattern).expect("path-line regex compiles")
     }
 
-    /// REQ: COR-050 (manual "Complete manifest": plugin identity at ilium:plugin@0.1.0)
+    /// REQ: COR-050
     #[test]
     fn manifest_identity_matches_the_manual() {
         let manifest = manifest();
@@ -93,7 +93,7 @@ mod spec_tests {
         assert_eq!(manifest["license"], "MIT");
     }
 
-    /// REQ: COR-050 (manual "Complete manifest": one server and one client entry, each with its world; one struct per side)
+    /// REQ: COR-050
     #[test]
     fn each_side_has_an_entry_a_world_and_a_struct() {
         let manifest = manifest();
@@ -105,7 +105,7 @@ mod spec_tests {
         let _client: TerminalClient = TerminalClient::default();
     }
 
-    /// REQ: COR-050 (manual "Complete manifest": activation on startup and on screen-changed)
+    /// REQ: COR-050
     #[test]
     fn activation_triggers_are_startup_and_screen_changed() {
         let mut activation = string_list(&manifest()["activation"]);
@@ -113,7 +113,7 @@ mod spec_tests {
         assert_eq!(activation, vec!["event:screen-changed", "startup"]);
     }
 
-    /// REQ: COR-033 (manual "Kernel tabs this plugin owns": the client side holds settings.write-kernel:terminal)
+    /// REQ: COR-033
     #[test]
     fn client_side_holds_the_write_grant_for_the_terminal_settings_tab() {
         let manifest = manifest();
@@ -121,7 +121,7 @@ mod spec_tests {
         assert!(client_caps.iter().any(|cap| cap == "settings.write-kernel:terminal"));
     }
 
-    /// REQ: COR-050 (manual "Complete manifest": server capabilities for terminal, pane and tree access)
+    /// REQ: COR-050
     #[test]
     fn server_side_grants_terminal_pane_and_tree_capabilities() {
         let manifest = manifest();
@@ -139,7 +139,7 @@ mod spec_tests {
         }
     }
 
-    /// REQ: EXT-052 (manual "Extension points this plugin owns": 20 ms deadline and 8 handlers for the two hooks, 64 entries for link-actions)
+    /// REQ: EXT-052
     #[test]
     fn extension_point_limits_match_the_manual_table() {
         let manifest = manifest();
@@ -153,7 +153,7 @@ mod spec_tests {
         assert_eq!(link_actions["max_entries"], 64);
     }
 
-    /// REQ: SEC-293 (manual "Extension points": before-send-input and open-link are high risk, link-actions standard)
+    /// REQ: SEC-293
     #[test]
     fn extension_point_risk_marks_follow_the_corrected_table() {
         let manifest = manifest();
@@ -162,7 +162,7 @@ mod spec_tests {
         assert_eq!(extension_point(&manifest, "link-actions")["risk"], "standard");
     }
 
-    /// REQ: EXT-052 (manual "Extension points this plugin owns": open-link is provided from the client side only)
+    /// REQ: EXT-052
     #[test]
     fn open_link_is_provided_from_the_client_side_not_the_server() {
         let manifest = manifest();
@@ -176,7 +176,6 @@ mod spec_tests {
             .any(|cap| cap == "extensions.provide:ilium.core.terminal/open-link"));
     }
 
-    /// REQ: none bracketed; manual section "Clickable links": the path-line detector matches file:line text and maps to link-open
     #[test]
     fn path_line_detector_matches_a_path_with_a_line_suffix() {
         let manifest = manifest();
@@ -186,7 +185,6 @@ mod spec_tests {
         assert!(path_line_regex().is_match("src/server/routes.rs:42"));
     }
 
-    /// REQ: none bracketed; manual section "Clickable links": empty text and paths without a line number are not path links
     #[test]
     fn path_line_detector_rejects_empty_text_and_paths_without_a_line_number() {
         let regex = path_line_regex();

@@ -95,9 +95,7 @@ fn port_copy_table_cells_respect_backtick_runs() {
     assert_offers("| `a|b` | plain |", &["plain"]);
 }
 
-/// REQ: PORT:ilium-client/src/smart_copy.rs::ascii_frames_and_codex_output_rows_are_detected
-/// REQ: PORT:ilium-client/src/smart_copy.rs::double_line_frames_and_short_tree_branches_are_detected
-/// REQ: PORT:ilium-client/src/smart_copy.rs::pre_scan_finds_terminal_frames_trees_lists_quotes_commands_and_diagnostics
+/// REQ: PORT:ilium-client/src/smart_copy.rs::ascii_frames_and_codex_output_rows_are_detected, PORT:ilium-client/src/smart_copy.rs::double_line_frames_and_short_tree_branches_are_detected, PORT:ilium-client/src/smart_copy.rs::pre_scan_finds_terminal_frames_trees_lists_quotes_commands_and_diagnostics
 #[test]
 fn port_copy_frames_trees_lists_and_quotes_offer_their_content() {
     let lines = scan(&[
@@ -115,9 +113,7 @@ fn port_copy_frames_trees_lists_and_quotes_offer_their_content() {
     }
 }
 
-/// REQ: PORT:ilium-client/src/smart_copy.rs::pre_scan_seeds_sections_paragraphs_code_and_table_cells
-/// REQ: PORT:ilium-client/src/smart_copy.rs::bare_fences_after_markdown_headings_keep_visible_code
-/// REQ: PORT:ilium-client/src/smart_copy.rs::claude_prompt_rows_are_isolated_from_following_prose
+/// REQ: PORT:ilium-client/src/smart_copy.rs::pre_scan_seeds_sections_paragraphs_code_and_table_cells, PORT:ilium-client/src/smart_copy.rs::bare_fences_after_markdown_headings_keep_visible_code, PORT:ilium-client/src/smart_copy.rs::claude_prompt_rows_are_isolated_from_following_prose
 #[test]
 fn port_copy_sections_fences_and_prompt_rows_are_isolated() {
     let lines = scan(&[
@@ -151,10 +147,7 @@ fn port_copy_picking_the_same_candidate_twice_copies_it_each_time() {
     assert!(host.failures().is_empty());
 }
 
-/// REQ: PORT:ilium-client/src/smart_copy.rs::rejects_model_authored_or_out_of_bounds_references
-/// REQ: PORT:ilium-client/src/smart_copy.rs::resolves_word_ranges_to_frozen_source_text
-/// REQ: PORT:ilium-client/src/smart_copy.rs::exact_model_repeats_are_dropped_but_distinct_overlaps_remain
-/// REQ: PORT:ilium-client/src/smart_copy.rs::wide_line_repeat_is_deduplicated_and_model_labels_are_bounded
+/// REQ: PORT:ilium-client/src/smart_copy.rs::rejects_model_authored_or_out_of_bounds_references, PORT:ilium-client/src/smart_copy.rs::resolves_word_ranges_to_frozen_source_text, PORT:ilium-client/src/smart_copy.rs::exact_model_repeats_are_dropped_but_distinct_overlaps_remain, PORT:ilium-client/src/smart_copy.rs::wide_line_repeat_is_deduplicated_and_model_labels_are_bounded
 #[test]
 fn port_copy_model_reply_is_limited_to_three_distinct_lines_of_the_screen() {
     let mut host = client_host();
@@ -189,8 +182,7 @@ fn port_copy_inference_request_keeps_the_smart_copy_contract() {
     assert!(system.contains("Return the three most useful strings to copy, one per line."));
 }
 
-/// REQ: PORT:ilium-client/src/app.rs::smart_copy_freezes_the_visible_screen_and_accepts_a_unique_streamed_record
-/// REQ: PORT:ilium-client/src/smart_copy.rs::pre_scanned_regions_do_not_flash_on_arrival
+/// REQ: PORT:ilium-client/src/app.rs::smart_copy_freezes_the_visible_screen_and_accepts_a_unique_streamed_record, PORT:ilium-client/src/smart_copy.rs::pre_scanned_regions_do_not_flash_on_arrival
 #[test]
 fn port_copy_the_frozen_screen_ignores_later_output() {
     let mut host = client_host();

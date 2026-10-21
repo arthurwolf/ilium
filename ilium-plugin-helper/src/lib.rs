@@ -72,7 +72,6 @@ mod spec_tests {
         }
     }
 
-    /// REQ: reference-host-helper.md "Messages" (Shutdown: the helper exits with code 0) and the
     /// `serve` doc comment (serves until the host closes the channel).
     #[test]
     fn serve_returns_ok_when_host_closes_channel_without_requests() {
@@ -81,7 +80,6 @@ mod spec_tests {
         assert!(result.is_ok(), "clean channel close must end serve with Ok, got {result:?}");
     }
 
-    /// REQ: reference-host-helper.md "Starting a helper" step 4 (the helper sends Hello first,
     /// before it waits for any Instantiate or CallExport).
     #[test]
     fn serve_writes_hello_before_it_reads_requests() {
@@ -91,8 +89,8 @@ mod spec_tests {
         assert!(!output.is_empty(), "the helper must announce itself with Hello");
     }
 
-    /// REQ: HST-155 (a message with a bad length ends the helper as a failure). The length
     /// prefix 0xFFFF_FFFF is far above the 4 MiB message cap.
+    /// REQ: HST-155
     #[test]
     fn serve_rejects_frame_length_above_message_cap() {
         let input = [0xFFu8, 0xFF, 0xFF, 0xFF];
@@ -104,8 +102,8 @@ mod spec_tests {
         );
     }
 
-    /// REQ: HST-155 (a truncated message ends the helper and counts as a failure). Two bytes
     /// cannot hold a complete length prefix, so the helper must not wait or return Ok.
+    /// REQ: HST-155
     #[test]
     fn serve_fails_on_truncated_frame() {
         let input = [0x10u8, 0x00];
@@ -114,7 +112,6 @@ mod spec_tests {
         assert!(result.is_err(), "a truncated frame must end serve with an error");
     }
 
-    /// REQ: HelperError::Channel ("Reading or writing the host channel failed") with
     /// reference-host-helper.md "Starting a helper" step 4 (the Hello write is the first channel write).
     #[test]
     fn serve_reports_channel_failure_when_hello_cannot_be_written() {
@@ -125,8 +122,8 @@ mod spec_tests {
         );
     }
 
-    /// REQ: SEC-022 (the helper's network namespace has no interface) and SEC-032 (children of
     /// T2 and T3 plugins have no network). A default policy must grant no network and no paths.
+    /// REQ: SEC-022
     #[test]
     fn default_sandbox_policy_grants_no_network_and_no_paths() {
         let policy = SandboxPolicy::default();

@@ -120,7 +120,7 @@ mod spec_tests {
         Some(message)
     }
 
-    /// REQ: DEV-500 (assert_golden compares bytes after converting CRLF to LF)
+    /// REQ: DEV-500
     #[test]
     fn dev_500_crlf_in_actual_text_matches_lf_golden() {
         let _env = GoldenEnv::set(false, false);
@@ -129,7 +129,7 @@ mod spec_tests {
         assert_golden(golden.path_str(), "first row\r\nsecond row\r\n");
     }
 
-    /// REQ: DEV-500 (empty actual text matches an empty golden file)
+    /// REQ: DEV-500
     #[test]
     fn dev_500_empty_actual_text_matches_empty_golden() {
         let _env = GoldenEnv::set(false, false);
@@ -138,7 +138,7 @@ mod spec_tests {
         assert_golden(golden.path_str(), "");
     }
 
-    /// REQ: DEV-500 (a mismatch fails with a unified diff of at most 40 changed lines)
+    /// REQ: DEV-500
     #[test]
     fn dev_500_mismatch_diff_shows_at_most_forty_changed_lines() {
         let _env = GoldenEnv::set(false, false);
@@ -166,7 +166,7 @@ mod spec_tests {
         );
     }
 
-    /// REQ: DEV-501 (update mode writes the actual text to the golden file and passes)
+    /// REQ: DEV-501
     #[test]
     fn dev_501_update_mode_rewrites_golden_and_passes() {
         let _env = GoldenEnv::set(true, false);
@@ -177,7 +177,7 @@ mod spec_tests {
         assert_eq!(written, "fresh row\nsecond row\n");
     }
 
-    /// REQ: DEV-502 (a missing golden file fails with harness.golden-missing outside update mode)
+    /// REQ: DEV-502
     #[test]
     fn dev_502_missing_golden_fails_with_golden_missing_code() {
         let _env = GoldenEnv::set(false, false);
@@ -190,7 +190,7 @@ mod spec_tests {
         );
     }
 
-    /// REQ: DEV-502 (update mode creates a missing golden file and passes)
+    /// REQ: DEV-502
     #[test]
     fn dev_502_update_mode_creates_missing_golden_file() {
         let _env = GoldenEnv::set(true, false);
@@ -200,7 +200,7 @@ mod spec_tests {
         assert_eq!(written, "created row\n");
     }
 
-    /// REQ: DEV-503 (update mode is refused when CI is set and non-empty, and the golden file is left unchanged)
+    /// REQ: DEV-503
     #[test]
     fn dev_503_update_in_ci_fails_and_leaves_golden_unchanged() {
         let _env = GoldenEnv::set(true, true);
@@ -216,7 +216,7 @@ mod spec_tests {
         assert_eq!(unchanged, "kept\n");
     }
 
-    /// REQ: DEV-504 (a snapshot file is pretty JSON with sorted keys and a trailing newline)
+    /// REQ: DEV-504
     #[test]
     fn dev_504_snapshot_is_pretty_sorted_json_with_trailing_newline() {
         let _env = GoldenEnv::set(false, false);
@@ -231,7 +231,7 @@ mod spec_tests {
         assert_snapshot("spec_dev_504_sorted", &value);
     }
 
-    /// REQ: DEV-504 (an empty object is stored as `{}` followed by a trailing newline)
+    /// REQ: DEV-504
     #[test]
     fn dev_504_empty_object_snapshot_is_braces_with_trailing_newline() {
         let _env = GoldenEnv::set(false, false);

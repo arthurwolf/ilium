@@ -49,7 +49,7 @@ mod spec_tests {
         (output.status, stdout)
     }
 
-    /// REQ: [SEC-022], [SEC-023] (empty input: no granted scope and no network)
+    /// Manual: empty input: no granted scope and no network
     #[test]
     fn default_policy_grants_no_paths_and_no_network() {
         let policy = SandboxPolicy::default();
@@ -58,7 +58,6 @@ mod spec_tests {
         assert!(!policy.allow_network);
     }
 
-    /// REQ: [SEC-024] (child body: runs apply, then reads NoNewPrivs and CapEff)
     #[test]
     fn sandboxed_child() {
         let Ok(scenario) = std::env::var(SCENARIO_ENV) else {
@@ -109,28 +108,27 @@ mod spec_tests {
         }
     }
 
-    /// REQ: [SEC-024] (apply sets no_new_privs before the helper reads plugin bytes)
+    /// Manual: apply sets no_new_privs before the helper reads plugin bytes
     #[test]
     fn apply_sets_no_new_privileges() {
         let (status, stdout) = run_sandboxed_scenario("no_new_privs");
         assert!(status.success(), "child failed: {stdout}");
     }
 
-    /// REQ: [SEC-024] (apply drops every capability)
+    /// Manual: apply drops every capability
     #[test]
     fn apply_drops_every_capability() {
         let (status, stdout) = run_sandboxed_scenario("caps");
         assert!(status.success(), "child failed: {stdout}");
     }
 
-    /// REQ: [SEC-022] (the network namespace has only a downed loopback interface)
+    /// Manual: the network namespace has only a downed loopback interface
     #[test]
     fn apply_leaves_only_loopback_interface() {
         let (status, stdout) = run_sandboxed_scenario("network");
         assert!(status.success(), "child failed: {stdout}");
     }
 
-    /// REQ: [SEC-055] (failure case: an unavailable sandbox is an error naming the prerequisite,
     /// never a silent unconfined run)
     #[test]
     fn apply_reports_sandbox_error_with_named_prerequisite() {

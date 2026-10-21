@@ -42,14 +42,12 @@ mod tests {
         }
     }
 
-    /// REQ: none-documented (frozen tab list, reference-settings-schema.md "Built-in tab ids")
     #[test]
     fn kernel_tab_ids_count_matches_frozen_constant() {
         assert_eq!(kernel_tab_ids().len(), KERNEL_TAB_COUNT);
         assert_eq!(KERNEL_TAB_COUNT, 25);
     }
 
-    /// REQ: none-documented (frozen tab list, reference-settings-schema.md "Built-in tab ids")
     #[test]
     fn kernel_tab_ids_follow_rail_order() {
         let expected = [
@@ -82,7 +80,6 @@ mod tests {
         assert_eq!(kernel_tab_ids(), &expected[..]);
     }
 
-    /// REQ: none-documented (frozen tab list, reference-settings-schema.md "Built-in tab ids")
     #[test]
     fn kernel_tab_ids_are_unique() {
         let ids = kernel_tab_ids();
@@ -94,7 +91,6 @@ mod tests {
         }
     }
 
-    /// REQ: none-documented (tab id grammar, reference-settings-schema.md "Tab entries")
     #[test]
     fn kernel_tab_ids_match_tab_id_grammar() {
         for id in kernel_tab_ids() {

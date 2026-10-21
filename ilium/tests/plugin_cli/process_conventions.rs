@@ -51,8 +51,7 @@ fn dev_007_process_exit_code_equals_the_result_record() {
     );
 }
 
-/// REQ: DEV-004
-/// REQ: DEV-006
+/// REQ: DEV-004, DEV-006
 #[test]
 fn dev_006_session_command_without_a_session_exits_six_without_retry() {
     let dir = scratch();

@@ -46,7 +46,7 @@ mod spec_tests {
     use ilium_plugin_sdk_core::types::ErrorCode;
     use serde_json::json;
 
-    /// REQ: DEV-467 (`host.settings().set(key, value)` validates the value and then the value reads back through `get`)
+    /// REQ: DEV-467
     #[test]
     fn set_then_get_returns_the_written_value() {
         let mut host = FakeHost::new();
@@ -56,7 +56,7 @@ mod spec_tests {
         assert_eq!(host.settings().get("theme"), Some(json!("dark")));
     }
 
-    /// REQ: DEV-467 (`writes` lists every `settings.set` in order, the pairs that trigger `settings-changed`)
+    /// REQ: DEV-467
     #[test]
     fn writes_list_each_successful_set_in_call_order() {
         let mut host = FakeHost::new();
@@ -71,7 +71,7 @@ mod spec_tests {
         );
     }
 
-    /// REQ: DEV-467 (an invalid value MUST return `Err(invalid-argument)`)
+    /// REQ: DEV-467
     #[test]
     fn invalid_value_returns_invalid_argument() {
         let mut host = FakeHost::new();
@@ -80,7 +80,7 @@ mod spec_tests {
         assert_eq!(error.code, ErrorCode::InvalidArgument);
     }
 
-    /// REQ: DEV-467 with SET-021 (the schema check runs before the write, so a refused value is neither stored nor recorded)
+    /// REQ: DEV-467
     #[test]
     fn refused_value_is_neither_stored_nor_recorded() {
         let mut host = FakeHost::new();
@@ -89,14 +89,14 @@ mod spec_tests {
         assert!(host.settings().writes().is_empty());
     }
 
-    /// REQ: DEV-467 (empty input: a key that was never set reads as absent, not as a default value)
+    /// REQ: DEV-467
     #[test]
     fn get_of_a_never_set_key_returns_none() {
         let mut host = FakeHost::new();
         assert_eq!(host.settings().get("never-written"), None);
     }
 
-    /// REQ: SET-024 (a text value above 4,096 characters fails the save with invalid-argument)
+    /// REQ: SET-024
     #[test]
     fn text_value_above_4096_characters_is_refused() {
         let mut host = FakeHost::new();

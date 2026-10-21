@@ -31,7 +31,7 @@ mod spec_tests {
     use super::*;
     use crate::host::FakeHost;
 
-    /// REQ: DEV-462 (Fake network: a registered entry is a fixture, never a real call)
+    /// REQ: DEV-462
     #[test]
     fn dev_462_registered_entry_makes_no_network_call() {
         let mut host = FakeHost::new();
@@ -47,7 +47,7 @@ mod spec_tests {
         assert!(host.http().calls().is_empty());
     }
 
-    /// REQ: DEV-462 (empty input: a fresh host has made no request and opened no stream)
+    /// REQ: DEV-462
     #[test]
     fn dev_462_fresh_host_has_no_calls_and_no_streams() {
         let mut host = FakeHost::new();
@@ -55,7 +55,7 @@ mod spec_tests {
         assert!(host.http().streams().is_empty());
     }
 
-    /// REQ: DEV-462 (several entries for different methods and URLs register without any call)
+    /// REQ: DEV-462
     #[test]
     fn dev_462_several_entries_register_without_calls() {
         let mut host = FakeHost::new();
@@ -81,7 +81,7 @@ mod spec_tests {
         assert!(host.http().streams().is_empty());
     }
 
-    /// REQ: DEV-462 (failure case: an entry whose response is an error status registers without a call)
+    /// REQ: DEV-462
     #[test]
     fn dev_462_error_status_entry_registers_without_call() {
         let mut host = FakeHost::new();
@@ -97,7 +97,7 @@ mod spec_tests {
         assert!(host.http().calls().is_empty());
     }
 
-    /// REQ: DEV-462 (streams(): only streams the plugin opened with open-stream are listed, so a registered entry lists none)
+    /// REQ: DEV-462
     #[test]
     fn dev_462_streams_stay_empty_when_only_entries_are_registered() {
         let mut host = FakeHost::new();

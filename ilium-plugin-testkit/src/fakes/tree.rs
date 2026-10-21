@@ -140,7 +140,7 @@ mod spec_tests {
         }
     }
 
-    /// REQ: DEV-471 (ids are assigned in increasing order from 1)
+    /// REQ: DEV-471
     #[test]
     fn dev_471_first_two_nodes_get_ids_one_and_two() {
         let mut host = FakeHost::new();
@@ -150,7 +150,7 @@ mod spec_tests {
         assert_eq!(second_id, 2);
     }
 
-    /// REQ: DEV-471 (a caller-supplied id is replaced; ids never reuse a removed id)
+    /// REQ: DEV-471
     #[test]
     fn dev_471_ids_ignore_supplied_value_and_are_not_reused_after_remove() {
         let mut host = FakeHost::new();
@@ -162,7 +162,7 @@ mod spec_tests {
         assert_eq!(host.tree().get(next_id).map(|node| node.id), Some(2));
     }
 
-    /// REQ: DEV-470 (add stores the node so that get returns it under the new id)
+    /// REQ: DEV-470
     #[test]
     fn dev_470_add_then_get_returns_the_node_with_its_parent_and_class() {
         let mut host = FakeHost::new();
@@ -179,7 +179,7 @@ mod spec_tests {
         assert_eq!(stored.content_kind.as_deref(), Some("ilium.terminal"));
     }
 
-    /// REQ: DEV-470 (rename changes the name that get reports)
+    /// REQ: DEV-470
     #[test]
     fn dev_470_rename_changes_the_name_that_get_reports() {
         let mut host = FakeHost::new();
@@ -188,7 +188,7 @@ mod spec_tests {
         assert_eq!(host.tree().get(pane_id).map(|node| node.name), Some("build".to_string()));
     }
 
-    /// REQ: DEV-470 (set_activity updates the activity of an agent node)
+    /// REQ: DEV-470
     #[test]
     fn dev_470_set_activity_updates_the_agent_activity_of_the_node() {
         let mut host = FakeHost::new();
@@ -202,7 +202,7 @@ mod spec_tests {
         assert_eq!(activity, Some(AgentActivity::Working));
     }
 
-    /// REQ: DEV-470 (remove deletes the node and its children and leaves siblings in place)
+    /// REQ: DEV-470
     #[test]
     fn dev_470_remove_deletes_the_node_and_its_children_only() {
         let mut host = FakeHost::new();
@@ -219,7 +219,7 @@ mod spec_tests {
         assert!(host.tree().get(sibling_id).is_some());
     }
 
-    /// REQ: DEV-470 (get on an id that was never added, or was removed, returns None)
+    /// REQ: DEV-470
     #[test]
     fn dev_470_get_on_unknown_or_removed_id_returns_none() {
         let mut host = FakeHost::new();
@@ -229,7 +229,7 @@ mod spec_tests {
         assert!(host.tree().get(pane_id).is_none());
     }
 
-    /// REQ: DEV-470 (lane hook move_node reparents a node under another parent)
+    /// REQ: DEV-470
     #[test]
     fn dev_470_move_node_reparents_the_node_under_the_new_parent() {
         let mut host = FakeHost::new();

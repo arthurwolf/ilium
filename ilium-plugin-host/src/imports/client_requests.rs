@@ -41,8 +41,8 @@ mod tests {
     use ilium_plugin_api::generated::types::errors::ErrorCode;
     use ilium_plugin_api::generated::types::ids::ClientId;
 
-    /// REQ: AUT-023
     /// Documented: `request` returns `not-found` when the client id is unknown (client gone or never attached).
+    /// REQ: AUT-023
     #[test]
     fn request_to_unknown_client_returns_not_found() {
         let mut import = ClientRequestsImport;
@@ -56,9 +56,9 @@ mod tests {
         assert_eq!(error.code, ErrorCode::NotFound);
     }
 
-    /// REQ: AUT-023
     /// Documented: `request` returns `not-found` when the kind is not declared in `client_requests`.
     /// Empty input: an empty kind is never declared, so it is refused with `not-found`.
+    /// REQ: AUT-023
     #[test]
     fn request_with_empty_kind_returns_not_found() {
         let mut import = ClientRequestsImport;
@@ -67,9 +67,9 @@ mod tests {
         assert_eq!(error.code, ErrorCode::NotFound);
     }
 
-    /// REQ: HST-499
     /// Boundary: the lower bound of `timeout-millis` (1 ms) is valid. Assumes client 1 is attached
     /// and declares `terminal-size` in the test fixture, so only the timeout is under test.
+    /// REQ: HST-499
     #[test]
     fn request_accepts_lower_timeout_bound_of_one_millisecond() {
         let mut import = ClientRequestsImport;
@@ -80,9 +80,9 @@ mod tests {
         );
     }
 
-    /// REQ: HST-499
     /// Boundary: the upper bound of `timeout-millis` (30,000 ms) is valid. Assumes the same fixture
     /// as the lower-bound test.
+    /// REQ: HST-499
     #[test]
     fn request_accepts_upper_timeout_bound_of_30000_milliseconds() {
         let mut import = ClientRequestsImport;

@@ -37,7 +37,7 @@ mod spec_tests {
         }
     }
 
-    /// REQ: DEV-531 (summary.json MUST list lines_total, lines_covered and percent, in that order)
+    /// REQ: DEV-531
     #[test]
     fn dev_531_summary_serialises_its_three_fields_in_order() {
         let json = serde_json::to_string(&summary_with(1000, 712, 71.2)).expect("serialise");
@@ -47,7 +47,7 @@ mod spec_tests {
         );
     }
 
-    /// REQ: DEV-531 (the summary written to summary.json reads back unchanged)
+    /// REQ: DEV-531
     #[test]
     fn dev_531_summary_round_trips_through_json() {
         let original = summary_with(250, 200, 80.0);
@@ -56,7 +56,7 @@ mod spec_tests {
         assert_eq!(restored, original);
     }
 
-    /// REQ: DEV-530 (ilium plugin test --coverage MUST write line coverage for the plugin source)
+    /// REQ: DEV-530
     #[test]
     fn dev_530_collect_reports_line_counts_consistent_with_percent() {
         let project_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -69,8 +69,8 @@ mod spec_tests {
         }
     }
 
-    /// REQ: DEV-530 (a missing coverage tool MUST fail with toolchain.coverage-tool-missing;
     /// this test asserts the code whenever the tool is absent on the running machine)
+    /// REQ: DEV-530
     #[test]
     fn dev_530_missing_tool_error_carries_the_coverage_tool_missing_code() {
         let project_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -79,40 +79,40 @@ mod spec_tests {
         }
     }
 
-    /// REQ: DEV-532 (--min-coverage MUST exit 3 when coverage is lower; message reads
     /// `coverage 71.2 percent is below 80`)
+    /// REQ: DEV-532
     #[test]
     fn dev_532_below_minimum_produces_the_exact_message() {
         let error = check_minimum(&summary_with(1000, 712, 71.2), 80.0).expect_err("below");
         assert_eq!(error, "coverage 71.2 percent is below 80");
     }
 
-    /// REQ: DEV-532 (coverage equal to the minimum is not lower, so it passes)
+    /// REQ: DEV-532
     #[test]
     fn dev_532_equal_to_minimum_passes() {
         assert!(check_minimum(&summary_with(1000, 800, 80.0), 80.0).is_ok());
     }
 
-    /// REQ: DEV-532 (coverage above the minimum passes)
+    /// REQ: DEV-532
     #[test]
     fn dev_532_above_minimum_passes() {
         assert!(check_minimum(&summary_with(1000, 955, 95.5), 80.0).is_ok());
     }
 
-    /// REQ: DEV-532 (just below the minimum fails, with the one-decimal percent in the message)
+    /// REQ: DEV-532
     #[test]
     fn dev_532_just_below_minimum_fails_with_its_percent() {
         let error = check_minimum(&summary_with(1000, 799, 79.9), 80.0).expect_err("below");
         assert_eq!(error, "coverage 79.9 percent is below 80");
     }
 
-    /// REQ: DEV-532 (empty input: zero coverage passes a zero minimum, since 0 is not below 0)
+    /// REQ: DEV-532
     #[test]
     fn dev_532_zero_coverage_passes_a_zero_minimum() {
         assert!(check_minimum(&summary_with(0, 0, 0.0), 0.0).is_ok());
     }
 
-    /// REQ: DEV-532 (invalid input: no percentage can reach a minimum above 100, so it fails)
+    /// REQ: DEV-532
     #[test]
     fn dev_532_full_coverage_fails_a_minimum_above_one_hundred() {
         let error = check_minimum(&summary_with(1000, 1000, 100.0), 101.0).expect_err("below");

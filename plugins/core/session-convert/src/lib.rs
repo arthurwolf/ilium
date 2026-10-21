@@ -96,8 +96,8 @@ mod spec_tests {
             .collect()
     }
 
-    /// REQ: COR-050
     /// Manual: the complete manifest names the plugin id, the api version and the display name.
+    /// REQ: COR-050
     #[test]
     fn manifest_declares_the_plugin_id_api_and_name() {
         let manifest_value = manifest();
@@ -108,8 +108,8 @@ mod spec_tests {
         assert_eq!(manifest_value["replaceable"], true);
     }
 
-    /// REQ: COR-050
     /// Manual: both sides exist, with their worlds and the exports each side lists.
+    /// REQ: COR-050
     #[test]
     fn sides_worlds_and_exports_match_the_manual() {
         let _server = SessionConvertServer::default();
@@ -127,8 +127,8 @@ mod spec_tests {
         );
     }
 
-    /// REQ: COR-050
     /// Manual: activation triggers and the surface list are part of the complete manifest.
+    /// REQ: COR-050
     #[test]
     fn activation_triggers_and_surface_match_the_manual() {
         let manifest_value = manifest();
@@ -147,8 +147,8 @@ mod spec_tests {
         );
     }
 
-    /// REQ: COR-050
     /// Manual: the capability grants of each side are exactly the grants listed on the page.
+    /// REQ: COR-050
     #[test]
     fn capability_grants_match_the_manual_complete_manifest() {
         let manifest_value = manifest();
@@ -182,9 +182,9 @@ mod spec_tests {
         assert_eq!(client_grants, vec!["agent.read", "ui.panels"]);
     }
 
-    /// REQ: COR-011
     /// Manual: the plugin holds no write grant on Claude's folders; it proposes the transcript
     /// through agent-config.propose, and the original transcript is read and never changed.
+    /// REQ: COR-011
     #[test]
     fn plugin_holds_no_write_grant_on_agent_folders() {
         let manifest_value = manifest();
@@ -199,9 +199,9 @@ mod spec_tests {
         assert!(grants.contains(&"fs.read:agent-sessions:codex".to_string()));
     }
 
-    /// REQ: F-077
     /// Manual: the convert service takes a pane and only the codex or claude target; antigravity
     /// sessions cannot be converted, so an invalid target fails the schema.
+    /// REQ: F-077
     #[test]
     fn convert_service_takes_pane_and_only_codex_or_claude_targets() {
         let manifest_value = manifest();
@@ -216,8 +216,8 @@ mod spec_tests {
         assert_eq!(string_list(&start["result"]["required"]), vec!["conversion"]);
     }
 
-    /// REQ: COR-050
     /// Manual: the codex-to-claude job runs under a 60 second deadline and a 256 MiB memory limit.
+    /// REQ: COR-050
     #[test]
     fn codex_to_claude_job_has_its_deadline_and_memory_limit() {
         let manifest_value = manifest();
@@ -227,9 +227,9 @@ mod spec_tests {
         assert_eq!(job["memory_mib"], 256);
     }
 
-    /// REQ: COR-050
     /// Manual: formats collects at most 8 entries; after-convert is an observe-only hook with a
     /// 20 ms deadline and at most 8 handlers.
+    /// REQ: COR-050
     #[test]
     fn extension_points_match_the_manual_limits() {
         let manifest_value = manifest();
@@ -254,9 +254,9 @@ mod spec_tests {
         assert_eq!(hook["payload_schema"]["properties"]["path"]["type"], "string");
     }
 
-    /// REQ: F-077
     /// Manual: the Convert session command appears as the pane context menu entry and opens the
     /// modal Convert session progress panel, which the activation list refers to.
+    /// REQ: F-077
     #[test]
     fn command_menu_entry_and_progress_panel_match_the_manual() {
         let manifest_value = manifest();

@@ -136,7 +136,7 @@ mod spec_tests {
         }
     }
 
-    /// REQ: rust-sdk.md "Exports and entry points" (side and exports are read from the attribute)
+    /// Manual: side and exports are read from the attribute
     #[test]
     fn side_and_exports_are_read_in_declared_order() {
         let args = parse_args(
@@ -151,7 +151,6 @@ mod spec_tests {
         );
     }
 
-    /// REQ: rust-sdk.md "Exports and entry points" (exports names the optional exports; none is the default)
     #[test]
     fn omitted_or_empty_exports_mean_no_optional_exports() {
         let omitted = parse_args(r#"side = "server""#).expect("side alone must parse");
@@ -162,7 +161,6 @@ mod spec_tests {
         assert!(empty.exports.is_empty());
     }
 
-    /// REQ: rust-sdk.md "Exports and entry points" (side is "server", "client" or "scene")
     #[test]
     fn every_documented_side_is_accepted() {
         for side in ["server", "client", "scene"] {
@@ -172,7 +170,7 @@ mod spec_tests {
         }
     }
 
-    /// REQ: rust-sdk.md "Modules, import paths and names" (the SDK crate is ilium_plugin_sdk)
+    /// Manual: the SDK crate is ilium_plugin_sdk
     #[test]
     fn generated_code_refers_to_the_sdk_crate_by_its_absolute_path() {
         let args = parse_args(r#"side = "server""#).expect("side alone must parse");
@@ -187,7 +185,7 @@ mod spec_tests {
         assert_eq!(segment_names, vec!["ilium_plugin_sdk"]);
     }
 
-    /// REQ: rust-sdk.md "Exports and entry points" (side is required)
+    /// Manual: side is required
     #[test]
     fn missing_side_is_a_compile_error_including_for_empty_input() {
         let without_side = parse_error_message(r#"exports = ["views"]"#);
@@ -197,7 +195,6 @@ mod spec_tests {
         assert!(empty_input.contains("requires side"), "got: {empty_input}");
     }
 
-    /// REQ: rust-sdk.md "Exports and entry points" (side must be server, client or scene; "both" is a CLI value only)
     #[test]
     fn side_outside_the_three_documented_values_is_rejected() {
         let message = parse_error_message(r#"side = "both""#);
@@ -208,7 +205,7 @@ mod spec_tests {
         );
     }
 
-    /// REQ: rust-sdk.md "Exports and entry points" (unknown attribute arguments are a compile error)
+    /// Manual: unknown attribute arguments are a compile error
     #[test]
     fn unknown_argument_is_a_compile_error() {
         let message = parse_error_message(r#"side = "server", colour = "red""#);
@@ -219,7 +216,6 @@ mod spec_tests {
         );
     }
 
-    /// REQ: rust-sdk.md "Exports and entry points" (exports are manifest names, so they must be string literals)
     #[test]
     fn non_string_export_entry_is_a_compile_error() {
         let message = parse_error_message(r#"side = "server", exports = ["views", 3]"#);

@@ -122,14 +122,14 @@ mod spec_tests {
         client_exports(manifest) == CLIENT_EXPORTS
     }
 
-    /// REQ: COR-050 (every core-plugin page has a Complete manifest section with the required keys)
+    /// REQ: COR-050
     #[test]
     fn manifest_has_every_key_of_the_complete_manifest() {
         let manifest = load_manifest();
         assert_eq!(missing_required_keys(&manifest), Vec::<&str>::new());
     }
 
-    /// REQ: COR-050 (the client side entry, world and exports listed in the Complete manifest)
+    /// REQ: COR-050
     #[test]
     fn client_side_entry_world_and_exports_match_the_manual() {
         let manifest = load_manifest();
@@ -139,7 +139,7 @@ mod spec_tests {
         assert_eq!(client_exports(&manifest), CLIENT_EXPORTS);
     }
 
-    /// REQ: COR-050 (the server part exports only service-provider and runs the server world)
+    /// REQ: COR-050
     #[test]
     fn server_side_part_exports_only_service_provider() {
         let manifest = load_manifest();
@@ -148,7 +148,7 @@ mod spec_tests {
         assert_eq!(strings_at(&manifest["server"]["exports"]), ["service-provider"]);
     }
 
-    /// REQ: COR-030 (only the owner plugin holds settings.write-kernel:editor; the client part never does)
+    /// REQ: COR-030
     #[test]
     fn client_capabilities_never_hold_the_editor_kernel_grant() {
         let manifest = load_manifest();
@@ -156,7 +156,7 @@ mod spec_tests {
         assert!(!client_capabilities.iter().any(|capability| capability == EDITOR_TAB_GRANT));
     }
 
-    /// REQ: COR-030 (a kernel tab has exactly one owner, and the grant sits on the server side)
+    /// REQ: COR-030
     #[test]
     fn exactly_one_side_holds_the_editor_kernel_grant_on_the_server() {
         let manifest = load_manifest();
@@ -171,14 +171,14 @@ mod spec_tests {
         assert!(server_capabilities.iter().any(|capability| capability == EDITOR_TAB_GRANT));
     }
 
-    /// REQ: COR-050 (activation follows the lazy trigger listed in the Complete manifest)
+    /// REQ: COR-050
     #[test]
     fn activation_is_lazy_on_the_editor_pane_kind() {
         let manifest = load_manifest();
         assert_eq!(strings_at(&manifest["activation"]), ["pane-kind:editor"]);
     }
 
-    /// REQ: SEC-293 (the core page repeats the risk mark and the 20 ms, 8-handler limits of before-save)
+    /// REQ: SEC-293
     #[test]
     fn before_save_hook_carries_high_risk_and_the_manual_limits() {
         let manifest = load_manifest();
@@ -195,7 +195,7 @@ mod spec_tests {
         assert_eq!(before_save["max_handlers"], 8);
     }
 
-    /// REQ: COR-050 (the Rust plugin implements every trait behind the exports its manifest lists)
+    /// REQ: COR-050
     #[test]
     fn plugin_type_implements_the_traits_behind_every_manifest_export() {
         fn assert_provides_manifest_exports<
@@ -206,7 +206,7 @@ mod spec_tests {
         let _default_client = EditorClient::default();
     }
 
-    /// REQ: COR-050 (empty or truncated manifest input is rejected; a manifest with no keys misses all of them)
+    /// REQ: COR-050
     #[test]
     fn empty_or_truncated_manifest_is_rejected() {
         assert!(serde_json::from_str::<Value>("").is_err());
@@ -217,7 +217,7 @@ mod spec_tests {
         );
     }
 
-    /// REQ: COR-050 (failure case: a client manifest without the views export does not match the manual)
+    /// REQ: COR-050
     #[test]
     fn manifest_without_the_views_export_does_not_match_the_manual() {
         let mut manifest = load_manifest();

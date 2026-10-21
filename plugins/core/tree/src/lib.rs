@@ -76,7 +76,7 @@ mod spec_tests {
             .and_then(|points| points.iter().find(|point| point["id"] == point_id))
     }
 
-    /// REQ: COR-050 (the Complete manifest of core-plugin-tree.md matches the plugin identity).
+    /// REQ: COR-050
     #[test]
     fn manifest_identity_matches_core_page() {
         let manifest = manifest();
@@ -88,7 +88,7 @@ mod spec_tests {
         assert_eq!(manifest["license"], "MIT");
     }
 
-    /// REQ: COR-050 (sides, entries and worlds match the page's Complete manifest).
+    /// REQ: COR-050
     #[test]
     fn manifest_sides_and_worlds_match_core_page() {
         let manifest = manifest();
@@ -98,7 +98,7 @@ mod spec_tests {
         assert_eq!(manifest["client"]["world"], "ilium:client/base@0.1.0");
     }
 
-    /// REQ: COR-050 (the server grants include the five tree grants and the three provided extension points).
+    /// REQ: COR-050
     #[test]
     fn server_grants_match_core_page() {
         let mut grants = string_list(&manifest()["capabilities"]["server"]);
@@ -117,21 +117,21 @@ mod spec_tests {
         assert_eq!(grants, expected);
     }
 
-    /// REQ: COR-050 (the client side holds only the read grant).
+    /// REQ: COR-050
     #[test]
     fn client_grants_are_read_only() {
         let grants = string_list(&manifest()["capabilities"]["client"]);
         assert_eq!(grants, vec!["tree.read".to_owned()]);
     }
 
-    /// REQ: COR-050 (activation is the startup trigger listed on the page).
+    /// REQ: COR-050
     #[test]
     fn activation_is_startup() {
         let manifest = manifest();
         assert_eq!(string_list(&manifest["activation"]), vec!["startup".to_owned()]);
     }
 
-    /// REQ: EXT-052 (before-move and before-close are server veto hooks with a 20 ms deadline and 8 handlers).
+    /// REQ: EXT-052
     #[test]
     fn veto_hooks_declare_mode_deadline_and_limit() {
         let manifest = manifest();
@@ -146,7 +146,7 @@ mod spec_tests {
         }
     }
 
-    /// REQ: EXT-052 (node-sorts is a static collect point with at most 64 entries).
+    /// REQ: EXT-052
     #[test]
     fn node_sorts_is_static_collect_with_64_entries() {
         let manifest = manifest();
@@ -157,7 +157,7 @@ mod spec_tests {
         assert_eq!(point["dynamic"], false);
     }
 
-    /// REQ: LIF-183 (the essential set is exactly four plugins, and the tree plugin is one of them).
+    /// REQ: LIF-183
     #[test]
     fn tree_plugin_is_in_the_essential_set() {
         assert_eq!(ESSENTIAL_PLUGIN_IDS.len(), 4);
@@ -166,13 +166,12 @@ mod spec_tests {
         assert!(ESSENTIAL_PLUGIN_IDS.contains(&plugin_id));
     }
 
-    /// REQ: EXT-052 (an extension point that is not in the core points table is not declared).
+    /// REQ: EXT-052
     #[test]
     fn undeclared_extension_point_is_absent() {
         assert!(extension_point(&manifest(), "after-close").is_none());
     }
 
-    /// REQ: n/a (manual sample "Order the tree": only tree-changed events lead to submissions, so an empty batch submits nothing).
     #[test]
     fn empty_event_batch_submits_nothing() {
         let submissions = TreeServer::default().on_events(Vec::new());

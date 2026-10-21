@@ -260,8 +260,7 @@ mod tests {
         assert!(loaded.is_empty());
     }
 
-    /// REQ: SEC-118
-    /// REQ: SEC-120
+    /// REQ: SEC-118, SEC-120
     #[test]
     fn grant_store_revoke_removes_only_the_named_grant() {
         let root = state_root();
@@ -589,8 +588,7 @@ mod tests {
         assert!(log.entries().is_empty());
     }
 
-    /// REQ: SEC-221
-    /// REQ: SEC-222
+    /// REQ: SEC-221, SEC-222
     #[test]
     fn audit_log_entries_are_read_oldest_first_with_event_plugin_and_verbatim_line() {
         let root = state_root();

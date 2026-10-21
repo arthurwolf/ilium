@@ -104,7 +104,7 @@ mod spec_tests {
         }
     }
 
-    /// REQ: reference-test-harness.md [DEV-560] (`FakeScene::frame` calls `render` once and returns a `Screen` of the scene size)
+    /// Manual: `FakeScene::frame` calls `render` once and returns a `Screen` of the scene size
     #[test]
     fn frame_returns_screen_of_scene_size_filled_by_render() {
         let mut scene = FakeScene::new::<MarkingRenderer>("scene", 4, 2);
@@ -116,7 +116,7 @@ mod spec_tests {
         assert_eq!(screen.cell(1, 3).symbol, "x");
     }
 
-    /// REQ: reference-test-harness.md [DEV-560] (empty input: a zero-size scene gives a `Screen` with no cells)
+    /// Manual: empty input: a zero-size scene gives a `Screen` with no cells
     #[test]
     fn frame_of_zero_size_scene_has_no_cells() {
         let mut scene = FakeScene::new::<MarkingRenderer>("scene", 0, 0);
@@ -126,7 +126,7 @@ mod spec_tests {
         assert!(screen.cells.is_empty());
     }
 
-    /// REQ: reference-test-harness.md [DEV-561] (equal inputs on the fake clock give equal screens)
+    /// Manual: equal inputs on the fake clock give equal screens
     #[test]
     fn equal_inputs_give_equal_screens() {
         let mut scene = FakeScene::new::<MarkingRenderer>("scene", 4, 2);
@@ -135,7 +135,7 @@ mod spec_tests {
         assert_eq!(first_screen, second_screen);
     }
 
-    /// REQ: reference-test-harness.md [DEV-562] (`set_palette` passes the palette to the renderer before the next frame)
+    /// Manual: `set_palette` passes the palette to the renderer before the next frame
     #[test]
     fn set_palette_reaches_renderer_before_next_frame() {
         let mut scene = FakeScene::new::<MarkingRenderer>("scene", 4, 2);
@@ -144,21 +144,18 @@ mod spec_tests {
         assert_eq!(screen.cell(0, 0).symbol, "2");
     }
 
-    /// REQ: reference-test-harness.md "Scenes" (`FakeScene::frames_per_second` reports the frame rate the renderer asks for; scene.rs doc comment)
     #[test]
     fn frames_per_second_reports_renderer_request() {
         let scene = FakeScene::new::<MarkingRenderer>("scene", 4, 2);
         assert_eq!(scene.frames_per_second(), 30);
     }
 
-    /// REQ: scene.rs `reconfigure` doc comment (returns `true` only when the renderer accepted the settings in place; a renderer without that support gives `false`)
     #[test]
     fn reconfigure_is_false_when_renderer_cannot_accept_in_place() {
         let mut scene = FakeScene::new::<MarkingRenderer>("scene", 4, 2);
         assert!(!scene.reconfigure("{}"));
     }
 
-    /// REQ: scene.rs `status` doc comment (status text the renderer reported after the frames so far; none before any frame reports one)
     #[test]
     fn status_is_none_before_renderer_reports_any() {
         let scene = FakeScene::new::<MarkingRenderer>("scene", 4, 2);

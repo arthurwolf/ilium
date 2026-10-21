@@ -72,7 +72,6 @@ mod tests {
         result.err().map(|error| error.code)
     }
 
-    /// REQ: none
     /// Manual: primitives-basic.md, Interface. A plain title on an own pane is accepted.
     #[test]
     fn set_title_accepts_plain_title_on_own_pane() {
@@ -81,7 +80,6 @@ mod tests {
         assert!(result.is_ok(), "expected Ok, got {result:?}");
     }
 
-    /// REQ: none
     /// Manual: primitives-basic.md, Interface ("At most 256 characters"). Zero length is inside the range.
     #[test]
     fn set_title_accepts_empty_title() {
@@ -90,7 +88,6 @@ mod tests {
         assert!(result.is_ok(), "expected Ok for empty title, got {result:?}");
     }
 
-    /// REQ: none
     /// Manual: primitives-basic.md, Interface. 256 characters is the inclusive upper bound.
     #[test]
     fn set_title_accepts_exactly_256_characters() {
@@ -99,7 +96,6 @@ mod tests {
         assert!(result.is_ok(), "expected Ok at 256 characters, got {result:?}");
     }
 
-    /// REQ: none
     /// Manual: primitives-basic.md, Errors and edge cases (`invalid-argument` for a title over 256 characters).
     #[test]
     fn set_title_rejects_257_characters_with_invalid_argument() {
@@ -108,7 +104,6 @@ mod tests {
         assert_eq!(error_code_of(result), Some(ErrorCode::InvalidArgument));
     }
 
-    /// REQ: none
     /// Manual: primitives-basic.md, Interface. The limit counts characters, not UTF-8 bytes:
     /// 256 two-byte characters are 512 bytes and must still be accepted.
     #[test]
@@ -118,7 +113,6 @@ mod tests {
         assert!(result.is_ok(), "expected Ok for 256 multi-byte characters, got {result:?}");
     }
 
-    /// REQ: none
     /// Manual: primitives-basic.md, Errors and edge cases (`not-permitted` for a node that is not a pane of the plugin's kinds).
     #[test]
     fn set_title_on_foreign_node_is_not_permitted() {
@@ -127,7 +121,6 @@ mod tests {
         assert_eq!(error_code_of(result), Some(ErrorCode::NotPermitted));
     }
 
-    /// REQ: none
     /// Manual: primitives-basic.md, Interface. A single plain span is a valid one-line footer.
     #[test]
     fn set_status_accepts_single_plain_span() {
@@ -136,7 +129,6 @@ mod tests {
         assert!(result.is_ok(), "expected Ok, got {result:?}");
     }
 
-    /// REQ: none
     /// Manual: primitives-basic.md, Interface. An empty status is inside the 0 to 256 character range.
     #[test]
     fn set_status_accepts_empty_status() {
@@ -145,7 +137,6 @@ mod tests {
         assert!(result.is_ok(), "expected Ok for empty status, got {result:?}");
     }
 
-    /// REQ: none
     /// Manual: primitives-basic.md, Interface. 256 characters is the inclusive upper bound.
     #[test]
     fn set_status_accepts_exactly_256_characters() {
@@ -154,7 +145,6 @@ mod tests {
         assert!(result.is_ok(), "expected Ok at 256 characters, got {result:?}");
     }
 
-    /// REQ: none
     /// Manual: primitives-basic.md, Errors and edge cases (`invalid-argument` for a status over 256 characters).
     /// The 257 characters are split over two spans to show the limit applies to the whole line.
     #[test]
@@ -168,7 +158,6 @@ mod tests {
         assert_eq!(error_code_of(result), Some(ErrorCode::InvalidArgument));
     }
 
-    /// REQ: none
     /// Manual: primitives-basic.md, Errors and edge cases (`invalid-argument` for a status with a line break).
     #[test]
     fn set_status_rejects_line_break_with_invalid_argument() {
@@ -177,7 +166,6 @@ mod tests {
         assert_eq!(error_code_of(result), Some(ErrorCode::InvalidArgument));
     }
 
-    /// REQ: none
     /// Manual: primitives-basic.md, Errors and edge cases (`not-permitted` for a node that is not a pane of the plugin's kinds).
     #[test]
     fn set_status_on_foreign_node_is_not_permitted() {
@@ -186,7 +174,6 @@ mod tests {
         assert_eq!(error_code_of(result), Some(ErrorCode::NotPermitted));
     }
 
-    /// REQ: none
     /// Manual: primitives-basic.md, Interface (`request-focus` asks the kernel to focus the pane).
     #[test]
     fn request_focus_on_own_pane_is_ok() {
@@ -195,7 +182,6 @@ mod tests {
         assert!(result.is_ok(), "expected Ok, got {result:?}");
     }
 
-    /// REQ: none
     /// Manual: primitives-basic.md, Errors and edge cases (`not-permitted` for a node that is not a pane of the plugin's kinds).
     #[test]
     fn request_focus_on_foreign_node_is_not_permitted() {
@@ -204,7 +190,6 @@ mod tests {
         assert_eq!(error_code_of(result), Some(ErrorCode::NotPermitted));
     }
 
-    /// REQ: none
     /// Manual: primitives-basic.md, Interface. `size` returns the body columns and rows for an own pane.
     #[test]
     fn size_of_own_pane_is_some() {
@@ -213,7 +198,6 @@ mod tests {
         assert!(size.is_some(), "expected Some((columns, rows)) for an own pane, got {size:?}");
     }
 
-    /// REQ: none
     /// Manual: primitives-basic.md, Interface and Errors and edge cases: `size` returns `None` with no
     /// error code for a node that is not one of the plugin's panes.
     #[test]
@@ -222,7 +206,6 @@ mod tests {
         assert_eq!(import.size(foreign_node()), None);
     }
 
-    /// REQ: none
     /// Manual: primitives-basic.md, Pane activity and dirty state. `report-activity` drives the activity icon.
     #[test]
     fn report_activity_working_on_own_pane_is_ok() {
@@ -231,7 +214,6 @@ mod tests {
         assert!(result.is_ok(), "expected Ok, got {result:?}");
     }
 
-    /// REQ: none
     /// Manual: primitives-basic.md, Pane activity and dirty state. `none` is a valid activity value.
     #[test]
     fn report_activity_none_on_own_pane_is_ok() {
@@ -240,7 +222,6 @@ mod tests {
         assert!(result.is_ok(), "expected Ok, got {result:?}");
     }
 
-    /// REQ: none
     /// Manual: primitives-basic.md, Pane activity and dirty state (`not-permitted` for a node that is not the plugin's kind).
     #[test]
     fn report_activity_on_foreign_node_is_not_permitted() {
@@ -249,8 +230,8 @@ mod tests {
         assert_eq!(error_code_of(result), Some(ErrorCode::NotPermitted));
     }
 
-    /// REQ: PRI-031
     /// Manual: primitives-basic.md, Pane activity and dirty state. `set-dirty` with true marks unsaved work.
+    /// REQ: PRI-031
     #[test]
     fn set_dirty_true_on_own_pane_is_ok() {
         let mut import = BasicImport;
@@ -258,8 +239,8 @@ mod tests {
         assert!(result.is_ok(), "expected Ok, got {result:?}");
     }
 
-    /// REQ: PRI-031
     /// Manual: primitives-basic.md, Pane activity and dirty state. Clearing the dirty flag is accepted.
+    /// REQ: PRI-031
     #[test]
     fn set_dirty_false_on_own_pane_is_ok() {
         let mut import = BasicImport;
@@ -267,7 +248,6 @@ mod tests {
         assert!(result.is_ok(), "expected Ok, got {result:?}");
     }
 
-    /// REQ: none
     /// Manual: primitives-basic.md, Pane activity and dirty state (`not-permitted` for a node that is not the plugin's kind).
     #[test]
     fn set_dirty_on_foreign_node_is_not_permitted() {

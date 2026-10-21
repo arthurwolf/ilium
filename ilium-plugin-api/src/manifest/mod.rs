@@ -758,7 +758,6 @@ mod tests {
     // ----- Keybinding chords -----
     // The manual's "Keybinding chords" section has no requirement id; these tests cite none.
 
-    /// REQ: none
     #[test]
     fn parse_chord_splits_modifiers_from_key_in_written_order() {
         assert_eq!(
@@ -768,7 +767,6 @@ mod tests {
         assert_eq!(parse_chord("shift+a"), Ok(Chord(vec!["shift".to_owned(), "a".to_owned()])));
     }
 
-    /// REQ: none
     #[test]
     fn parse_chord_accepts_named_keys_and_function_key_boundaries() {
         for chord in ["enter", "escape", "page-up", "super+f1", "alt+f24", "ctrl+plus", "ctrl+alt+delete"] {
@@ -776,7 +774,6 @@ mod tests {
         }
     }
 
-    /// REQ: none
     #[test]
     fn parse_chord_refuses_uppercase_empty_and_bare_plus() {
         for chord in ["Ctrl+P", "ctrl+", "+", "ctrl++", "f25", "", "ctrl+shift+"] {

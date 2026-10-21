@@ -32,8 +32,7 @@ const ROWS: [&str; 11] = [
     "Pause other media",
 ];
 
-/// REQ: PORT:ilium-client/src/onboarding/voice_ui.rs::every_configuration_and_live_action_is_reachable_on_small_and_wide_screens
-/// REQ: PORT:ilium-client/src/onboarding/voice_ui.rs::narrow_scrolling_reveals_real_transcripts_and_keyboard_focus_wraps
+/// REQ: PORT:ilium-client/src/onboarding/voice_ui.rs::every_configuration_and_live_action_is_reachable_on_small_and_wide_screens, PORT:ilium-client/src/onboarding/voice_ui.rs::narrow_scrolling_reveals_real_transcripts_and_keyboard_focus_wraps
 #[test]
 fn step_053_every_row_is_reachable_on_a_small_and_a_wide_screen() {
     let mut host = client_host();
@@ -56,8 +55,7 @@ fn step_053_every_row_is_reachable_on_a_small_and_a_wide_screen() {
     }
 }
 
-/// REQ: PORT:ilium-client/src/onboarding/voice_ui.rs::render_never_exposes_configured_key_and_keeps_test_visible
-/// REQ: PORT:ilium-client/src/onboarding/voice_runtime.rs::bounded_redaction_preserves_replace_prefix_unicode_and_no_secret
+/// REQ: PORT:ilium-client/src/onboarding/voice_ui.rs::render_never_exposes_configured_key_and_keeps_test_visible, PORT:ilium-client/src/onboarding/voice_runtime.rs::bounded_redaction_preserves_replace_prefix_unicode_and_no_secret
 #[test]
 fn step_053_the_configured_key_is_never_rendered_and_the_test_action_stays_visible() {
     let mut host = client_host();
@@ -93,10 +91,7 @@ fn step_053_the_recording_control_follows_the_input_mode() {
     assert_ne!(push, vad);
 }
 
-/// REQ: PORT:ilium-client/src/onboarding/voice_ui.rs::long_user_assistant_and_errors_are_fully_reachable_in_stacked_and_wide_layouts
-/// REQ: PORT:ilium-client/src/onboarding/voice_ui.rs::voice_studio_shows_independent_scrollbars_for_settings_and_transcript_overflow
-/// REQ: PORT:ilium-client/src/onboarding/voice_ui.rs::wide_mouse_scroll_and_focus_reveal_preserve_independent_reading_offsets
-/// REQ: PORT:ilium-client/src/onboarding/voice_ui.rs::wide_scrollbar_tracks_seek_only_their_own_pane
+/// REQ: PORT:ilium-client/src/onboarding/voice_ui.rs::long_user_assistant_and_errors_are_fully_reachable_in_stacked_and_wide_layouts, PORT:ilium-client/src/onboarding/voice_ui.rs::voice_studio_shows_independent_scrollbars_for_settings_and_transcript_overflow, PORT:ilium-client/src/onboarding/voice_ui.rs::wide_mouse_scroll_and_focus_reveal_preserve_independent_reading_offsets, PORT:ilium-client/src/onboarding/voice_ui.rs::wide_scrollbar_tracks_seek_only_their_own_pane
 #[test]
 fn step_053_the_settings_and_the_transcript_scroll_independently() {
     let mut host = client_host();
@@ -114,8 +109,7 @@ fn step_053_the_settings_and_the_transcript_scroll_independently() {
     assert_eq!(transcript_column(&before), transcript_column(&after));
 }
 
-/// REQ: PORT:ilium-client/src/onboarding/voice_runtime.rs::invalid_configuration_never_starts_audio
-/// REQ: PORT:ilium-client/src/onboarding/voice_runtime.rs::gate_release_retries_exact_intent_and_preserves_invalid_configuration_error_without_audio
+/// REQ: PORT:ilium-client/src/onboarding/voice_runtime.rs::invalid_configuration_never_starts_audio, PORT:ilium-client/src/onboarding/voice_runtime.rs::gate_release_retries_exact_intent_and_preserves_invalid_configuration_error_without_audio
 #[test]
 fn step_053_a_test_with_an_invalid_configuration_never_opens_audio() {
     let mut host = client_host();
@@ -127,10 +121,7 @@ fn step_053_a_test_with_an_invalid_configuration_never_opens_audio() {
     assert!(text.contains("Test"), "{text}");
 }
 
-/// REQ: PORT:ilium-client/src/onboarding/voice_runtime.rs::stop_is_nonblocking_and_preserves_original_queued_text
-/// REQ: PORT:ilium-client/src/onboarding/voice_runtime.rs::stop_during_shared_startup_discards_prepared_original_without_starting_audio
-/// REQ: PORT:ilium-client/src/onboarding/voice_runtime.rs::normal_owner_gate_keeps_original_test_and_stop_cancels_without_starting_audio
-/// REQ: PORT:ilium-client/src/onboarding/voice_runtime.rs::settings_change_cancels_waiting_test_before_external_ownership_releases
+/// REQ: PORT:ilium-client/src/onboarding/voice_runtime.rs::stop_is_nonblocking_and_preserves_original_queued_text, PORT:ilium-client/src/onboarding/voice_runtime.rs::stop_during_shared_startup_discards_prepared_original_without_starting_audio, PORT:ilium-client/src/onboarding/voice_runtime.rs::normal_owner_gate_keeps_original_test_and_stop_cancels_without_starting_audio, PORT:ilium-client/src/onboarding/voice_runtime.rs::settings_change_cancels_waiting_test_before_external_ownership_releases
 #[test]
 fn step_053_stop_or_a_settings_change_cancels_a_waiting_test_without_audio() {
     let mut host = client_host();
@@ -152,9 +143,7 @@ fn step_053_stop_or_a_settings_change_cancels_a_waiting_test_without_audio() {
     );
 }
 
-/// REQ: PORT:ilium-client/src/onboarding/voice_runtime.rs::advertised_capability_is_only_the_bulb
-/// REQ: PORT:ilium-client/src/onboarding/voice_runtime.rs::actual_cpu_projection_executes_ordered_tools_and_duplicate_receipt_without_relighting
-/// REQ: PORT:ilium-client/src/onboarding/voice_runtime.rs::saturated_outbox_retains_original_event_and_no_tool_state_effect
+/// REQ: PORT:ilium-client/src/onboarding/voice_runtime.rs::advertised_capability_is_only_the_bulb, PORT:ilium-client/src/onboarding/voice_runtime.rs::actual_cpu_projection_executes_ordered_tools_and_duplicate_receipt_without_relighting, PORT:ilium-client/src/onboarding/voice_runtime.rs::saturated_outbox_retains_original_event_and_no_tool_state_effect
 #[test]
 fn demo_053_the_only_advertised_tool_is_the_bulb_and_calls_run_in_order() {
     let mut host = client_host();
@@ -178,11 +167,7 @@ fn demo_053_the_only_advertised_tool_is_the_bulb_and_calls_run_in_order() {
     assert_eq!(host.onboarding_demo("voice").bulb(), Some(true));
 }
 
-/// REQ: PORT:ilium-client/src/onboarding/voice_runtime.rs::visible_state_clones_share_heap_and_last_guard
-/// REQ: PORT:ilium-client/src/onboarding/voice_demo.rs::actual_tool_execution_turns_bulb_on_and_off
-/// REQ: PORT:ilium-client/src/onboarding/voice_demo.rs::duplicate_on_after_off_returns_original_receipt_without_relighting
-/// REQ: PORT:ilium-client/src/onboarding/voice_demo.rs::exhausted_demo_retains_replay_receipts_and_refuses_new_mutations
-/// REQ: PORT:ilium-client/src/onboarding/voice_demo.rs::real_controls_and_malformed_arguments_are_rejected_without_state_changes
+/// REQ: PORT:ilium-client/src/onboarding/voice_runtime.rs::visible_state_clones_share_heap_and_last_guard, PORT:ilium-client/src/onboarding/voice_demo.rs::actual_tool_execution_turns_bulb_on_and_off, PORT:ilium-client/src/onboarding/voice_demo.rs::duplicate_on_after_off_returns_original_receipt_without_relighting, PORT:ilium-client/src/onboarding/voice_demo.rs::exhausted_demo_retains_replay_receipts_and_refuses_new_mutations, PORT:ilium-client/src/onboarding/voice_demo.rs::real_controls_and_malformed_arguments_are_rejected_without_state_changes
 #[test]
 fn demo_053_the_demonstration_offers_only_the_bulb_and_runs_it_by_call_id() {
     let mut host = client_host();

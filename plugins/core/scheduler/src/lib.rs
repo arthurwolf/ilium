@@ -71,7 +71,7 @@ mod spec_tests {
             .unwrap_or_default()
     }
 
-    /// REQ: core-plugin-scheduler.md "What it covers", the id is `ilium.core.scheduler` on the `ilium:plugin@0.1.0` api (the page carries no bracket ID here)
+    /// Manual: the page carries no bracket ID here
     #[test]
     fn manifest_declares_the_scheduler_id_on_the_plugin_api() {
         let manifest = manifest();
@@ -79,7 +79,7 @@ mod spec_tests {
         assert_eq!(text_at(&manifest, "/id"), Some("ilium.core.scheduler"));
     }
 
-    /// REQ: core-plugin-scheduler.md "What it covers", the plugin runs on both sides: the server world owns timers and writes, the client world draws the dialogs (the page carries no bracket ID here)
+    /// Manual: the page carries no bracket ID here
     #[test]
     fn manifest_declares_a_server_side_and_a_client_side_with_their_worlds() {
         let manifest = manifest();
@@ -87,7 +87,7 @@ mod spec_tests {
         assert_eq!(text_at(&manifest, "/client/world"), Some("ilium:client/base@0.1.0"));
     }
 
-    /// REQ: COR-050 (core-plugin-scheduler.md "Complete manifest": activation follows startup and lazy activation, with the triggers `startup` and `view:scheduler.queue`)
+    /// REQ: COR-050
     #[test]
     fn activation_triggers_are_startup_and_the_queue_panel_view() {
         let manifest = manifest();
@@ -97,7 +97,7 @@ mod spec_tests {
         );
     }
 
-    /// REQ: scheduler-B08 (core-plugin-scheduler.md "Behaviour contract": text and Enter are written while the pane input gate is held, so the server needs terminal.write and terminal.input-lock)
+    /// REQ: scheduler-B08
     #[test]
     fn server_side_can_write_into_a_pane_under_the_input_gate() {
         let manifest = manifest();
@@ -106,7 +106,7 @@ mod spec_tests {
         assert!(server_grants.iter().any(|grant| grant == "terminal.input-lock"));
     }
 
-    /// REQ: scheduler-B16 (core-plugin-scheduler.md "Behaviour contract": a queued prompt is sent when an agent finishes a turn, which needs agent.read; Sample 4 needs journal.read to check uncertain deliveries)
+    /// REQ: scheduler-B16
     #[test]
     fn server_side_can_read_agent_turns_and_the_input_journal() {
         let manifest = manifest();
@@ -115,7 +115,7 @@ mod spec_tests {
         assert!(server_grants.iter().any(|grant| grant == "journal.read"));
     }
 
-    /// REQ: core-plugin-scheduler.md "Manifest", `terminal.raw-input` is a high-risk grant that the user confirms at install (the page carries no bracket ID here)
+    /// Manual: the page carries no bracket ID here
     #[test]
     fn terminal_raw_input_is_declared_on_the_server_side() {
         let manifest = manifest();
@@ -123,7 +123,7 @@ mod spec_tests {
         assert!(server_grants.iter().any(|grant| grant == "terminal.raw-input"));
     }
 
-    /// REQ: core-plugin-scheduler.md "Complete manifest", the client side asks for `ui.panels` only (the page carries no bracket ID here)
+    /// Manual: the page carries no bracket ID here
     #[test]
     fn client_side_asks_for_ui_panels_only() {
         let manifest = manifest();
@@ -133,7 +133,7 @@ mod spec_tests {
         );
     }
 
-    /// REQ: EXT-052 (core-plugin-scheduler.md "Extension points this plugin owns": both points are server-side, granted to the plugin and declared with the kinds `collect` and `hook` with mode `veto`)
+    /// REQ: EXT-052
     #[test]
     fn extension_points_are_granted_and_declared_with_their_kinds() {
         let manifest = manifest();
@@ -163,13 +163,13 @@ mod spec_tests {
         assert_eq!(text_at(&before_send, "/mode"), Some("veto"));
     }
 
-    /// REQ: core-plugin-scheduler.md "Complete manifest", the manifest is a JSON document; empty text is rejected rather than read as a plugin with no contract (the page carries no bracket ID here)
+    /// Manual: the page carries no bracket ID here
     #[test]
     fn empty_manifest_text_is_not_a_valid_manifest() {
         assert!(serde_json::from_str::<Value>("").is_err());
     }
 
-    /// REQ: core-plugin-scheduler.md "Complete manifest", every `view:<panel>` activation must name a panel the manifest declares (the page carries no bracket ID here)
+    /// Manual: the page carries no bracket ID here
     #[test]
     fn every_view_activation_names_a_declared_panel() {
         let manifest = manifest();

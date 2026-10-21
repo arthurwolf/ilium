@@ -89,7 +89,7 @@ mod spec_tests {
             .find(|point| point["id"].as_str() == Some(point_id))
     }
 
-    /// REQ: COR-050 (manual "Complete manifest": activation is `startup` plus lazy `topic:chatroom`).
+    /// REQ: COR-050
     #[test]
     fn activation_is_startup_and_chatroom_topic() {
         let manifest = shipped_manifest();
@@ -97,7 +97,6 @@ mod spec_tests {
         assert!(array_contains(&manifest["activation"], "topic:chatroom"));
     }
 
-    /// REQ: manual "Complete manifest" (plugin id `ilium.core.chatroom`, contract `ilium:plugin@0.1.0`, version 0.1.0).
     #[test]
     fn manifest_identifies_the_chatroom_plugin() {
         let manifest = shipped_manifest();
@@ -106,7 +105,6 @@ mod spec_tests {
         assert_eq!(manifest["version"].as_str(), Some("0.1.0"));
     }
 
-    /// REQ: manual "Complete manifest" (server world `ilium:server/base@0.1.0`, client world `ilium:client/base@0.1.0`).
     #[test]
     fn each_side_names_its_entry_and_world() {
         let manifest = shipped_manifest();
@@ -116,7 +114,6 @@ mod spec_tests {
         assert_eq!(manifest["client"]["world"].as_str(), Some("ilium:client/base@0.1.0"));
     }
 
-    /// REQ: manual "Manifest" section (the plugin holds no `agent-config` grant; Agent setup owns the agent files,
     /// and the server grants agent-setup services and the project file scope).
     #[test]
     fn grants_cover_project_files_and_agent_setup_without_agent_config() {
@@ -129,7 +126,6 @@ mod spec_tests {
         assert!(!array_contains(&manifest["capabilities"]["client"], "agent-config"));
     }
 
-    /// REQ: manual "Complete manifest" (server exports `virtual-rows-provider`, client exports `views`).
     /// Compile-time check: the struct for each side implements the trait its manifest export names.
     #[test]
     fn side_structs_implement_their_manifest_exports() {
@@ -139,7 +135,6 @@ mod spec_tests {
         assert_views::<ChatroomClient>();
     }
 
-    /// REQ: manual "The Chatroom row" sample (the row lists one `CHATROOM.md` file child). Empty-input case: empty parent.
     #[test]
     fn chatroom_row_lists_the_room_file_for_an_empty_parent() {
         let mut server = ChatroomServer::default();
@@ -152,7 +147,6 @@ mod spec_tests {
         assert!(cursor.is_none());
     }
 
-    /// REQ: manual "The Chatroom row" sample (an unknown row kind is refused with not_found). Failure case.
     #[test]
     fn unknown_row_kind_is_refused() {
         let mut server = ChatroomServer::default();
@@ -160,8 +154,8 @@ mod spec_tests {
         assert!(result.is_err());
     }
 
-    /// REQ: EXT-052 (manual "Extension points this plugin owns": before-post is a server hook with 20 ms deadline
     /// and 8 handlers; message-renderers is a client collect point with 64 entries). Defaults are the manual's.
+    /// REQ: EXT-052
     #[test]
     fn owned_extension_points_declare_their_limits() {
         let manifest = shipped_manifest();
@@ -177,7 +171,7 @@ mod spec_tests {
         assert_eq!(message_renderers["max_entries"].as_u64(), Some(64));
     }
 
-    /// REQ: SEC-293 (manual "Security": risk marks of the extension points, before-post high and message-renderers standard).
+    /// REQ: SEC-293
     #[test]
     fn extension_point_risk_marks_follow_the_security_table() {
         let manifest = shipped_manifest();

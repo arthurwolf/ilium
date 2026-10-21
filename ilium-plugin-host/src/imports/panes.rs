@@ -26,24 +26,24 @@ mod tests {
     use ilium_plugin_api::generated::host::panes::HostPanes;
     use ilium_plugin_api::generated::types::ids::NodeId;
 
-    /// REQ: EVT-013
     /// Boundary: node id 0 is never a pane, so `info` returns `None` rather than an error.
+    /// REQ: EVT-013
     #[test]
     fn info_returns_none_for_node_zero() {
         let mut panes_import = PanesImport;
         assert_eq!(panes_import.info(NodeId(0)), None);
     }
 
-    /// REQ: EVT-013
     /// Boundary: the largest node id names no node in an empty tree, so `info` returns `None`.
+    /// REQ: EVT-013
     #[test]
     fn info_returns_none_for_maximum_node_id() {
         let mut panes_import = PanesImport;
         assert_eq!(panes_import.info(NodeId(u64::MAX)), None);
     }
 
-    /// REQ: EVT-013
     /// Empty input: with no pane in the tree, a lookup of the first ordinary node id returns `None`.
+    /// REQ: EVT-013
     #[test]
     fn info_returns_none_for_unknown_node_in_empty_tree() {
         let mut panes_import = PanesImport;

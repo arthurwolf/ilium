@@ -176,11 +176,11 @@ mod spec_tests {
         assert_eq!(panels[0]["modal"], false);
     }
 
-    /// REQ: COR-030
     /// Failure case: the manual says the `animations` kernel-settings write grant is server side only
     /// ("the client part never holds it"), so the client capabilities must not list it. The current
     /// manifest.json lists `settings.write-kernel:animations` under `capabilities.client`, so this
     /// test is expected to fail until that grant moves to the server side.
+    /// REQ: COR-030
     #[test]
     fn client_side_does_not_hold_the_kernel_settings_write_grant() {
         let manifest = ambient_manifest();

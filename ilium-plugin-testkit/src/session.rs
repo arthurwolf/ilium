@@ -230,7 +230,7 @@ mod spec_tests {
         payload.downcast_ref::<String>().cloned().unwrap_or_default()
     }
 
-    /// REQ: DEV-480 (services.use is resolved against services.provide: an active core stub lists its service)
+    /// REQ: DEV-480
     #[test]
     fn core_stub_service_is_listed_once_active() {
         let mut session = FakeSession::new();
@@ -241,7 +241,7 @@ mod spec_tests {
             .any(|name| name.as_str() == "bookmarks"));
     }
 
-    /// REQ: DEV-483 (the stub exposes the services of its core plugin and nothing else)
+    /// REQ: DEV-483
     #[test]
     fn core_stub_exposes_only_its_own_services() {
         let mut session = FakeSession::new();
@@ -249,7 +249,7 @@ mod spec_tests {
         assert_eq!(session.services(), vec!["bookmarks".to_string()]);
     }
 
-    /// REQ: DEV-483 (an unknown core plugin name fails with harness.core-unknown)
+    /// REQ: DEV-483
     #[test]
     fn install_core_rejects_unknown_core_name() {
         let mut session = FakeSession::new();
@@ -262,14 +262,14 @@ mod spec_tests {
         );
     }
 
-    /// REQ: DEV-484 (pump moves every queue until empty; an empty session settles without error)
+    /// REQ: DEV-484
     #[test]
     fn pump_on_empty_session_succeeds() {
         let mut session = FakeSession::new();
         assert_eq!(session.pump(), Ok(()));
     }
 
-    /// REQ: DEV-486 (an id that is not installed fails with harness.plugin-unknown)
+    /// REQ: DEV-486
     #[test]
     fn server_of_uninstalled_plugin_fails_with_plugin_unknown() {
         let mut session = FakeSession::new();
@@ -282,7 +282,7 @@ mod spec_tests {
         );
     }
 
-    /// REQ: DEV-487 (run_hook returns the HookReply of the handler; a core stub hook replies pass, see DEV-489)
+    /// REQ: DEV-487
     #[test]
     fn run_hook_returns_pass_from_core_stub() {
         let mut session = FakeSession::new();
@@ -299,7 +299,7 @@ mod spec_tests {
         assert_eq!(reply, HookReply::Pass);
     }
 
-    /// REQ: DEV-487 (a plugin without a hook handler fails with harness.not-a-hook-handler)
+    /// REQ: DEV-487
     #[test]
     fn run_hook_on_plugin_without_hook_handler_fails() {
         let mut session = FakeSession::new();
@@ -316,7 +316,7 @@ mod spec_tests {
         assert_eq!(error.code, codes::NOT_A_HOOK_HANDLER);
     }
 
-    /// REQ: DEV-488 (call_service routes to the provider and returns its ServiceReply; the stub service replies {"ok":true}, see DEV-489)
+    /// REQ: DEV-488
     #[test]
     fn call_service_returns_stub_provider_reply() {
         let mut session = FakeSession::new();
@@ -333,7 +333,7 @@ mod spec_tests {
         }
     }
 
-    /// REQ: DEV-488 (a missing provider returns Err(not-found))
+    /// REQ: DEV-488
     #[test]
     fn call_service_without_provider_is_not_found() {
         let mut session = FakeSession::new();

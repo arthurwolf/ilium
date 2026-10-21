@@ -78,7 +78,7 @@ mod spec_tests {
             .find(|point| point["id"].as_str() == Some(point_id))
     }
 
-    /// REQ: COR-050 - the manifest names `ilium.core.text-triggers`, targets `ilium:plugin@0.1.0` and is version 0.1.0.
+    /// REQ: COR-050
     #[test]
     fn manifest_identifies_the_text_triggers_plugin() {
         let manifest = manifest();
@@ -88,7 +88,7 @@ mod spec_tests {
         assert_eq!(manifest["name"].as_str(), Some("Text triggers"));
     }
 
-    /// REQ: COR-050 - the plugin runs on both sides: the server in `ilium:server/base@0.1.0`, the client in `ilium:client/base@0.1.0`.
+    /// REQ: COR-050
     #[test]
     fn manifest_declares_both_sides_with_their_worlds() {
         let manifest = manifest();
@@ -98,7 +98,7 @@ mod spec_tests {
         assert_eq!(manifest["client"]["world"].as_str(), Some("ilium:client/base@0.1.0"));
     }
 
-    /// REQ: COR-050 - the plugin activates at `startup` and when the rules view opens, in that order.
+    /// REQ: COR-050
     #[test]
     fn manifest_activates_on_startup_and_rules_view() {
         let manifest = manifest();
@@ -108,7 +108,7 @@ mod spec_tests {
         );
     }
 
-    /// REQ: COR-050 - the server side holds `terminal.output-filter` (matches output) and `terminal.write` (sends the reply).
+    /// REQ: COR-050
     #[test]
     fn server_side_holds_output_filter_and_write_capabilities() {
         let server = capability_list(&manifest(), "server");
@@ -116,7 +116,7 @@ mod spec_tests {
         assert!(server.iter().any(|capability| capability == "terminal.write"));
     }
 
-    /// REQ: COR-050 - the server side grants the provider right for both extension points, `rule-packs` and `before-fire`.
+    /// REQ: COR-050
     #[test]
     fn server_side_provides_both_extension_points() {
         let server = capability_list(&manifest(), "server");
@@ -126,7 +126,7 @@ mod spec_tests {
         }
     }
 
-    /// REQ: COR-030 - exactly one holder owns the `text-triggers` kernel tab, so the write grant appears once across both sides.
+    /// REQ: COR-030
     #[test]
     fn exactly_one_holder_writes_the_text_triggers_tab() {
         let manifest = manifest();
@@ -138,7 +138,7 @@ mod spec_tests {
         assert_eq!(occurrences, 1);
     }
 
-    /// REQ: COR-050 - `before-fire` is a veto hook with a 20 ms deadline and at most 8 handlers.
+    /// REQ: COR-050
     #[test]
     fn before_fire_is_a_veto_hook_with_deadline_and_handler_cap() {
         let manifest = manifest();
@@ -149,7 +149,7 @@ mod spec_tests {
         assert_eq!(point["max_handlers"].as_u64(), Some(8));
     }
 
-    /// REQ: SEC-293 - both extension points carry the `high` risk mark, and `rule-packs` holds at most 64 entries.
+    /// REQ: SEC-293
     #[test]
     fn extension_points_carry_high_risk_marks() {
         let manifest = manifest();
@@ -161,7 +161,7 @@ mod spec_tests {
         assert_eq!(rule_packs["max_entries"].as_u64(), Some(64));
     }
 
-    /// REQ: COR-050 - an empty or unknown extension point name resolves to nothing, so no contribution is invented.
+    /// REQ: COR-050
     #[test]
     fn empty_or_unknown_extension_point_is_not_found() {
         let manifest = manifest();
@@ -169,7 +169,7 @@ mod spec_tests {
         assert!(extension_point(&manifest, "no-such-point").is_none());
     }
 
-    /// REQ: COR-050 - a manifest without its activation list fails the activation check instead of passing silently.
+    /// REQ: COR-050
     #[test]
     fn manifest_without_activation_fails_the_activation_check() {
         let mut broken = manifest();

@@ -216,11 +216,11 @@ mod tests {
         assert_eq!(storage.get(Bucket::Global, key), Some(vec![3]));
     }
 
-    /// REQ: LIF-119
     ///
     /// Fills one bucket to exactly its 16 MiB quota, then checks that the next write is refused
     /// with `quota-exceeded` (never `io`), and that replacing a value of the same size still fits
     /// because only the difference counts.
+    /// REQ: LIF-119
     #[test]
     fn put_refuses_past_the_bucket_quota_with_quota_exceeded_and_counts_only_the_difference() {
         let mut storage = StorageImport;

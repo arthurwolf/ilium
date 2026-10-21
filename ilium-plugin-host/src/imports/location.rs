@@ -64,7 +64,6 @@ mod tests {
         );
     }
 
-    /// REQ: none (no requirement ID covers the WGS 84 range; the range is from api-location "Surface")
     #[test]
     fn returned_position_is_finite_and_within_wgs84_bounds() {
         let mut location = fresh_import();

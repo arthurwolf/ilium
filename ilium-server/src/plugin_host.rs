@@ -570,7 +570,6 @@ impl ServerKernel {
 mod spec_tests {
     use super::*;
 
-    /// REQ: [HST-033] (`--safe-plugins` and `--no-plugins` select the start mode) and reference-host-architecture.md "Safe start".
     #[test]
     fn host_reports_the_start_mode_it_was_created_with() {
         for mode in [StartMode::Normal, StartMode::SafePlugins, StartMode::NoPlugins] {
@@ -579,7 +578,6 @@ mod spec_tests {
         }
     }
 
-    /// REQ: [HST-033] and [HST-034] (`--no-plugins` starts no plugin host; the session still boots).
     #[test]
     fn no_plugins_start_activates_nothing() {
         let host = ServerPluginHost::new(StartMode::NoPlugins);
@@ -588,7 +586,6 @@ mod spec_tests {
         assert!(report.failed.is_empty(), "no plugin may fail: {:?}", report.failed);
     }
 
-    /// REQ: reference-host-architecture.md "Server shutdown" step 3 (each active plugin receives deactivate; plugins are deactivated or dropped at the budget).
     #[test]
     fn shutdown_accounts_for_every_started_plugin_exactly_once() {
         let host = ServerPluginHost::new(StartMode::Normal);
@@ -606,7 +603,6 @@ mod spec_tests {
         assert_eq!(accounted, started);
     }
 
-    /// REQ: parity-and-coverage.md driver contract for `feed_output` and `pane_input_log` (output is what the process writes; input is what is written to the process).
     #[test]
     fn fed_output_is_not_recorded_as_input_to_the_pane_process() {
         let kernel = ServerKernel::for_parity_world(StartMode::NoPlugins, "");
@@ -615,7 +611,6 @@ mod spec_tests {
         assert!(kernel.pane_input_log(pane).is_empty());
     }
 
-    /// REQ: parity-and-coverage.md driver contract for `write_config_file` and `config_text` (replace, then read back, including empty text).
     #[test]
     fn config_text_returns_what_write_config_file_stored() {
         let kernel = ServerKernel::for_parity_world(StartMode::NoPlugins, "");
@@ -625,7 +620,6 @@ mod spec_tests {
         assert_eq!(kernel.config_text(), "");
     }
 
-    /// REQ: parity-and-coverage.md driver contract for `write_project_file` and `read_project_file`; a missing file is `None` and does not exist.
     #[test]
     fn project_file_round_trips_and_missing_file_is_absent() {
         let kernel = ServerKernel::for_parity_world(StartMode::NoPlugins, "");
@@ -636,7 +630,6 @@ mod spec_tests {
         assert!(kernel.project_file_exists("notes/a.txt"));
     }
 
-    /// REQ: [HST-026] (a restart restores the tree from the snapshot, and the restored tree is unchanged) and reference-host-architecture.md "Server start" steps 2 and 7; COR-130 per the `restart_from_disk` doc.
     #[test]
     fn restart_from_disk_keeps_the_tree_structure() {
         let kernel = ServerKernel::for_parity_world(StartMode::NoPlugins, "");
@@ -648,7 +641,6 @@ mod spec_tests {
         assert_eq!(restarted.pane_count(), pane_count_before);
     }
 
-    /// REQ: [PAN-004] (a process replacement keeps node id, title, place and size) and the `pane_identity` doc in api-pane-lifecycle.md.
     #[test]
     fn starting_a_restored_process_keeps_the_pane_identity() {
         let kernel = ServerKernel::for_test_world("spec.plugin", &[]);
@@ -658,7 +650,6 @@ mod spec_tests {
         assert_eq!(kernel.pane_identity(pane), identity_before);
     }
 
-    /// REQ: [HST-450] (detector calls run on the plugin executor, never on the detection loop thread) and [HST-451] (one detector call per pane, at most one call per pane per tick).
     #[test]
     fn detector_calls_stay_off_the_detection_loop_thread_and_respect_one_per_pane() {
         let kernel = ServerKernel::for_test_world("spec.plugin", &[]);
@@ -670,7 +661,6 @@ mod spec_tests {
         assert!(kernel.detector_calls_in_last_tick() <= kernel.pane_count());
     }
 
-    /// REQ: invalid input: a job id that never ran has no result (`job_result` reports a result only once a job ended).
     #[test]
     fn job_result_is_absent_for_a_job_that_never_ran() {
         let kernel = ServerKernel::for_parity_world(StartMode::NoPlugins, "");

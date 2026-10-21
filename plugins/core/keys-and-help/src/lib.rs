@@ -80,8 +80,8 @@ mod spec_tests {
             .collect()
     }
 
-    /// REQ: COR-050
     /// The manifest activates the plugin on exactly the three triggers the manual lists.
+    /// REQ: COR-050
     #[test]
     fn manifest_activates_on_the_three_declared_triggers() {
         let triggers = string_array(&load_manifest()["activation"]);
@@ -95,8 +95,8 @@ mod spec_tests {
         );
     }
 
-    /// REQ: COR-050
     /// Identity and client side of the manifest match the manual's complete manifest.
+    /// REQ: COR-050
     #[test]
     fn manifest_identity_and_client_side_match_the_manual() {
         let manifest = load_manifest();
@@ -106,8 +106,8 @@ mod spec_tests {
         assert_eq!(manifest["client"]["exports"], serde_json::json!(["views"]));
     }
 
-    /// REQ: COR-050
     /// The key reference and the plugin manager appear in the palette under the Help category.
+    /// REQ: COR-050
     #[test]
     fn palette_commands_are_listed_under_the_help_category() {
         let manifest = load_manifest();
@@ -122,8 +122,8 @@ mod spec_tests {
         assert_eq!(help_command_ids, vec!["show-keys", "show-plugins"]);
     }
 
-    /// REQ: COR-030
     /// The plugin is the holder of the write grant for the Keyboard tab and for no other tab.
+    /// REQ: COR-030
     #[test]
     fn plugin_holds_the_write_grant_for_the_keyboard_tab_only() {
         let writes: Vec<String> = client_grants(&load_manifest())
@@ -133,16 +133,16 @@ mod spec_tests {
         assert_eq!(writes, vec!["settings.write-kernel:keyboard".to_string()]);
     }
 
-    /// REQ: COR-011
     /// The action table lists exactly 35 kernel actions.
+    /// REQ: COR-011
     #[test]
     fn keymap_table_lists_exactly_35_actions() {
         let rows = parse_action_rows(&load_manual_page());
         assert_eq!(rows.len(), 35);
     }
 
-    /// REQ: COR-011
     /// Every action has a global command id of the form kernel.<name>.
+    /// REQ: COR-011
     #[test]
     fn every_action_has_a_kernel_command_id() {
         let rows = parse_action_rows(&load_manual_page());
@@ -152,8 +152,8 @@ mod spec_tests {
         }
     }
 
-    /// REQ: COR-011
     /// Only the rename action has no default key.
+    /// REQ: COR-011
     #[test]
     fn only_rename_is_unbound_by_default() {
         let rows = parse_action_rows(&load_manual_page());
@@ -165,16 +165,16 @@ mod spec_tests {
         assert_eq!(unbound, vec!["rename"]);
     }
 
-    /// REQ: COR-011
     /// Invalid input: text without an action table yields no rows.
+    /// REQ: COR-011
     #[test]
     fn action_parser_yields_no_rows_without_a_table() {
         assert!(parse_action_rows("").is_empty());
         assert!(parse_action_rows("# no table here\n").is_empty());
     }
 
-    /// REQ: EXT-052
     /// The manifest declares both owned extension points with the values the manual gives.
+    /// REQ: EXT-052
     #[test]
     fn manifest_declares_both_owned_extension_points() {
         let manifest = load_manifest();
@@ -190,8 +190,8 @@ mod spec_tests {
         }
     }
 
-    /// REQ: EXT-052
     /// Failure case: the client grants must provide each owned point, otherwise the point is unusable.
+    /// REQ: EXT-052
     #[test]
     fn manifest_grants_provide_for_each_owned_extension_point() {
         let grants = client_grants(&load_manifest());

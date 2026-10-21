@@ -85,7 +85,7 @@ mod spec_tests {
         string_list(&manifest["activation"]).iter().any(|item| *item == trigger)
     }
 
-    /// REQ: COR-050 - the manifest names `ilium.core.recap`, targets the `ilium:plugin@0.1.0` API and is version 0.1.0.
+    /// REQ: COR-050
     #[test]
     fn manifest_identifies_recap_plugin() {
         let manifest = manifest();
@@ -94,7 +94,7 @@ mod spec_tests {
         assert_eq!(manifest["version"], "0.1.0");
     }
 
-    /// REQ: COR-050 - the plugin runs on both sides: the server in world `ilium:server/base@0.1.0` exporting job-runner and service-provider, the client in `ilium:client/base@0.1.0` with no exports.
+    /// REQ: COR-050
     #[test]
     fn manifest_declares_both_sides_with_their_worlds_and_exports() {
         let manifest = manifest();
@@ -107,7 +107,7 @@ mod spec_tests {
         assert!(string_list(&manifest["client"]["exports"]).is_empty());
     }
 
-    /// REQ: COR-050 - the `recap` CLI command writes JSON lines, reads no stdin, needs the server and takes the pane-selector argument group.
+    /// REQ: COR-050
     #[test]
     fn recap_cli_is_jsonl_and_needs_the_server() {
         let manifest = manifest();
@@ -119,7 +119,7 @@ mod spec_tests {
         assert_eq!(string_list(&cli["argument_groups"]), vec!["pane-selector"]);
     }
 
-    /// REQ: COR-050 - each pane runs as one `recap-pane` job with a 5000 ms CPU deadline and a 64 MiB memory cap.
+    /// REQ: COR-050
     #[test]
     fn recap_pane_job_declares_deadline_and_memory() {
         let manifest = manifest();
@@ -129,7 +129,7 @@ mod spec_tests {
         assert_eq!(job["memory_mib"], 64);
     }
 
-    /// REQ: COR-050 - the manifest description states the length limits: a short recap of at most 40 words and a long recap of at most 250 words.
+    /// REQ: COR-050
     #[test]
     fn manifest_description_states_both_length_limits() {
         let manifest = manifest();
@@ -138,14 +138,14 @@ mod spec_tests {
         assert!(description.contains("at most 250 words"));
     }
 
-    /// REQ: COR-050 - the server asks the client for `onboarding-state`, so the manifest must declare that client request kind.
+    /// REQ: COR-050
     #[test]
     fn onboarding_state_client_request_is_declared() {
         let manifest = manifest();
         assert!(named_entry(&manifest["contributes"]["client_requests"], "kind", "onboarding-state").is_some());
     }
 
-    /// REQ: COR-050 - the server holds the grants the consent gate and the model call need: reading the `inference` kernel settings, inference, and the pane transcript and screen reads.
+    /// REQ: COR-050
     #[test]
     fn server_holds_grants_for_consent_gate_and_model_call() {
         let manifest = manifest();
@@ -160,7 +160,7 @@ mod spec_tests {
         }
     }
 
-    /// REQ: COR-050 - the `fact-sources` and `before-recap` extension points are declared with their kinds, collect and transform (hook).
+    /// REQ: COR-050
     #[test]
     fn extension_points_are_declared_with_their_kinds() {
         let manifest = manifest();
@@ -171,7 +171,7 @@ mod spec_tests {
         assert_eq!(before_recap["kind"], "transform");
     }
 
-    /// REQ: COR-050 - an empty or unknown contribution name matches no declared CLI command, job or extension point.
+    /// REQ: COR-050
     #[test]
     fn empty_or_unknown_contribution_names_match_nothing() {
         let manifest = manifest();
@@ -181,7 +181,7 @@ mod spec_tests {
         assert!(named_entry(&manifest["contributes"]["extension_points"], "id", "").is_none());
     }
 
-    /// REQ: COR-050 - a manifest without the `cli:recap` trigger never wakes the CLI command, so the spec check must report it missing.
+    /// REQ: COR-050
     #[test]
     fn missing_cli_activation_trigger_is_reported() {
         let mut manifest = manifest();

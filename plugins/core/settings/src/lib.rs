@@ -65,8 +65,8 @@ mod spec_tests {
         })
     }
 
-    /// REQ: COR-030 - the Settings plugin holds `settings.write-kernel:<tab>` for each of its four
     /// kernel tabs (user-interface, icons, debug, about).
+    /// REQ: COR-030
     #[test]
     fn manifest_declares_write_kernel_for_each_owned_tab() {
         let grants = client_grants();
@@ -76,8 +76,8 @@ mod spec_tests {
         }
     }
 
-    /// REQ: COR-030 - at most one holder per kernel tab: no kernel-tab grant beyond the four owned
     /// tabs, and no grant declared twice.
+    /// REQ: COR-030
     #[test]
     fn manifest_holds_no_extra_or_duplicate_kernel_tab_grant() {
         let grants = client_grants();
@@ -92,8 +92,8 @@ mod spec_tests {
         assert_eq!(unique_grants.len(), kernel_grants.len(), "a kernel-tab grant is declared twice");
     }
 
-    /// REQ: COR-050 - the complete manifest starts at activation `startup`, targets the client base
     /// world and exports only `views`.
+    /// REQ: COR-050
     #[test]
     fn manifest_declares_startup_activation_and_views_export() {
         let manifest = manifest();
@@ -103,8 +103,8 @@ mod spec_tests {
         assert_eq!(manifest["limits_tier"], "first-party");
     }
 
-    /// REQ: COR-050 - the complete manifest declares the first-run onboarding step and the overview
     /// panel exactly as the manual's Complete manifest section lists them.
+    /// REQ: COR-050
     #[test]
     fn manifest_declares_first_run_step_and_overview_panel() {
         let manifest = manifest();
@@ -119,8 +119,8 @@ mod spec_tests {
         );
     }
 
-    /// REQ: COR-011 - the Appearance section keeps its manual defaults: density `comfortable`, and
     /// accent `#4a9eff` with theme swatches.
+    /// REQ: COR-011
     #[test]
     fn appearance_section_keeps_manual_defaults() {
         let manifest = manifest();
@@ -134,8 +134,8 @@ mod spec_tests {
         assert_eq!(section["rows"][1]["swatches"], "theme");
     }
 
-    /// REQ: COR-011 - a density change is saved by the host, so the plugin returns no submissions
     /// and writes no settings itself.
+    /// REQ: COR-011
     #[test]
     fn density_change_produces_no_submission() {
         let mut client = SettingsClient::default();
@@ -143,15 +143,15 @@ mod spec_tests {
         assert!(submissions.is_empty(), "the host saves the change; the plugin submits nothing");
     }
 
-    /// REQ: COR-011 - an empty event batch is a no-op: no submissions and no state change.
+    /// REQ: COR-011
     #[test]
     fn empty_event_batch_produces_no_submission() {
         let mut client = SettingsClient::default();
         assert!(client.on_events(Vec::new()).is_empty());
     }
 
-    /// REQ: COR-011 - failure case: a change to keys this plugin does not own (a kernel key such as
     /// `ui.motion_level`) is not acted on and yields no submission.
+    /// REQ: COR-011
     #[test]
     fn unrelated_setting_change_is_ignored() {
         let mut client = SettingsClient::default();
@@ -159,8 +159,8 @@ mod spec_tests {
         assert!(submissions.is_empty());
     }
 
-    /// REQ: COR-011 - the first-run onboarding step renders the `first-run` section as a schema form
     /// owned by this plugin.
+    /// REQ: COR-011
     #[test]
     fn onboarding_step_renders_first_run_schema_form() {
         let mut client = SettingsClient::default();
@@ -173,8 +173,8 @@ mod spec_tests {
         assert!(serialized.contains("first-run"));
     }
 
-    /// REQ: COR-011 - the overview panel renders the Appearance section as a schema form, not the
     /// onboarding section.
+    /// REQ: COR-011
     #[test]
     fn overview_panel_renders_appearance_schema_form() {
         let mut client = SettingsClient::default();

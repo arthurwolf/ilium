@@ -89,7 +89,7 @@ mod spec_tests {
         combined
     }
 
-    /// REQ: COR-050 - the plugin is `ilium.core.cost` and declares both a server and a client side.
+    /// REQ: COR-050
     #[test]
     fn manifest_declares_cost_id_and_both_sides() {
         let manifest = manifest();
@@ -100,7 +100,7 @@ mod spec_tests {
         assert_eq!(string_list(&manifest["client"]["exports"]), vec!["views"]);
     }
 
-    /// REQ: COR-050 - activation runs at startup and when the cost panel view is opened.
+    /// REQ: COR-050
     #[test]
     fn manifest_activates_at_startup_and_for_cost_panel() {
         let manifest = manifest();
@@ -109,7 +109,7 @@ mod spec_tests {
         assert!(activation.contains(&"view:cost.panel".to_string()));
     }
 
-    /// REQ: COR-050 - the server side may serve the usage service, decorate the tree and contribute the agent-cost settings tab.
+    /// REQ: COR-050
     #[test]
     fn server_capabilities_grant_usage_service_and_agent_cost_tab() {
         let server = capability_list(&manifest(), "server");
@@ -118,14 +118,14 @@ mod spec_tests {
         assert!(server.contains(&"settings.contribute:agent-cost".to_string()));
     }
 
-    /// REQ: COR-030 - the plugin owns the reset-planning kernel tab, so its write-kernel grant must be on the server side.
+    /// REQ: COR-030
     #[test]
     fn server_capabilities_grant_reset_planning_kernel_tab() {
         let server = capability_list(&manifest(), "server");
         assert!(server.contains(&"settings.write-kernel:reset-planning".to_string()));
     }
 
-    /// REQ: COR-033 - each owned kernel tab has exactly one write-kernel holder across both sides.
+    /// REQ: COR-033
     #[test]
     fn each_owned_kernel_tab_has_exactly_one_holder() {
         let manifest = manifest();
@@ -137,7 +137,7 @@ mod spec_tests {
         }
     }
 
-    /// REQ: COR-050 - the price and quota extension points are provided on the server side.
+    /// REQ: COR-050
     #[test]
     fn server_capabilities_provide_price_and_quota_extension_points() {
         let server = capability_list(&manifest(), "server");
@@ -145,7 +145,7 @@ mod spec_tests {
         assert!(server.contains(&"extensions.provide:ilium.core.cost/quota-sources".to_string()));
     }
 
-    /// REQ: COR-050 - the unit row is a choice with default "dollars" and the options dollars and quota.
+    /// REQ: COR-050
     #[test]
     fn unit_setting_defaults_to_dollars_with_quota_option() {
         let manifest = manifest();
@@ -162,7 +162,7 @@ mod spec_tests {
         assert_eq!(option_values, vec!["dollars", "quota"]);
     }
 
-    /// REQ: COR-050 - failure case: a usage reply without `panes` violates the declared result schema.
+    /// REQ: COR-050
     #[test]
     fn usage_reply_without_panes_violates_declared_result_schema() {
         let manifest = manifest();
@@ -177,14 +177,14 @@ mod spec_tests {
         assert_eq!(missing, vec![&"panes".to_string()]);
     }
 
-    /// REQ: COR-050 - invalid input: a truncated manifest must not parse as a complete plugin manifest.
+    /// REQ: COR-050
     #[test]
     fn truncated_manifest_text_does_not_parse() {
         let truncated: String = MANIFEST_TEXT.chars().take(MANIFEST_TEXT.chars().count() / 2).collect();
         assert!(serde_json::from_str::<Value>(&truncated).is_err());
     }
 
-    /// REQ: COR-050 - the manifest declares one struct per side, each constructible with Default.
+    /// REQ: COR-050
     #[test]
     fn server_and_client_sides_are_declared_structs() {
         let _server: CostServer = CostServer::default();

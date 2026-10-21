@@ -344,7 +344,7 @@ mod tests {
         }
     }
 
-    /// REQ: (none in the manual: chord grammar, api-keys.md "chord = *(modifier \"+\") key")
+    /// Manual: modifier \"+\") key"
     #[test]
     fn parse_chord_accepts_single_key_and_named_keys() {
         assert!(parse_chord("p").is_ok(), "a single printable key");
@@ -356,7 +356,7 @@ mod tests {
         assert!(parse_chord("f24").is_ok(), "the highest function key");
     }
 
-    /// REQ: (none in the manual: chord grammar, api-keys.md "chord = *(modifier \"+\") key")
+    /// Manual: modifier \"+\") key"
     #[test]
     fn parse_chord_accepts_each_modifier_and_plus_spelled_as_word() {
         assert!(parse_chord("ctrl+p").is_ok());
@@ -368,7 +368,7 @@ mod tests {
         assert!(parse_chord("shift+a").is_ok(), "shift plus a letter is written shift+a");
     }
 
-    /// REQ: (none in the manual: chord grammar, api-keys.md "chord = *(modifier \"+\") key")
+    /// Manual: modifier \"+\") key"
     #[test]
     fn parse_chord_splits_modifiers_then_key_in_any_order() {
         let canonical = parse_chord("ctrl+shift+p").expect("ctrl+shift+p is valid");
@@ -383,20 +383,20 @@ mod tests {
         assert_eq!(reordered.0.last().map(String::as_str), Some("p"));
     }
 
-    /// REQ: (none in the manual: chord grammar, api-keys.md "chord = *(modifier \"+\") key")
+    /// Manual: modifier \"+\") key"
     #[test]
     fn parse_chord_single_key_has_no_modifiers() {
         let chord = parse_chord("p").expect("p is valid");
         assert_eq!(chord, Chord(vec!["p".to_string()]));
     }
 
-    /// REQ: (none in the manual: chord grammar, api-keys.md "chord = *(modifier \"+\") key")
+    /// Manual: modifier \"+\") key"
     #[test]
     fn parse_chord_refuses_empty_input() {
         parse_chord("").expect_err("an empty chord is outside the grammar");
     }
 
-    /// REQ: (none in the manual: chord grammar, api-keys.md "chord = *(modifier \"+\") key")
+    /// Manual: modifier \"+\") key"
     #[test]
     fn parse_chord_refuses_dangling_or_bare_plus() {
         for chord in ["ctrl+", "+p", "+", "ctrl++", "ctrl+shift+"] {
@@ -404,7 +404,7 @@ mod tests {
         }
     }
 
-    /// REQ: (none in the manual: chord grammar, api-keys.md "chord = *(modifier \"+\") key")
+    /// Manual: modifier \"+\") key"
     #[test]
     fn parse_chord_refuses_unknown_modifier() {
         for chord in ["meta+p", "control+p", "cmd+p"] {
@@ -412,7 +412,7 @@ mod tests {
         }
     }
 
-    /// REQ: (none in the manual: chord grammar, api-keys.md "chord = *(modifier \"+\") key")
+    /// Manual: modifier \"+\") key"
     #[test]
     fn parse_chord_refuses_multi_character_or_unknown_key() {
         for chord in ["ctrl+ab", "ctrl+enterkey", "ctrl+f0", "f25", "ctrl+f25", "ctrl+arrow-up"] {
@@ -420,7 +420,7 @@ mod tests {
         }
     }
 
-    /// REQ: (none in the manual: chord grammar, api-keys.md "chord = *(modifier \"+\") key")
+    /// Manual: modifier \"+\") key"
     #[test]
     fn parse_chord_refuses_upper_case() {
         // The grammar is lower case: shift plus a letter is shift+a, not shift+A or Ctrl+p.

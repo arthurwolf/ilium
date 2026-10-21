@@ -129,8 +129,8 @@ mod tests {
 
     // ----- Instance state machine (reference-plugin-lifecycle-states.md, "Instance-state transitions") -----
 
-    /// REQ: LIF-005
     /// Row I1: an inactive side with a fired activation trigger starts `activate`.
+    /// REQ: LIF-005
     #[test]
     fn inactive_activate_moves_to_activating() {
         assert_eq!(
@@ -140,8 +140,8 @@ mod tests {
         );
     }
 
-    /// REQ: LIF-284
     /// Row I16: an inactive side whose required provider is not active waits.
+    /// REQ: LIF-284
     #[test]
     fn inactive_missing_dependency_enters_waiting_dependency() {
         assert_eq!(
@@ -151,8 +151,8 @@ mod tests {
         );
     }
 
-    /// REQ: LIF-284
     /// Row I17: when every requirement is active, the waiting side runs `activate`.
+    /// REQ: LIF-284
     #[test]
     fn waiting_dependency_becomes_activating_when_ready() {
         assert_eq!(
@@ -165,8 +165,8 @@ mod tests {
         );
     }
 
-    /// REQ: LIF-005
     /// Row I3: `activate` returning `ok` within its deadline makes the instance active.
+    /// REQ: LIF-005
     #[test]
     fn activating_ok_becomes_active() {
         assert_eq!(
@@ -176,9 +176,9 @@ mod tests {
         );
     }
 
-    /// REQ: LIF-012
     /// Row I4: an `activate` error or deadline breach drops the instance into `failed`
     /// (no `deactivate` call is part of the transition).
+    /// REQ: LIF-012
     #[test]
     fn activating_activate_error_fails_without_deactivate() {
         for error_code in ["trap.deadline", "trap.memory"] {
@@ -193,8 +193,8 @@ mod tests {
         }
     }
 
-    /// REQ: LIF-012
     /// Row I4: a trap while activating drops the instance into `failed`.
+    /// REQ: LIF-012
     #[test]
     fn activating_trap_fails() {
         assert_eq!(
@@ -207,8 +207,8 @@ mod tests {
         );
     }
 
-    /// REQ: LIF-012
     /// Row I5: a trap while active drops the instance into `failed`, not `deactivating`.
+    /// REQ: LIF-012
     #[test]
     fn active_trap_fails_without_deactivate() {
         assert_eq!(
@@ -221,9 +221,9 @@ mod tests {
         );
     }
 
-    /// REQ: LIF-014
     /// Rows I9 to I13: every deactivation reason from `active` moves the instance to `deactivating`,
     /// and a disable trigger does the same (row I9).
+    /// REQ: LIF-014
     #[test]
     fn active_deactivation_reasons_move_to_deactivating() {
         let reasons = [
@@ -247,8 +247,8 @@ mod tests {
         );
     }
 
-    /// REQ: LIF-005
     /// Row I8: when the restart timer fires, the side runs `activate` again.
+    /// REQ: LIF-005
     #[test]
     fn restart_timer_fired_reactivates() {
         assert_eq!(
@@ -261,9 +261,9 @@ mod tests {
         );
     }
 
-    /// REQ: LIF-013
     /// Row I14: disabling while a restart is scheduled cancels the timer, so the restart never begins.
     /// The resulting state is not named by the manual, so the test only excludes `activating`.
+    /// REQ: LIF-013
     #[test]
     fn restart_scheduled_disable_never_reactivates() {
         let result = next_instance_state(InstanceState::RestartScheduled, &InstanceInput::Disable);
@@ -274,8 +274,8 @@ mod tests {
         );
     }
 
-    /// REQ: LIF-036
     /// Row P5 (side effect): enabling a stopped-by-failure side clears its window and sets it `inactive`.
+    /// REQ: LIF-036
     #[test]
     fn stopped_by_failure_enable_sets_inactive() {
         assert_eq!(
@@ -285,8 +285,8 @@ mod tests {
         );
     }
 
-    /// REQ: LIF-005
     /// Only the transitions in the tables may occur; every other input/state pair is an illegal transition.
+    /// REQ: LIF-005
     #[test]
     fn transitions_outside_the_tables_are_rejected() {
         let illegal_pairs = [
@@ -310,8 +310,8 @@ mod tests {
 
     // ----- Package state machine (reference-plugin-lifecycle-states.md, "Package-state transitions") -----
 
-    /// REQ: LIF-001
     /// Row P1: installing a new plugin gives it the `installed-enabled` package state.
+    /// REQ: LIF-001
     #[test]
     fn install_moves_not_installed_to_installed_enabled() {
         assert_eq!(
@@ -321,8 +321,8 @@ mod tests {
         );
     }
 
-    /// REQ: LIF-001
     /// Rows P2 and P3: a user disable and enable move between the two user-visible states.
+    /// REQ: LIF-001
     #[test]
     fn user_disable_and_enable_round_trip() {
         assert_eq!(
@@ -337,8 +337,8 @@ mod tests {
         );
     }
 
-    /// REQ: LIF-019
     /// Enabling an enabled plugin, or disabling a disabled one, returns `ok` and changes nothing.
+    /// REQ: LIF-019
     #[test]
     fn repeated_set_enabled_changes_nothing() {
         assert_eq!(
@@ -353,8 +353,8 @@ mod tests {
         );
     }
 
-    /// REQ: LIF-283
     /// Row P13: removing the signing key with `--force` gives `disabled-untrusted`.
+    /// REQ: LIF-283
     #[test]
     fn trust_removed_disables_untrusted() {
         assert_eq!(
@@ -364,8 +364,8 @@ mod tests {
         );
     }
 
-    /// REQ: LIF-283
     /// Row P14: enabling an untrusted plugin with `--accept-risk` returns it to `installed-enabled`.
+    /// REQ: LIF-283
     #[test]
     fn untrusted_enable_returns_to_installed_enabled() {
         assert_eq!(
@@ -375,8 +375,8 @@ mod tests {
         );
     }
 
-    /// REQ: LIF-283
     /// Row P15: a compromised key revocation blocks an installed plugin.
+    /// REQ: LIF-283
     #[test]
     fn revoked_key_blocks_installed_plugin() {
         assert_eq!(
@@ -386,8 +386,8 @@ mod tests {
         );
     }
 
-    /// REQ: LIF-283
     /// Row P16: `enable --accept-risk` clears a blocked plugin back to `installed-enabled`.
+    /// REQ: LIF-283
     #[test]
     fn blocked_enable_returns_to_installed_enabled() {
         assert_eq!(
@@ -397,8 +397,8 @@ mod tests {
         );
     }
 
-    /// REQ: LIF-004
     /// Row P6: an administrator policy entry moves an enabled plugin to `disabled-by-policy`.
+    /// REQ: LIF-004
     #[test]
     fn policy_deny_moves_to_disabled_by_policy() {
         assert_eq!(
@@ -408,8 +408,8 @@ mod tests {
         );
     }
 
-    /// REQ: LIF-007
     /// Enabling a policy-blocked or refused plugin returns `not-permitted` and changes no state.
+    /// REQ: LIF-007
     #[test]
     fn enable_on_policy_or_refused_plugin_is_not_permitted() {
         for state in [PackageState::DisabledByPolicy, PackageState::RefusedAtLoad] {
@@ -421,8 +421,8 @@ mod tests {
         }
     }
 
-    /// REQ: LIF-003
     /// Row P7: each documented load-refusal code moves the package to `refused-at-load`.
+    /// REQ: LIF-003
     #[test]
     fn load_refusal_codes_move_to_refused_at_load() {
         let refusal_codes = [
@@ -444,9 +444,9 @@ mod tests {
         }
     }
 
-    /// REQ: LIF-010
     /// Rows P8 to P10: staging an update and swapping it in both leave the package `installed-enabled`;
     /// the package never rests in `update-staged` for a plain update.
+    /// REQ: LIF-010
     #[test]
     fn staging_and_swapping_an_update_keep_installed_enabled() {
         assert_eq!(
@@ -461,8 +461,8 @@ mod tests {
         );
     }
 
-    /// REQ: LIF-001
     /// Row P11: an uninstall request moves an installed plugin to `uninstall-pending`.
+    /// REQ: LIF-001
     #[test]
     fn request_uninstall_moves_to_uninstall_pending() {
         for state in [
@@ -477,8 +477,8 @@ mod tests {
         }
     }
 
-    /// REQ: LIF-020
     /// While an uninstall is pending, a new enable or disable is refused with `conflict`.
+    /// REQ: LIF-020
     #[test]
     fn uninstall_pending_refuses_set_enabled_with_conflict() {
         for input in [PackageInput::Enable, PackageInput::Disable] {
@@ -490,8 +490,8 @@ mod tests {
         }
     }
 
-    /// REQ: LIF-001
     /// Inputs that the package tables do not allow from the given state are illegal transitions.
+    /// REQ: LIF-001
     #[test]
     fn package_transitions_outside_the_tables_are_rejected() {
         assert!(
@@ -514,8 +514,8 @@ mod tests {
 
     // ----- Restart policy (reference-runtime-model.md "12. Failures and restart", Lifecycle "Failure counting and restart") -----
 
-    /// REQ: LIF-027
     /// The window constants match the manual: 10 minutes, 1 s and 5 s restart delays.
+    /// REQ: LIF-027
     #[test]
     fn restart_constants_match_the_manual() {
         assert_eq!(FAILURE_WINDOW_MS, 600_000, "window is 10 minutes");
@@ -523,8 +523,8 @@ mod tests {
         assert_eq!(SECOND_RESTART_DELAY_MS, 5_000, "second restart after 5 s");
     }
 
-    /// REQ: LIF-028
     /// The first counted failure schedules a restart after 1 s.
+    /// REQ: LIF-028
     #[test]
     fn first_failure_restarts_after_one_second() {
         let mut policy = RestartPolicy::default();
@@ -535,8 +535,8 @@ mod tests {
         );
     }
 
-    /// REQ: LIF-029
     /// The second counted failure within the window schedules a restart after 5 s.
+    /// REQ: LIF-029
     #[test]
     fn second_failure_restarts_after_five_seconds() {
         let mut policy = RestartPolicy::default();
@@ -548,8 +548,8 @@ mod tests {
         );
     }
 
-    /// REQ: LIF-030
     /// The third counted failure within the window disables the plugin and schedules no restart.
+    /// REQ: LIF-030
     #[test]
     fn third_failure_inside_window_disables() {
         let mut policy = RestartPolicy::default();
@@ -562,8 +562,8 @@ mod tests {
         );
     }
 
-    /// REQ: LIF-027
     /// Failures older than 600 s drop out of the count (manual example: 0 s, 300 s, 660 s).
+    /// REQ: LIF-027
     #[test]
     fn failure_at_660_seconds_sees_only_the_one_at_300_seconds() {
         let mut policy = RestartPolicy::default();
@@ -576,8 +576,8 @@ mod tests {
         );
     }
 
-    /// REQ: LIF-027
     /// A failure counts while its age is below 600 s: 599 s and 599.999 s count, 600 s does not.
+    /// REQ: LIF-027
     #[test]
     fn failure_age_boundary_is_strictly_below_600_seconds() {
         let mut policy = RestartPolicy::default();
@@ -588,8 +588,8 @@ mod tests {
         assert_eq!(policy.failures_in_window(601_000), 0, "age 601 s does not count");
     }
 
-    /// REQ: LIF-027
     /// A failure exactly 600 s old no longer counts, so the next failure is a first failure again.
+    /// REQ: LIF-027
     #[test]
     fn failure_exactly_at_window_end_is_not_counted() {
         let mut policy = RestartPolicy::default();
@@ -601,8 +601,8 @@ mod tests {
         );
     }
 
-    /// REQ: LIF-037
     /// A new policy (after a server restart) starts with an empty window.
+    /// REQ: LIF-037
     #[test]
     fn default_policy_has_empty_window() {
         let policy = RestartPolicy::default();
@@ -610,8 +610,8 @@ mod tests {
         assert_eq!(policy.failures_in_window(600_000), 0, "empty input at the window end");
     }
 
-    /// REQ: LIF-027
     /// Recording a failure makes it count inside the window.
+    /// REQ: LIF-027
     #[test]
     fn recorded_failure_counts_inside_window() {
         let mut policy = RestartPolicy::default();
@@ -621,8 +621,8 @@ mod tests {
         assert_eq!(policy.failures_in_window(10_000), 2, "two failures inside the window");
     }
 
-    /// REQ: LIF-036
     /// Manual reset (enable, reset-failures) forgets every failure, so the next failure is a first failure.
+    /// REQ: LIF-036
     #[test]
     fn reset_clears_failures_and_restarts_count() {
         let mut policy = RestartPolicy::default();
@@ -637,8 +637,8 @@ mod tests {
         );
     }
 
-    /// REQ: LIF-009
     /// After a reset, the next failure restarts after the first-failure delay, not the second.
+    /// REQ: LIF-009
     #[test]
     fn failure_after_enable_restarts_after_first_delay() {
         let mut policy = RestartPolicy::default();
@@ -651,8 +651,8 @@ mod tests {
         );
     }
 
-    /// REQ: LIF-025
     /// Each side and scope has its own window: failures on one policy do not count on another.
+    /// REQ: LIF-025
     #[test]
     fn separate_policies_keep_separate_windows() {
         let mut client_policy = RestartPolicy::default();

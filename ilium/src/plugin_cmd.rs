@@ -38,7 +38,7 @@ pub fn run_plugin_command(args: &[String]) -> i32 {
 mod spec_tests {
     use super::*;
 
-    /// REQ: HST-033 (reference-host-architecture.md "Safe start")
+    /// REQ: HST-033
     #[test]
     fn hst_033_the_safe_flag_alone_selects_safe_plugins() {
         assert_eq!(
@@ -47,7 +47,7 @@ mod spec_tests {
         );
     }
 
-    /// REQ: HST-033 (reference-host-architecture.md "Safe start")
+    /// REQ: HST-033
     #[test]
     fn hst_033_the_no_plugins_flag_alone_selects_no_plugins() {
         assert_eq!(
@@ -56,7 +56,7 @@ mod spec_tests {
         );
     }
 
-    /// REQ: HST-033 (no switch and no variable means a normal start)
+    /// REQ: HST-033
     #[test]
     fn hst_033_no_flag_and_no_variable_selects_normal() {
         assert_eq!(
@@ -65,7 +65,7 @@ mod spec_tests {
         );
     }
 
-    /// REQ: HST-043 (both safe-start switches given: `--no-plugins` wins)
+    /// REQ: HST-043
     #[test]
     fn hst_043_no_plugins_flag_beats_safe_plugins_flag() {
         assert_eq!(
@@ -74,7 +74,7 @@ mod spec_tests {
         );
     }
 
-    /// REQ: HST-043 and user-safe-mode-and-troubleshooting.md ("the strictest wins")
+    /// REQ: HST-043
     #[test]
     fn hst_043_no_plugins_variable_beats_safe_flag_as_the_strictest_mode() {
         assert_eq!(
@@ -83,7 +83,7 @@ mod spec_tests {
         );
     }
 
-    /// REQ: HST-033 (the safe variable `ILIUM_SAFE_PLUGINS` selects safe plugins when set to a value other than `0`)
+    /// REQ: HST-033
     #[test]
     fn hst_033_a_non_zero_safe_variable_selects_safe_plugins() {
         assert_eq!(
@@ -92,7 +92,7 @@ mod spec_tests {
         );
     }
 
-    /// REQ: HST-033 (empty and `0` values count as unset, so the start stays normal)
+    /// REQ: HST-033
     #[test]
     fn hst_033_empty_or_zero_variables_count_as_unset() {
         assert_eq!(
@@ -109,21 +109,21 @@ mod spec_tests {
         );
     }
 
-    /// REQ: DEV-003 (global flags such as `--help` are accepted; `--help` exits with 0)
+    /// REQ: DEV-003
     #[test]
     fn dev_003_help_prints_usage_and_exits_with_zero() {
         let args = vec!["--help".to_string()];
         assert_eq!(run_plugin_command(&args), 0);
     }
 
-    /// REQ: DEV-010 and DEV-007 (a usage error exits with 2 before any work starts)
+    /// REQ: DEV-010
     #[test]
     fn dev_010_unknown_subcommand_is_a_usage_error_with_exit_code_two() {
         let args = vec!["no-such-subcommand".to_string()];
         assert_eq!(run_plugin_command(&args), 2);
     }
 
-    /// REQ: DEV-003 (the real environment uses the process working directory)
+    /// REQ: DEV-003
     #[test]
     fn dev_003_real_cli_env_uses_the_current_working_directory() {
         let environment = real_cli_env();

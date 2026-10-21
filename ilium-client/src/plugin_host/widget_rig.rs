@@ -351,7 +351,7 @@ mod spec_tests {
     use super::*;
     use ilium_plugin_api::generated::types::Constraint;
 
-    /// REQ: WID-007 (fixed and fill solved in order; cells sum to the area width)
+    /// REQ: WID-007
     #[test]
     fn solve_row_fixed_then_fill_takes_the_remaining_width() {
         let widths = solve_row(40, &[Constraint::Length(10), Constraint::Fill(1)]);
@@ -359,14 +359,14 @@ mod spec_tests {
         assert_eq!(widths.iter().sum::<u16>(), 40);
     }
 
-    /// REQ: WID-006 (a percentage above 100 is clamped to 100)
+    /// REQ: WID-006
     #[test]
     fn solve_row_clamps_percentage_above_100_to_the_full_width() {
         let widths = solve_row(40, &[Constraint::Percentage(150)]);
         assert_eq!(widths, vec![40]);
     }
 
-    /// REQ: WID-005 (a child and constraint count mismatch is an error, never a silent layout)
+    /// REQ: WID-005
     #[test]
     fn show_layout_with_mismatched_constraint_count_is_an_error() {
         let mut rig = WidgetRig::new(40, 10);
@@ -374,7 +374,7 @@ mod spec_tests {
         assert!(result.is_err(), "3 children with 2 constraints must fail");
     }
 
-    /// REQ: WID-022 (calendar needs the unstable list; without it the install fails)
+    /// REQ: WID-022
     #[test]
     fn install_with_calendar_not_listed_in_unstable_is_rejected() {
         let result = install_with_widget("calendar", false);
@@ -382,7 +382,7 @@ mod spec_tests {
         assert!(diagnostic.contains("manifest.unstable-missing"));
     }
 
-    /// REQ: WID-008 and WID-027 (a toggle click reaches the plugin as a ui-action with key and action-id)
+    /// REQ: WID-008
     #[test]
     fn clicking_a_toggle_sends_one_ui_action_with_key_as_action_id() {
         let mut rig = WidgetRig::new(40, 10);
@@ -395,7 +395,7 @@ mod spec_tests {
         assert_eq!(actions[0].value, "true");
     }
 
-    /// REQ: WID-027 (the ui-action event carries five fields)
+    /// REQ: WID-027
     #[test]
     fn ui_action_event_has_five_fields() {
         let record = UiActionRecord {
@@ -406,7 +406,7 @@ mod spec_tests {
         assert_eq!(record.field_count(), 5);
     }
 
-    /// REQ: WID-023 (ratio above 1 is drawn full; NaN is drawn empty)
+    /// REQ: WID-023
     #[test]
     fn gauge_clamps_ratio_above_one_and_draws_nan_as_empty() {
         let mut rig = WidgetRig::new(40, 10);
@@ -418,7 +418,7 @@ mod spec_tests {
         assert_eq!(rig.gauge_filled_cells(), 0);
     }
 
-    /// REQ: WID-012 (more than 4 open popups in one view fails with quota-exceeded)
+    /// REQ: WID-012
     #[test]
     fn fifth_open_popup_in_one_view_fails_with_quota_exceeded() {
         let mut rig = WidgetRig::new(40, 10);
@@ -432,7 +432,7 @@ mod spec_tests {
         assert!(diagnostic.contains("quota-exceeded"));
     }
 
-    /// REQ: WID-011 (Escape closes a modal popup, which must send closed)
+    /// REQ: WID-011
     #[test]
     fn escape_closes_modal_popup_and_sends_closed() {
         let mut rig = WidgetRig::new(40, 10);
@@ -445,7 +445,7 @@ mod spec_tests {
         );
     }
 
-    /// REQ: WID-015 (a tooltip over 200 scalar values is cut at 199 and ends with the ellipsis)
+    /// REQ: WID-015
     #[test]
     fn tooltip_longer_than_200_scalars_is_cut_to_200_ending_in_ellipsis() {
         let mut rig = WidgetRig::new(40, 10);

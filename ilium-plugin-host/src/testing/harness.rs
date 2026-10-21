@@ -1962,8 +1962,8 @@ mod tests {
         assert!(HostHarness::new().build().is_ok());
     }
 
-    /// REQ: API-001
     /// A default reply carries no plugin error.
+    /// REQ: API-001
     #[test]
     fn import_reply_default_has_no_error() {
         assert!(ImportReply::default().error().is_none());
@@ -1975,8 +1975,8 @@ mod tests {
         assert!(ImportReply::default().error_code().is_none());
     }
 
-    /// REQ: HST-410
     /// A default reply did not trap.
+    /// REQ: HST-410
     #[test]
     fn import_reply_default_has_no_trap_code() {
         assert!(ImportReply::default().trap_code().is_none());
@@ -1988,15 +1988,15 @@ mod tests {
         assert!(ImportReply::default().retry_after_ms().is_none());
     }
 
-    /// REQ: API-005
     /// A default reply is not an accepted asynchronous call, so it has no request id.
+    /// REQ: API-005
     #[test]
     fn import_reply_default_has_no_request_id() {
         assert!(ImportReply::default().request_id().is_none());
     }
 
-    /// REQ: API-005
     /// A default completion carries no failure code.
+    /// REQ: API-005
     #[test]
     fn completion_view_default_has_no_failed_code() {
         assert!(CompletionView::default().failed_code().is_none());
@@ -2036,8 +2036,8 @@ mod tests {
         assert_eq!(report.tick_ms, 0);
     }
 
-    /// REQ: HST-079
     /// A default tick observation reports no installed callback.
+    /// REQ: HST-079
     #[test]
     fn tick_observation_default_has_no_callback() {
         assert!(!TickObservation::default().callback_installed);
@@ -2069,8 +2069,8 @@ mod tests {
         ));
     }
 
-    /// REQ: HST-490
     /// Every intent case is applied by the server or the client, never by the scene side.
+    /// REQ: HST-490
     #[test]
     fn applying_side_is_server_or_client_for_every_intent_case() {
         for case in Intent::CASE_NAMES {

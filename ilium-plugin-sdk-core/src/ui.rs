@@ -381,7 +381,6 @@ mod spec_tests {
         tree
     }
 
-    /// REQ: [WID-002] ui-model "The ui-tree": a flat node list whose root is node 0; children have greater indices than their parent.
     #[test]
     fn finished_tree_has_root_zero_and_forward_child_indices() {
         let mut tree = Tree::new();
@@ -394,7 +393,6 @@ mod spec_tests {
         assert!(built.nodes[1].children.is_empty());
     }
 
-    /// REQ: [WID-002] ui-model "The ui-tree": a child index must be less than nodes.len(); an out-of-range index is invalid (ui.invalid-tree).
     #[test]
     fn child_index_past_the_last_node_is_rejected() {
         let mut tree = Tree::new();
@@ -402,7 +400,6 @@ mod spec_tests {
         assert!(tree.finish(0).is_err());
     }
 
-    /// REQ: [WID-002] ui-model "The ui-tree": a backward index or a cycle is not a tree and traps (ui.invalid-tree).
     #[test]
     fn backward_child_index_is_rejected() {
         let mut tree = Tree::new();
@@ -411,7 +408,6 @@ mod spec_tests {
         assert!(tree.finish(0).is_err());
     }
 
-    /// REQ: ui-model "The ui-tree": root must equal 0; a nonzero root traps with ui.invalid-tree.
     #[test]
     fn nonzero_root_is_rejected() {
         let mut tree = Tree::new();
@@ -420,31 +416,26 @@ mod spec_tests {
         assert!(tree.finish(1).is_err());
     }
 
-    /// REQ: [API-011] and reference-errors-and-limits `ui_tree_nodes`: a tree of exactly 4,096 nodes (the default cap) is accepted.
     #[test]
     fn tree_at_the_node_limit_is_accepted() {
         assert!(flat_tree_with_nodes(4_096).finish(0).is_ok());
     }
 
-    /// REQ: [API-011] and reference-errors-and-limits `ui_tree_nodes`: more than 4,096 nodes is an invalid tree.
     #[test]
     fn tree_over_the_node_limit_is_rejected() {
         assert!(flat_tree_with_nodes(4_097).finish(0).is_err());
     }
 
-    /// REQ: [RND-020] ui-model "The ui-tree": depth 32 with the root as level 1 is the deepest allowed tree.
     #[test]
     fn chain_of_32_levels_is_accepted() {
         assert!(chain_tree(32).finish(0).is_ok());
     }
 
-    /// REQ: [WID-017] ui-model "The ui-tree": a node at depth 33 traps with ui.too-deep.
     #[test]
     fn chain_of_33_levels_is_too_deep() {
         assert!(chain_tree(33).finish(0).is_err());
     }
 
-    /// REQ: [WID-003] ui-model "The ui-tree": a key must be unique across the whole view; a duplicate traps with ui.duplicate-key.
     #[test]
     fn duplicate_key_in_one_tree_is_rejected() {
         let mut tree = Tree::new();
@@ -454,7 +445,6 @@ mod spec_tests {
         assert!(tree.finish(0).is_err());
     }
 
-    /// REQ: ui-model "The ui-tree" and api-ui: `disabled-reason` is at most 40 characters; a longer reason is invalid.
     #[test]
     fn disabled_reason_over_40_characters_is_rejected() {
         let mut tree = Tree::new();

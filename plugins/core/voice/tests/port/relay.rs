@@ -40,8 +40,7 @@ fn relay_052_without_a_voice_client_the_request_is_rejected_with_no_voice_client
     assert_eq!(last_record(&run)["code"], "no-voice-client");
 }
 
-/// REQ: PORT:ilium-server/src/voice_relay.rs::a_running_session_receives_the_normalized_sentences
-/// REQ: PORT:ilium-server/tests/voice_text_relay.rs::typed_sentences_are_offered_to_the_registered_voice_client_and_the_answer_returns
+/// REQ: PORT:ilium-server/src/voice_relay.rs::a_running_session_receives_the_normalized_sentences, PORT:ilium-server/tests/voice_text_relay.rs::typed_sentences_are_offered_to_the_registered_voice_client_and_the_answer_returns
 #[test]
 fn relay_052_a_running_session_receives_the_trimmed_sentences_with_start_false() {
     let mut host = host_with_clients(&[1]);
@@ -118,8 +117,7 @@ fn relay_052_start_is_offered_only_after_the_plain_offers_were_declined() {
     assert_eq!(start_offers[0].0, 2, "the newest client is tried first");
 }
 
-/// REQ: PORT:ilium-server/src/voice_relay.rs::a_failed_voice_session_is_reported_over_a_switched_off_one
-/// REQ: PORT:ilium-server/tests/voice_text_relay.rs::typed_sentences_are_offered_to_the_registered_voice_client_and_the_answer_returns
+/// REQ: PORT:ilium-server/src/voice_relay.rs::a_failed_voice_session_is_reported_over_a_switched_off_one, PORT:ilium-server/tests/voice_text_relay.rs::typed_sentences_are_offered_to_the_registered_voice_client_and_the_answer_returns
 #[test]
 fn relay_052_voice_unavailable_outranks_voice_off_and_keeps_its_message() {
     let mut host = host_with_clients(&[1]);
@@ -180,8 +178,7 @@ fn relay_052_attaching_the_same_client_twice_sends_one_offer() {
     assert_eq!(host.client_requests().sent().len(), 1);
 }
 
-/// REQ: PORT:ilium-server/src/voice_relay.rs::malformed_requests_are_rejected_before_any_client_is_asked
-/// REQ: PORT:ilium-server/tests/voice_text_relay.rs::a_malformed_request_is_refused_with_the_invalid_request_code
+/// REQ: PORT:ilium-server/src/voice_relay.rs::malformed_requests_are_rejected_before_any_client_is_asked, PORT:ilium-server/tests/voice_text_relay.rs::a_malformed_request_is_refused_with_the_invalid_request_code
 #[test]
 fn relay_052_a_malformed_request_is_invalid_request_before_any_client_is_asked() {
     let mut host = host_with_clients(&[1]);

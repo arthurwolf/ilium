@@ -107,7 +107,6 @@ mod spec_tests {
             .find(|point| point["id"] == point_id)
     }
 
-    /// REQ: core-plugin-titles.md "Manifest" (the plugin runs on both sides: one server struct, one client struct; no bracketed ID).
     #[test]
     fn both_sides_are_implemented_as_default_structs() {
         fn assert_default<T: Default>() {}
@@ -115,7 +114,6 @@ mod spec_tests {
         assert_default::<TitlesClient>();
     }
 
-    /// REQ: core-plugin-titles.md "Complete manifest" (api version, plugin id and server world; no bracketed ID).
     #[test]
     fn manifest_names_this_plugin_and_api_version() {
         let manifest = shipped_manifest();
@@ -124,21 +122,20 @@ mod spec_tests {
         assert_eq!(manifest["server"]["world"], "ilium:server/base@0.1.0");
     }
 
-    /// REQ: COR-050 (Titles follows the startup activation; it is not lazily activated).
+    /// REQ: COR-050
     #[test]
     fn activation_is_startup_only() {
         let manifest = shipped_manifest();
         assert_eq!(manifest["activation"], json!(["startup"]));
     }
 
-    /// REQ: COR-030, COR-033 (the plugin holds settings.write-kernel for titles and triggers, one holder per tab).
+    /// REQ: COR-030, COR-033
     #[test]
     fn each_owned_kernel_tab_has_exactly_one_holder() {
         let violations = kernel_tab_holder_violations(&shipped_manifest());
         assert!(violations.is_empty(), "kernel tab holders: {violations:?}");
     }
 
-    /// REQ: core-plugin-titles.md "Complete manifest" (server capabilities list the six base grants; no bracketed ID).
     #[test]
     fn server_side_declares_the_base_grants() {
         let grants = server_capabilities(&shipped_manifest());
@@ -154,7 +151,6 @@ mod spec_tests {
         }
     }
 
-    /// REQ: core-plugin-titles.md "Complete manifest" (settings.write-kernel:titles and :triggers are listed under server).
     #[test]
     fn kernel_tab_grants_are_declared_on_the_server_side() {
         let grants = server_capabilities(&shipped_manifest());
@@ -164,7 +160,6 @@ mod spec_tests {
         }
     }
 
-    /// REQ: core-plugin-titles.md "Extension points this plugin owns" (before-apply-title: 20 ms deadline, 8 handlers; title-styles: 64 entries).
     #[test]
     fn extension_points_carry_the_manual_limits() {
         let manifest = shipped_manifest();
@@ -175,7 +170,6 @@ mod spec_tests {
         assert_eq!(styles["max_entries"], 64);
     }
 
-    /// REQ: core-plugin-titles.md "Extension points this plugin owns" (both points run on the server, each with an extensions.provide grant).
     #[test]
     fn extension_point_grants_are_provided_on_the_server_side() {
         let grants = server_capabilities(&shipped_manifest());
@@ -185,13 +179,12 @@ mod spec_tests {
         }
     }
 
-    /// REQ: core-plugin-titles.md "Complete manifest" (the manifest must be a parseable ilium:plugin@0.1.0 document; empty text is invalid).
     #[test]
     fn empty_manifest_text_is_rejected() {
         assert!(parse_manifest("").is_err());
     }
 
-    /// REQ: COR-033 (a second holder of an owned kernel tab is a violation and must be reported).
+    /// REQ: COR-033
     #[test]
     fn duplicate_kernel_tab_holder_is_reported() {
         let mut manifest = shipped_manifest();

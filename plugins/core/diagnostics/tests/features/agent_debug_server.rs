@@ -22,8 +22,7 @@ fn observe(session: &mut Session, source: &str, kind: &str, summary: &str) -> bo
     reply["accepted"].as_bool().expect("accepted flag")
 }
 
-/// REQ: F-032
-/// REQ: PORT:ilium-server/src/agent_debug.rs::disabled_recorder_does_not_create_a_journal
+/// REQ: F-032, PORT:ilium-server/src/agent_debug.rs::disabled_recorder_does_not_create_a_journal
 #[test]
 fn f_032_disabled_recorder_does_not_create_a_journal() {
     let mut session = session();
@@ -38,8 +37,7 @@ fn f_032_disabled_recorder_does_not_create_a_journal() {
     );
 }
 
-/// REQ: F-032
-/// REQ: PORT:ilium-server/src/agent_debug.rs::replay_supports_initial_and_incremental_reads
+/// REQ: F-032, PORT:ilium-server/src/agent_debug.rs::replay_supports_initial_and_incremental_reads
 #[test]
 fn f_032_replay_supports_initial_and_incremental_reads() {
     let mut session = session();
@@ -63,8 +61,7 @@ fn f_032_replay_supports_initial_and_incremental_reads() {
     assert_eq!(incremental["entries"][0]["summary"], "third");
 }
 
-/// REQ: F-032
-/// REQ: PORT:ilium-server/src/agent_debug.rs::snapshot_restore_and_remove_follow_the_pane_lifecycle
+/// REQ: F-032, PORT:ilium-server/src/agent_debug.rs::snapshot_restore_and_remove_follow_the_pane_lifecycle
 #[test]
 fn f_032_snapshot_restore_and_remove_follow_the_pane_lifecycle() {
     let mut session = session();
@@ -79,8 +76,7 @@ fn f_032_snapshot_restore_and_remove_follow_the_pane_lifecycle() {
     assert_eq!(entries(&mut session)["entries"][0]["summary"], "persist me");
 }
 
-/// REQ: F-032
-/// REQ: PORT:ilium-server/src/agent_debug.rs::snapshot_preflight_rejects_spare_capacity_without_losing_journal
+/// REQ: F-032, PORT:ilium-server/src/agent_debug.rs::snapshot_preflight_rejects_spare_capacity_without_losing_journal
 #[test]
 fn f_032_snapshot_preflight_rejects_a_too_small_limit_without_losing_the_journal() {
     let mut session = session();
@@ -97,8 +93,7 @@ fn f_032_snapshot_preflight_rejects_a_too_small_limit_without_losing_the_journal
     assert_eq!(replay["entries"].as_array().unwrap().len(), 1);
 }
 
-/// REQ: F-032
-/// REQ: PORT:ilium-server/src/agent_debug.rs::change_only_filter_ignores_repeated_detection_across_other_events
+/// REQ: F-032, PORT:ilium-server/src/agent_debug.rs::change_only_filter_ignores_repeated_detection_across_other_events
 #[test]
 fn f_032_change_only_filter_ignores_repeated_detection_across_other_events() {
     let mut session = session();
@@ -129,8 +124,7 @@ fn f_032_change_only_filter_ignores_repeated_detection_across_other_events() {
     ));
 }
 
-/// REQ: F-032
-/// REQ: PORT:ilium-server/src/agent_debug.rs::enabling_the_ui_journal_after_file_logging_still_records_a_baseline
+/// REQ: F-032, PORT:ilium-server/src/agent_debug.rs::enabling_the_ui_journal_after_file_logging_still_records_a_baseline
 #[test]
 fn f_032_enabling_the_ui_journal_after_file_logging_still_records_a_baseline() {
     let mut session = session();
@@ -146,9 +140,7 @@ fn f_032_enabling_the_ui_journal_after_file_logging_still_records_a_baseline() {
     assert!(reply.get("sequence").is_some(), "{reply}");
 }
 
-/// REQ: F-032
-/// REQ: SEC-249
-/// REQ: PORT:ilium-server/src/agent_debug.rs::process_log_payload_keeps_context_and_exact_lifecycle_evidence
+/// REQ: F-032, SEC-249, PORT:ilium-server/src/agent_debug.rs::process_log_payload_keeps_context_and_exact_lifecycle_evidence
 #[test]
 fn f_032_process_log_payload_keeps_context_and_exact_lifecycle_evidence() {
     let mut session = session();

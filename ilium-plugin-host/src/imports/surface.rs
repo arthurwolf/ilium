@@ -111,8 +111,8 @@ mod tests {
         }
     }
 
-    /// REQ: RND-016
     /// Boundary: exactly 131,072 cells per frame is accepted.
+    /// REQ: RND-016
     #[test]
     fn write_glyphs_accepts_exactly_the_per_frame_cell_limit() {
         let mut surface = SurfaceImport;
@@ -120,8 +120,8 @@ mod tests {
         expect_ok(surface.frame_surface_write_glyphs(SURFACE_HANDLE, cells));
     }
 
-    /// REQ: RND-016
     /// Boundary: one cell over the per-frame limit returns quota-exceeded.
+    /// REQ: RND-016
     #[test]
     fn write_glyphs_rejects_one_cell_over_the_per_frame_limit() {
         let mut surface = SurfaceImport;
@@ -130,17 +130,17 @@ mod tests {
         assert_eq!(code, ErrorCode::QuotaExceeded);
     }
 
-    /// REQ: RND-016
     /// Empty input: an empty cell list is valid and writes nothing (no error is documented for it).
+    /// REQ: RND-016
     #[test]
     fn write_glyphs_accepts_an_empty_cell_list() {
         let mut surface = SurfaceImport;
         expect_ok(surface.frame_surface_write_glyphs(SURFACE_HANDLE, Vec::new()));
     }
 
-    /// REQ: RND-016
     /// Error table on api-surface-glyph-plane (no requirement id): a cell outside the surface is invalid-argument.
     /// Row u16::MAX is past any surface height in cells.
+    /// REQ: RND-016
     #[test]
     fn write_glyphs_rejects_a_cell_outside_the_surface() {
         let mut surface = SurfaceImport;
@@ -149,16 +149,16 @@ mod tests {
         assert_eq!(code, ErrorCode::InvalidArgument);
     }
 
-    /// REQ: RND-016
     /// Empty input: clearing a surface that holds no glyphs is accepted.
+    /// REQ: RND-016
     #[test]
     fn clear_glyphs_is_accepted_on_a_surface_without_glyphs() {
         let mut surface = SurfaceImport;
         surface.frame_surface_clear_glyphs(SURFACE_HANDLE);
     }
 
-    /// REQ: RND-006
     /// Valid input: a zero id means no owner, so an all-zero row is accepted.
+    /// REQ: RND-006
     #[test]
     fn set_owner_ids_accepts_a_full_row_of_zero_ids() {
         let mut surface = SurfaceImport;
@@ -167,8 +167,8 @@ mod tests {
         expect_ok(surface.frame_surface_set_owner_ids(SURFACE_HANDLE, 0, ids));
     }
 
-    /// REQ: RND-006
     /// Error table on api-surface-glyph-plane (no requirement id): id rows outside the surface are invalid-argument.
+    /// REQ: RND-006
     #[test]
     fn set_owner_ids_rejects_a_first_row_past_the_height() {
         let mut surface = SurfaceImport;
@@ -181,8 +181,8 @@ mod tests {
         assert_eq!(code, ErrorCode::InvalidArgument);
     }
 
-    /// REQ: RND-004
     /// Valid input: one whole gray8 row is exactly `width` bytes.
+    /// REQ: RND-004
     #[test]
     fn write_rows_accepts_one_whole_gray8_row() {
         let mut surface = SurfaceImport;
@@ -191,8 +191,8 @@ mod tests {
         expect_ok(surface.frame_surface_write_rows(SURFACE_HANDLE, 0, PixelFormat::Gray8, data));
     }
 
-    /// REQ: RND-004
     /// Valid input: two whole rgb8 rows are exactly `2 x 3 x width` bytes.
+    /// REQ: RND-004
     #[test]
     fn write_rows_accepts_two_whole_rgb8_rows() {
         let mut surface = SurfaceImport;
@@ -201,8 +201,8 @@ mod tests {
         expect_ok(surface.frame_surface_write_rows(SURFACE_HANDLE, 0, PixelFormat::Rgb8, data));
     }
 
-    /// REQ: RND-004
     /// Valid input: one whole rgba8 row is exactly `4 x width` bytes.
+    /// REQ: RND-004
     #[test]
     fn write_rows_accepts_one_whole_rgba8_row() {
         let mut surface = SurfaceImport;
@@ -211,8 +211,8 @@ mod tests {
         expect_ok(surface.frame_surface_write_rows(SURFACE_HANDLE, 0, PixelFormat::Rgba8, data));
     }
 
-    /// REQ: RND-004
     /// Boundary: a partial trailing row (width + 1 gray8 bytes) is dropped and the call still succeeds.
+    /// REQ: RND-004
     #[test]
     fn write_rows_drops_a_partial_trailing_row_without_error() {
         let mut surface = SurfaceImport;
@@ -221,8 +221,8 @@ mod tests {
         expect_ok(surface.frame_surface_write_rows(SURFACE_HANDLE, 0, PixelFormat::Gray8, data));
     }
 
-    /// REQ: RND-004
     /// Empty input: empty data is invalid-argument (surface rules, api-scenes).
+    /// REQ: RND-004
     #[test]
     fn write_rows_rejects_empty_data() {
         let mut surface = SurfaceImport;
@@ -235,9 +235,9 @@ mod tests {
         assert_eq!(code, ErrorCode::InvalidArgument);
     }
 
-    /// REQ: RND-005
     /// Boundary: a first row at the height is invalid-argument (surface rules, api-scenes).
     /// RND-005 says rows at or past the height are ignored; the surface rules name first-row as the one invalid case.
+    /// REQ: RND-005
     #[test]
     fn write_rows_rejects_a_first_row_at_the_height() {
         let mut surface = SurfaceImport;
@@ -252,8 +252,8 @@ mod tests {
         assert_eq!(code, ErrorCode::InvalidArgument);
     }
 
-    /// REQ: RND-005
     /// Boundary: a row written past the last visible row is ignored, so the call succeeds.
+    /// REQ: RND-005
     #[test]
     fn write_rows_ignores_rows_that_fall_past_the_height() {
         let mut surface = SurfaceImport;
@@ -267,40 +267,40 @@ mod tests {
         ));
     }
 
-    /// REQ: RND-006
     /// Valid input with the grant absent: write_cell_colors is ignored, so the call succeeds.
+    /// REQ: RND-006
     #[test]
     fn write_cell_colors_is_ignored_without_uses_cell_colors() {
         let mut surface = SurfaceImport;
         expect_ok(surface.frame_surface_write_cell_colors(SURFACE_HANDLE, 0, vec![0x00ff00]));
     }
 
-    /// REQ: RND-006
     /// occupancy() returns none unless wants-occupancy is true; this handle has no such grant.
+    /// REQ: RND-006
     #[test]
     fn occupancy_is_none_without_wants_occupancy() {
         let mut surface = SurfaceImport;
         assert!(surface.frame_surface_occupancy(SURFACE_HANDLE).is_none());
     }
 
-    /// REQ: RND-006
     /// pointer() returns none when wants-pointer is false; this handle has no such grant.
+    /// REQ: RND-006
     #[test]
     fn pointer_is_none_without_wants_pointer() {
         let mut surface = SurfaceImport;
         assert!(surface.frame_surface_pointer(SURFACE_HANDLE).is_none());
     }
 
-    /// REQ: RND-003
     /// Before the first presented frame there is no receipt.
+    /// REQ: RND-003
     #[test]
     fn last_receipt_is_none_before_the_first_frame_is_presented() {
         let mut surface = SurfaceImport;
         assert!(surface.frame_surface_last_receipt(SURFACE_HANDLE).is_none());
     }
 
-    /// REQ: RND-003
     /// Valid input: presenting a frame produces a receipt for it.
+    /// REQ: RND-003
     #[test]
     fn present_produces_a_receipt_for_the_frame() {
         let mut surface = SurfaceImport;

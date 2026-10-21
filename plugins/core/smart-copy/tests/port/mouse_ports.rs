@@ -4,8 +4,7 @@ use ilium_plugin_sdk::types::PointerKind;
 
 use crate::common::*;
 
-/// REQ: PORT:ilium-client/src/mouse.rs::smart_copy_release_only_hosts_still_copy_the_hovered_candidate
-/// REQ: PORT:ilium-client/src/mouse.rs::smart_copy_release_is_not_lost_to_stale_tree_drag
+/// REQ: PORT:ilium-client/src/mouse.rs::smart_copy_release_only_hosts_still_copy_the_hovered_candidate, PORT:ilium-client/src/mouse.rs::smart_copy_release_is_not_lost_to_stale_tree_drag
 #[test]
 fn port_mouse_picking_after_pointer_activity_still_copies() {
     let mut host = open_picker(&["hovered"]);

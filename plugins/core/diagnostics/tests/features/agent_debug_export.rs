@@ -27,8 +27,7 @@ fn resize_entry(sequence: u64, summary: &str, cause: Option<&str>) -> Value {
     json!({ "sequence": sequence, "at": 1_700_000_000_000_i64, "severity": "information", "source": "pty", "kind": "pane-resized", "summary": summary, "resize_cause": cause })
 }
 
-/// REQ: F-032
-/// REQ: PORT:ilium-client/src/agent_debug_export.rs::report_is_complete_human_readable_and_omits_internal_heartbeat_counters
+/// REQ: F-032, PORT:ilium-client/src/agent_debug_export.rs::report_is_complete_human_readable_and_omits_internal_heartbeat_counters
 #[test]
 fn f_032_report_is_complete_human_readable_and_omits_internal_heartbeat_counters() {
     let mut session = session();
@@ -46,8 +45,7 @@ fn f_032_report_is_complete_human_readable_and_omits_internal_heartbeat_counters
     }
 }
 
-/// REQ: F-032
-/// REQ: PORT:ilium-client/src/agent_debug_export.rs::report_keeps_untrusted_text_on_one_line_and_strips_escapes
+/// REQ: F-032, PORT:ilium-client/src/agent_debug_export.rs::report_keeps_untrusted_text_on_one_line_and_strips_escapes
 #[test]
 fn f_032_report_keeps_untrusted_text_on_one_line_and_strips_escapes() {
     let mut session = session();
@@ -63,8 +61,7 @@ fn f_032_report_keeps_untrusted_text_on_one_line_and_strips_escapes() {
     assert!(!text.contains('\u{1b}'));
 }
 
-/// REQ: F-032
-/// REQ: PORT:ilium-client/src/agent_debug_export.rs::report_applies_the_same_panel_resize_filter_as_the_viewer
+/// REQ: F-032, PORT:ilium-client/src/agent_debug_export.rs::report_applies_the_same_panel_resize_filter_as_the_viewer
 #[test]
 fn f_032_report_applies_the_same_panel_resize_filter_as_the_viewer() {
     let mut session = session();
@@ -91,8 +88,7 @@ fn save(
     )
 }
 
-/// REQ: F-032
-/// REQ: PORT:ilium-client/src/agent_debug_export.rs::saved_report_is_private
+/// REQ: F-032, PORT:ilium-client/src/agent_debug_export.rs::saved_report_is_private
 #[test]
 fn f_032_saved_report_is_private() {
     let mut session = session();
@@ -106,8 +102,7 @@ fn f_032_saved_report_is_private() {
     assert_eq!(mode["mode"], 0o600);
 }
 
-/// REQ: F-032
-/// REQ: PORT:ilium-client/src/agent_debug_export.rs::saved_report_refuses_a_symlink_destination
+/// REQ: F-032, PORT:ilium-client/src/agent_debug_export.rs::saved_report_refuses_a_symlink_destination
 #[test]
 fn f_032_saved_report_refuses_a_symlink_destination() {
     let mut session = session();
@@ -127,8 +122,7 @@ fn f_032_saved_report_refuses_a_symlink_destination() {
     assert_eq!(target, b"must remain unchanged");
 }
 
-/// REQ: F-032
-/// REQ: PORT:ilium-client/src/agent_debug_export.rs::saved_report_replaces_existing_content
+/// REQ: F-032, PORT:ilium-client/src/agent_debug_export.rs::saved_report_replaces_existing_content
 #[test]
 fn f_032_saved_report_replaces_existing_content() {
     let mut session = session();
@@ -143,8 +137,7 @@ fn f_032_saved_report_replaces_existing_content() {
     assert_eq!(read["text"], "new report\n");
 }
 
-/// REQ: F-032
-/// REQ: PORT:ilium-client/src/agent_debug_ui.rs::default_filter_hides_only_typed_tree_panel_animation_resizes
+/// REQ: F-032, PORT:ilium-client/src/agent_debug_ui.rs::default_filter_hides_only_typed_tree_panel_animation_resizes
 #[test]
 fn f_032_default_filter_hides_only_typed_tree_panel_animation_resizes() {
     let mut session = session();
@@ -186,8 +179,7 @@ fn sanitize(session: &mut Session, mode: &str, text: &str) -> String {
         .to_string()
 }
 
-/// REQ: F-032
-/// REQ: PORT:ilium-client/src/agent_debug_ui.rs::single_line_sanitizer_collapses_line_breaks_and_tabs
+/// REQ: F-032, PORT:ilium-client/src/agent_debug_ui.rs::single_line_sanitizer_collapses_line_breaks_and_tabs
 #[test]
 fn f_032_single_line_sanitizer_collapses_line_breaks_and_tabs() {
     let mut session = session();
@@ -201,8 +193,7 @@ fn f_032_single_line_sanitizer_collapses_line_breaks_and_tabs() {
     );
 }
 
-/// REQ: F-032
-/// REQ: PORT:ilium-client/src/agent_debug_ui.rs::terminal_control_sequences_are_rendered_inert
+/// REQ: F-032, PORT:ilium-client/src/agent_debug_ui.rs::terminal_control_sequences_are_rendered_inert
 #[test]
 fn f_032_terminal_control_sequences_are_rendered_inert() {
     let mut session = session();
@@ -212,8 +203,7 @@ fn f_032_terminal_control_sequences_are_rendered_inert() {
     );
 }
 
-/// REQ: F-032
-/// REQ: PORT:ilium-client/src/agent_debug_ui.rs::timestamps_use_european_date_order
+/// REQ: F-032, PORT:ilium-client/src/agent_debug_ui.rs::timestamps_use_european_date_order
 #[test]
 fn f_032_timestamps_use_european_date_order() {
     let mut session = session();

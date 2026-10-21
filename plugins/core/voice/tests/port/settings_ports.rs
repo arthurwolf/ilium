@@ -5,8 +5,7 @@ use serde_json::json;
 
 use crate::common::{client_host, command_invoked, configure, enabled_client};
 
-/// REQ: PORT:ilium-client/src/app.rs::pause_media_while_active_toggle_persists_and_does_not_reconnect_voice
-/// REQ: PORT:ilium-client/src/app.rs::terminal_submission_confirmation_is_opt_in_and_does_not_reconnect_voice
+/// REQ: PORT:ilium-client/src/app.rs::pause_media_while_active_toggle_persists_and_does_not_reconnect_voice, PORT:ilium-client/src/app.rs::terminal_submission_confirmation_is_opt_in_and_does_not_reconnect_voice
 #[test]
 fn settings_050_toggles_persist_and_do_not_open_a_new_capture() {
     let mut host = enabled_client("push_to_talk");

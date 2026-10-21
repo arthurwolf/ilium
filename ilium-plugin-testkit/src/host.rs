@@ -1600,7 +1600,7 @@ mod spec_tests {
         screen_from_symbols(3, 2, &["a", "b", " ", " ", "c", " "])
     }
 
-    /// REQ: reference-test-harness.md "Harness types" (Screen.text)
+    /// Manual: Screen.text
     #[test]
     fn screen_text_joins_rows_and_trims_trailing_spaces() {
         assert_eq!(sample_screen().text(), "ab\n c");
@@ -1614,7 +1614,6 @@ mod spec_tests {
         assert_eq!(screen.cell(0, 1).symbol, "b");
     }
 
-    /// REQ: reference-test-harness.md "Harness types" (Screen.lines, Screen.row)
     #[test]
     fn screen_lines_and_row_return_every_row_trimmed() {
         let screen = sample_screen();
@@ -1622,7 +1621,7 @@ mod spec_tests {
         assert_eq!(screen.row(1), " c");
     }
 
-    /// REQ: reference-test-harness.md "Harness types" (Screen.find); an absent text yields no position.
+    /// Manual: Screen.find
     #[test]
     fn screen_find_returns_first_position_or_none_for_missing_text() {
         let screen = sample_screen();
@@ -1640,7 +1639,7 @@ mod spec_tests {
         assert_eq!(host.current_mode(), Mode::Native);
     }
 
-    /// REQ: DEV-410, DEV-413 (an explicit seed call wins)
+    /// REQ: DEV-410, DEV-413
     #[test]
     fn builder_methods_chain_and_explicit_seed_wins() {
         let host = FakeHost::new()
@@ -1652,7 +1651,7 @@ mod spec_tests {
         assert_eq!(host.current_seed(), 3);
     }
 
-    /// REQ: DEV-412 (unknown grant name fails with harness.grant-unknown)
+    /// REQ: DEV-412
     #[test]
     fn grant_now_refuses_a_grant_name_outside_the_catalogue() {
         let mut host = FakeHost::new();
@@ -1662,13 +1661,13 @@ mod spec_tests {
         assert_eq!(error.code, "harness.grant-unknown");
     }
 
-    /// REQ: DEV-411 (for_manifest returns Result; an unreadable manifest path is an error)
+    /// REQ: DEV-411
     #[test]
     fn for_manifest_with_missing_file_returns_an_error() {
         assert!(FakeHost::for_manifest("does-not-exist/manifest.json").is_err());
     }
 
-    /// REQ: DEV-520 (same seed gives the same batch)
+    /// REQ: DEV-520
     #[test]
     fn fuzz_events_same_seed_gives_same_batch() {
         let host = FakeHost::new();
@@ -1677,7 +1676,7 @@ mod spec_tests {
         assert_eq!(first, host.fuzz_events(42, 8));
     }
 
-    /// REQ: DEV-520 (empty input: a zero-count request builds an empty batch)
+    /// REQ: DEV-520
     #[test]
     fn fuzz_events_with_zero_count_is_empty() {
         let host = FakeHost::new();

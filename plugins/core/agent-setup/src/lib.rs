@@ -87,7 +87,7 @@ mod spec_tests {
         string_items(&manifest["capabilities"][side])
     }
 
-    /// REQ: COR-050 - the complete manifest carries every required key, with the plugin id and API version.
+    /// REQ: COR-050
     #[test]
     fn manifest_carries_every_required_key() {
         let manifest = manifest();
@@ -110,7 +110,7 @@ mod spec_tests {
         assert_eq!(manifest["limits_tier"], "first-party");
     }
 
-    /// REQ: COR-050 - one server side and one client side, each with its world and export, and one struct per side.
+    /// REQ: COR-050
     #[test]
     fn manifest_declares_server_and_client_sides() {
         let manifest = manifest();
@@ -122,7 +122,7 @@ mod spec_tests {
         let _client = AgentSetupClient::default();
     }
 
-    /// REQ: COR-050 - activation follows the setup tab, the refresh command and the install service.
+    /// REQ: COR-050
     #[test]
     fn manifest_activation_lists_the_three_triggers() {
         assert_eq!(
@@ -131,7 +131,7 @@ mod spec_tests {
         );
     }
 
-    /// REQ: COR-050 - the plugin is replaceable, and its surface names exactly the service, the three points and the command.
+    /// REQ: COR-050
     #[test]
     fn manifest_surface_names_exactly_the_replaceable_contributions() {
         let manifest = manifest();
@@ -148,7 +148,7 @@ mod spec_tests {
         );
     }
 
-    /// REQ: COR-011 - the client draws the Setup tab and holds no file grant; only the server touches project and config files.
+    /// REQ: COR-011
     #[test]
     fn client_side_holds_no_file_grants() {
         let manifest = manifest();
@@ -159,7 +159,7 @@ mod spec_tests {
         );
     }
 
-    /// REQ: COR-050 - global agent files change only through `agent-config.propose`; a direct `fs.write:agent-config` grant is refused at install (Manifest section, which carries no bracketed ID).
+    /// REQ: COR-050
     #[test]
     fn no_direct_agent_config_write_grant_is_declared() {
         let manifest = manifest();
@@ -173,7 +173,7 @@ mod spec_tests {
         assert!(server.iter().any(|grant| grant == "agent-config.propose:codex"));
     }
 
-    /// REQ: COR-033 - the `setup` tab has exactly one holder of `settings.write-kernel`, across both sides.
+    /// REQ: COR-033
     #[test]
     fn exactly_one_grant_writes_the_setup_tab() {
         let manifest = manifest();
@@ -188,7 +188,7 @@ mod spec_tests {
         assert_eq!(kernel_writes, vec!["settings.write-kernel:setup"]);
     }
 
-    /// REQ: SEC-293 - the before-install point is a high-risk veto with a 20 ms deadline and at most four handlers.
+    /// REQ: SEC-293
     #[test]
     fn before_install_hook_is_a_high_risk_veto() {
         let manifest = manifest();
@@ -206,7 +206,7 @@ mod spec_tests {
         assert_eq!(before_install["max_handlers"], 4);
     }
 
-    /// REQ: COR-050 - the collect points keep their documented entry caps: 8 instruction blocks and 16 targets.
+    /// REQ: COR-050
     #[test]
     fn collect_points_keep_their_documented_caps() {
         let manifest = manifest();
@@ -225,7 +225,7 @@ mod spec_tests {
         assert!(cap_of("targets") > 0);
     }
 
-    /// REQ: COR-050 - an install or remove call without both `block` and `target` is invalid input (Manifest section, which carries no bracketed ID).
+    /// REQ: COR-050
     #[test]
     fn install_and_remove_params_require_block_and_target() {
         let manifest = manifest();

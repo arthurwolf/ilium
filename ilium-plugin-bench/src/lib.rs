@@ -139,14 +139,14 @@ pub fn pooling_allowed(_evidence: &PoolingEvidence) -> bool {
 mod spec_tests {
     use super::*;
 
-    /// REQ: HST-300 (iteration minimums)
+    /// REQ: HST-300
     #[test]
     fn iteration_minimums_match_the_spec() {
         assert_eq!(MIN_WARMUP_ITERATIONS, 100);
         assert_eq!(MIN_MEASURED_ITERATIONS, 1000);
     }
 
-    /// REQ: HST-306 (release gate ids)
+    /// REQ: HST-306
     #[test]
     fn release_gate_includes_required_benchmarks() {
         let mut required: Vec<String> = (1..=9).map(|n| format!("B{n}")).collect();
@@ -158,7 +158,7 @@ mod spec_tests {
         assert_eq!(RELEASE_GATE_IDS.len(), required.len());
     }
 
-    /// REQ: HST-300 (invalid input: zero and below-minimum iteration counts are refused)
+    /// REQ: HST-300
     #[test]
     fn run_with_refuses_iterations_below_minimum() {
         let zero = RunSpec { warmup_iterations: 0, measured_iterations: 0 };
@@ -169,7 +169,7 @@ mod spec_tests {
         assert!(matches!(run_with("B1", &short_measured), Err(BenchError::BelowMinimum(_))));
     }
 
-    /// REQ: HST-305 (unknown program id is an error, not a silent pass)
+    /// REQ: HST-305
     #[test]
     fn run_with_rejects_unknown_program_id() {
         let spec = RunSpec { warmup_iterations: 100, measured_iterations: 1000 };
@@ -179,7 +179,7 @@ mod spec_tests {
         );
     }
 
-    /// REQ: HST-303 (benchmarks refuse to run on a non-release build)
+    /// REQ: HST-303
     #[test]
     fn run_benchmark_refuses_non_release_build() {
         if !is_release_build() {
@@ -187,7 +187,7 @@ mod spec_tests {
         }
     }
 
-    /// REQ: HST-301 (result record fields in the JSON output)
+    /// REQ: HST-301
     #[test]
     fn to_json_carries_every_required_field() {
         let mut metrics = BTreeMap::new();
@@ -220,7 +220,7 @@ mod spec_tests {
         assert!(json.get("wasmtime_config").is_some());
     }
 
-    /// REQ: HST-302, HST-304 (B1 budget is under 1 us; more than 2x is a plan stop)
+    /// REQ: HST-302, HST-304
     #[test]
     fn judge_b1_pass_fail_and_plan_stop() {
         assert_eq!(judge("B1", "median_ns", 900.0), Verdict::Pass);
@@ -228,14 +228,14 @@ mod spec_tests {
         assert_eq!(judge("B1", "median_ns", 2001.0), Verdict::PlanStop);
     }
 
-    /// REQ: HST-302 (B21 is record only, so no value fails it)
+    /// REQ: HST-302
     #[test]
     fn judge_record_only_benchmark_is_recorded() {
         assert_eq!(judge("B21", "spawn_to_ready_ms", 12.0), Verdict::Recorded);
         assert_eq!(judge("B21", "spawn_to_ready_ms", 1.0e6), Verdict::Recorded);
     }
 
-    /// REQ: HST-302 (exit code is non-zero on any Fail or PlanStop)
+    /// REQ: HST-302
     #[test]
     fn exit_code_is_non_zero_on_fail_or_plan_stop() {
         assert_eq!(exit_code_for(&[]), 0);
@@ -244,7 +244,7 @@ mod spec_tests {
         assert_ne!(exit_code_for(&[Verdict::PlanStop]), 0);
     }
 
-    /// REQ: HST-312 (pooling only when on-demand misses and pooling meets both within 16 MiB)
+    /// REQ: HST-312
     #[test]
     fn pooling_allowed_only_when_rule_holds() {
         let enabling = PoolingEvidence {

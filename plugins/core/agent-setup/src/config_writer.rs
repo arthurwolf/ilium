@@ -49,7 +49,6 @@ pub fn parse_toml_setting(_text: &str, _key: &str) -> Result<Option<u64>, String
 mod spec_tests {
     use super::*;
 
-    /// REQ: no ID in the manual. core-plugin-agent-setup.md, "Setup tab: statuses, rows and files",
     /// safety rules: "text outside the markers is kept". Unrelated keys keep their exact bytes.
     #[test]
     fn json_set_keeps_unrelated_keys_verbatim() {
@@ -63,7 +62,6 @@ mod spec_tests {
         );
     }
 
-    /// REQ: no ID in the manual. Contract from the doc comment on `edit_json_text`: `Set` applies to
     /// the top-level key. An existing key is replaced in place, not duplicated.
     #[test]
     fn json_set_replaces_existing_value_without_duplicating_key() {
@@ -76,7 +74,6 @@ mod spec_tests {
         );
     }
 
-    /// REQ: no ID in the manual. Contract from the doc comment on `edit_json_text`: `Remove` deletes
     /// the top-level key, and the other keys stay.
     #[test]
     fn json_remove_drops_key_and_keeps_other_keys() {
@@ -86,7 +83,6 @@ mod spec_tests {
         assert!(edited.contains("\"model\": \"opus\""));
     }
 
-    /// REQ: no ID in the manual. Contract from the doc comment on `edit_json_text`: only the
     /// top-level key is targeted. A nested key of the same name keeps its value and text.
     #[test]
     fn json_set_does_not_touch_nested_key_of_same_name() {
@@ -99,7 +95,6 @@ mod spec_tests {
         );
     }
 
-    /// REQ: no ID in the manual. Contract from the doc comment on `parse_setting`: `Ok(None)` when
     /// the key is absent.
     #[test]
     fn parse_setting_absent_key_is_none() {
@@ -107,7 +102,6 @@ mod spec_tests {
         assert_eq!(parse_setting(ConfigTarget::ClaudeAutoCompactWindow, text).unwrap(), None);
     }
 
-    /// REQ: no ID in the manual. Contract from the doc comment on `edit_config_text`: an empty
     /// settings object (no keys yet) accepts a `Set` and reads it back.
     #[test]
     fn config_text_set_on_empty_object_adds_claude_key() {
@@ -123,7 +117,6 @@ mod spec_tests {
         );
     }
 
-    /// REQ: no ID in the manual. Contract from the doc comment on `parse_toml_setting`: reads the
     /// top-level integer key of a TOML document.
     #[test]
     fn parse_toml_reads_top_level_integer() {
@@ -134,7 +127,6 @@ mod spec_tests {
         );
     }
 
-    /// REQ: no ID in the manual. Contract from the doc comment on `parse_toml_setting`: only the
     /// top-level table counts. A same-named key inside `[profiles.fast]` is not the setting.
     #[test]
     fn parse_toml_ignores_table_scoped_key() {
@@ -142,7 +134,6 @@ mod spec_tests {
         assert_eq!(parse_toml_setting(text, "auto_compact_token_limit").unwrap(), None);
     }
 
-    /// REQ: no ID in the manual. Failure case: a value that is not an integer cannot be read as
     /// `u64`, so the parse returns `Err` instead of a made-up number.
     #[test]
     fn parse_toml_non_integer_value_is_error() {
@@ -150,7 +141,6 @@ mod spec_tests {
         assert!(parse_toml_setting(text, "auto_compact_token_limit").is_err());
     }
 
-    /// REQ: no ID in the manual. Failure case: malformed JSON is reported as `Err`, not as an
     /// absent key.
     #[test]
     fn parse_setting_malformed_json_is_error() {

@@ -77,7 +77,6 @@ mod spec_tests {
             .find(|point| point["id"].as_str() == Some(point_id))
     }
 
-    /// REQ: manual "Complete manifest" (plugin id `ilium.core.sessions`, contract `ilium:plugin@0.1.0`, version 0.1.0).
     #[test]
     fn manifest_identifies_the_sessions_plugin() {
         let manifest = shipped_manifest();
@@ -86,7 +85,6 @@ mod spec_tests {
         assert_eq!(manifest["version"].as_str(), Some("0.1.0"));
     }
 
-    /// REQ: manual "Complete manifest" (server world `ilium:server/base@0.1.0`, client world `ilium:client/base@0.1.0`).
     #[test]
     fn each_side_names_its_entry_and_world() {
         let manifest = shipped_manifest();
@@ -96,7 +94,7 @@ mod spec_tests {
         assert_eq!(manifest["client"]["world"].as_str(), Some("ilium:client/base@0.1.0"));
     }
 
-    /// REQ: COR-050 (manual "Complete manifest": activation triggers are `startup` and `view:sessions.list`).
+    /// REQ: COR-050
     #[test]
     fn activation_is_startup_and_the_sessions_view() {
         let manifest = shipped_manifest();
@@ -104,7 +102,6 @@ mod spec_tests {
         assert!(array_contains(&manifest["activation"], "view:sessions.list"));
     }
 
-    /// REQ: manual "Sessions" section (the server side owns the session logic and holds `settings.write-kernel:session`;
     /// the client side needs no grants of its own). Fails until the shipped manifest moves the grant to the server side.
     #[test]
     fn server_side_holds_the_session_settings_grant() {
@@ -112,8 +109,8 @@ mod spec_tests {
         assert_eq!(grant_holders(&manifest, SESSION_GRANT), vec!["server".to_string()]);
     }
 
-    /// REQ: COR-030 (manual "Kernel tabs this plugin owns": the `session` tab has exactly one holder of
     /// `settings.write-kernel:session`). Empty input: a manifest without the grant has no owner, so the tab stays read-only.
+    /// REQ: COR-030
     #[test]
     fn session_tab_has_exactly_one_owner_and_none_without_a_grant() {
         let manifest = shipped_manifest();
@@ -121,8 +118,8 @@ mod spec_tests {
         assert!(grant_holders(&json!({}), SESSION_GRANT).is_empty());
     }
 
-    /// REQ: COR-030 (failure case: a second declaration of `settings.write-kernel:session` must fail with
     /// `manifest.settings-owner`, so a manifest that declares it on both sides is not a valid single owner).
+    /// REQ: COR-030
     #[test]
     fn duplicate_session_grant_on_both_sides_is_not_a_single_owner() {
         let duplicate = json!({
@@ -134,7 +131,6 @@ mod spec_tests {
         assert_ne!(grant_holders(&duplicate, SESSION_GRANT).len(), 1);
     }
 
-    /// REQ: manual "Complete manifest" (server capabilities: `panes.read`, `panes.lifecycle`, `tree.restructure`, `agent.read`).
     #[test]
     fn server_capabilities_cover_pane_tree_and_agent_work() {
         let manifest = shipped_manifest();
@@ -146,8 +142,8 @@ mod spec_tests {
         }
     }
 
-    /// REQ: EXT-052 (manual "Extension points this plugin owns": both points are granted `extensions.provide`
     /// on the server side).
+    /// REQ: EXT-052
     #[test]
     fn server_grants_both_sessions_extension_points() {
         let manifest = shipped_manifest();
@@ -161,8 +157,8 @@ mod spec_tests {
         ));
     }
 
-    /// REQ: EXT-052 (manual table: `snapshot-sections` version 0.1.0, 64 entries, not dynamic; `before-restore`
     /// version 0.1.0, deadline 20 ms, 8 handlers).
+    /// REQ: EXT-052
     #[test]
     fn extension_points_declare_the_documented_limits() {
         let manifest = shipped_manifest();

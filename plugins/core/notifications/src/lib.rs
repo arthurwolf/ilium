@@ -151,7 +151,6 @@ mod spec_tests {
         assert_eq!(channels["dynamic"], false);
     }
 
-    /// REQ: core-plugin-notifications.md "Samples" 1 (sound on approval prompts; no bracketed ID)
     #[test]
     fn approval_prompt_submits_one_sound_keyed_to_the_prompt() {
         let mut server = NotificationsServer::default();
@@ -167,7 +166,6 @@ mod spec_tests {
         assert_eq!(submissions[0].dedup_key.as_deref(), Some("ask:7:3"));
     }
 
-    /// REQ: core-plugin-notifications.md "Samples" 1 (a new revision is a new prompt; no bracketed ID)
     #[test]
     fn a_new_revision_of_the_same_node_is_sounded_again() {
         let mut server = NotificationsServer::default();
@@ -182,14 +180,13 @@ mod spec_tests {
         assert_ne!(submissions[0].dedup_key, submissions[1].dedup_key);
     }
 
-    /// REQ: core-plugin-notifications.md "Samples" 1 (empty input case; no bracketed ID)
     #[test]
     fn empty_batch_submits_nothing() {
         let mut server = NotificationsServer::default();
         assert!(server.on_events(Vec::new()).is_empty());
     }
 
-    /// REQ: core-plugin-notifications.md "Samples" 1 (failure case: a transition that is not an approval prompt)
+    /// Manual: failure case: a transition that is not an approval prompt
     #[test]
     fn transition_to_idle_does_not_sound_an_approval_prompt() {
         let mut server = NotificationsServer::default();

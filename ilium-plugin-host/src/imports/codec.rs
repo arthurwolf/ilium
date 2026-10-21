@@ -116,8 +116,8 @@ mod tests {
         bytes
     }
 
-    /// REQ: CAP-011
     /// codec is always granted: CodecImport answers without any grant or manifest entry.
+    /// REQ: CAP-011
     #[test]
     fn codec_import_runs_without_any_grant() {
         let mut codec = CodecImport;
@@ -128,7 +128,6 @@ mod tests {
         assert_eq!(plain, HELLO);
     }
 
-    /// REQ: NONE
     /// api-codec.md, inflate: a zlib stream returns its plain bytes.
     #[test]
     fn inflate_zlib_stream_returns_plain_bytes() {
@@ -139,7 +138,6 @@ mod tests {
         assert_eq!(plain, HELLO);
     }
 
-    /// REQ: NONE
     /// api-codec.md, inflate: raw deflate data (no header) is accepted with the deflate-raw format.
     #[test]
     fn inflate_raw_deflate_returns_plain_bytes() {
@@ -150,7 +148,6 @@ mod tests {
         assert_eq!(plain, HELLO);
     }
 
-    /// REQ: NONE
     /// api-codec.md, inflate: an empty zlib stream returns zero bytes (empty output boundary).
     #[test]
     fn inflate_empty_zlib_stream_returns_empty_output() {
@@ -161,7 +158,6 @@ mod tests {
         assert!(plain.is_empty());
     }
 
-    /// REQ: NONE
     /// api-codec.md, inflate: output exactly equal to max-output is accepted (boundary).
     #[test]
     fn inflate_output_equal_to_max_output_succeeds() {
@@ -172,7 +168,6 @@ mod tests {
         assert_eq!(plain, HELLO);
     }
 
-    /// REQ: NONE
     /// api-codec.md, inflate: output longer than max-output is refused with quota-exceeded.
     #[test]
     fn inflate_output_one_byte_over_max_output_is_quota_exceeded() {
@@ -185,7 +180,6 @@ mod tests {
         assert_error_code(result, ErrorCode::QuotaExceeded);
     }
 
-    /// REQ: NONE
     /// api-codec.md, inflate: max-output 0 refuses any non-empty output with quota-exceeded.
     #[test]
     fn inflate_max_output_zero_refuses_non_empty_output() {
@@ -194,7 +188,6 @@ mod tests {
         assert_error_code(result, ErrorCode::QuotaExceeded);
     }
 
-    /// REQ: NONE
     /// api-codec.md, inflate: max-output of 64 MiB is the highest accepted value (boundary).
     #[test]
     fn inflate_max_output_at_64_mib_is_accepted() {
@@ -205,7 +198,6 @@ mod tests {
         assert_eq!(plain, HELLO);
     }
 
-    /// REQ: NONE
     /// api-codec.md, inflate: max-output above 64 MiB is refused with invalid-argument.
     #[test]
     fn inflate_max_output_above_64_mib_is_invalid_argument() {
@@ -218,7 +210,6 @@ mod tests {
         assert_error_code(result, ErrorCode::InvalidArgument);
     }
 
-    /// REQ: NONE
     /// api-codec.md, inflate: corrupt compressed data is invalid-argument.
     #[test]
     fn inflate_corrupt_data_is_invalid_argument() {
@@ -227,7 +218,6 @@ mod tests {
         assert_error_code(result, ErrorCode::InvalidArgument);
     }
 
-    /// REQ: NONE
     /// api-codec.md, inflate: a stream cut short before its end is corrupt data (invalid-argument).
     #[test]
     fn inflate_truncated_zlib_stream_is_invalid_argument() {
@@ -237,7 +227,6 @@ mod tests {
         assert_error_code(result, ErrorCode::InvalidArgument);
     }
 
-    /// REQ: NONE
     /// api-codec.md, inflate: empty input is not a compressed stream and is invalid-argument.
     #[test]
     fn inflate_empty_input_is_invalid_argument() {
@@ -246,7 +235,6 @@ mod tests {
         assert_error_code(result, ErrorCode::InvalidArgument);
     }
 
-    /// REQ: NONE
     /// api-codec.md, inflate: zlib bytes passed as gzip are corrupt for that format (invalid-argument).
     #[test]
     fn inflate_zlib_bytes_labelled_gzip_is_invalid_argument() {
@@ -255,7 +243,6 @@ mod tests {
         assert_error_code(result, ErrorCode::InvalidArgument);
     }
 
-    /// REQ: NONE
     /// api-codec.md, Limits: input over 16 MiB is refused with invalid-argument.
     #[test]
     fn inflate_input_over_16_mib_is_invalid_argument() {
@@ -268,7 +255,6 @@ mod tests {
         assert_error_code(result, ErrorCode::InvalidArgument);
     }
 
-    /// REQ: NONE
     /// api-codec.md, deflate: zlib level 6 of b"hello" produces the reference zlib stream.
     #[test]
     fn deflate_zlib_level_6_matches_reference_bytes() {
@@ -279,7 +265,6 @@ mod tests {
         assert_eq!(packed, ZLIB_HELLO);
     }
 
-    /// REQ: NONE
     /// api-codec.md, deflate: empty input deflates to the empty zlib stream.
     #[test]
     fn deflate_empty_input_produces_empty_zlib_stream() {
@@ -290,7 +275,6 @@ mod tests {
         assert_eq!(packed, ZLIB_EMPTY);
     }
 
-    /// REQ: NONE
     /// api-codec.md, deflate: level 0 (stored, lowest boundary) round-trips through inflate.
     #[test]
     fn deflate_level_0_round_trips() {
@@ -304,7 +288,6 @@ mod tests {
         assert_eq!(plain, HELLO);
     }
 
-    /// REQ: NONE
     /// api-codec.md, deflate: level 9 (highest boundary) is accepted.
     #[test]
     fn deflate_level_9_is_accepted() {
@@ -315,7 +298,6 @@ mod tests {
         assert!(!packed.is_empty());
     }
 
-    /// REQ: NONE
     /// api-codec.md, deflate: level 10 is above the 0 to 9 range and is invalid-argument.
     #[test]
     fn deflate_level_10_is_invalid_argument() {
@@ -324,7 +306,6 @@ mod tests {
         assert_error_code(result, ErrorCode::InvalidArgument);
     }
 
-    /// REQ: NONE
     /// api-codec.md, deflate: level 255 (u8 maximum) is invalid-argument.
     #[test]
     fn deflate_level_255_is_invalid_argument() {
@@ -333,7 +314,6 @@ mod tests {
         assert_error_code(result, ErrorCode::InvalidArgument);
     }
 
-    /// REQ: NONE
     /// api-codec.md, deflate: the gzip format produces gzip output, which starts with the magic 1f 8b.
     #[test]
     fn deflate_gzip_output_starts_with_gzip_magic() {
@@ -344,7 +324,6 @@ mod tests {
         assert_eq!(&packed[..2], &[0x1f, 0x8b]);
     }
 
-    /// REQ: NONE
     /// api-codec.md, deflate: input over 16 MiB is refused with invalid-argument.
     #[test]
     fn deflate_input_over_16_mib_is_invalid_argument() {
@@ -357,7 +336,6 @@ mod tests {
         assert_error_code(result, ErrorCode::InvalidArgument);
     }
 
-    /// REQ: NONE
     /// api-codec.md, sha256: the digest of empty input is the known 32-byte SHA-256 value.
     #[test]
     fn sha256_of_empty_input_is_known_digest() {
@@ -367,7 +345,6 @@ mod tests {
         assert_eq!(digest, SHA256_EMPTY.to_vec());
     }
 
-    /// REQ: NONE
     /// api-codec.md, sha256: the digest of b"hello" is the known 32-byte SHA-256 value.
     #[test]
     fn sha256_of_hello_is_known_digest() {
@@ -376,7 +353,6 @@ mod tests {
         assert_eq!(digest, SHA256_HELLO.to_vec());
     }
 
-    /// REQ: NONE
     /// api-codec.md, image-info: a PNG header gives width, height and one frame.
     #[test]
     fn image_info_png_reports_size_and_one_frame() {
@@ -394,7 +370,6 @@ mod tests {
         );
     }
 
-    /// REQ: NONE
     /// api-codec.md, image-info: data that matches no supported format is unsupported.
     #[test]
     fn image_info_unknown_format_is_unsupported() {
@@ -403,7 +378,6 @@ mod tests {
         assert_error_code(result, ErrorCode::Unsupported);
     }
 
-    /// REQ: NONE
     /// api-codec.md, image-info: a PNG signature with its header cut off is corrupt (invalid-argument).
     #[test]
     fn image_info_truncated_png_is_invalid_argument() {
@@ -412,7 +386,6 @@ mod tests {
         assert_error_code(result, ErrorCode::InvalidArgument);
     }
 
-    /// REQ: NONE
     /// api-codec.md, Limits: input over 16 MiB is refused with invalid-argument before any parsing.
     #[test]
     fn image_info_input_over_16_mib_is_invalid_argument() {
@@ -421,7 +394,6 @@ mod tests {
         assert_error_code(result, ErrorCode::InvalidArgument);
     }
 
-    /// REQ: NONE
     /// api-codec.md, decode-image: frame 0 of the 1 x 1 PNG decodes to its RGBA pixel.
     #[test]
     fn decode_image_png_frame_0_returns_rgba_pixels() {
@@ -439,7 +411,6 @@ mod tests {
         );
     }
 
-    /// REQ: NONE
     /// api-codec.md, decode-image: a frame at or above the frame count is invalid-argument.
     #[test]
     fn decode_image_frame_out_of_range_is_invalid_argument() {
@@ -448,7 +419,6 @@ mod tests {
         assert_error_code(result, ErrorCode::InvalidArgument);
     }
 
-    /// REQ: NONE
     /// api-codec.md, decode-image: an image with more pixels than max-pixels is quota-exceeded.
     #[test]
     fn decode_image_image_over_max_pixels_is_quota_exceeded() {
@@ -457,7 +427,6 @@ mod tests {
         assert_error_code(result, ErrorCode::QuotaExceeded);
     }
 
-    /// REQ: NONE
     /// api-codec.md, decode-image: max-pixels above 67,108,864 is invalid-argument.
     #[test]
     fn decode_image_max_pixels_above_host_cap_is_invalid_argument() {
@@ -466,7 +435,6 @@ mod tests {
         assert_error_code(result, ErrorCode::InvalidArgument);
     }
 
-    /// REQ: NONE
     /// api-codec.md, decode-image: max-pixels exactly at the 67,108,864 cap is accepted (boundary).
     #[test]
     fn decode_image_max_pixels_at_host_cap_is_accepted() {
@@ -479,7 +447,6 @@ mod tests {
         assert_eq!(image.rgba.len(), 4);
     }
 
-    /// REQ: NONE
     /// api-codec.md, decode-image: corrupt picture data is invalid-argument.
     #[test]
     fn decode_image_corrupt_png_is_invalid_argument() {
@@ -491,7 +458,6 @@ mod tests {
         assert_error_code(result, ErrorCode::InvalidArgument);
     }
 
-    /// REQ: NONE
     /// api-codec.md, decode-image: data that matches no supported format is unsupported.
     #[test]
     fn decode_image_unknown_format_is_unsupported() {
@@ -500,7 +466,6 @@ mod tests {
         assert_error_code(result, ErrorCode::Unsupported);
     }
 
-    /// REQ: NONE
     /// api-codec.md, Limits: input over 16 MiB is refused with invalid-argument.
     #[test]
     fn decode_image_input_over_16_mib_is_invalid_argument() {
@@ -513,7 +478,6 @@ mod tests {
         assert_error_code(result, ErrorCode::InvalidArgument);
     }
 
-    /// REQ: NONE
     /// api-codec.md, rasterize-text: output is white pixels whose alpha is the ink tone, sized within max-width.
     #[test]
     fn rasterize_text_returns_white_ink_pixels_within_max_width() {
@@ -540,7 +504,6 @@ mod tests {
         );
     }
 
-    /// REQ: NONE
     /// api-codec.md, rasterize-text: text wraps at word boundaries to max-width, so it gets taller.
     #[test]
     fn rasterize_text_wraps_at_word_boundaries_to_max_width() {
@@ -564,7 +527,6 @@ mod tests {
         assert!(wrapped.height > single_line.height);
     }
 
-    /// REQ: NONE
     /// api-codec.md, rasterize-text: empty text is not refused and yields a consistent image.
     #[test]
     fn rasterize_text_empty_text_is_accepted() {
@@ -582,7 +544,6 @@ mod tests {
         );
     }
 
-    /// REQ: NONE
     /// api-codec.md, rasterize-text: text of exactly 64 KiB is accepted (boundary).
     #[test]
     fn rasterize_text_64_kib_text_is_accepted() {
@@ -597,7 +558,6 @@ mod tests {
         assert!(image.width >= 1 && image.height >= 1);
     }
 
-    /// REQ: NONE
     /// api-codec.md, rasterize-text: text over 64 KiB is invalid-argument.
     #[test]
     fn rasterize_text_over_64_kib_is_invalid_argument() {
@@ -610,7 +570,6 @@ mod tests {
         assert_error_code(result, ErrorCode::InvalidArgument);
     }
 
-    /// REQ: NONE
     /// api-codec.md, rasterize-text: size_px 0 is below the 1 to 512 range and is invalid-argument.
     #[test]
     fn rasterize_text_size_px_zero_is_invalid_argument() {
@@ -623,7 +582,6 @@ mod tests {
         assert_error_code(result, ErrorCode::InvalidArgument);
     }
 
-    /// REQ: NONE
     /// api-codec.md, rasterize-text: size_px 1 and 512 are the accepted boundaries.
     #[test]
     fn rasterize_text_size_px_boundaries_are_accepted() {
@@ -638,7 +596,6 @@ mod tests {
         }
     }
 
-    /// REQ: NONE
     /// api-codec.md, rasterize-text: size_px 513 is above the 1 to 512 range and is invalid-argument.
     #[test]
     fn rasterize_text_size_px_513_is_invalid_argument() {
@@ -651,7 +608,6 @@ mod tests {
         assert_error_code(result, ErrorCode::InvalidArgument);
     }
 
-    /// REQ: NONE
     /// api-codec.md, rasterize-text: max_width_px 0 is below the 1 to 16,384 range and is invalid-argument.
     #[test]
     fn rasterize_text_max_width_zero_is_invalid_argument() {
@@ -664,7 +620,6 @@ mod tests {
         assert_error_code(result, ErrorCode::InvalidArgument);
     }
 
-    /// REQ: NONE
     /// api-codec.md, rasterize-text: max_width_px 1 and 16,384 are the accepted boundaries.
     #[test]
     fn rasterize_text_max_width_boundaries_are_accepted() {
@@ -679,7 +634,6 @@ mod tests {
         }
     }
 
-    /// REQ: NONE
     /// api-codec.md, rasterize-text: max_width_px 16,385 is above the range and is invalid-argument.
     #[test]
     fn rasterize_text_max_width_above_16384_is_invalid_argument() {
@@ -692,8 +646,8 @@ mod tests {
         assert_error_code(result, ErrorCode::InvalidArgument);
     }
 
-    /// REQ: SEC-340
     /// Hostile inputs to every decoding function must return a defined codec error code, never panic.
+    /// REQ: SEC-340
     #[test]
     fn hostile_inputs_return_defined_error_codes_without_panic() {
         let mut codec = CodecImport;

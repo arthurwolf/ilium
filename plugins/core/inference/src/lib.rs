@@ -92,7 +92,7 @@ mod spec_tests {
             .collect()
     }
 
-    /// REQ: COR-050 (Complete manifest: id, api version, activation trigger and limits tier as the page prints them)
+    /// REQ: COR-050
     #[test]
     fn complete_manifest_identifies_the_plugin_and_api_version() {
         let manifest = shipped_manifest();
@@ -105,7 +105,7 @@ mod spec_tests {
         assert_eq!(manifest["limits_tier"], "first-party");
     }
 
-    /// REQ: COR-050 (the server side runs in the world and entry the Complete manifest names)
+    /// REQ: COR-050
     #[test]
     fn server_side_runs_in_the_server_base_world() {
         let manifest = shipped_manifest();
@@ -113,7 +113,7 @@ mod spec_tests {
         assert_eq!(manifest["server"]["entry"], "server.wasm");
     }
 
-    /// REQ: COR-050 (server grants match the Complete manifest list, including the two before-request/after-response extension grants)
+    /// REQ: COR-050
     #[test]
     fn server_grants_match_the_complete_manifest() {
         let mut actual = grants_on_side(&shipped_manifest(), "server");
@@ -132,7 +132,7 @@ mod spec_tests {
         assert_eq!(actual, expected);
     }
 
-    /// REQ: COR-050 (client grants match the Complete manifest list, including the provider-profiles extension grant)
+    /// REQ: COR-050
     #[test]
     fn client_grants_match_the_complete_manifest() {
         let mut actual = grants_on_side(&shipped_manifest(), "client");
@@ -150,7 +150,7 @@ mod spec_tests {
         assert_eq!(actual, expected);
     }
 
-    /// REQ: COR-030 (a kernel tab has one owner, so no grant may be declared twice on a side)
+    /// REQ: COR-030
     #[test]
     fn no_grant_is_declared_twice_on_either_side() {
         let manifest = shipped_manifest();
@@ -163,7 +163,7 @@ mod spec_tests {
         }
     }
 
-    /// REQ: COR-030 (this plugin is the single owner of exactly the inference and llm-instructions tabs)
+    /// REQ: COR-030
     #[test]
     fn owns_exactly_the_inference_and_llm_instructions_tabs() {
         let grants = grants_on_side(&shipped_manifest(), "client");
@@ -176,14 +176,14 @@ mod spec_tests {
         assert!(grants.iter().any(|grant| grant == "settings.write-kernel:llm-instructions"));
     }
 
-    /// REQ: COR-050 (the Provider section puts the inference.provide grant on the server; the client must not hold it)
+    /// REQ: COR-050
     #[test]
     fn client_side_does_not_hold_the_provider_grant() {
         let grants = grants_on_side(&shipped_manifest(), "client");
         assert!(!grants.iter().any(|grant| grant == "inference.provide"));
     }
 
-    /// REQ: COR-050 (the Samples export inference-provider and catalog-provider from the server and views from the client)
+    /// REQ: COR-050
     #[test]
     fn server_implements_provider_exports_and_client_implements_views() {
         fn assert_inference_provider<T: InferenceProvider>() {}
@@ -194,7 +194,7 @@ mod spec_tests {
         assert_views::<InferenceClient>();
     }
 
-    /// REQ: COR-050 (invalid input: an empty or whitespace-containing grant is not a valid capability token)
+    /// REQ: COR-050
     #[test]
     fn every_grant_is_a_non_empty_token_without_whitespace() {
         let manifest = shipped_manifest();
@@ -209,7 +209,7 @@ mod spec_tests {
         }
     }
 
-    /// REQ: COR-050 (failure case: an extension grant naming another plugin's point is a mismatch with the owned points)
+    /// REQ: COR-050
     #[test]
     fn extension_grants_only_name_this_plugins_own_points() {
         let manifest = shipped_manifest();

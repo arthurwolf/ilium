@@ -73,7 +73,7 @@ mod spec_tests {
         FakeCli { _private: () }
     }
 
-    /// REQ: DEV-473 (`invoke(args, stdin)` delivers `cli-invoked`; `name` is the first word, `arguments` the rest)
+    /// REQ: DEV-473
     #[test]
     fn dev_473_invoke_takes_the_first_word_as_the_name() {
         let mut cli = fresh_cli();
@@ -85,7 +85,7 @@ mod spec_tests {
         );
     }
 
-    /// REQ: DEV-473 (empty input: a bare command name with no arguments and closed stdin gives an empty argument list)
+    /// REQ: DEV-473
     #[test]
     fn dev_473_invoke_with_no_arguments_gives_an_empty_argument_list() {
         let mut cli = fresh_cli();
@@ -94,7 +94,7 @@ mod spec_tests {
         assert!(invocation.arguments.is_empty());
     }
 
-    /// REQ: DEV-473 (`stdout()` and `stderr()` hold only what the plugin wrote, so a fresh invocation has none)
+    /// REQ: DEV-473
     #[test]
     fn dev_473_a_new_invocation_has_written_no_output_yet() {
         let mut cli = fresh_cli();
@@ -103,7 +103,8 @@ mod spec_tests {
         assert_eq!(invocation.stderr(), "");
     }
 
-    /// REQ: DEV-473 (api-cli: the invocation stays open until the plugin calls `finish`, so `exit_code()` is `None`)
+    /// REQ: DEV-473
+    /// Manual: )` is `None`
     #[test]
     fn dev_473_an_open_invocation_has_no_exit_code() {
         let mut cli = fresh_cli();
@@ -111,7 +112,7 @@ mod spec_tests {
         assert_eq!(invocation.exit_code(), None);
     }
 
-    /// REQ: DEV-473 (`refresh` returns the current state of an earlier invocation, for the same command)
+    /// REQ: DEV-473
     #[test]
     fn dev_473_refresh_keeps_the_name_and_arguments_of_the_invocation() {
         let mut cli = fresh_cli();
@@ -121,7 +122,7 @@ mod spec_tests {
         assert_eq!(refreshed.arguments, invocation.arguments);
     }
 
-    /// REQ: DEV-473 (`refresh` of an invocation the plugin has not finished reports no exit code yet)
+    /// REQ: DEV-473
     #[test]
     fn dev_473_refresh_of_an_unfinished_invocation_reports_no_exit_code() {
         let mut cli = fresh_cli();
@@ -129,7 +130,7 @@ mod spec_tests {
         assert_eq!(cli.refresh(&invocation).exit_code(), None);
     }
 
-    /// REQ: DEV-473 (api-cli: a caller that disconnects first gets `cli-cancelled` instead of a `finish`, so no exit status is set)
+    /// REQ: DEV-473
     #[test]
     fn dev_473_cancel_leaves_the_cancelled_invocation_without_an_exit_code() {
         let mut cli = fresh_cli();

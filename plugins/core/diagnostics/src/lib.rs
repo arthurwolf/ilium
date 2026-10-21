@@ -91,7 +91,7 @@ mod spec_tests {
             .expect("extension point is declared in the manifest")
     }
 
-    /// REQ: COR-050 (manual "Complete manifest": the required keys are all present).
+    /// REQ: COR-050
     #[test]
     fn manifest_has_identity_replaceable_flag_and_required_keys() {
         let manifest = manifest();
@@ -110,7 +110,7 @@ mod spec_tests {
         }
     }
 
-    /// REQ: COR-050 (manual "Complete manifest": the sides and the exports of each side).
+    /// REQ: COR-050
     #[test]
     fn manifest_sides_match_the_server_and_client_structs() {
         let manifest = manifest();
@@ -124,7 +124,7 @@ mod spec_tests {
         let _client = DiagnosticsClient::default();
     }
 
-    /// REQ: COR-050 (manual "Complete manifest": activation triggers, startup and the warnings view).
+    /// REQ: COR-050
     #[test]
     fn activation_starts_at_startup_and_when_the_warnings_panel_opens() {
         let manifest = manifest();
@@ -141,7 +141,6 @@ mod spec_tests {
         assert_eq!(panel_ids, vec!["warnings"]);
     }
 
-    /// REQ: none-id (core-plugin-diagnostics.md "Read the Debug setting without writing it" and
     /// "Tail the log file": server reads the log folder and the debug setting, and writes neither).
     #[test]
     fn server_grants_are_read_only_for_logs_and_debug_setting() {
@@ -154,7 +153,6 @@ mod spec_tests {
         assert!(!server_capabilities.iter().any(|grant| grant.starts_with("settings.write")));
     }
 
-    /// REQ: none-id (core-plugin-diagnostics.md "What it covers" and "Attach a log to an issue":
     /// diagnostics holds no grant on the Settings plugin's extension points and contributes no settings rows).
     #[test]
     fn diagnostics_contributes_no_settings_rows_and_no_settings_extension_grant() {
@@ -165,8 +163,8 @@ mod spec_tests {
         assert!(!server_capabilities.iter().any(|grant| grant.starts_with("extensions.contribute:")));
     }
 
-    /// REQ: SEC-249 (log-sinks receive redacted records: the payload carries only the five fields
     /// level, plugin, target, message and time, so no raw headers or URL parameters travel).
+    /// REQ: SEC-249
     #[test]
     fn log_sinks_payload_carries_only_the_five_redacted_record_fields() {
         let manifest = manifest();
@@ -180,7 +178,6 @@ mod spec_tests {
         assert_eq!(field_names, vec!["level", "message", "plugin", "target", "time"]);
     }
 
-    /// REQ: none-id (core-plugin-diagnostics.md "Extension points" table and reference-core-extension-points.md:
     /// log-sinks is an observe hook with a 20 ms deadline and at most 8 handlers).
     #[test]
     fn log_sinks_is_an_observe_hook_for_warn_and_error_records_only() {
@@ -194,7 +191,6 @@ mod spec_tests {
         assert_eq!(string_list(&sinks["payload_schema"]["properties"]["level"]["enum"]), vec!["warn", "error"]);
     }
 
-    /// REQ: none-id (core-plugin-diagnostics.md "Build the report in a service": each section is
     /// asked for text, at most 32 sections, collect point not dynamic).
     #[test]
     fn report_sections_point_is_a_collect_point_with_room_for_32_entries() {
@@ -206,7 +202,6 @@ mod spec_tests {
         assert_eq!(sections["dynamic"], false);
     }
 
-    /// REQ: none-id (core-plugin-diagnostics.md "Build the report in a service" and the entry table:
     /// an entry needs id, title and service). Empty and invalid input case: an entry without `service`
     /// must be reported as missing a required key.
     #[test]
@@ -225,7 +220,6 @@ mod spec_tests {
         assert_eq!(missing, vec!["service".to_string()]);
     }
 
-    /// REQ: none-id (core-plugin-diagnostics.md "Build the report in a service": the report text is cut
     /// at 256 KiB, which is 262,144 bytes, and the service result is an object with a `text` field).
     /// Failure case: a 262,145-byte text exceeds the declared limit.
     #[test]
@@ -242,7 +236,6 @@ mod spec_tests {
         assert!(oversized_text.len() > limit);
     }
 
-    /// REQ: none-id (core-plugin-diagnostics.md "Build the report in a service": the build params take an
     /// optional boolean `include_log_tail`). Empty input case: an empty parameter object is valid because
     /// no parameter is required.
     #[test]
@@ -256,7 +249,6 @@ mod spec_tests {
         assert!(empty_params.as_object().expect("object").is_empty());
     }
 
-    /// REQ: none-id (core-plugin-diagnostics.md "Manifest" and "Extension points": the build-report command
     /// is in the Help category and the report service is on the surface).
     #[test]
     fn build_report_command_and_report_service_are_on_the_surface() {

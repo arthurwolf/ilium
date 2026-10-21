@@ -281,7 +281,7 @@ pub fn dismiss_toast(payload: String) -> Intent {
 mod spec_tests {
     use super::*;
 
-    /// REQ: rust-sdk.md "Values, submissions and outcomes" (Submission::new has no dedup key)
+    /// Manual: Submission::new has no dedup key
     #[test]
     fn plain_submission_has_no_dedup_key_and_keeps_intent() {
         let submission = Submission::new(close_node(NodeId(7)));
@@ -289,7 +289,7 @@ mod spec_tests {
         assert_eq!(submission.intent, Intent::CloseNode(NodeId(7)));
     }
 
-    /// REQ: rust-sdk.md "Values, submissions and outcomes" (SDK numbers correlations from 2^63 upward)
+    /// Manual: SDK numbers correlations from 2^63 upward
     #[test]
     fn plain_submissions_get_distinct_correlations_from_two_pow_63() {
         let first = Submission::new(close_node(NodeId(1)));
@@ -299,7 +299,7 @@ mod spec_tests {
         assert_ne!(first.correlation, second.correlation);
     }
 
-    /// REQ: reference-events-and-intents.md "Dedup keys" (Submission::keyed sets the key)
+    /// Manual: Submission::keyed sets the key
     #[test]
     fn keyed_submission_stores_dedup_key_and_correlation_from_two_pow_63() {
         let submission = Submission::keyed(play_sound("chime".to_string()), "toast.done");
@@ -308,7 +308,7 @@ mod spec_tests {
         assert!(submission.correlation >= 1u64 << 63);
     }
 
-    /// REQ: rust-sdk.md "Values, submissions and outcomes" (empty input: a message may be empty)
+    /// Manual: empty input: a message may be empty
     #[test]
     fn plugin_error_with_empty_message_keeps_code_and_no_retry_hint() {
         let error = PluginError::new(ErrorCode::Conflict, "");
@@ -317,7 +317,6 @@ mod spec_tests {
         assert_eq!(error.retry_after_ms, None);
     }
 
-    /// REQ: reference-wit.md section 4.2 (plugin-error message is at most 256 characters, counted in characters)
     #[test]
     fn plugin_error_message_is_cut_to_256_characters_not_bytes() {
         let long_ascii = PluginError::new(ErrorCode::Internal, "a".repeat(300));
@@ -328,7 +327,7 @@ mod spec_tests {
         assert_eq!(long_multibyte.message.chars().count(), 256);
     }
 
-    /// REQ: rust-sdk.md "Errors" (named constructors map to their error codes)
+    /// Manual: named constructors map to their error codes
     #[test]
     fn named_error_constructors_map_to_their_codes() {
         assert_eq!(PluginError::timed_out("slow").code, ErrorCode::TimedOut);
@@ -338,7 +337,7 @@ mod spec_tests {
         assert_eq!(PluginError::timed_out("slow").retry_after_ms, None);
     }
 
-    /// REQ: rust-sdk.md "Errors" (busy error carries the retry hint)
+    /// Manual: busy error carries the retry hint
     #[test]
     fn busy_error_carries_retry_hint_in_milliseconds() {
         let error = PluginError::busy("pending requests full", 250);
@@ -347,7 +346,6 @@ mod spec_tests {
         assert_eq!(error.message, "pending requests full");
     }
 
-    /// REQ: rust-sdk.md "Values, submissions and outcomes" (is_ok is true for Ok, OkNode and OkEpoch only)
     #[test]
     fn is_ok_is_true_for_applied_outcomes_and_false_for_refused_failed_duplicate_cancelled() {
         assert!(Outcome::Ok.is_ok());

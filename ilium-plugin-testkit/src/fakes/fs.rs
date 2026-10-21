@@ -189,7 +189,6 @@ pub fn parse_shorthand(_text: &str) -> Result<FsPath, crate::errors::HarnessErro
 mod spec_tests {
     use super::*;
 
-    /// REQ: [DEV-458] The shorthand form "scope:path" names a scope and a path relative to that scope's root, with '/' separators.
     #[test]
     fn shorthand_splits_scope_and_relative_path() {
         let path = parse_shorthand("project:docs/notes.md").expect("valid shorthand");
@@ -197,28 +196,24 @@ mod spec_tests {
         assert_eq!(path.path, "docs/notes.md");
     }
 
-    /// REQ: [DEV-458] A path that contains `..` MUST fail with `harness.fs-path-invalid`.
     #[test]
     fn parent_segment_is_rejected_with_fs_path_invalid() {
         let error = parse_shorthand("project:../secrets.txt").expect_err("parent segment must fail");
         assert_eq!(error.code, crate::errors::codes::FS_PATH_INVALID);
     }
 
-    /// REQ: [DEV-458] A path that is absolute MUST fail with `harness.fs-path-invalid`.
     #[test]
     fn absolute_path_is_rejected_with_fs_path_invalid() {
         let error = parse_shorthand("project:/etc/hosts").expect_err("absolute path must fail");
         assert_eq!(error.code, crate::errors::codes::FS_PATH_INVALID);
     }
 
-    /// REQ: [DEV-458] Shorthand is "scope:path" (reference-test-harness.md, Fake file system); text with no scope separator, or empty text, is not a valid path.
     #[test]
     fn text_without_scope_separator_or_empty_text_is_rejected() {
         assert!(parse_shorthand("notes.md").is_err());
         assert!(parse_shorthand("").is_err());
     }
 
-    /// REQ: [DEV-456] host.fs().write(path, bytes) followed by host.fs().read(path) returns the same bytes, with the shorthand accepted as the path.
     #[test]
     fn write_then_read_round_trips_bytes_through_shorthand() {
         let mut fs = FakeFs { _private: () };
@@ -226,7 +221,6 @@ mod spec_tests {
         assert_eq!(fs.read("project:notes.md"), Some(b"hello".to_vec()));
     }
 
-    /// REQ: [DEV-456] An FsPath value and its shorthand string address the same file.
     #[test]
     fn fs_path_value_and_shorthand_address_same_file() {
         let mut fs = FakeFs { _private: () };
@@ -240,14 +234,12 @@ mod spec_tests {
         assert_eq!(fs.read("project:notes.md"), Some(b"x".to_vec()));
     }
 
-    /// REQ: [DEV-456] read returns None for a file that was never written (fakes/fs.rs read doc: "Option" result, absent file).
     #[test]
     fn read_of_missing_file_returns_none() {
         let fs = FakeFs { _private: () };
         assert_eq!(fs.read("project:missing.md"), None);
     }
 
-    /// REQ: [DEV-456] remove deletes a file, so a later read returns None (fakes/fs.rs remove doc: "Removes a file or an empty directory").
     #[test]
     fn remove_deletes_file_so_read_returns_none() {
         let mut fs = FakeFs { _private: () };
@@ -256,7 +248,6 @@ mod spec_tests {
         assert_eq!(fs.read("project:old.md"), None);
     }
 
-    /// REQ: api-fs.md entry-kind `symlink` (fakes/fs.rs symlink and is_symlink docs): symlink creates a link at `link` to `target`, is_symlink reports it, and a regular file is not a symlink.
     #[test]
     fn symlink_is_reported_and_regular_file_is_not() {
         let mut fs = FakeFs { _private: () };
@@ -266,7 +257,6 @@ mod spec_tests {
         assert!(!fs.is_symlink("project:real.md"));
     }
 
-    /// REQ: fakes/fs.rs paths doc: lists the paths in one scope in "scope:path" shorthand, and leaves out other scopes.
     #[test]
     fn paths_lists_only_the_requested_scope_in_shorthand_form() {
         let mut fs = FakeFs { _private: () };

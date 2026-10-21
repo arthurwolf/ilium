@@ -83,7 +83,7 @@ mod spec_tests {
             .and_then(|points| points.iter().find(|point| point["id"] == point_id))
     }
 
-    /// REQ: COR-050 - the manifest names `ilium.core.fleet` and declares both a server and a client side.
+    /// REQ: COR-050
     #[test]
     fn manifest_declares_fleet_id_and_both_sides() {
         let manifest = manifest();
@@ -94,7 +94,7 @@ mod spec_tests {
         assert_eq!(manifest["client"]["world"], "ilium:client/base@0.1.0");
     }
 
-    /// REQ: COR-050 - the manifest targets the `ilium:plugin@0.1.0` API at plugin version 0.1.0.
+    /// REQ: COR-050
     #[test]
     fn manifest_targets_plugin_api_0_1_0() {
         let manifest = manifest();
@@ -102,7 +102,7 @@ mod spec_tests {
         assert_eq!(manifest["version"], "0.1.0");
     }
 
-    /// REQ: COR-050 - the CLI contributions are `panes`, `broadcast` and `new-pane`, each needing the server.
+    /// REQ: COR-050
     #[test]
     fn cli_contributions_are_panes_broadcast_and_new_pane() {
         let manifest = manifest();
@@ -114,7 +114,7 @@ mod spec_tests {
         assert_eq!(broadcast["argument_groups"][0], "pane-selector");
     }
 
-    /// REQ: COR-050 - the activation list names every trigger that wakes the plugin, in the manual's order.
+    /// REQ: COR-050
     #[test]
     fn activation_lists_every_wake_trigger() {
         let manifest = manifest();
@@ -130,7 +130,7 @@ mod spec_tests {
         );
     }
 
-    /// REQ: COR-050 - the server side holds the grants for both extension points the plugin provides.
+    /// REQ: COR-050
     #[test]
     fn server_capabilities_include_both_extension_point_grants() {
         let manifest = manifest();
@@ -139,7 +139,7 @@ mod spec_tests {
         assert!(server.contains(&"extensions.provide:ilium.core.fleet/before-broadcast".to_owned()));
     }
 
-    /// REQ: COR-050 - each extension point is declared with the kind, risk and limits the manual gives.
+    /// REQ: COR-050
     #[test]
     fn extension_points_declare_manual_limits() {
         let manifest = manifest();
@@ -156,7 +156,7 @@ mod spec_tests {
         assert_eq!(before_broadcast["max_handlers"], json!(8));
     }
 
-    /// REQ: COR-033 - exactly one side holds the `settings.write-kernel:api` grant for the Fleet-owned API tab.
+    /// REQ: COR-033
     #[test]
     fn api_settings_tab_has_exactly_one_holder() {
         let manifest = manifest();
@@ -167,7 +167,7 @@ mod spec_tests {
         assert_eq!(holders, 1);
     }
 
-    /// REQ: COR-010 - the plugin owns only the route `POST /create_agent`; the kernel owns the listener.
+    /// REQ: COR-010
     #[test]
     fn http_route_is_post_create_agent_only() {
         let manifest = manifest();
@@ -180,7 +180,7 @@ mod spec_tests {
         assert!(capability_list(&manifest, "server").contains(&"http-api.route:/create_agent".to_owned()));
     }
 
-    /// REQ: COR-050 - an input with no capability block for a side yields no grants instead of failing.
+    /// REQ: COR-050
     #[test]
     fn missing_capability_side_yields_no_grants() {
         let without_capabilities = json!({ "id": "ilium.core.fleet" });
@@ -188,7 +188,7 @@ mod spec_tests {
         assert!(capability_list(&json!({ "capabilities": {} }), "client").is_empty());
     }
 
-    /// REQ: COR-050 - a manifest text that is not a JSON object is rejected, never read as a manifest.
+    /// REQ: COR-050
     #[test]
     fn truncated_manifest_text_is_rejected() {
         let truncated = &MANIFEST_TEXT[..MANIFEST_TEXT.len() / 2];

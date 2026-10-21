@@ -77,7 +77,6 @@ mod spec_tests {
 
     fn assert_implements_lifecycle_and_handler<T: Lifecycle + Handler + Default>() {}
 
-    /// REQ: manual "Complete manifest" (plugin id `ilium.core.progress`, contract `ilium:plugin@0.1.0`, version 0.1.0).
     #[test]
     fn manifest_identifies_the_progress_plugin() {
         let manifest = shipped_manifest();
@@ -86,14 +85,12 @@ mod spec_tests {
         assert_eq!(manifest["version"].as_str(), Some("0.1.0"));
     }
 
-    /// REQ: manual "Complete manifest" (activation is `startup`, following the startup and lazy activation rule).
     #[test]
     fn activation_is_startup() {
         let manifest = shipped_manifest();
         assert!(array_contains(&manifest["activation"], "startup"));
     }
 
-    /// REQ: manual "Complete manifest" (server world `ilium:server/base@0.1.0`, client world `ilium:client/base@0.1.0`).
     #[test]
     fn each_side_names_its_entry_and_world() {
         let manifest = shipped_manifest();
@@ -103,8 +100,8 @@ mod spec_tests {
         assert_eq!(manifest["client"]["world"].as_str(), Some("ilium:client/base@0.1.0"));
     }
 
-    /// REQ: COR-050 (manual "Complete manifest": the `cli` key matches the Manifest fragment; the `progress`
     /// command is served by the server and `ilium wait` works as an alias of `ilium progress wait`).
+    /// REQ: COR-050
     #[test]
     fn progress_cli_is_served_by_the_server_with_wait_alias() {
         let manifest = shipped_manifest();
@@ -114,8 +111,8 @@ mod spec_tests {
         assert_eq!(command["output"].as_str(), Some("jsonl"));
     }
 
-    /// REQ: COR-050 (empty or mis-aliased input must not satisfy the progress CLI rule; without the `wait`
     /// alias `ilium wait` would not resolve, so the check fails).
+    /// REQ: COR-050
     #[test]
     fn cli_check_rejects_empty_and_mis_aliased_manifests() {
         assert!(!declares_progress_cli(&json!({})));
@@ -127,7 +124,6 @@ mod spec_tests {
         assert!(!declares_progress_cli(&mis_aliased));
     }
 
-    /// REQ: manual "Complete manifest" (server capabilities: cli.contribute, process.run:sh, process.long-lived,
     /// http-api.route:/progress.json, settings.read-kernel:agent-monitoring).
     #[test]
     fn server_grants_cover_cli_process_route_and_settings() {
@@ -140,7 +136,6 @@ mod spec_tests {
         assert!(array_contains(grants, "settings.read-kernel:agent-monitoring"));
     }
 
-    /// REQ: manual "Complete manifest" (client capabilities: ui.chrome for the footer and status bar segment,
     /// and the read-only agent-monitoring settings kernel that the Agent Monitoring tab writes).
     #[test]
     fn client_grants_cover_footer_chrome_and_settings_read() {
@@ -150,7 +145,6 @@ mod spec_tests {
         assert!(array_contains(grants, "settings.read-kernel:agent-monitoring"));
     }
 
-    /// REQ: manual "Behaviour contract" intro (the plugin runs on both sides: the server owns the CLI, probes and
     /// watchers; the client draws the footer). Each side must implement the lifecycle and the handler.
     #[test]
     fn each_side_implements_lifecycle_and_handler() {
@@ -158,8 +152,8 @@ mod spec_tests {
         assert_implements_lifecycle_and_handler::<ProgressClient>();
     }
 
-    /// REQ: progress-B01, progress-B02 (exit status and outcome of `progress set --wait` and `progress wait`).
     /// These pin the manual's table; the implementation is still a skeleton, so this does not exercise it.
+    /// REQ: progress-B01, progress-B02
     #[test]
     fn settled_outcomes_map_to_documented_exit_codes() {
         let outcome_exit_codes: [(&str, i32); 6] = [
@@ -184,8 +178,8 @@ mod spec_tests {
         assert_eq!(success_outcomes, 1, "only `done` exits 0");
     }
 
-    /// REQ: progress-B05, progress-B06, progress-B07, progress-B08 (monitor cap, interval range, probe size
     /// limits, probe timeout). These pin the manual's numbers; they do not exercise the implementation.
+    /// REQ: progress-B05, progress-B06, progress-B07, progress-B08
     #[test]
     fn probe_limits_match_the_manual() {
         const MAX_MONITORS_PER_PANE: usize = 8;

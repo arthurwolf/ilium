@@ -61,9 +61,9 @@ mod tests {
         }
     }
 
-    /// REQ: COR-010
     /// The keymap is a kernel part; `bindings` returns the kernel's live bindings, each naming
     /// a command with at least one chord (manual: api-kernel-settings-and-keymap, `binding` record).
+    /// REQ: COR-010
     #[test]
     fn bindings_each_entry_names_a_command_and_at_least_one_chord() {
         let mut import = KeymapImport;
@@ -74,8 +74,8 @@ mod tests {
         }
     }
 
-    /// REQ: COR-010
     /// Every chord in `binding.chords` uses the chord syntax of the keys page (api-keys, "Chord syntax").
+    /// REQ: COR-010
     #[test]
     fn bindings_chords_follow_the_chord_grammar() {
         let mut import = KeymapImport;
@@ -87,17 +87,17 @@ mod tests {
         }
     }
 
-    /// REQ: COR-010
     /// Documented example: the chord `ctrl+shift+k` is shown to the user as `Ctrl+Shift+K`
     /// (api-kernel-settings-and-keymap, `chord-label`; api-keys, "Chord syntax").
+    /// REQ: COR-010
     #[test]
     fn chord_label_formats_modifiers_and_key_with_capitals() {
         let mut import = KeymapImport;
         assert_eq!(import.chord_label("ctrl+shift+k".to_string()), "Ctrl+Shift+K");
     }
 
-    /// REQ: COR-010
     /// Arrow keys show as the arrow glyphs in the client's help (api-keys, "Chord syntax").
+    /// REQ: COR-010
     #[test]
     fn chord_label_shows_arrow_keys_as_glyphs() {
         let mut import = KeymapImport;
@@ -107,8 +107,8 @@ mod tests {
         }
     }
 
-    /// REQ: COR-010
     /// Page keys show as `Pg↑` and `Pg↓` in the client's help (api-keys, "Chord syntax").
+    /// REQ: COR-010
     #[test]
     fn chord_label_shows_page_keys_with_pg_prefix() {
         let mut import = KeymapImport;
@@ -116,9 +116,9 @@ mod tests {
         assert_eq!(import.chord_label("page-down".to_string()), "Pg↓");
     }
 
-    /// REQ: COR-010
     /// The label of a chord with one modifier keeps the same capitals as the documented example
     /// (`alt+c` is written in lower case in the grammar; its label starts with `Alt+`).
+    /// REQ: COR-010
     #[test]
     fn chord_label_capitalises_a_single_modifier() {
         let mut import = KeymapImport;

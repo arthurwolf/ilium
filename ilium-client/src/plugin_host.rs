@@ -35,7 +35,7 @@ impl ClientPluginHost {
 mod spec_tests {
     use super::*;
 
-    /// REQ: HST-033, HST-034 (`--no-plugins` starts no plugin host, so no plugin starts or fails)
+    /// REQ: HST-033, HST-034
     #[test]
     fn no_plugins_start_starts_and_fails_nothing() {
         let report = ClientPluginHost::new(StartMode::NoPlugins).start();
@@ -43,8 +43,8 @@ mod spec_tests {
         assert!(report.failed.is_empty());
     }
 
-    /// REQ: HST-033 (`--safe-plugins` loads no T2 or T3 package, so only bundled core plugins start;
     /// the Tree plugin is in the client startup group of reference-kernel-and-boot)
+    /// REQ: HST-033
     #[test]
     fn safe_plugins_start_runs_only_core_plugins() {
         let report = ClientPluginHost::new(StartMode::SafePlugins).start();
@@ -55,7 +55,7 @@ mod spec_tests {
         assert!(report.started.iter().any(|plugin_id| plugin_id == "ilium.core.tree"));
     }
 
-    /// REQ: LIF-001 (every plugin has exactly one state, so it is either started or failed, never both)
+    /// REQ: LIF-001
     #[test]
     fn normal_start_lists_each_plugin_in_one_outcome_only() {
         let report = ClientPluginHost::new(StartMode::Normal).start();
@@ -68,7 +68,7 @@ mod spec_tests {
         assert_eq!(seen.len(), report.started.len());
     }
 
-    /// REQ: LIF-003 (a plugin that fails to start carries a non-empty refusal or failure code)
+    /// REQ: LIF-003
     #[test]
     fn normal_start_gives_every_failed_plugin_a_code() {
         let report = ClientPluginHost::new(StartMode::Normal).start();
@@ -77,8 +77,8 @@ mod spec_tests {
         }
     }
 
-    /// REQ: LIF-050 (only active plugins receive `deactivate(shutdown)`, so a host that never
     /// started reports nothing deactivated and nothing forced)
+    /// REQ: LIF-050
     #[test]
     fn shutdown_before_start_deactivates_nothing() {
         let report = ClientPluginHost::new(StartMode::Normal).shutdown();
@@ -86,8 +86,8 @@ mod spec_tests {
         assert!(report.forced.is_empty());
     }
 
-    /// REQ: HST-030, HST-032 (shutdown reaches only plugins that started, and a plugin is either
     /// deactivated cleanly or forced at the budget, never both)
+    /// REQ: HST-030, HST-032
     #[test]
     fn shutdown_reports_only_started_plugins_once_each() {
         let host = ClientPluginHost::new(StartMode::Normal);

@@ -20,8 +20,7 @@ fn terminal_context(pane: u64) -> MenuContext {
     }
 }
 
-/// REQ: PORT:ilium-client/src/context_menu_layout.rs::padding_and_group_boundaries_never_activate_an_action
-/// REQ: PORT:ilium-client/src/context_menu_layout.rs::every_action_remains_visible_and_clickable_on_a_short_menu
+/// REQ: PORT:ilium-client/src/context_menu_layout.rs::padding_and_group_boundaries_never_activate_an_action, PORT:ilium-client/src/context_menu_layout.rs::every_action_remains_visible_and_clickable_on_a_short_menu
 #[test]
 fn port_layout_every_terminal_menu_action_is_offered_once_in_order() {
     let mut host = client_host();

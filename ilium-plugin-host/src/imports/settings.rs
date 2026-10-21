@@ -145,8 +145,8 @@ mod tests {
         format!("{{\"filler\":\"{filler}\"}}")
     }
 
-    /// REQ: CAP-011
     /// Manual: api-settings, "Surface" (`get-json` is always granted, returns one JSON object).
+    /// REQ: CAP-011
     #[test]
     fn get_json_returns_a_json_object_without_any_grant() {
         let mut settings = SettingsImport;
@@ -156,8 +156,8 @@ mod tests {
         assert!(parsed.is_object(), "get_json must return one JSON object, got: {values}");
     }
 
-    /// REQ: CAP-011
     /// Manual: api-settings, "Writing values" (an empty merge patch changes nothing and succeeds).
+    /// REQ: CAP-011
     #[test]
     fn set_json_empty_object_patch_is_accepted() {
         let mut settings = SettingsImport;
@@ -165,7 +165,6 @@ mod tests {
         assert!(result.is_ok(), "an empty merge patch must succeed, got {result:?}");
     }
 
-    /// REQ: none (manual: api-settings, "Errors": `set-json` returns `invalid-argument` when the patch is not one JSON object).
     #[test]
     fn set_json_rejects_each_non_object_patch_with_invalid_argument() {
         let non_object_patches = ["", "null", "42", "\"text\"", "true", "[]", "[{}]"];
@@ -176,7 +175,6 @@ mod tests {
         }
     }
 
-    /// REQ: none (manual: api-settings, "Errors": a patch that is not valid JSON is `invalid-argument`).
     #[test]
     fn set_json_rejects_malformed_json_with_invalid_argument() {
         let malformed_patches = ["{", "{\"a\":", "{\"a\" 1}"];
@@ -187,7 +185,6 @@ mod tests {
         }
     }
 
-    /// REQ: none (manual: api-settings, "Writing values": a key not in the schema is `invalid-argument`, nothing stored).
     #[test]
     fn set_json_rejects_a_key_no_schema_declares_with_invalid_argument() {
         let mut settings = SettingsImport;
@@ -196,7 +193,6 @@ mod tests {
         assert_error_code(result, ErrorCode::InvalidArgument);
     }
 
-    /// REQ: none (manual: api-settings, "Errors": a patch over 256 KiB is `invalid-argument`).
     /// The one-byte-over boundary is the first size that must fail; the error message must fit PluginError's 256-character cap.
     #[test]
     fn set_json_rejects_a_patch_over_256_kib_with_a_short_message() {
@@ -217,7 +213,6 @@ mod tests {
         }
     }
 
-    /// REQ: none (manual: api-settings, "Errors": `get-plugin-json` returns `not-found` for an uninstalled plugin).
     #[test]
     fn get_plugin_json_for_an_uninstalled_plugin_returns_not_found() {
         let mut settings = SettingsImport;
@@ -225,7 +220,6 @@ mod tests {
         assert_error_code(result, ErrorCode::NotFound);
     }
 
-    /// REQ: none (manual: api-settings, "Errors": `set-plugin-json` returns `not-found` for an uninstalled plugin).
     #[test]
     fn set_plugin_json_for_an_uninstalled_plugin_returns_not_found() {
         let mut settings = SettingsImport;
@@ -234,7 +228,6 @@ mod tests {
         assert_error_code(result, ErrorCode::NotFound);
     }
 
-    /// REQ: none (manual: api-settings, "Dynamic content": an unknown key returns `not-found`).
     #[test]
     fn set_row_state_for_an_undeclared_row_key_returns_not_found() {
         let mut settings = SettingsImport;
@@ -243,7 +236,6 @@ mod tests {
         assert_error_code(result, ErrorCode::NotFound);
     }
 
-    /// REQ: none (manual: api-settings, "Dynamic content": `set-info` text is at most 120 characters, else `invalid-argument`).
     /// The test assumes the key check does not take precedence over the length check; see the unresolved note.
     #[test]
     fn set_info_text_one_character_over_120_is_invalid_argument() {
@@ -255,7 +247,6 @@ mod tests {
         assert_error_code(result, ErrorCode::InvalidArgument);
     }
 
-    /// REQ: none (manual: api-settings, "Dynamic content": `set-choices` takes 1 to 64 options, so zero is `invalid-argument`).
     #[test]
     fn set_choices_with_zero_options_is_invalid_argument() {
         let mut settings = SettingsImport;
@@ -263,7 +254,6 @@ mod tests {
         assert_error_code(result, ErrorCode::InvalidArgument);
     }
 
-    /// REQ: none (manual: api-settings, "Dynamic content": `set-choices` takes at most 64 options; 65 is `invalid-argument`).
     #[test]
     fn set_choices_with_one_more_than_64_options_is_invalid_argument() {
         let mut settings = SettingsImport;
@@ -274,7 +264,6 @@ mod tests {
         assert_error_code(result, ErrorCode::InvalidArgument);
     }
 
-    /// REQ: none (manual: api-settings, "Dynamic content": a row note is at most 120 characters, else `invalid-argument`).
     #[test]
     fn set_row_note_one_character_over_120_is_invalid_argument() {
         let mut settings = SettingsImport;
@@ -285,7 +274,6 @@ mod tests {
         assert_error_code(result, ErrorCode::InvalidArgument);
     }
 
-    /// REQ: none (manual: api-settings, "Dynamic content": a row-state message is at most 80 characters, else `invalid-argument`).
     #[test]
     fn set_row_state_message_one_character_over_80_is_invalid_argument() {
         let mut settings = SettingsImport;
@@ -297,7 +285,6 @@ mod tests {
         assert_error_code(result, ErrorCode::InvalidArgument);
     }
 
-    /// REQ: none (manual: api-settings, "Dynamic content": `set-meter` replaces up to 8 segments; nine is `invalid-argument`).
     #[test]
     fn set_meter_with_one_more_than_8_segments_is_invalid_argument() {
         let mut settings = SettingsImport;

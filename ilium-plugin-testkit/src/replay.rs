@@ -63,7 +63,7 @@ mod spec_tests {
         )
     }
 
-    /// REQ: DEV-540 (record_to writes a replay file whose first line is the header)
+    /// REQ: DEV-540
     #[test]
     fn dev_540_record_to_writes_header_as_first_line() {
         let path = replay_path("dev_540_header_first");
@@ -75,7 +75,7 @@ mod spec_tests {
         assert_eq!(header.version, 1);
     }
 
-    /// REQ: DEV-540 (header fields follow the reference: api string and YYYY-MM-DD HH:mm:ss start)
+    /// REQ: DEV-540
     #[test]
     fn dev_540_header_api_and_start_format_match_reference() {
         let path = replay_path("dev_540_header_fields");
@@ -89,7 +89,7 @@ mod spec_tests {
         assert_eq!(header.start.as_bytes()[13], b':');
     }
 
-    /// REQ: DEV-541 (replaying a file whose host calls match the new run succeeds)
+    /// REQ: DEV-541
     #[test]
     fn dev_541_replay_of_matching_recording_succeeds() {
         let path = replay_path("dev_541_match");
@@ -97,7 +97,7 @@ mod spec_tests {
         replay(&path).expect("recorded inputs reproduce the same host calls");
     }
 
-    /// REQ: DEV-541 (the first differing host-call line fails with replay.diverged and its one-based line number)
+    /// REQ: DEV-541
     #[test]
     fn dev_541_divergence_reports_first_differing_line() {
         let path = replay_path("dev_541_diverged");
@@ -109,7 +109,7 @@ mod spec_tests {
         assert!(mismatch.to_string().starts_with("replay.diverged at line 2"));
     }
 
-    /// REQ: DEV-542 (a replay file with a version other than 1 is refused)
+    /// REQ: DEV-542
     #[test]
     fn dev_542_unsupported_version_is_refused() {
         let path = replay_path("dev_542_version_two");
@@ -117,7 +117,7 @@ mod spec_tests {
         assert!(replay(&path).is_err());
     }
 
-    /// REQ: DEV-540 and DEV-541 (an empty file has no header, so it is invalid input and cannot be replayed)
+    /// REQ: DEV-540
     #[test]
     fn dev_541_empty_replay_file_is_refused() {
         let path = replay_path("dev_541_empty");

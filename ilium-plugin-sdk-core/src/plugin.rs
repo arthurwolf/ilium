@@ -154,7 +154,7 @@ mod spec_tests {
         }
     }
 
-    /// REQ: rust-sdk.md "Traits" (`Lifecycle`: `deactivate` has a default that saves no state)
+    /// Manual: `Lifecycle`: `deactivate` has a default that saves no state
     #[test]
     fn default_deactivate_saves_no_state_for_every_delivered_reason() {
         let mut plugin = QuietPlugin::default();
@@ -181,7 +181,6 @@ mod spec_tests {
         }
     }
 
-    /// REQ: rust-sdk.md "Exports and entry points" (`lifecycle` is always exported) and exports.rs
     /// `ExportLifecycle::activate` ("Called once per instance, before any event")
     #[test]
     fn export_lifecycle_activate_reaches_the_plugin_once() {
@@ -198,7 +197,7 @@ mod spec_tests {
         }
     }
 
-    /// REQ: exports.rs `ExportLifecycle::activate` ("An error stops the activation and counts as a failure")
+    /// Manual: "An error stops the activation and counts as a failure"
     #[test]
     fn export_lifecycle_activate_returns_the_plugin_error_unchanged() {
         let mut plugin = RefusingPlugin;
@@ -225,7 +224,6 @@ mod spec_tests {
         }
     }
 
-    /// REQ: exports.rs `ExportLifecycle::deactivate` ("The returned bytes arrive in the next activation as
     /// restored") and reference-test-harness.md [DEV-424] (the default reason is `shutdown`, which keeps no bytes here)
     #[test]
     fn export_lifecycle_deactivate_returns_restore_bytes_from_the_plugin() {
@@ -242,7 +240,6 @@ mod spec_tests {
 
     fn accept_host_api(_handle: &dyn HostApi) {}
 
-    /// REQ: rust-sdk.md "Calling the host" (named at plugin.rs:64; no heading of that name in the page) and
     /// plugin.rs `set_host` ("Installs the host handle for the current thread")
     #[test]
     fn set_host_installs_the_handle_that_host_returns() {
@@ -270,7 +267,6 @@ mod spec_tests {
         }
     }
 
-    /// REQ: rust-sdk.md "The ilium_plugin macro" (named at plugin.rs:108; no heading of that name in the page):
     /// the side is "server", "client" or "scene"
     #[test]
     fn native_entry_side_is_server_client_or_scene() {
@@ -297,8 +293,8 @@ mod spec_tests {
         }
     }
 
-    /// REQ: exports.rs `ExportLifecycle::activate` ("An error stops the activation and counts as a failure"),
     /// reached through the native dispatch of `NativeEntry::native_activate`
+    /// Manual: "An error stops the activation and counts as a failure"
     #[test]
     fn native_activate_error_reaches_the_caller() {
         let mut entry = DeniedEntry;
@@ -343,7 +339,6 @@ mod spec_tests {
         }
     }
 
-    /// REQ: reference-test-harness.md [DEV-562] (`set_palette` reaches the renderer before the next frame) and
     /// [DEV-560] (`frame` returns the surface cells in the scene size)
     #[test]
     fn palette_set_before_a_frame_colours_that_frame() {

@@ -22,8 +22,7 @@ fn record(session: &mut FakeSession, menu_enabled: bool, file_logging: bool) -> 
     .expect("record")
 }
 
-/// REQ: F-032
-/// REQ: PORT:ilium-client/src/app.rs::client_owned_agent_events_are_suppressed_when_both_debug_sinks_are_disabled
+/// REQ: F-032, PORT:ilium-client/src/app.rs::client_owned_agent_events_are_suppressed_when_both_debug_sinks_are_disabled
 #[test]
 fn f_032_client_owned_agent_events_are_suppressed_when_both_debug_sinks_are_disabled() {
     let mut session = session();
@@ -31,8 +30,7 @@ fn f_032_client_owned_agent_events_are_suppressed_when_both_debug_sinks_are_disa
     assert_eq!(reply["forwarded"], false);
 }
 
-/// REQ: F-032
-/// REQ: PORT:ilium-client/src/app.rs::file_logging_alone_forwards_client_owned_agent_events
+/// REQ: F-032, PORT:ilium-client/src/app.rs::file_logging_alone_forwards_client_owned_agent_events
 #[test]
 fn f_032_file_logging_alone_forwards_client_owned_agent_events() {
     let mut session = session();
@@ -42,8 +40,7 @@ fn f_032_file_logging_alone_forwards_client_owned_agent_events() {
     assert_eq!(reply["kind"], "trigger-evaluated");
 }
 
-/// REQ: F-032
-/// REQ: PORT:ilium-client/src/app.rs::opening_debug_log_fetches_retained_history_before_using_incremental_replay
+/// REQ: F-032, PORT:ilium-client/src/app.rs::opening_debug_log_fetches_retained_history_before_using_incremental_replay
 #[test]
 fn f_032_opening_debug_log_fetches_retained_history_before_using_incremental_replay() {
     let mut session = session();
@@ -69,8 +66,7 @@ fn f_032_opening_debug_log_fetches_retained_history_before_using_incremental_rep
     );
 }
 
-/// REQ: F-032
-/// REQ: PORT:ilium-client/src/app.rs::debug_log_save_prompt_uses_an_editable_absolute_path_only_after_full_replay
+/// REQ: F-032, PORT:ilium-client/src/app.rs::debug_log_save_prompt_uses_an_editable_absolute_path_only_after_full_replay
 #[test]
 fn f_032_debug_log_save_prompt_uses_an_editable_absolute_path_only_after_full_replay() {
     let mut session = session();
@@ -81,8 +77,7 @@ fn f_032_debug_log_save_prompt_uses_an_editable_absolute_path_only_after_full_re
     assert!(path.ends_with(".log"), "{path}");
 }
 
-/// REQ: F-032
-/// REQ: PORT:ilium-client/src/app.rs::saving_agent_debug_log_resolves_relative_path_and_writes_the_complete_report
+/// REQ: F-032, PORT:ilium-client/src/app.rs::saving_agent_debug_log_resolves_relative_path_and_writes_the_complete_report
 #[test]
 fn f_032_saving_agent_debug_log_resolves_relative_path_and_writes_the_complete_report() {
     let mut session = session();
@@ -113,8 +108,7 @@ fn f_032_saving_agent_debug_log_resolves_relative_path_and_writes_the_complete_r
     assert!(text.contains("Pane: Codex audit"));
 }
 
-/// REQ: F-032
-/// REQ: PORT:ilium-client/src/app.rs::oldest_debug_log_anchor_can_page_toward_newer_events
+/// REQ: F-032, PORT:ilium-client/src/app.rs::oldest_debug_log_anchor_can_page_toward_newer_events
 #[test]
 fn f_032_oldest_debug_log_anchor_can_page_toward_newer_events() {
     let mut session = session();
@@ -127,8 +121,7 @@ fn f_032_oldest_debug_log_anchor_can_page_toward_newer_events() {
     assert_eq!(reply["position"], json!({ "from_oldest": 10 }));
 }
 
-/// REQ: F-032
-/// REQ: PORT:ilium-client/src/render_cache.rs::debug_snapshot_and_live_events_merge_in_sequence_order_without_duplicates
+/// REQ: F-032, PORT:ilium-client/src/render_cache.rs::debug_snapshot_and_live_events_merge_in_sequence_order_without_duplicates
 #[test]
 fn f_032_debug_snapshot_and_live_events_merge_in_sequence_order_without_duplicates() {
     let mut session = session();
@@ -158,8 +151,7 @@ fn f_032_debug_snapshot_and_live_events_merge_in_sequence_order_without_duplicat
     assert_eq!(cache["is_loading"], false);
 }
 
-/// REQ: F-032
-/// REQ: PORT:ilium-client/src/render_cache.rs::closing_a_pane_closes_its_nested_debug_save_flow_and_cache
+/// REQ: F-032, PORT:ilium-client/src/render_cache.rs::closing_a_pane_closes_its_nested_debug_save_flow_and_cache
 #[test]
 fn f_032_closing_a_pane_closes_its_nested_debug_save_flow_and_cache() {
     let mut session = session();
@@ -171,8 +163,7 @@ fn f_032_closing_a_pane_closes_its_nested_debug_save_flow_and_cache() {
     let _ = PLUGIN_ID;
 }
 
-/// REQ: F-032
-/// REQ: PORT:ilium-client/src/ui.rs::agent_debug_mode_replaces_the_complete_right_panel_with_aerated_history
+/// REQ: F-032, PORT:ilium-client/src/ui.rs::agent_debug_mode_replaces_the_complete_right_panel_with_aerated_history
 #[test]
 fn f_032_agent_debug_mode_replaces_the_complete_right_panel_with_aerated_history() {
     let mut session = session();
