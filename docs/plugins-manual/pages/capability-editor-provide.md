@@ -12,7 +12,7 @@ The `editor.provide` grant lets a client-side plugin replace the native editor. 
 
 <div class="warn">
 
-High risk. The grant is high risk (H) and for T1 bundled plugins only. By default the native editor serves `ilium:primitives/editor`, and no other feature depends on this grant.
+High risk. The grant is high risk (H) and reserved: in `ilium:plugin@0.1.0` a package that names it is refused at every tier with `manifest.grant-unknown`. By default the native editor serves `ilium:primitives/editor`, and no other feature depends on this grant.
 
 </div>
 
@@ -51,7 +51,7 @@ Only one editor provider runs at a time.
 
 ## You will need
 
-- A T1 bundled plugin. In `ilium:plugin@0.1.0` a package that names the grant, at any tier, is refused with `manifest.grant-unknown`.
+- A future version of the API that accepts the grant. In `ilium:plugin@0.1.0` a package that names it is refused at any tier with `manifest.grant-unknown`, so this page describes a provider that cannot be installed yet.
 - The API string `ilium:plugin@0.1.0` in the manifest `api` key.
 - A client-side build. A grant or export on the server side gives `manifest.grant-side`.
 - The calls that the provider implements are described on [editor.read](/pages/capability-editor-read/) and [editor.edit](/pages/capability-editor-edit/). The provider needs no extra grant for them, because it is the implementation.
