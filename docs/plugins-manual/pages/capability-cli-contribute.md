@@ -38,7 +38,7 @@ The install error for the first row reads
 
 ### Manifest
 
-A plugin declares its subcommands in the `cli` key. The key holds one object, or a list of at most 8 objects when the plugin owns several commands (the fleet plugin owns `panes`, `broadcast` and `new-pane`). Names MUST be unique inside the plugin:
+A plugin declares its subcommands in the `cli` key. The key holds one object, or a list of at most 16 objects when the plugin owns several commands (the fleet plugin owns `panes`, `broadcast` and `new-pane`). Names MUST be unique inside the plugin:
 
 ```json
 {

@@ -212,7 +212,7 @@ let response = http::take_response(id);   // Option<HttpResponse>; None after 30
 }
 ```
 
-`reason` is `not-granted` when the manifest asked for other hosts but not this one, and `declined` when the user refused the grant for it. A manifest with no `http` grant at all traps with `host.capability-not-requested` instead.
+`reason` is `not-granted` when the manifest asked for other hosts but not this one, and `declined` when the user refused the grant for it. A manifest with no `http` grant at all is refused at install with `manifest.import-not-requested`, so the interface never links and no call can trap on it.
 
 - **Log lines.** Results appear in the plugin log like this:
 

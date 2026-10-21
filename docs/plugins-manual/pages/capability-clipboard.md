@@ -165,7 +165,7 @@ Rules that follow from the table:
 - A declined or revoked read is not reported as an error. The plugin cannot tell "no text" from
   "not allowed" by the return value alone. The warn line in the plugin log is the only record of
   a refused read.
-- `write-text` counts the 64 KiB limit in UTF-8 bytes, not in characters. A text of 300,000
+- `write-text` counts the 1 MiB limit in UTF-8 bytes, not in characters. A text of 300,000
   characters that take four bytes each is 1.2 MB, so it is refused.
 - A revoked grant does not make the plugin fail. Revocation re-activates the plugin, as described
   in the grant lifecycle.

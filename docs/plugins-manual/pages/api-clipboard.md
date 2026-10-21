@@ -51,7 +51,7 @@ The names follow the binding rules (S5): kebab-case becomes snake_case in Rust a
 ### How the import behaves
 
 - **Plain text only.** Only UTF-8 text is covered. Images and other formats are not part of the contract. `read-text` returns nothing for an image. Text longer than 1 MiB is cut at a character boundary.
-- **Write limit.** `write-text` accepts at most 64 KiB (65,536 UTF-8 bytes). A larger text returns `invalid-argument`, nothing is written, and the text is never truncated.
+- **Write limit.** `write-text` accepts at most 1 MiB (1,048,576 UTF-8 bytes). A larger text returns `invalid-argument`, nothing is written, and the text is never truncated.
 - **Route.** The client writes through the system clipboard when it runs on the user's desktop. When it runs in a terminal that supports OSC 52, it writes through an OSC 52 sequence. With neither route, `write-text` returns `unsupported` and `read-text` returns nothing.
 - **Logging.** Every successful read writes an info line to the plugin log that records only the length, never the text. The same line goes to the privacy log. The user is not asked before each read.
 - **Footer.** After each read, the client footer shows `clipboard read by <plugin name>` for 3 s.
@@ -293,7 +293,7 @@ The plugin log shows one line per call. The footer confirms each read.
 
 | Function | Code | When |
 |---|---|---|
-| `write-text` | `invalid-argument` | The text is over 64 KiB (65,536 UTF-8 bytes). Nothing is written. |
+| `write-text` | `invalid-argument` | The text is over 1 MiB (1,048,576 UTF-8 bytes). Nothing is written. |
 | `write-text` | `unsupported` | Neither the system clipboard nor OSC 52 is available. |
 | `write-text` | `not-permitted` | The user declined `clipboard.write`. |
 | `write-text` | `revoked` | The grant was revoked during the call. |
@@ -304,7 +304,7 @@ The plugin log shows one line per call. The footer confirms each read.
 
 | Item | Value | Error |
 |---|---|---|
-| `write-text` size | 64 KiB (65,536 UTF-8 bytes) | `invalid-argument`, nothing written |
+| `write-text` size | 1 MiB (1,048,576 UTF-8 bytes) | `invalid-argument`, nothing written |
 | Text format | UTF-8 plain text | an image reads as nothing |
 | Read frequency | no limit; every read is logged | none |
 | Prompt for the high-risk grant | once, at first activation | none |
