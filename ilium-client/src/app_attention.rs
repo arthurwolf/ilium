@@ -1341,7 +1341,7 @@ mod tests {
             assert!(!app.attention.turbo.is_running(), "{mode:?}");
             assert_eq!(app.attention.refresh_requests, 0, "{mode:?}");
 
-            assert!(app.request_project_restructure(project, RestructureRequestOrigin::Manual));
+            app.request_project_restructure(project, RestructureRequestOrigin::Manual);
             let pending = app.take_pending_restructure_requests();
             assert_eq!(pending.len(), 1, "{mode:?}: the plain sort still runs");
             assert!(!pending[0].include_attention, "{mode:?}");
