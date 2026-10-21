@@ -14,6 +14,9 @@ development period. Dates are commit dates (`YYYY-MM-DD`).
 ## [Unreleased]
 
 ### Fixed
+- Board card typing retains brief bursts while disk publication is pending, within the shared filesystem job and memory limits; restored upstream image fixtures required by vendored tests.
+- Chatroom author defaults ignore empty environment values; invalid pane state selectors now use the documented structured selection-error response.
+- Terminal smoke verification waits for the restored voice control after closing Settings, and title evidence tests cover full requests larger than the transcript discovery limit.
 - Restored strict workspace lint checks by removing duplicated progress-monitor attributes and clarifying the retained host field in the compaction test scaffold.
 - Jumping to an attention target ("Next: needs you", the right panel or the overview dialog) now scrolls the tree so that agent's row sits in the middle of the tree, and the row blinks like a newly created one unless it was already centred.
 - The attention arrival block beside the last-prompt banner now names the agent the next "Next: needs you" press visits (an unseen or newly arrived one first) instead of always the highest-priority agent, which could be one you had just visited.
