@@ -132,3 +132,240 @@ impl FakeNet {
         unimplemented!("host::testing::FakeNet::resolve_count")
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{FakeNet, FakeResponse, SeenRequest};
+
+    #[test]
+    fn ok_response_is_200_with_body_and_no_declared_size() {
+        let response: FakeResponse = FakeResponse::ok(b"hello".to_vec());
+
+        assert_eq!(
+            response,
+            FakeResponse {
+                status: 200,
+                headers: Vec::new(),
+                body: b"hello".to_vec(),
+                size: None,
+            }
+        );
+    }
+
+    #[test]
+    fn ok_response_with_empty_body_is_200_and_empty() {
+        let response: FakeResponse = FakeResponse::ok(Vec::new());
+
+        assert_eq!(
+            response,
+            FakeResponse {
+                status: 200,
+                headers: Vec::new(),
+                body: Vec::new(),
+                size: None,
+            }
+        );
+    }
+
+    /// REQ: SEC-082
+    #[test]
+    fn sized_response_declares_size_and_buffers_no_body() {
+        let response: FakeResponse = FakeResponse::sized(8 * 1024 * 1024);
+
+        assert_eq!(
+            response,
+            FakeResponse {
+                status: 200,
+                headers: Vec::new(),
+                body: Vec::new(),
+                size: Some(8 * 1024 * 1024),
+            }
+        );
+    }
+
+    /// REQ: SEC-082
+    #[test]
+    fn sized_zero_bytes_is_a_valid_empty_stream() {
+        let response: FakeResponse = FakeResponse::sized(0);
+
+        assert_eq!(response.size, Some(0));
+        assert!(response.body.is_empty());
+    }
+
+    /// REQ: SEC-082
+    #[test]
+    fn sized_u64_max_keeps_the_full_declared_size() {
+        let response: FakeResponse = FakeResponse::sized(u64::MAX);
+
+        assert_eq!(response.size, Some(u64::MAX));
+        assert_eq!(response.status, 200);
+    }
+
+    #[test]
+    fn header_appends_in_call_order() {
+        let response: FakeResponse = FakeResponse::ok(Vec::new())
+            .header("Content-Type", "text/plain")
+            .header("X-Trace", "1");
+
+        assert_eq!(
+            response.headers,
+            vec![
+                ("Content-Type".to_owned(), "text/plain".to_owned()),
+                ("X-Trace".to_owned(), "1".to_owned()),
+            ]
+        );
+    }
+
+    #[test]
+    fn header_keeps_duplicate_names_and_empty_values() {
+        let response: FakeResponse = FakeResponse::ok(Vec::new())
+            .header("Set-Cookie", "")
+            .header("Set-Cookie", "a=b");
+
+        assert_eq!(
+            response.headers,
+            vec![
+                ("Set-Cookie".to_owned(), String::new()),
+                ("Set-Cookie".to_owned(), "a=b".to_owned()),
+            ]
+        );
+    }
+
+    #[test]
+    fn new_network_has_no_traffic_and_no_resolutions() {
+        let net: FakeNet = FakeNet::new();
+
+        let seen: Vec<SeenRequest> = net.seen();
+        assert!(seen.is_empty());
+        assert!(net.resolutions().is_empty());
+    }
+
+    #[test]
+    fn unconfigured_host_has_zero_resolutions() {
+        let net: FakeNet = FakeNet::new();
+
+        assert_eq!(net.resolve_count("never-configured.example"), 0);
+    }
+
+    #[test]
+    fn empty_host_name_has_zero_resolutions() {
+        let net: FakeNet = FakeNet::new();
+
+        assert_eq!(net.resolve_count(""), 0);
+    }
+
+    #[test]
+    fn clone_observes_the_same_traffic_as_the_original() {
+        let net: FakeNet = FakeNet::new();
+        let copy: FakeNet = net.clone();
+
+        assert_eq!(copy.seen(), net.seen());
+        assert_eq!(copy.resolutions(), net.resolutions());
+    }
+
+    /// REQ: SEC-072
+    #[test]
+    fn dns_with_no_addresses_records_no_traffic() {
+        let net: FakeNet = FakeNet::new();
+
+        net.dns("empty-answer.example", &[]);
+
+        assert!(net.seen().is_empty());
+        assert!(net.resolutions().is_empty());
+    }
+
+    /// REQ: SEC-073
+    #[test]
+    fn dns_then_configuration_does_not_resolve_the_name() {
+        let net: FakeNet = FakeNet::new();
+
+        net.dns_then("rebind.example", &["203.0.113.5"], &["127.0.0.1"]);
+
+        assert_eq!(net.resolve_count("rebind.example"), 0);
+        assert!(net.resolutions().is_empty());
+    }
+
+    /// REQ: SEC-073
+    #[test]
+    fn dns_then_accepts_empty_first_and_second_answers() {
+        let net: FakeNet = FakeNet::new();
+
+        net.dns_then("empty.example", &[], &[]);
+
+        assert_eq!(net.resolve_count("empty.example"), 0);
+    }
+
+    #[test]
+    fn serve_with_empty_url_records_no_traffic() {
+        let net: FakeNet = FakeNet::new();
+
+        net.serve("", FakeResponse::ok(b"body".to_vec()));
+
+        assert!(net.seen().is_empty());
+    }
+
+    /// REQ: SEC-075
+    #[test]
+    fn redirect_configuration_records_no_traffic() {
+        let net: FakeNet = FakeNet::new();
+
+        net.redirect("https://a.example/start", 308, "https://b.example/next");
+
+        assert!(net.seen().is_empty());
+    }
+
+    /// REQ: SEC-077
+    #[test]
+    fn fail_tls_records_no_traffic_or_resolution() {
+        let net: FakeNet = FakeNet::new();
+
+        net.fail_tls("tls-broken.example");
+
+        assert!(net.seen().is_empty());
+        assert_eq!(net.resolve_count("tls-broken.example"), 0);
+    }
+
+    /// REQ: SEC-077
+    #[test]
+    fn set_tls_version_accepts_tls13_without_traffic() {
+        let net: FakeNet = FakeNet::new();
+
+        net.set_tls_version("secure.example", "TLS1.3");
+
+        assert!(net.seen().is_empty());
+    }
+
+    /// REQ: SEC-077
+    #[test]
+    fn require_root_and_trust_bundle_leave_traffic_empty() {
+        let net: FakeNet = FakeNet::new();
+
+        net.require_root("internal.example", "Example Root CA");
+        net.trust_bundle("/etc/ilium/ca_bundle.pem", "Example Root CA");
+
+        assert!(net.seen().is_empty());
+        assert!(net.resolutions().is_empty());
+    }
+
+    /// REQ: SEC-074
+    #[test]
+    fn reserve_ilium_port_boundary_ports_record_no_traffic() {
+        let net: FakeNet = FakeNet::new();
+
+        net.reserve_ilium_port(0);
+        net.reserve_ilium_port(u16::MAX);
+
+        assert!(net.seen().is_empty());
+    }
+
+    /// REQ: SEC-074
+    #[test]
+    fn reserve_other_session_port_records_no_traffic() {
+        let net: FakeNet = FakeNet::new();
+
+        net.reserve_ilium_port_of_other_session(7878);
+
+        assert!(net.seen().is_empty());
+        assert_eq!(net.resolve_count("localhost"), 0);
+    }
+}

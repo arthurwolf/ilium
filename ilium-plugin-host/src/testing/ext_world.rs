@@ -772,3 +772,457 @@ impl Default for ExtWorld {
         ExtWorld::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{ExtWorld, HandlerAction, HandlerScript, ReplacementShape};
+    use ilium_plugin_api::generated::types::{ErrorCode, Outcome, RequestId};
+    use ilium_plugin_api::Tier;
+    use serde_json::{json, Value};
+
+    /// The veto point of the terminal core plugin (EXT-055 names it; core table lists it as veto).
+    const TERMINAL_VETO_POINT: &str = "ilium.core.terminal/before-send-input";
+    /// A dynamic collect point of the smart-copy core plugin (core table: Dynamic = yes).
+    const DYNAMIC_COLLECT_POINT: &str = "ilium.core.smart-copy/recognisers";
+    /// A static (non-dynamic) point of the terminal core plugin.
+    const STATIC_POINT: &str = TERMINAL_VETO_POINT;
+
+    fn pass_script() -> HandlerScript {
+        HandlerScript {
+            elapsed_ms: 0,
+            action: HandlerAction::Pass,
+        }
+    }
+
+    fn refuse_script(reason: &str) -> HandlerScript {
+        HandlerScript {
+            elapsed_ms: 0,
+            action: HandlerAction::Refuse(reason.to_string()),
+        }
+    }
+
+    /// A plugin manifest whose contributor entries sit on the given points (contributes.extensions).
+    fn contributor_manifest(plugin_id: &str, point: &str, extension_id: &str, priority: u8) -> Value {
+        json!({
+            "id": plugin_id,
+            "version": "1.0.0",
+            "contributes": {
+                "extensions": [{
+                    "point": point,
+                    "id": extension_id,
+                    "priority": priority,
+                    "entry": "{}",
+                    "handler": extension_id
+                }]
+            }
+        })
+    }
+
+    /// A host with the bundled core plugins, plus two contributors on the terminal veto point.
+    fn host_with_two_veto_contributors(
+        first_priority: u8,
+        second_priority: u8,
+    ) -> ExtWorld {
+        let mut world = ExtWorld::with_core_plugins();
+        world
+            .install(
+                Tier::T2,
+                contributor_manifest("demo.alpha", TERMINAL_VETO_POINT, "demo.alpha", first_priority),
+                vec![("demo.alpha".to_string(), pass_script())],
+            )
+            .expect("demo.alpha installs");
+        world
+            .install(
+                Tier::T2,
+                contributor_manifest("demo.beta", TERMINAL_VETO_POINT, "demo.beta", second_priority),
+                vec![("demo.beta".to_string(), pass_script())],
+            )
+            .expect("demo.beta installs");
+        world
+    }
+
+    // ---- construction and manual clock (helper behaviour, documented in doc comments) ----
+
+    #[test]
+    fn new_host_starts_with_manual_clock_at_zero() {
+        let world = ExtWorld::new();
+
+        assert_eq!(world.now_ms(), 0);
+    }
+
+    #[test]
+    fn default_host_matches_new_host() {
+        let world = ExtWorld::default();
+
+        assert_eq!(world.now_ms(), 0);
+        assert!(world.handler_runs().is_empty());
+        assert!(world.hook_errors().is_empty());
+    }
+
+    #[test]
+    fn new_host_has_no_installed_plugins() {
+        let world = ExtWorld::new();
+
+        assert!(!world.plugin_installed("demo.alpha"));
+        assert!(!world.plugin_active("demo.alpha"));
+    }
+
+    #[test]
+    fn advance_ms_moves_manual_clock_by_each_step() {
+        let mut world = ExtWorld::new();
+
+        world.advance_ms(250);
+        assert_eq!(world.now_ms(), 250);
+        world.advance_ms(0);
+        assert_eq!(world.now_ms(), 250);
+        world.advance_ms(250);
+        assert_eq!(world.now_ms(), 500);
+    }
+
+    #[test]
+    fn settle_on_empty_host_is_a_no_op() {
+        let mut world = ExtWorld::new();
+
+        world.settle();
+
+        assert!(world.handler_runs().is_empty());
+        assert!(world.hook_errors().is_empty());
+        assert_eq!(world.now_ms(), 0);
+    }
+
+    #[test]
+    fn unknown_extension_has_no_breaches_and_no_outcome() {
+        let mut world = ExtWorld::new();
+
+        assert_eq!(world.breach_count("demo.alpha", STATIC_POINT, "demo.alpha"), 0);
+        assert!(world.outcome("demo.alpha", RequestId(999)).is_none());
+        assert!(world.take_reply("demo.alpha", RequestId(999)).is_none());
+    }
+
+    #[test]
+    fn default_replacement_shape_declares_no_overrides() {
+        let shape = ReplacementShape::default();
+
+        assert!(shape.drop_item.is_none());
+        assert!(shape.point_mode_override.is_none());
+        assert!(shape.point_version_override.is_none());
+        assert!(shape.service_methods_override.is_none());
+    }
+
+    // ---- core plugins and install lifecycle ----
+
+    /// REQ: EXT-040
+    #[test]
+    fn with_core_plugins_lists_the_66_core_points() {
+        let world = ExtWorld::with_core_plugins();
+
+        assert_eq!(world.list_points().len(), 66);
+    }
+
+    #[test]
+    fn with_core_plugins_installs_smart_copy_core_plugin() {
+        let world = ExtWorld::with_core_plugins();
+
+        assert!(world.plugin_installed("ilium.core.smart-copy"));
+        assert!(world.plugin_enabled("ilium.core.smart-copy"));
+    }
+
+    #[test]
+    fn install_enables_and_activates_plugin() {
+        let mut world = ExtWorld::new();
+        let manifest = json!({ "id": "demo.alpha", "version": "1.0.0" });
+
+        let result = world.install(Tier::T1, manifest, vec![]);
+
+        assert!(result.is_ok());
+        assert!(world.plugin_installed("demo.alpha"));
+        assert!(world.plugin_enabled("demo.alpha"));
+        assert!(world.plugin_active("demo.alpha"));
+    }
+
+    #[test]
+    fn disabling_a_plugin_keeps_it_installed() {
+        let mut world = ExtWorld::new();
+        world
+            .install(
+                Tier::T1,
+                json!({ "id": "demo.alpha", "version": "1.0.0" }),
+                vec![],
+            )
+            .expect("demo.alpha installs");
+
+        world.set_enabled("demo.alpha", false);
+
+        assert!(world.plugin_installed("demo.alpha"));
+        assert!(!world.plugin_enabled("demo.alpha"));
+    }
+
+    #[test]
+    fn uninstall_removes_plugin_from_host() {
+        let mut world = ExtWorld::new();
+        world
+            .install(
+                Tier::T1,
+                json!({ "id": "demo.alpha", "version": "1.0.0" }),
+                vec![],
+            )
+            .expect("demo.alpha installs");
+
+        world.uninstall("demo.alpha");
+
+        assert!(!world.plugin_installed("demo.alpha"));
+        assert!(!world.plugin_active("demo.alpha"));
+    }
+
+    // ---- documented error cases ----
+
+    /// REQ: EXT-024
+    #[test]
+    fn run_hook_on_undeclared_point_fails_not_found() {
+        let mut world = ExtWorld::new();
+
+        let error = world
+            .run_hook("demo.alpha", "demo.alpha/nothing-here", "{}")
+            .err()
+            .expect("an undeclared point must be refused");
+
+        assert_eq!(error.code, ErrorCode::NotFound);
+        assert!(error.message.starts_with("extension.unknown-point"));
+    }
+
+    /// REQ: EXT-024
+    #[test]
+    fn list_on_undeclared_point_fails_not_found() {
+        let world = ExtWorld::new();
+
+        let error = world
+            .list("demo.alpha", "demo.alpha/nothing-here")
+            .err()
+            .expect("an undeclared point must be refused");
+
+        assert_eq!(error.code, ErrorCode::NotFound);
+    }
+
+    /// REQ: EXT-025
+    #[test]
+    fn register_on_static_point_fails_unsupported() {
+        let mut world = ExtWorld::with_core_plugins();
+
+        let error = world
+            .register("ilium.core.terminal", STATIC_POINT, "demo.alpha", 10, "{}")
+            .err()
+            .expect("a static point cannot take runtime entries");
+
+        assert_eq!(error.code, ErrorCode::Unsupported);
+        assert!(error.message.starts_with("extension.not-dynamic"));
+    }
+
+    /// REQ: EXT-047
+    #[test]
+    fn register_priority_boundary_is_100_accepted_and_101_refused() {
+        let mut world = ExtWorld::with_core_plugins();
+
+        let at_limit = world.register(
+            "ilium.core.smart-copy",
+            DYNAMIC_COLLECT_POINT,
+            "demo.alpha",
+            100,
+            "{}",
+        );
+        let above_limit = world
+            .register(
+                "ilium.core.smart-copy",
+                DYNAMIC_COLLECT_POINT,
+                "demo.beta",
+                101,
+                "{}",
+            )
+            .err()
+            .expect("priority 101 must be refused");
+
+        assert!(at_limit.is_ok());
+        assert_eq!(above_limit.code, ErrorCode::InvalidArgument);
+        assert!(above_limit.message.starts_with("extension.schema-mismatch"));
+    }
+
+    /// REQ: EXT-004
+    #[test]
+    fn payload_over_64_kib_fails_cap_exceeded() {
+        let mut world = ExtWorld::with_core_plugins();
+        let oversized_payload = format!("\"{}\"", "a".repeat(64 * 1024));
+
+        let error = world
+            .run_hook("demo.alpha", TERMINAL_VETO_POINT, &oversized_payload)
+            .err()
+            .expect("a payload over 64 KiB must be refused");
+
+        assert_eq!(error.code, ErrorCode::InvalidArgument);
+        assert!(error.message.starts_with("extension.cap-exceeded"));
+    }
+
+    /// REQ: EXT-048
+    #[test]
+    fn run_hook_rate_limit_allows_200_calls_per_second_then_refuses() {
+        let mut world = ExtWorld::with_core_plugins();
+
+        for _ in 0..200 {
+            assert!(world
+                .run_hook("demo.alpha", TERMINAL_VETO_POINT, "{}")
+                .is_ok());
+        }
+        let refused = world
+            .run_hook("demo.alpha", TERMINAL_VETO_POINT, "{}")
+            .err()
+            .expect("the 201st call in one second must be rate-limited");
+        assert_eq!(refused.code, ErrorCode::RateLimited);
+        assert!(refused.retry_after_ms.is_some());
+
+        world.advance_ms(1000);
+
+        assert!(world
+            .run_hook("demo.alpha", TERMINAL_VETO_POINT, "{}")
+            .is_ok());
+    }
+
+    // ---- chain ordering and veto (EXT-007, EXT-008, EXT-012) ----
+
+    /// REQ: EXT-007
+    #[test]
+    fn same_priority_contributors_run_in_plugin_id_order() {
+        let mut world = host_with_two_veto_contributors(5, 5);
+
+        world
+            .run_hook("demo.alpha", TERMINAL_VETO_POINT, "{}")
+            .expect("the chain starts");
+        world.settle();
+
+        let order: Vec<String> = world
+            .handler_runs()
+            .into_iter()
+            .map(|run| run.plugin)
+            .collect();
+        assert_eq!(order, vec!["demo.alpha".to_string(), "demo.beta".to_string()]);
+    }
+
+    /// REQ: EXT-008
+    #[test]
+    fn lower_priority_number_runs_first() {
+        let mut world = host_with_two_veto_contributors(9, 1);
+
+        world
+            .run_hook("demo.alpha", TERMINAL_VETO_POINT, "{}")
+            .expect("the chain starts");
+        world.settle();
+
+        let order: Vec<String> = world
+            .handler_runs()
+            .into_iter()
+            .map(|run| run.plugin)
+            .collect();
+        assert_eq!(order, vec!["demo.beta".to_string(), "demo.alpha".to_string()]);
+    }
+
+    /// REQ: EXT-008
+    #[test]
+    fn stored_user_order_overrides_priority() {
+        let mut world = host_with_two_veto_contributors(1, 9);
+        world.set_user_order(
+            TERMINAL_VETO_POINT,
+            vec![
+                ("demo.beta".to_string(), "demo.beta".to_string()),
+                ("demo.alpha".to_string(), "demo.alpha".to_string()),
+            ],
+        );
+
+        world
+            .run_hook("demo.alpha", TERMINAL_VETO_POINT, "{}")
+            .expect("the chain starts");
+        world.settle();
+
+        let order: Vec<String> = world
+            .handler_runs()
+            .into_iter()
+            .map(|run| run.plugin)
+            .collect();
+        assert_eq!(order, vec!["demo.beta".to_string(), "demo.alpha".to_string()]);
+    }
+
+    /// REQ: EXT-012
+    #[test]
+    fn veto_stops_at_first_refuse_and_reports_vetoed() {
+        let mut world = ExtWorld::with_core_plugins();
+        world
+            .install(
+                Tier::T2,
+                contributor_manifest(
+                    "demo.alpha",
+                    TERMINAL_VETO_POINT,
+                    "demo.alpha",
+                    1,
+                ),
+                vec![("demo.alpha".to_string(), refuse_script("no thanks"))],
+            )
+            .expect("demo.alpha installs");
+        world
+            .install(
+                Tier::T2,
+                contributor_manifest(
+                    "demo.beta",
+                    TERMINAL_VETO_POINT,
+                    "demo.beta",
+                    2,
+                ),
+                vec![("demo.beta".to_string(), pass_script())],
+            )
+            .expect("demo.beta installs");
+
+        let request = world
+            .run_hook("ilium.core.terminal", TERMINAL_VETO_POINT, "{}")
+            .expect("the chain starts");
+        world.settle();
+
+        let outcome = world.outcome("ilium.core.terminal", request);
+        let ran: Vec<String> = world
+            .handler_runs()
+            .into_iter()
+            .map(|run| run.plugin)
+            .collect();
+        assert_eq!(ran, vec!["demo.alpha".to_string()]);
+        match outcome {
+            Some(Outcome::Refused(error)) => {
+                assert_eq!(error.code, ErrorCode::Conflict);
+                assert!(error.message.starts_with("extension.vetoed"));
+            }
+            _ => panic!("expected a refused outcome for the vetoed chain"),
+        }
+    }
+
+    /// REQ: EXT-012
+    #[test]
+    fn veto_without_refuse_completes_ok() {
+        let mut world = host_with_two_veto_contributors(1, 2);
+
+        let request = world
+            .run_hook("ilium.core.terminal", TERMINAL_VETO_POINT, "{}")
+            .expect("the chain starts");
+        world.settle();
+
+        assert!(matches!(
+            world.outcome("ilium.core.terminal", request),
+            Some(Outcome::Ok)
+        ));
+    }
+
+    #[test]
+    fn chain_with_no_contributors_leaves_no_handler_runs() {
+        let mut world = ExtWorld::with_core_plugins();
+
+        world
+            .run_hook("ilium.core.terminal", TERMINAL_VETO_POINT, "{}")
+            .expect("the chain starts");
+        world.settle();
+
+        assert!(world.handler_runs().is_empty());
+        assert!(world.hook_errors().is_empty());
+    }
+}

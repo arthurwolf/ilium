@@ -1007,3 +1007,377 @@ pub fn tree_with_tooltip(_text: &str) -> UiTree {
 pub fn hit_stack_tree() -> UiTree {
     unimplemented!("host::testing::render::hit_stack_tree")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        cell_width, frame_budget_ms, hit_layers_in_order, hit_stack_tree, install_prerender,
+        sanitise, scene_memory_limit_mib, set_decoration_with_frames, tab_next, tab_order,
+        tooltip_shown, tree_with_text, widget_families, Rig, SceneRig,
+    };
+
+    /// REQ: WID-019
+    #[test]
+    fn cell_width_counts_ascii_one_cell_per_character() {
+        assert_eq!(cell_width("abc"), 3);
+    }
+
+    /// REQ: WID-019
+    #[test]
+    fn cell_width_of_empty_text_is_zero() {
+        assert_eq!(cell_width(""), 0);
+    }
+
+    /// REQ: WID-019
+    #[test]
+    fn cell_width_wide_glyphs_take_two_cells_each() {
+        assert_eq!(cell_width("漢字"), 4);
+    }
+
+    /// REQ: WID-019
+    #[test]
+    fn cell_width_combining_mark_adds_no_cells() {
+        assert_eq!(cell_width("e\u{0301}"), 1);
+    }
+
+    /// REQ: WID-019
+    #[test]
+    fn cell_width_zero_width_joiner_alone_is_zero() {
+        assert_eq!(cell_width("\u{200D}"), 0);
+    }
+
+    /// REQ: WID-019
+    #[test]
+    fn cell_width_emoji_presentation_selector_makes_two_cells() {
+        assert_eq!(cell_width("\u{2764}\u{FE0F}"), 2);
+    }
+
+    /// REQ: WID-019
+    #[test]
+    fn cell_width_private_use_nerd_font_glyph_is_one_cell() {
+        assert_eq!(cell_width("\u{F120}"), 1);
+    }
+
+    /// REQ: RND-019
+    #[test]
+    fn sanitise_removes_csi_escape_sequences() {
+        assert_eq!(sanitise("\u{1b}[31mred\u{1b}[0m", true), "red");
+    }
+
+    /// REQ: RND-019
+    #[test]
+    fn sanitise_removes_c0_c1_and_delete_controls() {
+        assert_eq!(sanitise("a\u{7}b\u{85}c\u{7f}d", true), "abcd");
+    }
+
+    /// REQ: RND-019
+    #[test]
+    fn sanitise_tab_expands_to_next_multiple_of_four_cells() {
+        assert_eq!(sanitise("ab\tc", true), "ab  c");
+    }
+
+    /// REQ: RND-019
+    #[test]
+    fn sanitise_tab_on_a_stop_adds_a_full_four_cells() {
+        assert_eq!(sanitise("abcd\te", true), "abcd    e");
+    }
+
+    /// REQ: RND-019
+    #[test]
+    fn sanitise_single_line_turns_cr_lf_and_crlf_into_one_space() {
+        assert_eq!(sanitise("a\nb", true), "a b");
+        assert_eq!(sanitise("a\rb", true), "a b");
+        assert_eq!(sanitise("a\r\nb", true), "a b");
+    }
+
+    /// REQ: RND-019
+    #[test]
+    fn sanitise_multi_line_keeps_line_feed() {
+        assert_eq!(sanitise("a\nb", false), "a\nb");
+    }
+
+    /// REQ: RND-019
+    #[test]
+    fn sanitise_removes_escape_before_tab_expansion() {
+        assert_eq!(sanitise("\u{1b}[31m\tx", true), "    x");
+    }
+
+    #[test]
+    fn sanitise_empty_text_is_empty() {
+        assert_eq!(sanitise("", true), "");
+    }
+
+    /// REQ: WID-015
+    #[test]
+    fn tooltip_shown_keeps_text_of_exactly_200_scalars() {
+        let text = "a".repeat(200);
+        assert_eq!(tooltip_shown(&text), text);
+    }
+
+    /// REQ: WID-015
+    #[test]
+    fn tooltip_shown_cuts_long_text_to_199_scalars_and_ellipsis() {
+        let shown = tooltip_shown(&"a".repeat(300));
+        assert_eq!(shown, format!("{}…", "a".repeat(199)));
+        assert_eq!(shown.chars().count(), 200);
+    }
+
+    /// REQ: WID-015
+    #[test]
+    fn tooltip_shown_counts_scalar_values_not_bytes() {
+        let shown = tooltip_shown(&"é".repeat(201));
+        assert_eq!(shown, format!("{}…", "é".repeat(199)));
+    }
+
+    #[test]
+    fn tooltip_shown_empty_text_is_empty() {
+        assert_eq!(tooltip_shown(""), "");
+    }
+
+    /// REQ: WID-018
+    #[test]
+    fn tab_order_visits_positive_indices_ascending_then_unindexed_in_preorder() {
+        assert_eq!(
+            tab_order(&[(Some(2), true), (Some(1), true), (None, true)]),
+            vec![2, 1, 3]
+        );
+    }
+
+    /// REQ: WID-018
+    #[test]
+    fn tab_order_zero_index_joins_unindexed_nodes_in_preorder() {
+        assert_eq!(
+            tab_order(&[(Some(0), true), (None, true), (Some(1), true)]),
+            vec![3, 1, 2]
+        );
+    }
+
+    /// REQ: WID-018
+    #[test]
+    fn tab_order_equal_indices_keep_tree_preorder() {
+        assert_eq!(tab_order(&[(Some(1), true), (Some(1), true)]), vec![1, 2]);
+    }
+
+    /// REQ: WID-018
+    #[test]
+    fn tab_order_skips_negative_indices_and_unfocusable_nodes() {
+        assert_eq!(
+            tab_order(&[(Some(-1), true), (None, false), (None, true)]),
+            vec![3]
+        );
+    }
+
+    #[test]
+    fn tab_order_of_no_nodes_is_empty() {
+        assert_eq!(tab_order(&[]), Vec::<usize>::new());
+    }
+
+    /// REQ: WID-018
+    #[test]
+    fn tab_next_advances_to_following_entry() {
+        assert_eq!(tab_next(&[2, 1, 3], 2), 1);
+    }
+
+    /// REQ: WID-018
+    #[test]
+    fn tab_next_wraps_from_last_entry_to_first() {
+        assert_eq!(tab_next(&[2, 1, 3], 3), 2);
+    }
+
+    /// REQ: WID-001
+    #[test]
+    fn widget_families_holds_seven_families_and_51_widgets() {
+        let families = widget_families();
+        assert_eq!(families.len(), 7);
+        let total: usize = families.values().map(|names| names.len()).sum();
+        assert_eq!(total, 51);
+    }
+
+    /// REQ: WID-001
+    #[test]
+    fn widget_families_widget_names_are_distinct() {
+        let families = widget_families();
+        let all: Vec<&str> = families.values().flatten().copied().collect();
+        let unique: std::collections::BTreeSet<&str> = all.iter().copied().collect();
+        assert_eq!(unique.len(), 51);
+    }
+
+    /// REQ: WID-001
+    #[test]
+    fn widget_families_sizes_match_the_catalogue() {
+        let families = widget_families();
+        let size_of = |widget: &str| {
+            families
+                .values()
+                .find(|names| names.contains(&widget))
+                .map(|names| names.len())
+        };
+        assert_eq!(size_of("layout"), Some(10));
+        assert_eq!(size_of("paragraph"), Some(5));
+        assert_eq!(size_of("%list"), Some(6));
+        assert_eq!(size_of("gauge"), Some(10));
+        assert_eq!(size_of("button"), Some(11));
+        assert_eq!(size_of("badge"), Some(4));
+        assert_eq!(size_of("image"), Some(5));
+    }
+
+    /// REQ: HST-270
+    #[test]
+    fn hit_layers_are_popups_overlays_content_frame() {
+        assert_eq!(
+            hit_layers_in_order(),
+            vec!["popups", "overlays", "content", "frame"]
+        );
+    }
+
+    /// REQ: RND-001
+    #[test]
+    fn frame_budget_is_one_second_over_fps_rounded_down() {
+        assert_eq!(frame_budget_ms(30, None), 33);
+        assert_eq!(frame_budget_ms(60, None), 16);
+        assert_eq!(frame_budget_ms(7, None), 142);
+    }
+
+    /// REQ: RND-001
+    #[test]
+    fn frame_budget_at_boundary_rates() {
+        assert_eq!(frame_budget_ms(1, None), 1000);
+        assert_eq!(frame_budget_ms(1000, None), 1);
+    }
+
+    /// REQ: RND-001
+    #[test]
+    fn frame_deadline_raises_budget_up_to_50_ms() {
+        assert_eq!(frame_budget_ms(30, Some(40)), 40);
+        assert_eq!(frame_budget_ms(30, Some(50)), 50);
+    }
+
+    /// REQ: RND-001
+    #[test]
+    fn frame_deadline_never_lowers_the_budget() {
+        assert_eq!(frame_budget_ms(30, Some(20)), 33);
+    }
+
+    /// REQ: RND-014
+    #[test]
+    fn scene_memory_default_is_32_mib_for_every_tier() {
+        assert_eq!(scene_memory_limit_mib("T1", None), 32);
+        assert_eq!(scene_memory_limit_mib("T2", None), 32);
+    }
+
+    /// REQ: RND-014
+    #[test]
+    fn scene_memory_t1_ceiling_is_256_mib() {
+        assert_eq!(scene_memory_limit_mib("T1", Some(256)), 256);
+        assert_eq!(scene_memory_limit_mib("T1", Some(512)), 256);
+    }
+
+    /// REQ: RND-014
+    #[test]
+    fn scene_memory_other_tier_ceiling_is_128_mib() {
+        assert_eq!(scene_memory_limit_mib("T2", Some(128)), 128);
+        assert_eq!(scene_memory_limit_mib("T2", Some(256)), 128);
+    }
+
+    /// REQ: RND-014
+    #[test]
+    fn scene_memory_request_below_ceiling_is_honoured() {
+        assert_eq!(scene_memory_limit_mib("T1", Some(64)), 64);
+    }
+
+    /// REQ: RND-017
+    #[test]
+    fn install_prerender_accepts_loop_at_the_limits() {
+        assert!(install_prerender(3600, 30, 128).is_ok());
+    }
+
+    /// REQ: RND-017
+    #[test]
+    fn install_prerender_rejects_more_than_3600_frames() {
+        let error = install_prerender(3601, 30, 128).unwrap_err();
+        assert!(error.contains("manifest.scene-prerender"));
+    }
+
+    /// REQ: RND-017
+    #[test]
+    fn install_prerender_rejects_more_than_30_fps() {
+        let error = install_prerender(3600, 31, 128).unwrap_err();
+        assert!(error.contains("manifest.scene-prerender"));
+    }
+
+    /// REQ: RND-017
+    #[test]
+    fn install_prerender_rejects_more_than_128_mib() {
+        let error = install_prerender(3600, 30, 129).unwrap_err();
+        assert!(error.contains("manifest.scene-prerender"));
+    }
+
+    /// REQ: RND-018
+    #[test]
+    fn decoration_accepts_16_frames_each_shown_90_ms() {
+        assert!(set_decoration_with_frames(16, 90).is_ok());
+    }
+
+    /// REQ: RND-018
+    #[test]
+    fn decoration_rejects_17_frames_as_invalid_argument() {
+        let error = set_decoration_with_frames(17, 90).unwrap_err();
+        assert!(error.contains("invalid-argument"));
+    }
+
+    /// REQ: RND-018
+    #[test]
+    fn decoration_rejects_frame_shorter_than_90_ms_as_invalid_argument() {
+        let error = set_decoration_with_frames(16, 89).unwrap_err();
+        assert!(error.contains("invalid-argument"));
+    }
+
+    /// REQ: RND-001
+    #[test]
+    fn scene_frame_costing_more_than_budget_is_skipped() {
+        let mut rig = SceneRig::new(30);
+        rig.frame_cost_ms(40);
+        rig.run_frames(1);
+        assert_eq!(rig.budget_ms(), 33);
+        assert_eq!(rig.skipped_frames(), 1);
+    }
+
+    /// REQ: RND-014
+    #[test]
+    fn scene_allocation_over_default_limit_traps() {
+        let mut rig = SceneRig::new(30);
+        rig.allocate_in_next_frame_mib(64);
+        rig.run_frames(1);
+        assert!(rig.trap().is_some());
+    }
+
+    /// REQ: RND-019
+    #[test]
+    fn rig_sanitises_view_text_and_warns_once_per_view() {
+        let mut rig = Rig::new("T2");
+        let view = rig.open_view("status");
+        rig.deliver_tree(view, tree_with_text("a\u{1b}[31mb")).unwrap();
+        let shown = rig.screen_text();
+        assert!(shown.contains("ab"));
+        assert!(!shown.contains('\u{1b}'));
+        rig.deliver_tree(view, tree_with_text("c\u{1b}[0m d")).unwrap();
+        let warnings = rig
+            .log_lines()
+            .iter()
+            .filter(|(first, second)| first == "ui.text-sanitized" || second == "ui.text-sanitized")
+            .count();
+        assert_eq!(warnings, 1);
+    }
+
+    /// REQ: HST-270
+    #[test]
+    fn rig_hit_test_resolves_on_ui_thread_without_calling_plugin() {
+        let mut rig = Rig::new("T2");
+        let view = rig.open_view("main");
+        rig.deliver_tree(view, hit_stack_tree()).unwrap();
+        let calls_before = rig.plugin_calls_received();
+        let _hit = rig.hit_test(view, 0, 0);
+        assert!(rig.hit_resolved_on_ui_thread());
+        assert_eq!(rig.plugin_calls_received(), calls_before);
+    }
+}

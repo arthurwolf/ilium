@@ -1838,3 +1838,247 @@ impl HarnessHandle {
         unimplemented!("host::testing::HarnessHandle::take_proposal")
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        applying_side, CompletionView, DetectReport, HostHarness, ImportReply, ImportResult,
+        Isolation, ManualClock, NullGuest, PeerMessage, RetainedContribution, ReviewRow,
+        TickObservation,
+    };
+    use crate::testing::native_guest::NativeGuest;
+    use ilium_plugin_api::generated::types::intents::Intent;
+    use ilium_plugin_api::{Side, Tier};
+
+    /// A clock starts at time zero.
+    #[test]
+    fn manual_clock_new_reads_zero() {
+        assert_eq!(ManualClock::new().now_millis(), 0);
+    }
+
+    /// The default clock equals a clock made with `new`.
+    #[test]
+    fn manual_clock_default_reads_zero() {
+        assert_eq!(ManualClock::default().now_millis(), 0);
+    }
+
+    /// A new harness is a T3 server-side plugin, as its doc comment states.
+    #[test]
+    fn harness_new_defaults_to_t3_server_side() {
+        let harness = HostHarness::new();
+        assert!(matches!(harness.tier, Tier::T3));
+        assert!(matches!(harness.side, Side::Server));
+    }
+
+    /// A new harness has no grants, declines or other-side grants.
+    #[test]
+    fn harness_new_has_no_grants_declines_or_other_side_grants() {
+        let harness = HostHarness::new();
+        assert!(harness.grants.is_empty());
+        assert!(harness.declined.is_empty());
+        assert!(harness.other_side_grants.is_empty());
+    }
+
+    /// A new harness is online, single-plugin and has no second side.
+    #[test]
+    fn harness_new_is_online_single_plugin_one_side() {
+        let harness = HostHarness::new();
+        assert!(!harness.offline);
+        assert!(!harness.two_plugins);
+        assert!(!harness.both_sides);
+    }
+
+    /// `Default` produces the same initial state as `new`.
+    #[test]
+    fn harness_default_matches_new_state() {
+        let from_default = HostHarness::default();
+        let from_new = HostHarness::new();
+        assert!(matches!(from_default.tier, Tier::T3));
+        assert!(matches!(from_default.side, Side::Server));
+        assert_eq!(from_default.grants, from_new.grants);
+        assert_eq!(from_default.secrets, from_new.secrets);
+        assert_eq!(from_default.settings, from_new.settings);
+        assert_eq!(from_default.offline, from_new.offline);
+    }
+
+    /// Grants are recorded in the order given.
+    #[test]
+    fn harness_grants_records_each_grant_in_order() {
+        let harness = HostHarness::new().grants(&["tree.read", "tree.write"]);
+        assert_eq!(
+            harness.grants,
+            vec!["tree.read".to_string(), "tree.write".to_string()]
+        );
+    }
+
+    /// An empty grant list leaves no grants (boundary: empty input).
+    #[test]
+    fn harness_grants_empty_slice_records_nothing() {
+        let harness = HostHarness::new().grants(&[]);
+        assert!(harness.grants.is_empty());
+    }
+
+    /// Declined grants are kept apart from granted ones.
+    #[test]
+    fn harness_declined_is_separate_from_grants() {
+        let harness = HostHarness::new()
+            .grants(&["tree.read"])
+            .declined(&["open-external"]);
+        assert_eq!(harness.grants, vec!["tree.read".to_string()]);
+        assert_eq!(harness.declined, vec!["open-external".to_string()]);
+    }
+
+    /// The side setter replaces the default server side.
+    #[test]
+    fn harness_side_setter_replaces_server_default() {
+        let harness = HostHarness::new().side(Side::Client);
+        assert!(matches!(harness.side, Side::Client));
+    }
+
+    /// The offline setter flips the flag on.
+    #[test]
+    fn harness_offline_setter_sets_flag() {
+        let harness = HostHarness::new().offline(true);
+        assert!(harness.offline);
+    }
+
+    /// Secrets and settings are appended as key/value pairs.
+    #[test]
+    fn harness_secret_and_setting_record_pairs() {
+        let harness = HostHarness::new()
+            .secret("api-key", "value-1")
+            .setting("theme", serde_json::Value::Bool(true));
+        assert_eq!(
+            harness.secrets,
+            vec![("api-key".to_string(), "value-1".to_string())]
+        );
+        assert_eq!(harness.settings.len(), 1);
+        assert_eq!(harness.settings[0].0, "theme");
+    }
+
+    /// `build` on a default harness activates the plugin and returns a handle.
+    #[test]
+    fn harness_build_default_activates_plugin() {
+        assert!(HostHarness::new().build().is_ok());
+    }
+
+    /// REQ: API-001
+    /// A default reply carries no plugin error.
+    #[test]
+    fn import_reply_default_has_no_error() {
+        assert!(ImportReply::default().error().is_none());
+    }
+
+    /// A default reply carries no error code.
+    #[test]
+    fn import_reply_default_has_no_error_code() {
+        assert!(ImportReply::default().error_code().is_none());
+    }
+
+    /// REQ: HST-410
+    /// A default reply did not trap.
+    #[test]
+    fn import_reply_default_has_no_trap_code() {
+        assert!(ImportReply::default().trap_code().is_none());
+    }
+
+    /// A default reply has no quota retry delay.
+    #[test]
+    fn import_reply_default_has_no_retry_after() {
+        assert!(ImportReply::default().retry_after_ms().is_none());
+    }
+
+    /// REQ: API-005
+    /// A default reply is not an accepted asynchronous call, so it has no request id.
+    #[test]
+    fn import_reply_default_has_no_request_id() {
+        assert!(ImportReply::default().request_id().is_none());
+    }
+
+    /// REQ: API-005
+    /// A default completion carries no failure code.
+    #[test]
+    fn completion_view_default_has_no_failed_code() {
+        assert!(CompletionView::default().failed_code().is_none());
+    }
+
+    /// Two import results of the same plain variant are equal.
+    #[test]
+    fn import_result_ok_equals_ok() {
+        assert_eq!(ImportResult::Ok, ImportResult::Ok);
+    }
+
+    /// The in-process and helper isolation levels are distinct.
+    #[test]
+    fn isolation_in_process_differs_from_helper_process() {
+        assert_ne!(Isolation::InProcess, Isolation::HelperProcess);
+    }
+
+    /// A default review row is a plain, unchecked, unlocked, non-warning row.
+    #[test]
+    fn review_row_default_is_plain_unchecked_row() {
+        let row = ReviewRow::default();
+        assert!(!row.toxic);
+        assert!(!row.locked);
+        assert!(!row.checkable);
+        assert!(!row.checked);
+        assert!(!row.warning_style);
+        assert!(row.note.is_none());
+        assert!(row.text.is_empty());
+    }
+
+    /// A default detection report describes an empty cycle with zero time.
+    #[test]
+    fn detect_report_default_is_empty_cycle() {
+        let report = DetectReport::default();
+        assert!(report.served.is_empty());
+        assert_eq!(report.spent_ms, 0);
+        assert_eq!(report.tick_ms, 0);
+    }
+
+    /// REQ: HST-079
+    /// A default tick observation reports no installed callback.
+    #[test]
+    fn tick_observation_default_has_no_callback() {
+        assert!(!TickObservation::default().callback_installed);
+    }
+
+    /// A default retained contribution has no key and is not stale.
+    #[test]
+    fn retained_contribution_default_is_empty_and_fresh() {
+        let contribution = RetainedContribution::default();
+        assert!(contribution.key.is_empty());
+        assert!(!contribution.stale);
+    }
+
+    /// A default peer message has no sender and no payload.
+    #[test]
+    fn peer_message_default_is_empty() {
+        let message = PeerMessage::default();
+        assert!(message.sender.is_empty());
+        assert!(message.payload.is_empty());
+    }
+
+    /// The null guest accepts an empty batch and returns no submissions (boundary: empty input).
+    #[test]
+    fn null_guest_accepts_empty_batch_with_no_submissions() {
+        let mut guest = NullGuest;
+        assert!(matches!(
+            guest.on_events(Vec::new()),
+            Ok(ref submissions) if submissions.is_empty()
+        ));
+    }
+
+    /// REQ: HST-490
+    /// Every intent case is applied by the server or the client, never by the scene side.
+    #[test]
+    fn applying_side_is_server_or_client_for_every_intent_case() {
+        for case in Intent::CASE_NAMES {
+            let side = applying_side(case);
+            assert!(
+                matches!(side, Side::Server | Side::Client),
+                "intent {case} must be applied by server or client"
+            );
+        }
+    }
+}

@@ -224,3 +224,224 @@ impl Installer {
         unimplemented!("host::install::Installer::uninstall")
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+    use std::path::Path;
+
+    use ilium_plugin_api::ids::PluginId;
+    use ilium_plugin_api::manifest::{CheckMode, Diagnostic};
+
+    use super::{Consent, ConsentDecision, ConsentRequest, InstallOptions, Installer};
+    use crate::registry::PackageStore;
+
+    /// A consent double that counts how often the review was asked and always refuses.
+    struct CountingConsent {
+        asked: Cell<usize>,
+    }
+
+    impl CountingConsent {
+        fn new() -> CountingConsent {
+            CountingConsent {
+                asked: Cell::new(0),
+            }
+        }
+    }
+
+    impl Consent for CountingConsent {
+        fn decide(&self, _request: &ConsentRequest) -> ConsentDecision {
+            self.asked.set(self.asked.get() + 1);
+            ConsentDecision::Deny
+        }
+    }
+
+    /// An installer over an empty package store rooted at `root`.
+    fn installer_over(root: &Path) -> Installer {
+        Installer::new(PackageStore {
+            root: root.to_path_buf(),
+        })
+    }
+
+    fn code_of(diagnostic: &Diagnostic) -> &str {
+        diagnostic.code.as_str()
+    }
+
+    fn unknown_plugin() -> PluginId {
+        PluginId("com.example.notes".to_owned())
+    }
+
+    /// Bytes that are not a ZIP archive, so stage 1 (archive) refuses them.
+    const NOT_A_ZIP: &[u8] = b"this is not a zip archive at all";
+
+    /// REQ: PKG-262
+    #[test]
+    fn default_install_options_refuse_unsigned_packages() {
+        assert!(!InstallOptions::default().allow_unsigned);
+    }
+
+    /// REQ: PKG-165
+    #[test]
+    fn check_reports_zip_invalid_for_empty_input_at_stage_one() {
+        let root = tempfile::tempdir().expect("temp dir");
+        let report = installer_over(root.path()).check(&[], CheckMode::Install);
+        assert_eq!(report.last_stage, 1);
+        assert!(
+            report
+                .diagnostics
+                .iter()
+                .any(|diagnostic| code_of(diagnostic) == "package.zip-invalid"),
+            "expected package.zip-invalid, got {:?}",
+            report.diagnostics
+        );
+    }
+
+    /// REQ: PKG-165
+    #[test]
+    fn check_reports_zip_invalid_for_one_byte_input_at_stage_one() {
+        let root = tempfile::tempdir().expect("temp dir");
+        let report = installer_over(root.path()).check(&[0u8], CheckMode::Install);
+        assert_eq!(report.last_stage, 1);
+        assert!(
+            report
+                .diagnostics
+                .iter()
+                .any(|diagnostic| code_of(diagnostic) == "package.zip-invalid"),
+            "expected package.zip-invalid, got {:?}",
+            report.diagnostics
+        );
+    }
+
+    /// REQ: PKG-149
+    #[test]
+    fn check_stops_after_the_first_failing_stage() {
+        let root = tempfile::tempdir().expect("temp dir");
+        let report = installer_over(root.path()).check(NOT_A_ZIP, CheckMode::Install);
+        assert_eq!(report.last_stage, 1);
+        assert!(!report.diagnostics.is_empty());
+        assert!(
+            report.diagnostics.iter().all(|diagnostic| {
+                let code = code_of(diagnostic);
+                !code.starts_with("manifest.") && !code.starts_with("trust.")
+            }),
+            "stages after the archive stage must not run, got {:?}",
+            report.diagnostics
+        );
+    }
+
+    /// REQ: PKG-165
+    #[test]
+    fn install_refuses_empty_input_with_zip_invalid() {
+        let root = tempfile::tempdir().expect("temp dir");
+        let consent = CountingConsent::new();
+        let diagnostic = installer_over(root.path())
+            .install(&[], &consent)
+            .expect_err("empty bytes are not a package");
+        assert_eq!(code_of(&diagnostic), "package.zip-invalid");
+    }
+
+    /// REQ: PKG-165
+    #[test]
+    fn install_refuses_non_zip_bytes_with_zip_invalid() {
+        let root = tempfile::tempdir().expect("temp dir");
+        let consent = CountingConsent::new();
+        let diagnostic = installer_over(root.path())
+            .install(NOT_A_ZIP, &consent)
+            .expect_err("non-ZIP bytes are not a package");
+        assert_eq!(code_of(&diagnostic), "package.zip-invalid");
+    }
+
+    /// REQ: LIF-071
+    #[test]
+    fn install_never_asks_for_consent_when_validation_refuses_the_package() {
+        let root = tempfile::tempdir().expect("temp dir");
+        let consent = CountingConsent::new();
+        let _refused = installer_over(root.path())
+            .install(NOT_A_ZIP, &consent)
+            .expect_err("non-ZIP bytes are not a package");
+        assert_eq!(consent.asked.get(), 0);
+    }
+
+    /// REQ: LIF-071
+    #[test]
+    fn update_refuses_invalid_package_before_asking_for_consent() {
+        let root = tempfile::tempdir().expect("temp dir");
+        let consent = CountingConsent::new();
+        let diagnostic = installer_over(root.path())
+            .update(NOT_A_ZIP, &consent)
+            .expect_err("non-ZIP bytes are not a package");
+        assert_eq!(code_of(&diagnostic), "package.zip-invalid");
+        assert_eq!(consent.asked.get(), 0);
+    }
+
+    /// REQ: PKG-272
+    #[test]
+    fn fresh_installer_has_instantiated_no_component() {
+        let root = tempfile::tempdir().expect("temp dir");
+        assert_eq!(installer_over(root.path()).instantiated_count(), 0);
+    }
+
+    /// REQ: PKG-151
+    #[test]
+    fn refused_install_instantiates_no_component() {
+        let root = tempfile::tempdir().expect("temp dir");
+        let consent = CountingConsent::new();
+        let installer = installer_over(root.path());
+        let _refused = installer
+            .install(NOT_A_ZIP, &consent)
+            .expect_err("non-ZIP bytes are not a package");
+        assert_eq!(installer.instantiated_count(), 0);
+    }
+
+    /// REQ: PKG-291
+    #[test]
+    fn rollback_with_no_earlier_version_is_refused() {
+        let root = tempfile::tempdir().expect("temp dir");
+        let diagnostic = installer_over(root.path())
+            .rollback(&unknown_plugin())
+            .expect_err("nothing is installed, so there is no earlier version");
+        assert_eq!(code_of(&diagnostic), "install.no-previous");
+    }
+
+    /// REQ: PKG-293
+    #[test]
+    fn uninstall_of_an_unknown_id_reports_not_installed() {
+        let root = tempfile::tempdir().expect("temp dir");
+        let diagnostic = installer_over(root.path())
+            .uninstall(&unknown_plugin(), false)
+            .expect_err("the id is not installed");
+        assert_eq!(code_of(&diagnostic), "install.not-installed");
+    }
+
+    /// REQ: PKG-295
+    #[test]
+    fn purge_uninstall_of_an_unknown_id_reports_not_installed() {
+        let root = tempfile::tempdir().expect("temp dir");
+        let diagnostic = installer_over(root.path())
+            .uninstall(&unknown_plugin(), true)
+            .expect_err("the id is not installed");
+        assert_eq!(code_of(&diagnostic), "install.not-installed");
+    }
+
+    /// REQ: PKG-271
+    #[test]
+    fn recover_at_start_on_clean_state_removes_nothing_and_is_repeatable() {
+        let root = tempfile::tempdir().expect("temp dir");
+        let state = tempfile::tempdir().expect("temp dir");
+        let installer = Installer::with_options(
+            PackageStore {
+                root: root.path().to_path_buf(),
+            },
+            state.path().to_path_buf(),
+            InstallOptions::default(),
+        );
+        let first = installer
+            .recover_at_start()
+            .expect("recovery on a clean state must succeed");
+        assert!(first.removed_staging.is_empty());
+        let second = installer
+            .recover_at_start()
+            .expect("a second recovery must succeed too");
+        assert!(second.removed_staging.is_empty());
+    }
+}

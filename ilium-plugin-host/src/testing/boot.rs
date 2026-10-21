@@ -814,3 +814,654 @@ impl BootRun {
         unimplemented!("host::testing::boot::BootRun::stored_data")
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use ilium_plugin_api::{ProcessKind, Side, Tier};
+
+    use super::{BootHarness, BootRun, ClientId, JobStats, PluginSpec};
+    use crate::lifecycle::StartMode;
+
+    /// A T1 plugin that activates at boot through the `startup` trigger.
+    fn startup_plugin(id: &str) -> PluginSpec {
+        PluginSpec::new(id, Tier::T1).activation(&["startup"])
+    }
+
+    /// A server-kernel harness with the given plugins, built but not started.
+    fn server_run(plugins: Vec<PluginSpec>) -> BootRun {
+        let mut harness = BootHarness::new(ProcessKind::Server);
+        for plugin in plugins {
+            harness = harness.plugin(plugin);
+        }
+        harness.build()
+    }
+
+    /// Attaches a client and fails the test with the refusal code when the server refuses it.
+    fn attached_client(run: &mut BootRun) -> ClientId {
+        match run.attach_client() {
+            Ok(client) => client,
+            Err(code) => panic!("client was refused: {}", code.as_str()),
+        }
+    }
+
+    #[test]
+    fn empty_harness_starts_with_no_plugins() {
+        let mut run = server_run(Vec::new());
+        let report = run.start();
+        assert!(report.started.is_empty());
+        assert!(report.failed.is_empty());
+        assert!(run.activation_order().is_empty());
+    }
+
+    #[test]
+    fn plugin_spec_with_no_sides_equals_plain_spec() {
+        let plain = PluginSpec::new("ilium.core.tree", Tier::T1);
+        let with_empty_sides = PluginSpec::new("ilium.core.tree", Tier::T1).sides(&[]);
+        assert_eq!(plain, with_empty_sides);
+    }
+
+    /// REQ: COR-021
+    #[test]
+    fn only_startup_plugins_activate_at_boot() {
+        let mut run = server_run(vec![
+            startup_plugin("ilium.core.tree"),
+            PluginSpec::new("ilium.core.search", Tier::T1).activation(&["command:search.open"]),
+        ]);
+        let report = run.start();
+        assert_eq!(report.started, vec!["ilium.core.tree".to_string()]);
+        assert_eq!(run.activation_order(), vec!["ilium.core.tree".to_string()]);
+        run.fire_trigger("command:search.open");
+        assert!(run
+            .activation_order()
+            .contains(&"ilium.core.search".to_string()));
+    }
+
+    /// REQ: HST-027
+    #[test]
+    fn non_startup_plugin_is_not_instantiated_at_boot() {
+        let mut run = server_run(vec![
+            PluginSpec::new("ilium.core.search", Tier::T1).activation(&["command:search.open"]),
+            startup_plugin("ilium.core.tree"),
+        ]);
+        run.start();
+        assert_eq!(run.instantiations("ilium.core.search"), 0);
+        assert_eq!(run.instantiations("ilium.core.tree"), 1);
+    }
+
+    /// REQ: COR-020
+    #[test]
+    fn restored_tree_is_visible_at_first_activation() {
+        let mut run = BootHarness::new(ProcessKind::Server)
+            .restored_tree(3)
+            .plugin(startup_plugin("ilium.core.tree").records_tree_on_activate())
+            .build();
+        run.start();
+        assert_eq!(run.tree_seen_on_activate("ilium.core.tree"), 3);
+    }
+
+    /// REQ: HST-026
+    #[test]
+    fn restored_tree_delivers_one_batch_and_no_restore_replay() {
+        let mut run = BootHarness::new(ProcessKind::Server)
+            .restored_tree(3)
+            .plugin(startup_plugin("ilium.core.tree").subscribes("tree-changed"))
+            .build();
+        run.start();
+        assert_eq!(run.tree_changed_batches("ilium.core.tree"), 1);
+        assert_eq!(run.restore_step_events("ilium.core.tree"), 0);
+    }
+
+    /// REQ: HST-028
+    #[test]
+    fn service_provider_activates_before_its_consumer() {
+        let mut run = server_run(vec![
+            startup_plugin("consumer.plugin").requires(&["provider.plugin"]),
+            startup_plugin("provider.plugin"),
+        ]);
+        run.start();
+        assert_eq!(
+            run.activation_order(),
+            vec!["provider.plugin".to_string(), "consumer.plugin".to_string()]
+        );
+    }
+
+    /// REQ: HST-028
+    #[test]
+    fn service_cycle_leaves_cycle_plugins_disabled() {
+        let mut run = server_run(vec![
+            startup_plugin("cycle.a").requires(&["cycle.b"]),
+            startup_plugin("cycle.b").requires(&["cycle.a"]),
+        ]);
+        let report = run.start();
+        assert!(report.started.is_empty());
+        assert_eq!(report.failed.len(), 2);
+        assert!(report
+            .failed
+            .iter()
+            .all(|(_, code)| code.as_str() == "manifest.service-cycle"));
+        assert!(run.disabled_reason("cycle.a").is_some());
+    }
+
+    /// REQ: HST-030
+    #[test]
+    fn shutdown_deactivates_in_reverse_activation_order() {
+        let mut run = server_run(vec![
+            startup_plugin("consumer.plugin").requires(&["provider.plugin"]),
+            startup_plugin("provider.plugin"),
+        ]);
+        run.start();
+        let report = run.shutdown();
+        let mut expected_order = run.activation_order();
+        expected_order.reverse();
+        assert_eq!(run.deactivation_order(), expected_order);
+        assert!(report.forced.is_empty());
+    }
+
+    /// REQ: HST-030
+    #[test]
+    fn instant_deactivate_is_not_forced_and_called_once() {
+        let mut run = server_run(vec![startup_plugin("ilium.core.tree").deactivate_takes_ms(0)]);
+        run.start();
+        let report = run.shutdown();
+        assert!(report.forced.is_empty());
+        assert_eq!(run.deactivate_calls("ilium.core.tree"), 1);
+    }
+
+    /// REQ: HST-030
+    #[test]
+    fn slow_deactivate_is_forced_past_the_five_second_budget() {
+        let mut run = server_run(vec![startup_plugin("slow.plugin").deactivate_takes_ms(10_000)]);
+        run.start();
+        let report = run.shutdown();
+        assert!(report.forced.contains(&"slow.plugin".to_string()));
+        assert!(run.shutdown_plugin_time() <= Duration::from_secs(5));
+    }
+
+    /// REQ: HST-029
+    #[test]
+    fn submissions_are_refused_as_cancelled_before_first_deactivate() {
+        let mut run = server_run(vec![startup_plugin("ilium.core.tree")]);
+        run.start();
+        run.shutdown_hold_before_deactivate();
+        assert_eq!(run.submit_from("ilium.core.tree"), "cancelled");
+        assert_eq!(run.deactivate_calls("ilium.core.tree"), 0);
+    }
+
+    /// REQ: HST-031
+    #[test]
+    fn client_connecting_before_server_ready_is_refused_as_starting() {
+        let mut run = server_run(vec![startup_plugin("ilium.core.tree")]);
+        run.begin_start_paused_before_accept();
+        let code = match run.attach_client() {
+            Ok(_) => panic!("client was accepted before the server host finished step 6"),
+            Err(code) => code,
+        };
+        assert_eq!(code.as_str(), "server.starting");
+    }
+
+    /// REQ: HST-031
+    #[test]
+    fn client_connecting_after_start_is_accepted() {
+        let mut run = server_run(vec![startup_plugin("ilium.core.tree")]);
+        run.start();
+        assert!(run.attach_client().is_ok());
+    }
+
+    /// REQ: HST-032
+    #[test]
+    fn client_shutdown_is_bounded_at_two_seconds() {
+        let mut run = server_run(vec![startup_plugin("slow.plugin")
+            .sides(&[Side::Server, Side::Client])
+            .client_activation(&["startup"])
+            .deactivate_takes_ms(10_000)]);
+        run.start();
+        let client = attached_client(&mut run);
+        let took = run.client_shutdown(client);
+        assert!(took <= Duration::from_secs(2));
+    }
+
+    /// REQ: HST-010
+    #[test]
+    fn client_exit_leaves_server_and_its_plugin_running() {
+        let mut run = server_run(vec![startup_plugin("ilium.core.tree")]);
+        run.start();
+        let client = attached_client(&mut run);
+        run.client_exit(client);
+        assert!(run.server_alive());
+        assert_eq!(run.side_state("ilium.core.tree", Side::Server).state, "active");
+    }
+
+    /// REQ: HST-007
+    #[test]
+    fn each_side_is_hosted_by_exactly_one_process() {
+        let mut run = server_run(vec![startup_plugin("ilium.core.tree")
+            .sides(&[Side::Server, Side::Client])
+            .client_activation(&["startup"])]);
+        run.start();
+        let client = attached_client(&mut run);
+        assert_eq!(run.hosts_of("ilium.core.tree", Side::Server), 1);
+        assert_eq!(
+            run.host_process("ilium.core.tree", Side::Server),
+            ProcessKind::Server
+        );
+        assert_eq!(
+            run.host_process_of_client("ilium.core.tree", Side::Client, client),
+            ProcessKind::Client
+        );
+    }
+
+    /// REQ: HST-011
+    #[test]
+    fn session_has_exactly_one_server_host() {
+        let mut run = server_run(vec![startup_plugin("ilium.core.tree")]);
+        run.start();
+        assert_eq!(run.server_host_count(), 1);
+    }
+
+    /// REQ: HST-008
+    #[test]
+    fn t1_plugin_runs_in_process_without_helper() {
+        let mut run = server_run(vec![startup_plugin("ilium.core.tree")]);
+        run.start();
+        assert_eq!(
+            run.host_process("ilium.core.tree", Side::Server),
+            ProcessKind::Server
+        );
+        assert_eq!(run.helper_count(), 0);
+    }
+
+    /// REQ: HST-009
+    #[test]
+    fn t2_plugin_runs_in_helper_never_in_parent_engine() {
+        let mut run = BootHarness::new(ProcessKind::Server)
+            .plugin(PluginSpec::new("vendor.sandboxed", Tier::T2).activation(&["startup"]))
+            .build();
+        run.start();
+        assert_eq!(
+            run.host_process("vendor.sandboxed", Side::Server),
+            ProcessKind::Helper
+        );
+        assert_eq!(run.parent_instantiations("vendor.sandboxed"), 0);
+        assert_eq!(run.helper_count(), 1);
+    }
+
+    /// REQ: HST-021
+    #[test]
+    fn one_engine_serves_every_store_of_the_process() {
+        let mut run = server_run(vec![startup_plugin("ilium.core.tree").limit("concurrent_jobs", 4)]);
+        run.start();
+        run.start_jobs("ilium.core.tree", 2);
+        assert_eq!(run.engine_count(), 1);
+        let store_ids = run.store_ids("ilium.core.tree", Side::Server);
+        assert!(!store_ids.is_empty());
+        for store_id in store_ids {
+            assert_eq!(run.engine_of_store(store_id), run.engine_id());
+        }
+    }
+
+    /// REQ: HST-022
+    #[test]
+    fn each_job_instance_has_its_own_store() {
+        let mut run = server_run(vec![startup_plugin("ilium.core.tree").limit("concurrent_jobs", 8)]);
+        run.start();
+        run.start_jobs("ilium.core.tree", 3);
+        let mut job_store_ids = run.job_store_ids("ilium.core.tree");
+        assert_eq!(job_store_ids.len(), 3);
+        job_store_ids.sort_unstable();
+        job_store_ids.dedup();
+        assert_eq!(job_store_ids.len(), 3);
+    }
+
+    /// REQ: HST-017
+    #[test]
+    fn job_memory_is_separate_from_main_instance_memory() {
+        let mut run = server_run(vec![startup_plugin("ilium.core.tree").limit("concurrent_jobs", 2)]);
+        run.start();
+        run.start_jobs("ilium.core.tree", 1);
+        assert_ne!(
+            run.job_memory_base("ilium.core.tree", 0),
+            run.main_memory_base("ilium.core.tree")
+        );
+    }
+
+    /// REQ: HST-018
+    #[test]
+    fn jobs_beyond_concurrent_limit_wait_in_queue() {
+        let mut run = server_run(vec![startup_plugin("ilium.core.search").limit("concurrent_jobs", 2)]);
+        run.start();
+        run.start_jobs("ilium.core.search", 5);
+        assert_eq!(
+            run.job_stats("ilium.core.search"),
+            JobStats {
+                live: 2,
+                queued: 3,
+                peak: 2
+            }
+        );
+    }
+
+    /// REQ: HST-018
+    #[test]
+    fn jobs_exactly_at_concurrent_limit_do_not_queue() {
+        let mut run = server_run(vec![startup_plugin("ilium.core.search").limit("concurrent_jobs", 2)]);
+        run.start();
+        run.start_jobs("ilium.core.search", 2);
+        assert_eq!(
+            run.job_stats("ilium.core.search"),
+            JobStats {
+                live: 2,
+                queued: 0,
+                peak: 2
+            }
+        );
+    }
+
+    /// REQ: HST-018
+    #[test]
+    fn zero_started_jobs_leave_stats_at_default() {
+        let mut run = server_run(vec![startup_plugin("ilium.core.search").limit("concurrent_jobs", 2)]);
+        run.start();
+        run.start_jobs("ilium.core.search", 0);
+        assert_eq!(run.job_stats("ilium.core.search"), JobStats::default());
+    }
+
+    /// REQ: HST-016
+    #[test]
+    fn late_scene_frame_is_replaced_by_previous_complete_frame() {
+        let mut run = BootHarness::new(ProcessKind::Client)
+            .plugin(
+                startup_plugin("ilium.core.ambient")
+                    .sides(&[Side::Client, Side::Scene])
+                    .client_activation(&["startup"]),
+            )
+            .build();
+        run.start();
+        let client = attached_client(&mut run);
+        run.start_scene_instance("ilium.core.ambient");
+        let first = run.compose_client_frame(client);
+        run.set_scene_frame_delay(Duration::from_millis(500));
+        let second = run.compose_client_frame(client);
+        assert!(second.reused_previous_scene_frame);
+        assert_eq!(second.scene_frame_id, first.scene_frame_id);
+    }
+
+    /// REQ: HST-015
+    #[test]
+    fn scene_frames_render_off_client_ui_and_executor_threads() {
+        let mut run = BootHarness::new(ProcessKind::Client)
+            .plugin(
+                startup_plugin("ilium.core.ambient")
+                    .sides(&[Side::Client, Side::Scene])
+                    .client_activation(&["startup"]),
+            )
+            .build();
+        run.start();
+        let _client = attached_client(&mut run);
+        run.start_scene_instance("ilium.core.ambient");
+        let scene_thread = run.scene_frame_thread("ilium.core.ambient");
+        assert_ne!(scene_thread, run.client_ui_thread());
+        assert!(!run.client_executor_threads().contains(&scene_thread));
+    }
+
+    /// REQ: HST-013
+    #[test]
+    fn client_failure_leaves_other_clients_side_active() {
+        let mut run = server_run(vec![startup_plugin("ilium.core.tree")
+            .sides(&[Side::Server, Side::Client])
+            .client_activation(&["startup"])]);
+        run.start();
+        let first = attached_client(&mut run);
+        let second = attached_client(&mut run);
+        run.trap_in_client(first, "ilium.core.tree");
+        assert!(run.client_side_state(first, "ilium.core.tree").failures_in_window >= 1);
+        let other = run.client_side_state(second, "ilium.core.tree");
+        assert_eq!(other.state, "active");
+        assert_eq!(other.failures_in_window, 0);
+    }
+
+    /// REQ: HST-035
+    #[test]
+    fn guest_trap_ends_only_the_trapped_plugin_instance() {
+        let mut run = server_run(vec![
+            startup_plugin("ilium.core.tree"),
+            startup_plugin("ilium.core.search"),
+        ]);
+        run.start();
+        run.trap_in("ilium.core.tree", Side::Server);
+        assert_ne!(run.side_state("ilium.core.tree", Side::Server).state, "active");
+        assert_eq!(run.side_state("ilium.core.search", Side::Server).state, "active");
+    }
+
+    /// REQ: HST-038
+    #[test]
+    fn no_kernel_lock_is_held_during_guest_calls() {
+        let mut run = server_run(vec![startup_plugin("ilium.core.tree")]);
+        run.start();
+        assert_eq!(run.kernel_locks_held(), 0);
+        assert_eq!(run.max_kernel_locks_held_during_guest_calls(), 0);
+    }
+
+    /// REQ: HST-039
+    #[test]
+    fn killed_helper_leaves_parent_running() {
+        let mut run = BootHarness::new(ProcessKind::Server)
+            .plugin(PluginSpec::new("vendor.sandboxed", Tier::T2).activation(&["startup"]))
+            .build();
+        run.start();
+        run.kill_helper();
+        assert!(run.kernel_alive());
+        assert!(run.server_alive());
+        assert!(run.host_started());
+    }
+
+    /// REQ: HST-039
+    #[test]
+    fn hung_helper_does_not_hang_parent() {
+        let mut run = BootHarness::new(ProcessKind::Server)
+            .plugin(PluginSpec::new("vendor.sandboxed", Tier::T2).activation(&["startup"]))
+            .build();
+        run.start();
+        run.hang_helper();
+        let took = run.timed_pump(Duration::from_millis(100));
+        assert!(took < Duration::from_secs(1));
+        assert!(run.kernel_alive());
+    }
+
+    /// REQ: HST-025
+    #[test]
+    fn client_point_is_not_visible_to_server_plugins() {
+        let mut run = server_run(vec![startup_plugin("ilium.core.tree")]);
+        run.start();
+        run.client_registers_point("ilium.point.client");
+        assert!(!run.server_sees_point("ilium.point.client"));
+        run.server_registers_point("ilium.point.server");
+        assert!(run.server_sees_point("ilium.point.server"));
+    }
+
+    /// REQ: HST-019
+    #[test]
+    fn cli_host_activates_only_the_named_plugin() {
+        let mut run = BootHarness::new(ProcessKind::Cli)
+            .plugin(PluginSpec::new("ilium.core.tree", Tier::T1).core())
+            .plugin(PluginSpec::new("ilium.core.search", Tier::T1))
+            .build();
+        let cli = run.run_cli("ilium.core.search", "search");
+        assert_eq!(cli.activated, vec!["ilium.core.search".to_string()]);
+        assert_eq!(cli.host_process, ProcessKind::Cli);
+    }
+
+    /// REQ: HST-020
+    #[test]
+    fn cli_session_import_is_refused_without_starting_server() {
+        let mut run = BootHarness::new(ProcessKind::Cli)
+            .plugin(PluginSpec::new("ilium.core.tree", Tier::T1))
+            .build();
+        run.run_cli("ilium.core.tree", "tree");
+        assert!(run.cli_call_tree_import("ilium.core.tree").is_err());
+        assert_eq!(run.servers_started(), 0);
+    }
+
+    /// REQ: HST-033
+    #[test]
+    fn safe_plugins_start_skips_t2_packages() {
+        let mut run = BootHarness::new(ProcessKind::Server)
+            .mode(StartMode::SafePlugins)
+            .plugin(startup_plugin("ilium.core.tree").core())
+            .plugin(PluginSpec::new("vendor.sandboxed", Tier::T2).activation(&["startup"]))
+            .build();
+        let report = run.start();
+        assert_eq!(report.started, vec!["ilium.core.tree".to_string()]);
+        assert!(!report.started.contains(&"vendor.sandboxed".to_string()));
+        assert_eq!(run.helper_count(), 0);
+    }
+
+    /// REQ: HST-033
+    #[test]
+    fn no_plugins_mode_starts_no_plugin_host() {
+        let mut run = BootHarness::new(ProcessKind::Server)
+            .mode(StartMode::NoPlugins)
+            .plugin(startup_plugin("ilium.core.tree"))
+            .build();
+        run.start();
+        assert!(!run.host_started());
+        assert!(run.kernel_alive());
+        assert!(run.activation_order().is_empty());
+    }
+
+    /// REQ: HST-034
+    #[test]
+    fn no_plugins_mode_boots_to_usable_recovery_page() {
+        let mut run = BootHarness::new(ProcessKind::Server)
+            .mode(StartMode::NoPlugins)
+            .plugin(startup_plugin("ilium.core.tree"))
+            .build();
+        run.start();
+        assert!(run.recovery_page_renders());
+    }
+
+    /// REQ: HST-037
+    #[test]
+    fn engine_failure_continues_without_plugin_host() {
+        let mut run = BootHarness::new(ProcessKind::Server)
+            .plugin(startup_plugin("ilium.core.tree"))
+            .fail_engine_creation()
+            .build();
+        run.start();
+        assert!(!run.host_started());
+        assert!(run.kernel_alive());
+        assert!(run.logs().iter().any(|line| line.contains("host.engine-failed")));
+    }
+
+    /// REQ: HST-044
+    #[test]
+    fn corrupt_grant_store_grants_t1_only_its_default_grants() {
+        let mut run = BootHarness::new(ProcessKind::Server)
+            .plugin(
+                startup_plugin("ilium.core.tree")
+                    .default_grants(&["fs.read"])
+                    .stored_grants(&["net.http"]),
+            )
+            .corrupt_grant_store()
+            .build();
+        run.start();
+        assert!(!run.granted("ilium.core.tree").contains(&"net.http".to_string()));
+    }
+
+    /// REQ: HST-044
+    #[test]
+    fn corrupt_grant_store_keeps_t2_plugins_stopped() {
+        let mut run = BootHarness::new(ProcessKind::Server)
+            .plugin(PluginSpec::new("vendor.sandboxed", Tier::T2).activation(&["startup"]))
+            .corrupt_grant_store()
+            .build();
+        let report = run.start();
+        assert!(!report.started.contains(&"vendor.sandboxed".to_string()));
+    }
+
+    /// REQ: HST-045
+    #[test]
+    fn tampered_package_is_not_loaded() {
+        let mut run = BootHarness::new(ProcessKind::Server)
+            .plugin(startup_plugin("vendor.tampered"))
+            .tamper_package("vendor.tampered")
+            .build();
+        let report = run.start();
+        assert!(!report.started.contains(&"vendor.tampered".to_string()));
+        assert!(!run.verify_install_hashes("vendor.tampered").is_empty());
+    }
+
+    /// REQ: HST-045
+    #[test]
+    fn intact_package_passes_install_hash_check() {
+        let mut run = BootHarness::new(ProcessKind::Server)
+            .plugin(startup_plugin("vendor.intact"))
+            .build();
+        run.start();
+        assert!(run.verify_install_hashes("vendor.intact").is_empty());
+    }
+
+    /// REQ: HST-040
+    #[test]
+    fn disabled_core_plugin_stays_disabled_after_server_restart() {
+        let mut run = server_run(vec![startup_plugin("ilium.core.tree").core()]);
+        run.start();
+        run.disable("ilium.core.tree");
+        let restarted = run.restart_server();
+        assert!(restarted.disabled_reason("ilium.core.tree").is_some());
+        assert!(restarted.kernel_alive());
+    }
+
+    /// REQ: HST-041
+    #[test]
+    fn recovery_page_works_with_every_plugin_disabled() {
+        let mut run = server_run(vec![startup_plugin("ilium.core.tree").core()]);
+        run.start();
+        run.disable_all_plugins();
+        assert!(run.recovery_page_renders());
+        assert!(run.command_works("kernel.open-recovery"));
+    }
+
+    /// REQ: HST-042
+    #[test]
+    fn tree_rows_use_only_names_when_tree_plugin_is_disabled() {
+        let mut run = BootHarness::new(ProcessKind::Client)
+            .restored_tree(2)
+            .plugin(startup_plugin("ilium.core.tree").core())
+            .build();
+        run.start();
+        run.disable("ilium.core.tree");
+        let rows = run.kernel_tree_rows();
+        assert_eq!(rows.len(), 2);
+        assert!(rows.iter().all(|row| row.uses_only_name_and_status));
+    }
+
+    /// REQ: HST-042
+    #[test]
+    fn tree_pane_with_no_panes_has_no_rows() {
+        let mut run = BootHarness::new(ProcessKind::Client)
+            .restored_tree(0)
+            .plugin(startup_plugin("ilium.core.tree").core())
+            .build();
+        run.start();
+        assert!(run.kernel_tree_rows().is_empty());
+    }
+
+    /// REQ: COR-022
+    #[test]
+    fn disabling_core_plugin_keeps_stored_data_and_recovery_page() {
+        let mut run = BootHarness::new(ProcessKind::Server)
+            .plugin(startup_plugin("ilium.core.tree").core())
+            .store_data("ilium.core.tree", "pane-count", "3")
+            .build();
+        run.start();
+        run.disable("ilium.core.tree");
+        assert_eq!(
+            run.stored_data("ilium.core.tree", "pane-count"),
+            Some("3".to_string())
+        );
+        assert!(run.recovery_page_renders());
+        assert!(run.kernel_alive());
+    }
+}

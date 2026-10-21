@@ -1264,3 +1264,532 @@ impl Default for OpsRig {
         OpsRig::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use ilium_plugin_api::Side;
+
+    use super::{compile_cache_key, Effects, LifeEvent, OpsRig, PackageSpec, ServerHandle};
+
+    const EXAMPLE_ID: &str = "example.hello";
+    const OTHER_ID: &str = "example.other";
+    const SESSION: &str = "default";
+    const ONE_MIB: usize = 1024 * 1024;
+
+    /// Installs a bundled package on a fresh rig and starts its server (rig stays alive via the caller).
+    fn installed_server(rig: &OpsRig, spec: &PackageSpec) -> ServerHandle {
+        rig.install_bundled(spec);
+        rig.start_server(SESSION)
+    }
+
+    fn effects(input_lock: bool, stream_open: bool, child_running: bool) -> Effects {
+        Effects {
+            instance: 1,
+            input_lock,
+            stream_open,
+            child_running,
+        }
+    }
+
+    /// REQ: LIF-176
+    #[test]
+    fn compile_cache_key_is_stable_for_identical_inputs() {
+        let first = compile_cache_key("hash-a", "21.0.0", "avx2");
+        let second = compile_cache_key("hash-a", "21.0.0", "avx2");
+        assert_eq!(first, second);
+    }
+
+    /// REQ: LIF-176
+    #[test]
+    fn compile_cache_key_changes_with_component_hash() {
+        let first = compile_cache_key("hash-a", "21.0.0", "avx2");
+        let second = compile_cache_key("hash-b", "21.0.0", "avx2");
+        assert_ne!(first, second);
+    }
+
+    /// REQ: LIF-176
+    #[test]
+    fn compile_cache_key_changes_with_wasmtime_version() {
+        let first = compile_cache_key("hash-a", "21.0.0", "avx2");
+        let second = compile_cache_key("hash-a", "22.0.0", "avx2");
+        assert_ne!(first, second);
+    }
+
+    /// REQ: LIF-176
+    #[test]
+    fn compile_cache_key_changes_with_cpu_features() {
+        let first = compile_cache_key("hash-a", "21.0.0", "avx2");
+        let second = compile_cache_key("hash-a", "21.0.0", "sse4.2");
+        assert_ne!(first, second);
+    }
+
+    #[test]
+    fn compile_cache_key_is_deterministic_for_empty_inputs() {
+        let first = compile_cache_key("", "", "");
+        let second = compile_cache_key("", "", "");
+        assert_eq!(first, second);
+        assert_ne!(first, compile_cache_key("hash-a", "21.0.0", "avx2"));
+    }
+
+    #[test]
+    fn effects_any_is_false_when_nothing_is_held() {
+        assert!(!effects(false, false, false).any());
+    }
+
+    #[test]
+    fn effects_any_ignores_the_instance_number() {
+        let idle_first = Effects {
+            instance: 0,
+            input_lock: false,
+            stream_open: false,
+            child_running: false,
+        };
+        let idle_last = Effects {
+            instance: u64::MAX,
+            input_lock: false,
+            stream_open: false,
+            child_running: false,
+        };
+        assert!(!idle_first.any());
+        assert!(!idle_last.any());
+    }
+
+    #[test]
+    fn effects_any_is_true_when_only_the_input_lock_is_held() {
+        assert!(effects(true, false, false).any());
+    }
+
+    #[test]
+    fn effects_any_is_true_when_only_a_stream_is_open() {
+        assert!(effects(false, true, false).any());
+    }
+
+    #[test]
+    fn effects_any_is_true_when_only_a_child_process_runs() {
+        assert!(effects(false, false, true).any());
+    }
+
+    #[test]
+    fn effects_any_is_true_when_every_effect_is_held() {
+        assert!(effects(true, true, true).any());
+    }
+
+    #[test]
+    fn fresh_rig_has_no_virtual_time_prompts_lock_polls_or_network_attempts() {
+        let rig = OpsRig::default();
+        assert_eq!(rig.virtual_elapsed(), Duration::ZERO);
+        assert_eq!(rig.prompt_count(), 0);
+        assert_eq!(rig.lock_polls(), 0);
+        assert_eq!(rig.network_attempts(), 0);
+    }
+
+    #[test]
+    fn advance_moves_the_virtual_clock_by_the_requested_amount() {
+        let rig = OpsRig::new();
+        rig.advance(Duration::from_secs(5));
+        assert_eq!(rig.virtual_elapsed(), Duration::from_secs(5));
+    }
+
+    #[test]
+    fn advance_accumulates_across_calls() {
+        let rig = OpsRig::new();
+        rig.advance(Duration::from_secs(2));
+        rig.advance(Duration::from_secs(3));
+        assert_eq!(rig.virtual_elapsed(), Duration::from_secs(5));
+    }
+
+    #[test]
+    fn advance_by_zero_keeps_the_clock_where_it_was() {
+        let rig = OpsRig::new();
+        rig.advance(Duration::ZERO);
+        assert_eq!(rig.virtual_elapsed(), Duration::ZERO);
+    }
+
+    #[test]
+    fn state_cache_and_plugins_directories_sit_inside_the_scratch_dir() {
+        let rig = OpsRig::new();
+        let scratch = rig.scratch_dir();
+        assert!(rig.state_dir().starts_with(&scratch));
+        assert!(rig.cache_dir().starts_with(&scratch));
+        assert!(rig.plugins_root().starts_with(&scratch));
+    }
+
+    #[test]
+    fn registry_bytes_return_what_was_written() {
+        let rig = OpsRig::new();
+        rig.set_registry_bytes(b"{}");
+        assert_eq!(rig.registry_bytes(), b"{}".to_vec());
+    }
+
+    #[test]
+    fn registry_bytes_accept_an_empty_file() {
+        let rig = OpsRig::new();
+        rig.set_registry_bytes(&[]);
+        assert!(rig.registry_bytes().is_empty());
+    }
+
+    #[test]
+    fn corrupt_file_overwrites_existing_bytes() {
+        let rig = OpsRig::new();
+        let path = rig.scratch_dir().join("garbage.db");
+        std::fs::write(&path, b"old bytes").expect("seed file for corruption");
+        rig.corrupt_file(&path, b"garbage");
+        assert_eq!(
+            std::fs::read(&path).expect("read corrupted file"),
+            b"garbage".to_vec()
+        );
+    }
+
+    /// REQ: LIF-172
+    #[test]
+    fn required_free_space_grows_with_the_package_size() {
+        let rig = OpsRig::new();
+        let small = PackageSpec::new(EXAMPLE_ID, "1.0.0").padding(0);
+        let large = PackageSpec::new(EXAMPLE_ID, "1.0.0").padding(10 * 1024 * 1024);
+        assert!(rig.required_free_bytes(&large) > rig.required_free_bytes(&small));
+    }
+
+    #[test]
+    fn written_package_is_padded_to_at_least_the_requested_size() {
+        let rig = OpsRig::new();
+        let spec = PackageSpec::new(EXAMPLE_ID, "1.0.0").padding(4096);
+        let path = rig.write_package(&spec);
+        let length = std::fs::metadata(&path)
+            .expect("stat written package")
+            .len();
+        assert!(length >= 4096);
+    }
+
+    #[test]
+    fn server_reports_running_after_start_and_not_running_for_unknown_session() {
+        let rig = OpsRig::new();
+        let server = rig.start_server(SESSION);
+        assert!(server.is_running());
+        assert!(rig.server_running(SESSION));
+        assert!(!rig.server_running("no-such-session"));
+    }
+
+    #[test]
+    fn shutdown_stops_the_server() {
+        let rig = OpsRig::new();
+        let server = rig.start_server(SESSION);
+        server.shutdown();
+        assert!(!server.is_running());
+    }
+
+    #[test]
+    fn crash_stops_the_server() {
+        let rig = OpsRig::new();
+        let server = rig.start_server(SESSION);
+        server.crash();
+        assert!(!server.is_running());
+    }
+
+    #[test]
+    fn start_server_or_same_returns_the_running_server() {
+        let rig = OpsRig::new();
+        let server = rig.start_server(SESSION);
+        let again = rig.start_server_or_same(&server);
+        assert!(again.is_running());
+    }
+
+    /// REQ: LIF-170
+    #[test]
+    fn installed_plugin_runs_with_the_network_blocked() {
+        let rig = OpsRig::new();
+        rig.block_network();
+        let server = installed_server(&rig, &PackageSpec::new(EXAMPLE_ID, "1.0.0"));
+        server.apply_pending();
+        assert!(server.active_version(EXAMPLE_ID).is_some());
+        assert_eq!(rig.network_attempts(), 0);
+    }
+
+    /// REQ: LIF-171
+    #[test]
+    fn installing_a_local_package_makes_no_network_attempt() {
+        let rig = OpsRig::new();
+        rig.block_network();
+        rig.install_bundled(&PackageSpec::new(EXAMPLE_ID, "1.0.0"));
+        assert_eq!(rig.network_attempts(), 0);
+    }
+
+    /// REQ: LIF-190
+    #[test]
+    fn plugin_detail_view_has_five_tabs() {
+        let rig = OpsRig::new();
+        let server = installed_server(&rig, &PackageSpec::new(EXAMPLE_ID, "1.0.0"));
+        let detail = server.render_plugin_detail(EXAMPLE_ID);
+        assert_eq!(detail.tabs().len(), 5);
+    }
+
+    /// REQ: LIF-190
+    #[test]
+    fn plugins_screen_row_shows_state_and_health_of_installed_plugin() {
+        let rig = OpsRig::new();
+        let server = installed_server(&rig, &PackageSpec::new(EXAMPLE_ID, "1.0.0"));
+        let screen = server.render_plugins_screen();
+        let row = screen
+            .row_for(EXAMPLE_ID)
+            .expect("installed plugin has a row");
+        assert!(!row.state.is_empty());
+        assert!(!row.health.is_empty());
+    }
+
+    #[test]
+    fn plugins_screen_has_no_row_for_unknown_plugin() {
+        let rig = OpsRig::new();
+        let server = rig.start_server(SESSION);
+        let screen = server.render_plugins_screen();
+        assert!(screen.row_for("no.such.plugin").is_none());
+    }
+
+    /// REQ: LIF-088
+    #[test]
+    fn disabling_twice_leaves_the_plugin_disabled() {
+        let rig = OpsRig::new();
+        let server = installed_server(&rig, &PackageSpec::new(EXAMPLE_ID, "1.0.0"));
+        server.disable(EXAMPLE_ID);
+        server.disable(EXAMPLE_ID);
+        assert!(!server.is_enabled(EXAMPLE_ID));
+    }
+
+    /// REQ: LIF-161
+    #[test]
+    fn session_level_overrides_project_and_global_levels() {
+        let rig = OpsRig::new();
+        rig.install_bundled(&PackageSpec::new(EXAMPLE_ID, "1.0.0"));
+        rig.set_enabled_levels(EXAMPLE_ID, SESSION, Some(true), Some(true), Some(false));
+        let server = rig.start_server(SESSION);
+        assert!(!server.is_enabled(EXAMPLE_ID));
+    }
+
+    /// REQ: LIF-161
+    #[test]
+    fn project_level_overrides_global_when_session_is_unset() {
+        let rig = OpsRig::new();
+        rig.install_bundled(&PackageSpec::new(EXAMPLE_ID, "1.0.0"));
+        rig.set_enabled_levels(EXAMPLE_ID, SESSION, Some(true), Some(false), None);
+        let server = rig.start_server(SESSION);
+        assert!(!server.is_enabled(EXAMPLE_ID));
+    }
+
+    /// REQ: LIF-161
+    #[test]
+    fn global_level_applies_when_session_and_project_are_unset() {
+        let rig = OpsRig::new();
+        rig.install_bundled(&PackageSpec::new(EXAMPLE_ID, "1.0.0"));
+        rig.set_enabled_levels(EXAMPLE_ID, SESSION, Some(false), None, None);
+        let server = rig.start_server(SESSION);
+        assert!(!server.is_enabled(EXAMPLE_ID));
+    }
+
+    /// REQ: LIF-162
+    #[test]
+    fn project_plugins_toml_request_does_not_install_the_plugin() {
+        let rig = OpsRig::new();
+        rig.write_project_plugins_toml("[[plugins]]\nid = \"example.requested\"\n");
+        let server = rig.start_server(SESSION);
+        assert_eq!(server.active_version("example.requested"), None);
+    }
+
+    /// REQ: LIF-163
+    #[test]
+    fn global_disable_reaches_every_running_session_within_two_seconds() {
+        let rig = OpsRig::new();
+        rig.install_bundled(&PackageSpec::new(EXAMPLE_ID, "1.0.0"));
+        let first_session = rig.start_server("alpha");
+        let second_session = rig.start_server("beta");
+        rig.set_enabled_levels(EXAMPLE_ID, "alpha", Some(false), None, None);
+        rig.advance(Duration::from_secs(2));
+        assert!(!first_session.is_enabled(EXAMPLE_ID));
+        assert!(!second_session.is_enabled(EXAMPLE_ID));
+    }
+
+    /// REQ: LIF-151
+    #[test]
+    fn pending_request_is_cancelled_once_at_each_of_the_first_four_events() {
+        let events = [
+            LifeEvent::PluginRestart,
+            LifeEvent::DisableEnable,
+            LifeEvent::Update,
+            LifeEvent::ServerRestart,
+        ];
+        for event in events {
+            let rig = OpsRig::new();
+            let server = installed_server(&rig, &PackageSpec::new(EXAMPLE_ID, "1.0.0"));
+            let pending = server.send_pending_request(EXAMPLE_ID);
+            rig.apply_event(&server, EXAMPLE_ID, event);
+            assert_eq!(
+                pending.outcome(),
+                Some("cancelled".to_string()),
+                "event {:?}",
+                event
+            );
+            assert_eq!(
+                server.deliveries_of(pending.id()),
+                1,
+                "not replayed after {:?}",
+                event
+            );
+        }
+    }
+
+    /// REQ: LIF-152
+    #[test]
+    fn restore_bytes_over_one_mebibyte_are_dropped() {
+        let rig = OpsRig::new();
+        let spec = PackageSpec::new(EXAMPLE_ID, "1.0.0").restore_bytes(ONE_MIB + 1);
+        let server = installed_server(&rig, &spec);
+        rig.apply_event(&server, EXAMPLE_ID, LifeEvent::PluginRestart);
+        assert_eq!(server.last_restored_len(EXAMPLE_ID), None);
+    }
+
+    /// REQ: LIF-152
+    #[test]
+    fn restore_bytes_of_exactly_one_mebibyte_are_kept() {
+        let rig = OpsRig::new();
+        let spec = PackageSpec::new(EXAMPLE_ID, "1.0.0").restore_bytes(ONE_MIB);
+        let server = installed_server(&rig, &spec);
+        rig.apply_event(&server, EXAMPLE_ID, LifeEvent::PluginRestart);
+        assert_eq!(server.last_restored_len(EXAMPLE_ID), Some(ONE_MIB));
+    }
+
+    /// REQ: LIF-153
+    #[test]
+    fn client_restore_bytes_are_last_writer_wins_per_plugin() {
+        let rig = OpsRig::new();
+        let server = installed_server(&rig, &PackageSpec::new(EXAMPLE_ID, "1.0.0"));
+        let first_client = server.attach_client("first");
+        first_client.detach_with_restore(EXAMPLE_ID, b"one");
+        let second_client = server.attach_client("second");
+        second_client.detach_with_restore(EXAMPLE_ID, b"two");
+        let third_client = server.attach_client("third");
+        assert_eq!(
+            third_client.restored_bytes(EXAMPLE_ID),
+            Some(b"two".to_vec())
+        );
+        assert_eq!(
+            server.stored_client_restore(EXAMPLE_ID),
+            Some(b"two".to_vec())
+        );
+    }
+
+    /// REQ: LIF-155
+    #[test]
+    fn node_metadata_survives_plugin_and_server_restarts_until_node_removed() {
+        let rig = OpsRig::new();
+        let server = installed_server(&rig, &PackageSpec::new(EXAMPLE_ID, "1.0.0"));
+        server.set_node_metadata(7, EXAMPLE_ID, "layout", b"wide");
+        rig.apply_event(&server, EXAMPLE_ID, LifeEvent::PluginRestart);
+        assert_eq!(
+            server.node_metadata_as(EXAMPLE_ID, 7, EXAMPLE_ID, "layout"),
+            Some(b"wide".to_vec())
+        );
+        rig.apply_event(&server, EXAMPLE_ID, LifeEvent::ServerRestart);
+        assert_eq!(
+            server.node_metadata_as(EXAMPLE_ID, 7, EXAMPLE_ID, "layout"),
+            Some(b"wide".to_vec())
+        );
+        server.remove_node(7);
+        assert_eq!(
+            server.node_metadata_as(EXAMPLE_ID, 7, EXAMPLE_ID, "layout"),
+            None
+        );
+    }
+
+    /// REQ: LIF-157
+    #[test]
+    fn crash_keeps_storage_written_before_the_crash() {
+        let rig = OpsRig::new();
+        let server = installed_server(&rig, &PackageSpec::new(EXAMPLE_ID, "1.0.0"));
+        server.write_storage(EXAMPLE_ID, "global", "greeting", b"hello");
+        server.crash();
+        let restarted = rig.start_server(SESSION);
+        assert_eq!(
+            restarted.read_storage(EXAMPLE_ID, "global", "greeting"),
+            Some(b"hello".to_vec())
+        );
+    }
+
+    /// REQ: LIF-175
+    #[test]
+    fn corrupt_storage_database_is_replaced_with_an_empty_one_not_deleted() {
+        let rig = OpsRig::new();
+        let server = installed_server(&rig, &PackageSpec::new(EXAMPLE_ID, "1.0.0"));
+        server.write_storage(EXAMPLE_ID, "global", "greeting", b"hello");
+        server.shutdown();
+        rig.corrupt_file(&rig.storage_db_path(EXAMPLE_ID), b"not a database");
+        let restarted = rig.start_server(SESSION);
+        assert_eq!(restarted.read_storage(EXAMPLE_ID, "global", "greeting"), None);
+        assert!(rig.storage_db_path(EXAMPLE_ID).exists());
+    }
+
+    /// REQ: LIF-173
+    #[test]
+    fn disk_full_write_is_refused_without_counting_as_a_plugin_failure() {
+        let rig = OpsRig::new();
+        let server = installed_server(&rig, &PackageSpec::new(EXAMPLE_ID, "1.0.0"));
+        rig.fill_disk();
+        let result = server.write_storage_checked(EXAMPLE_ID, "global", "key", b"value");
+        assert!(result.is_err());
+        assert_eq!(server.failure_count(EXAMPLE_ID, Side::Server), 0);
+    }
+
+    /// REQ: LIF-174
+    #[test]
+    fn read_only_data_folder_does_not_stop_the_server_or_the_plugin() {
+        let rig = OpsRig::new();
+        let server = installed_server(&rig, &PackageSpec::new(EXAMPLE_ID, "1.0.0"));
+        rig.make_data_read_only(EXAMPLE_ID);
+        server.apply_pending();
+        assert!(server.is_running());
+        assert!(server.active_version(EXAMPLE_ID).is_some());
+    }
+
+    /// REQ: LIF-191
+    #[test]
+    fn enable_clears_the_failure_window_of_a_failed_plugin() {
+        let rig = OpsRig::new();
+        let server = installed_server(&rig, &PackageSpec::new(EXAMPLE_ID, "1.0.0"));
+        server.fail(EXAMPLE_ID, Side::Server);
+        server.enable(EXAMPLE_ID);
+        server.fail(EXAMPLE_ID, Side::Server);
+        server.fail(EXAMPLE_ID, Side::Server);
+        assert!(!server.is_disabled_by_failure(EXAMPLE_ID));
+    }
+
+    /// REQ: LIF-083
+    #[test]
+    fn uninstall_deletes_grants_so_reinstall_asks_again() {
+        let rig = OpsRig::new();
+        let spec = PackageSpec::new(EXAMPLE_ID, "1.0.0").grant("clipboard.read");
+        let server = installed_server(&rig, &spec);
+        server.apply_pending();
+        rig.apply_event(&server, EXAMPLE_ID, LifeEvent::Uninstall);
+        rig.install_bundled(&spec);
+        assert!(server.granted(EXAMPLE_ID).is_empty());
+    }
+
+    /// REQ: LIF-086
+    #[test]
+    fn uninstall_leaves_the_data_of_other_plugins_untouched() {
+        let rig = OpsRig::new();
+        rig.install_bundled(&PackageSpec::new(EXAMPLE_ID, "1.0.0"));
+        rig.install_bundled(&PackageSpec::new(OTHER_ID, "1.0.0"));
+        let other_data = rig.plant_data(OTHER_ID, 1);
+        let server = rig.start_server(SESSION);
+        rig.apply_event(&server, EXAMPLE_ID, LifeEvent::Uninstall);
+        assert!(other_data.exists());
+    }
+
+    #[test]
+    fn dev_session_has_no_exit_code_until_it_ends() {
+        let rig = OpsRig::new();
+        let session = rig.dev_start(&PackageSpec::new(EXAMPLE_ID, "1.0.0"), &[]);
+        assert_eq!(session.exit_code(), None);
+        session.end();
+        assert!(session.exit_code().is_some());
+    }
+}

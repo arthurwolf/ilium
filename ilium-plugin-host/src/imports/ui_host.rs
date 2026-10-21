@@ -78,3 +78,134 @@ impl HostUiHost for UiHostImport {
         unimplemented!("host::imports::ui_host::write_surface")
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::UiHostImport;
+    use ilium_plugin_api::generated::host::ui_host::HostUiHost;
+    use ilium_plugin_api::generated::types::errors::{ErrorCode, PluginError};
+    use ilium_plugin_api::generated::types::ui::{
+        PopupAnchor, PopupOptions, ViewTarget, WidgetState,
+    };
+
+    fn default_popup_options() -> PopupOptions {
+        PopupOptions {
+            modal: false,
+            pinnable: true,
+            dismiss_on_leave: true,
+            close_on_escape: true,
+        }
+    }
+
+    fn assert_error_code(result: Result<(), PluginError>, expected_code: ErrorCode) {
+        match result {
+            Err(error) => assert_eq!(error.code, expected_code),
+            Ok(()) => panic!("expected error {expected_code:?}, got Ok(())"),
+        }
+    }
+
+    /// REQ: HST-251
+    #[test]
+    fn invalidate_panel_view_completes_without_error_code() {
+        let mut host = UiHostImport;
+        host.invalidate(ViewTarget::Panel("notes".into()));
+    }
+
+    /// REQ: HST-495
+    #[test]
+    fn open_popup_unknown_name_returns_not_found() {
+        let mut host = UiHostImport;
+        assert_error_code(
+            host.open_popup("missing-popup".into(), PopupAnchor::BelowKey("help".into())),
+            ErrorCode::NotFound,
+        );
+    }
+
+    /// REQ: HST-495
+    #[test]
+    fn open_popup_empty_name_returns_not_found() {
+        let mut host = UiHostImport;
+        assert_error_code(
+            host.open_popup(String::new(), PopupAnchor::AtCell((0, 0))),
+            ErrorCode::NotFound,
+        );
+    }
+
+    /// REQ: HST-495
+    #[test]
+    fn open_popup_with_unknown_name_and_options_returns_not_found() {
+        let mut host = UiHostImport;
+        assert_error_code(
+            host.open_popup_with(
+                "missing-popup".into(),
+                PopupAnchor::BelowKey("row-3".into()),
+                default_popup_options(),
+            ),
+            ErrorCode::NotFound,
+        );
+    }
+
+    /// REQ: WID-029
+    #[test]
+    fn close_popup_unopened_id_is_noop() {
+        let mut host = UiHostImport;
+        host.close_popup("never-opened".into());
+    }
+
+    /// REQ: WID-029
+    #[test]
+    fn close_popup_empty_id_is_noop() {
+        let mut host = UiHostImport;
+        host.close_popup(String::new());
+    }
+
+    /// REQ: WID-009
+    #[test]
+    fn widget_state_unknown_key_returns_none() {
+        let mut host = UiHostImport;
+        let state = host.widget_state(ViewTarget::Panel("notes".into()), "no-such-key".into());
+        assert_eq!(state, None);
+    }
+
+    /// REQ: WID-009
+    #[test]
+    fn set_widget_state_unknown_key_returns_not_found() {
+        let mut host = UiHostImport;
+        assert_error_code(
+            host.set_widget_state(
+                ViewTarget::Panel("notes".into()),
+                "no-such-key".into(),
+                WidgetState::Selected(Some(0)),
+            ),
+            ErrorCode::NotFound,
+        );
+    }
+
+    /// REQ: WID-019
+    #[test]
+    fn display_width_empty_string_is_zero_cells() {
+        let mut host = UiHostImport;
+        assert_eq!(host.display_width(String::new()), 0);
+    }
+
+    /// REQ: WID-019
+    #[test]
+    fn display_width_ascii_counts_one_cell_per_character() {
+        let mut host = UiHostImport;
+        assert_eq!(host.display_width("abc".into()), 3);
+    }
+
+    /// REQ: WID-019
+    #[test]
+    fn display_width_three_wide_glyphs_is_six_cells() {
+        let mut host = UiHostImport;
+        assert_eq!(host.display_width("漢字語".into()), 6);
+    }
+
+    /// REQ: WID-019
+    #[test]
+    fn display_width_combining_mark_adds_no_cells() {
+        let mut host = UiHostImport;
+        assert_eq!(host.display_width("e\u{0301}".into()), 1);
+    }
+}

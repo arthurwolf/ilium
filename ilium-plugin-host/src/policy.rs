@@ -27,3 +27,74 @@ impl PolicyEngine {
         unimplemented!("host::policy::PolicyEngine::check_egress")
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{PolicyEngine, PolicyVerdict};
+    use ilium_plugin_api::grants::Grant;
+
+    fn grant(text: &str) -> Grant {
+        Grant::parse(text).expect("test grant must parse")
+    }
+
+    /// REQ: SEC-184
+    #[test]
+    fn check_grant_without_restricting_policy_allows_normal_grant() {
+        let engine = PolicyEngine;
+        assert_eq!(engine.check_grant("com.example.plugin", &grant("tree.read")), PolicyVerdict::Allow);
+    }
+
+    /// REQ: SEC-184
+    #[test]
+    fn check_grant_without_restricting_policy_allows_exact_host_grant() {
+        let engine = PolicyEngine;
+        assert_eq!(
+            engine.check_grant("com.example.plugin", &grant("http:api.example.com")),
+            PolicyVerdict::Allow
+        );
+    }
+
+    /// REQ: SEC-184
+    #[test]
+    fn check_grant_without_restricting_policy_allows_wildcard_host_grant() {
+        let engine = PolicyEngine;
+        assert_eq!(
+            engine.check_grant("com.example.plugin", &grant("http:*.openstreetmap.org")),
+            PolicyVerdict::Allow
+        );
+    }
+
+    /// REQ: SEC-085
+    #[test]
+    fn check_egress_without_restricting_policy_allows_public_host() {
+        let engine = PolicyEngine;
+        assert_eq!(engine.check_egress("com.example.plugin", "api.example.com"), PolicyVerdict::Allow);
+    }
+
+    /// REQ: SEC-085
+    #[test]
+    fn check_egress_without_restricting_policy_allows_subdomain_of_public_host() {
+        let engine = PolicyEngine;
+        assert_eq!(
+            engine.check_egress("com.example.plugin", "tiles.openstreetmap.org"),
+            PolicyVerdict::Allow
+        );
+    }
+
+    /// REQ: SEC-184
+    #[test]
+    fn policy_verdict_deny_carries_policy_code_and_differs_from_allow() {
+        let verdict = PolicyVerdict::Deny(String::from("policy.grant-forbidden"));
+        assert_ne!(verdict, PolicyVerdict::Allow);
+        assert_eq!(verdict, PolicyVerdict::Deny(String::from("policy.grant-forbidden")));
+    }
+
+    /// REQ: SEC-184
+    #[test]
+    fn policy_verdict_deny_codes_differ_by_detail_code() {
+        assert_ne!(
+            PolicyVerdict::Deny(String::from("policy.id-denied")),
+            PolicyVerdict::Deny(String::from("policy.tier-denied"))
+        );
+    }
+}

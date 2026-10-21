@@ -816,3 +816,379 @@ impl FakeKernel {
         unimplemented!("host::testing::FakeKernel::audit_records")
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{FakeKernel, FakePaneScreen};
+    use ilium_plugin_api::generated::types::ids::{BufferId, ClientId, NodeId};
+    use ilium_plugin_api::kernel::KernelFacade;
+    use ilium_plugin_api::{ErrorCode, ProcessKind, Side};
+    use std::time::Duration;
+
+    fn fresh_kernel() -> FakeKernel {
+        FakeKernel::new(ProcessKind::Server)
+    }
+
+    fn screen_with_rows(rows: &[&str]) -> FakePaneScreen {
+        FakePaneScreen {
+            rows: rows.iter().map(|row| row.to_string()).collect(),
+            history: Vec::new(),
+        }
+    }
+
+    fn screen_with_history(history: &[&str]) -> FakePaneScreen {
+        FakePaneScreen {
+            rows: Vec::new(),
+            history: history.iter().map(|line| line.to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn new_keeps_the_process_kind_for_every_kind() {
+        for kind in ProcessKind::ALL {
+            assert_eq!(FakeKernel::new(kind).process_kind(), kind);
+        }
+    }
+
+    #[test]
+    fn new_kernel_has_no_applied_intents() {
+        let kernel = fresh_kernel();
+        assert!(kernel.applied_intents().is_empty());
+    }
+
+    #[test]
+    fn new_kernel_has_an_empty_step_log() {
+        let kernel = fresh_kernel();
+        assert!(kernel.step_log().is_empty());
+    }
+
+    #[test]
+    fn new_kernel_has_no_tree_nodes_and_no_focus() {
+        let kernel = fresh_kernel();
+        assert!(kernel.tree().nodes().is_empty());
+        assert!(kernel.focused_pane().is_none());
+        assert!(!kernel.node_exists(NodeId(1)));
+    }
+
+    #[test]
+    fn set_tree_with_empty_input_leaves_no_addressable_node() {
+        let kernel = fresh_kernel();
+        kernel.set_tree(Vec::new());
+        assert!(kernel.tree().nodes().is_empty());
+        assert!(kernel.tree().node(NodeId(1)).is_none());
+    }
+
+    #[test]
+    fn set_tree_bumps_the_epoch() {
+        let kernel = fresh_kernel();
+        let epoch_before = kernel.tree().epoch();
+        kernel.set_tree(Vec::new());
+        assert!(kernel.tree().epoch() > epoch_before);
+    }
+
+    #[test]
+    fn node_lookup_of_an_absent_id_is_none() {
+        let kernel = fresh_kernel();
+        assert!(kernel.tree().node(NodeId(0)).is_none());
+        assert!(kernel.tree().node(NodeId(u64::MAX)).is_none());
+    }
+
+    #[test]
+    fn set_screen_makes_its_rows_visible_as_screen_text() {
+        let kernel = fresh_kernel();
+        let pane = NodeId(1);
+        kernel.set_screen(pane, screen_with_rows(&["ready", "prompt"]));
+        let text = kernel.panes().screen_text(pane).unwrap_or_default();
+        assert!(text.contains("ready"));
+        assert!(text.contains("prompt"));
+    }
+
+    #[test]
+    fn set_screen_with_an_empty_screen_gives_blank_text() {
+        let kernel = fresh_kernel();
+        let pane = NodeId(1);
+        kernel.set_screen(pane, FakePaneScreen::default());
+        assert_eq!(kernel.panes().screen_text(pane).as_deref(), Some(""));
+    }
+
+    #[test]
+    fn screen_text_of_an_unknown_pane_is_none() {
+        let kernel = fresh_kernel();
+        assert!(kernel.panes().screen_text(NodeId(9)).is_none());
+    }
+
+    #[test]
+    fn emit_lines_with_no_lines_keeps_the_screen() {
+        let kernel = fresh_kernel();
+        let pane = NodeId(1);
+        kernel.set_screen(pane, screen_with_rows(&["keep"]));
+        kernel.emit_lines(pane, Vec::new());
+        let text = kernel.panes().screen_text(pane).unwrap_or_default();
+        assert!(text.contains("keep"));
+    }
+
+    #[test]
+    fn history_with_zero_lines_is_empty() {
+        let kernel = fresh_kernel();
+        let pane = NodeId(1);
+        kernel.set_screen(pane, screen_with_history(&["old"]));
+        assert_eq!(kernel.panes().history(pane, 0), Some(Vec::new()));
+    }
+
+    #[test]
+    fn history_beyond_the_stored_lines_returns_all_of_them_oldest_first() {
+        let kernel = fresh_kernel();
+        let pane = NodeId(1);
+        kernel.set_screen(pane, screen_with_history(&["first", "second"]));
+        assert_eq!(
+            kernel.panes().history(pane, 10),
+            Some(vec!["first".to_string(), "second".to_string()])
+        );
+    }
+
+    #[test]
+    fn history_of_an_unknown_pane_is_none() {
+        let kernel = fresh_kernel();
+        assert!(kernel.panes().history(NodeId(9), 5).is_none());
+    }
+
+    #[test]
+    fn raw_bytes_sent_starts_at_zero() {
+        let kernel = fresh_kernel();
+        assert_eq!(kernel.raw_bytes_sent(), 0);
+    }
+
+    #[test]
+    fn pane_flags_and_titles_of_an_unknown_pane_are_empty() {
+        let kernel = fresh_kernel();
+        let pane = NodeId(9);
+        assert!(!kernel.pane_is_dirty(pane));
+        assert!(!kernel.pending_confirmation(pane));
+        assert!(kernel.pane_title(pane).is_none());
+        assert!(kernel.pane_status_text(pane).is_none());
+    }
+
+    #[test]
+    fn identify_process_name_without_signatures_is_none() {
+        let kernel = fresh_kernel();
+        assert!(kernel.identify_process_name("claude").is_none());
+        assert!(kernel.identify_process_name("").is_none());
+    }
+
+    #[test]
+    fn a_contributed_toolbar_button_has_a_reported_state() {
+        let kernel = fresh_kernel();
+        kernel.contribute_toolbar_button("save");
+        assert!(kernel.toolbar_state("save", None).is_some());
+    }
+
+    #[test]
+    fn pane_activity_of_an_unknown_pane_is_none() {
+        let kernel = fresh_kernel();
+        assert!(kernel.pane_activity(NodeId(9)).is_none());
+        assert!(kernel.initial_activity(NodeId(9)).is_none());
+    }
+
+    #[test]
+    fn annotator_calls_are_zero_before_any_edit_of_an_empty_buffer() {
+        let kernel = fresh_kernel();
+        let buffer = kernel.attach_buffer(NodeId(1), "");
+        assert_eq!(kernel.annotator_calls(buffer), 0);
+    }
+
+    #[test]
+    fn annotator_calls_of_an_unseen_buffer_are_zero() {
+        let kernel = fresh_kernel();
+        assert_eq!(kernel.annotator_calls(BufferId(1)), 0);
+    }
+
+    #[test]
+    fn put_file_with_empty_bytes_is_distinct_from_a_missing_file() {
+        let kernel = fresh_kernel();
+        kernel.put_file("project", "empty.txt", b"");
+        assert_eq!(kernel.file("project", "empty.txt"), Some(Vec::new()));
+        assert!(kernel.file("project", "missing.txt").is_none());
+    }
+
+    #[test]
+    fn open_captures_and_played_audio_are_empty_on_a_fresh_kernel() {
+        let kernel = fresh_kernel();
+        assert!(kernel.open_captures().is_empty());
+        assert!(kernel.played_audio().is_empty());
+    }
+
+    #[test]
+    fn an_unknown_http_call_has_no_response() {
+        let kernel = fresh_kernel();
+        assert!(kernel.http_response(999).is_none());
+    }
+
+    #[test]
+    fn each_started_http_call_gets_its_own_id() {
+        let kernel = fresh_kernel();
+        let first_call = kernel.start_http_call("GET", "/a");
+        let second_call = kernel.start_http_call("GET", "/b");
+        assert_ne!(first_call, second_call);
+    }
+
+    #[test]
+    fn surface_rows_with_zero_rows_are_empty() {
+        let kernel = fresh_kernel();
+        assert!(kernel.surface_rows("harness", "surface", 0, 0).is_empty());
+    }
+
+    #[test]
+    fn a_declared_panel_is_listed_as_open() {
+        let kernel = fresh_kernel();
+        kernel.declare_panel("harness");
+        assert!(kernel.open_panels().contains(&"harness".to_string()));
+    }
+
+    #[test]
+    fn a_view_tree_without_popups_opens_no_popup() {
+        let kernel = fresh_kernel();
+        kernel.commit_view_tree("harness", &[], &[]);
+        assert!(kernel.open_popups().is_empty());
+    }
+
+    #[test]
+    fn a_popup_key_in_the_view_tree_opens_that_popup() {
+        let kernel = fresh_kernel();
+        kernel.commit_view_tree("harness", &[], &["menu"]);
+        assert_eq!(kernel.open_popups(), vec!["menu".to_string()]);
+    }
+
+    #[test]
+    fn popup_options_of_an_unopened_popup_are_none() {
+        let kernel = fresh_kernel();
+        assert!(kernel.popup_options("missing").is_none());
+    }
+
+    #[test]
+    fn a_panel_never_rendered_has_zero_renders() {
+        let kernel = fresh_kernel();
+        assert_eq!(kernel.render_count("harness"), 0);
+    }
+
+    #[test]
+    fn a_running_cli_invocation_has_no_exit_code_yet() {
+        let kernel = fresh_kernel();
+        let invocation = kernel.start_cli_invocation_without_stdin("version", "json");
+        assert!(kernel.cli_exit_code(invocation).is_none());
+    }
+
+    #[test]
+    fn an_unknown_cli_invocation_has_no_output_or_errors() {
+        let kernel = fresh_kernel();
+        assert!(kernel.cli_stdout(999).is_empty());
+        assert!(kernel.cli_errors(999).is_empty());
+    }
+
+    #[test]
+    fn a_registered_client_starts_with_an_empty_inbox() {
+        let kernel = fresh_kernel();
+        kernel.register_client(ClientId(1), &[]);
+        assert!(kernel.client_inbox(ClientId(1)).is_empty());
+    }
+
+    #[test]
+    fn a_client_request_call_has_no_answer_until_the_client_answers() {
+        let kernel = fresh_kernel();
+        let call = kernel.start_client_request_call("ping", "{}");
+        assert!(kernel.client_request_answer(call).is_none());
+    }
+
+    #[test]
+    fn clipboard_is_empty_by_default() {
+        let kernel = fresh_kernel();
+        assert!(kernel.clipboard().is_none());
+    }
+
+    #[test]
+    fn clipboard_keeps_an_empty_string_distinct_from_none() {
+        let kernel = fresh_kernel();
+        kernel.set_clipboard(Some(String::new()));
+        assert_eq!(kernel.clipboard(), Some(String::new()));
+    }
+
+    #[test]
+    fn a_session_reply_is_not_recorded_as_a_command() {
+        let kernel = fresh_kernel();
+        kernel.set_session_reply("session-a", "{}");
+        assert!(kernel.session_commands("session-a").is_empty());
+    }
+
+    #[test]
+    fn video_position_of_an_unknown_video_is_none() {
+        let kernel = fresh_kernel();
+        assert!(kernel.video_position(7).is_none());
+    }
+
+    #[test]
+    fn sides_that_applied_an_unknown_case_is_empty() {
+        let kernel = fresh_kernel();
+        let sides: Vec<Side> = kernel.sides_that_applied("never-applied");
+        assert!(sides.is_empty());
+    }
+
+    #[test]
+    fn agent_config_file_written_empty_exists_and_reads_back_empty() {
+        let kernel = fresh_kernel();
+        assert!(!kernel.agent_config_file_exists("claude", "settings.json"));
+        kernel.write_agent_config_file("claude", "settings.json", b"");
+        assert!(kernel.agent_config_file_exists("claude", "settings.json"));
+        assert_eq!(
+            kernel.read_agent_config_file("claude", "settings.json"),
+            Vec::<u8>::new()
+        );
+    }
+
+    #[test]
+    fn no_proposal_dialog_is_open_on_a_fresh_kernel() {
+        let kernel = fresh_kernel();
+        assert!(kernel.open_proposal_dialog().is_none());
+    }
+
+    /// REQ: CAP-890
+    #[test]
+    fn consents_json_is_unchanged_before_any_prompt() {
+        let kernel = fresh_kernel();
+        assert!(kernel.consents_json_is_unchanged());
+    }
+
+    /// REQ: CAP-891
+    #[test]
+    fn no_audit_records_exist_before_any_write() {
+        let kernel = fresh_kernel();
+        assert!(kernel.audit_records("write-outside-data").is_empty());
+    }
+
+    #[test]
+    fn no_key_grabs_or_popups_are_active_on_a_fresh_kernel() {
+        let kernel = fresh_kernel();
+        assert!(kernel.active_grabs().is_empty());
+        assert!(kernel.open_popups().is_empty());
+    }
+
+    #[test]
+    fn a_failing_write_is_not_recorded_as_an_applied_intent() {
+        let kernel = fresh_kernel();
+        kernel.fail_next_write(ErrorCode::Busy);
+        assert!(kernel.applied_intents().is_empty());
+    }
+
+    #[test]
+    fn location_can_be_cleared_and_set_to_the_origin() {
+        let kernel = fresh_kernel();
+        kernel.set_location(None);
+        kernel.set_location(Some((0.0, 0.0)));
+        assert!(kernel.active_grabs().is_empty());
+    }
+
+    #[test]
+    fn a_zero_catalog_provider_delay_is_accepted() {
+        let kernel = fresh_kernel();
+        kernel.set_catalog_provider_delay("commands", Duration::from_millis(0));
+        assert!(kernel.open_panels().is_empty());
+    }
+}

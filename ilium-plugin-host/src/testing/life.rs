@@ -739,3 +739,418 @@ impl Default for LifeHost {
         LifeHost::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{FailureKind, LifeHost, LimitSource, PluginSpec, SafeMode};
+    use crate::lifecycle::StartMode;
+    use ilium_plugin_api::generated::host::plugins::{HealthState, InstanceState, PackageState};
+    use ilium_plugin_api::lifecycle::DeactivationReason;
+    use ilium_plugin_api::limits::LimitKey;
+    use ilium_plugin_api::{Side, Tier};
+
+    /// A third-party server-side plugin that starts at startup.
+    fn server_plugin(plugin_id: &str) -> PluginSpec {
+        PluginSpec::new(plugin_id)
+            .tier(Tier::T3)
+            .sides(&[Side::Server])
+            .startup()
+    }
+
+    /// A third-party client-side plugin that starts at startup.
+    fn client_plugin(plugin_id: &str) -> PluginSpec {
+        PluginSpec::new(plugin_id)
+            .tier(Tier::T3)
+            .sides(&[Side::Client])
+            .startup()
+    }
+
+    /// A third-party plugin with a server and a client side that starts at startup.
+    fn server_and_client_plugin(plugin_id: &str) -> PluginSpec {
+        PluginSpec::new(plugin_id)
+            .tier(Tier::T3)
+            .sides(&[Side::Server, Side::Client])
+            .startup()
+    }
+
+    #[test]
+    fn fresh_host_has_no_activations() {
+        let host = LifeHost::new();
+        assert!(host.activations().is_empty());
+    }
+
+    #[test]
+    fn fresh_host_has_no_state_changes_log_or_running_plugins() {
+        let host = LifeHost::new();
+        assert!(host.state_changes().is_empty());
+        assert!(host.log().is_empty());
+        assert!(host.running_plugins().is_empty());
+        assert!(host.start_order().is_empty());
+        assert!(host.banner().is_empty());
+    }
+
+    #[test]
+    fn default_host_is_equivalent_to_new() {
+        let host = LifeHost::default();
+        assert!(host.running_plugins().is_empty());
+        assert_eq!(host.safe_mode(), SafeMode::Off);
+    }
+
+    #[test]
+    fn peak_concurrency_is_zero_on_fresh_host() {
+        let host = LifeHost::new();
+        assert_eq!(host.peak_concurrent_activations(Side::Server), 0);
+        assert_eq!(host.peak_concurrent_deactivations(), 0);
+    }
+
+    #[test]
+    fn pool_without_sessions_reports_no_memory_in_use() {
+        let host = LifeHost::new().with_pool_mib(64);
+        assert_eq!(host.session_pool_used_mib(), 0);
+    }
+
+    #[test]
+    fn try_install_accepts_a_valid_spec() {
+        let mut host = LifeHost::new();
+        assert!(host.try_install(server_plugin("core.alpha")).is_ok());
+    }
+
+    #[test]
+    fn try_install_rejects_an_empty_plugin_id() {
+        let mut host = LifeHost::new();
+        assert!(host.try_install(PluginSpec::new("")).is_err());
+    }
+
+    #[test]
+    fn try_install_manifest_key_rejects_an_empty_key() {
+        let mut host = LifeHost::new();
+        host.install(server_plugin("core.alpha"));
+        let result = host.try_install_manifest_key("core.alpha", "", "\"1.0.0\"");
+        assert!(result.is_err());
+    }
+
+    /// REQ: LIF-001
+    #[test]
+    fn installed_plugin_has_exactly_one_package_state() {
+        let mut host = LifeHost::new();
+        host.install(server_plugin("core.alpha"));
+        assert_eq!(host.package_state("core.alpha"), PackageState::InstalledEnabled);
+    }
+
+    #[test]
+    fn forced_package_state_is_reported_back() {
+        let mut host = LifeHost::new();
+        host.install(server_plugin("core.alpha"));
+        host.force_package_state("core.alpha", PackageState::DisabledByPolicy);
+        assert_eq!(host.package_state("core.alpha"), PackageState::DisabledByPolicy);
+    }
+
+    #[test]
+    fn start_no_plugins_starts_nothing() {
+        let mut host = LifeHost::new();
+        host.install(server_plugin("core.alpha"));
+        let report = host.start(StartMode::NoPlugins);
+        assert!(report.started.is_empty());
+        assert!(report.failed.is_empty());
+        assert!(host.running_plugins().is_empty());
+    }
+
+    #[test]
+    fn normal_start_reports_the_startup_plugin_as_started() {
+        let mut host = LifeHost::new();
+        host.install(server_plugin("core.alpha"));
+        let report = host.start(StartMode::Normal);
+        assert_eq!(report.started, vec!["core.alpha".to_string()]);
+        assert!(report.failed.is_empty());
+    }
+
+    /// REQ: LIF-004
+    #[test]
+    fn safe_mode_is_not_written_to_installed_json() {
+        let mut host = LifeHost::new();
+        host.install(server_plugin("core.alpha"));
+        host.start_safe(SafeMode::ThirdParty, None, None);
+        assert_eq!(host.safe_mode(), SafeMode::ThirdParty);
+        let installed = host.installed_json().to_string();
+        assert!(!installed.contains("disabled-by-policy"));
+    }
+
+    #[test]
+    fn activation_records_have_ordered_begin_and_end_readings() {
+        let mut host = LifeHost::new();
+        host.install(server_plugin("core.alpha"));
+        host.start(StartMode::Normal);
+        let records = host.activations();
+        assert!(!records.is_empty());
+        for record in &records {
+            assert!(record.begin_ms <= record.end_ms);
+            assert!(record.begin_seq < record.end_seq);
+        }
+    }
+
+    /// REQ: LIF-014
+    #[test]
+    fn shutdown_sends_exactly_one_deactivate_per_live_server_instance() {
+        let mut host = LifeHost::new();
+        host.install(server_plugin("core.alpha"));
+        host.start(StartMode::Normal);
+        host.shutdown();
+        assert_eq!(host.all_deactivations("core.alpha").len(), 1);
+    }
+
+    /// REQ: LIF-015
+    #[test]
+    fn clean_client_disconnect_sends_only_a_shutdown_deactivate() {
+        let mut host = LifeHost::new();
+        host.install(client_plugin("ui.gamma"));
+        host.start(StartMode::Normal);
+        let scope = host.attach_client("c1");
+        assert!(!scope.is_empty());
+        host.detach_client("c1");
+        assert_eq!(
+            host.client_deactivations("ui.gamma", "c1"),
+            vec![DeactivationReason::Shutdown]
+        );
+        assert!(host.deactivations("ui.gamma").is_empty());
+    }
+
+    /// REQ: LIF-016
+    #[test]
+    fn state_changes_of_one_side_chain_from_each_previous_state() {
+        let mut host = LifeHost::new();
+        host.install(server_plugin("core.alpha"));
+        host.start(StartMode::Normal);
+        host.shutdown();
+        let changes: Vec<_> = host
+            .state_changes()
+            .into_iter()
+            .filter(|change| change.plugin == "core.alpha" && change.side == Side::Server)
+            .collect();
+        assert!(!changes.is_empty());
+        for pair in changes.windows(2) {
+            assert_eq!(pair[0].to, pair[1].from);
+        }
+    }
+
+    /// REQ: LIF-016
+    #[test]
+    fn state_change_wall_clock_never_goes_backwards() {
+        let mut host = LifeHost::new();
+        host.install(server_plugin("core.alpha"));
+        host.start(StartMode::Normal);
+        host.shutdown();
+        let times: Vec<u64> = host.state_changes().iter().map(|c| c.at_unix_ms).collect();
+        for pair in times.windows(2) {
+            assert!(pair[0] <= pair[1]);
+        }
+    }
+
+    /// REQ: LIF-053
+    #[test]
+    fn consumer_sees_availability_loss_when_provider_is_uninstalled() {
+        let mut host = LifeHost::new();
+        host.install(
+            PluginSpec::new("svc.provider")
+                .tier(Tier::T3)
+                .sides(&[Side::Server])
+                .provides_service("svc.clock")
+                .startup(),
+        );
+        host.install(
+            PluginSpec::new("ui.consumer")
+                .tier(Tier::T3)
+                .sides(&[Side::Client])
+                .requires_service("svc.clock")
+                .startup(),
+        );
+        host.start(StartMode::Normal);
+        host.uninstall("svc.provider");
+        let events = host.service_events("ui.consumer");
+        assert!(events.iter().any(|event| {
+            event.interface == "svc.clock" && !event.available && event.provider == "svc.provider"
+        }));
+    }
+
+    #[test]
+    fn calling_an_unprovided_service_is_an_error() {
+        let mut host = LifeHost::new();
+        host.install(client_plugin("ui.consumer"));
+        host.start(StartMode::Normal);
+        assert!(host.call_service("ui.consumer", "svc.missing").is_err());
+    }
+
+    #[test]
+    fn advancing_the_manual_clock_by_zero_leaves_the_wall_clock_unchanged() {
+        let mut host = LifeHost::new();
+        let before = host.unix_ms();
+        host.advance_ms(0);
+        assert_eq!(host.unix_ms(), before);
+    }
+
+    #[test]
+    fn advancing_the_manual_clock_moves_the_wall_clock_by_the_given_amount() {
+        let mut host = LifeHost::new();
+        let before = host.unix_ms();
+        host.advance_ms(1_500);
+        assert_eq!(host.unix_ms(), before + 1_500);
+    }
+
+    /// REQ: LIF-002
+    #[test]
+    fn three_client_traps_stop_only_the_client_side() {
+        let mut host = LifeHost::new();
+        host.install(server_and_client_plugin("core.alpha"));
+        host.start(StartMode::Normal);
+        let scope = host.attach_client("c1");
+        for _ in 0..3 {
+            host.fail("core.alpha", Side::Client, &scope, FailureKind::Trap);
+        }
+        assert_eq!(
+            host.side("core.alpha", Side::Client, &scope).state,
+            InstanceState::StoppedByFailure
+        );
+        assert_eq!(
+            host.side("core.alpha", Side::Server, "server").state,
+            InstanceState::Active
+        );
+    }
+
+    /// REQ: LIF-025
+    #[test]
+    fn two_traps_on_one_client_count_twice_in_its_window() {
+        let mut host = LifeHost::new();
+        host.install(server_and_client_plugin("core.alpha"));
+        host.start(StartMode::Normal);
+        let scope = host.attach_client("c1");
+        host.fail("core.alpha", Side::Client, &scope, FailureKind::Trap);
+        host.fail("core.alpha", Side::Client, &scope, FailureKind::Trap);
+        assert_eq!(
+            host.side("core.alpha", Side::Client, &scope).failures_in_window,
+            2
+        );
+    }
+
+    /// REQ: LIF-008
+    #[test]
+    fn server_failure_stop_is_written_to_installed_json() {
+        let mut host = LifeHost::new();
+        host.install(server_plugin("core.alpha"));
+        host.start(StartMode::Normal);
+        for _ in 0..3 {
+            host.fail("core.alpha", Side::Server, "server", FailureKind::Trap);
+        }
+        assert!(host.installed_json().to_string().contains("failure_stopped"));
+    }
+
+    /// REQ: LIF-010
+    #[test]
+    fn failing_first_activation_of_a_candidate_keeps_the_previous_version() {
+        let mut host = LifeHost::new();
+        host.install(server_plugin("core.alpha"));
+        host.start(StartMode::Normal);
+        host.update_candidate_fails("core.alpha", "2.0.0");
+        assert_ne!(host.active_version("core.alpha", Side::Server), "2.0.0");
+        assert_ne!(host.package_state("core.alpha"), PackageState::UpdateStaged);
+    }
+
+    /// REQ: LIF-020
+    #[test]
+    fn a_begun_disable_is_not_finished_until_completed() {
+        let mut host = LifeHost::new();
+        host.install(server_plugin("core.alpha"));
+        host.start(StartMode::Normal);
+        let pending = host.begin_disable("core.alpha");
+        assert!(!pending.finished());
+    }
+
+    /// REQ: LIF-020
+    #[test]
+    fn disable_racing_uninstall_settles_on_one_package_state() {
+        let mut host = LifeHost::new();
+        host.install(server_plugin("core.alpha"));
+        host.start(StartMode::Normal);
+        host.race_disable_and_uninstall("core.alpha");
+        assert!(matches!(
+            host.package_state("core.alpha"),
+            PackageState::NotInstalled | PackageState::InstalledDisabledByUser
+        ));
+    }
+
+    /// REQ: LIF-133
+    #[test]
+    fn helper_crash_counts_one_helper_restart() {
+        let mut host = LifeHost::new();
+        host.install(server_plugin("core.alpha"));
+        host.start(StartMode::Normal);
+        host.helper_crash("core.alpha", &[]);
+        assert_eq!(host.helper_restarts(), 1);
+    }
+
+    #[test]
+    fn fresh_host_has_no_helper_restarts() {
+        let host = LifeHost::new();
+        assert_eq!(host.helper_restarts(), 0);
+    }
+
+    /// REQ: LIF-143
+    #[test]
+    fn effective_limit_comes_from_the_tier_default_until_a_user_sets_one() {
+        let mut host = LifeHost::new();
+        host.install(server_plugin("core.alpha"));
+        let (_, source) = host.effective_limit("core.alpha", LimitKey::MemoryMib);
+        assert_eq!(source, LimitSource::Default);
+        host.set_user_limit(Some("core.alpha"), LimitKey::MemoryMib, 32);
+        assert_eq!(
+            host.effective_limit("core.alpha", LimitKey::MemoryMib),
+            (32, LimitSource::User)
+        );
+    }
+
+    #[test]
+    fn zero_work_call_is_not_trapped_and_takes_no_time() {
+        let mut host = LifeHost::new();
+        host.install(server_plugin("core.alpha"));
+        host.start(StartMode::Normal);
+        let result = host.run_call("core.alpha", 100, 0, 0, 0);
+        assert!(!result.trapped);
+        assert_eq!(result.elapsed_ms, 0);
+    }
+
+    #[test]
+    fn hook_chain_with_no_handlers_passes_zero_times() {
+        let mut host = LifeHost::new();
+        let result = host.call_hook("core.alpha", "ilium.core.none/point");
+        assert_eq!(result.passes, 0);
+    }
+
+    #[test]
+    fn requests_of_an_unknown_plugin_have_no_outcomes() {
+        let host = LifeHost::new();
+        assert!(host.request_outcomes("core.alpha").is_empty());
+    }
+
+    #[test]
+    fn delivering_zero_events_leaves_the_queue_and_drop_count_empty() {
+        let mut host = LifeHost::new();
+        host.install(server_plugin("core.alpha"));
+        host.start(StartMode::Normal);
+        host.deliver_event("core.alpha", Side::Server, "server", 0);
+        assert_eq!(host.queued_events("core.alpha", Side::Server), 0);
+        assert_eq!(host.dropped_events("core.alpha", Side::Server), 0);
+    }
+
+    #[test]
+    fn drained_cpu_bucket_is_not_positive() {
+        let mut host = LifeHost::new();
+        host.install(server_plugin("core.alpha"));
+        host.start(StartMode::Normal);
+        host.drain_bucket("core.alpha");
+        assert!(host.bucket_balance_ms("core.alpha") <= 0);
+    }
+
+    #[test]
+    fn health_of_a_plugin_that_was_never_installed_is_not_healthy() {
+        let host = LifeHost::new();
+        assert_ne!(host.health("core.alpha"), HealthState::Healthy);
+    }
+}

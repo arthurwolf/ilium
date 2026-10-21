@@ -415,3 +415,716 @@ impl Default for MigrationRig {
         MigrationRig::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use ilium_plugin_api::{ErrorCode, PluginError};
+
+    use super::{Bucket, MigServer, MigrateScope, MigrationRig, PluginSpec, Step};
+    use crate::cli::CliOutput;
+
+    const PLUGIN_ID: &str = "dev.ilium.migration-fixture";
+    const OLD_VERSION: &str = "1.0.0";
+    const NEW_VERSION: &str = "2.0.0";
+    const FOUR_MIB: usize = 4 * 1024 * 1024;
+    const LARGE_QUOTA: u64 = 64 * 1024 * 1024;
+
+    fn plugin_error(code: ErrorCode, message: &str) -> PluginError {
+        PluginError {
+            code,
+            message: message.to_string(),
+            retry_after_ms: None,
+        }
+    }
+
+    fn assert_succeeded(output: &CliOutput) {
+        assert_eq!(output.exit_code, 0, "command failed: {}", output.stderr);
+    }
+
+    fn assert_refused_with(output: &CliOutput, code: &str) {
+        assert_ne!(output.exit_code, 0, "command was accepted");
+        let mentioned = output.stderr.contains(code) || output.stdout_raw.contains(code);
+        assert!(mentioned, "refusal does not name {code}: {}", output.stderr);
+    }
+
+    fn install_v1(rig: &MigrationRig, data_version: u32) {
+        let spec = PluginSpec::new(PLUGIN_ID, OLD_VERSION).data_version(data_version);
+        assert_succeeded(&rig.install(&spec));
+    }
+
+    fn update_to_v2(rig: &MigrationRig, data_version: u32, steps: Vec<Step>) -> CliOutput {
+        let spec = PluginSpec::new(PLUGIN_ID, NEW_VERSION)
+            .data_version(data_version)
+            .migrator(steps);
+        rig.update(&spec, &[])
+    }
+
+    fn count_calls(rig: &MigrationRig, scope: &MigrateScope, from: u32, to: u32) -> usize {
+        rig.migrate_calls(PLUGIN_ID)
+            .iter()
+            .filter(|call| call.from == from && call.to == to && call.scope == *scope)
+            .count()
+    }
+
+    fn session_scope(project: &str, session: &str) -> MigrateScope {
+        MigrateScope::Session {
+            project: project.to_string(),
+            session: session.to_string(),
+        }
+    }
+
+    fn only_backup_name(rig: &MigrationRig) -> String {
+        let backups = rig.backups(PLUGIN_ID);
+        assert_eq!(backups.len(), 1, "expected exactly one backup, found {backups:?}");
+        backups[0].clone()
+    }
+
+    fn is_stale_data_version(error: Option<PluginError>) -> bool {
+        matches!(
+            error,
+            Some(PluginError { code: ErrorCode::Conflict, message, .. })
+                if message == "stale-data-version"
+        )
+    }
+
+    /// Two sessions of one project. `stale` stays on version 1 while `fresh` migrates the
+    /// project and global stamps to version 3.
+    fn stale_and_fresh_servers(rig: &MigrationRig) -> (MigServer, MigServer) {
+        let stale = rig.server("stale", "/projects/alpha", "s1");
+        let fresh = rig.server("fresh", "/projects/alpha", "s2");
+        install_v1(rig, 1);
+        stale.activate(PLUGIN_ID);
+        fresh.activate(PLUGIN_ID);
+        assert_succeeded(&update_to_v2(rig, 3, vec![]));
+        fresh.upgrade(PLUGIN_ID);
+        (stale, fresh)
+    }
+
+    /// REQ: LIF-100
+    #[test]
+    fn manifest_data_version_zero_is_refused() {
+        let rig = MigrationRig::new();
+        let output = rig.install(&PluginSpec::new(PLUGIN_ID, OLD_VERSION).data_version(0));
+        assert_refused_with(&output, "manifest.data-version");
+    }
+
+    /// REQ: LIF-100
+    #[test]
+    fn manifest_data_version_string_is_refused() {
+        let rig = MigrationRig::new();
+        let output = rig.install(
+            &PluginSpec::new(PLUGIN_ID, OLD_VERSION).data_version_json("\"2\""),
+        );
+        assert_refused_with(&output, "manifest.data-version");
+    }
+
+    /// REQ: LIF-100
+    #[test]
+    fn manifest_data_version_upper_bound_is_accepted() {
+        let rig = MigrationRig::new();
+        let output = rig.install(
+            &PluginSpec::new(PLUGIN_ID, OLD_VERSION).data_version(u32::MAX),
+        );
+        assert_succeeded(&output);
+    }
+
+    /// REQ: LIF-100
+    #[test]
+    fn absent_data_version_stamps_bucket_as_one() {
+        let rig = MigrationRig::new();
+        assert_succeeded(&rig.install(&PluginSpec::new(PLUGIN_ID, OLD_VERSION)));
+        let server = rig.server("main", "/projects/alpha", "default");
+        server.activate(PLUGIN_ID);
+        assert!(server.storage(PLUGIN_ID).put(Bucket::Global, "key", b"value").is_ok());
+        assert_eq!(rig.stamp(PLUGIN_ID, Bucket::Global), Some(1));
+    }
+
+    /// REQ: LIF-101
+    #[test]
+    fn stamp_is_readable_after_successful_migration() {
+        let rig = MigrationRig::new();
+        let server = rig.server("main", "/projects/alpha", "default");
+        install_v1(&rig, 1);
+        server.activate(PLUGIN_ID);
+        assert!(server.storage(PLUGIN_ID).put(Bucket::Global, "key", b"value").is_ok());
+        assert_succeeded(&update_to_v2(&rig, 3, vec![]));
+        server.upgrade(PLUGIN_ID);
+        assert_eq!(rig.stamp(PLUGIN_ID, Bucket::Global), Some(3));
+        assert_eq!(rig.data_dir_stamp(PLUGIN_ID), Some(3));
+    }
+
+    /// REQ: LIF-102
+    #[test]
+    fn unstamped_bucket_is_stamped_at_first_write_without_migration() {
+        let rig = MigrationRig::new();
+        let server = rig.server("main", "/projects/alpha", "default");
+        assert_succeeded(&rig.install(&PluginSpec::new(PLUGIN_ID, OLD_VERSION).data_version(4)));
+        server.activate(PLUGIN_ID);
+        assert!(server.storage(PLUGIN_ID).put(Bucket::Global, "key", b"value").is_ok());
+        assert_eq!(rig.stamp(PLUGIN_ID, Bucket::Global), Some(4));
+        assert!(rig.migrate_calls(PLUGIN_ID).is_empty());
+    }
+
+    /// REQ: LIF-103
+    #[test]
+    fn restore_bytes_dropped_when_data_version_changes() {
+        let rig = MigrationRig::new();
+        let server = rig.server("main", "/projects/alpha", "default");
+        let spec = PluginSpec::new(PLUGIN_ID, OLD_VERSION)
+            .data_version(1)
+            .restore_bytes(b"blob".to_vec());
+        assert_succeeded(&rig.install(&spec));
+        server.activate(PLUGIN_ID);
+        assert_succeeded(&update_to_v2(&rig, 2, vec![]));
+        let report = server.upgrade(PLUGIN_ID);
+        assert_eq!(report.restored, None);
+        assert!(rig.log_line("restore.dropped-data-version").is_some());
+    }
+
+    /// REQ: LIF-103
+    #[test]
+    fn restore_bytes_kept_when_data_version_is_unchanged() {
+        let rig = MigrationRig::new();
+        let server = rig.server("main", "/projects/alpha", "default");
+        let spec = PluginSpec::new(PLUGIN_ID, OLD_VERSION)
+            .data_version(1)
+            .restore_bytes(b"blob".to_vec());
+        assert_succeeded(&rig.install(&spec));
+        server.activate(PLUGIN_ID);
+        assert_succeeded(&update_to_v2(&rig, 1, vec![]));
+        let report = server.upgrade(PLUGIN_ID);
+        assert_eq!(report.restored, Some(b"blob".to_vec()));
+    }
+
+    /// REQ: LIF-104
+    #[test]
+    fn migrate_runs_once_per_bucket_scope_per_update() {
+        let rig = MigrationRig::new();
+        let first = rig.server("a", "/projects/alpha", "s1");
+        let second = rig.server("b", "/projects/beta", "s2");
+        install_v1(&rig, 1);
+        first.activate(PLUGIN_ID);
+        second.activate(PLUGIN_ID);
+        assert!(first.storage(PLUGIN_ID).put(Bucket::Session, "key", b"a").is_ok());
+        assert!(second.storage(PLUGIN_ID).put(Bucket::Session, "key", b"b").is_ok());
+        assert_succeeded(&update_to_v2(&rig, 3, vec![]));
+        first.upgrade(PLUGIN_ID);
+        second.upgrade(PLUGIN_ID);
+        first.activate(PLUGIN_ID);
+        assert_eq!(count_calls(&rig, &MigrateScope::Global, 1, 3), 1);
+        assert_eq!(count_calls(&rig, &session_scope("/projects/alpha", "s1"), 1, 3), 1);
+        assert_eq!(count_calls(&rig, &session_scope("/projects/beta", "s2"), 1, 3), 1);
+    }
+
+    /// REQ: LIF-104
+    #[test]
+    fn migrate_skipped_when_data_version_is_unchanged() {
+        let rig = MigrationRig::new();
+        let server = rig.server("main", "/projects/alpha", "default");
+        install_v1(&rig, 2);
+        server.activate(PLUGIN_ID);
+        let steps = vec![Step::Put(Bucket::Global, "key".to_string(), b"new".to_vec())];
+        assert_succeeded(&update_to_v2(&rig, 2, steps));
+        server.upgrade(PLUGIN_ID);
+        assert!(rig.migrate_calls(PLUGIN_ID).is_empty());
+    }
+
+    /// REQ: LIF-105
+    #[test]
+    fn migrate_error_does_not_count_toward_failure_window() {
+        let rig = MigrationRig::new();
+        let server = rig.server("main", "/projects/alpha", "default");
+        install_v1(&rig, 1);
+        server.activate(PLUGIN_ID);
+        let steps = vec![Step::Fail(plugin_error(ErrorCode::Internal, "boom"))];
+        assert_succeeded(&update_to_v2(&rig, 3, steps));
+        let report = server.upgrade(PLUGIN_ID);
+        assert!(report.rolled_back);
+        assert_eq!(rig.failures_in_window(PLUGIN_ID), 0);
+        assert!(rig.migrate_calls(PLUGIN_ID).iter().any(|call| !call.returned_ok));
+    }
+
+    /// REQ: LIF-105
+    #[test]
+    fn migrate_trap_does_not_count_toward_failure_window() {
+        let rig = MigrationRig::new();
+        let server = rig.server("main", "/projects/alpha", "default");
+        install_v1(&rig, 1);
+        server.activate(PLUGIN_ID);
+        assert_succeeded(&update_to_v2(&rig, 3, vec![Step::Trap]));
+        let report = server.upgrade(PLUGIN_ID);
+        assert!(report.rolled_back);
+        assert_eq!(rig.failures_in_window(PLUGIN_ID), 0);
+    }
+
+    /// REQ: LIF-105
+    #[test]
+    fn migrate_deadline_miss_does_not_count_toward_failure_window() {
+        let rig = MigrationRig::new();
+        let server = rig.server("main", "/projects/alpha", "default");
+        install_v1(&rig, 1);
+        server.activate(PLUGIN_ID);
+        let spec = PluginSpec::new(PLUGIN_ID, NEW_VERSION)
+            .data_version(3)
+            .migrator(vec![Step::Hang])
+            .migrate_deadline_ms(50);
+        assert_succeeded(&rig.update(&spec, &[]));
+        let report = server.upgrade(PLUGIN_ID);
+        assert!(report.rolled_back);
+        assert_eq!(rig.failures_in_window(PLUGIN_ID), 0);
+    }
+
+    /// REQ: LIF-106
+    #[test]
+    fn migrate_called_twice_with_same_arguments_leaves_same_data() {
+        let rig = MigrationRig::new();
+        let server = rig.server("main", "/projects/alpha", "default");
+        install_v1(&rig, 1);
+        server.activate(PLUGIN_ID);
+        assert!(server.storage(PLUGIN_ID).put(Bucket::Global, "key", b"old").is_ok());
+        let steps = vec![Step::Put(Bucket::Global, "key".to_string(), b"new".to_vec())];
+        assert_succeeded(&update_to_v2(&rig, 3, steps));
+        assert!(server.call_migrate(PLUGIN_ID, 1, 3).is_ok());
+        let after_first = server.storage(PLUGIN_ID).dump(Bucket::Global);
+        assert!(server.call_migrate(PLUGIN_ID, 1, 3).is_ok());
+        let after_second = server.storage(PLUGIN_ID).dump(Bucket::Global);
+        assert_eq!(after_first, after_second);
+        assert_eq!(after_second.get("key"), Some(&b"new".to_vec()));
+    }
+
+    /// REQ: LIF-107
+    #[test]
+    fn backup_taken_before_migrate_uses_timestamped_name() {
+        let rig = MigrationRig::new();
+        let server = rig.server("main", "/projects/alpha", "default");
+        install_v1(&rig, 1);
+        server.activate(PLUGIN_ID);
+        assert!(server.storage(PLUGIN_ID).put(Bucket::Global, "key", b"old").is_ok());
+        assert_succeeded(&update_to_v2(&rig, 3, vec![]));
+        server.upgrade(PLUGIN_ID);
+        let name = only_backup_name(&rig);
+        let timestamp = name.rsplit('-').next().unwrap_or_default();
+        assert_eq!(timestamp.len(), 16, "timestamp in {name}");
+        assert!(timestamp.ends_with('Z'));
+        assert_eq!(timestamp.as_bytes()[8], b'T');
+        assert!(timestamp[..8].bytes().all(|byte| byte.is_ascii_digit()));
+        let global = rig.backup_dump(PLUGIN_ID, &name, Bucket::Global);
+        assert_eq!(global.get("key"), Some(&b"old".to_vec()));
+    }
+
+    /// REQ: LIF-107
+    #[test]
+    fn zero_backup_cap_disables_backups() {
+        let rig = MigrationRig::new();
+        rig.config("[plugins]\nmigration_backup_mib = 0\n");
+        let server = rig.server("main", "/projects/alpha", "default");
+        install_v1(&rig, 1);
+        server.activate(PLUGIN_ID);
+        assert_succeeded(&update_to_v2(&rig, 3, vec![]));
+        server.upgrade(PLUGIN_ID);
+        assert!(rig.backups(PLUGIN_ID).is_empty());
+    }
+
+    /// REQ: LIF-107
+    #[test]
+    fn update_refused_with_no_space_before_touching_data() {
+        let rig = MigrationRig::new();
+        let server = rig.server("main", "/projects/alpha", "default");
+        install_v1(&rig, 1);
+        server.activate(PLUGIN_ID);
+        assert!(server.storage(PLUGIN_ID).put(Bucket::Global, "key", b"old").is_ok());
+        rig.set_free_bytes(0);
+        let output = update_to_v2(&rig, 3, vec![]);
+        assert_ne!(output.exit_code, 0);
+        assert!(rig.log_codes().iter().any(|code| code == "install.no-space"));
+        assert_eq!(rig.stamp(PLUGIN_ID, Bucket::Global), Some(1));
+    }
+
+    /// REQ: LIF-108
+    #[test]
+    fn failed_migration_restores_backup_keeps_old_version_and_stamp() {
+        let rig = MigrationRig::new();
+        let server = rig.server("main", "/projects/alpha", "default");
+        install_v1(&rig, 1);
+        server.activate(PLUGIN_ID);
+        assert!(server.storage(PLUGIN_ID).put(Bucket::Global, "a", b"old").is_ok());
+        assert!(server.storage(PLUGIN_ID).put(Bucket::Global, "b", b"old").is_ok());
+        let steps = vec![
+            Step::Put(Bucket::Global, "a".to_string(), b"half".to_vec()),
+            Step::Fail(plugin_error(ErrorCode::Internal, "half-written")),
+        ];
+        assert_succeeded(&update_to_v2(&rig, 3, steps));
+        let report = server.upgrade(PLUGIN_ID);
+        assert!(report.rolled_back);
+        assert_eq!(report.active_version, OLD_VERSION);
+        let name = only_backup_name(&rig);
+        assert_eq!(
+            server.storage(PLUGIN_ID).dump(Bucket::Global),
+            rig.backup_dump(PLUGIN_ID, &name, Bucket::Global)
+        );
+        assert_eq!(rig.stamp(PLUGIN_ID, Bucket::Global), Some(1));
+        let rendered = rig
+            .log_line("migration.failed")
+            .map(|record| record.to_string())
+            .unwrap_or_default();
+        assert!(rendered.contains("half-written"), "log record: {rendered}");
+    }
+
+    /// REQ: LIF-109
+    #[test]
+    fn only_newest_backup_kept_after_two_successful_updates() {
+        let rig = MigrationRig::new();
+        let server = rig.server("main", "/projects/alpha", "default");
+        install_v1(&rig, 1);
+        server.activate(PLUGIN_ID);
+        rig.set_clock_utc("2026-10-21T10:00:00Z");
+        assert_succeeded(&update_to_v2(&rig, 2, vec![]));
+        server.upgrade(PLUGIN_ID);
+        rig.set_clock_utc("2026-10-21T11:00:00Z");
+        assert_succeeded(&update_to_v2(&rig, 3, vec![]));
+        server.upgrade(PLUGIN_ID);
+        let name = only_backup_name(&rig);
+        assert!(name.ends_with("20261021T110000Z"), "kept backup {name}");
+    }
+
+    /// REQ: LIF-110
+    #[test]
+    fn interrupted_migration_is_rerun_from_backup_on_next_start() {
+        let rig = MigrationRig::new();
+        let server = rig.server("main", "/projects/alpha", "default");
+        install_v1(&rig, 1);
+        server.activate(PLUGIN_ID);
+        assert!(server.storage(PLUGIN_ID).put(Bucket::Global, "key", b"old").is_ok());
+        let steps = vec![Step::KillHostFirstRun];
+        assert_succeeded(&update_to_v2(&rig, 3, steps));
+        let report = server.upgrade(PLUGIN_ID);
+        assert!(report.killed);
+        let restarted = rig.restart_server(&server);
+        assert!(restarted.is_running());
+        assert_eq!(rig.stamp(PLUGIN_ID, Bucket::Global), Some(3));
+    }
+
+    /// REQ: LIF-110
+    #[test]
+    fn second_interrupted_migration_rolls_back_and_marks_skip() {
+        let rig = MigrationRig::new();
+        let server = rig.server("main", "/projects/alpha", "default");
+        install_v1(&rig, 1);
+        server.activate(PLUGIN_ID);
+        assert_succeeded(&update_to_v2(&rig, 3, vec![Step::KillHost]));
+        let report = server.upgrade(PLUGIN_ID);
+        assert!(report.killed);
+        let second = rig.restart_server(&server);
+        let third = rig.restart_server(&second);
+        assert!(third.is_running());
+        assert!(rig.log_line("migration.interrupted").is_some());
+        assert!(rig.registry_json().to_string().contains("\"skip\""));
+        assert_eq!(rig.stamp(PLUGIN_ID, Bucket::Global), Some(1));
+    }
+
+    /// REQ: LIF-111
+    #[test]
+    fn rollback_below_stamp_refused_without_flags() {
+        let rig = MigrationRig::new();
+        let server = rig.server("main", "/projects/alpha", "default");
+        install_v1(&rig, 1);
+        server.activate(PLUGIN_ID);
+        assert_succeeded(&update_to_v2(&rig, 3, vec![]));
+        server.upgrade(PLUGIN_ID);
+        let output = rig.rollback(PLUGIN_ID, &[]);
+        assert_refused_with(&output, "migration.data-newer");
+        assert_eq!(rig.stamp(PLUGIN_ID, Bucket::Global), Some(3));
+    }
+
+    /// REQ: LIF-111
+    #[test]
+    fn rollback_with_restore_backup_restores_previous_contents() {
+        let rig = MigrationRig::new();
+        let server = rig.server("main", "/projects/alpha", "default");
+        install_v1(&rig, 1);
+        server.activate(PLUGIN_ID);
+        assert!(server.storage(PLUGIN_ID).put(Bucket::Global, "key", b"old").is_ok());
+        assert_succeeded(&update_to_v2(&rig, 3, vec![]));
+        server.upgrade(PLUGIN_ID);
+        assert_succeeded(&rig.rollback(PLUGIN_ID, &["--restore-backup"]));
+        assert_eq!(rig.stamp(PLUGIN_ID, Bucket::Global), Some(1));
+        assert_eq!(server.storage(PLUGIN_ID).get(Bucket::Global, "key"), Some(b"old".to_vec()));
+    }
+
+    /// REQ: LIF-111
+    #[test]
+    fn rollback_with_discard_data_deletes_buckets_and_data_dir() {
+        let rig = MigrationRig::new();
+        let server = rig.server("main", "/projects/alpha", "default");
+        install_v1(&rig, 1);
+        server.activate(PLUGIN_ID);
+        rig.write_data_file(PLUGIN_ID, "data.bin", b"x");
+        assert_succeeded(&update_to_v2(&rig, 3, vec![]));
+        server.upgrade(PLUGIN_ID);
+        assert_succeeded(&rig.rollback(PLUGIN_ID, &["--discard-data"]));
+        assert_eq!(rig.stamp(PLUGIN_ID, Bucket::Global), None);
+        assert!(rig.data_dir_files(PLUGIN_ID).is_empty());
+    }
+
+    /// REQ: LIF-112
+    #[test]
+    fn global_migration_runs_once_across_two_servers() {
+        let rig = MigrationRig::new();
+        let first = rig.server("a", "/projects/alpha", "s1");
+        let second = rig.server("b", "/projects/beta", "s2");
+        install_v1(&rig, 1);
+        first.activate(PLUGIN_ID);
+        second.activate(PLUGIN_ID);
+        assert_succeeded(&update_to_v2(&rig, 3, vec![]));
+        first.upgrade(PLUGIN_ID);
+        second.upgrade(PLUGIN_ID);
+        assert_eq!(count_calls(&rig, &MigrateScope::Global, 1, 3), 1);
+        assert_eq!(rig.stamp(PLUGIN_ID, Bucket::Global), Some(3));
+    }
+
+    /// REQ: LIF-113
+    #[test]
+    fn writes_from_stale_instance_conflict_on_global_and_project_buckets() {
+        let rig = MigrationRig::new();
+        let (stale, _fresh) = stale_and_fresh_servers(&rig);
+        let storage = stale.storage(PLUGIN_ID);
+        assert!(is_stale_data_version(storage.put(Bucket::Global, "key", b"x").err()));
+        assert!(is_stale_data_version(storage.put(Bucket::Project, "key", b"x").err()));
+    }
+
+    /// REQ: LIF-114
+    #[test]
+    fn each_project_and_session_migrates_once_in_its_own_session() {
+        let rig = MigrationRig::new();
+        let alpha = rig.server("a", "/projects/alpha", "s1");
+        let beta = rig.server("b", "/projects/beta", "s2");
+        install_v1(&rig, 1);
+        alpha.activate(PLUGIN_ID);
+        beta.activate(PLUGIN_ID);
+        assert!(alpha.storage(PLUGIN_ID).put(Bucket::Session, "key", b"a").is_ok());
+        assert!(beta.storage(PLUGIN_ID).put(Bucket::Session, "key", b"b").is_ok());
+        assert_succeeded(&update_to_v2(&rig, 3, vec![]));
+        alpha.upgrade(PLUGIN_ID);
+        beta.upgrade(PLUGIN_ID);
+        assert_eq!(count_calls(&rig, &session_scope("/projects/alpha", "s1"), 1, 3), 1);
+        assert_eq!(count_calls(&rig, &session_scope("/projects/beta", "s2"), 1, 3), 1);
+    }
+
+    /// REQ: LIF-115
+    #[test]
+    fn put_is_flushed_before_return_and_survives_power_loss() {
+        let rig = MigrationRig::new();
+        let server = rig.server("main", "/projects/alpha", "default");
+        install_v1(&rig, 1);
+        server.activate(PLUGIN_ID);
+        assert!(server.storage(PLUGIN_ID).put(Bucket::Global, "key", b"durable").is_ok());
+        assert_eq!(rig.unflushed_bytes(PLUGIN_ID), 0);
+        rig.power_loss();
+        assert_eq!(
+            rig.read_after_power_loss(PLUGIN_ID, Bucket::Global, "key"),
+            Some(b"durable".to_vec())
+        );
+    }
+
+    /// REQ: LIF-116
+    #[test]
+    fn crash_between_data_file_writes_leaves_version_marker_old() {
+        let rig = MigrationRig::new();
+        let server = rig.server("main", "/projects/alpha", "default");
+        install_v1(&rig, 1);
+        server.activate(PLUGIN_ID);
+        rig.write_data_file(PLUGIN_ID, "set.bin", b"old-set");
+        rig.write_data_file(PLUGIN_ID, "set.version", b"1");
+        let steps = vec![
+            Step::WriteFile("set.bin".to_string(), b"new-set".to_vec()),
+            Step::KillHost,
+            Step::WriteFile("set.version".to_string(), b"3".to_vec()),
+        ];
+        assert_succeeded(&update_to_v2(&rig, 3, steps));
+        let report = server.upgrade(PLUGIN_ID);
+        assert!(report.killed);
+        assert_eq!(
+            rig.data_dir_files(PLUGIN_ID).get("set.version"),
+            Some(&b"1".to_vec())
+        );
+    }
+
+    /// REQ: LIF-117
+    #[test]
+    fn refused_batch_keeps_every_previous_value() {
+        let rig = MigrationRig::new();
+        let server = rig.server("main", "/projects/alpha", "default");
+        install_v1(&rig, 1);
+        server.activate(PLUGIN_ID);
+        rig.set_plugin_quota(PLUGIN_ID, Bucket::Global, 64);
+        let storage = server.storage(PLUGIN_ID);
+        assert!(storage.put(Bucket::Global, "a", b"x").is_ok());
+        let entries = vec![
+            ("b".to_string(), Some(vec![0u8; 4])),
+            ("c".to_string(), Some(vec![0u8; 100])),
+        ];
+        let error = storage.write_batch(Bucket::Global, &entries).err();
+        assert!(error.is_some_and(|error| error.code == ErrorCode::QuotaExceeded));
+        assert_eq!(storage.get(Bucket::Global, "a"), Some(b"x".to_vec()));
+        assert_eq!(storage.get(Bucket::Global, "b"), None);
+        assert_eq!(storage.get(Bucket::Global, "c"), None);
+    }
+
+    /// REQ: LIF-117
+    #[test]
+    fn batch_of_256_entries_is_accepted() {
+        let rig = MigrationRig::new();
+        let server = rig.server("main", "/projects/alpha", "default");
+        install_v1(&rig, 1);
+        server.activate(PLUGIN_ID);
+        rig.set_plugin_quota(PLUGIN_ID, Bucket::Global, LARGE_QUOTA);
+        let storage = server.storage(PLUGIN_ID);
+        let entries: Vec<(String, Option<Vec<u8>>)> = (0..256)
+            .map(|index| (format!("key-{index}"), Some(vec![1u8])))
+            .collect();
+        assert!(storage.write_batch(Bucket::Global, &entries).is_ok());
+        assert_eq!(storage.keys(Bucket::Global, "key-").len(), 256);
+    }
+
+    /// REQ: LIF-117
+    #[test]
+    fn batch_of_257_entries_is_invalid_argument() {
+        let rig = MigrationRig::new();
+        let server = rig.server("main", "/projects/alpha", "default");
+        install_v1(&rig, 1);
+        server.activate(PLUGIN_ID);
+        rig.set_plugin_quota(PLUGIN_ID, Bucket::Global, LARGE_QUOTA);
+        let storage = server.storage(PLUGIN_ID);
+        let entries: Vec<(String, Option<Vec<u8>>)> = (0..257)
+            .map(|index| (format!("key-{index}"), Some(vec![1u8])))
+            .collect();
+        let error = storage.write_batch(Bucket::Global, &entries).err();
+        assert!(error.is_some_and(|error| error.code == ErrorCode::InvalidArgument));
+        assert!(storage.keys(Bucket::Global, "key-").is_empty());
+    }
+
+    /// REQ: LIF-117
+    #[test]
+    fn batch_over_four_mib_of_key_and_value_bytes_is_invalid_argument() {
+        let rig = MigrationRig::new();
+        let server = rig.server("main", "/projects/alpha", "default");
+        install_v1(&rig, 1);
+        server.activate(PLUGIN_ID);
+        rig.set_plugin_quota(PLUGIN_ID, Bucket::Global, LARGE_QUOTA);
+        let storage = server.storage(PLUGIN_ID);
+        // Key "big" (3 bytes) plus a value of exactly 4 MiB is one byte over the 4 MiB total.
+        let entries = vec![("big".to_string(), Some(vec![0u8; FOUR_MIB]))];
+        let error = storage.write_batch(Bucket::Global, &entries).err();
+        assert!(error.is_some_and(|error| error.code == ErrorCode::InvalidArgument));
+        assert_eq!(storage.get(Bucket::Global, "big"), None);
+    }
+
+    /// REQ: LIF-118
+    #[test]
+    fn crash_during_batch_leaves_previous_value() {
+        let rig = MigrationRig::new();
+        let server = rig.server("main", "/projects/alpha", "default");
+        install_v1(&rig, 1);
+        server.activate(PLUGIN_ID);
+        let storage = server.storage(PLUGIN_ID);
+        assert!(storage.put(Bucket::Global, "key", b"old").is_ok());
+        rig.crash_during_next_write();
+        let entries = vec![("key".to_string(), Some(b"new".to_vec()))];
+        let _outcome = storage.write_batch(Bucket::Global, &entries);
+        rig.power_loss();
+        assert_eq!(
+            rig.read_after_power_loss(PLUGIN_ID, Bucket::Global, "key"),
+            Some(b"old".to_vec())
+        );
+    }
+
+    /// REQ: LIF-118
+    #[test]
+    fn remove_is_flushed_before_return() {
+        let rig = MigrationRig::new();
+        let server = rig.server("main", "/projects/alpha", "default");
+        install_v1(&rig, 1);
+        server.activate(PLUGIN_ID);
+        let storage = server.storage(PLUGIN_ID);
+        assert!(storage.put(Bucket::Global, "key", b"value").is_ok());
+        assert!(storage.remove(Bucket::Global, "key").is_ok());
+        assert_eq!(rig.unflushed_bytes(PLUGIN_ID), 0);
+        rig.power_loss();
+        assert_eq!(rig.read_after_power_loss(PLUGIN_ID, Bucket::Global, "key"), None);
+    }
+
+    /// REQ: LIF-119
+    #[test]
+    fn full_disk_put_returns_io_no_space_not_quota_exceeded() {
+        let rig = MigrationRig::new();
+        let server = rig.server("main", "/projects/alpha", "default");
+        install_v1(&rig, 1);
+        server.activate(PLUGIN_ID);
+        let storage = server.storage(PLUGIN_ID);
+        rig.fill_disk();
+        let error = storage.put(Bucket::Global, "key", b"value").err();
+        assert!(error.is_some_and(|error| error.code == ErrorCode::Io && error.message == "no-space"));
+        rig.free_disk();
+        assert!(storage.put(Bucket::Global, "key", b"value").is_ok());
+    }
+
+    /// REQ: LIF-119
+    #[test]
+    fn plugin_quota_breach_still_reports_quota_exceeded() {
+        let rig = MigrationRig::new();
+        let server = rig.server("main", "/projects/alpha", "default");
+        install_v1(&rig, 1);
+        server.activate(PLUGIN_ID);
+        rig.set_plugin_quota(PLUGIN_ID, Bucket::Global, 2);
+        let error = server.storage(PLUGIN_ID).put(Bucket::Global, "key", &[0u8; 10]).err();
+        assert!(error.is_some_and(|error| error.code == ErrorCode::QuotaExceeded));
+    }
+
+    /// REQ: LIF-120
+    #[test]
+    fn last_writer_wins_across_two_servers() {
+        let rig = MigrationRig::new();
+        let first = rig.server("a", "/projects/alpha", "s1");
+        let second = rig.server("b", "/projects/beta", "s2");
+        install_v1(&rig, 1);
+        first.activate(PLUGIN_ID);
+        second.activate(PLUGIN_ID);
+        assert!(first.storage(PLUGIN_ID).put(Bucket::Global, "key", b"from-first").is_ok());
+        assert!(second.storage(PLUGIN_ID).put(Bucket::Global, "key", b"from-second").is_ok());
+        assert_eq!(
+            first.storage(PLUGIN_ID).get(Bucket::Global, "key"),
+            Some(b"from-second".to_vec())
+        );
+    }
+
+    /// REQ: LIF-121
+    #[test]
+    fn stale_instance_put_remove_and_batch_all_conflict() {
+        let rig = MigrationRig::new();
+        let (stale, _fresh) = stale_and_fresh_servers(&rig);
+        let storage = stale.storage(PLUGIN_ID);
+        assert!(is_stale_data_version(storage.put(Bucket::Global, "key", b"x").err()));
+        assert!(is_stale_data_version(storage.remove(Bucket::Global, "key").err()));
+        let entries = vec![("key".to_string(), Some(b"x".to_vec()))];
+        assert!(is_stale_data_version(storage.write_batch(Bucket::Global, &entries).err()));
+    }
+
+    /// REQ: COR-090
+    #[test]
+    fn unparseable_config_is_left_unchanged_and_host_still_boots() {
+        let rig = MigrationRig::new();
+        let broken = "[plugins\nmigration_backup_mib = = 3\n";
+        rig.config(broken);
+        let server = rig.server("main", "/projects/alpha", "default");
+        assert!(server.is_running());
+        assert_eq!(rig.config_text(), broken);
+        assert!(rig.log_codes().iter().any(|code| code == "config.parse-error"));
+        let warning = rig
+            .log_line("config.parse-error")
+            .map(|record| record.to_string())
+            .unwrap_or_default();
+        assert!(warning.contains("config.toml"), "warning: {warning}");
+        server.write_setting("plugins", "migration_backup_mib", "0");
+        assert_eq!(rig.config_text(), broken);
+    }
+}

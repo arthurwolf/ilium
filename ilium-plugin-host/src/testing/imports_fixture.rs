@@ -559,3 +559,348 @@ impl ImportsFixture {
         unimplemented!("host::testing::imports_fixture::ImportsFixture::other_plugin_metadata")
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        ImportsFixture, ImportsFixtureBuilder, JobInstance, UserInput, UserSave,
+    };
+    use ilium_plugin_api::generated::types::ErrorCode;
+    use ilium_plugin_api::side::Side;
+    use ilium_plugin_api::Tier;
+    use std::path::Path;
+    use std::time::Duration;
+
+    /// A value of `count` ASCII characters.
+    fn repeated_text(count: usize) -> String {
+        "a".repeat(count)
+    }
+
+    /// A fixture with the default manifest and no user-supplied exports.
+    fn default_fixture() -> ImportsFixture {
+        ImportsFixture::builder().manifest_json("{}").build()
+    }
+
+    /// Writes one info row and returns the error code, if the call was refused.
+    fn info_refusal_code(fixture: &mut ImportsFixture, key: &str, text: &str) -> Option<ErrorCode> {
+        fixture
+            .settings()
+            .set_info(key.to_string(), text.to_string())
+            .err()
+            .map(|error| error.code)
+    }
+
+    #[test]
+    fn builder_debug_text_names_the_builder() {
+        let builder = ImportsFixtureBuilder { _private: () };
+        assert_eq!(format!("{builder:?}"), "ImportsFixtureBuilder");
+    }
+
+    #[test]
+    fn fixture_debug_text_names_the_fixture() {
+        let fixture = ImportsFixture { _private: () };
+        assert_eq!(format!("{fixture:?}"), "ImportsFixture");
+    }
+
+    #[test]
+    fn job_instance_debug_text_names_the_job_instance() {
+        let job = JobInstance { _private: () };
+        assert_eq!(format!("{job:?}"), "JobInstance");
+    }
+
+    #[test]
+    fn user_input_variants_are_distinct_and_comparable() {
+        assert_eq!(UserInput::Toggle, UserInput::Toggle);
+        assert_ne!(UserInput::Toggle, UserInput::Choice);
+        assert_ne!(UserInput::Typed, UserInput::TextArea);
+    }
+
+    #[test]
+    fn user_save_refused_compares_by_message() {
+        assert_eq!(
+            UserSave::Refused("bad".to_string()),
+            UserSave::Refused("bad".to_string())
+        );
+        assert_ne!(
+            UserSave::Refused("bad".to_string()),
+            UserSave::Refused("worse".to_string())
+        );
+        assert_ne!(UserSave::Refused(String::new()), UserSave::Saved);
+        assert_ne!(UserSave::Pending, UserSave::Saved);
+    }
+
+    #[test]
+    fn builder_accepts_every_documented_setter_in_one_chain() {
+        let fixture = ImportsFixture::builder()
+            .tier(Tier::T1)
+            .side(Side::Server)
+            .grants(&["fs", "http"])
+            .manifest_json("{}")
+            .project_root(Path::new("."))
+            .limit("fs_write_mib", 1)
+            .websocket_feature(false)
+            .build();
+        assert!(!fixture.plugin_is_stopped());
+    }
+
+    #[test]
+    fn builder_accepts_empty_grant_list() {
+        let fixture = ImportsFixture::builder()
+            .grants(&[])
+            .manifest_json("{}")
+            .build();
+        assert!(!fixture.plugin_is_stopped());
+    }
+
+    #[test]
+    fn builder_limit_accepts_zero_and_maximum_values() {
+        let fixture = ImportsFixture::builder()
+            .limit("journal_entries", 0)
+            .limit("node_metadata_kib", u64::MAX)
+            .manifest_json("{}")
+            .build();
+        assert!(!fixture.plugin_is_stopped());
+    }
+
+    #[test]
+    fn builder_settings_validate_latency_accepts_zero() {
+        let fixture = ImportsFixture::builder()
+            .manifest_json("{}")
+            .settings_validate_latency(Duration::ZERO)
+            .build();
+        assert!(!fixture.plugin_is_stopped());
+    }
+
+    /// REQ: SET-022
+    #[test]
+    fn settings_validate_answer_at_100_ms_still_saves() {
+        let mut fixture = ImportsFixture::builder()
+            .manifest_json("{}")
+            .settings_validate(Box::new(|_patch, _merged| Ok(())))
+            .settings_validate_latency(Duration::from_millis(100))
+            .build();
+        assert_eq!(fixture.user_save("{\"a\":1}"), UserSave::Saved);
+    }
+
+    /// REQ: SET-022
+    #[test]
+    fn settings_validate_answer_at_150_ms_refuses_the_save() {
+        let mut fixture = ImportsFixture::builder()
+            .manifest_json("{}")
+            .settings_validate(Box::new(|_patch, _merged| Ok(())))
+            .settings_validate_latency(Duration::from_millis(150))
+            .build();
+        let old_value = fixture.settings_value("a");
+        assert!(matches!(fixture.user_save("{\"a\":2}"), UserSave::Refused(_)));
+        assert_eq!(fixture.settings_value("a"), old_value);
+    }
+
+    #[test]
+    fn job_runner_returning_empty_output_is_accepted() {
+        let fixture = ImportsFixture::builder()
+            .manifest_json("{}")
+            .job_runner(Box::new(|_kind, _input| Ok(Vec::new())))
+            .build();
+        assert!(!fixture.plugin_is_stopped());
+    }
+
+    #[test]
+    fn fresh_fixture_has_no_logs_and_no_events() {
+        let fixture = default_fixture();
+        assert!(fixture.logs().is_empty());
+        assert!(fixture.events().is_empty());
+    }
+
+    #[test]
+    fn advance_by_zero_and_pump_leave_a_fresh_fixture_quiet() {
+        let mut fixture = default_fixture();
+        fixture.advance(Duration::ZERO);
+        fixture.pump();
+        assert!(fixture.events().is_empty());
+    }
+
+    #[test]
+    fn stop_plugin_marks_the_instance_stopped() {
+        let mut fixture = default_fixture();
+        assert!(!fixture.plugin_is_stopped());
+        fixture.stop_plugin();
+        assert!(fixture.plugin_is_stopped());
+    }
+
+    #[test]
+    fn unknown_choice_row_has_no_values_or_items() {
+        let fixture = default_fixture();
+        assert!(fixture.choice_values("no-such-row").is_empty());
+        assert!(fixture.choice_item_ids("no-such-row").is_empty());
+    }
+
+    #[test]
+    fn fresh_job_instance_reports_no_progress() {
+        let fixture_job = {
+            let mut fixture = default_fixture();
+            fixture.job_instance("test.kind", &[])
+        };
+        assert!(fixture_job.reported_progress().is_empty());
+    }
+
+    #[test]
+    fn restore_stored_json_then_read_back_value() {
+        let mut fixture = default_fixture();
+        fixture.restore_stored_json("{\"a\":1}");
+        assert_eq!(fixture.settings_value("a"), serde_json::json!(1));
+    }
+
+    /// REQ: SET-023
+    #[test]
+    fn toggle_choice_and_dialog_confirm_save_at_once() {
+        let mut fixture = default_fixture();
+        assert_eq!(
+            fixture.user_edit("flag", "true", UserInput::Toggle),
+            UserSave::Saved
+        );
+        assert_eq!(
+            fixture.user_edit("mode", "\"fast\"", UserInput::Choice),
+            UserSave::Saved
+        );
+        assert_eq!(
+            fixture.user_edit("confirm", "true", UserInput::DialogConfirm),
+            UserSave::Saved
+        );
+    }
+
+    /// REQ: SET-023
+    #[test]
+    fn typed_number_and_text_area_are_pending_during_debounce() {
+        let mut fixture = default_fixture();
+        assert_eq!(
+            fixture.user_edit("count", "5", UserInput::NumberStep),
+            UserSave::Pending
+        );
+        assert_eq!(
+            fixture.user_edit("name", "\"abc\"", UserInput::Typed),
+            UserSave::Pending
+        );
+        assert_eq!(
+            fixture.user_edit("notes", "\"abc\"", UserInput::TextArea),
+            UserSave::Pending
+        );
+    }
+
+    /// REQ: SET-020
+    #[test]
+    fn number_typed_outside_bounds_is_refused_and_keeps_stored_value() {
+        let mut fixture = default_fixture();
+        fixture.restore_stored_json("{\"limit\":3}");
+        let outcome = fixture.user_edit("limit", "99", UserInput::Typed);
+        assert!(matches!(outcome, UserSave::Refused(_)));
+        assert_eq!(fixture.settings_value("limit"), serde_json::json!(3));
+    }
+
+    /// REQ: SET-021
+    #[test]
+    fn save_runs_settings_validate_before_settings_changed() {
+        let mut fixture = ImportsFixture::builder()
+            .manifest_json("{}")
+            .settings_validate(Box::new(|_patch, _merged| Ok(())))
+            .build();
+        assert_eq!(fixture.user_save("{\"a\":1}"), UserSave::Saved);
+        let trace = fixture.save_trace();
+        let validate_at = trace.iter().position(|step| step.contains("validate"));
+        let changed_at = trace.iter().position(|step| step.contains("changed"));
+        assert!(validate_at.is_some());
+        assert!(changed_at.is_some());
+        assert!(validate_at < changed_at);
+    }
+
+    /// REQ: SET-031
+    #[test]
+    fn set_json_save_is_written_at_once() {
+        let mut fixture = default_fixture();
+        assert_eq!(fixture.user_save("{\"a\":1}"), UserSave::Saved);
+        assert_eq!(fixture.settings_value("a"), serde_json::json!(1));
+    }
+
+    /// REQ: SET-024
+    #[test]
+    fn save_with_more_than_256_kib_is_refused() {
+        let mut fixture = default_fixture();
+        let oversized_patch = format!("{{\"big\":\"{}\"}}", repeated_text(300 * 1024));
+        assert!(matches!(
+            fixture.user_save(&oversized_patch),
+            UserSave::Refused(_)
+        ));
+    }
+
+    /// REQ: SET-024
+    #[test]
+    fn text_value_of_4096_characters_is_accepted() {
+        let mut fixture = default_fixture();
+        let patch = format!("{{\"text\":\"{}\"}}", repeated_text(4096));
+        assert_eq!(fixture.user_save(&patch), UserSave::Saved);
+    }
+
+    /// REQ: SET-024
+    #[test]
+    fn text_value_of_4097_characters_is_refused() {
+        let mut fixture = default_fixture();
+        let patch = format!("{{\"text\":\"{}\"}}", repeated_text(4097));
+        assert!(matches!(fixture.user_save(&patch), UserSave::Refused(_)));
+    }
+
+    /// REQ: SET-050
+    #[test]
+    fn eleventh_settings_call_in_one_second_returns_rate_limited() {
+        let mut fixture = default_fixture();
+        for index in 0..10 {
+            assert_eq!(
+                info_refusal_code(&mut fixture, &format!("row-{index}"), "x"),
+                None
+            );
+        }
+        assert_eq!(
+            info_refusal_code(&mut fixture, "row-10", "x"),
+            Some(ErrorCode::RateLimited)
+        );
+        assert_eq!(fixture.last_import_error_code(), Some(ErrorCode::RateLimited));
+    }
+
+    /// REQ: SET-051
+    #[test]
+    fn info_text_of_120_characters_is_accepted() {
+        let mut fixture = default_fixture();
+        assert_eq!(
+            info_refusal_code(&mut fixture, "info", &repeated_text(120)),
+            None
+        );
+    }
+
+    /// REQ: SET-051
+    #[test]
+    fn info_text_of_121_characters_returns_invalid_argument() {
+        let mut fixture = default_fixture();
+        assert_eq!(
+            info_refusal_code(&mut fixture, "info", &repeated_text(121)),
+            Some(ErrorCode::InvalidArgument)
+        );
+    }
+
+    /// REQ: SET-051
+    #[test]
+    fn info_text_empty_string_is_accepted() {
+        let mut fixture = default_fixture();
+        assert_eq!(info_refusal_code(&mut fixture, "info", ""), None);
+    }
+
+    #[test]
+    fn last_import_error_code_is_none_before_any_refused_call() {
+        let fixture = default_fixture();
+        assert_eq!(fixture.last_import_error_code(), None);
+    }
+
+    #[test]
+    fn unknown_setting_key_reads_as_absent_and_unknown_row_has_no_note() {
+        let fixture = default_fixture();
+        assert!(fixture.row_note("no-such-row").is_none());
+        assert!(fixture.info_text("no-such-row").is_none());
+    }
+}

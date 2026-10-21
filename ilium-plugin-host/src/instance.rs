@@ -138,3 +138,80 @@ impl PluginInstance {
         self.state
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::PluginInstance;
+    use ilium_plugin_api::generated::host::plugins::InstanceState;
+    use ilium_plugin_api::generated::types::lifecycle::{Activation, DeactivationReason};
+
+    /// Builds an instance in the given state. The stub holds only its state, so no guest is involved.
+    fn instance_in_state(state: InstanceState) -> PluginInstance {
+        PluginInstance { state }
+    }
+
+    /// REQ: LIF-005
+    #[test]
+    fn state_reports_each_of_the_nine_instance_states() {
+        assert_eq!(InstanceState::CASE_NAMES.len(), 9);
+        let every_state = [
+            InstanceState::Inactive,
+            InstanceState::Activating,
+            InstanceState::WaitingDependency,
+            InstanceState::Active,
+            InstanceState::Deactivating,
+            InstanceState::Failed,
+            InstanceState::RestartScheduled,
+            InstanceState::StoppedByFailure,
+            InstanceState::Stopped,
+        ];
+        for state in every_state {
+            assert_eq!(instance_in_state(state).state(), state);
+        }
+    }
+
+    /// REQ: LIF-005
+    #[test]
+    fn activate_moves_an_activating_instance_to_active() {
+        let mut instance = instance_in_state(InstanceState::Activating);
+        let activation = Activation {
+            api: "ilium:plugin@0.1.0".to_string(),
+            instance: 1,
+            side: "server".to_string(),
+            ..Default::default()
+        };
+        let result = instance.activate(activation);
+        assert!(result.is_ok(), "activate of a valid activation must return ok");
+        assert_eq!(instance.state(), InstanceState::Active);
+    }
+
+    /// REQ: LIF-006
+    #[test]
+    fn on_events_on_a_stopped_instance_delivers_no_submissions() {
+        let mut instance = instance_in_state(InstanceState::Stopped);
+        let submissions = instance
+            .on_events(Vec::new())
+            .ok()
+            .expect("an event to a stopped instance is dropped, not reported as a trap");
+        assert!(submissions.is_empty());
+    }
+
+    /// REQ: ABI-045
+    #[test]
+    fn on_events_with_an_empty_batch_returns_no_submissions() {
+        let mut instance = instance_in_state(InstanceState::Active);
+        let submissions = instance
+            .on_events(Vec::new())
+            .ok()
+            .expect("an empty batch is within the 256-event limit");
+        assert!(submissions.is_empty());
+    }
+
+    /// REQ: LIF-014
+    #[test]
+    fn deactivate_of_an_active_instance_leaves_the_active_state() {
+        let mut instance = instance_in_state(InstanceState::Active);
+        let _saved_bytes: Option<Vec<u8>> = instance.deactivate(DeactivationReason::Disabled);
+        assert_ne!(instance.state(), InstanceState::Active);
+    }
+}

@@ -913,3 +913,302 @@ impl Default for UserRig {
         UserRig::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        CallOutcome, DialogAnswer, HookBehaviour, KeyPair, PackageSpec, PaneId, Platform, UserRig,
+    };
+
+    /// REQ: DEV-112
+    #[test]
+    fn key_fingerprint_is_64_lowercase_hex_characters() {
+        let key = KeyPair::generate("example-publisher");
+        let fingerprint = key.fingerprint();
+        assert_eq!(fingerprint.len(), 64);
+        assert!(fingerprint
+            .chars()
+            .all(|character| character.is_ascii_digit() || ('a'..='f').contains(&character)));
+    }
+
+    /// REQ: DEV-112
+    #[test]
+    fn short_fingerprint_is_the_first_eight_characters_of_the_fingerprint() {
+        let key = KeyPair::generate("example-publisher");
+        let short = key.short_fingerprint();
+        assert_eq!(short.len(), 8);
+        assert_eq!(short, key.fingerprint()[..8].to_string());
+    }
+
+    #[test]
+    fn generated_keys_for_different_generations_have_distinct_fingerprints() {
+        let first = KeyPair::generate("example-publisher");
+        let second = KeyPair::generate("example-publisher");
+        assert_ne!(first.fingerprint(), second.fingerprint());
+    }
+
+    #[test]
+    fn key_public_key_path_string_is_not_empty() {
+        let key = KeyPair::generate("example-publisher");
+        assert!(!key.public_key_path_string().is_empty());
+    }
+
+    #[test]
+    fn key_private_key_bytes_are_not_empty() {
+        let key = KeyPair::generate("example-publisher");
+        assert!(!key.private_key_bytes().is_empty());
+    }
+
+    #[test]
+    fn minimal_package_builds_non_empty_bytes() {
+        let bytes = PackageSpec::new("minimal-plugin", "0.1.0").build_bytes();
+        assert!(!bytes.is_empty());
+    }
+
+    #[test]
+    fn package_with_empty_grant_list_still_builds() {
+        let bytes = PackageSpec::new("no-grants", "0.1.0")
+            .grants("client", &[])
+            .build_bytes();
+        assert!(!bytes.is_empty());
+    }
+
+    #[test]
+    fn package_with_hook_behaviour_of_zero_delay_still_builds() {
+        let bytes = PackageSpec::new("hooky", "1.0.0")
+            .hook("owner-plugin", "some.point", HookBehaviour::AppendAfterMs(0, ""))
+            .build_bytes();
+        assert!(!bytes.is_empty());
+    }
+
+    #[test]
+    fn corrupting_the_archive_changes_the_package_bytes() {
+        let clean = PackageSpec::new("corrupt-archive", "1.0.0").build_bytes();
+        let corrupted = PackageSpec::new("corrupt-archive", "1.0.0")
+            .corrupt_archive()
+            .build_bytes();
+        assert_ne!(clean, corrupted);
+    }
+
+    #[test]
+    fn corrupting_a_file_hash_changes_the_package_bytes() {
+        let clean = PackageSpec::new("corrupt-hash", "1.0.0").build_bytes();
+        let corrupted = PackageSpec::new("corrupt-hash", "1.0.0")
+            .corrupt_file_hash()
+            .build_bytes();
+        assert_ne!(clean, corrupted);
+    }
+
+    #[test]
+    fn corrupting_the_signature_changes_the_package_bytes() {
+        let key = KeyPair::generate("example-publisher");
+        let signed = PackageSpec::new("corrupt-sig", "1.0.0")
+            .signed_with(&key)
+            .build_bytes();
+        let corrupted = PackageSpec::new("corrupt-sig", "1.0.0")
+            .signed_with(&key)
+            .corrupt_signature()
+            .build_bytes();
+        assert_ne!(signed, corrupted);
+    }
+
+    #[test]
+    fn signed_package_differs_from_unsigned_package() {
+        let key = KeyPair::generate("example-publisher");
+        let unsigned = PackageSpec::new("signed-check", "1.0.0").build_bytes();
+        let signed = PackageSpec::new("signed-check", "1.0.0")
+            .signed_with(&key)
+            .build_bytes();
+        assert_ne!(unsigned, signed);
+    }
+
+    #[test]
+    fn fresh_rig_trusts_no_keys() {
+        let rig = UserRig::new();
+        assert!(rig.trusted_keys().is_empty());
+    }
+
+    #[test]
+    fn default_rig_matches_new_rig_with_no_trusted_keys() {
+        let rig = UserRig::default();
+        assert!(rig.trusted_keys().is_empty());
+    }
+
+    #[test]
+    fn rig_on_macos_starts_with_no_trusted_keys() {
+        let rig = UserRig::new_on(Platform::MacOs);
+        assert!(rig.trusted_keys().is_empty());
+    }
+
+    #[test]
+    fn trusting_a_key_lists_its_fingerprint() {
+        let key = KeyPair::generate("example-publisher");
+        let mut rig = UserRig::new();
+        rig.trust(&key);
+        assert!(rig.trusted_keys().contains(&key.fingerprint()));
+    }
+
+    /// REQ: USR-200
+    #[test]
+    fn xdg_isolated_rig_writes_no_plugin_files_outside_xdg_roots() {
+        let mut rig = UserRig::new_with_xdg_isolation();
+        rig.start_server();
+        assert!(rig.files_outside_xdg_roots().is_empty());
+    }
+
+    /// REQ: USR-200
+    #[test]
+    fn xdg_roots_config_data_cache_and_state_are_four_distinct_directories() {
+        let rig = UserRig::new_with_xdg_isolation();
+        let roots = [
+            rig.config_dir(),
+            rig.data_dir(),
+            rig.cache_dir(),
+            rig.state_dir(),
+        ];
+        for (index, root) in roots.iter().enumerate() {
+            for other in roots.iter().skip(index + 1) {
+                assert_ne!(root, other);
+            }
+        }
+    }
+
+    /// REQ: USR-043
+    #[test]
+    fn replacement_accepted_with_yes_is_recorded() {
+        let mut rig = UserRig::new();
+        rig.attach_client(vec![DialogAnswer::ReviewAcceptDefaults]);
+        rig.install_file(&PackageSpec::new("old-a", "1.0.0"), &[]);
+        rig.attach_client(vec![DialogAnswer::ReplaceYes]);
+        rig.install_file(&PackageSpec::new("new-a", "2.0.0").replaces(&["old-a"]), &[]);
+        assert_eq!(
+            rig.replacements(),
+            vec![("old-a".to_string(), "new-a".to_string())]
+        );
+        assert_eq!(rig.replace_prompts().len(), 1);
+    }
+
+    /// REQ: USR-043
+    #[test]
+    fn replacement_declined_with_install_without_records_no_replacement() {
+        let mut rig = UserRig::new();
+        rig.attach_client(vec![DialogAnswer::ReviewAcceptDefaults]);
+        rig.install_file(&PackageSpec::new("old-b", "1.0.0"), &[]);
+        rig.attach_client(vec![DialogAnswer::ReplaceInstallWithout]);
+        rig.install_file(&PackageSpec::new("new-b", "2.0.0").replaces(&["old-b"]), &[]);
+        assert!(rig.replacements().is_empty());
+    }
+
+    /// REQ: USR-043
+    #[test]
+    fn replacement_list_of_four_entries_is_accepted_at_the_limit() {
+        let mut rig = UserRig::new();
+        let output = rig.install_file(
+            &PackageSpec::new("replacer-four", "1.0.0").replaces(&["a", "b", "c", "d"]),
+            &[],
+        );
+        assert_eq!(output.exit_code, 0);
+    }
+
+    /// REQ: USR-043
+    #[test]
+    fn replacement_list_of_five_entries_is_refused() {
+        let mut rig = UserRig::new();
+        let output = rig.install_file(
+            &PackageSpec::new("replacer-five", "1.0.0").replaces(&["a", "b", "c", "d", "e"]),
+            &[],
+        );
+        assert_ne!(output.exit_code, 0);
+        assert!(rig.replace_prompts().is_empty());
+    }
+
+    /// REQ: USR-043
+    #[test]
+    fn empty_replaces_list_shows_no_replace_prompt() {
+        let mut rig = UserRig::new();
+        rig.install_file(&PackageSpec::new("replacer-none", "1.0.0").replaces(&[]), &[]);
+        assert!(rig.replace_prompts().is_empty());
+        assert!(rig.replacements().is_empty());
+    }
+
+    #[test]
+    fn call_for_unlisted_grant_is_refused() {
+        let mut rig = UserRig::new();
+        rig.attach_client(vec![DialogAnswer::ReviewAcceptDefaults]);
+        rig.install_file(
+            &PackageSpec::new("calc-plugin", "1.0.0").grants("client", &["clipboard-read"]),
+            &[],
+        );
+        let outcome = rig.call_needing_unlisted("calc-plugin", "client", "network");
+        assert!(matches!(outcome, CallOutcome::Refused { .. }));
+    }
+
+    #[test]
+    fn fresh_rig_has_no_visible_toasts() {
+        let rig = UserRig::new();
+        assert!(rig.visible_toasts().is_empty());
+    }
+
+    #[test]
+    fn plugin_toast_is_visible_until_cleared() {
+        let mut rig = UserRig::new();
+        rig.plugin_toast("toast-plugin", "Export finished");
+        assert!(rig.visible_toasts().iter().any(|text| text == "Export finished"));
+        rig.clear_toasts();
+        assert!(rig.visible_toasts().is_empty());
+    }
+
+    #[test]
+    fn clearing_toasts_on_empty_rig_is_a_no_op() {
+        let mut rig = UserRig::new();
+        rig.clear_toasts();
+        assert!(rig.visible_toasts().is_empty());
+    }
+
+    #[test]
+    fn input_is_not_locked_on_a_fresh_rig() {
+        let rig = UserRig::new();
+        assert!(!rig.input_locked());
+    }
+
+    #[test]
+    fn unknown_pane_does_not_exist() {
+        let rig = UserRig::new();
+        assert!(!rig.pane_exists(PaneId(0)));
+    }
+
+    #[test]
+    fn fresh_rig_has_no_opened_links() {
+        let rig = UserRig::new();
+        assert!(rig.opened_links().is_empty());
+    }
+
+    #[test]
+    fn zero_byte_log_write_leaves_no_journal_lines() {
+        let mut rig = UserRig::new();
+        rig.plugin_logs_bytes("log-plugin", 0);
+        assert!(rig.log_lines("log-plugin").is_empty());
+    }
+
+    #[test]
+    fn plugin_setting_round_trips_its_value() {
+        let mut rig = UserRig::new();
+        rig.set_plugin_setting("settings-plugin", "volume", "7");
+        assert_eq!(
+            rig.plugin_setting("settings-plugin", "volume"),
+            Some("7".to_string())
+        );
+    }
+
+    #[test]
+    fn unset_plugin_setting_reads_as_none() {
+        let rig = UserRig::new();
+        assert_eq!(rig.plugin_setting("settings-plugin", "volume"), None);
+    }
+
+    #[test]
+    fn fresh_rig_has_no_audit_records_for_any_event() {
+        let rig = UserRig::new();
+        assert!(rig.audit_records_of("install").is_empty());
+    }
+}
