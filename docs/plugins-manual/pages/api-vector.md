@@ -209,7 +209,7 @@ export function resetNotes(index: number): void {
 The import has no screen of its own. The user sees the effect in the plugin's panel, such as a list of notes ordered by relevance, and in the admission gate and privacy log, which receive the `purpose` of each `embed` call. The plugin log shows the calls the plugin writes:
 
 <pre class="term">2026-10-12 09:41:03 example.notes info  indexed 212 notes
-2026-10-12 09:41:03 example.notes info  vector.embed 212 texts, 2 batches
+2026-10-12 09:41:03 example.notes info  vector.embed 212 texts, 1 batch
 2026-10-12 09:44:19 example.notes info  vector.top_k notes k=5 best=0.83
 2026-10-12 09:44:51 example.notes warn  embed failed: unsupported
 </pre>

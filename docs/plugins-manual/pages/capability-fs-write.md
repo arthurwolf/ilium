@@ -45,7 +45,7 @@ A literal absolute path inside `path:` (for example `fs.write:path:/srv/logs/**`
 | `worktrees` | the worktree folder from `workspace.worktree_root` | `fs.write:worktrees` | H |
 | `path:<template>` | the folders a template names | `fs.write:path:<template>` | H |
 | `agent-config:<agent>` (`claude`, `codex`, `gemini`, `antigravity`) | each agent's configuration folder | none: `fs.write:agent-config:<agent>` is refused at install with `manifest.grant-scope`. A plugin proposes changes with [`agent-config.propose:<agent>`](/pages/capability-agent-config-propose/), and the host writes only what the user accepts | H for the proposal grant |
-| `picked/<n>` | the file or folder the user chose | `fs.write:picked` for a save pick | normal |
+| `picked/<n>` | the file or folder the user chose | `fs.write:picked` for a save pick | H, granted per pick |
 | `data` | the plugin's private data folder | always granted | none |
 | `cache` | the plugin's private cache folder, which the host may evict | always granted | none |
 | `package`, `agent-sessions:*` | read only | not writable | refused at install |
