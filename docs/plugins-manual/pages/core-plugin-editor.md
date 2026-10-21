@@ -739,6 +739,7 @@ The sides above are the sides of the points in the manifest; no point on this pa
 
 ### See also
 
+- [Core replacement matrix](/pages/reference-core-replacement-matrix/) for the surface, stored data, CLI names and install codes that a replacement of this plugin must keep.
 - [Core plugins](/pages/core-plugins/)
 - [Terminal plugin](/pages/core-plugin-terminal/)
 - [Kanban plugin](/pages/core-plugin-kanban/)

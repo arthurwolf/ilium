@@ -36,6 +36,7 @@ Contract version: `ilium:plugin@0.1.0`. The platform is not implemented yet, so 
 | USR-200 to USR-209 | Files on disk | [Plugin files](/pages/reference-plugin-files/) |
 | USR-210 to USR-220 | Policy file and audit log | [Plugin policy](/pages/reference-plugin-policy/) |
 | USR-221 to USR-229 | Support bundle and crash records | [Plugin diagnostics](/pages/core-plugin-diagnostics/) |
+| USR-230 to USR-235 | Administrator failure runbook | [Administrator failure runbook](/pages/guide-admin-failure-runbook/) |
 
 ### Requirements
 
@@ -144,6 +145,12 @@ Contract version: `ilium:plugin@0.1.0`. The platform is not implemented yet, so 
 | USR-227 | Each helper crash, kill or out-of-memory kill MUST append one crash record with UTC time, plugin id and version, side, reason, exit status and export name, and no payloads. | Kill a fixture helper three ways and check each record's fields. | [Plugin diagnostics](/pages/core-plugin-diagnostics/) |
 | USR-228 | Crash records MUST be kept for 30 days and at most 200, removing the oldest first. | Insert 201 records and 31-day-old records; assert the survivors. | [Plugin diagnostics](/pages/core-plugin-diagnostics/) |
 | USR-229 | Crash records MUST live in the server state folder, never in a plugin data folder, and MUST appear in the support bundle. | Assert the record path and its presence in `crashes.txt`. | [Plugin diagnostics](/pages/core-plugin-diagnostics/) |
+| USR-230 | The runbook MUST give, for each of the five symptoms in its triage table, a first command that exists in the CLI reference and a section that lists the policy keys and audit events for that symptom. | check each row against the CLI reference and each named key against the policy reference. | [Administrator failure runbook](/pages/guide-admin-failure-runbook/) |
+| USR-231 | An administrator MUST be able to stop a plugin for all users by its id without deleting its data, using `plugins.deny_ids` and the next server start. | add the id to `plugins.deny_ids`, restart the server, and assert the state `Blocked by policy` and that the data folder still exists. | [Administrator failure runbook](/pages/guide-admin-failure-runbook/) |
+| USR-232 | On a compromised signing key the administrator MUST run `ilium plugin trust revoke <key_id> --reason compromised` and MUST NOT rely on `trust remove --force` as the response. | revoke a key used by an installed plugin and assert the plugin state `disabled-blocked` with the reason `trust.key-revoked`. | [Administrator failure runbook](/pages/guide-admin-failure-runbook/) |
+| USR-233 | The runbook MUST state the time limits of the failure window, the helper kill sequence, the crash-loop guard and the install lock as the source pages define them. | compare each value in the time-limits table with its source page. | [Administrator failure runbook](/pages/guide-admin-failure-runbook/) |
+| USR-234 | The runbook MUST name the audit file path for Linux and each event it tells the administrator to search for, and every event name MUST appear in the source page that defines it. | run the `jq` command of the Bad plugin section on a fixture audit log and search each event name in the source pages. | [Administrator failure runbook](/pages/guide-admin-failure-runbook/) |
+| USR-235 | The runbook MUST name the escalation path in this order: the plugin's security contact, then the Ilium project's security contact, then the release blocklist, and MUST list the security contact address as an open decision while it is a placeholder. | check the page for the three steps and the open decision row. | [Administrator failure runbook](/pages/guide-admin-failure-runbook/) |
 
 ### Pending decisions
 

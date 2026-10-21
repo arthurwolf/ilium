@@ -193,5 +193,6 @@ After writing a policy, check it with a throwaway user:
 - [Plugin privacy](/pages/user-privacy/)
 - [Troubleshooting plugins](/pages/user-troubleshooting/)
 - [CLI reference](/pages/reference-plugin-cli/)
+- [Administrator failure runbook](/pages/guide-admin-failure-runbook/)
 
 API version checked: `ilium:plugin@0.1.0`.

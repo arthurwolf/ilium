@@ -558,6 +558,7 @@ The plugin owns the two points below. Each has a grant `extensions.provide:ilium
 
 ### See also
 
+- [Core replacement matrix](/pages/reference-core-replacement-matrix/) for the surface, stored data, CLI names and install codes that a replacement of this plugin must keep.
 - [Core plugins](/pages/core-plugins/)
 - [Terminal plugin](/pages/core-plugin-terminal/)
 - [Inference providers plugin](/pages/core-plugin-inference/)

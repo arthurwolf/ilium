@@ -680,6 +680,7 @@ The table gives the values that the core extension points table requires for eac
 
 ### See also
 
+- [Core replacement matrix](/pages/reference-core-replacement-matrix/) for the surface, stored data, CLI names and install codes that a replacement of this plugin must keep.
 - [Core plugins](/pages/core-plugins/)
 - [Ambient look plugin](/pages/core-plugin-ambient/), the shared look every scene gets
 - [Tutorial: an ambient scene](/pages/tutorial-07-ambient-scene/)

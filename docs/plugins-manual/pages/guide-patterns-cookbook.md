@@ -738,6 +738,7 @@ Nothing of these patterns directly. They see the effects: a panel that settles a
 - [Quality checklist](/pages/guide-quality-checklist/) for a review list that covers these patterns
 - [Troubleshooting](/pages/guide-troubleshooting/) when a pattern misbehaves
 - [Performance](/pages/performance/) for deadlines and budgets
+- [Concurrency for plugin authors](/pages/concurrency-for-plugin-authors/) for where handler, job and activate code runs
 - [Testing](/pages/testing/) for the fake host
 - [Requests and outcomes](/pages/requests-and-outcomes/) for outcomes and error codes
 

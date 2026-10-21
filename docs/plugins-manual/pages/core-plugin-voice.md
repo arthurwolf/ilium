@@ -593,6 +593,7 @@ Side basis: `ilium.core.voice/voice-intents` is client because the manifest gran
 
 ### See also
 
+- [Core replacement matrix](/pages/reference-core-replacement-matrix/) for the surface, stored data, CLI names and install codes that a replacement of this plugin must keep.
 - [Core plugins](/pages/core-plugins/)
 - [Inference providers](/pages/core-plugin-inference/)
 - [Security](/pages/security/)

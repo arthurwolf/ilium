@@ -682,6 +682,7 @@ Side basis: the page routes every move and close through server-side intents, an
 
 ### See also
 
+- [Core replacement matrix](/pages/reference-core-replacement-matrix/) for the surface, stored data, CLI names and install codes that a replacement of this plugin must keep.
 - [Core plugins](/pages/core-plugins/)
 - [Layout plugin](/pages/core-plugin-layout/)
 - [Sessions plugin](/pages/core-plugin-sessions/)

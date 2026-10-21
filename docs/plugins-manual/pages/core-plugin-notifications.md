@@ -592,6 +592,7 @@ Side basis: `ilium.core.notifications/channels` is server because the `notify` s
 
 ### See also
 
+- [Core replacement matrix](/pages/reference-core-replacement-matrix/) for the surface, stored data, CLI names and install codes that a replacement of this plugin must keep.
 - [Core plugins](/pages/core-plugins/)
 - [Agent detection](/pages/core-plugin-agent-detect/), the source of the activity events
 - [Scheduler](/pages/core-plugin-scheduler/)

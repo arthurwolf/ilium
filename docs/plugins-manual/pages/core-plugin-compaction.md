@@ -630,6 +630,7 @@ Both points run on the server: the complete manifest grants `extensions.provide`
 
 ### See also
 
+- [Core replacement matrix](/pages/reference-core-replacement-matrix/) for the surface, stored data, CLI names and install codes that a replacement of this plugin must keep.
 - [Core plugins](/pages/core-plugins/)
 - [Settings plugin](/pages/core-plugin-settings/), which hosts the Optimization tab
 - [Agent toolbar plugin](/pages/core-plugin-agent-toolbar/), which owns the compact button

@@ -743,6 +743,7 @@ Side basis: `before-send-input` is server because input reaches a pane through t
 
 ### See also
 
+- [Core replacement matrix](/pages/reference-core-replacement-matrix/) for the surface, stored data, CLI names and install codes that a replacement of this plugin must keep.
 - [Core plugins](/pages/core-plugins/)
 - [Smart Copy plugin](/pages/core-plugin-smart-copy/)
 - [Editor plugin](/pages/core-plugin-editor/)

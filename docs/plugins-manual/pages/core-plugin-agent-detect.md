@@ -772,6 +772,7 @@ A package adds this entry in its manifest. It needs no code.
 
 ### See also
 
+- [Core replacement matrix](/pages/reference-core-replacement-matrix/) for the surface, stored data, CLI names and install codes that a replacement of this plugin must keep.
 - [Agent toolbar](/pages/core-plugin-agent-toolbar/), which acts on the agents this plugin identifies.
 - [Fleet](/pages/core-plugin-fleet/), which lists the same agents across sessions.
 - [Cost](/pages/core-plugin-cost/), which adds spend to the same rows.

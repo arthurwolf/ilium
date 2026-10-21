@@ -441,6 +441,7 @@ When a replacement plugin is disabled by failure, the built-in core plugin it re
 
 ### See also
 
+- [Core replacement matrix](/pages/reference-core-replacement-matrix/) for the surface, stored data, CLI names and install codes of every replaceable core plugin.
 - [Extension points](/pages/api-extension-points/) for the full interface, the hook modes and the error codes.
 - [Reference: core extension points](/pages/reference-core-extension-points/) for the points of every core plugin.
 - [extensions.provide](/pages/capability-extensions-provide/) and [extensions.contribute](/pages/capability-extensions-contribute/) for the grants.

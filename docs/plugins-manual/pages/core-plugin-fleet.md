@@ -810,6 +810,7 @@ Side basis: `ilium.core.fleet/before-broadcast` is server because it changes a m
 
 ### See also
 
+- [Core replacement matrix](/pages/reference-core-replacement-matrix/) for the surface, stored data, CLI names and install codes that a replacement of this plugin must keep.
 - [Cost](/pages/core-plugin-cost/), which serves the usage figures used above.
 - [Agent detection](/pages/core-plugin-agent-detect/), which decides what counts as an agent pane.
 - [Agent toolbar](/pages/core-plugin-agent-toolbar/), which sends actions to a single agent.

@@ -665,6 +665,7 @@ Side basis: `schedule-sources` is server because the server side owns the timers
 
 ### See also
 
+- [Core replacement matrix](/pages/reference-core-replacement-matrix/) for the surface, stored data, CLI names and install codes that a replacement of this plugin must keep.
 - [Core plugins](/pages/core-plugins/)
 - [Notifications](/pages/core-plugin-notifications/)
 - [Terminal](/pages/core-plugin-terminal/)

@@ -726,6 +726,7 @@ Side basis: `ilium.core.inference/provider-profiles` is client because its entri
 
 ### See also
 
+- [Core replacement matrix](/pages/reference-core-replacement-matrix/) for the surface, stored data, CLI names and install codes that a replacement of this plugin must keep.
 - [Core plugins](/pages/core-plugins/)
 - [Titles and organisation](/pages/core-plugin-titles/), a main consumer
 - [Security](/pages/security/)

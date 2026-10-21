@@ -694,5 +694,6 @@ The side is client for both points because the page declares the toolbar buttons
 
 ### See also
 
+- [Core replacement matrix](/pages/reference-core-replacement-matrix/) for the surface, stored data, CLI names and install codes that a replacement of this plugin must keep.
 - [Agent detection](/pages/core-plugin-agent-detect/), which supplies the activity changes used here.
 - [Fleet](/pages/core-plugin-fleet/), which sends text to the same agents from the command line.

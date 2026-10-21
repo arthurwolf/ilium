@@ -712,5 +712,6 @@ The table gives the values that [EXT-052] requires for each point this plugin ow
 
 ### See also
 
+- [Core replacement matrix](/pages/reference-core-replacement-matrix/) for the surface, stored data, CLI names and install codes that a replacement of this plugin must keep.
 - [Core plugins](/pages/core-plugins/)
 - [Settings plugin](/pages/core-plugin-settings/)

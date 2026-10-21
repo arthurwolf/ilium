@@ -669,6 +669,7 @@ Side basis: `ilium.core.titles/title-styles` is server because the style `instru
 
 ### See also
 
+- [Core replacement matrix](/pages/reference-core-replacement-matrix/) for the surface, stored data, CLI names and install codes that a replacement of this plugin must keep.
 - [Core plugins](/pages/core-plugins/)
 - [Inference providers](/pages/core-plugin-inference/), which supplies the model
 - [Contract overview](/pages/getting-started-overview/)

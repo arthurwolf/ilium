@@ -478,6 +478,7 @@ The main manifest grants `extensions.provide:ilium.core.layout/layout-presets` a
 
 ### See also
 
+- [Core replacement matrix](/pages/reference-core-replacement-matrix/) for the surface, stored data, CLI names and install codes that a replacement of this plugin must keep.
 - [Core plugins](/pages/core-plugins/)
 - [Tree plugin](/pages/core-plugin-tree/)
 - [Terminal plugin](/pages/core-plugin-terminal/)

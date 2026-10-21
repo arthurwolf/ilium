@@ -615,6 +615,7 @@ Side basis: `ilium.core.ambient/palettes` is client because the palette is drawn
 
 ### See also
 
+- [Core replacement matrix](/pages/reference-core-replacement-matrix/) for the surface, stored data, CLI names and install codes that a replacement of this plugin must keep.
 - [Core plugins](/pages/core-plugins/)
 - [Scenes plugin](/pages/core-plugin-scenes/), the scenes that use this look
 - [Settings plugin](/pages/core-plugin-settings/)

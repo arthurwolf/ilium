@@ -735,5 +735,6 @@ Both points run on the server: the complete manifest grants `extensions.provide`
 
 ### See also
 
+- [Core replacement matrix](/pages/reference-core-replacement-matrix/) for the surface, stored data, CLI names and install codes that a replacement of this plugin must keep.
 - [Fleet](/pages/core-plugin-fleet/), which calls the usage service to show cost in `ilium panes`.
 - [Agent detection](/pages/core-plugin-agent-detect/), which supplies the agents that this plugin prices.

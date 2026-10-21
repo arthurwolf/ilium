@@ -503,6 +503,7 @@ Side basis: `before-remove` is server because the `remove` service that runs thi
 
 ### See also
 
+- [Core replacement matrix](/pages/reference-core-replacement-matrix/) for the surface, stored data, CLI names and install codes that a replacement of this plugin must keep.
 - [Core plugins](/pages/core-plugins/)
 - [Sessions](/pages/core-plugin-sessions/)
 

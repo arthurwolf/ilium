@@ -718,5 +718,6 @@ The plugin owns both points below. The complete manifest holds the grants `exten
 
 ### See also
 
+- [Core replacement matrix](/pages/reference-core-replacement-matrix/) for the surface, stored data, CLI names and install codes that a replacement of this plugin must keep.
 - [Editor](/pages/core-plugin-editor/), which edits the board file as text.
 - [Agent detection](/pages/core-plugin-agent-detect/), for the agents that tick the tasks off.

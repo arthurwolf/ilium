@@ -664,5 +664,6 @@ Side basis: `ilium.core.search/rank` is server because the server `capabilities`
 
 ### See also
 
+- [Core replacement matrix](/pages/reference-core-replacement-matrix/) for the surface, stored data, CLI names and install codes that a replacement of this plugin must keep.
 - [Core plugins](/pages/core-plugins/)
 - [Compaction plugin](/pages/core-plugin-compaction/), which shows the job runner in full

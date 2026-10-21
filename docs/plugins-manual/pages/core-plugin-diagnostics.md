@@ -689,6 +689,7 @@ A package adds this entry in its manifest. It needs no code.
 
 ### See also
 
+- [Core replacement matrix](/pages/reference-core-replacement-matrix/) for the surface, stored data, CLI names and install codes that a replacement of this plugin must keep.
 - [Core plugins](/pages/core-plugins/)
 - [Settings](/pages/core-plugin-settings/)
 - [Settings screens](/pages/settings-screens/)

@@ -451,6 +451,7 @@ Concurrency is not an error: a job past `concurrent_jobs` waits in the queue. A 
 - [Plugin exports](/pages/api-exports/) for the `job-runner` export.
 - [Events](/pages/api-events/) for `job-progress` and `request-completed`.
 - [Background jobs](/pages/background-jobs/) for the execution model and the cancellation rules.
+- [Concurrency for plugin authors](/pages/concurrency-for-plugin-authors/) for the call order, deadlines and yield rules that handlers and jobs share.
 - [Requests and outcomes](/pages/requests-and-outcomes/) for holds and takes.
 - [inference](/pages/api-inference/) for the call used in the second example.
 - [codec](/pages/api-codec/) for work that fits under 16 MiB and needs no job.

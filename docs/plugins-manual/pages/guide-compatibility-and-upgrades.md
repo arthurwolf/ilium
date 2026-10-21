@@ -262,7 +262,9 @@ An update shows the new grants in a review dialog and keeps the old version acti
 - [Versioning](/pages/versioning/) for the contract rules
 - [Data migration](/pages/guide-data-migration/) for the `migrator` export and the backup
 - [Install, update and uninstall](/pages/reference-install-update-uninstall/) for the pipeline
+- [Host upgrade and restart while plugins run](/pages/host-upgrade-while-plugins-run/) for what happens to running instances when Ilium restarts
 - [Publishing and support](/pages/guide-publishing-and-support/) for releases and changelogs
 - [Quality checklist](/pages/guide-quality-checklist/) for a pre-release review
+- [Backwards-compatibility test matrix](/pages/guide-backwards-compatibility-test-matrix/) for the test cells that check these rules
 
 API version checked: `ilium:plugin@0.1.0`.

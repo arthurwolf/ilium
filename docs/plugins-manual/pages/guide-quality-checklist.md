@@ -157,6 +157,7 @@ A suppression lives in `lint.toml` with a rule, an optional `key_path` and a rea
 - [Check and lint rules](/pages/reference-check-and-lint-rules/)
 - [Testing plugins](/pages/testing/)
 - [Performance](/pages/performance/)
+- [Concurrency for plugin authors](/pages/concurrency-for-plugin-authors/) for deadlines, slow work and job state
 - [Security](/pages/security/)
 - [CI recipes](/pages/guide-ci-recipes/) to run the list on every commit
 - [Troubleshooting](/pages/guide-troubleshooting/)

@@ -527,5 +527,6 @@ The values below are the ones the core extension points table uses for these two
 
 ### See also
 
+- [Core replacement matrix](/pages/reference-core-replacement-matrix/) for the surface, stored data, CLI names and install codes that a replacement of this plugin must keep.
 - [Core plugins](/pages/core-plugins/)
 - [Chatroom](/pages/core-plugin-chatroom/), which agents use beside progress monitors
