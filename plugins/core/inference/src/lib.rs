@@ -72,3 +72,156 @@ impl Views for InferenceClient {
         unimplemented!("ilium.core.inference: client views.render")
     }
 }
+
+#[cfg(test)]
+mod spec_tests {
+    use super::*;
+
+    /// The crate's shipped manifest, the file the plugin build packages with the component.
+    fn shipped_manifest() -> serde_json::Value {
+        serde_json::from_str(include_str!("../manifest.json")).expect("manifest.json must be valid JSON")
+    }
+
+    /// Grant strings the manifest declares on one side ("server" or "client").
+    fn grants_on_side(manifest: &serde_json::Value, side: &str) -> Vec<String> {
+        manifest["capabilities"][side]
+            .as_array()
+            .expect("capabilities must list each side as an array")
+            .iter()
+            .map(|grant| grant.as_str().expect("each grant must be a string").to_string())
+            .collect()
+    }
+
+    /// REQ: COR-050 (Complete manifest: id, api version, activation trigger and limits tier as the page prints them)
+    #[test]
+    fn complete_manifest_identifies_the_plugin_and_api_version() {
+        let manifest = shipped_manifest();
+        assert_eq!(manifest["id"], "ilium.core.inference");
+        assert_eq!(manifest["api"], "ilium:plugin@0.1.0");
+        assert_eq!(
+            manifest["activation"],
+            serde_json::json!(["service:ilium:inference/provider"])
+        );
+        assert_eq!(manifest["limits_tier"], "first-party");
+    }
+
+    /// REQ: COR-050 (the server side runs in the world and entry the Complete manifest names)
+    #[test]
+    fn server_side_runs_in_the_server_base_world() {
+        let manifest = shipped_manifest();
+        assert_eq!(manifest["server"]["world"], "ilium:server/base@0.1.0");
+        assert_eq!(manifest["server"]["entry"], "server.wasm");
+    }
+
+    /// REQ: COR-050 (server grants match the Complete manifest list, including the two before-request/after-response extension grants)
+    #[test]
+    fn server_grants_match_the_complete_manifest() {
+        let mut actual = grants_on_side(&shipped_manifest(), "server");
+        actual.sort();
+        let mut expected: Vec<String> = [
+            "inference.provide",
+            "http:api.openai.com",
+            "http:localhost",
+            "extensions.provide:ilium.core.inference/before-request",
+            "extensions.provide:ilium.core.inference/after-response",
+        ]
+        .iter()
+        .map(|grant| grant.to_string())
+        .collect();
+        expected.sort();
+        assert_eq!(actual, expected);
+    }
+
+    /// REQ: COR-050 (client grants match the Complete manifest list, including the provider-profiles extension grant)
+    #[test]
+    fn client_grants_match_the_complete_manifest() {
+        let mut actual = grants_on_side(&shipped_manifest(), "client");
+        actual.sort();
+        let mut expected: Vec<String> = [
+            "ui.panels",
+            "settings.write-kernel:inference",
+            "settings.write-kernel:llm-instructions",
+            "extensions.provide:ilium.core.inference/provider-profiles",
+        ]
+        .iter()
+        .map(|grant| grant.to_string())
+        .collect();
+        expected.sort();
+        assert_eq!(actual, expected);
+    }
+
+    /// REQ: COR-030 (a kernel tab has one owner, so no grant may be declared twice on a side)
+    #[test]
+    fn no_grant_is_declared_twice_on_either_side() {
+        let manifest = shipped_manifest();
+        for side in ["server", "client"] {
+            let grants = grants_on_side(&manifest, side);
+            let mut unique = grants.clone();
+            unique.sort();
+            unique.dedup();
+            assert_eq!(unique.len(), grants.len(), "duplicate grant on the {side} side");
+        }
+    }
+
+    /// REQ: COR-030 (this plugin is the single owner of exactly the inference and llm-instructions tabs)
+    #[test]
+    fn owns_exactly_the_inference_and_llm_instructions_tabs() {
+        let grants = grants_on_side(&shipped_manifest(), "client");
+        let owned_tab_grants: Vec<&String> = grants
+            .iter()
+            .filter(|grant| grant.starts_with("settings.write-kernel:"))
+            .collect();
+        assert_eq!(owned_tab_grants.len(), 2);
+        assert!(grants.iter().any(|grant| grant == "settings.write-kernel:inference"));
+        assert!(grants.iter().any(|grant| grant == "settings.write-kernel:llm-instructions"));
+    }
+
+    /// REQ: COR-050 (the Provider section puts the inference.provide grant on the server; the client must not hold it)
+    #[test]
+    fn client_side_does_not_hold_the_provider_grant() {
+        let grants = grants_on_side(&shipped_manifest(), "client");
+        assert!(!grants.iter().any(|grant| grant == "inference.provide"));
+    }
+
+    /// REQ: COR-050 (the Samples export inference-provider and catalog-provider from the server and views from the client)
+    #[test]
+    fn server_implements_provider_exports_and_client_implements_views() {
+        fn assert_inference_provider<T: InferenceProvider>() {}
+        fn assert_catalog_provider<T: CatalogProvider>() {}
+        fn assert_views<T: Views>() {}
+        assert_inference_provider::<InferenceServer>();
+        assert_catalog_provider::<InferenceServer>();
+        assert_views::<InferenceClient>();
+    }
+
+    /// REQ: COR-050 (invalid input: an empty or whitespace-containing grant is not a valid capability token)
+    #[test]
+    fn every_grant_is_a_non_empty_token_without_whitespace() {
+        let manifest = shipped_manifest();
+        for side in ["server", "client"] {
+            for grant in grants_on_side(&manifest, side) {
+                assert!(!grant.is_empty(), "empty grant on the {side} side");
+                assert!(
+                    !grant.chars().any(char::is_whitespace),
+                    "grant with whitespace on the {side} side: {grant}"
+                );
+            }
+        }
+    }
+
+    /// REQ: COR-050 (failure case: an extension grant naming another plugin's point is a mismatch with the owned points)
+    #[test]
+    fn extension_grants_only_name_this_plugins_own_points() {
+        let manifest = shipped_manifest();
+        for side in ["server", "client"] {
+            for grant in grants_on_side(&manifest, side) {
+                if grant.starts_with("extensions.provide:") {
+                    assert!(
+                        grant.starts_with("extensions.provide:ilium.core.inference/"),
+                        "extension grant for another plugin: {grant}"
+                    );
+                }
+            }
+        }
+    }
+}

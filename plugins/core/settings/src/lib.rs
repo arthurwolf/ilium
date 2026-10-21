@@ -35,3 +35,156 @@ impl Views for SettingsClient {
         unimplemented!("ilium.core.settings: client views.render")
     }
 }
+
+#[cfg(test)]
+mod spec_tests {
+    use super::*;
+    use ilium_plugin_sdk::generated::types::events::{SettingsChange, SettingsOrigin};
+    use ilium_plugin_sdk::generated::types::intents::PluginSide;
+
+    const MANIFEST_JSON: &str = include_str!("../manifest.json");
+
+    fn manifest() -> serde_json::Value {
+        serde_json::from_str(MANIFEST_JSON).expect("manifest.json is valid JSON")
+    }
+
+    fn client_grants() -> Vec<String> {
+        manifest()["capabilities"]["client"]
+            .as_array()
+            .expect("capabilities.client is an array")
+            .iter()
+            .map(|grant| grant.as_str().expect("each grant is a string").to_string())
+            .collect()
+    }
+
+    fn settings_changed(keys: &[&str]) -> Event {
+        Event::SettingsChanged(SettingsChange {
+            keys: keys.iter().map(|key| key.to_string()).collect(),
+            origin: SettingsOrigin::User,
+            side: PluginSide::Client,
+        })
+    }
+
+    /// REQ: COR-030 - the Settings plugin holds `settings.write-kernel:<tab>` for each of its four
+    /// kernel tabs (user-interface, icons, debug, about).
+    #[test]
+    fn manifest_declares_write_kernel_for_each_owned_tab() {
+        let grants = client_grants();
+        for tab in ["user-interface", "icons", "debug", "about"] {
+            let grant = format!("settings.write-kernel:{tab}");
+            assert!(grants.contains(&grant), "missing grant {grant}");
+        }
+    }
+
+    /// REQ: COR-030 - at most one holder per kernel tab: no kernel-tab grant beyond the four owned
+    /// tabs, and no grant declared twice.
+    #[test]
+    fn manifest_holds_no_extra_or_duplicate_kernel_tab_grant() {
+        let grants = client_grants();
+        let kernel_grants: Vec<&String> = grants
+            .iter()
+            .filter(|grant| grant.starts_with("settings.write-kernel:"))
+            .collect();
+        assert_eq!(kernel_grants.len(), 4, "exactly four kernel tabs are owned");
+        let mut unique_grants = kernel_grants.clone();
+        unique_grants.sort();
+        unique_grants.dedup();
+        assert_eq!(unique_grants.len(), kernel_grants.len(), "a kernel-tab grant is declared twice");
+    }
+
+    /// REQ: COR-050 - the complete manifest starts at activation `startup`, targets the client base
+    /// world and exports only `views`.
+    #[test]
+    fn manifest_declares_startup_activation_and_views_export() {
+        let manifest = manifest();
+        assert_eq!(manifest["activation"], serde_json::json!(["startup"]));
+        assert_eq!(manifest["client"]["world"], "ilium:client/base@0.1.0");
+        assert_eq!(manifest["client"]["exports"], serde_json::json!(["views"]));
+        assert_eq!(manifest["limits_tier"], "first-party");
+    }
+
+    /// REQ: COR-050 - the complete manifest declares the first-run onboarding step and the overview
+    /// panel exactly as the manual's Complete manifest section lists them.
+    #[test]
+    fn manifest_declares_first_run_step_and_overview_panel() {
+        let manifest = manifest();
+        let contributes = &manifest["contributes"];
+        assert_eq!(
+            contributes["onboarding_steps"],
+            serde_json::json!([{ "id": "first-run", "title": "Welcome", "order": 10 }])
+        );
+        assert_eq!(
+            contributes["panels"],
+            serde_json::json!([{ "id": "overview", "title": "All settings", "modal": false }])
+        );
+    }
+
+    /// REQ: COR-011 - the Appearance section keeps its manual defaults: density `comfortable`, and
+    /// accent `#4a9eff` with theme swatches.
+    #[test]
+    fn appearance_section_keeps_manual_defaults() {
+        let manifest = manifest();
+        let section = &manifest["contributes"]["settings"][0];
+        assert_eq!(section["id"], "appearance");
+        assert_eq!(section["tab"], "user-interface");
+        assert_eq!(section["rows"][0]["key"], "density");
+        assert_eq!(section["rows"][0]["default"], "comfortable");
+        assert_eq!(section["rows"][1]["key"], "accent");
+        assert_eq!(section["rows"][1]["default"], "#4a9eff");
+        assert_eq!(section["rows"][1]["swatches"], "theme");
+    }
+
+    /// REQ: COR-011 - a density change is saved by the host, so the plugin returns no submissions
+    /// and writes no settings itself.
+    #[test]
+    fn density_change_produces_no_submission() {
+        let mut client = SettingsClient::default();
+        let submissions = client.on_events(vec![settings_changed(&["density"])]);
+        assert!(submissions.is_empty(), "the host saves the change; the plugin submits nothing");
+    }
+
+    /// REQ: COR-011 - an empty event batch is a no-op: no submissions and no state change.
+    #[test]
+    fn empty_event_batch_produces_no_submission() {
+        let mut client = SettingsClient::default();
+        assert!(client.on_events(Vec::new()).is_empty());
+    }
+
+    /// REQ: COR-011 - failure case: a change to keys this plugin does not own (a kernel key such as
+    /// `ui.motion_level`) is not acted on and yields no submission.
+    #[test]
+    fn unrelated_setting_change_is_ignored() {
+        let mut client = SettingsClient::default();
+        let submissions = client.on_events(vec![settings_changed(&["ui.motion_level"])]);
+        assert!(submissions.is_empty());
+    }
+
+    /// REQ: COR-011 - the first-run onboarding step renders the `first-run` section as a schema form
+    /// owned by this plugin.
+    #[test]
+    fn onboarding_step_renders_first_run_schema_form() {
+        let mut client = SettingsClient::default();
+        let tree = client.render(
+            ViewTarget::OnboardingStep("first-run".to_string()),
+            Area { columns: 80, rows: 24 },
+        );
+        let serialized = serde_json::to_string(&tree).expect("UiTree serializes");
+        assert!(serialized.contains("schema-form"));
+        assert!(serialized.contains("first-run"));
+    }
+
+    /// REQ: COR-011 - the overview panel renders the Appearance section as a schema form, not the
+    /// onboarding section.
+    #[test]
+    fn overview_panel_renders_appearance_schema_form() {
+        let mut client = SettingsClient::default();
+        let tree = client.render(
+            ViewTarget::Panel("overview".to_string()),
+            Area { columns: 80, rows: 24 },
+        );
+        let serialized = serde_json::to_string(&tree).expect("UiTree serializes");
+        assert!(serialized.contains("schema-form"));
+        assert!(serialized.contains("appearance"));
+        assert!(!serialized.contains("first-run"));
+    }
+}

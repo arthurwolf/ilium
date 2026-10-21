@@ -94,3 +94,154 @@ impl NativeRenderer for ScenesScene {
         unimplemented!("ilium.core.scenes: native renderer frames_per_second")
     }
 }
+
+#[cfg(test)]
+mod spec_tests {
+    use serde_json::json;
+
+    /// Words that name a shared-look control (colour, palette, brightness, contrast, hue, dithering).
+    /// COR-011 forbids a scene package from adding any of these to its own settings.
+    const SHARED_LOOK_WORDS: [&str; 5] = ["brightness", "contrast", "hue", "palette", "dither"];
+
+    /// The shipped manifest, read at compile time so the tests check the file that gets installed.
+    fn manifest_value() -> serde_json::Value {
+        serde_json::from_str(include_str!("../manifest.json")).expect("manifest.json is valid JSON")
+    }
+
+    fn scene_entries(manifest: &serde_json::Value) -> Vec<serde_json::Value> {
+        manifest["contributes"]["scenes"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    fn settings_property_names(scene: &serde_json::Value) -> Vec<String> {
+        scene["settings_schema"]["properties"]
+            .as_object()
+            .map(|properties| properties.keys().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    fn is_shared_look_control(property_name: &str) -> bool {
+        let lowered = property_name.to_ascii_lowercase();
+        SHARED_LOOK_WORDS.iter().any(|word| lowered.contains(word))
+    }
+
+    /// REQ: COR-010
+    #[test]
+    fn cor_010_catalogue_names_the_three_scenes_in_order() {
+        let manifest = manifest_value();
+        let ids: Vec<String> = scene_entries(&manifest)
+            .iter()
+            .map(|scene| scene["id"].as_str().unwrap_or_default().to_string())
+            .collect();
+        assert_eq!(ids, vec!["waves", "clock", "stars-overhead"]);
+    }
+
+    /// REQ: COR-010
+    #[test]
+    fn cor_010_every_scene_has_a_title_and_a_family() {
+        let manifest = manifest_value();
+        for scene in scene_entries(&manifest) {
+            let title = scene["title"].as_str().unwrap_or_default();
+            let family = scene["family"].as_str().unwrap_or_default();
+            assert!(!title.is_empty(), "scene {} has no title", scene["id"]);
+            assert!(!family.is_empty(), "scene {} has no family", scene["id"]);
+        }
+    }
+
+    /// REQ: COR-010
+    #[test]
+    fn cor_010_scene_package_has_a_scene_side_only() {
+        let manifest = manifest_value();
+        assert_eq!(manifest["scene"]["entry"], "scene.wasm");
+        assert_eq!(manifest["scene"]["world"], "ilium:anim/base@0.1.0");
+        assert!(manifest.get("server").is_none(), "no server side expected");
+        assert!(manifest.get("client").is_none(), "no client side expected");
+    }
+
+    /// REQ: COR-010
+    #[test]
+    fn cor_010_live_data_scene_declares_its_host_and_observer_grants() {
+        let manifest = manifest_value();
+        let stars = scene_entries(&manifest)
+            .into_iter()
+            .find(|scene| scene["id"] == "stars-overhead")
+            .expect("stars-overhead is in the catalogue");
+        assert_eq!(stars["modes"], json!(["live"]));
+        let grants = manifest["capabilities"]["scene"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        assert!(grants.contains(&json!("http:services.swpc.noaa.gov")));
+        assert!(grants.contains(&json!("location.observer")));
+    }
+
+    /// REQ: COR-010
+    #[test]
+    fn cor_010_scene_grants_cover_media_gpu_observer_and_live_host() {
+        let manifest = manifest_value();
+        let grants = manifest["capabilities"]["scene"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(
+            grants,
+            vec![
+                json!("media.video"),
+                json!("location.observer"),
+                json!("gpu.kernels"),
+                json!("http:services.swpc.noaa.gov"),
+            ]
+        );
+    }
+
+    /// REQ: COR-011
+    #[test]
+    fn cor_011_every_scene_settings_schema_has_no_properties() {
+        let manifest = manifest_value();
+        for scene in scene_entries(&manifest) {
+            let properties = scene["settings_schema"]["properties"]
+                .as_object()
+                .expect("settings_schema.properties is an object");
+            assert!(
+                properties.is_empty(),
+                "scene {} adds scene controls of its own",
+                scene["id"]
+            );
+        }
+    }
+
+    /// REQ: COR-011
+    #[test]
+    fn cor_011_manifest_carries_no_shared_look_control_names() {
+        let manifest = manifest_value();
+        for scene in scene_entries(&manifest) {
+            for name in settings_property_names(&scene) {
+                assert!(
+                    !is_shared_look_control(&name),
+                    "scene {} declares shared-look control {name}",
+                    scene["id"]
+                );
+            }
+        }
+        let text = include_str!("../manifest.json").to_ascii_lowercase();
+        assert!(!text.contains("\"palette\""));
+        assert!(!text.contains("\"brightness\""));
+    }
+
+    /// REQ: COR-011
+    #[test]
+    fn cor_011_failure_case_brightness_control_is_flagged() {
+        let scene = json!({
+            "id": "custom",
+            "settings_schema": {
+                "type": "object",
+                "properties": { "brightness": { "type": "number" } }
+            }
+        });
+        let names = settings_property_names(&scene);
+        assert_eq!(names, vec!["brightness".to_string()]);
+        assert!(is_shared_look_control(&names[0]));
+    }
+}

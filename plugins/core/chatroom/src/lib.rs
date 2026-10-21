@@ -65,3 +65,125 @@ impl Views for ChatroomClient {
         unimplemented!("ilium.core.chatroom: client views.render")
     }
 }
+
+#[cfg(test)]
+mod spec_tests {
+    use super::*;
+
+    /// The shipped manifest, read at compile time so the tests check the same bytes the host loads.
+    fn shipped_manifest() -> serde_json::Value {
+        serde_json::from_str(include_str!("../manifest.json")).expect("manifest.json is valid JSON")
+    }
+
+    fn array_contains(values: &serde_json::Value, expected: &str) -> bool {
+        values
+            .as_array()
+            .map(|entries| entries.iter().any(|entry| entry.as_str() == Some(expected)))
+            .unwrap_or(false)
+    }
+
+    fn extension_point<'a>(manifest: &'a serde_json::Value, point_id: &str) -> Option<&'a serde_json::Value> {
+        manifest["contributes"]["extension_points"]
+            .as_array()?
+            .iter()
+            .find(|point| point["id"].as_str() == Some(point_id))
+    }
+
+    /// REQ: COR-050 (manual "Complete manifest": activation is `startup` plus lazy `topic:chatroom`).
+    #[test]
+    fn activation_is_startup_and_chatroom_topic() {
+        let manifest = shipped_manifest();
+        assert!(array_contains(&manifest["activation"], "startup"));
+        assert!(array_contains(&manifest["activation"], "topic:chatroom"));
+    }
+
+    /// REQ: manual "Complete manifest" (plugin id `ilium.core.chatroom`, contract `ilium:plugin@0.1.0`, version 0.1.0).
+    #[test]
+    fn manifest_identifies_the_chatroom_plugin() {
+        let manifest = shipped_manifest();
+        assert_eq!(manifest["api"].as_str(), Some("ilium:plugin@0.1.0"));
+        assert_eq!(manifest["id"].as_str(), Some("ilium.core.chatroom"));
+        assert_eq!(manifest["version"].as_str(), Some("0.1.0"));
+    }
+
+    /// REQ: manual "Complete manifest" (server world `ilium:server/base@0.1.0`, client world `ilium:client/base@0.1.0`).
+    #[test]
+    fn each_side_names_its_entry_and_world() {
+        let manifest = shipped_manifest();
+        assert_eq!(manifest["server"]["entry"].as_str(), Some("server.wasm"));
+        assert_eq!(manifest["server"]["world"].as_str(), Some("ilium:server/base@0.1.0"));
+        assert_eq!(manifest["client"]["entry"].as_str(), Some("client.wasm"));
+        assert_eq!(manifest["client"]["world"].as_str(), Some("ilium:client/base@0.1.0"));
+    }
+
+    /// REQ: manual "Manifest" section (the plugin holds no `agent-config` grant; Agent setup owns the agent files,
+    /// and the server grants agent-setup services and the project file scope).
+    #[test]
+    fn grants_cover_project_files_and_agent_setup_without_agent_config() {
+        let manifest = shipped_manifest();
+        let server_grants = &manifest["capabilities"]["server"];
+        assert!(array_contains(server_grants, "fs.write:project"));
+        assert!(array_contains(server_grants, "topics.subscribe:chatroom"));
+        assert!(array_contains(server_grants, "services.use:ilium.core.agent-setup"));
+        assert!(!array_contains(server_grants, "agent-config"));
+        assert!(!array_contains(&manifest["capabilities"]["client"], "agent-config"));
+    }
+
+    /// REQ: manual "Complete manifest" (server exports `virtual-rows-provider`, client exports `views`).
+    /// Compile-time check: the struct for each side implements the trait its manifest export names.
+    #[test]
+    fn side_structs_implement_their_manifest_exports() {
+        fn assert_virtual_rows_provider<T: VirtualRowsProvider>() {}
+        fn assert_views<T: Views>() {}
+        assert_virtual_rows_provider::<ChatroomServer>();
+        assert_views::<ChatroomClient>();
+    }
+
+    /// REQ: manual "The Chatroom row" sample (the row lists one `CHATROOM.md` file child). Empty-input case: empty parent.
+    #[test]
+    fn chatroom_row_lists_the_room_file_for_an_empty_parent() {
+        let mut server = ChatroomServer::default();
+        let result = server.list_virtual_children("chatroom".to_string(), String::new(), None);
+        let (children, cursor) = match result {
+            Ok(page) => page,
+            Err(_) => panic!("the chatroom row must list its children"),
+        };
+        assert_eq!(children.len(), 1);
+        assert!(cursor.is_none());
+    }
+
+    /// REQ: manual "The Chatroom row" sample (an unknown row kind is refused with not_found). Failure case.
+    #[test]
+    fn unknown_row_kind_is_refused() {
+        let mut server = ChatroomServer::default();
+        let result = server.list_virtual_children("not-chatroom".to_string(), String::new(), None);
+        assert!(result.is_err());
+    }
+
+    /// REQ: EXT-052 (manual "Extension points this plugin owns": before-post is a server hook with 20 ms deadline
+    /// and 8 handlers; message-renderers is a client collect point with 64 entries). Defaults are the manual's.
+    #[test]
+    fn owned_extension_points_declare_their_limits() {
+        let manifest = shipped_manifest();
+
+        let before_post = extension_point(&manifest, "before-post").expect("before-post is declared");
+        assert_eq!(before_post["kind"].as_str(), Some("hook"));
+        assert_eq!(before_post["mode"].as_str(), Some("transform"));
+        assert_eq!(before_post["deadline_ms"].as_u64(), Some(20));
+        assert_eq!(before_post["max_handlers"].as_u64(), Some(8));
+
+        let message_renderers = extension_point(&manifest, "message-renderers").expect("message-renderers is declared");
+        assert_eq!(message_renderers["kind"].as_str(), Some("collect"));
+        assert_eq!(message_renderers["max_entries"].as_u64(), Some(64));
+    }
+
+    /// REQ: SEC-293 (manual "Security": risk marks of the extension points, before-post high and message-renderers standard).
+    #[test]
+    fn extension_point_risk_marks_follow_the_security_table() {
+        let manifest = shipped_manifest();
+        let before_post = extension_point(&manifest, "before-post").expect("before-post is declared");
+        let message_renderers = extension_point(&manifest, "message-renderers").expect("message-renderers is declared");
+        assert_eq!(before_post["risk"].as_str(), Some("high"));
+        assert_eq!(message_renderers["risk"].as_str(), Some("standard"));
+    }
+}

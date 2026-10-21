@@ -43,3 +43,137 @@ impl Handler for SessionsClient {
         unimplemented!("ilium.core.sessions: client handler.on_events")
     }
 }
+
+#[cfg(test)]
+mod spec_tests {
+    use serde_json::{json, Value};
+
+    const SESSION_GRANT: &str = "settings.write-kernel:session";
+
+    fn shipped_manifest() -> Value {
+        serde_json::from_str(include_str!("../manifest.json")).expect("manifest.json is valid JSON")
+    }
+
+    fn array_contains(values: &Value, expected: &str) -> bool {
+        values
+            .as_array()
+            .map(|entries| entries.iter().any(|entry| entry.as_str() == Some(expected)))
+            .unwrap_or(false)
+    }
+
+    /// Returns the sides ("server", "client") whose `capabilities` list declares `grant`.
+    fn grant_holders(manifest: &Value, grant: &str) -> Vec<String> {
+        ["server", "client"]
+            .into_iter()
+            .filter(|side| array_contains(&manifest["capabilities"][*side], grant))
+            .map(|side| side.to_string())
+            .collect()
+    }
+
+    fn extension_point<'a>(manifest: &'a Value, point_id: &str) -> Option<&'a Value> {
+        manifest["contributes"]["extension_points"]
+            .as_array()?
+            .iter()
+            .find(|point| point["id"].as_str() == Some(point_id))
+    }
+
+    /// REQ: manual "Complete manifest" (plugin id `ilium.core.sessions`, contract `ilium:plugin@0.1.0`, version 0.1.0).
+    #[test]
+    fn manifest_identifies_the_sessions_plugin() {
+        let manifest = shipped_manifest();
+        assert_eq!(manifest["api"].as_str(), Some("ilium:plugin@0.1.0"));
+        assert_eq!(manifest["id"].as_str(), Some("ilium.core.sessions"));
+        assert_eq!(manifest["version"].as_str(), Some("0.1.0"));
+    }
+
+    /// REQ: manual "Complete manifest" (server world `ilium:server/base@0.1.0`, client world `ilium:client/base@0.1.0`).
+    #[test]
+    fn each_side_names_its_entry_and_world() {
+        let manifest = shipped_manifest();
+        assert_eq!(manifest["server"]["entry"].as_str(), Some("server.wasm"));
+        assert_eq!(manifest["server"]["world"].as_str(), Some("ilium:server/base@0.1.0"));
+        assert_eq!(manifest["client"]["entry"].as_str(), Some("client.wasm"));
+        assert_eq!(manifest["client"]["world"].as_str(), Some("ilium:client/base@0.1.0"));
+    }
+
+    /// REQ: COR-050 (manual "Complete manifest": activation triggers are `startup` and `view:sessions.list`).
+    #[test]
+    fn activation_is_startup_and_the_sessions_view() {
+        let manifest = shipped_manifest();
+        assert!(array_contains(&manifest["activation"], "startup"));
+        assert!(array_contains(&manifest["activation"], "view:sessions.list"));
+    }
+
+    /// REQ: manual "Sessions" section (the server side owns the session logic and holds `settings.write-kernel:session`;
+    /// the client side needs no grants of its own). Fails until the shipped manifest moves the grant to the server side.
+    #[test]
+    fn server_side_holds_the_session_settings_grant() {
+        let manifest = shipped_manifest();
+        assert_eq!(grant_holders(&manifest, SESSION_GRANT), vec!["server".to_string()]);
+    }
+
+    /// REQ: COR-030 (manual "Kernel tabs this plugin owns": the `session` tab has exactly one holder of
+    /// `settings.write-kernel:session`). Empty input: a manifest without the grant has no owner, so the tab stays read-only.
+    #[test]
+    fn session_tab_has_exactly_one_owner_and_none_without_a_grant() {
+        let manifest = shipped_manifest();
+        assert_eq!(grant_holders(&manifest, SESSION_GRANT).len(), 1);
+        assert!(grant_holders(&json!({}), SESSION_GRANT).is_empty());
+    }
+
+    /// REQ: COR-030 (failure case: a second declaration of `settings.write-kernel:session` must fail with
+    /// `manifest.settings-owner`, so a manifest that declares it on both sides is not a valid single owner).
+    #[test]
+    fn duplicate_session_grant_on_both_sides_is_not_a_single_owner() {
+        let duplicate = json!({
+            "capabilities": {
+                "server": [SESSION_GRANT],
+                "client": [SESSION_GRANT]
+            }
+        });
+        assert_ne!(grant_holders(&duplicate, SESSION_GRANT).len(), 1);
+    }
+
+    /// REQ: manual "Complete manifest" (server capabilities: `panes.read`, `panes.lifecycle`, `tree.restructure`, `agent.read`).
+    #[test]
+    fn server_capabilities_cover_pane_tree_and_agent_work() {
+        let manifest = shipped_manifest();
+        for capability in ["panes.read", "panes.lifecycle", "tree.restructure", "agent.read"] {
+            assert!(
+                array_contains(&manifest["capabilities"]["server"], capability),
+                "server capabilities are missing {capability}"
+            );
+        }
+    }
+
+    /// REQ: EXT-052 (manual "Extension points this plugin owns": both points are granted `extensions.provide`
+    /// on the server side).
+    #[test]
+    fn server_grants_both_sessions_extension_points() {
+        let manifest = shipped_manifest();
+        assert!(array_contains(
+            &manifest["capabilities"]["server"],
+            "extensions.provide:ilium.core.sessions/snapshot-sections"
+        ));
+        assert!(array_contains(
+            &manifest["capabilities"]["server"],
+            "extensions.provide:ilium.core.sessions/before-restore"
+        ));
+    }
+
+    /// REQ: EXT-052 (manual table: `snapshot-sections` version 0.1.0, 64 entries, not dynamic; `before-restore`
+    /// version 0.1.0, deadline 20 ms, 8 handlers).
+    #[test]
+    fn extension_points_declare_the_documented_limits() {
+        let manifest = shipped_manifest();
+        let snapshot = extension_point(&manifest, "snapshot-sections").expect("snapshot-sections is declared");
+        assert_eq!(snapshot["version"].as_str(), Some("0.1.0"));
+        assert_eq!(snapshot["max_entries"].as_u64(), Some(64));
+        assert_eq!(snapshot["dynamic"].as_bool(), Some(false));
+
+        let before_restore = extension_point(&manifest, "before-restore").expect("before-restore is declared");
+        assert_eq!(before_restore["version"].as_str(), Some("0.1.0"));
+        assert_eq!(before_restore["deadline_ms"].as_u64(), Some(20));
+        assert_eq!(before_restore["max_handlers"].as_u64(), Some(8));
+    }
+}

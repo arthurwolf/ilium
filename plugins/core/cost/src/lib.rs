@@ -60,3 +60,134 @@ impl Views for CostClient {
         unimplemented!("ilium.core.cost: client views.render")
     }
 }
+
+#[cfg(test)]
+mod spec_tests {
+    use super::*;
+    use serde_json::Value;
+
+    const MANIFEST_TEXT: &str = include_str!("../manifest.json");
+
+    fn manifest() -> Value {
+        serde_json::from_str(MANIFEST_TEXT).expect("manifest.json is valid JSON")
+    }
+
+    fn string_list(value: &Value) -> Vec<String> {
+        value
+            .as_array()
+            .map(|items| items.iter().filter_map(|item| item.as_str().map(str::to_owned)).collect())
+            .unwrap_or_default()
+    }
+
+    fn capability_list(manifest: &Value, side: &str) -> Vec<String> {
+        string_list(&manifest["capabilities"][side])
+    }
+
+    fn all_capabilities(manifest: &Value) -> Vec<String> {
+        let mut combined = capability_list(manifest, "server");
+        combined.extend(capability_list(manifest, "client"));
+        combined
+    }
+
+    /// REQ: COR-050 - the plugin is `ilium.core.cost` and declares both a server and a client side.
+    #[test]
+    fn manifest_declares_cost_id_and_both_sides() {
+        let manifest = manifest();
+        assert_eq!(manifest["id"], "ilium.core.cost");
+        assert_eq!(manifest["server"]["world"], "ilium:server/base@0.1.0");
+        assert_eq!(manifest["client"]["world"], "ilium:client/base@0.1.0");
+        assert_eq!(string_list(&manifest["server"]["exports"]), vec!["service-provider"]);
+        assert_eq!(string_list(&manifest["client"]["exports"]), vec!["views"]);
+    }
+
+    /// REQ: COR-050 - activation runs at startup and when the cost panel view is opened.
+    #[test]
+    fn manifest_activates_at_startup_and_for_cost_panel() {
+        let manifest = manifest();
+        let activation = string_list(&manifest["activation"]);
+        assert!(activation.contains(&"startup".to_string()));
+        assert!(activation.contains(&"view:cost.panel".to_string()));
+    }
+
+    /// REQ: COR-050 - the server side may serve the usage service, decorate the tree and contribute the agent-cost settings tab.
+    #[test]
+    fn server_capabilities_grant_usage_service_and_agent_cost_tab() {
+        let server = capability_list(&manifest(), "server");
+        assert!(server.contains(&"services.provide:ilium.core.cost/usage".to_string()));
+        assert!(server.contains(&"tree.decorate".to_string()));
+        assert!(server.contains(&"settings.contribute:agent-cost".to_string()));
+    }
+
+    /// REQ: COR-030 - the plugin owns the reset-planning kernel tab, so its write-kernel grant must be on the server side.
+    #[test]
+    fn server_capabilities_grant_reset_planning_kernel_tab() {
+        let server = capability_list(&manifest(), "server");
+        assert!(server.contains(&"settings.write-kernel:reset-planning".to_string()));
+    }
+
+    /// REQ: COR-033 - each owned kernel tab has exactly one write-kernel holder across both sides.
+    #[test]
+    fn each_owned_kernel_tab_has_exactly_one_holder() {
+        let manifest = manifest();
+        let combined = all_capabilities(&manifest);
+        for tab in ["agent-cost", "reset-planning"] {
+            let grant = format!("settings.write-kernel:{tab}");
+            let holders = combined.iter().filter(|capability| **capability == grant).count();
+            assert_eq!(holders, 1, "tab {tab} must have exactly one holder");
+        }
+    }
+
+    /// REQ: COR-050 - the price and quota extension points are provided on the server side.
+    #[test]
+    fn server_capabilities_provide_price_and_quota_extension_points() {
+        let server = capability_list(&manifest(), "server");
+        assert!(server.contains(&"extensions.provide:ilium.core.cost/price-sources".to_string()));
+        assert!(server.contains(&"extensions.provide:ilium.core.cost/quota-sources".to_string()));
+    }
+
+    /// REQ: COR-050 - the unit row is a choice with default "dollars" and the options dollars and quota.
+    #[test]
+    fn unit_setting_defaults_to_dollars_with_quota_option() {
+        let manifest = manifest();
+        let unit_row = &manifest["contributes"]["settings"][0]["rows"][0];
+        assert_eq!(unit_row["type"], "choice");
+        assert_eq!(unit_row["key"], "unit");
+        assert_eq!(unit_row["default"], "dollars");
+        let option_values: Vec<String> = unit_row["options"]
+            .as_array()
+            .expect("unit row lists options")
+            .iter()
+            .filter_map(|option| option["value"].as_str().map(str::to_owned))
+            .collect();
+        assert_eq!(option_values, vec!["dollars", "quota"]);
+    }
+
+    /// REQ: COR-050 - failure case: a usage reply without `panes` violates the declared result schema.
+    #[test]
+    fn usage_reply_without_panes_violates_declared_result_schema() {
+        let manifest = manifest();
+        let result_schema = &manifest["contributes"]["services"]["ilium.core.cost/usage"]["usage"]["result"];
+        let required = string_list(&result_schema["required"]);
+        assert!(required.contains(&"panes".to_string()));
+        let empty_reply = serde_json::json!({});
+        let missing: Vec<&String> = required
+            .iter()
+            .filter(|key| empty_reply.get(key.as_str()).is_none())
+            .collect();
+        assert_eq!(missing, vec![&"panes".to_string()]);
+    }
+
+    /// REQ: COR-050 - invalid input: a truncated manifest must not parse as a complete plugin manifest.
+    #[test]
+    fn truncated_manifest_text_does_not_parse() {
+        let truncated: String = MANIFEST_TEXT.chars().take(MANIFEST_TEXT.chars().count() / 2).collect();
+        assert!(serde_json::from_str::<Value>(&truncated).is_err());
+    }
+
+    /// REQ: COR-050 - the manifest declares one struct per side, each constructible with Default.
+    #[test]
+    fn server_and_client_sides_are_declared_structs() {
+        let _server: CostServer = CostServer::default();
+        let _client: CostClient = CostClient::default();
+    }
+}

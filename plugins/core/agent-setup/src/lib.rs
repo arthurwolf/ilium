@@ -62,3 +62,177 @@ impl Views for AgentSetupClient {
         unimplemented!("ilium.core.agent-setup: client views.render")
     }
 }
+
+#[cfg(test)]
+mod spec_tests {
+    use super::*;
+
+    /// The shipped manifest, read at compile time so the contract checks need no host.
+    const MANIFEST_TEXT: &str = include_str!("../manifest.json");
+
+    fn manifest() -> serde_json::Value {
+        serde_json::from_str(MANIFEST_TEXT).expect("manifest.json parses as JSON")
+    }
+
+    fn string_items(value: &serde_json::Value) -> Vec<String> {
+        value
+            .as_array()
+            .expect("expected a JSON array")
+            .iter()
+            .map(|item| item.as_str().expect("expected a JSON string").to_string())
+            .collect()
+    }
+
+    fn side_capabilities(manifest: &serde_json::Value, side: &str) -> Vec<String> {
+        string_items(&manifest["capabilities"][side])
+    }
+
+    /// REQ: COR-050 - the complete manifest carries every required key, with the plugin id and API version.
+    #[test]
+    fn manifest_carries_every_required_key() {
+        let manifest = manifest();
+        for key in [
+            "api",
+            "id",
+            "name",
+            "version",
+            "publisher",
+            "server",
+            "client",
+            "capabilities",
+            "activation",
+            "limits_tier",
+        ] {
+            assert!(manifest.get(key).is_some(), "manifest is missing `{key}`");
+        }
+        assert_eq!(manifest["api"], "ilium:plugin@0.1.0");
+        assert_eq!(manifest["id"], "ilium.core.agent-setup");
+        assert_eq!(manifest["limits_tier"], "first-party");
+    }
+
+    /// REQ: COR-050 - one server side and one client side, each with its world and export, and one struct per side.
+    #[test]
+    fn manifest_declares_server_and_client_sides() {
+        let manifest = manifest();
+        assert_eq!(manifest["server"]["world"], "ilium:server/base@0.1.0");
+        assert_eq!(string_items(&manifest["server"]["exports"]), vec!["service-provider"]);
+        assert_eq!(manifest["client"]["world"], "ilium:client/base@0.1.0");
+        assert_eq!(string_items(&manifest["client"]["exports"]), vec!["views"]);
+        let _server = AgentSetupServer::default();
+        let _client = AgentSetupClient::default();
+    }
+
+    /// REQ: COR-050 - activation follows the setup tab, the refresh command and the install service.
+    #[test]
+    fn manifest_activation_lists_the_three_triggers() {
+        assert_eq!(
+            string_items(&manifest()["activation"]),
+            vec!["settings:setup", "command:refresh", "service:install"]
+        );
+    }
+
+    /// REQ: COR-050 - the plugin is replaceable, and its surface names exactly the service, the three points and the command.
+    #[test]
+    fn manifest_surface_names_exactly_the_replaceable_contributions() {
+        let manifest = manifest();
+        assert_eq!(manifest["replaceable"], true);
+        assert_eq!(
+            string_items(&manifest["surface"]),
+            vec![
+                "services:install",
+                "points:instruction-blocks",
+                "points:targets",
+                "points:before-install",
+                "commands:refresh",
+            ]
+        );
+    }
+
+    /// REQ: COR-011 - the client draws the Setup tab and holds no file grant; only the server touches project and config files.
+    #[test]
+    fn client_side_holds_no_file_grants() {
+        let manifest = manifest();
+        let client = side_capabilities(&manifest, "client");
+        assert!(
+            client.iter().all(|grant| !grant.starts_with("fs.")),
+            "client grants: {client:?}"
+        );
+    }
+
+    /// REQ: COR-050 - global agent files change only through `agent-config.propose`; a direct `fs.write:agent-config` grant is refused at install (Manifest section, which carries no bracketed ID).
+    #[test]
+    fn no_direct_agent_config_write_grant_is_declared() {
+        let manifest = manifest();
+        let server = side_capabilities(&manifest, "server");
+        let direct_writes: Vec<&String> = server
+            .iter()
+            .filter(|grant| grant.starts_with("fs.write:agent-config:"))
+            .collect();
+        assert!(direct_writes.is_empty(), "direct agent-config writes: {direct_writes:?}");
+        assert!(server.iter().any(|grant| grant == "agent-config.propose:claude"));
+        assert!(server.iter().any(|grant| grant == "agent-config.propose:codex"));
+    }
+
+    /// REQ: COR-033 - the `setup` tab has exactly one holder of `settings.write-kernel`, across both sides.
+    #[test]
+    fn exactly_one_grant_writes_the_setup_tab() {
+        let manifest = manifest();
+        let all_grants: Vec<String> = side_capabilities(&manifest, "server")
+            .into_iter()
+            .chain(side_capabilities(&manifest, "client"))
+            .collect();
+        let kernel_writes: Vec<String> = all_grants
+            .into_iter()
+            .filter(|grant| grant.starts_with("settings.write-kernel:"))
+            .collect();
+        assert_eq!(kernel_writes, vec!["settings.write-kernel:setup"]);
+    }
+
+    /// REQ: SEC-293 - the before-install point is a high-risk veto with a 20 ms deadline and at most four handlers.
+    #[test]
+    fn before_install_hook_is_a_high_risk_veto() {
+        let manifest = manifest();
+        let points = manifest["contributes"]["extension_points"]
+            .as_array()
+            .expect("extension_points is an array");
+        let before_install = points
+            .iter()
+            .find(|point| point["id"] == "before-install")
+            .expect("before-install point is declared");
+        assert_eq!(before_install["kind"], "hook");
+        assert_eq!(before_install["mode"], "veto");
+        assert_eq!(before_install["risk"], "high");
+        assert_eq!(before_install["deadline_ms"], 20);
+        assert_eq!(before_install["max_handlers"], 4);
+    }
+
+    /// REQ: COR-050 - the collect points keep their documented entry caps: 8 instruction blocks and 16 targets.
+    #[test]
+    fn collect_points_keep_their_documented_caps() {
+        let manifest = manifest();
+        let points = manifest["contributes"]["extension_points"]
+            .as_array()
+            .expect("extension_points is an array");
+        let cap_of = |point_id: &str| -> u64 {
+            points
+                .iter()
+                .find(|point| point["id"] == point_id)
+                .and_then(|point| point["max_entries"].as_u64())
+                .expect("collect point declares a positive entry cap")
+        };
+        assert_eq!(cap_of("instruction-blocks"), 8);
+        assert_eq!(cap_of("targets"), 16);
+        assert!(cap_of("targets") > 0);
+    }
+
+    /// REQ: COR-050 - an install or remove call without both `block` and `target` is invalid input (Manifest section, which carries no bracketed ID).
+    #[test]
+    fn install_and_remove_params_require_block_and_target() {
+        let manifest = manifest();
+        let service = &manifest["contributes"]["services"]["ilium.core.agent-setup/install"];
+        for operation in ["install", "remove"] {
+            let required = string_items(&service[operation]["params"]["required"]);
+            assert_eq!(required, vec!["block", "target"], "operation `{operation}`");
+        }
+    }
+}

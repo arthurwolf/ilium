@@ -50,3 +50,139 @@ impl Views for WorktreesClient {
         unimplemented!("ilium.core.worktrees: client views.render")
     }
 }
+
+#[cfg(test)]
+mod spec_tests {
+
+    const MANIFEST_JSON: &str = include_str!("../manifest.json");
+
+    fn manifest() -> serde_json::Value {
+        serde_json::from_str(MANIFEST_JSON).expect("manifest.json is valid JSON")
+    }
+
+    fn string_list(value: &serde_json::Value) -> Vec<String> {
+        value
+            .as_array()
+            .map(|items| items.iter().filter_map(|item| item.as_str().map(str::to_owned)).collect())
+            .unwrap_or_default()
+    }
+
+    fn extension_point<'a>(manifest: &'a serde_json::Value, point_id: &str) -> &'a serde_json::Value {
+        manifest["contributes"]["extension_points"]
+            .as_array()
+            .and_then(|points| points.iter().find(|point| point["id"] == point_id))
+            .expect("the extension point is declared in contributes.extension_points")
+    }
+
+    /// REQ: COR-050
+    #[test]
+    fn manifest_declares_worktrees_identity_and_api_version() {
+        let manifest = manifest();
+        assert_eq!(manifest["id"], "ilium.core.worktrees");
+        assert_eq!(manifest["api"], "ilium:plugin@0.1.0");
+        assert_eq!(manifest["server"]["world"], "ilium:server/base@0.1.0");
+    }
+
+    /// REQ: COR-050
+    #[test]
+    fn activation_triggers_include_new_agent_command_and_create_service() {
+        let activation = string_list(&manifest()["activation"]);
+        assert!(activation.iter().any(|item| item == "command:new-agent"));
+        assert!(activation.iter().any(|item| item == "service:create"));
+    }
+
+    /// REQ: COR-050
+    #[test]
+    fn server_side_holds_the_git_worktree_and_pane_grants() {
+        let manifest = manifest();
+        let server = string_list(&manifest["capabilities"]["server"]);
+        let required = [
+            "workspace.manage",
+            "process.run:git",
+            "process.run:sh",
+            "panes.create",
+            "panes.read",
+            "fs.read:project",
+            "fs.write:worktrees",
+        ];
+        for grant in required {
+            assert!(server.iter().any(|item| item == grant), "server side is missing {grant}");
+        }
+    }
+
+    /// REQ: COR-050
+    #[test]
+    fn client_side_holds_no_process_grant_because_git_runs_on_the_server() {
+        let manifest = manifest();
+        let client = string_list(&manifest["capabilities"]["client"]);
+        assert!(client.iter().any(|item| item == "ui.panels"));
+        assert!(
+            client.iter().all(|item| !item.starts_with("process.run")),
+            "the client side must not run processes; Git runs on the server side"
+        );
+    }
+
+    /// REQ: COR-030
+    #[test]
+    fn exactly_one_side_holds_the_kernel_writer_grant_for_the_git_tab() {
+        let manifest = manifest();
+        let holders = ["server", "client"]
+            .into_iter()
+            .filter(|side| {
+                string_list(&manifest["capabilities"][*side])
+                    .iter()
+                    .any(|item| item == "settings.write-kernel:git")
+            })
+            .count();
+        assert_eq!(holders, 1, "the git Settings tab has one kernel writer");
+    }
+
+    /// REQ: EXT-052
+    #[test]
+    fn three_extension_points_are_declared_with_kind_and_mode() {
+        let manifest = manifest();
+        assert_eq!(extension_point(&manifest, "before-create")["kind"], "hook");
+        assert_eq!(extension_point(&manifest, "before-create")["mode"], "transform");
+        assert_eq!(extension_point(&manifest, "post-create-steps")["kind"], "collect");
+        assert_eq!(extension_point(&manifest, "before-remove")["kind"], "hook");
+        assert_eq!(extension_point(&manifest, "before-remove")["mode"], "veto");
+    }
+
+    /// REQ: EXT-052
+    #[test]
+    fn extension_point_deadlines_and_limits_match_the_manual_table() {
+        let manifest = manifest();
+        assert_eq!(extension_point(&manifest, "before-create")["deadline_ms"], 20);
+        assert_eq!(extension_point(&manifest, "before-create")["max_handlers"], 8);
+        assert_eq!(extension_point(&manifest, "post-create-steps")["max_entries"], 64);
+        assert_eq!(extension_point(&manifest, "post-create-steps")["dynamic"], false);
+        assert_eq!(extension_point(&manifest, "before-remove")["deadline_ms"], 20);
+        assert_eq!(extension_point(&manifest, "before-remove")["max_handlers"], 8);
+    }
+
+    /// REQ: SEC-293
+    #[test]
+    fn extension_point_risk_marks_follow_the_corrected_table() {
+        let manifest = manifest();
+        assert_eq!(extension_point(&manifest, "before-create")["risk"], "standard");
+        assert_eq!(extension_point(&manifest, "post-create-steps")["risk"], "high");
+        assert_eq!(extension_point(&manifest, "before-remove")["risk"], "standard");
+    }
+
+    /// REQ: EXT-052
+    #[test]
+    fn post_create_entry_schema_requires_id_title_command_and_working_directory() {
+        let manifest = manifest();
+        let mut required = string_list(&extension_point(&manifest, "post-create-steps")["entry_schema"]["required"]);
+        required.sort();
+        assert_eq!(required, ["command", "id", "title", "working_directory"]);
+    }
+
+    /// REQ: EXT-052
+    #[test]
+    fn before_create_reply_must_carry_a_branch_name() {
+        let manifest = manifest();
+        let required = string_list(&extension_point(&manifest, "before-create")["reply_schema"]["required"]);
+        assert_eq!(required, ["branch"]);
+    }
+}
