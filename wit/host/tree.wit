@@ -9,7 +9,7 @@ interface tree {
   roots: func() -> list<node-id>;
   /// At most 4,096 ids.
   find: func(query: node-query) -> list<node-id>;
-  /// The plugin's own metadata map for the node. At most 64 KiB per node.
+  /// The plugin's own metadata map for the node. At most 64 KiB per node by default; a T1 bundled plugin may raise it to 256 KiB.
   metadata: func(node: node-id) -> option<list<u8>>;
   set-metadata: func(node: node-id, bytes: list<u8>) -> result<_, plugin-error>;
 }

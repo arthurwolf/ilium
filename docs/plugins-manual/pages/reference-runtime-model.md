@@ -219,7 +219,7 @@ A **failure** is a trap (deadline, memory, illegal instruction, invalid UTF-8, m
 |---|---|
 | First | 1 s |
 | Second | 5 s |
-| Third | Not restarted. The plugin is disabled on that side until the user turns it on again, except an essential core plugin, which restarts after 5 s (LIF-042). |
+| Third | Not restarted. The plugin is disabled on that side until the user turns it on again, except an essential core plugin, which restarts after 5 s (LIF-042). In a development build the third and later failures restart after 5 s instead (LIF-226). |
 
 A restart that follows a 10-minute quiet period starts the count again at the first failure. A job failure never counts. `host-capacity` refusals never count. The `deactivation-reason` `crash-restart` is reserved and never delivered, because a crashed instance cannot be called [ABI-028].
 

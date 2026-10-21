@@ -6,7 +6,7 @@ permalink: /pages/api-intent-pane-lifecycle/
 
 ## Pane lifecycle intents
 
-Five intents let a server-side plugin control the process of a terminal pane: stop it without killing it, restart it with another command, terminate it politely, and ask for a size. All five need the grant `panes.lifecycle`, which is high risk and offered to the server side only. A high-risk grant needs an explicit user grant even for a bundled first-party plugin. The kernel keeps what stays kernel: PTY spawn, the resize itself, and the durable resume binding of agent sessions.
+Five intents let a server-side plugin control the process of a terminal pane: stop it without killing it, restart it with another command, terminate it politely, and ask for a size. All five need the grant `panes.lifecycle`, which is high risk and offered to the server side only. A restart with a new command (`replace-pane-command`) also needs the program grant `panes.create-command:<program>` ([SEC-041]). A high-risk grant needs an explicit user grant even for a bundled first-party plugin. The kernel keeps what stays kernel: PTY spawn, the resize itself, and the durable resume binding of agent sessions.
 
 **You need:** `panes.lifecycle` in the `server` capability list of the manifest. To observe results you also want `panes.read`, which delivers `pane-lifecycle-changed`. See [panes](/pages/api-panes/) for the read side and [intents](/pages/api-intents/) for batches and keys.
 

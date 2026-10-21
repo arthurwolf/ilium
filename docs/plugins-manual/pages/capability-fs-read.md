@@ -40,7 +40,7 @@ The scope is the text after the colon. Valid grants:
 | `fs.read:minecraft-saves` | `/minecraft-saves` | The platform's Minecraft saves directory. | normal |
 | `fs.read:agent-config:claude` | `/agent-config/claude` | The Claude configuration directory. Also `codex`. | high |
 | `fs.read:agent-sessions:claude` | `/agent-sessions/claude` | Claude transcript directory. Also `codex`, `gemini` and `antigravity`. | high |
-| `fs.read:path:<template>` | `/paths/<n>` | A path template, see below. | normal, high if literal |
+| `fs.read:path:<template>` | `/paths/<n>` | A path template, see below. | normal; H for a literal path, for `{config}`, and for a root at `$HOME` or above ([SEC-062]) |
 
 A path template starts with a placeholder or a literal absolute path, and ends with a name or with `/**`:
 

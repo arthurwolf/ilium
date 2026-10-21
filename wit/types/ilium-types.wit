@@ -551,7 +551,7 @@ interface intents {
   // ---- panes
   /// parent none means the root of the tree.
   record create-pane-spec {
-    parent: option<node-id>, title: string, content-kind: string, cwd: option<string>,
+    parent: option<node-id>, title: string, content-kind: string, cwd: option<fs-path>,
     command: option<list<string>>, initial-input: option<string>,
   }
   record signal-pane-spec { pane: node-id, signal: signal }

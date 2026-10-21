@@ -272,7 +272,7 @@ A write outside `data` and `cache` is logged at level info, with the scope, path
 
 ## Reading large files and scans
 
-`read-all` returns the whole file when it is 64 MiB or smaller. A larger file completes as `failed(quota-exceeded)`. Read a large file in pieces with the synchronous `read` call, which returns at most 1 MiB per call. A `read` at or past the end of the file returns an empty list, not an error.
+`read-all` returns the whole file when it is 64 MiB or smaller by default (512 MiB for a T1 bundled plugin). A larger file completes as `failed(quota-exceeded)`. Read a large file in pieces with the synchronous `read` call, which returns at most 1 MiB per call. A `read` at or past the end of the file returns an empty list, not an error.
 
 `scan` matches a glob against paths relative to the scope root. `*` matches within one segment, a whole `**` segment matches any depth, and `?` matches one character. Braces and character classes are not supported. Matches are sorted by path bytes, and dotfiles are included. More matches than `max-entries` complete as `failed(quota-exceeded)`, never as a silent truncation.
 

@@ -80,7 +80,7 @@ Every grant name is in the [capability index](/pages/capabilities/). A slow call
 **Notes.**
 
 - A scene may import `storage` for reads only (`get`, `keys`), and `fs` for the scopes its manifest names. Both are rows with `read only` or `scope reads only` in the A column.
-- `geocode` is linked on all three sides. `gpu` is for client and scene only.
+- `geocode` is linked on the client and scene sides. `gpu` is for client and scene only.
 - `ui-host` is the host interface `ui`. Its name differs only to avoid a clash with the type interface `ilium:types/ui`.
 
 ## 3. Export matrix

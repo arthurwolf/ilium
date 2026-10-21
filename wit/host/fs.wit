@@ -30,7 +30,7 @@ interface fs {
   list-dir: func(path: fs-path, max-entries: u32) -> result<list<dir-entry>, plugin-error>;
   /// Sync. max-bytes at most 1 MiB.
   read: func(path: fs-path, offset: u64, max-bytes: u32) -> result<list<u8>, plugin-error>;
-  /// Async, take-bytes. At most 64 MiB.
+  /// Async, take-bytes. At most 64 MiB by default; a T1 bundled plugin may raise it to 512 MiB.
   read-all: func(path: fs-path) -> result<request-id, plugin-error>;
   /// Async, take-entries. glob follows the scope root. max-entries at most 65,536.
   scan: func(path: fs-path, glob: string, max-entries: u32) -> result<request-id, plugin-error>;

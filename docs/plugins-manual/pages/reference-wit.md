@@ -706,7 +706,7 @@ interface intents {
   // ---- panes
   /// parent none means the root of the tree.
   record create-pane-spec {
-    parent: option<node-id>, title: string, content-kind: string, cwd: option<string>,
+    parent: option<node-id>, title: string, content-kind: string, cwd: option<fs-path>,
     command: option<list<string>>, initial-input: option<string>,
   }
   record signal-pane-spec { pane: node-id, signal: signal }
@@ -1150,7 +1150,7 @@ interface tree {
   roots: func() -> list<node-id>;
   /// At most 4,096 ids.
   find: func(query: node-query) -> list<node-id>;
-  /// The plugin's own metadata map for the node. At most 64 KiB per node.
+  /// The plugin's own metadata map for the node. At most 64 KiB per node by default; a T1 bundled plugin may raise it to 256 KiB.
   metadata: func(node: node-id) -> option<list<u8>>;
   set-metadata: func(node: node-id, bytes: list<u8>) -> result<_, plugin-error>;
 }
@@ -1323,7 +1323,7 @@ interface fs {
   list-dir: func(path: fs-path, max-entries: u32) -> result<list<dir-entry>, plugin-error>;
   /// Sync. max-bytes at most 1 MiB.
   read: func(path: fs-path, offset: u64, max-bytes: u32) -> result<list<u8>, plugin-error>;
-  /// Async, take-bytes. At most 64 MiB.
+  /// Async, take-bytes. At most 64 MiB by default; a T1 bundled plugin may raise it to 512 MiB.
   read-all: func(path: fs-path) -> result<request-id, plugin-error>;
   /// Async, take-entries. glob follows the scope root. max-entries at most 65,536.
   scan: func(path: fs-path, glob: string, max-entries: u32) -> result<request-id, plugin-error>;
@@ -1593,7 +1593,7 @@ interface keys {
   use ilium:types/errors@0.1.0.{plugin-error};
   /// chords: 1 to 32. until-release stops the grab when the chord is released.
   record grab-spec { chords: list<string>, pane: option<node-id>, until-release: bool }
-  /// Errors: conflict when a reserved chord is named, quota-exceeded above 8 grabs.
+  /// Errors: conflict when a reserved chord is named, quota-exceeded above the plugin's key_grabs limit (8 by default, up to 32 on T1).
   grab: func(spec: grab-spec) -> result<grab-id, plugin-error>;
   release: func(grab: grab-id);
 }

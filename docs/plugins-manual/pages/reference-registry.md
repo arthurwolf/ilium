@@ -181,7 +181,7 @@ A `revocations.json` without a valid signature of the threshold of those keys is
 | [PKG-374] | The client reads `HTTPS_PROXY` and `NO_PROXY` and the `[plugins.registry] proxy` setting. The setting wins. |
 | [PKG-375] | A download is written to a temporary file under the cache folder and renamed only after the hash and length match. A resumed download MUST use `Range` and MUST verify the final hash. |
 | [PKG-376] | The only request data the client sends is the HTTP request itself: the path, the standard headers and `User-Agent: ilium/<version>`. It sends no identifier, no list of installed plugins and no install count. A registry operator who wants statistics reads their own server logs. |
-| [PKG-377] | The configured registries are listed in `[plugins.registry] urls` in order (default: none). A registry marked `default` is searched first. A client with no URLs makes no network request. |
+| [PKG-377] | The configured registries are listed in `[plugins.registry] urls` in order (default: none). A registry marked `default` is used when a request names no registry; when two registries return the same id, the order in `urls` decides ([PKG-422]). A client with no URLs makes no network request. |
 
 Offline behaviour: the client keeps the last verified set of metadata in the cache folder. When the network fails, it uses the cached metadata and shows its age. [PKG-378] A cached index MAY be used after its `expires` time only when the user passes `--offline` or sets `[plugins.registry] offline = true`; the client then shows a clear warning that the data is stale. Without that setting the expired metadata is refused with `registry.metadata-expired`.
 
