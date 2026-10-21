@@ -657,7 +657,9 @@ mod tests {
     #[tokio::test]
     async fn oversized_transcript_line_fails_closed_without_partial_authorization() {
         const SESSION_ID: &str = "33333333-3333-4333-8333-333333333333";
-        const MAX_LINE_BYTES: usize = 1024 * 1024;
+        // Must exceed the evidence reader's per-line cap (16 MiB, see
+        // ilium-agent-session/src/request_evidence.rs), so the line is skipped.
+        const MAX_LINE_BYTES: usize = 16 * 1024 * 1024;
 
         let home = tempfile::tempdir().unwrap();
         let project = home.path().join("project");
