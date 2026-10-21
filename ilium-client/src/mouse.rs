@@ -338,6 +338,10 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
         handle_agent_debug_log_mouse(app, mouse, position);
         return;
     }
+    if matches!(app.mode, Mode::LastPromptDialog(_)) {
+        handle_last_prompt_dialog_mouse(app, mouse, position);
+        return;
+    }
     if matches!(app.mode, Mode::Search(_)) {
         let Mode::Search(mut state) = std::mem::replace(&mut app.mode, Mode::Normal) else {
             unreachable!("just matched Mode::Search above");
@@ -613,6 +617,8 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
     if app.layout.pane_area.contains(position) {
         if matches!(app.right_panel_target, RightPanelTarget::Chatroom { .. }) {
             app.handle_chatroom_mouse(mouse, position);
+        } else if matches!(app.right_panel_target, RightPanelTarget::Attention) {
+            app.handle_attention_mouse(mouse, position);
         } else {
             app.handle_pane_mouse(mouse, position);
         }
@@ -933,6 +939,28 @@ fn handle_location_picker_mouse(app: &mut App, mouse: MouseEvent) {
     }
 }
 
+fn handle_last_prompt_dialog_mouse(app: &mut App, mouse: MouseEvent, position: Position) {
+    let dialog = crate::last_prompt_toolbar::dialog_area(app.layout.screen_area);
+    let Mode::LastPromptDialog(state) = &mut app.mode else {
+        return;
+    };
+    match mouse.kind {
+        MouseEventKind::ScrollUp => state.scroll = state.scroll.saturating_sub(3),
+        MouseEventKind::ScrollDown => state.scroll = state.scroll.saturating_add(3),
+        MouseEventKind::Down(MouseButton::Left) => {
+            if crate::last_prompt_toolbar::dialog_copy_button(dialog).contains(position) {
+                let text = state.text.clone();
+                app.copy_terminal_text_to_clipboard(text, "Prompt copied to clipboard");
+            } else if crate::last_prompt_toolbar::dialog_close_button(dialog).contains(position)
+                || !dialog.contains(position)
+            {
+                app.mode = Mode::Normal;
+            }
+        }
+        _ => {}
+    }
+}
+
 fn handle_agent_debug_log_mouse(app: &mut App, mouse: MouseEvent, position: Position) {
     if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
         && crate::agent_debug_ui::resize_filter_button_area(app.layout.pane_area).contains(position)
@@ -1115,6 +1143,17 @@ fn handle_tree_mouse(app: &mut App, mouse: MouseEvent, position: Position) {
     }
 
     if matches!(mouse.kind, MouseEventKind::Moved) {
+        return;
+    }
+
+    // The "Next: needs you" button sits above the toolbar; the row exists only
+    // while the attention queue is on.
+    if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
+        && app
+            .attention_button_rect()
+            .is_some_and(|button| button.contains(position))
+    {
+        app.action_attention_press();
         return;
     }
 

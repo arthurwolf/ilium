@@ -1,6 +1,6 @@
 //! Closed settings catalogs with stable enum identities and fresh commit validation.
 use crate::app::{
-    AgentMonitoringRow, App, AppearanceRow, EditorRow, Mode, SettingsTab, TerminalRow,
+    AgentMonitoringRow, App, AppearanceRow, AttentionRow, EditorRow, Mode, SettingsTab, TerminalRow,
 };
 use crate::config::{
     AgentIdentifierMode, LineDisplay, MotionLevel, NewPaneDirectory, SidebarDensity, TreeOrder,
@@ -47,6 +47,36 @@ pub enum SettingsChoice {
     SessionRecovery,
     SmartCopyModifier,
     RemoteTechnique(TechniqueTarget),
+    AttentionMode,
+    AttentionPressSorts,
+    AttentionModel,
+}
+
+/// Model ids offered for the attention queue: the models of the provider that
+/// currently names threads, plus the saved override when it is outside that list.
+pub(crate) fn attention_model_ids(app: &App) -> Vec<String> {
+    // OpenRouter has no discovered catalogue; only a saved override is offered.
+    let no_models = Vec::new();
+    let discovered = match app.inference_settings.selected_provider {
+        ilium_inference::InferenceProviderKind::KiloGateway => &app.kilo_gateway_models,
+        ilium_inference::InferenceProviderKind::Ollama => &app.ollama_models,
+        ilium_inference::InferenceProviderKind::OpenAi => &app.openai_models,
+        ilium_inference::InferenceProviderKind::Anthropic => &app.anthropic_models,
+        ilium_inference::InferenceProviderKind::OpenRouter => &no_models,
+    };
+    let mut ids: Vec<String> = Vec::new();
+    for model in app
+        .attention_settings
+        .model_override
+        .iter()
+        .chain(discovered.iter())
+        .filter(|model| !model.trim().is_empty())
+    {
+        if !ids.contains(model) {
+            ids.push(model.clone());
+        }
+    }
+    ids
 }
 
 fn sound_file_id(path: &std::path::Path) -> String {
@@ -148,7 +178,7 @@ fn catalog<T: Copy + std::fmt::Debug + PartialEq>(
 }
 
 impl SettingsChoice {
-    pub const ALL: [Self; 38] = [
+    pub const ALL: [Self; 41] = [
         Self::TerminalDirectory,
         Self::EditorLineDisplay,
         Self::EditorMarkdown,
@@ -187,6 +217,9 @@ impl SettingsChoice {
         Self::RemoteTechnique(TechniqueTarget::Claude),
         Self::RemoteTechnique(TechniqueTarget::Codex),
         Self::RemoteTechnique(TechniqueTarget::Other),
+        Self::AttentionMode,
+        Self::AttentionPressSorts,
+        Self::AttentionModel,
     ];
 
     pub fn at(app: &App, tab: SettingsTab, row: usize) -> Option<Self> {
@@ -238,6 +271,12 @@ impl SettingsChoice {
                 }
             }
             SettingsTab::ResetPlanning if row == 2 => Some(Self::ResetTimeDisplay),
+            SettingsTab::Attention => match AttentionRow::ALL.get(row) {
+                Some(AttentionRow::Mode) => Some(Self::AttentionMode),
+                Some(AttentionRow::PressSorts) => Some(Self::AttentionPressSorts),
+                Some(AttentionRow::Model) => Some(Self::AttentionModel),
+                _ => None,
+            },
             SettingsTab::Sound => match crate::app::SoundRow::ALL.get(row) {
                 Some(crate::app::SoundRow::Source) => Some(Self::SoundSource),
                 Some(crate::app::SoundRow::File) => Some(Self::SoundFile),
@@ -312,6 +351,9 @@ impl SettingsChoice {
             Self::OpenAiModel => "OpenAI model",
             Self::AnthropicModel => "Anthropic model",
             Self::ResetTimeDisplay => "Time display",
+            Self::AttentionMode => "Attention mode",
+            Self::AttentionPressSorts => "Sort refreshes attention",
+            Self::AttentionModel => "Attention model",
             Self::SoundSource => "Sound source",
             Self::SoundFile => "Sound file",
             Self::TitleStyle => "Title style",
@@ -434,6 +476,38 @@ impl SettingsChoice {
                 crate::value_inference::OnboardingInference::KiloModel.options(app),
                 app.inference_settings.kilo_gateway.model.clone(),
             ),
+            Self::AttentionMode => catalog(
+                &crate::attention::AttentionMode::ALL,
+                app.attention_settings.mode,
+                |value| value.label().into(),
+            ),
+            Self::AttentionPressSorts => catalog(
+                &[true, false],
+                app.attention_settings.press_sorts,
+                |value| if value { "☑ On" } else { "☐ Off" }.into(),
+            ),
+            Self::AttentionModel => {
+                let mut options = vec![ChoiceOption {
+                    id: "none".into(),
+                    label: "Same as titles".into(),
+                    disabled_reason: None,
+                }];
+                options.extend(
+                    attention_model_ids(app)
+                        .into_iter()
+                        .map(|model| ChoiceOption {
+                            id: model.clone(),
+                            label: model,
+                            disabled_reason: None,
+                        }),
+                );
+                let selected = app
+                    .attention_settings
+                    .model_override
+                    .clone()
+                    .unwrap_or_else(|| "none".into());
+                (options, selected)
+            }
             Self::ResetTimeDisplay => catalog(
                 &[
                     crate::reset_planning::ResetTimeStyle::Exact,
@@ -842,6 +916,7 @@ impl App {
         let mut sound = self.sound_settings.clone();
         let mut resets = self.reset_planning_settings.clone();
         let mut remote_compaction = self.remote_compaction_settings.clone();
+        let mut attention = self.attention_settings.clone();
         match field {
             SettingsChoice::GitDefaultWhere => {
                 select!(crate::config::GitDefaultWhere::ALL, git.default_where)
@@ -870,6 +945,15 @@ impl App {
             | SettingsChoice::OpenAiModel
             | SettingsChoice::AnthropicModel => {
                 return Err("Inference choice was not dispatched".into());
+            }
+            SettingsChoice::AttentionMode => {
+                select!(crate::attention::AttentionMode::ALL, attention.mode);
+            }
+            SettingsChoice::AttentionPressSorts => {
+                select!([true, false], attention.press_sorts);
+            }
+            SettingsChoice::AttentionModel => {
+                attention.set_model_override((id != "none").then(|| id.to_owned()));
             }
             SettingsChoice::ResetTimeDisplay => {
                 select!(
@@ -1011,6 +1095,16 @@ impl App {
                     intent,
                 )?;
                 self.apply_git_settings(git);
+            }
+            SettingsChoice::AttentionMode
+            | SettingsChoice::AttentionPressSorts
+            | SettingsChoice::AttentionModel => {
+                self.enqueue_configuration(
+                    directory,
+                    ConfigurationChange::Attention(attention.clone()),
+                    intent,
+                )?;
+                self.apply_attention_settings(attention);
             }
             SettingsChoice::ResetTimeDisplay => {
                 self.enqueue_configuration(
@@ -1609,6 +1703,7 @@ mod tests {
             1,
             2,
             2,
+            2,
             ilium_inference::InferenceProviderKind::ALL.len(),
             crate::value_inference::OnboardingInference::KiloModel
                 .options(&app)
@@ -1626,6 +1721,10 @@ mod tests {
             ilium_remote_compaction::Technique::ALL.len(),
             ilium_remote_compaction::Technique::ALL.len(),
             ilium_remote_compaction::Technique::ALL.len(),
+            crate::attention::AttentionMode::ALL.len(),
+            2,
+            // Depends on the selected provider; recomputed inside the loop below.
+            0,
         ];
         assert_eq!(expected.len(), SettingsChoice::ALL.len());
         for (field, expected) in SettingsChoice::ALL.into_iter().zip(expected) {
@@ -1635,6 +1734,11 @@ mod tests {
                 SettingsChoice::OpenAiModel => ilium_inference::InferenceProviderKind::OpenAi,
                 SettingsChoice::AnthropicModel => ilium_inference::InferenceProviderKind::Anthropic,
                 _ => app.inference_settings.selected_provider,
+            };
+            let expected = if field == SettingsChoice::AttentionModel {
+                1 + attention_model_ids(&app).len()
+            } else {
+                expected
             };
             let (options, selected) = field.options(&app);
             assert_eq!(options.len(), expected, "{field:?}");

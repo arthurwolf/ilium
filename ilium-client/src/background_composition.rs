@@ -299,7 +299,10 @@ pub fn compose(buffer: &mut Buffer, app: &mut App, elapsed: Duration) {
     }
 
     if !settings.panels.shows_right()
-        || matches!(app.right_panel_target, RightPanelTarget::Chatroom { .. })
+        || matches!(
+            app.right_panel_target,
+            RightPanelTarget::Chatroom { .. } | RightPanelTarget::Attention
+        )
     {
         finish_field(app, presentation, painted_bits);
         return;
@@ -417,7 +420,10 @@ fn screen_occupancy(
             mark_free(panel_inner(app.layout.tree_area), None);
         }
         if settings.panels.shows_right()
-            && !matches!(app.right_panel_target, RightPanelTarget::Chatroom { .. })
+            && !matches!(
+                app.right_panel_target,
+                RightPanelTarget::Chatroom { .. } | RightPanelTarget::Attention
+            )
         {
             let viewports = app.pane_viewports();
             if viewports.is_empty() {

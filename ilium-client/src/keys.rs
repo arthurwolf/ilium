@@ -191,6 +191,7 @@ pub(crate) fn handle_event_after_intercept(app: &mut App, event: Event) {
             handle_terminal_pane_context_menu_event(app, menu, &event)
         }
         Mode::AgentDebugLog(state) => handle_agent_debug_log_event(app, state, &event),
+        Mode::LastPromptDialog(state) => handle_last_prompt_dialog_event(app, state, &event),
         Mode::AgentDebugSavePath(pane_id, state) => {
             handle_agent_debug_save_path_event(app, pane_id, state, &event)
         }
@@ -473,6 +474,47 @@ fn handle_terminal_pane_context_menu_event(
             }
         }
         _ => app.mode = Mode::TerminalPaneContextMenu(menu),
+    }
+}
+
+/// Esc/Enter/q close the full-prompt dialog, `c` copies, arrows and paging
+/// scroll.
+fn handle_last_prompt_dialog_event(
+    app: &mut App,
+    mut state: crate::last_prompt_toolbar::LastPromptDialogState,
+    event: &Event,
+) {
+    let Event::Key(key) = event else {
+        app.mode = Mode::LastPromptDialog(state);
+        return;
+    };
+    if key.kind == KeyEventKind::Release {
+        app.mode = Mode::LastPromptDialog(state);
+        return;
+    }
+    match key.code {
+        KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') => app.mode = Mode::Normal,
+        KeyCode::Char('c') => {
+            app.copy_terminal_text_to_clipboard(state.text.clone(), "Prompt copied to clipboard");
+            app.mode = Mode::LastPromptDialog(state);
+        }
+        KeyCode::Up => {
+            state.scroll = state.scroll.saturating_sub(1);
+            app.mode = Mode::LastPromptDialog(state);
+        }
+        KeyCode::Down => {
+            state.scroll = state.scroll.saturating_add(1);
+            app.mode = Mode::LastPromptDialog(state);
+        }
+        KeyCode::PageUp => {
+            state.scroll = state.scroll.saturating_sub(10);
+            app.mode = Mode::LastPromptDialog(state);
+        }
+        KeyCode::PageDown => {
+            state.scroll = state.scroll.saturating_add(10);
+            app.mode = Mode::LastPromptDialog(state);
+        }
+        _ => app.mode = Mode::LastPromptDialog(state),
     }
 }
 
@@ -1008,6 +1050,8 @@ fn execute_action(app: &mut App, action: Action) {
         Action::ToggleMinimap => app.action_toggle_editor_minimap(),
         Action::ToggleAutosave => app.action_toggle_editor_autosave(),
         Action::Settings => app.action_open_settings(),
+        Action::AttentionNext => app.action_attention_press(),
+        Action::AttentionPanel => app.action_toggle_attention_panel(),
     }
 }
 
@@ -3669,6 +3713,13 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                     app.settings_adjust_remote_compaction_row(row, direction);
                 }
             }
+        }
+        KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::Attention => {
+            state.selected_row = state.selected_row.saturating_sub(1);
+        }
+        KeyCode::Down | KeyCode::Char('j') if state.tab == SettingsTab::Attention => {
+            state.selected_row =
+                (state.selected_row + 1).min(crate::app::AttentionRow::ALL.len().saturating_sub(1));
         }
         KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::ResetPlanning => {
             state.selected_row = state.selected_row.saturating_sub(1);

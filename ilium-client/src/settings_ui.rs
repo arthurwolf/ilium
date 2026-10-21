@@ -514,6 +514,12 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
             session_lines(&app.session_settings, state.selected_row),
             state.scroll,
         ),
+        SettingsTab::Attention => render_scrollable(
+            frame,
+            layout.content_area,
+            attention_lines(&app.attention_settings, state.selected_row),
+            state.scroll,
+        ),
         SettingsTab::Git => render_scrollable(
             frame,
             layout.content_area,
@@ -808,6 +814,18 @@ pub fn settings_help_anchors(
         }
         SettingsTab::Editor => {
             for (i, id) in simple_rows("ED-", 6) {
+                push_help_anchor(
+                    &mut anchors,
+                    layout,
+                    &id,
+                    1 + i as u16 * 3,
+                    state.scroll,
+                    state.selected_row == i,
+                );
+            }
+        }
+        SettingsTab::Attention => {
+            for (i, id) in simple_rows("ATT-", 5) {
                 push_help_anchor(
                     &mut anchors,
                     layout,
@@ -1291,6 +1309,7 @@ fn tab_icon(tab: SettingsTab) -> &'static str {
         SettingsTab::Terminal => "❯",
         SettingsTab::Editor => "✎",
         SettingsTab::Session => "▣",
+        SettingsTab::Attention => "◎",
         SettingsTab::Git => "⑂",
         SettingsTab::KanbanBoard => "▥",
         SettingsTab::Animations => "▷",
@@ -1313,6 +1332,7 @@ fn compact_tab_label(tab: SettingsTab) -> &'static str {
     match tab {
         SettingsTab::Appearance => "Display",
         SettingsTab::AgentMonitoring => "Agents",
+        SettingsTab::Attention => "Queue",
         SettingsTab::Cost => "Cost",
         SettingsTab::Optimization => "Optimize",
         SettingsTab::RemoteCompaction => "Remote",
@@ -1749,6 +1769,9 @@ pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area
         SettingsTab::Terminal => terminal_lines(&app.terminal_settings, selected_row).len() as u16,
         SettingsTab::Editor => editor_lines(&app.editor_settings, selected_row).len() as u16,
         SettingsTab::Session => session_lines(&app.session_settings, selected_row).len() as u16,
+        SettingsTab::Attention => {
+            attention_lines(&app.attention_settings, selected_row).len() as u16
+        }
         SettingsTab::Git => git_lines(
             &app.git_settings,
             app.git_settings_error.as_deref(),
@@ -4977,6 +5000,12 @@ fn settings_control_row(
                     BoardNumber::MinimumColumnWidth,
                 )) => "Minimum column width",
                 Some(crate::value_settings::SettingsNumber::ApiPort) => "HTTP API port",
+                Some(crate::value_settings::SettingsNumber::AttentionTurboConcurrency) => {
+                    "Turbo parallel calls"
+                }
+                Some(crate::value_settings::SettingsNumber::AttentionExpirySeconds) => {
+                    "Forget stale items after"
+                }
                 _ => crate::value_settings_choice::SettingsChoice::at(app, state.tab, row)?.title(),
             };
             (
@@ -5036,7 +5065,8 @@ pub(crate) fn settings_number_control(
             }
         }
         crate::value_settings::SettingsNumber::VoiceVolume => format!("{text}%"),
-        crate::value_settings::SettingsNumber::NotificationCoalesce => format!("{text} s"),
+        crate::value_settings::SettingsNumber::NotificationCoalesce
+        | crate::value_settings::SettingsNumber::AttentionExpirySeconds => format!("{text} s"),
         crate::value_settings::SettingsNumber::TerminalScrollback => format!("{text} MiB"),
         crate::value_settings::SettingsNumber::TerminalEngineMemory => format!("{text} MiB"),
         crate::value_settings::SettingsNumber::EditorAutosaveDelay => format!("{text} ms"),
@@ -5188,6 +5218,7 @@ pub(crate) fn settings_number_row_count(app: &App, tab: SettingsTab) -> usize {
         SettingsTab::AgentMonitoring => agent_monitoring_rows(app).len(),
         SettingsTab::Terminal => crate::app::TerminalRow::ALL.len(),
         SettingsTab::Session => crate::app::SessionRow::ALL.len(),
+        SettingsTab::Attention => crate::app::AttentionRow::ALL.len(),
         SettingsTab::Git => crate::app::GitRow::ALL.len(),
         SettingsTab::Editor => crate::app::EditorRow::ALL.len(),
         SettingsTab::KanbanBoard => KanbanBoardRow::ALL.len(),
@@ -5512,6 +5543,45 @@ fn session_lines(settings: &SessionSettings, selected: usize) -> Vec<Line<'stati
                 "Automatic backups",
                 on_off(settings.backups_enabled),
                 "Copy this project's native session snapshot every 30 minutes. Older copies thin to daily, weekly, monthly, then yearly history.",
+            ),
+        ],
+        selected,
+    )
+}
+
+fn attention_lines(
+    settings: &crate::attention::AttentionSettings,
+    selected: usize,
+) -> Vec<Line<'static>> {
+    setting_lines(
+        &[
+            (
+                "Attention mode",
+                settings.mode.label().to_string(),
+                "Instant only calls no LLM and uses only what agent detection already knows; Shared adds the question to Sort; Turbo asks one call per agent.",
+            ),
+            (
+                "Sort refreshes attention",
+                on_off(settings.press_sorts),
+                "Pressing Sort also refreshes the attention queue.",
+            ),
+            (
+                "Turbo parallel calls",
+                settings.turbo_concurrency.to_string(),
+                "Most LLM calls in flight at once in Turbo mode (1 to 64).",
+            ),
+            (
+                "Forget stale items after",
+                format!("{} s", settings.expiry_seconds),
+                "An item the live state no longer supports is dropped after this long (60 to 86400).",
+            ),
+            (
+                "Attention model",
+                settings
+                    .model_override
+                    .clone()
+                    .unwrap_or_else(|| "Same as titles".to_string()),
+                "Model used for attention calls; Same as titles follows the title naming model.",
             ),
         ],
         selected,
@@ -6858,6 +6928,7 @@ mod number_control_tests {
             SettingsTab::Sound,
             SettingsTab::Titles,
             SettingsTab::ResetPlanning,
+            SettingsTab::Attention,
         ]
         .into_iter()
         .map(|tab| (tab, app.inference_settings.selected_provider))
@@ -6961,6 +7032,7 @@ mod number_control_tests {
             SettingsTab::VoiceControl,
             SettingsTab::Sound,
             SettingsTab::ResetPlanning,
+            SettingsTab::Attention,
         ]
         .into_iter()
         .map(|tab| (tab, app.inference_settings.selected_provider))
@@ -7101,17 +7173,17 @@ mod tests {
     #[test]
     fn settings_navigation_has_semantic_icons_for_every_tab() {
         let expected_icons = [
-            "◐", "▢", "▦", "◉", "¤", "↗", "⇥", "⌨", "❯", "✎", "▣", "⑂", "▥", "▷", "♪", "🎙", "↻",
-            "⚡", "≡", "≔", "⚑", "¶", "⌕", "⇄", "ⓘ", "⚙",
+            "◐", "▢", "▦", "◉", "◎", "¤", "↗", "⇥", "⌨", "❯", "✎", "▣", "⑂", "▥", "▷", "♪", "🎙",
+            "↻", "⚡", "≡", "≔", "⚑", "¶", "⌕", "⇄", "ⓘ", "⚙",
         ];
         assert_eq!(SettingsTab::ALL.len(), expected_icons.len());
         for (tab, expected_icon) in SettingsTab::ALL.into_iter().zip(expected_icons) {
             assert_eq!(tab_icon(tab), expected_icon, "semantic icon for {tab:?}");
         }
 
-        let area = Rect::new(0, 0, 30, 54);
+        let area = Rect::new(0, 0, 30, 56);
         for active in SettingsTab::ALL {
-            let mut terminal = Terminal::new(TestBackend::new(30, 54)).unwrap();
+            let mut terminal = Terminal::new(TestBackend::new(30, 56)).unwrap();
             terminal
                 .draw(|frame| render_tab_list(frame, area, active))
                 .unwrap();
@@ -7309,7 +7381,7 @@ mod tests {
 
     #[test]
     fn compact_navigation_keeps_distinct_icon_labels_readable() {
-        let area = Rect::new(0, 0, 12, 54);
+        let area = Rect::new(0, 0, 12, 56);
         let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
         terminal
             .draw(|frame| render_tab_list(frame, area, SettingsTab::Appearance))

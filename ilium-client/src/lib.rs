@@ -47,6 +47,7 @@ mod animation_visibility;
 pub mod antigravity_model_statusline;
 pub mod app;
 pub mod ascii_chart;
+pub mod attention;
 #[cfg(test)]
 mod background_acceptance;
 pub mod background_animation;
@@ -97,6 +98,7 @@ mod ipc_preparation;
 pub mod keymap;
 pub mod keys;
 pub mod last_prompt_banner;
+pub mod last_prompt_toolbar;
 pub mod layout;
 pub mod location_picker;
 pub mod markdown;
@@ -999,7 +1001,7 @@ async fn run_inner(
     app.model_catalog_preparation
         .configure(provider_client.clone());
     let mut naming_workers =
-        NamingWorkers::new(naming_events_tx, &config.inference).map_err(|reason| {
+        NamingWorkers::new(naming_events_tx.clone(), &config.inference).map_err(|reason| {
             ClientError::TerminalSetup(std::io::Error::other(format!(
                 "naming settings startup: {reason:?}"
             )))
@@ -1111,6 +1113,7 @@ async fn run_inner(
     app.apply_git_settings(config.git);
     app.apply_voice_settings(config.voice);
     app.apply_reset_planning_settings(config.reset_planning);
+    app.apply_attention_settings(config.attention);
     app.apply_cost_settings(config.cost);
     app.apply_remote_compaction_settings(config.remote_compaction);
     app.apply_debug_settings(config.debug);
@@ -1302,6 +1305,9 @@ async fn run_inner(
     // has arrived; start from blank cells.
     startup_dialog.clear();
     app.startup_progress_path = Some(ilium_ipc::startup_progress_path(&options.socket_path));
+    // Pane ids are session-local, so the queue file is keyed by the session's socket.
+    app.attach_attention_store(attention::store::store_path_for_session(&options.socket_path));
+    app.attach_attention_events(naming_events_tx.clone());
 
     // Set so the very first pass through the loop always draws (there's
     // nothing on screen yet); every branch below that actually changes
