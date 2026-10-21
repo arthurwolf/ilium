@@ -1099,7 +1099,7 @@ The SDK version has its own number, separate from the contract `ilium:plugin@0.1
 
 ## Edge cases
 
-- A batch holds at most 256 events and a submission list at most 256 entries; a larger list traps the instance with `trap.submission-batch`.
+- A batch holds at most 256 events; the host splits a larger backlog into later batches. A call that returns more than 256 submissions traps the instance with `trap.submission-batch`.
 - A crashed instance restarts after 1 s, then 5 s; the third failure within 10 minutes disables the plugin until the user enables it.
 - `on_events` has a 20 ms deadline, `render` 10 ms, `activate` 2000 ms and `deactivate` 500 ms. A breach traps the instance.
 - Instance memory is capped at 32 MiB (the `memory_mib` manifest key can raise it, up to 128 MiB for T2 and T3 plugins).

@@ -384,7 +384,7 @@ A package with `"replaces": ["ilium.core.titles"]` can take the place of a core 
 - **Uninstall of the replacement.** Removing the replacement, or turning it off, turns the built-in plugin back on. See the [uninstall cascade](/pages/lifecycle/#uninstall-cascade). The built-in plugin's data was never read or changed by the replacement.
 - **Contributions carry over.** Standard contributions of other plugins to the replaced points move to the replacement after a notice. High-risk ones are suspended until the user confirms them for the new owner ([SEC-304]).
 - **What is lost.** The settings tabs, commands and pane kinds of the replaced plugin disappear while it is off. Its stored data stays on disk and is not read by the replacement. When the built-in plugin comes back, it finds its data as it left it.
-- **Install errors.** `manifest.replaces-unknown` (no such plugin), `manifest.replaces-not-replaceable`, `manifest.replaces-surface-incomplete`, `manifest.replaces-cycle` (a package lists its own id, or an id twice). A list of more than 4 ids fails with `manifest.schema`.
+- **Install errors.** `manifest.replaces-unknown` (no such plugin), `manifest.replaces-not-replaceable`, `manifest.replaces-surface-incomplete`, `manifest.replaces-cycle` (a package lists its own id). A list of more than 4 ids fails with `manifest.schema`, and so does a list with a duplicate id, because the list must be unique.
 
 A replacement carries a real cost. It must keep up with every new point of the core plugin. Prefer extending when you can.
 

@@ -135,7 +135,7 @@ Widening is defined for these real argument forms only. Any other argument chang
 
 An answer the user gave to an unchanged grant is kept. New and widened grants start in their default state (widened: unchecked). A removed grant is dropped.
 
-**[SEC-109]** A change of the publisher key, or of the tier (T2 to T3 or T3 to T2), resets all grants and consents of the plugin and shows the full dialog as for a first install. A key change that is endorsed by a rotation statement ([SEC-143]) shows the update dialog and a line `Signing key rotated`.
+**[SEC-109]** A change of the publisher key that no rotation statement endorses is refused for an update ([PKG-237]); the user must uninstall the plugin first. A change of the tier (T2 to T3 or T3 to T2) resets all grants and consents of the plugin and shows the full dialog as for a first install. A key change that is endorsed by a rotation statement ([SEC-143]) shows the update dialog and a line `Signing key rotated`.
 
 <figure>
 <pre class="term"><span class="t-hi">╭─ Publisher key changed ──────────────────────╮</span>

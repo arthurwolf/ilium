@@ -208,7 +208,7 @@ Two switches exist. They are defined in [Host architecture](/pages/reference-hos
 
 | Switch | Environment variable | Loads | Core plugins | Stored state |
 |---|---|---|---|---|
-| `ilium --safe-plugins` | `ILIUM_SAFE_PLUGINS=1` | Bundled T1 plugins with default grants | Run. Every `replaces` entry is ignored, so the built-in core plugin runs | Not changed |
+| `ilium --safe-plugins` | `ILIUM_SAFE_MODE=third-party` | Bundled T1 plugins with default grants | Run. Every `replaces` entry is ignored, so the built-in core plugin runs | Not changed |
 | `ilium --no-plugins` | `ILIUM_NO_PLUGINS=1` | Nothing | Off. The kernel fallbacks in the next section apply | Not changed |
 
 Neither switch is written to `installed.json` (see [LIF-004](/pages/reference-plugin-lifecycle-states/)). The state shown on the Plugins screen is `disabled-by-policy` with the reason `safe-mode` while the switch is on. The flags apply to the server that the launcher starts. A running server keeps its mode, so a user who needs safe mode runs `ilium kill-session <name>` first, then `ilium --safe-plugins`.
@@ -290,7 +290,7 @@ These variables are read by the platform. Variables that Ilium sets inside panes
 | Variable | Read by | Default | Effect |
 |---|---|---|---|
 | `ILIUM_NO_PLUGINS` | `ilium`, server | unset | `1` is the same as `--no-plugins` |
-| `ILIUM_SAFE_PLUGINS` | `ilium`, server | unset | `1` is the same as `--safe-plugins`. Ignored when `ILIUM_NO_PLUGINS` is `1` |
+| `ILIUM_SAFE_MODE` | `ilium`, server | unset | `1` is the same as `third-party`, and `--safe-plugins` is an alias of `--safe-mode=third-party` (SEC-328). Ignored when `ILIUM_NO_PLUGINS` is `1` |
 | `ILIUM_CONFIG_DIR` | kernel | platform default | Folder of `config.toml`. Grants live in `$XDG_STATE_HOME/ilium/grants.json`, not here |
 | `ILIUM_SOCKET_DIR` | kernel | runtime default | Folder of session sockets. Cross-session commands list this folder |
 | `ILIUM_DEBUG_LOG_DIR` | kernel | platform default | Root of debug logs. The `log` import of a plugin writes there when Debug logging is on |

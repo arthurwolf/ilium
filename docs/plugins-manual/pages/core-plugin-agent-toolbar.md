@@ -357,7 +357,7 @@ fn forward(invoked: &CommandInvokedEvent) -> Vec<Submission> {
     }))]
 }
 
-// Server side: run the action, once per pane and press.
+// Server side: run the action once per pane in each 10-minute window. A press with the same key inside that window completes as duplicate, because a press carries no request id to key on.
 fn run_action(channel: &str, payload: &[u8]) -> Option<Submission> {
     let pane: NodeId = String::from_utf8_lossy(payload).parse().ok()?;
     if channel != "compact" {
@@ -393,7 +393,7 @@ export function forward(event: Extract<Event, { tag: 'command-invoked' }>): Subm
   }];
 }
 
-// Server side: run the action, once per pane and press.
+// Server side: run the action once per pane in each 10-minute window. A press with the same key inside that window completes as duplicate, because a press carries no request id to key on.
 export function runAction(channel: string, payload: Uint8Array): Submission | undefined {
   if (channel !== 'compact') return undefined;
   const pane = BigInt(new TextDecoder().decode(payload));

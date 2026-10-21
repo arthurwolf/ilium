@@ -446,7 +446,7 @@ No new `error-code` case exists. The extended functions reuse the 15 codes. Code
 | `surface.write-glyphs`, `set-owner-ids` | `invalid-argument`, `quota-exceeded`, `unsupported` | none |
 | `media.open-video-bytes` | `invalid-argument` (including more than 16 MiB), `io`, `unsupported` (mime type or codec) | none |
 | `media.open-video-range` | `invalid-argument` (including more than 16 MiB), `io` | none |
-| `fs.write-atomic` | `not-permitted` | `conflict`, `io` |
+| `fs.write-atomic` | `invalid-argument` (bad path, over 16 MiB), `not-permitted` | `conflict`, `io`, `not-found`, `quota-exceeded` |
 | `fs.propose-agent-config` | `not-permitted` (`scope`: a path outside the folder, a credential file or the deny set), `invalid-argument` (an empty list, two changes to one path, more than 32 changes, more than 16 MiB of new content in total, a title over 80 or a summary over 200 characters), `busy`, `rate-limited` | `not-permitted` (`declined`), `timed-out`, `conflict`, `quota-exceeded` (history entry), `io`, `cancelled` |
 | `fs.tail` | `not-permitted`, `not-found`, `invalid-argument` (`max-bytes` over 1 MiB), `io` | none |
 | `http.open-stream` | `not-permitted`, `quota-exceeded` | `network`, `timed-out`, `rate-limited` (in `http-stream-closed`) |

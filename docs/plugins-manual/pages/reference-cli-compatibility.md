@@ -94,7 +94,7 @@ The kernel sets these inside every terminal pane. Plugins read them through the 
 | `ILIUM_WORKTREE`, `ILIUM_BRANCH` | worktrees | agent setup scripts | none; set at pane spawn |
 | `ILIUM_CHATROOM_AUTHOR`, `AGENT_NAME` | user | chatroom | listed in the `cli-invoked` environment subset |
 | `ILIUM_CONFIG_DIR`, `ILIUM_SOCKET_DIR`, `ILIUM_DEBUG_LOG_DIR` | user | kernel | none |
-| `ILIUM_SAFE_PLUGINS`, `ILIUM_NO_PLUGINS` | user | kernel | none |
+| `ILIUM_SAFE_MODE`, `ILIUM_NO_PLUGINS` | user | kernel | none |
 
 The kernel MUST pass only the listed variables to a plugin. A plugin cannot read other variables of the caller.
 
