@@ -22,8 +22,8 @@ The additional scopes:
 
 | Scope (grant argument) | Preopen | Root | Risk |
 |---|---|---|---|
-| `agent-sessions:gemini` | `/agent-sessions/gemini` | the Gemini CLI transcripts, `~/.gemini/tmp/*/chats` | high for read; a write grant is refused at install, as for every `agent-sessions` scope |
-| `agent-config:gemini` | `/agent-config/gemini` | the Gemini CLI configuration, `~/.gemini/settings.json` | high for read; a write grant is refused at install, changes are proposed with `agent-config.propose:gemini` |
+| `agent-sessions:gemini` | `/agent-sessions/gemini` | the Gemini CLI transcripts: one folder per project hash under `~/.gemini/tmp`, each with a `chats` folder | high for read; a write grant is refused at install, as for every `agent-sessions` scope |
+| `agent-config:gemini` | `/agent-config/gemini` | the Gemini CLI configuration folder, `~/.gemini` | high for read; a write grant is refused at install, changes are proposed with `agent-config.propose:gemini` |
 | `agent-config:antigravity` | `/agent-config/antigravity` | the Antigravity configuration directory, `~/.gemini/antigravity` (a directory root, not a single file) | high for read; a write grant is refused at install, changes are proposed with `agent-config.propose:antigravity` |
 
 The kernel resolves each root per platform, so a plugin never builds the home path itself. A scope whose directory does not exist is still granted; the calls then return `not-found`.

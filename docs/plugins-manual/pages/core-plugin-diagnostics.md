@@ -520,7 +520,7 @@ export async function buildReport(): Promise<string> {
 
 #### Owner side: run the `log-sinks` hook
 
-`log-sinks` is an observe hook. Warnings and errors that the plugin finds in the log are sent to it, one payload for each line. Handlers may forward them to a chat tool or a metrics tool. Replies are ignored, and a handler that fails does not matter. The plugin lists the current contributors only to show the count in the panel, and it lists again on `ilium.extensions/changed`. See [events](/pages/api-events/) and [requests and outcomes](/pages/requests-and-outcomes/).
+`log-sinks` is an observe hook. Warnings and errors that the plugin finds in the log are sent to it in batches of up to 64 records, one chain per 250 ms ([EXT-054]). Handlers may forward them to a chat tool or a metrics tool. Replies are ignored, and a handler that fails does not matter. The plugin lists the current contributors only to show the count in the panel, and it lists again on `ilium.extensions/changed`. See [events](/pages/api-events/) and [requests and outcomes](/pages/requests-and-outcomes/).
 
 **Rust**
 
