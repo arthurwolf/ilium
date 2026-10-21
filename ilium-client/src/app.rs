@@ -18725,13 +18725,14 @@ impl App {
         self.request_project_restructure(project_id, RestructureRequestOrigin::Automatic);
     }
 
+    /// Returns whether a worker request was queued, as the attention variant does.
     fn request_project_restructure(
         &mut self,
         project_id: NodeId,
         request_origin: RestructureRequestOrigin,
-    ) {
+    ) -> bool {
         let attention = self.default_restructure_attention();
-        self.request_project_restructure_with_attention(project_id, request_origin, attention);
+        self.request_project_restructure_with_attention(project_id, request_origin, attention)
     }
 
     /// Queues one restructure call for `project_id`. With `attention` set the
