@@ -449,7 +449,7 @@ No new `error-code` case exists. The extended functions reuse the 15 codes. Code
 | `fs.write-atomic` | `invalid-argument` (bad path, over 16 MiB), `not-permitted` | `conflict`, `io`, `not-found`, `quota-exceeded` |
 | `fs.propose-agent-config` | `not-permitted` (`scope`: a path outside the folder, a credential file or the deny set), `invalid-argument` (an empty list, two changes to one path, more than 32 changes, more than 16 MiB of new content in total, a title over 80 or a summary over 200 characters), `busy`, `rate-limited` | `not-permitted` (`declined`), `timed-out`, `conflict`, `quota-exceeded` (history entry), `io`, `cancelled` |
 | `fs.tail` | `not-permitted`, `not-found`, `invalid-argument` (`max-bytes` over 1 MiB), `io` | none |
-| `http.open-stream` | `not-permitted`, `quota-exceeded` | `network`, `timed-out`, `rate-limited` (in `http-stream-closed`) |
+| `http.open-stream` | `not-permitted`, `quota-exceeded`, `invalid-argument` | `network`, `timed-out`, `rate-limited` (in `http-stream-closed`) |
 | `vector.embed` | `unsupported`, `invalid-argument` | `network`, `rate-limited`, `timed-out` |
 | `vector.upsert`, `create-index` | `quota-exceeded`, `invalid-argument` | none |
 | `vector.top-k`, `remove-entries` | `not-found` (unknown index id), `invalid-argument` | none |

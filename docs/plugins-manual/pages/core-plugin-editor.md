@@ -71,7 +71,7 @@ This block is a fragment. It lists the contributions. The whole manifest is in [
   "capabilities": {
     "client": [
       "editor.read", "editor.edit", "fs.read:project",
-      "panes.create", "terminal.write", "ui.panels"
+      "panes.create", "panes.create-command:claude", "terminal.write", "ui.panels"
     ]
   }
 }
@@ -112,6 +112,7 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "editor.edit",
       "fs.read:project",
       "panes.create",
+      "panes.create-command:claude",
       "terminal.write",
       "ui.panels",
       "services.use:ilium.core.editor/set-setting",

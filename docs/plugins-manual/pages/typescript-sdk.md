@@ -1101,7 +1101,7 @@ The SDK version has its own number, separate from the contract `ilium:plugin@0.1
 
 - A batch holds at most 256 events; the host splits a larger backlog into later batches. A call that returns more than 256 submissions traps the instance with `trap.submission-batch`.
 - A crashed instance restarts after 1 s, then 5 s; the third failure within 10 minutes disables the plugin until the user enables it.
-- `on_events` has a 20 ms deadline, `render` 10 ms, `activate` 2000 ms and `deactivate` 500 ms. A breach traps the instance.
+- `on_events` has a 20 ms deadline, `render` 10 ms, `activate` 2000 ms and `deactivate` 500 ms. A breach of `on_events`, `render` or `activate` traps the instance. A breach of `deactivate` drops the instance, discards the restore bytes, logs `deactivate.deadline` and does not count as a failure.
 - Instance memory is capped at 32 MiB (the `memory_mib` manifest key can raise it, up to 128 MiB for T2 and T3 plugins).
 - A log message over 16 KiB is cut and ends with `…[truncated]`.
 - An await that never completes is cancelled with `timed-out` when its request timeout elapses.

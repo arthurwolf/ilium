@@ -99,7 +99,7 @@ The contract version is 0.1. The plugin is replaceable. A replacement must provi
   "unstable": ["plugin-services"],
   "capabilities": {
     "server": [
-      "panes.read", "panes.lifecycle", "panes.create", "tree.write", "agent.read",
+      "panes.read", "panes.lifecycle", "panes.create", "panes.create-command:codex", "panes.create-command:claude", "tree.write", "agent.read",
       "fs.read:agent-sessions:claude", "fs.read:agent-sessions:codex",
       "fs.read:agent-config:claude", "agent-config.propose:claude",
       "process.run:codex", "process.long-lived", "jobs.run", "notify.toast",
@@ -177,6 +177,8 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "panes.read",
       "panes.lifecycle",
       "panes.create",
+      "panes.create-command:codex",
+      "panes.create-command:claude",
       "tree.write",
       "agent.read",
       "fs.read:agent-sessions:claude",
