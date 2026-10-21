@@ -2713,7 +2713,7 @@ async fn finish_input_retirement(
             report.complete_exit_click_release(exit_click_release);
             return report
                 .into_result()
-                .map_err(|failure| crate::error::InputRetirementError::Failed(failure));
+                .map_err(crate::error::InputRetirementError::Failed);
         }
         if tokio::time::Instant::now() >= deadline {
             return Err(crate::error::InputRetirementError::Deadline(

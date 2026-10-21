@@ -11,4 +11,5 @@ Classify the agent as exactly one of:
 <agent-evidence>{{{agent_evidence}}}</agent-evidence>
 
 Return one JSON object only:
-{"kind":"question|stuck|waiting_on|changed|none","reason":"under 120 characters, plain words","question":"the exact question, or an empty string","priority":0-100}
+{"kind":"question|stuck|waiting_on|changed|none","reason":"under 120 characters, plain words","question":"the exact question, or an empty string","status_summary":"one or two plain sentences on what the agent is doing or has done, under 300 characters","why_here":"why the user needs to look, under 300 characters","suggested_action":"the short next step for the user, under 300 characters","priority":0-100}
+Write the three briefing fields only from what the evidence shows; use an empty string for any you cannot support. Never invent facts.

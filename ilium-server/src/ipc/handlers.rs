@@ -3349,9 +3349,6 @@ async fn idempotent_install_progress_monitor(
     // Cold path, one value per progress registration: boxing would only add
     // indirection at every match site.
     #[allow(clippy::large_enum_variant)]
-    // Cold path, one value per progress registration: boxing would only add
-    // indirection at every match site.
-    #[allow(clippy::large_enum_variant)]
     enum Decision {
         Lead,
         Wait(tokio::sync::watch::Receiver<Option<ProgressSetResult>>),

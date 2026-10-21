@@ -5,7 +5,20 @@ use std::collections::HashMap;
 use ilium_core::NodeId;
 use serde::{Deserialize, Serialize};
 
-use super::item::{AttentionItem, AttentionSource};
+use super::item::{AttentionItem, AttentionKind, AttentionSource, Briefing};
+
+/// How long a visited agent stays at the back of the line when only its
+/// screen changed. An agent that becomes more urgent comes back at once.
+pub const REVISIT_COOLDOWN_MS: u64 = 5 * 60 * 1000;
+
+/// What the user saw when they last visited an agent: the evidence and the
+/// kind of attention it asked for. A press only returns to the agent early if
+/// it has since become more urgent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VisitedAs {
+    pub fingerprint: u64,
+    pub kind: AttentionKind,
+}
 
 /// Current evidence fingerprint of every pane that still exists. Anything not
 /// in this map is gone, and anything whose fingerprint differs has moved on.
@@ -25,6 +38,9 @@ pub struct LlmReply {
 pub struct PersistedQueue {
     pub items: Vec<AttentionItem>,
     pub last_looked_ms: Vec<(NodeId, u64)>,
+    /// Older stores lack this: they load with no visit memory.
+    #[serde(default)]
+    pub visited_as: Vec<(NodeId, VisitedAs)>,
 }
 
 #[derive(Debug, Default)]
@@ -32,6 +48,7 @@ pub struct AttentionQueue {
     items: HashMap<NodeId, AttentionItem>,
     generation: u64,
     last_looked_ms: HashMap<NodeId, u64>,
+    visited_as: HashMap<NodeId, VisitedAs>,
     /// Evidence fingerprint each pane was last analysed at by an accepted LLM
     /// reply, including replies that found nothing to report. Not persisted:
     /// after a restart every agent is analysed once more.
@@ -94,6 +111,66 @@ impl AttentionQueue {
 
     pub fn mark_looked(&mut self, pane_id: NodeId, now_ms: u64) {
         self.last_looked_ms.insert(pane_id, now_ms);
+        if let Some(item) = self.items.get(&pane_id) {
+            self.visited_as.insert(
+                pane_id,
+                VisitedAs {
+                    fingerprint: item.fingerprint,
+                    kind: item.kind,
+                },
+            );
+        }
+    }
+
+    /// Whether the user has dealt with this item and nothing important has
+    /// changed since: visited, not more urgent than then, and either the same
+    /// evidence or still inside the revisit cooldown.
+    pub fn is_handled(&self, item: &AttentionItem, now_ms: u64) -> bool {
+        let (Some(visit), Some(looked_ms)) = (
+            self.visited_as.get(&item.pane_id),
+            self.last_looked_ms.get(&item.pane_id),
+        ) else {
+            return false;
+        };
+        if item.kind < visit.kind {
+            return false;
+        }
+        item.fingerprint == visit.fingerprint
+            || now_ms.saturating_sub(*looked_ms) < REVISIT_COOLDOWN_MS
+    }
+
+    /// The agent the next press should visit, never the one on screen.
+    /// Unhandled items come first in priority order. When every item has been
+    /// handled the queue rotates instead of repeating: the agent visited
+    /// longest ago comes next, so a long queue is walked end to end before any
+    /// agent is shown twice.
+    pub fn next_to_visit(&self, focused: Option<NodeId>, now_ms: u64) -> Option<&AttentionItem> {
+        let candidates: Vec<&AttentionItem> = self
+            .ordered()
+            .into_iter()
+            .filter(|item| Some(item.pane_id) != focused)
+            .collect();
+        candidates
+            .iter()
+            .copied()
+            .find(|item| !self.is_handled(item, now_ms))
+            .or_else(|| {
+                candidates
+                    .iter()
+                    .copied()
+                    .min_by_key(|item| self.last_looked_ms.get(&item.pane_id).copied().unwrap_or(0))
+            })
+    }
+
+    /// Items in the order the panel and dialog show them: unhandled first,
+    /// handled ones sunk to the back, each group in priority order.
+    pub fn ordered_for_display(&self, now_ms: u64) -> Vec<&AttentionItem> {
+        let (mut open, handled): (Vec<_>, Vec<_>) = self
+            .ordered()
+            .into_iter()
+            .partition(|item| !self.is_handled(item, now_ms));
+        open.extend(handled);
+        open
     }
 
     pub fn last_looked_ms(&self, pane_id: NodeId) -> Option<u64> {
@@ -108,6 +185,8 @@ impl AttentionQueue {
             item.source == AttentionSource::Llm && live.get(pane_id) == Some(&item.fingerprint)
         });
         self.last_looked_ms
+            .retain(|pane_id, _| live.contains_key(pane_id));
+        self.visited_as
             .retain(|pane_id, _| live.contains_key(pane_id));
         self.analysed
             .retain(|pane_id, _| live.contains_key(pane_id));
@@ -196,9 +275,16 @@ impl AttentionQueue {
             .map(|(id, ms)| (*id, *ms))
             .collect();
         last_looked_ms.sort();
+        let mut visited_as: Vec<(NodeId, VisitedAs)> = self
+            .visited_as
+            .iter()
+            .map(|(id, visit)| (*id, *visit))
+            .collect();
+        visited_as.sort_by_key(|(id, _)| *id);
         PersistedQueue {
             items,
             last_looked_ms,
+            visited_as,
         }
     }
 
@@ -220,6 +306,11 @@ impl AttentionQueue {
         for (pane_id, ms) in persisted.last_looked_ms {
             if live.contains_key(&pane_id) {
                 queue.last_looked_ms.insert(pane_id, ms);
+            }
+        }
+        for (pane_id, visit) in persisted.visited_as {
+            if live.contains_key(&pane_id) {
+                queue.visited_as.insert(pane_id, visit);
             }
         }
         queue
@@ -248,9 +339,22 @@ fn combine(existing: AttentionItem, incoming: AttentionItem) -> AttentionItem {
         if winner.waiting_on.is_none() {
             winner.waiting_on = loser.waiting_on;
         }
+        winner.briefing = merge_briefing(winner.briefing, &loser.briefing);
     }
     winner.created_ms = created_ms;
     winner
+}
+
+/// Keeps LLM wording over deterministic wording. Automatic and AI text are
+/// never mixed in one box: an LLM briefing is only completed from another LLM
+/// briefing, and a deterministic one gives way to any LLM wording.
+fn merge_briefing(winner: Briefing, loser: &Briefing) -> Briefing {
+    match (winner.from_llm, loser.from_llm) {
+        (true, true) => winner.filled_from(loser),
+        (true, false) => winner,
+        (false, true) => loser.clone(),
+        (false, false) => winner.filled_from(loser),
+    }
 }
 
 #[cfg(test)]
@@ -272,6 +376,7 @@ mod tests {
             reason: "r".into(),
             question: None,
             waiting_on: None,
+            briefing: Briefing::default(),
             priority,
             source,
             fingerprint: 100 + pane,
@@ -298,6 +403,109 @@ mod tests {
         );
         let order: Vec<u64> = queue.ordered().iter().map(|i| i.pane_id.0).collect();
         assert_eq!(order, vec![3, 2, 4, 1]);
+    }
+
+    fn queue_of(count: u64) -> AttentionQueue {
+        let mut queue = AttentionQueue::new();
+        let live: LiveFingerprints = (1..=count).map(|id| (NodeId(id), id)).collect();
+        let items = (1..=count)
+            .map(|id| {
+                let mut entry = item(id, AttentionKind::Question, 50, AttentionSource::Instant);
+                entry.fingerprint = id;
+                entry.created_ms = id;
+                entry
+            })
+            .collect();
+        queue.reconcile_instant(&live, items);
+        queue
+    }
+
+    #[test]
+    fn repeated_presses_walk_the_whole_queue_before_repeating() {
+        let mut queue = queue_of(25);
+        let mut seen = Vec::new();
+        let mut focused = None;
+        for step in 0..25 {
+            let pane = queue.next_to_visit(focused, 10_000 + step).unwrap().pane_id;
+            queue.mark_looked(pane, 10_000 + step);
+            seen.push(pane);
+            focused = Some(pane);
+        }
+        let mut unique = seen.clone();
+        unique.sort();
+        unique.dedup();
+        assert_eq!(unique.len(), 25, "every agent exactly once: {seen:?}");
+        // Second lap rotates in the same order (longest ago first).
+        let again = queue.next_to_visit(focused, 20_000).unwrap().pane_id;
+        assert_eq!(again, seen[0]);
+    }
+
+    #[test]
+    fn a_visited_agent_returns_early_only_when_it_becomes_more_urgent() {
+        let mut queue = AttentionQueue::new();
+        let live: LiveFingerprints = [(NodeId(1), 1), (NodeId(2), 2)].into();
+        let changed = {
+            let mut entry = item(1, AttentionKind::Changed, 50, AttentionSource::Instant);
+            entry.fingerprint = 1;
+            entry
+        };
+        let waiting = {
+            let mut entry = item(2, AttentionKind::WaitingOn, 50, AttentionSource::Instant);
+            entry.fingerprint = 2;
+            entry
+        };
+        queue.reconcile_instant(&live, vec![changed, waiting]);
+        queue.mark_looked(NodeId(2), 1_000);
+        assert_eq!(queue.next_to_visit(None, 2_000).unwrap().pane_id, NodeId(1));
+        // Pane 2 now asks a question: urgent again despite being visited.
+        let live: LiveFingerprints = [(NodeId(1), 1), (NodeId(2), 3)].into();
+        let mut question = item(2, AttentionKind::Question, 50, AttentionSource::Instant);
+        question.fingerprint = 3;
+        let mut still_changed = item(1, AttentionKind::Changed, 50, AttentionSource::Instant);
+        still_changed.fingerprint = 1;
+        queue.reconcile_instant(&live, vec![still_changed, question]);
+        assert_eq!(queue.next_to_visit(None, 3_000).unwrap().pane_id, NodeId(2));
+    }
+
+    #[test]
+    fn handled_agents_sink_to_the_back_of_the_display_order() {
+        let mut queue = queue_of(3);
+        queue.mark_looked(NodeId(1), 1_000);
+        let order: Vec<NodeId> = queue
+            .ordered_for_display(2_000)
+            .iter()
+            .map(|entry| entry.pane_id)
+            .collect();
+        assert_eq!(order, vec![NodeId(2), NodeId(3), NodeId(1)]);
+    }
+
+    #[test]
+    fn a_visited_agent_whose_screen_changed_waits_out_the_cooldown() {
+        let mut queue = queue_of(2);
+        queue.mark_looked(NodeId(1), 1_000);
+        let live: LiveFingerprints = [(NodeId(1), 99), (NodeId(2), 2)].into();
+        let mut moved = item(1, AttentionKind::Question, 50, AttentionSource::Instant);
+        moved.fingerprint = 99;
+        let mut other = item(2, AttentionKind::Question, 50, AttentionSource::Instant);
+        other.fingerprint = 2;
+        queue.reconcile_instant(&live, vec![moved, other]);
+        assert!(queue.is_handled(
+            queue.item(NodeId(1)).unwrap(),
+            1_000 + REVISIT_COOLDOWN_MS - 1
+        ));
+        assert!(!queue.is_handled(queue.item(NodeId(1)).unwrap(), 1_000 + REVISIT_COOLDOWN_MS));
+    }
+
+    #[test]
+    fn visit_memory_survives_persistence_and_old_stores_still_load() {
+        let mut queue = queue_of(2);
+        queue.mark_looked(NodeId(1), 500);
+        let live: LiveFingerprints = [(NodeId(1), 1), (NodeId(2), 2)].into();
+        let restored = AttentionQueue::from_persisted(queue.to_persisted(), &live);
+        assert!(restored.is_handled(restored.item(NodeId(1)).unwrap(), 600));
+        let old: PersistedQueue =
+            serde_json::from_str(r#"{"items":[],"last_looked_ms":[]}"#).unwrap();
+        assert!(old.visited_as.is_empty());
     }
 
     #[test]
@@ -516,5 +724,84 @@ mod tests {
         assert_eq!(restored.len(), 1);
         assert!(restored.item(NodeId(1)).is_some());
         assert_eq!(restored.last_looked_ms(NodeId(1)), Some(77));
+    }
+
+    fn briefed(pane: u64, source: AttentionSource, from_llm: bool, summary: &str) -> AttentionItem {
+        let mut base = item(pane, AttentionKind::Question, 50, source);
+        base.briefing = Briefing {
+            status_summary: Some(summary.into()),
+            why_here: None,
+            suggested_action: None,
+            from_llm,
+        };
+        base
+    }
+
+    #[test]
+    fn an_llm_reply_fills_the_briefing_and_the_next_instant_pass_keeps_it() {
+        let mut queue = AttentionQueue::new();
+        let live = live(&[1]);
+        queue.reconcile_instant(
+            &live,
+            vec![briefed(1, AttentionSource::Instant, false, "automatic")],
+        );
+        queue.apply_llm(
+            LlmReply {
+                generation: 1,
+                analysed: vec![(NodeId(1), 101)],
+                items: vec![briefed(1, AttentionSource::Llm, true, "from the model")],
+            },
+            &live,
+        );
+        let shown = queue.item(NodeId(1)).unwrap();
+        assert_eq!(
+            shown.briefing.status_summary.as_deref(),
+            Some("from the model")
+        );
+        assert!(shown.briefing.from_llm);
+
+        queue.reconcile_instant(
+            &live,
+            vec![briefed(1, AttentionSource::Instant, false, "automatic")],
+        );
+        let kept = queue.item(NodeId(1)).unwrap();
+        assert_eq!(
+            kept.briefing.status_summary.as_deref(),
+            Some("from the model")
+        );
+        assert!(kept.briefing.from_llm);
+    }
+
+    #[test]
+    fn an_llm_item_without_briefing_text_keeps_the_automatic_one() {
+        let mut queue = AttentionQueue::new();
+        let live = live(&[1]);
+        queue.reconcile_instant(
+            &live,
+            vec![briefed(1, AttentionSource::Instant, false, "automatic")],
+        );
+        queue.apply_llm(
+            LlmReply {
+                generation: 1,
+                analysed: vec![(NodeId(1), 101)],
+                items: vec![item(1, AttentionKind::Question, 60, AttentionSource::Llm)],
+            },
+            &live,
+        );
+        let shown = queue.item(NodeId(1)).unwrap();
+        assert_eq!(shown.briefing.status_summary.as_deref(), Some("automatic"));
+        assert!(!shown.briefing.from_llm);
+    }
+
+    #[test]
+    fn a_partial_llm_briefing_is_never_completed_with_automatic_text() {
+        let mut automatic = briefed(1, AttentionSource::Instant, false, "automatic");
+        automatic.briefing.why_here = Some("automatic why".into());
+        let mut model = item(1, AttentionKind::Question, 60, AttentionSource::Llm);
+        model.briefing.why_here = Some("model why".into());
+        model.briefing.from_llm = true;
+        let merged = combine(automatic, model);
+        assert_eq!(merged.briefing.why_here.as_deref(), Some("model why"));
+        assert_eq!(merged.briefing.status_summary, None);
     }
 }

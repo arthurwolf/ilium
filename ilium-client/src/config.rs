@@ -4355,6 +4355,7 @@ mod tests {
         let settings = AttentionSettings {
             mode: AttentionMode::Turbo,
             press_sorts: false,
+            show_briefing: false,
             turbo_concurrency: 4,
             expiry_seconds: 900,
             model_override: Some("some-model".to_owned()),

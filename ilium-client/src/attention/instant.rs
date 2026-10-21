@@ -2,7 +2,7 @@
 
 use ilium_core::{AgentState, AgentTurn, GoalState, NodeId};
 
-use super::item::{AttentionItem, AttentionKind, AttentionSource};
+use super::item::{AttentionItem, AttentionKind, AttentionSource, Briefing};
 
 /// Longest question excerpt copied from the visible screen.
 const MAXIMUM_QUESTION_CHARACTERS: usize = 400;
@@ -64,6 +64,7 @@ pub fn derive_instant_item(pane: &LivePane, generation: u64, now_ms: u64) -> Opt
     } else {
         return None;
     };
+    let briefing = fallback_briefing(agent.class.label(), kind, question.is_some());
     Some(AttentionItem {
         pane_id: pane.pane_id,
         project_id: pane.project_id,
@@ -72,12 +73,51 @@ pub fn derive_instant_item(pane: &LivePane, generation: u64, now_ms: u64) -> Opt
         reason,
         question,
         waiting_on: None,
+        briefing,
         priority,
         source: AttentionSource::Instant,
         fingerprint: pane.fingerprint,
         generation,
         created_ms: now_ms,
     })
+}
+
+/// Deterministic briefing for an item no LLM has annotated. It restates only
+/// what agent detection knows (the agent's name and why detection flagged it),
+/// so it never claims anything about the agent's actual work.
+pub fn fallback_briefing(agent_label: &str, kind: AttentionKind, has_question: bool) -> Briefing {
+    let (status_summary, why_here, suggested_action) = match kind {
+        AttentionKind::Question => (
+            format!("{agent_label} is waiting for your answer or approval."),
+            "It paused its turn and cannot continue until you respond.",
+            if has_question {
+                "Read the question and answer it."
+            } else {
+                "Open the agent and answer or approve."
+            },
+        ),
+        AttentionKind::Stuck => (
+            format!("{agent_label} has stopped making progress."),
+            "Its goal is blocked or it hit a usage limit.",
+            "Open the agent and decide how to unblock it.",
+        ),
+        AttentionKind::WaitingOn => (
+            format!("{agent_label} is waiting on subagents or background tasks."),
+            "It cannot finish until those tasks return.",
+            "Check whether the tasks are still running.",
+        ),
+        AttentionKind::Changed => (
+            format!("{agent_label} finished a turn since you last looked."),
+            "It has new output you have not seen yet.",
+            "Review what it produced.",
+        ),
+    };
+    Briefing {
+        status_summary: Some(status_summary),
+        why_here: Some(why_here.to_string()),
+        suggested_action: Some(suggested_action.to_string()),
+        from_llm: false,
+    }
 }
 
 /// Last non-empty visible lines, clipped on a character boundary.
@@ -174,5 +214,36 @@ mod tests {
         )
         .unwrap();
         assert_eq!(item.kind, AttentionKind::Question);
+    }
+
+    #[test]
+    fn every_instant_item_carries_a_deterministic_briefing_naming_the_agent() {
+        for (activity, goal) in [
+            (AgentActivity::WaitingApproval, None),
+            (AgentActivity::Idle, Some(GoalState::Blocked)),
+            (AgentActivity::Idle, Some(GoalState::UsageLimited)),
+        ] {
+            let item = derive_instant_item(&pane(activity, goal), 1, 1).unwrap();
+            let briefing = &item.briefing;
+            assert!(!briefing.from_llm, "{activity:?}");
+            assert!(briefing
+                .status_summary
+                .as_deref()
+                .unwrap()
+                .starts_with("Claude"));
+            assert!(briefing.why_here.is_some() && briefing.suggested_action.is_some());
+        }
+        let waiting = fallback_briefing("Codex", AttentionKind::Question, false);
+        assert_eq!(
+            waiting.status_summary.as_deref(),
+            Some("Codex is waiting for your answer or approval.")
+        );
+        for kind in [
+            AttentionKind::Stuck,
+            AttentionKind::WaitingOn,
+            AttentionKind::Changed,
+        ] {
+            assert!(!fallback_briefing("X", kind, false).is_empty());
+        }
     }
 }

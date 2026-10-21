@@ -98,6 +98,12 @@ mod semantic_presentation;
 // A child module of `app` so it can use the private restructure request path.
 #[path = "app_attention.rs"]
 mod attention_app;
+// Glue between the pure overview dialog and the live queue.
+#[path = "app_attention_dialog.rs"]
+mod attention_dialog_app;
+// Glue between the pure briefing box and the live queue.
+#[path = "app_attention_briefing.rs"]
+mod attention_briefing_app;
 use ilium_ipc::TextTriggerSettings;
 
 /// Rows scrolled per wheel notch over a terminal pane's own scrollback --
@@ -471,6 +477,9 @@ pub enum Mode {
     /// Progress dialog over a frozen agent pane while its conversation is
     /// compacted by a remote model. State lives in `App::remote_compaction`.
     RemoteCompaction,
+    /// The "Needs you" overview over the attention queue. State lives in
+    /// `App::attention.dialog` (see `crate::attention::dialog`).
+    AttentionOverview,
 }
 
 /// Which animation control a `Mode::AnimationTextPrompt` edits, and what to
@@ -975,7 +984,7 @@ impl TerminalRow {
         Self::EngineMemoryBudget,
     ];
 }
-/// Rows of the Attention settings tab, in display order. All five are generic
+/// Rows of the Attention settings tab, in display order. All six are generic
 /// choice/number rows (`SettingsChoice` / `SettingsNumber`), so keyboard,
 /// mouse and dialogs need no tab-specific handlers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -985,14 +994,16 @@ pub enum AttentionRow {
     TurboConcurrency,
     ExpirySeconds,
     Model,
+    ShowBriefing,
 }
 impl AttentionRow {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::Mode,
         Self::PressSorts,
         Self::TurboConcurrency,
         Self::ExpirySeconds,
         Self::Model,
+        Self::ShowBriefing,
     ];
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -4813,6 +4824,7 @@ impl App {
                 } else {
                     viewport
                 };
+                let viewport = self.with_briefing_slot(viewport);
                 if self.ui_settings.progress_monitor_enabled {
                     viewport.with_progress_reserved(
                         crate::progress_bar::reserved_height(
@@ -4833,6 +4845,29 @@ impl App {
                 viewport
             })
             .collect()
+    }
+
+    /// Reserves the briefing box's rows right below the prompt banner. The
+    /// rows come from the same pure function the drawing uses, so the
+    /// terminal's size and the box can never disagree. The box asks for what
+    /// is left after the terminal's minimum height and the progress footer.
+    fn with_briefing_slot(&self, viewport: PaneViewport) -> PaneViewport {
+        let minimum_progress_rows = if self.ui_settings.progress_monitor_enabled {
+            2.min(viewport.content_area.height.saturating_sub(2))
+        } else {
+            0
+        };
+        let keep_free_rows = if minimum_progress_rows > 0 {
+            minimum_progress_rows + 1
+        } else {
+            0
+        };
+        let frames = self.ui_settings.section_frames_enabled;
+        let spare_rows = viewport.content_area.height.saturating_sub(
+            crate::attention::briefing::MINIMUM_TERMINAL_ROWS + keep_free_rows + u16::from(frames),
+        );
+        let rows = self.briefing_rows(viewport.pane_id, viewport.content_area.width, spare_rows);
+        viewport.with_briefing_reserved(rows, keep_free_rows, frames)
     }
 
     /// Whether the already-reserved toolbar slot displays controls. Terminal
@@ -19360,6 +19395,9 @@ impl App {
         {
             self.hovered_last_prompt_button = None;
         }
+        if self.handle_briefing_mouse(id, viewport.briefing_area, mouse, position) {
+            return;
+        }
         if self
             .completed_agent_close_action(viewport)
             .is_some_and(|action| action.button_area.contains(position))
@@ -28922,7 +28960,7 @@ mod tests {
         let directory = config_dir.path().to_path_buf();
         assert_eq!(app.attention_settings.mode, AttentionMode::Shared);
 
-        // The Attention tab exposes five rows and the closed catalogs resolve each.
+        // The Attention tab exposes six rows and the closed catalogs resolve each.
         for (index, row) in AttentionRow::ALL.into_iter().enumerate() {
             let choice = SettingsChoice::at(&app, SettingsTab::Attention, index);
             let number = SettingsNumber::at(&app, SettingsTab::Attention, index);
@@ -28950,6 +28988,15 @@ mod tests {
             None,
         )
         .unwrap();
+        assert!(app.attention_settings.show_briefing);
+        app.save_settings_choice(
+            SettingsChoice::AttentionShowBriefing,
+            "false",
+            directory.clone(),
+            None,
+        )
+        .unwrap();
+        assert!(!app.attention_settings.show_briefing);
         app.save_settings_number(
             SettingsNumber::AttentionTurboConcurrency,
             "7",
@@ -28996,6 +29043,7 @@ mod tests {
         assert_eq!(loaded, app.attention_settings);
         assert_eq!(loaded.mode, AttentionMode::InstantOnly);
         assert!(!loaded.press_sorts);
+        assert!(!loaded.show_briefing);
         assert_eq!(loaded.model_override.as_deref(), Some("synthetic-model"));
 
         // Choosing "Same as titles" clears the override again.

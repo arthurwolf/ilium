@@ -569,6 +569,12 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
         return;
     }
 
+    // The "Needs you" overview owns every pointer event while it is open.
+    if matches!(app.mode, Mode::AttentionOverview) {
+        app.handle_attention_overview_mouse(mouse);
+        return;
+    }
+
     // The conversion dialog is keyboard-only; pointer events must not reach
     // the frozen pane or the tree while it runs.
     if matches!(app.mode, Mode::ConvertSession) {
@@ -1156,7 +1162,16 @@ fn handle_tree_mouse(app: &mut App, mouse: MouseEvent, position: Position) {
     }
 
     // The "Next: needs you" button sits above the toolbar; the row exists only
-    // while the attention queue is on.
+    // while the attention queue is on. Its `[+]` opens the overview and must
+    // be tested first: the rest of the button jumps to the next agent.
+    if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
+        && app
+            .attention_plus_rect()
+            .is_some_and(|plus| plus.contains(position))
+    {
+        app.action_open_attention_overview();
+        return;
+    }
     if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
         && app
             .attention_button_rect()

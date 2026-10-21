@@ -342,6 +342,23 @@ pub fn last_prompt_style(scheme: ColorScheme) -> Style {
     Style::new().bg(muted_accent_bg(scheme))
 }
 
+/// Background fill for the attention briefing box. A weaker tint than the
+/// last-prompt banner's so the two stacked boxes read as different sections
+/// while both stay dark on the dark scheme.
+pub fn briefing_style(scheme: ColorScheme) -> Style {
+    let blend_target = match scheme {
+        ColorScheme::Dark => Color::Rgb(0, 0, 0),
+        ColorScheme::Light => Color::Rgb(0xff, 0xff, 0xff),
+    };
+    Style::new().bg(mix(current().accent_bg, blend_target, 0.84))
+}
+
+/// Gutter and label colour of the attention briefing box: the focused-border
+/// colour, which differs from the banner's accent gutter.
+pub fn briefing_gutter_style(scheme: ColorScheme) -> Style {
+    briefing_style(scheme).fg(current().border_focused)
+}
+
 #[cfg(test)]
 mod tests {
     use ratatui::backend::TestBackend;
