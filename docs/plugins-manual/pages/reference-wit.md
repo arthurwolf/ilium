@@ -58,7 +58,7 @@ These rules apply to every interface below. Limit tables on other pages link her
 | `mark-attention` reason | 80 | characters |
 | Message channel | 1 to 64 | characters from `[a-z0-9.-]` |
 | Message payload | 1,048,576 | bytes |
-| Clipboard text | 65,536 | bytes |
+| Clipboard text | 1,048,576 | bytes |
 | `arguments-json` of a command | 65,536 | bytes |
 | Payload and reply of a service call | 1,048,576 | bytes |
 | Journal payload | 4,096 | bytes |

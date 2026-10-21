@@ -94,7 +94,9 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "commands.invoke:*",
       "inference",
       "jobs.run",
-      "settings.write-kernel:voice-control"
+      "settings.write-kernel:voice-control",
+      "extensions.provide:ilium.core.voice/transcript",
+      "extensions.provide:ilium.core.voice/voice-intents"
     ]
   },
   "activation": [
@@ -114,6 +116,51 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
     }],
     "jobs": [
       { "kind": "transcribe", "deadline_ms": 30000, "memory_mib": 512 }
+    ],
+    "extension_points": [
+      {
+        "id": "transcript",
+        "kind": "hook",
+        "mode": "transform",
+        "title": "Correct the transcript before commands are matched",
+        "payload_schema": {
+          "type": "object",
+          "properties": {
+            "text": { "type": "string" },
+            "confidence": { "type": "number" },
+            "language": { "type": "string" }
+          },
+          "required": ["text", "confidence", "language"]
+        },
+        "reply_schema": {
+          "type": "object",
+          "properties": { "text": { "type": "string" } },
+          "required": ["text"]
+        },
+        "risk": "high",
+        "deadline_ms": 20,
+        "max_handlers": 8,
+        "version": "0.1.0"
+      },
+      {
+        "id": "voice-intents",
+        "kind": "collect",
+        "title": "Add a spoken phrase that runs a command",
+        "entry_schema": {
+          "type": "object",
+          "properties": {
+            "id": { "type": "string" },
+            "phrases": { "type": "array", "items": { "type": "string" } },
+            "command": { "type": "string" },
+            "confirm": { "type": "boolean" }
+          },
+          "required": ["id", "phrases", "command", "confirm"]
+        },
+        "risk": "standard",
+        "max_entries": 64,
+        "dynamic": false,
+        "version": "0.1.0"
+      }
     ]
   }
 }
@@ -524,7 +571,7 @@ A package adds this entry in its manifest. It needs no code.
 
 ### Extension points this plugin owns
 
-The table gives the values that [EXT-052] requires for each point this plugin owns. The page does not state them, so the values come from the defaults in [Extension points](/pages/api-extension-points/) and are marked (default). Side is unknown because the manifest has no `extensions.provide` grant for these points and the page does not state the side on which their handlers run.
+The table gives the values that [EXT-052] requires for each point this plugin owns. The page does not state them, so the values come from the defaults in [Extension points](/pages/api-extension-points/) and are marked (default). The complete manifest holds an `extensions.provide:ilium.core.voice/<point>` grant for each point in its client `capabilities` list and declares each point in `contributes.extension_points`.
 
 | Point | Side | Version | Deadline | Max | Dynamic |
 |---|---|---|---|---|---|
@@ -532,7 +579,7 @@ The table gives the values that [EXT-052] requires for each point this plugin ow
 | `ilium.core.voice/voice-intents` | client | 0.1.0 (default) | none (default) | 64 entries (default) | no (default) |
 
 Side basis: `ilium.core.voice/transcript` is client because the manifest's server capabilities hold only `cli.contribute`, and the transcript comes from the client-side `transcribe` job (`audio.microphone`, `jobs.run`, `inference`) before the client matches commands in its `on_transcript` handler.
-Side basis: `ilium.core.voice/voice-intents` is client because the manifest gives no `extensions.provide` grant on either side, and the phrase-to-command matching that consumes these entries runs in the client's `on_transcript` handler, which holds the `commands.invoke:*` grant.
+Side basis: `ilium.core.voice/voice-intents` is client because the manifest grants `extensions.provide` for it on the client side, and the phrase-to-command matching that consumes these entries runs in the client's `on_transcript` handler, which holds the `commands.invoke:*` grant.
 
 ### ABI used
 

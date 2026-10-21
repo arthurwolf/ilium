@@ -121,7 +121,9 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "help.read",
       "plugins.manage",
       "ui.panels",
-      "settings.write-kernel:keyboard"
+      "settings.write-kernel:keyboard",
+      "extensions.provide:ilium.core.keys-and-help/key-hints",
+      "extensions.provide:ilium.core.keys-and-help/help-sources"
     ]
   },
   "activation": [
@@ -130,6 +132,45 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
     "settings:keyboard"
   ],
   "contributes": {
+    "extension_points": [
+      {
+        "id": "key-hints",
+        "kind": "collect",
+        "title": "Key hints",
+        "entry_schema": {
+          "type": "object",
+          "properties": {
+            "id": { "type": "string" },
+            "context": { "type": "string" },
+            "chord": { "type": "string" },
+            "label": { "type": "string" }
+          },
+          "required": ["id", "context", "chord", "label"]
+        },
+        "risk": "standard",
+        "max_entries": 64,
+        "dynamic": false,
+        "version": "0.1.0"
+      },
+      {
+        "id": "help-sources",
+        "kind": "collect",
+        "title": "Help sources",
+        "entry_schema": {
+          "type": "object",
+          "properties": {
+            "id": { "type": "string" },
+            "title": { "type": "string" },
+            "service": { "type": "string" }
+          },
+          "required": ["id", "title", "service"]
+        },
+        "risk": "standard",
+        "max_entries": 64,
+        "dynamic": false,
+        "version": "0.1.0"
+      }
+    ],
     "commands": [
       {
         "id": "show-keys",
@@ -651,7 +692,7 @@ A package adds this entry in its manifest. It needs no code.
 
 ### Extension points this plugin owns
 
-The table gives the values that [EXT-052] requires for each point this plugin owns. Side is `client`, the side the page states for this plugin; the manifest has no `extensions.provide` grant for these points. The other values are not stated on the page, so they come from the defaults in [Extension points](/pages/api-extension-points/) and are marked (default).
+The table gives the values that [EXT-052] requires for each point this plugin owns. Side is `client`, the side the page states for this plugin. The complete manifest grants `extensions.provide` for each point in its client `capabilities` and declares each in `contributes.extension_points`. The other values are not stated on the page, so they come from the defaults in [Extension points](/pages/api-extension-points/) and are marked (default).
 
 | Point | Side | Version | Deadline | Max | Dynamic |
 |---|---|---|---|---|---|

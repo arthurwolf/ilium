@@ -114,7 +114,10 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "panes.create",
       "terminal.write",
       "ui.panels",
-      "services.use:ilium.core.editor/set-setting"
+      "services.use:ilium.core.editor/set-setting",
+      "extensions.provide:ilium.core.editor/before-save",
+      "extensions.provide:ilium.core.editor/file-openers",
+      "extensions.provide:ilium.core.editor/line-badges"
     ],
     "server": [
       "services.provide:ilium.core.editor/set-setting",
@@ -126,6 +129,117 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
   ],
   "unstable": ["plugin-services"],
   "contributes": {
+    "extension_points": [
+      {
+        "id": "before-save",
+        "kind": "hook",
+        "mode": "transform",
+        "title": "Before save",
+        "payload_schema": {
+          "type": "object",
+          "required": [
+            "buffer",
+            "path",
+            "language",
+            "text"
+          ],
+          "properties": {
+            "buffer": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "language": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          }
+        },
+        "reply_schema": {
+          "type": "object",
+          "required": [
+            "text"
+          ],
+          "properties": {
+            "text": {
+              "type": "string"
+            }
+          }
+        },
+        "risk": "high",
+        "deadline_ms": 20,
+        "max_handlers": 8,
+        "version": "0.1.0"
+      },
+      {
+        "id": "file-openers",
+        "kind": "collect",
+        "title": "File openers",
+        "entry_schema": {
+          "type": "object",
+          "required": [
+            "id",
+            "extensions",
+            "pane_kind",
+            "priority"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "extensions": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "pane_kind": {
+              "type": "string"
+            },
+            "priority": {
+              "type": "integer"
+            }
+          }
+        },
+        "max_entries": 64,
+        "dynamic": false,
+        "version": "0.1.0"
+      },
+      {
+        "id": "line-badges",
+        "kind": "collect",
+        "title": "Line badges",
+        "entry_schema": {
+          "type": "object",
+          "required": [
+            "id",
+            "regex",
+            "glyph",
+            "tooltip"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "regex": {
+              "type": "string"
+            },
+            "glyph": {
+              "type": "string"
+            },
+            "tooltip": {
+              "type": "string"
+            }
+          }
+        },
+        "max_entries": 64,
+        "dynamic": false,
+        "version": "0.1.0"
+      }
+    ],
     "services": {
       "provides": [
         { "name": "ilium.core.editor/set-setting", "version": "0.1.0", "schema": "schemas/set-setting.json" }
@@ -608,9 +722,9 @@ The table gives each point's side, version, deadline, maximum and dynamic value.
 | `ilium.core.editor/file-openers` | client | 0.1.0 (default) | none (default) | 64 entries (default) | no (default) |
 | `ilium.core.editor/line-badges` | client | 0.1.0 (default) | none (default) | 64 entries (default) | no (default) |
 
-Side basis: `ilium.core.editor/file-openers` is client because the manifest gives the server part only `services.provide` and `settings.write-kernel:editor` (no `extensions.provide` for it), and the page says the server part's one job is settings, while the client part owns the editor panes that pick which pane kind opens a file. Side basis: `ilium.core.editor/line-badges` is client because the manifest gives the server part no `extensions.provide` for it, and the gutter markers it adds belong to the editor panes the client part draws.
+Side basis: all three points are client. The server part's manifest grants only `services.provide` and `settings.write-kernel:editor`, and its one job is settings. The client part owns the editor panes, so the pane that opens a file and the gutter badges are client; `before-save` is client because the example contributes it from the client capabilities.
 
-The side of `before-save` is client because the example above contributes that point from the client capabilities. This page does not state a side for `file-openers` or `line-badges`, so their side is unknown.
+The sides above are the sides of the points in the manifest; no point on this page has an unknown side.
 
 ### ABI used
 

@@ -60,16 +60,134 @@ This block is a fragment. It lists the contributions. The whole manifest is in [
   "capabilities": {
     "server": [
       "terminal.read-screen", "terminal.read-cells", "terminal.history", "terminal.write",
-      "panes.read", "panes.signal", "tree.write"
+      "panes.read", "panes.signal", "tree.write",
+      "extensions.provide:ilium.core.terminal/before-send-input"
     ],
     "client": [
       "terminal.read-screen", "editor.edit",
-      "commands.invoke:ilium.core.editor/*", "ui.panels", "settings.write-kernel:terminal"
+      "commands.invoke:ilium.core.editor/*", "ui.panels", "settings.write-kernel:terminal",
+      "extensions.provide:ilium.core.terminal/open-link",
+      "extensions.provide:ilium.core.terminal/link-actions"
     ]
   },
   "contributes": {
     "link_detectors": [
       { "id": "path-line", "regex": "[./A-Za-z0-9_-]+\\.[a-z]+:[0-9]+", "command": "link-open" }
+    ],
+    "extension_points": [
+      {
+        "id": "before-send-input",
+        "kind": "hook",
+        "mode": "veto",
+        "title": "Before input is sent to a terminal pane",
+        "payload_schema": {
+          "type": "object",
+          "properties": {
+            "pane": {
+              "type": "string"
+            },
+            "length": {
+              "type": "integer"
+            },
+            "source": {
+              "type": "string"
+            },
+            "preview": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "pane",
+            "length",
+            "source",
+            "preview"
+          ]
+        },
+        "risk": "high",
+        "deadline_ms": 20,
+        "max_handlers": 8,
+        "version": "0.1.0"
+      },
+      {
+        "id": "open-link",
+        "kind": "hook",
+        "mode": "first",
+        "title": "How a clicked link opens",
+        "payload_schema": {
+          "type": "object",
+          "properties": {
+            "pane": {
+              "type": "string"
+            },
+            "link_kind": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "pane",
+            "link_kind",
+            "text"
+          ]
+        },
+        "reply_schema": {
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string",
+              "enum": [
+                "open-external",
+                "run-command",
+                "ignore"
+              ]
+            },
+            "command": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "action"
+          ]
+        },
+        "risk": "high",
+        "deadline_ms": 20,
+        "max_handlers": 8,
+        "version": "0.1.0"
+      },
+      {
+        "id": "link-actions",
+        "kind": "collect",
+        "title": "Actions for a detected link in the right-click menu",
+        "entry_schema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "link_kind": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "link_kind",
+            "title",
+            "command"
+          ]
+        },
+        "risk": "standard",
+        "max_entries": 64,
+        "dynamic": false,
+        "version": "0.1.0"
+      }
     ]
   }
 }
@@ -104,14 +222,17 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "terminal.write",
       "panes.read",
       "panes.signal",
-      "tree.write"
+      "tree.write",
+      "extensions.provide:ilium.core.terminal/before-send-input"
     ],
     "client": [
       "terminal.read-screen",
       "editor.edit",
       "commands.invoke:ilium.core.editor/*",
       "ui.panels",
-      "settings.write-kernel:terminal"
+      "settings.write-kernel:terminal",
+      "extensions.provide:ilium.core.terminal/open-link",
+      "extensions.provide:ilium.core.terminal/link-actions"
     ]
   },
   "activation": [
@@ -124,6 +245,121 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
         "id": "path-line",
         "regex": "[./A-Za-z0-9_-]+\\.[a-z]+:[0-9]+",
         "command": "link-open"
+      }
+    ],
+    "extension_points": [
+      {
+        "id": "before-send-input",
+        "kind": "hook",
+        "mode": "veto",
+        "title": "Before input is sent to a terminal pane",
+        "payload_schema": {
+          "type": "object",
+          "properties": {
+            "pane": {
+              "type": "string"
+            },
+            "length": {
+              "type": "integer"
+            },
+            "source": {
+              "type": "string"
+            },
+            "preview": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "pane",
+            "length",
+            "source",
+            "preview"
+          ]
+        },
+        "risk": "high",
+        "deadline_ms": 20,
+        "max_handlers": 8,
+        "version": "0.1.0"
+      },
+      {
+        "id": "open-link",
+        "kind": "hook",
+        "mode": "first",
+        "title": "How a clicked link opens",
+        "payload_schema": {
+          "type": "object",
+          "properties": {
+            "pane": {
+              "type": "string"
+            },
+            "link_kind": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "pane",
+            "link_kind",
+            "text"
+          ]
+        },
+        "reply_schema": {
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string",
+              "enum": [
+                "open-external",
+                "run-command",
+                "ignore"
+              ]
+            },
+            "command": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "action"
+          ]
+        },
+        "risk": "high",
+        "deadline_ms": 20,
+        "max_handlers": 8,
+        "version": "0.1.0"
+      },
+      {
+        "id": "link-actions",
+        "kind": "collect",
+        "title": "Actions for a detected link in the right-click menu",
+        "entry_schema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "link_kind": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "link_kind",
+            "title",
+            "command"
+          ]
+        },
+        "risk": "standard",
+        "max_entries": 64,
+        "dynamic": false,
+        "version": "0.1.0"
       }
     ]
   },
@@ -487,7 +723,7 @@ A package adds this entry in its manifest. It needs no code.
 
 ### Extension points this plugin owns
 
-The table gives the values that [EXT-052] requires for each point this plugin owns. The page does not state them, so the values come from the defaults in [Extension points](/pages/api-extension-points/) and are marked (default). Side is unknown because the manifest has no `extensions.provide` grant for these points and the page does not state the side on which their handlers run.
+The table gives the values that [EXT-052] requires for each point this plugin owns. The page does not state them, so the values come from the defaults in [Extension points](/pages/api-extension-points/) and are marked (default). The main manifest grants `extensions.provide:ilium.core.terminal/<point>` on the side shown in the table (`before-send-input` on the server, `open-link` and `link-actions` on the client) and declares each point in `contributes.extension_points`.
 
 | Point | Side | Version | Deadline | Max | Dynamic |
 |---|---|---|---|---|---|
@@ -495,7 +731,7 @@ The table gives the values that [EXT-052] requires for each point this plugin ow
 | `ilium.core.terminal/open-link` | client | 0.1.0 (default) | 20 ms (default) | 8 handlers (default) | no (default) |
 | `ilium.core.terminal/link-actions` | client | 0.1.0 (default) | none (default) | 64 entries (default) | no (default) |
 
-Side basis: ilium.core.terminal/before-send-input is server because the manifest has no `extensions.provide` grant for it and the page does not state where its handlers run, but input reaches a pane through the `send-input` intent that the server submits (the paste sample) and the server holds `terminal.write`. Side basis: ilium.core.terminal/open-link is client because the manifest has no grant for it and the page does not state where its handlers run, but the click is handled on the client, which submits `editor-open` on `link-activated` (the Clickable links sample). Side basis: ilium.core.terminal/link-actions is client because the manifest has no grant for it and the page does not state where its handlers run, but the point feeds the terminal right-click menu, which is client UI (the point's own row in the table above).
+Side basis: `before-send-input` is server because input reaches a pane through the `send-input` intent that the server submits (the paste sample) and the server holds `terminal.write`. `open-link` is client because the click is handled on the client, which submits `editor-open` on `link-activated` (the Clickable links sample). `link-actions` is client because the point feeds the terminal right-click menu, which is client UI.
 
 ### ABI used
 

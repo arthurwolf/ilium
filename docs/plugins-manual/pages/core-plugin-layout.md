@@ -90,11 +90,54 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "panes.read",
       "panes.lifecycle",
       "panes.create",
-      "tree.restructure"
+      "tree.restructure",
+      "extensions.provide:ilium.core.layout/layout-presets",
+      "extensions.provide:ilium.core.layout/before-split"
     ],
     "client": [
       "panes.read",
       "ui.panels"
+    ]
+  },
+  "contributes": {
+    "extension_points": [
+      {
+        "id": "layout-presets",
+        "kind": "collect",
+        "title": "Layout presets",
+        "entry_schema": {
+          "type": "object",
+          "properties": {
+            "id": { "type": "string" },
+            "title": { "type": "string" },
+            "template": { "type": "string" }
+          },
+          "required": ["id", "title", "template"]
+        },
+        "risk": "standard",
+        "max_entries": 64,
+        "dynamic": false,
+        "version": "0.1.0"
+      },
+      {
+        "id": "before-split",
+        "kind": "hook",
+        "mode": "veto",
+        "title": "Before split",
+        "payload_schema": {
+          "type": "object",
+          "properties": {
+            "node": { "type": "string" },
+            "direction": { "type": "string" },
+            "pane_count": { "type": "integer" }
+          },
+          "required": ["node", "direction", "pane_count"]
+        },
+        "risk": "standard",
+        "deadline_ms": 20,
+        "max_handlers": 8,
+        "version": "0.1.0"
+      }
     ]
   },
   "activation": [
@@ -417,14 +460,14 @@ A package adds this entry in its manifest. It needs no code.
 
 ### Extension points this plugin owns
 
-The table gives the side, version, deadline, maximum and dynamic setting of each point this plugin owns. Values marked (default) are the defaults of the extension point mechanism, because this page does not state them. A side of unknown means the page does not state which side runs the handler.
+The table gives the side, version, deadline, maximum and dynamic setting of each point this plugin owns. Values marked (default) are the defaults of the extension point mechanism, because this page does not state them. Both points run on the server side.
 
 | Point | Side | Version | Deadline | Max | Dynamic |
 |---|---|---|---|---|---|
 | `ilium.core.layout/layout-presets` | server | 0.1.0 (default) | none (default) | 64 entries (default) | no (default) |
 | `ilium.core.layout/before-split` | server | 0.1.0 (default) | 20 ms (default) | 8 handlers (default) | no (default) |
 
-Side basis: `layout-presets` is server because the manifest grants no `extensions.provide` entry and the page does not name the handler side, so the owning logic decides: the presets service that lists and applies the contributed templates runs server side, where the `tree.restructure` and `panes.create` grants live, while the client only draws the chooser panel with `ui.panels`. Side basis: `before-split` is server because the manifest grants no `extensions.provide` entry and the page does not name the handler side, and the page states that the server side submits `create-split` for every split (see Split four ways), so the veto runs where the split is decided.
+The main manifest grants `extensions.provide:ilium.core.layout/layout-presets` and `extensions.provide:ilium.core.layout/before-split` on the server side and declares both points in `contributes.extension_points`. Side basis: `layout-presets` is server because the owning logic decides: the presets service that lists and applies the contributed templates runs server side, where the `tree.restructure` and `panes.create` grants live, while the client only draws the chooser panel with `ui.panels`. Side basis: `before-split` is server because the page states that the server side submits `create-split` for every split (see Split four ways), so the veto runs where the split is decided.
 
 ### ABI used
 

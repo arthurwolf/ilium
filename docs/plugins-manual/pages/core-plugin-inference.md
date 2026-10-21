@@ -83,12 +83,144 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
     "server": [
       "inference.provide",
       "http:api.openai.com",
-      "http:localhost"
+      "http:localhost",
+      "extensions.provide:ilium.core.inference/before-request",
+      "extensions.provide:ilium.core.inference/after-response"
     ],
     "client": [
       "ui.panels",
       "settings.write-kernel:inference",
-      "settings.write-kernel:llm-instructions"
+      "settings.write-kernel:llm-instructions",
+      "extensions.provide:ilium.core.inference/provider-profiles"
+    ]
+  },
+  "contributes": {
+    "extension_points": [
+      {
+        "id": "before-request",
+        "kind": "hook",
+        "mode": "transform",
+        "title": "Rewrite or refuse an outgoing model request",
+        "payload_schema": {
+          "type": "object",
+          "properties": {
+            "purpose": {
+              "type": "string"
+            },
+            "provider": {
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            },
+            "messages_length": {
+              "type": "integer"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "purpose",
+            "provider",
+            "model",
+            "messages_length",
+            "text"
+          ]
+        },
+        "reply_schema": {
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "text"
+          ]
+        },
+        "risk": "high",
+        "deadline_ms": 20,
+        "max_handlers": 8,
+        "version": "0.1.0"
+      },
+      {
+        "id": "after-response",
+        "kind": "hook",
+        "mode": "observe",
+        "title": "Learn that a model request finished",
+        "payload_schema": {
+          "type": "object",
+          "properties": {
+            "purpose": {
+              "type": "string"
+            },
+            "provider": {
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            },
+            "input_tokens": {
+              "type": "integer"
+            },
+            "output_tokens": {
+              "type": "integer"
+            },
+            "millis": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "purpose",
+            "provider",
+            "model",
+            "input_tokens",
+            "output_tokens",
+            "millis"
+          ]
+        },
+        "risk": "standard",
+        "deadline_ms": 20,
+        "max_handlers": 8,
+        "version": "0.1.0"
+      },
+      {
+        "id": "provider-profiles",
+        "kind": "collect",
+        "title": "Ready-made provider setups for the provider chooser",
+        "entry_schema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "base_url": {
+              "type": "string"
+            },
+            "models_path": {
+              "type": "string"
+            },
+            "key_name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "title",
+            "base_url",
+            "models_path",
+            "key_name"
+          ]
+        },
+        "risk": "high",
+        "max_entries": 64,
+        "dynamic": false,
+        "version": "0.1.0"
+      }
     ]
   },
   "activation": [
@@ -567,7 +699,7 @@ A handler that is late, traps or returns a reply the mode does not allow counts 
 
 ### Extension points this plugin owns
 
-The page does not state the side that runs these points, and its manifest has no `extensions.provide` grant for them, so the side is `unknown`. The page also gives no version, deadline, max or dynamic values, so those are the documented defaults and are marked `(default)`.
+The complete manifest grants `extensions.provide:ilium.core.inference/<point>` on the side that runs each point (server for `before-request` and `after-response`, client for `provider-profiles`) and declares all three in `contributes.extension_points`. The page gives no deadline, max or dynamic values beyond the version, deadline, max or dynamic values, so those are the documented defaults and are marked `(default)`.
 
 | Point | Side | Version | Deadline | Max | Dynamic |
 |---|---|---|---|---|---|

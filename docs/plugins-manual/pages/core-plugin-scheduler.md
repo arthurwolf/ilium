@@ -92,8 +92,16 @@ This block is a fragment. It lists the contributions. The whole manifest is in [
   "id": "ilium.core.scheduler",
   "capabilities": {
     "server": ["terminal.write", "terminal.raw-input", "terminal.input-lock",
-               "agent.read", "journal.read"],
+               "agent.read", "journal.read",
+               "extensions.provide:ilium.core.scheduler/schedule-sources",
+               "extensions.provide:ilium.core.scheduler/before-send-scheduled"],
     "client": ["ui.panels"]
+  },
+  "contributes": {
+    "extension_points": [
+      { "id": "schedule-sources", "kind": "collect", "version": "0.1.0" },
+      { "id": "before-send-scheduled", "kind": "hook", "mode": "veto", "version": "0.1.0" }
+    ]
   }
 }
 ```
@@ -127,13 +135,55 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "terminal.raw-input",
       "terminal.input-lock",
       "agent.read",
-      "journal.read"
+      "journal.read",
+      "extensions.provide:ilium.core.scheduler/schedule-sources",
+      "extensions.provide:ilium.core.scheduler/before-send-scheduled"
     ],
     "client": [
       "ui.panels"
     ]
   },
   "contributes": {
+    "extension_points": [
+      {
+        "id": "schedule-sources",
+        "kind": "collect",
+        "title": "Trigger sources",
+        "entry_schema": {
+          "type": "object",
+          "properties": {
+            "id": { "type": "string" },
+            "title": { "type": "string" },
+            "service": { "type": "string" }
+          },
+          "required": ["id", "title", "service"]
+        },
+        "risk": "standard",
+        "max_entries": 64,
+        "dynamic": false,
+        "version": "0.1.0"
+      },
+      {
+        "id": "before-send-scheduled",
+        "kind": "hook",
+        "mode": "veto",
+        "title": "Before a scheduled or queued input is sent",
+        "payload_schema": {
+          "type": "object",
+          "properties": {
+            "pane": { "type": "string" },
+            "text_length": { "type": "integer" },
+            "schedule": { "type": "string" },
+            "source": { "type": "string" }
+          },
+          "required": ["pane", "text_length", "schedule", "source"]
+        },
+        "risk": "high",
+        "deadline_ms": 20,
+        "max_handlers": 8,
+        "version": "0.1.0"
+      }
+    ],
     "panels": [
       { "id": "scheduler.queue", "title": "Scheduler queue", "modal": false }
     ]
@@ -595,16 +645,14 @@ A handler that is late, traps or returns a reply the mode does not allow counts 
 
 ### Extension points this plugin owns
 
-The table gives the values that [EXT-052] requires for each point this plugin owns. The page does not state the version, deadline, max or dynamic values, so they come from the defaults in [Extension points](/pages/api-extension-points/) and are marked (default). The side of `before-send-scheduled` is `server` because the page's example contributor manifest declares its handler on the server side. The side of `schedule-sources` is unknown because the page does not state the side on which its service runs, and the manifest has no `extensions.provide` grant for either point.
+The table gives the values that [EXT-052] requires for each point this plugin owns. The page does not state the version, deadline, max or dynamic values, so they come from the defaults in [Extension points](/pages/api-extension-points/) and are marked (default). Both points run on the server side, so the main manifest grants `extensions.provide:ilium.core.scheduler/schedule-sources` and `extensions.provide:ilium.core.scheduler/before-send-scheduled` in its `server` capabilities and declares both in `contributes.extension_points`.
 
 | Point | Side | Version | Deadline | Max | Dynamic |
 |---|---|---|---|---|---|
 | `ilium.core.scheduler/schedule-sources` | server | 0.1.0 (default) | none (default) | 64 entries (default) | no (default) |
 | `ilium.core.scheduler/before-send-scheduled` | server | 0.1.0 (default) | 20 ms (default) | 8 handlers (default) | no (default) |
 
-Side basis: ilium.core.scheduler/schedule-sources is server because the manifest has no `extensions.provide` grant or `extension_points` entry for it and the page does not name the side that runs its `service`; the trigger sources feed the fire times that the scheduler's timers use, and the page places those timers on the server side ("the server side owns the timers", and "The server arms a durable timer").
-
-Side basis: ilium.core.scheduler/before-send-scheduled is server because the manifest has no `extensions.provide` grant or `extension_points` entry for it and the page does not name the side that runs its handler directly; the sample veto handler is declared with `extensions.contribute` in the server capabilities, and the point refuses input at the moment the server would send it to the terminal.
+Side basis: `schedule-sources` is server because the server side owns the timers that use the fire times; `before-send-scheduled` is server because it refuses input at the moment the server would send it to the terminal.
 
 ### ABI used
 

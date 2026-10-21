@@ -109,10 +109,92 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "tree.decorate",
       "tree.restructure",
       "settings.write-kernel:titles",
-      "settings.write-kernel:triggers"
+      "settings.write-kernel:triggers",
+      "extensions.provide:ilium.core.titles/before-apply-title",
+      "extensions.provide:ilium.core.titles/title-styles"
     ],
     "client": [
       "ui.panels"
+    ]
+  },
+  "contributes": {
+    "extension_points": [
+      {
+        "id": "before-apply-title",
+        "kind": "hook",
+        "mode": "transform",
+        "title": "Before apply title",
+        "payload_schema": {
+          "type": "object",
+          "required": [
+            "node",
+            "proposed",
+            "source",
+            "previous"
+          ],
+          "properties": {
+            "node": {
+              "type": "string"
+            },
+            "proposed": {
+              "type": "string"
+            },
+            "source": {
+              "type": "string",
+              "enum": [
+                "transcript",
+                "process",
+                "manual-trigger"
+              ]
+            },
+            "previous": {
+              "type": "string"
+            }
+          }
+        },
+        "reply_schema": {
+          "type": "object",
+          "required": [
+            "proposed"
+          ],
+          "properties": {
+            "proposed": {
+              "type": "string"
+            }
+          }
+        },
+        "risk": "standard",
+        "deadline_ms": 20,
+        "max_handlers": 8,
+        "version": "0.1.0"
+      },
+      {
+        "id": "title-styles",
+        "kind": "collect",
+        "title": "Title styles",
+        "entry_schema": {
+          "type": "object",
+          "required": [
+            "id",
+            "title",
+            "instruction"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "instruction": {
+              "type": "string"
+            }
+          }
+        },
+        "max_entries": 64,
+        "dynamic": false,
+        "version": "0.1.0"
+      }
     ]
   },
   "activation": [
@@ -565,15 +647,15 @@ A package adds this entry in its manifest. It needs no code.
 
 ### Extension points this plugin owns
 
-Values marked (default) come from the defaults in [Extension points](/pages/api-extension-points/). The page does not state the side that runs these points, so it is marked unknown.
+Values marked (default) come from the defaults in [Extension points](/pages/api-extension-points/). Both points run on the server: the manifest grants `extensions.provide` for each on the server side.
 
 | Point | Side | Version | Deadline | Max | Dynamic |
 |---|---|---|---|---|---|
 | `ilium.core.titles/before-apply-title` | server | 0.1.0 (default) | 20 ms (default) | 8 handlers (default) | no (default) |
 | `ilium.core.titles/title-styles` | server | 0.1.0 (default) | none (default) | 64 entries (default) | no (default) |
 
-Side basis: `ilium.core.titles/before-apply-title` is server because the page has no manifest entry or `contributes.extension_points` naming it, and the server side generates the proposed title and submits the `rename-node` that applies it, so the hook runs on the server before that apply step.
-Side basis: `ilium.core.titles/title-styles` is server because the page has no manifest entry naming it, and the style `instruction` text it collects is the text the server side sends to the model when it asks for a title.
+Side basis: `ilium.core.titles/before-apply-title` is server because the server side generates the proposed title and submits the `rename-node` that applies it, so the hook runs on the server before that apply step.
+Side basis: `ilium.core.titles/title-styles` is server because the style `instruction` text it collects is the text the server side sends to the model when it asks for a title.
 
 ### ABI used
 

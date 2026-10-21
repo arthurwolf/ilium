@@ -129,11 +129,13 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "fs.watch:project",
       "topics.subscribe:chatroom",
       "services.use:ilium.core.agent-setup",
-      "cli.contribute"
+      "cli.contribute",
+      "extensions.provide:ilium.core.chatroom/before-post"
     ],
     "client": [
       "topics.subscribe:chatroom",
-      "ui.panels"
+      "ui.panels",
+      "extensions.provide:ilium.core.chatroom/message-renderers"
     ]
   },
   "activation": [
@@ -148,7 +150,51 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "output": "text",
       "stdin": "none",
       "requires_server": false
-    }]
+    }],
+    "extension_points": [
+      {
+        "id": "before-post",
+        "kind": "hook",
+        "mode": "transform",
+        "title": "Change a message before it is written to the room",
+        "payload_schema": {
+          "type": "object",
+          "properties": {
+            "author": { "type": "string" },
+            "text": { "type": "string" },
+            "kind": { "type": "string" }
+          },
+          "required": ["author", "text", "kind"]
+        },
+        "reply_schema": {
+          "type": "object",
+          "properties": { "text": { "type": "string" } },
+          "required": ["text"]
+        },
+        "risk": "high",
+        "deadline_ms": 20,
+        "max_handlers": 8,
+        "version": "0.1.0"
+      },
+      {
+        "id": "message-renderers",
+        "kind": "collect",
+        "title": "Draw a message kind in a special way",
+        "entry_schema": {
+          "type": "object",
+          "properties": {
+            "id": { "type": "string" },
+            "kind": { "type": "string" },
+            "view": { "type": "string" }
+          },
+          "required": ["id", "kind", "view"]
+        },
+        "risk": "standard",
+        "max_entries": 64,
+        "dynamic": false,
+        "version": "0.1.0"
+      }
+    ]
   }
 }
 ```
@@ -521,7 +567,7 @@ A handler that is late, traps or returns a reply the mode does not allow counts 
 
 ### Extension points this plugin owns
 
-The table gives the values that [EXT-052] requires for each point this plugin owns. The page does not state the version, deadline, max or dynamic values for these points, so those come from the defaults in [Extension points](/pages/api-extension-points/) and are marked (default). The side comes from the page: the `before-post` example declares its handler under the server side, and the message view that draws `message-renderers` entries runs on the client side.
+The table gives the values that [EXT-052] requires for each point this plugin owns. The page does not state the version, deadline, max or dynamic values for these points, so those come from the defaults in [Extension points](/pages/api-extension-points/) and are marked (default). The side comes from the page: the `before-post` example declares its handler under the server side, and the message view that draws `message-renderers` entries runs on the client side. The complete manifest grants `extensions.provide:ilium.core.chatroom/before-post` on the server side and `extensions.provide:ilium.core.chatroom/message-renderers` on the client side, and declares both points in `contributes.extension_points`.
 
 | Point | Side | Version | Deadline | Max | Dynamic |
 |---|---|---|---|---|---|

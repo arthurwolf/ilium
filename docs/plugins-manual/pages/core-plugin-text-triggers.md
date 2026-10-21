@@ -87,10 +87,65 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
     "server": [
       "terminal.output-filter",
       "terminal.write",
-      "settings.write-kernel:text-triggers"
+      "settings.write-kernel:text-triggers",
+      "extensions.provide:ilium.core.text-triggers/rule-packs",
+      "extensions.provide:ilium.core.text-triggers/before-fire"
     ],
     "client": [
       "ui.panels"
+    ]
+  },
+  "contributes": {
+    "extension_points": [
+      {
+        "id": "rule-packs",
+        "kind": "collect",
+        "title": "Rule packs",
+        "entry_schema": {
+          "type": "object",
+          "properties": {
+            "id": { "type": "string" },
+            "title": { "type": "string" },
+            "rules": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "pattern": { "type": "string" },
+                  "reply": { "type": "string" },
+                  "enabled": { "type": "boolean" }
+                },
+                "required": ["pattern", "reply", "enabled"]
+              }
+            }
+          },
+          "required": ["id", "title", "rules"]
+        },
+        "risk": "high",
+        "max_entries": 64,
+        "dynamic": false,
+        "version": "0.1.0"
+      },
+      {
+        "id": "before-fire",
+        "kind": "hook",
+        "mode": "veto",
+        "title": "Before a rule fires",
+        "payload_schema": {
+          "type": "object",
+          "properties": {
+            "rule": { "type": "string" },
+            "pane": { "type": "string" },
+            "match": { "type": "string" },
+            "reply_length": { "type": "integer" }
+          },
+          "required": ["rule", "pane", "match", "reply_length"]
+        },
+        "risk": "high",
+        "deadline_ms": 20,
+        "max_handlers": 8,
+        "version": "0.1.0"
+      }
     ]
   },
   "activation": [
@@ -392,7 +447,7 @@ A handler that is late, traps or returns a reply the mode does not allow counts 
 
 ### Extension points this plugin owns
 
-The plugin owns the two points below. A value marked (default) is not stated on this page; it takes the default from [Extension points](/pages/api-extension-points/). The side is `server` because the before-fire example above declares its contributor grant under the server capabilities, [Tutorial 20](/pages/tutorial-20-extend-six-core-plugins/) declares the rule-packs grant the same way, and the server side is where rules match output and send input.
+The plugin owns the two points below. The complete manifest holds the grant `extensions.provide:ilium.core.text-triggers/<point>` for each one in its server `capabilities` and declares each in `contributes.extension_points`. A value marked (default) is not stated on this page; it takes the default from [Extension points](/pages/api-extension-points/). The side is `server` because the before-fire example above declares its contributor grant under the server capabilities, [Tutorial 20](/pages/tutorial-20-extend-six-core-plugins/) declares the rule-packs grant the same way, and the server side is where rules match output and send input.
 
 | Point | Side | Version | Deadline | Max | Dynamic |
 |---|---|---|---|---|---|

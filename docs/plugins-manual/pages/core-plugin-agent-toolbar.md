@@ -114,7 +114,9 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
     "client": [
       "agent.read",
       "agent.read-prompts",
-      "ui.chrome"
+      "ui.chrome",
+      "extensions.provide:ilium.core.agent-toolbar/toolbar-actions",
+      "extensions.provide:ilium.core.agent-toolbar/banner-segments"
     ]
   },
   "activation": [
@@ -122,6 +124,74 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
     "startup"
   ],
   "contributes": {
+    "extension_points": [
+      {
+        "id": "toolbar-actions",
+        "kind": "collect",
+        "title": "Toolbar actions",
+        "entry_schema": {
+          "type": "object",
+          "required": [
+            "id",
+            "signature",
+            "label",
+            "icon",
+            "command",
+            "requires_action"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "signature": {
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            },
+            "icon": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string"
+            },
+            "requires_action": {
+              "type": "boolean"
+            }
+          }
+        },
+        "max_entries": 64,
+        "dynamic": false,
+        "version": "0.1.0"
+      },
+      {
+        "id": "banner-segments",
+        "kind": "collect",
+        "title": "Banner segments",
+        "entry_schema": {
+          "type": "object",
+          "required": [
+            "id",
+            "priority",
+            "max_width"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "priority": {
+              "type": "integer"
+            },
+            "max_width": {
+              "type": "integer"
+            }
+          }
+        },
+        "max_entries": 64,
+        "dynamic": false,
+        "version": "0.1.0"
+      }
+    ],
     "commands": [
       {
         "id": "compact",
@@ -611,7 +681,7 @@ The plugin owns both collect points above. The values come from the page where i
 | `ilium.core.agent-toolbar/toolbar-actions` | client | 0.1.0 (default) | none (default) | 64 entries (default) | no (default) |
 | `ilium.core.agent-toolbar/banner-segments` | client | 0.1.0 (default) | none (default) | 64 entries (default) | no (default) |
 
-The side is client for both points because the page declares the toolbar buttons under `ui.chrome` (granted only to the client side) and fills the banner slot with `set-frame-slot`. The page grants no `extensions.provide` for either point.
+The side is client for both points because the page declares the toolbar buttons under `ui.chrome` (granted only to the client side) and fills the banner slot with `set-frame-slot`. The main manifest above declares both points under `contributes.extension_points` and grants `extensions.provide` for each on the client side.
 
 ### ABI used
 

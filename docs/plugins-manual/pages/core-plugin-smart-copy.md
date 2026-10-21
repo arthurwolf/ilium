@@ -95,7 +95,9 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
     "server": [
       "terminal.read-cells",
       "terminal.read-screen",
-      "inference"
+      "inference",
+      "extensions.provide:ilium.core.smart-copy/recognisers",
+      "extensions.provide:ilium.core.smart-copy/after-copy"
     ],
     "client": [
       "terminal.read-screen",
@@ -114,6 +116,53 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
         "title": "Smart Copy",
         "command": "smart-copy",
         "target": "terminal"
+      }
+    ],
+    "extension_points": [
+      {
+        "id": "recognisers",
+        "kind": "collect",
+        "title": "Teach Smart Copy a new kind of structure to select",
+        "entry_schema": {
+          "type": "object",
+          "properties": {
+            "id": { "type": "string" },
+            "kind": { "type": "string" },
+            "regex": { "type": "string" },
+            "multiline": { "type": "boolean" },
+            "label": { "type": "string" }
+          },
+          "required": ["id", "kind", "regex", "multiline", "label"]
+        },
+        "max_entries": 64,
+        "dynamic": false,
+        "version": "0.1.0"
+      },
+      {
+        "id": "after-copy",
+        "kind": "hook",
+        "mode": "transform",
+        "title": "Change the copied text before it reaches the clipboard",
+        "payload_schema": {
+          "type": "object",
+          "properties": {
+            "text": { "type": "string" },
+            "kind": { "type": "string" },
+            "pane": { "type": "string" }
+          },
+          "required": ["text", "kind", "pane"]
+        },
+        "reply_schema": {
+          "type": "object",
+          "properties": {
+            "text": { "type": "string" }
+          },
+          "required": ["text"]
+        },
+        "risk": "high",
+        "deadline_ms": 20,
+        "max_handlers": 8,
+        "version": "0.1.0"
       }
     ]
   },
@@ -492,7 +541,7 @@ A handler that is late, traps or returns a reply the mode does not allow counts 
 
 ### Extension points this plugin owns
 
-The plugin owns the two points below. A value marked (default) is not stated on this page; it takes the default from [Extension points](/pages/api-extension-points/).
+The plugin owns the two points below. Each has a grant `extensions.provide:ilium.core.smart-copy/<point>` in the server `capabilities` list and a declaration in `contributes.extension_points` of the [Complete manifest](#complete-manifest). A value marked (default) is not stated on this page; it takes the default from [Extension points](/pages/api-extension-points/).
 
 | Point | Side | Version | Deadline | Max | Dynamic |
 |---|---|---|---|---|---|

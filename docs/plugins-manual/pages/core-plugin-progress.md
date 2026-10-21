@@ -130,11 +130,13 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "process.run:sh",
       "process.long-lived",
       "http-api.route:/progress.json",
-      "settings.read-kernel:agent-monitoring"
+      "settings.read-kernel:agent-monitoring",
+      "extensions.provide:ilium.core.progress/probe-kinds"
     ],
     "client": [
       "ui.chrome",
-      "settings.read-kernel:agent-monitoring"
+      "settings.read-kernel:agent-monitoring",
+      "extensions.provide:ilium.core.progress/footer-segments"
     ]
   },
   "activation": [
@@ -147,7 +149,46 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "output": "jsonl",
       "requires_server": true,
       "aliases": ["wait"]
-    }]
+    }],
+    "extension_points": [
+      {
+        "id": "footer-segments",
+        "kind": "collect",
+        "title": "Add a segment to the progress footer",
+        "entry_schema": {
+          "type": "object",
+          "properties": {
+            "id": { "type": "string" },
+            "priority": { "type": "integer" },
+            "max_width": { "type": "integer" }
+          },
+          "required": ["id", "priority", "max_width"]
+        },
+        "risk": "standard",
+        "max_entries": 64,
+        "dynamic": false,
+        "version": "0.1.0"
+      },
+      {
+        "id": "probe-kinds",
+        "kind": "collect",
+        "title": "Add a ready-made probe, such as a CI run or a build",
+        "entry_schema": {
+          "type": "object",
+          "properties": {
+            "id": { "type": "string" },
+            "title": { "type": "string" },
+            "command_template": { "type": "string" },
+            "interval_seconds": { "type": "integer" }
+          },
+          "required": ["id", "title", "command_template", "interval_seconds"]
+        },
+        "risk": "standard",
+        "max_entries": 64,
+        "dynamic": false,
+        "version": "0.1.0"
+      }
+    ]
   },
   "limits_tier": "first-party"
 }
@@ -468,7 +509,7 @@ A package adds this entry in its manifest. It needs no code.
 
 ### Extension points this plugin owns
 
-The values below are the ones the core extension points table uses for these two points. The page states no version, deadline, max or dynamic value for them, so the defaults from [Extension points](/pages/api-extension-points/) apply and are marked (default). The side follows the page: the footer is drawn on the client side, and the probes run on the server side.
+The values below are the ones the core extension points table uses for these two points. The page states no version, deadline, max or dynamic value for them, so the defaults from [Extension points](/pages/api-extension-points/) apply and are marked (default). The side follows the page: the footer is drawn on the client side, and the probes run on the server side. The complete manifest holds the matching grants, `extensions.provide:ilium.core.progress/footer-segments` in the client list and `extensions.provide:ilium.core.progress/probe-kinds` in the server list, and declares both points in `contributes.extension_points`.
 
 | Point | Side | Version | Deadline | Max | Dynamic |
 |---|---|---|---|---|---|

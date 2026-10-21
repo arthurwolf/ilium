@@ -109,7 +109,9 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "agent.read",
       "messages.peer:ilium.core.notifications",
       "services.use:ilium.core.cost/usage",
-      "settings.write-kernel:api"
+      "settings.write-kernel:api",
+      "extensions.provide:ilium.core.fleet/selectors",
+      "extensions.provide:ilium.core.fleet/before-broadcast"
     ],
     "client": [
       "ui.panels"
@@ -156,6 +158,79 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       {
         "id": "ask-for-update",
         "title": "Ask for update"
+      }
+    ],
+    "extension_points": [
+      {
+        "id": "selectors",
+        "kind": "collect",
+        "title": "Selectors",
+        "entry_schema": {
+          "type": "object",
+          "required": [
+            "id",
+            "title",
+            "rule"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "rule": {
+              "type": "object"
+            }
+          }
+        },
+        "risk": "standard",
+        "max_entries": 64,
+        "dynamic": false,
+        "version": "0.1.0"
+      },
+      {
+        "id": "before-broadcast",
+        "kind": "hook",
+        "mode": "transform",
+        "title": "Before broadcast",
+        "payload_schema": {
+          "type": "object",
+          "required": [
+            "message",
+            "targets",
+            "source"
+          ],
+          "properties": {
+            "message": {
+              "type": "string"
+            },
+            "targets": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "source": {
+              "type": "string"
+            }
+          }
+        },
+        "reply_schema": {
+          "type": "object",
+          "required": [
+            "message"
+          ],
+          "properties": {
+            "message": {
+              "type": "string"
+            }
+          }
+        },
+        "risk": "high",
+        "deadline_ms": 20,
+        "max_handlers": 8,
+        "version": "0.1.0"
       }
     ]
   },
@@ -664,7 +739,7 @@ export async function costByPane(): Promise<Map<number, number>> {
 
 ### Extension points
 
-Other plugins change what `ilium.core.fleet` does through the points below. The plugin owns each point (grant `extensions.provide:ilium.core.fleet/<point>`). Contributors need `extensions.contribute:ilium.core.fleet/<point>`. See [Extension points](/pages/api-extension-points/) for the mechanism and [Extending core plugins](/pages/extending-core-plugins/) for the five ways to work with a core feature.
+Other plugins change what `ilium.core.fleet` does through the points below. The plugin owns each point: the main manifest holds the grant `extensions.provide:ilium.core.fleet/<point>` on the server side and declares the point in `contributes.extension_points`. Contributors need `extensions.contribute:ilium.core.fleet/<point>`. See [Extension points](/pages/api-extension-points/) for the mechanism and [Extending core plugins](/pages/extending-core-plugins/) for the five ways to work with a core feature.
 
 | Point | Kind | What it does | Payload | Risk |
 |---|---|---|---|---|
@@ -712,15 +787,15 @@ A package adds this entry in its manifest. It needs no code.
 
 ### Extension points this plugin owns
 
-The table gives the values for the two points this plugin owns. A value marked (default) is not stated on this page; it comes from the defaults in [Extension points](/pages/api-extension-points/). Side is unknown: this page names no `extensions.provide` grant for either point and does not say which side runs the handlers.
+The table gives the values for the two points this plugin owns. A value marked (default) is not stated on this page; it comes from the defaults in [Extension points](/pages/api-extension-points/). Both points run on the server side: the main manifest grants `extensions.provide` for each on the server side and declares each in `contributes.extension_points`.
 
 | Point | Side | Version | Deadline | Max | Dynamic |
 |---|---|---|---|---|---|
 | `ilium.core.fleet/selectors` | server | 0.1.0 (default) | none (default) | 64 entries (default) | no (default) |
 | `ilium.core.fleet/before-broadcast` | server | 0.1.0 (default) | 20 ms (default) | 8 handlers (default) | no (default) |
 
-Side basis: `ilium.core.fleet/selectors` is server because the manifest names no `extensions.provide` grant or extension-point entry for it, and its rules are applied by `ilium panes` and `ilium broadcast`, which the page documents as server commands (`requires_server: true`, with the panes and broadcast samples written as server code).
-Side basis: `ilium.core.fleet/before-broadcast` is server because the manifest names no `extensions.provide` grant or extension-point entry for it, and it changes a message before `ilium broadcast` sends it, a server-side command in the broadcast sample; the client side only draws the Ask for update dialog.
+Side basis: `ilium.core.fleet/selectors` is server because its rules are applied by `ilium panes` and `ilium broadcast`, which the page documents as server commands (`requires_server: true`, with the panes and broadcast samples written as server code).
+Side basis: `ilium.core.fleet/before-broadcast` is server because it changes a message before `ilium broadcast` sends it, a server-side command in the broadcast sample; the client side only draws the Ask for update dialog.
 
 ### ABI used
 

@@ -98,10 +98,75 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "tree.write",
       "tree.metadata",
       "tree.decorate",
-      "tree.restructure"
+      "tree.restructure",
+      "extensions.provide:ilium.core.tree/before-move",
+      "extensions.provide:ilium.core.tree/before-close",
+      "extensions.provide:ilium.core.tree/node-sorts"
     ],
     "client": [
       "tree.read"
+    ]
+  },
+  "contributes": {
+    "extension_points": [
+      {
+        "id": "before-move",
+        "kind": "hook",
+        "mode": "veto",
+        "title": "Before a node is moved",
+        "payload_schema": {
+          "type": "object",
+          "properties": {
+            "node": {"type": "string"},
+            "from_parent": {"type": "string"},
+            "to_parent": {"type": "string"},
+            "index": {"type": "integer"},
+            "source": {"type": "string", "enum": ["mouse", "keys", "command", "plugin"]}
+          },
+          "required": ["node", "from_parent", "to_parent", "index", "source"]
+        },
+        "risk": "standard",
+        "deadline_ms": 20,
+        "max_handlers": 8,
+        "version": "0.1.0"
+      },
+      {
+        "id": "before-close",
+        "kind": "hook",
+        "mode": "veto",
+        "title": "Before a pane or group is closed",
+        "payload_schema": {
+          "type": "object",
+          "properties": {
+            "node": {"type": "string"},
+            "kind": {"type": "string"},
+            "has_children": {"type": "boolean"}
+          },
+          "required": ["node", "kind", "has_children"]
+        },
+        "risk": "standard",
+        "deadline_ms": 20,
+        "max_handlers": 8,
+        "version": "0.1.0"
+      },
+      {
+        "id": "node-sorts",
+        "kind": "collect",
+        "title": "Tree sort orders",
+        "entry_schema": {
+          "type": "object",
+          "properties": {
+            "id": {"type": "string"},
+            "title": {"type": "string"},
+            "slot": {"type": "string"}
+          },
+          "required": ["id", "title", "slot"]
+        },
+        "risk": "standard",
+        "max_entries": 64,
+        "dynamic": false,
+        "version": "0.1.0"
+      }
     ]
   },
   "activation": [
@@ -597,7 +662,7 @@ A handler that is late, traps or returns a reply the mode does not allow counts 
 
 ### Extension points this plugin owns
 
-Values marked (default) are not stated on this page; they are the defaults of [Extension points](/pages/api-extension-points/). Side is `server` where the sample above declares the handler on the server, and `unknown` where this page does not say which side runs the handler.
+Values marked (default) are not stated on this page; they are the defaults of [Extension points](/pages/api-extension-points/). All three points run on the server: the complete manifest grants `extensions.provide` for each on the server side and declares each in `contributes.extension_points`.
 
 | Point | Side | Version | Deadline | Max | Dynamic |
 |---|---|---|---|---|---|
@@ -605,8 +670,7 @@ Values marked (default) are not stated on this page; they are the defaults of [E
 | `ilium.core.tree/before-close` | server | 0.1.0 (default) | 20 ms (default) | 8 handlers (default) | no (default) |
 | `ilium.core.tree/node-sorts` | server | 0.1.0 (default) | none (default) | 64 entries (default) | no (default) |
 
-Side basis: ilium.core.tree/before-move is server because the manifest has no extensions.provide grant or contributes.extension_points entry for it, and the page does not name the side that runs its handler, so the side where the tree plugin's logic that drives moves runs decides it: the page routes every move through server-side intents (the client command only forwards a message to its server side, and the tree is changed only through intents submitted by the server).
-Side basis: ilium.core.tree/node-sorts is server because the manifest has no grant or entry for it, and the page does not name the handler's side, so the side where the sort logic runs decides it: the "Order the tree" sample is a server handler that reads the tree and submits set-decoration with the sort-key that orders siblings.
+Side basis: the page routes every move and close through server-side intents, and the "Order the tree" sample is a server handler, so the server runs all three points.
 
 ### ABI used
 

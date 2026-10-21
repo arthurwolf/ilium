@@ -122,7 +122,9 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "fs.pick",
       "fs.read:picked",
       "editor.read",
-      "services.use:ilium.core.kanban/set-setting"
+      "services.use:ilium.core.kanban/set-setting",
+      "extensions.provide:ilium.core.kanban/card-actions",
+      "extensions.provide:ilium.core.kanban/card-moved"
     ],
     "server": [
       "services.provide:ilium.core.kanban/set-setting",
@@ -173,6 +175,29 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
             "default": 24
           }
         ]
+      }
+    ],
+    "extension_points": [
+      {
+        "id": "card-actions",
+        "kind": "collect",
+        "title": "Card actions",
+        "entry_schema": { "type": "object", "properties": { "id": { "type": "string" }, "title": { "type": "string" }, "command": { "type": "string" } }, "required": ["id", "title", "command"] },
+        "risk": "standard",
+        "max_entries": 64,
+        "dynamic": false,
+        "version": "0.1.0"
+      },
+      {
+        "id": "card-moved",
+        "kind": "hook",
+        "mode": "observe",
+        "title": "Card moved",
+        "payload_schema": { "type": "object", "properties": { "board": { "type": "string" }, "card": { "type": "string" }, "from_column": { "type": "string" }, "to_column": { "type": "string" } }, "required": ["board", "card", "from_column", "to_column"] },
+        "risk": "standard",
+        "deadline_ms": 20,
+        "max_handlers": 8,
+        "version": "0.1.0"
       }
     ]
   },
@@ -676,7 +701,7 @@ A handler that is late, traps or returns a reply the mode does not allow counts 
 
 ### Extension points this plugin owns
 
-The plugin owns both points below. The manifest on this page has no `extensions.provide` grant for them, so the side is the client side that the page gives the plugin: the board pane is drawn on the client, and the `card-moved` example declares its handler under `capabilities.client`. The page states no version, deadline, max or dynamic value for either point, so those values are the defaults from [Extension points](/pages/api-extension-points/), marked (default).
+The plugin owns both points below. The complete manifest holds the grants `extensions.provide:ilium.core.kanban/card-actions` and `extensions.provide:ilium.core.kanban/card-moved` under `capabilities.client`, and declares both points in `contributes.extension_points`. The side is the client side: the board pane is drawn on the client. The page states no version, deadline, max or dynamic value for either point, so those values are the defaults from [Extension points](/pages/api-extension-points/), marked (default).
 
 | Point | Side | Version | Deadline | Max | Dynamic |
 |---|---|---|---|---|---|

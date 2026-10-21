@@ -803,7 +803,7 @@ Terminal, agent, editor and basic primitives gain the following functions, each 
 | cli | additions listed on [cli](/pages/api-cli/) | same, camelCase | `cli` |
 | ui | `open_popup_with`, `theme_extras` | `openPopupWith`, `themeExtras` | `ui.chrome` for chrome surfaces |
 
-`gpu` is `@unstable`: import it only from a scene and expect it to change. Twelve of the 24 grants are high risk and prompt the user with a separate consent line: `terminal.history`, `terminal.input-lock`, `terminal.raw-input`, `panes.lifecycle`, `tree.restructure`, `sessions.cross`, `process.long-lived`, `agent.transcript`, `settings.read-kernel:api`, `settings.write-kernel:<tab-id>`, `panes.create-command:<program>` and `agent-config.propose:<agent>`. See [Capabilities](/pages/reference-capabilities/) and [Security](/pages/security/).
+`gpu` is `@unstable`: import it only from a scene and expect it to change. High-risk grants (marked H in the grant table) prompt the user with a separate consent line. Examples: `terminal.history`, `terminal.input-lock`, `terminal.raw-input`, `panes.lifecycle`, `tree.restructure`, `sessions.cross`, `process.long-lived`, `agent.transcript`, `agent.read-prompts` and `process.run:<program>`. See [Capabilities](/pages/reference-capabilities/) and [Security](/pages/security/).
 
 ## Settings rows, meters and row state
 

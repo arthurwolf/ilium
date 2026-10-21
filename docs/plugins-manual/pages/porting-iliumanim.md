@@ -53,7 +53,7 @@ Ilium replaces the `.iliumanim` animation package with the plugin package `.iliu
 | Limits | `heap_bytes`, `render_ms` and others | `memory_mib`, `frame_deadline_ms` and others |
 | Pre-rendered clips | `modes: pre-rendered` with `clip_seconds` | `clip_seconds`, and the `prerender` object |
 | Text over pixels | none | `glyph_plane: true` |
-| Fonts, large assets | none | font assets up to 4 MiB each, package assets up to 64 MiB |
+| Fonts, large assets | none | font assets up to 4 MiB each, package assets up to 64 MiB (256 MiB for T1) |
 
 Every entry other than `manifest.json` and `signature` must appear in `files`. The `api` value in the manifest must equal the `ilium:api-version` section of `scene.wasm`, which is `ilium:plugin@0.1.0`.
 

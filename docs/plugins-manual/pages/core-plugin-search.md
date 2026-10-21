@@ -112,7 +112,9 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "tree.read",
       "terminal.read-screen",
       "fs.read:project",
-      "jobs.run"
+      "jobs.run",
+      "extensions.provide:ilium.core.search/sources",
+      "extensions.provide:ilium.core.search/rank"
     ],
     "client": [
       "ui.panels"
@@ -123,6 +125,114 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
     "view:search"
   ],
   "contributes": {
+    "extension_points": [
+      {
+        "id": "sources",
+        "kind": "collect",
+        "title": "Search sources",
+        "entry_schema": {
+          "type": "object",
+          "required": [
+            "id",
+            "title",
+            "kind",
+            "service"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string"
+            },
+            "service": {
+              "type": "string"
+            }
+          }
+        },
+        "risk": "standard",
+        "max_entries": 64,
+        "dynamic": false,
+        "version": "0.1.0"
+      },
+      {
+        "id": "rank",
+        "kind": "hook",
+        "mode": "transform",
+        "title": "Rank results",
+        "payload_schema": {
+          "type": "object",
+          "required": [
+            "query",
+            "hits"
+          ],
+          "properties": {
+            "query": {
+              "type": "string"
+            },
+            "hits": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "id",
+                  "kind",
+                  "score"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string"
+                  },
+                  "score": {
+                    "type": "number"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "reply_schema": {
+          "type": "object",
+          "required": [
+            "hits"
+          ],
+          "properties": {
+            "hits": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "id",
+                  "kind",
+                  "score"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string"
+                  },
+                  "score": {
+                    "type": "number"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "risk": "standard",
+        "deadline_ms": 20,
+        "max_handlers": 8,
+        "version": "0.1.0"
+      }
+    ],
     "commands": [
       {
         "id": "open",
@@ -532,16 +642,16 @@ A package adds this entry in its manifest. It needs no code.
 
 ### Extension points this plugin owns
 
-The plugin owns the two points below (grant `extensions.provide:ilium.core.search/<point>`). The manifest above declares no `extensions.provide` grant and the page does not name a side for either point, so the side is unknown. Values marked (default) are the defaults of [Extension points](/pages/api-extension-points/), because this page does not state them.
+The plugin owns the two points below (grant `extensions.provide:ilium.core.search/<point>`). The complete manifest holds both grants in the server `capabilities` list and declares both points in `contributes.extension_points`; both points run on the server side. Values marked (default) are the defaults of [Extension points](/pages/api-extension-points/), because this page does not state them.
 
 | Point | Side | Version | Deadline | Max | Dynamic |
 |---|---|---|---|---|---|
 | `ilium.core.search/sources` | server | 0.1.0 (default) | none (default) | 64 entries (default) | no (default) |
 | `ilium.core.search/rank` | server | 0.1.0 (default) | 20 ms (default) | 8 handlers (default) | no (default) |
 
-Side basis: `ilium.core.search/sources` is server because the manifest declares no `extensions.provide` grant and names no side for the point, and the page describes a source entry's `service` as the handler that answers a query with ranked hits, while the server keeps the index and answers queries (Samples 2 and Services).
+Side basis: `ilium.core.search/sources` is server because the server `capabilities` list holds its `extensions.provide` grant, and the page describes a source entry's `service` as the handler that answers a query with ranked hits, while the server keeps the index and answers queries (Samples 2 and Services).
 
-Side basis: `ilium.core.search/rank` is server because the manifest declares no grant and the page names no handler side, so the side where the calling logic runs decides it, and the server answers the query and holds the hits before the client panel shows them.
+Side basis: `ilium.core.search/rank` is server because the server `capabilities` list holds its grant, and the server answers the query and holds the hits before the client panel shows them.
 
 ### ABI used
 

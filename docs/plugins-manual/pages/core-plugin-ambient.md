@@ -120,7 +120,9 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "location.geocode",
       "media.video",
       "ui.panels",
-      "services.use:ilium.core.ambient/set-setting"
+      "services.use:ilium.core.ambient/set-setting",
+      "extensions.provide:ilium.core.ambient/palettes",
+      "extensions.provide:ilium.core.ambient/style-presets"
     ],
     "server": [
       "services.provide:ilium.core.ambient/set-setting",
@@ -132,6 +134,67 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
   ],
   "unstable": ["plugin-services"],
   "contributes": {
+    "extension_points": [
+      {
+        "id": "palettes",
+        "kind": "collect",
+        "title": "Palettes",
+        "entry_schema": {
+          "type": "object",
+          "required": [
+            "id",
+            "title",
+            "stops"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "stops": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "risk": "standard",
+        "max_entries": 64,
+        "dynamic": false,
+        "version": "0.1.0"
+      },
+      {
+        "id": "style-presets",
+        "kind": "collect",
+        "title": "Style presets",
+        "entry_schema": {
+          "type": "object",
+          "required": [
+            "id",
+            "title",
+            "values"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "values": {
+              "type": "object"
+            }
+          }
+        },
+        "risk": "standard",
+        "max_entries": 64,
+        "dynamic": false,
+        "version": "0.1.0"
+      }
+    ],
     "services": {
       "provides": [
         { "name": "ilium.core.ambient/set-setting", "version": "0.1.0", "schema": "schemas/set-setting.json" }
@@ -532,14 +595,14 @@ A package adds this entry in its manifest. It needs no code.
 
 ### Extension points this plugin owns
 
-The table gives the values that [EXT-052] requires for each point this plugin owns. The page does not state them, so the values come from the defaults in [Extension points](/pages/api-extension-points/) and are marked (default). Side is unknown because the manifest has no `extensions.provide` grant for these points and the page does not state the side on which their handlers run.
+The table gives the values that [EXT-052] requires for each point this plugin owns. The page does not state them, so the values come from the defaults in [Extension points](/pages/api-extension-points/) and are marked (default). Both points run on the client side: the complete manifest grants `extensions.provide:ilium.core.ambient/palettes` and `extensions.provide:ilium.core.ambient/style-presets` in its client `capabilities` and declares both in `contributes.extension_points`.
 
 | Point | Side | Version | Deadline | Max | Dynamic |
 |---|---|---|---|---|---|
 | `ilium.core.ambient/palettes` | client | 0.1.0 (default) | none (default) | 64 entries (default) | no (default) |
 | `ilium.core.ambient/style-presets` | client | 0.1.0 (default) | none (default) | 64 entries (default) | no (default) |
 
-Side basis: `ilium.core.ambient/palettes` is client because the manifest has no `extensions.provide` grant for it, and the palette is drawn by the client, and the page says the palette choice belongs to the client-scope Animations tab and that the client kernel applies the look to each cell. Side basis: `ilium.core.ambient/style-presets` is client because the manifest has no `extensions.provide` grant for it, and the palette is drawn by the client, and the page says the entries are full sets of shared look values that the client kernel applies to each cell.
+Side basis: `ilium.core.ambient/palettes` is client because the palette is drawn by the client, and the page says the palette choice belongs to the client-scope Animations tab and that the client kernel applies the look to each cell. Side basis: `ilium.core.ambient/style-presets` is client because the palette is drawn by the client, and the page says the entries are full sets of shared look values that the client kernel applies to each cell.
 
 ### ABI used
 

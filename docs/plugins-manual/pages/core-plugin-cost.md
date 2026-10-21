@@ -136,7 +136,9 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "services.provide:ilium.core.cost/usage",
       "settings.contribute:agent-cost",
       "settings.write-kernel:agent-cost",
-      "settings.write-kernel:reset-planning"
+      "settings.write-kernel:reset-planning",
+      "extensions.provide:ilium.core.cost/price-sources",
+      "extensions.provide:ilium.core.cost/quota-sources"
     ],
     "client": [
       "ui.panels"
@@ -147,6 +149,47 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
     "view:cost.panel"
   ],
   "contributes": {
+    "extension_points": [
+      {
+        "id": "price-sources",
+        "kind": "collect",
+        "title": "Price sources",
+        "entry_schema": {
+          "type": "object",
+          "properties": {
+            "id": { "type": "string" },
+            "model_pattern": { "type": "string" },
+            "input_per_mtok": { "type": "number" },
+            "output_per_mtok": { "type": "number" },
+            "cache_read_per_mtok": { "type": "number" },
+            "currency": { "type": "string" }
+          },
+          "required": ["id", "model_pattern", "input_per_mtok", "output_per_mtok", "cache_read_per_mtok", "currency"]
+        },
+        "risk": "standard",
+        "max_entries": 64,
+        "dynamic": false,
+        "version": "0.1.0"
+      },
+      {
+        "id": "quota-sources",
+        "kind": "collect",
+        "title": "Quota sources",
+        "entry_schema": {
+          "type": "object",
+          "properties": {
+            "id": { "type": "string" },
+            "provider": { "type": "string" },
+            "service": { "type": "string" }
+          },
+          "required": ["id", "provider", "service"]
+        },
+        "risk": "standard",
+        "max_entries": 64,
+        "dynamic": false,
+        "version": "0.1.0"
+      }
+    ],
     "decoration_slots": [
       {
         "id": "cost",
@@ -676,7 +719,7 @@ A package adds this entry in its manifest. It needs no code.
 | `ilium.core.cost/price-sources` | server | 0.1.0 (default) | none (default) | 64 entries (default) | no (default) |
 | `ilium.core.cost/quota-sources` | server | 0.1.0 (default) | none (default) | 64 entries (default) | no (default) |
 
-Side basis: ilium.core.cost/quota-sources is server because neither the manifest nor the page lists an extensions.provide grant or contribution for it on either side, so the side is taken from the owning logic: each entry names a service the plugin provides (ilium.core.cost/usage), which the server-side service provider serves, and the server side computes the quota percentages from transcript facts.
+Both points run on the server: the complete manifest grants `extensions.provide` for each on the server side and declares each in `contributes.extension_points`.
 
 ### ABI used
 

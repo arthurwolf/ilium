@@ -91,7 +91,48 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "panes.lifecycle",
       "tree.restructure",
       "agent.read",
-      "settings.write-kernel:session"
+      "settings.write-kernel:session",
+      "extensions.provide:ilium.core.sessions/snapshot-sections",
+      "extensions.provide:ilium.core.sessions/before-restore"
+    ]
+  },
+  "contributes": {
+    "extension_points": [
+      {
+        "id": "snapshot-sections",
+        "kind": "collect",
+        "title": "Snapshot sections",
+        "entry_schema": {
+          "type": "object",
+          "required": ["id", "max_bytes"],
+          "properties": {
+            "id": { "type": "string" },
+            "max_bytes": { "type": "integer" }
+          }
+        },
+        "risk": "standard",
+        "max_entries": 64,
+        "dynamic": false,
+        "version": "0.1.0"
+      },
+      {
+        "id": "before-restore",
+        "kind": "hook",
+        "mode": "observe",
+        "title": "Before restore",
+        "payload_schema": {
+          "type": "object",
+          "required": ["session", "pane_count"],
+          "properties": {
+            "session": { "type": "string" },
+            "pane_count": { "type": "integer" }
+          }
+        },
+        "risk": "standard",
+        "deadline_ms": 20,
+        "max_handlers": 8,
+        "version": "0.1.0"
+      }
     ]
   },
   "activation": [
@@ -369,15 +410,15 @@ A package adds this entry in its manifest. The manifest only declares the sectio
 
 ### Extension points this plugin owns
 
-The table gives the values that [EXT-052] requires for each point this plugin owns. The page does not state them, so the values come from the defaults in [Extension points](/pages/api-extension-points/) and are marked (default). Side is unknown because the manifest has no `extensions.provide` grant for these points and the page does not state the side on which their handlers run.
+The table gives the values that [EXT-052] requires for each point this plugin owns. The page does not state them, so the values come from the defaults in [Extension points](/pages/api-extension-points/) and are marked (default). The complete manifest grants `extensions.provide:<point>` on the server side for each point and declares both in `contributes.extension_points`.
 
 | Point | Side | Version | Deadline | Max | Dynamic |
 |---|---|---|---|---|---|
 | `ilium.core.sessions/snapshot-sections` | server | 0.1.0 (default) | none (default) | 64 entries (default) | no (default) |
 | `ilium.core.sessions/before-restore` | server | 0.1.0 (default) | 20 ms (default) | 8 handlers (default) | no (default) |
 
-Side basis: `ilium.core.sessions/snapshot-sections` is server because the manifest grants no `extensions.provide` for it and lists no extension points, so the evidence comes from the page text: the snapshot is session logic, and the server side owns the session logic while the client side only writes the `session` kernel setting.
-Side basis: `ilium.core.sessions/before-restore` is server because the manifest grants no `extensions.provide` for it and lists no extension points, so the evidence comes from the page text: the restore is driven by the server side, which rebuilds the layout, freezes and thaws panes and relaunches agents through its `panes.lifecycle` and `agent.read` capabilities.
+Side basis: `ilium.core.sessions/snapshot-sections` is server, granted in the server `capabilities` list and declared in `contributes.extension_points`, because the page text shows the snapshot is session logic, and the server side owns the session logic while the client side only writes the `session` kernel setting.
+Side basis: `ilium.core.sessions/before-restore` is server, granted in the server `capabilities` list and declared in `contributes.extension_points`, because the page text shows the restore is driven by the server side, which rebuilds the layout, freezes and thaws panes and relaunches agents through its `panes.lifecycle` and `agent.read` capabilities.
 
 ### ABI used
 

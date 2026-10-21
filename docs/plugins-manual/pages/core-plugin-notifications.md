@@ -92,11 +92,85 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "notify.desktop",
       "agent.read",
       "tree.read",
-      "tree.attention"
+      "tree.attention",
+      "extensions.provide:ilium.core.notifications/before-notify",
+      "extensions.provide:ilium.core.notifications/channels"
     ],
     "client": [
       "notify.toast",
       "settings.write-kernel:sound"
+    ]
+  },
+  "contributes": {
+    "extension_points": [
+      {
+        "id": "before-notify",
+        "kind": "hook",
+        "mode": "veto",
+        "title": "Before notify",
+        "payload_schema": {
+          "type": "object",
+          "required": [
+            "event",
+            "pane",
+            "title",
+            "urgency",
+            "channels"
+          ],
+          "properties": {
+            "event": {
+              "type": "string"
+            },
+            "pane": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "urgency": {
+              "type": "string"
+            },
+            "channels": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "risk": "standard",
+        "deadline_ms": 20,
+        "max_handlers": 8,
+        "version": "0.1.0"
+      },
+      {
+        "id": "channels",
+        "kind": "collect",
+        "title": "Channels",
+        "entry_schema": {
+          "type": "object",
+          "required": [
+            "id",
+            "title",
+            "service"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "service": {
+              "type": "string"
+            }
+          }
+        },
+        "risk": "high",
+        "max_entries": 64,
+        "dynamic": false,
+        "version": "0.1.0"
+      }
     ]
   },
   "activation": [
@@ -499,14 +573,14 @@ A handler that is late, traps or returns a reply the mode does not allow counts 
 
 ### Extension points this plugin owns
 
-The table gives the values that [EXT-052] requires for each point this plugin owns. The page does not state them, so the values come from the defaults in [Extension points](/pages/api-extension-points/) and are marked (default). Side for `before-notify` is server because the page's contributor example grants `extensions.contribute` on the server side and its handler runs there. The manifest has no `extensions.provide` grant for these points. The side for `channels` is server because the notify service that raises a notice runs on the server, and the client only draws toasts (see the Side basis sentence after the table).
+The table gives the values that [EXT-052] requires for each point this plugin owns. The values come from the defaults in [Extension points](/pages/api-extension-points/) and are marked (default). Both points are server: the manifest grants `extensions.provide` for each on the server side, and the contributor example grants `extensions.contribute` on the server side, where its handler runs.
 
 | Point | Side | Version | Deadline | Max | Dynamic |
 |---|---|---|---|---|---|
 | `ilium.core.notifications/before-notify` | server | 0.1.0 (default) | 20 ms (default) | 8 handlers (default) | no (default) |
 | `ilium.core.notifications/channels` | server | 0.1.0 (default) | none (default) | 64 entries (default) | no (default) |
 
-Side basis: `ilium.core.notifications/channels` is server because the manifest has no `extensions.provide` grant or `extension_points` entry for it, and the page states no channel handler side, so the side comes from the owning plugin logic that delivers notices: the page says the server side "submits sounds, notices and marks" and the `notify` service that raises a notice is server-side, while the client side only draws toasts.
+Side basis: `ilium.core.notifications/channels` is server because the `notify` service that raises a notice is server-side, and the manifest declares the point under `contributes.extension_points` with a server grant.
 
 ### ABI used
 

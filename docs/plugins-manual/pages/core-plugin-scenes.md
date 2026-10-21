@@ -126,13 +126,63 @@ The `capabilities` list of this manifest is the grant set of one sample scene pa
       "media.video",
       "location.observer",
       "gpu.kernels",
-      "http:services.swpc.noaa.gov"
+      "http:services.swpc.noaa.gov",
+      "extensions.provide:ilium.core.scenes/scene-packs",
+      "extensions.provide:ilium.core.scenes/scene-data-sources"
     ]
   },
   "activation": [
     "scene:*"
   ],
   "contributes": {
+    "extension_points": [
+      {
+        "id": "scene-packs",
+        "kind": "collect",
+        "title": "Scene packs",
+        "entry_schema": {
+          "type": "object",
+          "required": ["id", "title", "scenes"],
+          "properties": {
+            "id": { "type": "string" },
+            "title": { "type": "string" },
+            "scenes": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["scene"],
+                "properties": {
+                  "scene": { "type": "string" },
+                  "controls": { "type": "object" }
+                }
+              }
+            }
+          }
+        },
+        "risk": "standard",
+        "max_entries": 64,
+        "dynamic": false,
+        "version": "0.1.0"
+      },
+      {
+        "id": "scene-data-sources",
+        "kind": "collect",
+        "title": "Scene data sources",
+        "entry_schema": {
+          "type": "object",
+          "required": ["id", "title", "service"],
+          "properties": {
+            "id": { "type": "string" },
+            "title": { "type": "string" },
+            "service": { "type": "string" }
+          }
+        },
+        "risk": "standard",
+        "max_entries": 64,
+        "dynamic": false,
+        "version": "0.1.0"
+      }
+    ],
     "scenes": [
       {
         "id": "waves",
@@ -613,7 +663,7 @@ A package adds this entry in its manifest. It needs no code.
 
 ### Extension points this plugin owns
 
-The table gives the values that the core extension points table requires for each point this plugin owns. The page does not state the version, deadline, max or dynamic values, so they come from the defaults in [Extension points](/pages/api-extension-points/) and are marked (default). The side is `scene` because the page states that the Scenes plugin runs on the scene side. The manifest has no `extensions.provide` grant for these points.
+The table gives the values that the core extension points table requires for each point this plugin owns. The page does not state the version, deadline, max or dynamic values, so they come from the defaults in [Extension points](/pages/api-extension-points/) and are marked (default). The side is `scene` because the page states that the Scenes plugin runs on the scene side. The complete manifest grants `extensions.provide:ilium.core.scenes/<point>` in its `capabilities.scene` list and declares both points in `contributes.extension_points`.
 
 | Point | Side | Version | Deadline | Max | Dynamic |
 |---|---|---|---|---|---|

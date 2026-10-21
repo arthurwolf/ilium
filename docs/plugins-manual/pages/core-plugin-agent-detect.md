@@ -121,7 +121,9 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "tree.decorate",
       "panes.read",
       "terminal.write",
-      "settings.write-kernel:agent-monitoring"
+      "settings.write-kernel:agent-monitoring",
+      "extensions.provide:ilium.core.agent-detect/activity-rules",
+      "extensions.provide:ilium.core.agent-detect/classify"
     ],
     "client": [
       "agent.read",
@@ -133,6 +135,93 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
     "view:agent-detect.panel"
   ],
   "contributes": {
+    "extension_points": [
+      {
+        "id": "activity-rules",
+        "kind": "collect",
+        "title": "Activity rules",
+        "entry_schema": {
+          "type": "object",
+          "required": [
+            "id",
+            "signature",
+            "state",
+            "regex",
+            "region"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "signature": {
+              "type": "string"
+            },
+            "state": {
+              "type": "string"
+            },
+            "regex": {
+              "type": "string"
+            },
+            "region": {
+              "type": "string",
+              "enum": [
+                "last-lines",
+                "status-row",
+                "whole-screen"
+              ]
+            }
+          }
+        },
+        "risk": "standard",
+        "max_entries": 64,
+        "dynamic": false,
+        "version": "0.1.0"
+      },
+      {
+        "id": "classify",
+        "kind": "hook",
+        "mode": "transform",
+        "title": "Classify",
+        "payload_schema": {
+          "type": "object",
+          "required": [
+            "pane",
+            "signature",
+            "state",
+            "reason"
+          ],
+          "properties": {
+            "pane": {
+              "type": "string"
+            },
+            "signature": {
+              "type": "string"
+            },
+            "state": {
+              "type": "string"
+            },
+            "reason": {
+              "type": "string"
+            }
+          }
+        },
+        "reply_schema": {
+          "type": "object",
+          "required": [
+            "state"
+          ],
+          "properties": {
+            "state": {
+              "type": "string"
+            }
+          }
+        },
+        "risk": "high",
+        "deadline_ms": 20,
+        "max_handlers": 8,
+        "version": "0.1.0"
+      }
+    ],
     "signatures": [
       {
         "id": "example-agent",

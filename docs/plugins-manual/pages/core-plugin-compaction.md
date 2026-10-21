@@ -118,7 +118,9 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "fs.read:agent-config:codex",
       "agent-config.propose:codex",
       "settings.write-kernel:optimization",
-      "settings.write-kernel:remote-compaction"
+      "settings.write-kernel:remote-compaction",
+      "extensions.provide:ilium.core.compaction/techniques",
+      "extensions.provide:ilium.core.compaction/before-compact"
     ],
     "client": [
       "open-external",
@@ -131,6 +133,65 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
     "view:compaction.optimizer"
   ],
   "contributes": {
+    "extension_points": [
+      {
+        "id": "techniques",
+        "kind": "collect",
+        "title": "Compaction techniques",
+        "entry_schema": {
+          "type": "object",
+          "required": [
+            "id",
+            "title",
+            "service"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "service": {
+              "type": "string"
+            }
+          }
+        },
+        "risk": "standard",
+        "max_entries": 64,
+        "dynamic": false,
+        "version": "0.1.0"
+      },
+      {
+        "id": "before-compact",
+        "kind": "hook",
+        "mode": "veto",
+        "title": "Before compact",
+        "payload_schema": {
+          "type": "object",
+          "required": [
+            "pane",
+            "technique",
+            "tokens"
+          ],
+          "properties": {
+            "pane": {
+              "type": "string"
+            },
+            "technique": {
+              "type": "string"
+            },
+            "tokens": {
+              "type": "integer"
+            }
+          }
+        },
+        "risk": "standard",
+        "deadline_ms": 20,
+        "max_handlers": 8,
+        "version": "0.1.0"
+      }
+    ],
     "jobs": [
       {
         "kind": "compact",
@@ -547,14 +608,14 @@ A handler that is late, traps or returns a reply the mode does not allow counts 
 
 ### Extension points this plugin owns
 
-Values marked (default) are not stated on this page; they are the defaults of [Extension points](/pages/api-extension-points/). Side is `server` where the sample above declares the handler on the server, and `unknown` where this page does not say which side runs the handler.
+Values marked (default) are not stated on this page; they are the defaults of [Extension points](/pages/api-extension-points/). Side is `server` where the sample above declares the handler on the server.
 
 | Point | Side | Version | Deadline | Max | Dynamic |
 |---|---|---|---|---|---|
 | `ilium.core.compaction/techniques` | server | 0.1.0 (default) | none (default) | 64 entries (default) | no (default) |
 | `ilium.core.compaction/before-compact` | server | 0.1.0 (default) | 20 ms (default) | 8 handlers (default) | no (default) |
 
-Side basis: `ilium.core.compaction/techniques` is server because the manifest lists no `extensions.provide` grant or `contributes.extension_points` entry for it, and the technique's service summarises a transcript inside the server-side job runner (`JobRunner::run` calls `summarise`, and the server starts the compact job). Side basis: `ilium.core.compaction/before-compact` is server because the manifest lists no `extensions.provide` grant or `contributes.extension_points` entry for it, and the veto handler sample is declared in the server capabilities and runs as a server-side `HookHandler`.
+Both points run on the server: the complete manifest grants `extensions.provide` for each on the server side and declares each in `contributes.extension_points`. The technique's service summarises a transcript inside the server-side job runner, and the veto hook runs as a server-side `HookHandler`.
 
 ### ABI used
 
