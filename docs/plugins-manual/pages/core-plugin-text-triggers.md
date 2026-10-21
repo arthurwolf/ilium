@@ -86,11 +86,11 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
   "capabilities": {
     "server": [
       "terminal.output-filter",
-      "terminal.write"
+      "terminal.write",
+      "settings.write-kernel:text-triggers"
     ],
     "client": [
-      "ui.panels",
-      "settings.write-kernel:text-triggers"
+      "ui.panels"
     ]
   },
   "activation": [

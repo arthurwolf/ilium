@@ -35,7 +35,7 @@ The table of [Plugin command line](/pages/reference-plugin-cli/#exit-codes) hold
 | Id | Rule |
 |---|---|
 | [PKG-423] | Every command on this page MUST exit with a code of this table, and the `exit_code` of its `result` record MUST equal the process exit code. |
-| [PKG-424] | A policy refusal (`policy.*`, `package.blocked`) MUST exit 7. `registry.unreachable`, `registry.stale`, `registry.metadata-expired` and `install.download-failed` MUST exit 8. A declined prompt (`install.review-declined`, `trust.declined`) and `install.needs-input` are failures and MUST exit 1. Any other `manifest.*`, `package.*`, `trust.*`, `dependency.*` or `install.*` failure MUST exit 1, except `install.locked` (4) and the not-found codes (5). |
+| [PKG-424] | A policy refusal (`policy.*`, `package.blocked`) MUST exit 7. `registry.unreachable`, `registry.metadata-expired` and `install.download-failed` MUST exit 8. A declined prompt (`install.review-declined`, `trust.declined`) and `install.needs-input` are failures and MUST exit 1. Any other `manifest.*`, `package.*`, `trust.*`, `dependency.*` or `install.*` failure MUST exit 1, except `install.locked` (4) and the not-found codes (5). |
 | [PKG-425] | A command MUST NOT start work and then exit 2. Usage errors are found before any file or network access. |
 
 ## install

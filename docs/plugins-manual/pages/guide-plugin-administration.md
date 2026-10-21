@@ -49,12 +49,12 @@ A registry is a folder of signed files on a web server. You need no database. Fo
 | Id | Rule |
 |---|---|
 | [PKG-467] | A registry MUST be served over HTTPS. The client refuses plain `http:` except `localhost` in development (PKG-371). |
-| [PKG-468] | The timestamp document expires after one day. The operator MUST re-sign it at least daily, or clients report `registry.stale`. |
+| [PKG-468] | The timestamp document expires after one day. The operator MUST re-sign it at least daily, or clients report `registry.metadata-expired`. |
 | [PKG-469] | To rotate the root key, publish a rotation document signed by the old and the new key. See [Registry reference](/pages/reference-registry/#rootjson). |
 
 ## Mirror and air-gap
 
-A mirror copies a registry so that machines without internet can install. Run `ilium plugin mirror sync <dir> --registry <url> --allow <id>` on a connected machine, copy the folder to the isolated network and serve it. For a single machine, use `export-bundle` and `install --from-bundle`. Both copy signed bytes without change, so the signatures still verify.
+A mirror copies a registry so that machines without internet can install. Run `ilium plugin mirror sync <dir> --registry <url>` on a connected machine (a full copy; add `--allow <id>` for a partial one), copy the folder to the isolated network and serve it. For a single machine, use `export-bundle` and `install --from-bundle`. The bundle and a full copy copy signed bytes without change, so the signatures still verify. A partial copy re-signs its index and snapshot with its own keys ([PKG-409]); clients verify it against its own root ([PKG-473]).
 
 | Id | Rule |
 |---|---|

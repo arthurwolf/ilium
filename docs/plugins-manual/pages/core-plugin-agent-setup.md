@@ -126,13 +126,14 @@ The plugin is replaceable. A replacement must provide the service and the three 
       "fs.read:agent-config:claude", "agent-config.propose:claude",
       "fs.read:agent-config:codex", "agent-config.propose:codex",
       "fs.read:project", "fs.write:project",
-      "projects.read", "settings.read-kernel:setup",
+      "tree.read", "settings.read-kernel:setup",
       "services.provide:ilium.core.agent-setup/install",
       "extensions.provide:ilium.core.agent-setup/instruction-blocks",
       "extensions.provide:ilium.core.agent-setup/targets",
-      "extensions.provide:ilium.core.agent-setup/before-install"
+      "extensions.provide:ilium.core.agent-setup/before-install",
+      "settings.write-kernel:setup"
     ],
-    "client": ["ui.panels", "help.read", "settings.write-kernel:setup"]
+    "client": ["ui.panels", "help.read"]
   },
   "contributes": {
     "commands": [{ "id": "refresh", "title": "Refresh agent instructions", "category": "Agents" }],
@@ -205,17 +206,17 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "agent-config.propose:codex",
       "fs.read:project",
       "fs.write:project",
-      "projects.read",
+      "tree.read",
       "settings.read-kernel:setup",
       "services.provide:ilium.core.agent-setup/install",
       "extensions.provide:ilium.core.agent-setup/instruction-blocks",
       "extensions.provide:ilium.core.agent-setup/targets",
-      "extensions.provide:ilium.core.agent-setup/before-install"
+      "extensions.provide:ilium.core.agent-setup/before-install",
+      "settings.write-kernel:setup"
     ],
     "client": [
       "ui.panels",
-      "help.read",
-      "settings.write-kernel:setup"
+      "help.read"
     ]
   },
   "activation": [

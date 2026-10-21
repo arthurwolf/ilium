@@ -932,7 +932,7 @@ Exit codes are those of [Distribution commands](/pages/reference-plugin-distribu
 
 ## Error catalogue
 
-This catalogue has 252 codes, of which 93 are in the `manifest.*` family. A code that appears in an older page and is not here is in the table of retired codes below.
+This catalogue has 251 codes, of which 93 are in the `manifest.*` family. A code that appears in an older page and is not here is in the table of retired codes below.
 
 | Id | Rule |
 |---|---|
@@ -1218,7 +1218,6 @@ See [Registry reference](/pages/reference-registry/).
 | `registry.root-key-missing` | R | 2 | `A registry needs --root-key.` |
 | `registry.insecure-url` | R | 1 | `{url}: only https registries are allowed.` |
 | `registry.unreachable` | R | 8 | `{url} cannot be reached ({reason}).` |
-| `registry.stale` | R | 8 | `The metadata of {url} is older than its freshness window.` |
 | `registry.metadata-expired` | R | 8 | `The {document} document of {url} expired on {date}.` |
 | `registry.signature-invalid` | R | 1 | `The {document} document of {url} has an invalid signature.` |
 | `registry.rollback` | R | 1 | `The {document} version {found} is lower than the version {known} seen before.` |
