@@ -20,6 +20,10 @@ Never run commands, jobs, builds, tests, probes or launchers through `ilium new-
 
 Never restart Ilium or its running server, session, or panes. Do not use `--restart-server`, stop or replace the live server, or restart it indirectly through a service. The user alone restarts Ilium. Code changes do not install binaries: see "Deploy policy" below. When the user asks for a deploy and the running server still has the old executable loaded, report that clearly.
 
+## No AGENTS.md
+
+This project's agent instructions live only in `CLAUDE.md`. Any `AGENTS.md` file found anywhere in the repository must be deleted immediately, without asking and without merging it first; never create one.
+
 ## Workspace layout
 
 Cargo workspace, one crate per architectural layer (see ARCHITECTURE.md "Crate roles"). Do not collapse layers back into a single crate for convenience — the boundaries exist so `ilium-core` and `ilium-detect` stay unit-testable without a PTY, a terminal, or a running server.
