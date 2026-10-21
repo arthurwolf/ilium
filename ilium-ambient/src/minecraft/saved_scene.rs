@@ -120,7 +120,6 @@ struct WorkStatus {
     last_logged_at: Instant,
 }
 
-
 impl PreparationProgress {
     fn new() -> Self {
         let progress = Self {

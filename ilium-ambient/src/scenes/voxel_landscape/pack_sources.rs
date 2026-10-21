@@ -3,8 +3,8 @@
 use super::{
     assets::{
         archive::{DuplicateMember, DuplicatePolicy, ZipSource},
-        directory_snapshot,
         budget::{ByteBudget, Cancel, Limits},
+        directory_snapshot,
         error::{AssetError, Result},
         identity::{AssetPath, Digest256, Label, OriginKind},
         layers::{LayeredPack, MountLayout, PackFormat},
@@ -239,7 +239,8 @@ mod immutable_source_tests {
         let budget = ByteBudget::new(64 << 20).unwrap();
         let stop = AtomicBool::new(false);
         let cancel = Cancel::new(&stop);
-        let mounted_directory = source(&directory, true, DuplicatePolicy::Reject, &budget, cancel).unwrap();
+        let mounted_directory =
+            source(&directory, true, DuplicatePolicy::Reject, &budget, cancel).unwrap();
         let frozen = source(&archive, false, DuplicatePolicy::Reject, &budget, cancel).unwrap();
         // A directory is snapshotted at load, so it has a digest like a ZIP does.
         assert!(mounted_directory.source_sha256.is_some());
