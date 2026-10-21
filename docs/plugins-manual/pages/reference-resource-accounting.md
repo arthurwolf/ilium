@@ -31,7 +31,7 @@ Contract version: `ilium:plugin@0.1.0`.
 
 The `ilium-execution` quota group is a token bucket. It holds 2,000 ms of CPU time and refills at 500 ms per second. There is one group for each plugin side in each process. A call spends its thread time. A submission also spends 1 ms for every 64 KiB of payload.
 
-- When the bucket is empty, a new submission returns `quota-exceeded` with a `retry-after-ms` value. The bucket balance can go below zero, because a call is charged after it ends. The bucket is empty when the balance is 0 or less. `retry-after-ms` = max(100, ceil_10(-balance_ms * 2)), where `ceil_10` rounds up to the next 10 ms: the wall time until the balance refills to 0 at 500 ms per second, never below 100. A balance of -100 ms gives 200.
+- When the bucket is empty, a new submission, and any call that returns a `request-id`, returns `quota-exceeded` with a `retry-after-ms` value. This is API-072. The bucket balance can go below zero, because a call is charged after it ends. The bucket is empty when the balance is 0 or less. `retry-after-ms` = max(100, ceil_10(-balance_ms * 2)), where `ceil_10` rounds up to the next 10 ms: the wall time until the balance refills to 0 at 500 ms per second, never below 100. A balance of -100 ms gives 200.
 - A call already running is not stopped by an empty bucket. Its deadline stops it.
 - A refused call is not a failure and is not counted toward the restart rule. It counts as a quota hit in the metrics of [Health and watchdog](/pages/reference-health-and-watchdog/).
 

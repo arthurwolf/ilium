@@ -75,7 +75,7 @@ The grant goes into `manifest.json` under `capabilities`, in the list of the sid
 
 ### Worked example
 
-This plugin searches for Lyon, limited to five results, in French.
+This plugin searches for Lyon, limited to five results, in French. The search returns a request id at once. The places are read with `take-places` when the `request-completed` event for that id arrives.
 
 **Rust**
 
@@ -88,17 +88,31 @@ use ilium_plugin_sdk::host::geocode::GeocodeQuery;
 
 #[ilium_plugin(side = "client")]
 #[derive(Default)]
-struct Places;
+struct Places {
+    pending: Option<RequestId>,
+}
 
 impl Handler for Places {
     fn on_events(&mut self, batch: Vec<Event>) -> Vec<Submission> {
         for event in batch {
-            let Event::CommandInvoked(invoked) = event else { continue };
-            if invoked.command != "com.example.places/lookup" { continue; }
-            let query = GeocodeQuery { text: "Lyon".into(), near: None, limit: 5, language: Some("fr".into()) };
-            match geocode::search(query).block_on() {
-                Ok(places) => log::log(Level::Info, &format!("{} places", places.len())),
-                Err(error) => log::log(Level::Warn, &format!("geocode failed: {error:?}")),
+            match event {
+                Event::CommandInvoked(invoked) if invoked.command == "com.example.places/lookup" => {
+                    let query = GeocodeQuery { text: "Lyon".into(), near: None, limit: 5, language: Some("fr".into()) };
+                    match geocode::search(query) {
+                        Ok(request_id) => self.pending = Some(request_id),
+                        Err(error) => log::log(Level::Warn, &format!("geocode refused: {error:?}")),
+                    }
+                }
+                Event::RequestCompleted(result) => {
+                    let Some(request_id) = self.pending else { continue };
+                    if result.request != request_id { continue; }
+                    self.pending = None;
+                    match geocode::take_places(request_id) {
+                        Some(places) => log::log(Level::Info, &format!("{} places", places.len())),
+                        None => log::log(Level::Warn, "geocode gave no places"),
+                    }
+                }
+                _ => {}
             }
         }
         Vec::new()
@@ -111,19 +125,28 @@ impl Handler for Places {
 ```ts
 import { definePlugin } from '@ilium/plugin-sdk';
 import type { Event, Submission } from '@ilium/plugin-sdk/types';
-import { search } from '@ilium/plugin-sdk/host/geocode';
+import { search, takePlaces } from '@ilium/plugin-sdk/host/geocode';
 import { log } from '@ilium/plugin-sdk/host/log';
+
+let pending: bigint | undefined;
 
 export const { lifecycle, handler } = definePlugin({
   side: 'client',
   async onEvents(batch: Event[]): Promise<Submission[]> {
     for (const event of batch) {
-      if (event.tag !== 'command-invoked' || event.val.command !== 'com.example.places/lookup') continue;
-      try {
-        const places = await search({ text: 'Lyon', near: undefined, limit: 5, language: 'fr' });
-        log('info', `${places.length} places`);
-      } catch (error) {
-        log('warn', `geocode failed: ${String(error)}`);
+      if (event.tag === 'command-invoked' && event.val.command === 'com.example.places/lookup') {
+        try {
+          pending = search({ text: 'Lyon', near: undefined, limit: 5, language: 'fr' });
+        } catch (error) {
+          log('warn', `geocode refused: ${String(error)}`);
+        }
+      } else if (event.tag === 'request-completed' && pending !== undefined
+        && event.val.request.tag === 'call' && event.val.request.val === pending) {
+        const requestId = pending;
+        pending = undefined;
+        const places = takePlaces(requestId);
+        if (places) log('info', `${places.length} places`);
+        else log('warn', 'geocode gave no places');
       }
     }
     return [];
