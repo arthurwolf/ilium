@@ -125,6 +125,16 @@ impl ScreensRig {
         unimplemented!("client::plugin_host::screens_rig::ScreensRig::confirm_no")
     }
 
+    /// USR-226: opens the Diagnostics "Build support bundle" dialog for a plugin.
+    pub fn open_support_bundle_dialog(&mut self, _plugin_id: &str) {
+        unimplemented!("client::plugin_host::screens_rig::ScreensRig::open_support_bundle_dialog")
+    }
+
+    /// USR-226: the label of the button that Enter presses in the open dialog.
+    pub fn default_button_label(&self) -> Option<String> {
+        unimplemented!("client::plugin_host::screens_rig::ScreensRig::default_button_label")
+    }
+
     /// USR-014/USR-031/USR-161/USR-162 set-up.
     pub fn install_plugin(&mut self, _id: &str, _tier: &str) {
         unimplemented!("client::plugin_host::screens_rig::ScreensRig::install_plugin")
