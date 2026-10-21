@@ -180,7 +180,7 @@ The caps of the contribution keys as a table render. Illustrative, not generated
 - A manifest limit above the tier ceiling is clamped and logged. It is never refused.
 - A trap ends the plugin instance and is not an error code. Deadline breaches, memory over the limit and more than 256 submissions are traps.
 - A dedup key with a character outside the allowed set is a malformed submission. It refuses the whole batch.
-- A duplicate submission completes as `duplicate(original)`. It is not an error and has no effect.
+- A duplicate submission completes as `duplicate(request-ref)`. It is not an error and has no effect.
 - A value over a per-call cap that the plugin can know in advance returns `invalid-argument` at once, and nothing is written. Two exceptions do not fail: `log.log` cuts the line and `terminal.read-screen` clamps its row count.
 
 ## What the user sees

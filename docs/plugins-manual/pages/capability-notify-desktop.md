@@ -104,7 +104,7 @@ The submission carries a `dedup-key`. The key is optional for `notify`, but a pl
 - Format: 1 to 128 characters from `[A-Za-z0-9._:/-]`. Any other character makes the submission malformed.
 - Scope: the pair of plugin id and key, in the kernel that applies the intent.
 - Window: 10 minutes from the moment the key is reserved.
-- Duplicate: a submission whose key is reserved completes as `duplicate(original)` and shows nothing. `original` is the `request-ref` of the submission that reserved the key.
+- Duplicate: a submission whose key is reserved completes as `duplicate(request-ref)` and shows nothing. The `request-ref` payload names the submission that reserved the key.
 - A refused submission does not reserve its key, so a retry with the same key is correct after the cause is fixed.
 
 In Rust, `dedup::key_for(&["notes-export", "2026-10-11"])` joins the parts with `:` and returns `notes-export:2026-10-11`. TypeScript has no helper, so write the string.
@@ -208,7 +208,7 @@ The `correlation` value is a `bigint` in TypeScript. It names the submission, so
 | `title` empty or over 80 characters | `refused(invalid-argument)` | Fix the text. |
 | `body` over 2,048 characters | `refused(invalid-argument)` | Shorten the text. |
 | `dedup-key` with a disallowed character or over 128 characters | `refused(invalid-argument)` for the lowest-index offender; every other submission completes as `refused(cancelled)` ([ABI-009]) | Fix the key. |
-| Same key within 10 minutes | `duplicate(original)`; no second notice | Nothing. The first notice stands. |
+| Same key within 10 minutes | `duplicate(request-ref)`; no second notice | Nothing. The first notice stands. |
 | More than 6 notices per minute | `refused(rate-limited)` for the extra ones | Wait a minute, or merge the notices. |
 | Grant revoked later | Later submissions are `refused(not-permitted)`; queued notices stay | Re-read the grant on activation. |
 

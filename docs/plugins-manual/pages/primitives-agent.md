@@ -319,7 +319,7 @@ key, so a retry with the same key after fixing the cause is valid.
 |---|---|
 | Well formed, key present | `refused(invalid-argument)`; the whole batch is refused |
 | Grant `agent.control` | `refused(not-permitted)` |
-| Key reserved already | `duplicate(original)` |
+| Key reserved already | `duplicate(request-ref)` |
 | Pane exists and is an agent pane | `refused(not-found)` |
 | Pane restored and process started | `refused(pane-not-ready)` |
 | Action id in the signature | `refused(unsupported)` |

@@ -262,7 +262,7 @@ export function pasteClipboard(pane: bigint): Submission | undefined {
 }
 ```
 
-The caller returns the submission from `on-events` (Rust) or `onEvents` (TypeScript). The key is built from the current millisecond, so a paste of new text is not swallowed as a duplicate. Two pastes in the same millisecond share a key, and the second completes as `duplicate(original)`.
+The caller returns the submission from `on-events` (Rust) or `onEvents` (TypeScript). The key is built from the current millisecond, so a paste of new text is not swallowed as a duplicate. Two pastes in the same millisecond share a key, and the second completes as `duplicate(request-ref)`.
 
 Outcome: the `send-input` submission completes as `ok` in the next batch, and the text appears at the prompt of the pane as a paste. If the pane is still restoring, the submission completes as `refused(pane-not-ready)`. A refused submission does not reserve its key, so the same key is valid for a retry.
 

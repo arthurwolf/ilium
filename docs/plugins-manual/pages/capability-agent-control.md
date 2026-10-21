@@ -86,7 +86,7 @@ The kernel checks a submission in this order. The first failing check decides th
 
 1. The submission is well formed. Its `dedup-key` is present and uses 1 to 128 characters from `[A-Za-z0-9._:/-]`. A malformed submission refuses its whole batch with `invalid-argument`.
 2. The plugin holds `agent.control`. Otherwise the batch is refused with `not-permitted`.
-3. The key is not reserved. A reserved key completes as `duplicate(original)` with no effect.
+3. The key is not reserved. A reserved key completes as `duplicate(request-ref)` with no effect.
 4. The pane exists. Otherwise `refused(not-found)`.
 5. The pane is restored and its process has started. Otherwise `refused(pane-not-ready)`.
 6. The signature declares the action id. Otherwise `refused(unsupported)`.
@@ -187,7 +187,7 @@ impl CompactButton {
 }
 ```
 
-The `next_request` counter restarts at zero when the plugin restarts. Within 10 minutes of a restart, a new request can then reuse a key that is still reserved, and the kernel answers `duplicate(original)`. A plugin that needs unique keys across restarts should add a value that does not repeat, such as a timestamp.
+The `next_request` counter restarts at zero when the plugin restarts. Within 10 minutes of a restart, a new request can then reuse a key that is still reserved, and the kernel answers `duplicate(request-ref)`. A plugin that needs unique keys across restarts should add a value that does not repeat, such as a timestamp.
 
 ## Worked example in TypeScript
 
@@ -325,7 +325,7 @@ When the grant is declined, `agent-action` completes with `refused(not-permitted
 | `agent-action` | `refused(unsupported)` | The signature declares no action with that id. |
 | `agent-action` | `refused(conflict)` | The activity is not in `allowed_when`. The message names the current activity: `agent is working`, `agent is idle`, `agent is done`, `agent is awaiting approval` or `agent is in a menu`, named after the current activity. The key is not reserved, so the same key can be used later. |
 | `agent-action` | `refused(rate-limited)` | The pane received more than 20 submissions per second. `retry-after-ms` is set. |
-| `agent-action` | `duplicate(original)` | The key was reserved within the last 10 minutes. Nothing happens. |
+| `agent-action` | `duplicate(request-ref)` | The key was reserved within the last 10 minutes. Nothing happens. |
 | `agent-action` | `failed(code)` | The key was accepted and the write failed. The key stays reserved, so a retry needs a new key. |
 | `set-toolbar-state` | `not-found` | The button is not the plugin's own, or the pane does not exist. |
 | `set-toolbar-state` | `invalid-argument` | The label is over 32 cells. |
@@ -336,7 +336,7 @@ Edge cases to design for:
 - A batch refused for a malformed submission or a missing grant cancels its other submissions, each with `refused(cancelled)`. Other checks refuse only the submission that fails them.
 - Activity is checked when the batch is accepted. The agent can become busy after that check, and the keys are then written while it works.
 - A revoked grant ends in-flight calls with `revoked`. The plugin is re-activated without the grant, and its toolbar state is withdrawn.
-- A plugin that uses the same key for two different requests gets `duplicate(original)` for the second one and no action. Use one key per request.
+- A plugin that uses the same key for two different requests gets `duplicate(request-ref)` for the second one and no action. Use one key per request.
 
 ## First-party features that use it
 

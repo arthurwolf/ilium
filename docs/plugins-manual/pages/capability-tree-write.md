@@ -69,7 +69,7 @@ Import paths:
 - A batch holds at most 256 submissions. A return of more than 256 traps the plugin, and none of the batch is applied.
 - A batch is refused as a whole for one of two reasons: a malformed submission, or a missing grant. The offending submission gets `refused(invalid-argument)` or `refused(not-permitted)`. Every other submission gets `refused(cancelled)` with the message `batch refused: submission <index>`.
 - Submissions apply in order. A node closed by an earlier submission in the batch makes a later submission on it fail with `failed(not-found)`.
-- `dedup-key` is optional for these intents. A key of 1 to 128 characters from `A-Z`, `a-z`, `0-9`, `.`, `_`, `:`, `/` and `-` is reserved for 10 minutes once the submission is accepted. A repeat completes as `duplicate(<original>)`. A refused submission does not reserve its key, so a retry with the same key is valid.
+- `dedup-key` is optional for these intents. A key of 1 to 128 characters from `A-Z`, `a-z`, `0-9`, `.`, `_`, `:`, `/` and `-` is reserved for 10 minutes once the submission is accepted. A repeat completes as `duplicate(request-ref)`. A refused submission does not reserve its key, so a retry with the same key is valid.
 
 ## Manual titles stay with the user
 
@@ -178,7 +178,7 @@ export const { lifecycle, handler } = definePlugin({
 | More than 256 submissions in one return | The plugin traps, and none of the batch is applied. |
 | The grant is declined | `refused(not-permitted)` for the first `tree.write` submission in a batch, `refused(cancelled)` for the rest. The plugin's other intents and events are not affected. |
 | The grant is revoked | The authorization epoch changes. Calls in flight return `revoked`. The plugin is deactivated with `revoked`, then re-activated with the reduced grant set. |
-| A repeat of an accepted `dedup-key` within 10 minutes | `duplicate(<original>)`, with no effect |
+| A repeat of an accepted `dedup-key` within 10 minutes | `duplicate(request-ref)`, with no effect |
 
 Every `not-permitted` refusal is also written to the plugin log, which `ilium plugin logs` shows. Conflicts are not logged by the kernel, so a plugin that needs a record of them writes its own log line, as the examples do.
 

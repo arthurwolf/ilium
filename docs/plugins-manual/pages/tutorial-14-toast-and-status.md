@@ -329,7 +329,7 @@ A segment never grows past its `max_width`. Longer text is cut with `…`. When 
 
 | Case | What happens | Code or result |
 |---|---|---|
-| Same finish delivered twice | The second toast is skipped | `duplicate(original)` |
+| Same finish delivered twice | The second toast is skipped | `duplicate(request-ref)` |
 | Four toasts within 10 seconds | The fourth is dropped | `refused(rate-limited)` |
 | More than 10 updates per second to one status segment or frame slot | The extra updates are dropped | `refused(rate-limited)` with `retry-after-ms` |
 | Segment id not declared in the manifest | The update is refused | `refused(invalid-argument)` |

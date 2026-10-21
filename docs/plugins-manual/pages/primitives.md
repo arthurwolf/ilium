@@ -163,7 +163,7 @@ Input is the intent `send-input`: `pane`, `text` (at most 64 KiB), `delivery` (`
 
 1. Shape, key and text size. Failure refuses the batch with `invalid-argument`.
 2. The `terminal.write` grant. Failure refuses the batch with `not-permitted`.
-3. The dedup key. A reserved key completes as `duplicate(original)`.
+3. The dedup key. A reserved key completes as `duplicate(request-ref)`.
 4. The pane exists and is a terminal pane. Failure is `not-found` or `unsupported`.
 5. The pane is restored. A restored pane still waiting for its process gives `pane-not-ready`.
 6. The rate. Failure is `rate-limited`.
@@ -314,7 +314,7 @@ The editor stays native because every keystroke passes through it, and it keeps 
 | Pane, node or buffer closed during a call | `not-found`. |
 | Invalid filter regex, rate 0 or over 100 | `invalid-argument`. |
 | Layers, filters or buffers over quota | `quota-exceeded`. |
-| `send-input` with a reserved key | `duplicate(original)`. No second write. |
+| `send-input` with a reserved key | `duplicate(request-ref)`. No second write. |
 | `send-input` with a stale prompt epoch | `conflict`. Read `prompt_epoch` again. |
 | `agent-action` while working | `refused(conflict)`, `agent is working`. |
 | Edit on a stale revision, or save after an outside change | `conflict`. Read the state again. |

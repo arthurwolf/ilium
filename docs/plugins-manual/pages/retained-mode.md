@@ -291,7 +291,7 @@ The diagram shows the path of one decoration from the plugin to the clients:
 | Toolbar call for a button that is not the plugin's own, or for a missing pane | `not-found` |
 | Toolbar label over 32 cells | `invalid-argument` |
 | A malformed submission in a batch | The whole batch is refused, so nothing is half-applied |
-| Repeat of a submission with the same `dedup-key` within 10 minutes | `duplicate(original)`, with no effect |
+| Repeat of a submission with the same `dedup-key` within 10 minutes | `duplicate(request-ref)`, with no effect |
 | Node removed | Its decorations and its rows are removed with it |
 
 Wide content is cut, as described under placements. Limits apply per plugin, and the host limit for all plugins together is 65,536 decorations.

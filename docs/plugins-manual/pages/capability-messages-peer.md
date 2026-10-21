@@ -45,7 +45,7 @@ The intent `message` sends. The event `message` receives.
 | `channel` | `string` | 1 to 64 characters from `a-z`, `0-9`, `.` and `-` |
 | `payload` | `list<u8>` | the message bytes, at most 1 MiB |
 
-The submission also carries `correlation` and an optional `dedup-key`. A `message` does not need a dedup key. A key that the same plugin already used within 10 minutes completes as `duplicate(original)` with no effect.
+The submission also carries `correlation` and an optional `dedup-key`. A `message` does not need a dedup key. A key that the same plugin already used within 10 minutes completes as `duplicate(request-ref)` with no effect.
 
 **Event `message` (receiver):**
 
@@ -79,7 +79,7 @@ The sender gets a `request-completed` event for each `message` submission.
 | `refused(not-permitted)` | no grant for that receiver, or the grant was declined or revoked before the call |
 | `refused(not-found)` | the receiver is not installed or is disabled |
 | `refused(invalid-argument)` | channel outside the allowed form, payload over 1 MiB, or a malformed submission |
-| `duplicate(original)` | the same `dedup-key` was used within 10 minutes |
+| `duplicate(request-ref)` | the same `dedup-key` was used within 10 minutes |
 
 A missing grant refuses the whole batch. The offending submission completes as `refused(not-permitted)`, and every other submission of that batch completes as `refused(cancelled)` with the message `batch refused: submission <index>`.
 
@@ -248,7 +248,7 @@ The matching send from a TypeScript sender is one literal submission. The intent
 | Channel empty, longer than 64 characters, or with other characters | `refused(invalid-argument)` |
 | Payload over 1 MiB | `refused(invalid-argument)` |
 | Batch with more than 256 submissions | the plugin traps and none of the batch is applied |
-| Same `dedup-key` within 10 minutes | `duplicate(original)`, no second delivery |
+| Same `dedup-key` within 10 minutes | `duplicate(request-ref)`, no second delivery |
 | Message to the plugin's own other side | allowed with no grant; `from` is the plugin's own id |
 
 A `message` is not a request. An `ok` outcome means the host queued the message, so the receiver's handler must decide what to do with it.

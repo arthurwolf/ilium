@@ -105,7 +105,7 @@ A handler returns submissions. The host applies them in order after `on-events` 
 - The lowest-index offender completes as `refused(invalid-argument)` (shape) or `refused(not-permitted)` (grant). Every other submission completes as `refused(cancelled)` with the message `batch refused: submission <index>`, where `<index>` is the 0-based position of the offending submission [ABI-009].
 - A refused submission does not reserve its dedup key.
 - A dedup key has 1 to 128 characters from `[A-Za-z0-9._:/-]`. It is scoped to the plugin and reserved while `now_wall_ms - accepted_wall_ms < 600,000`. The accepted time is persisted in the journal on the wall clock [ABI-010] [ABI-034].
-- A repeat completes as `duplicate(original)`, where `original` is the ref of the first submission. The outcome makes no claim about the result of the original, and the host does not check that correlation numbers are unique [ABI-035].
+- A repeat completes as `duplicate(request-ref)`, where `request-ref` is the ref of the first submission. The outcome makes no claim about the result of the original, and the host does not check that correlation numbers are unique [ABI-035].
 - `correlation` is chosen by the plugin. Values below 2^63 belong to the plugin. Values from 2^63 up belong to the SDK [ABI-011].
 
 The `intents.submit` import is for use outside a batch. It carries one submission, queues it, and answers `request-completed` with the request ref `submission(correlation)`; the value returned by `submit` is the `request-id` of the call.

@@ -39,7 +39,7 @@ A plugin is a WebAssembly component that the host loads, checks and runs. It rea
 
 **Decoration.** A short styled text or a Tabler icon that a plugin sets on a tree row, in a slot that the manifest declares, such as a badge or a footer. A decoration with `persist: true` survives a server restart, marked as stale. See [Manifest reference](/pages/reference-manifest/).
 
-**De-duplication key.** The optional `dedup-key` field of a submission: 1 to 128 characters from `[A-Za-z0-9._:/-]`. A submission whose key the same plugin reserved within the last 10 minutes completes as `duplicate(original)` and has no effect. A refused submission does not reserve its key. The Rust helper `dedup::key_for` joins its parts with `:`. A `send-input` or `agent-action` submission must carry a key. See [Events and intents](/pages/reference-events-and-intents/).
+**De-duplication key.** The optional `dedup-key` field of a submission: 1 to 128 characters from `[A-Za-z0-9._:/-]`. A submission whose key the same plugin reserved within the last 10 minutes completes as `duplicate(request-ref)` and has no effect. A refused submission does not reserve its key. The Rust helper `dedup::key_for` joins its parts with `:`. A `send-input` or `agent-action` submission must carry a key. See [Events and intents](/pages/reference-events-and-intents/).
 
 **Deprecate.** To mark a whole plugin as no longer maintained, with an optional successor. Installs still work. See [Registry reference](/pages/reference-registry/).
 
@@ -281,7 +281,7 @@ Windows and macOS refuse T2 and T3 packages until a sandbox exists on those syst
 | `ok` | The submission was applied. For a call, the typed result is ready to take. |
 | `ok-node(node-id)` | The submission was applied and created this node. |
 | `ok-epoch(u64)` | A `send-input` on an agent pane was applied and carries the new prompt epoch. The SDK treats it as `ok` where code matches only `ok`. |
-| `duplicate(original)` | The dedup key was reserved. `original` is the reference of the first submission. |
+| `duplicate(request-ref)` | The dedup key was reserved. `request-ref` is the reference of the first submission. |
 | `refused(code)` | Not applied, for a check that ran before acceptance. The key is not reserved. |
 | `failed(code)` | Accepted, but the host failed to apply it, for example with `io` or `timed-out`. |
 | `cancelled` | Stopped by the plugin, the user, or a shutdown. (A sibling of a refused submission is `refused(cancelled)`, not `cancelled`.) |

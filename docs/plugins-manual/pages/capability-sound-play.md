@@ -165,7 +165,7 @@ The host answers each submission with a `request-completed` event. The SDK passe
 | `refused(not-permitted)` | The grant is missing or declined, or was revoked before the call started. Every other submission in the same batch completes as `refused(cancelled)`. | Do not retry. Tell the user the grant is needed. |
 | `refused(not-found)` | The id is not in `catalog()`. Only this submission is refused. | Check `catalog()` first. Do not retry the same id. |
 | `refused(rate-limited)` | More than 4 `play-sound` submissions per second from this plugin. The result carries `retry-after-ms`. | Wait for `retry-after-ms`, or drop the sound. The key is not reserved, so a retry with the same key is valid. |
-| `duplicate(original)` | The same key was reserved within the last 10 minutes. The `original` field names the earlier submission. | Nothing. The earlier sound was already accepted. |
+| `duplicate(request-ref)` | The same key was reserved within the last 10 minutes. The `request-ref` payload names the earlier submission. | Nothing. The earlier sound was already accepted. |
 | `failed(io)` | The client has no audio output, or the device fails. | Log it. A retry of a failed play needs a new key. |
 | `refused(invalid-argument)` | The `dedup-key` is malformed. | Fix the key. The malformed submission refuses its whole batch. |
 

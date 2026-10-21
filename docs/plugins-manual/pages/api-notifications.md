@@ -52,7 +52,7 @@ Every submission may carry a `dedup-key`. Rust sets it with `Submission::keyed(i
 - **Format.** From 1 to 128 characters from `A-Z`, `a-z`, `0-9`, `.`, `_`, `:`, `/` and `-`. A key over 128 characters or with any other character is refused as `refused(invalid-argument)` for the lowest-index offender of the batch; every other submission completes as `refused(cancelled)` with the message `batch refused: submission <index>` ([ABI-009]).
 - **Scope.** The pair of plugin id and key. The server and each client keep separate tables, so a server notice and a client notice with the same key do not suppress each other.
 - **Window.** 10 minutes from the moment the key is reserved. The table is kept in memory, so a restart clears it, except that the keys of `send-input` and `agent-action` are journaled in the snapshot and survive.
-- **Outcome.** A repeat completes as `duplicate(original)`, where `original` names the submission that reserved the key. Nothing is shown or played. A duplicate is not an error.
+- **Outcome.** A repeat completes as `duplicate(request-ref)`, where `request-ref` names the submission that reserved the key. Nothing is shown or played. A duplicate is not an error.
 - **Reservation.** A key is reserved only after the submission passes its checks. A refused submission does not reserve its key, so a retry with the same key is valid.
 - **Batches.** The first submission in a batch that reserves a key blocks every later submission in the same batch with that key. Use a different key for the notice and for the sound, as the examples do.
 
@@ -173,7 +173,7 @@ export const { lifecycle, handler } = definePlugin({
 });
 ```
 
-Outcome: the first change of a pane to `awaiting-approval` completes both submissions as `ok`. A second change of the same pane within 10 minutes completes both as `duplicate(original)`. The user hears one sound and sees one notice.
+Outcome: the first change of a pane to `awaiting-approval` completes both submissions as `ok`. A second change of the same pane within 10 minutes completes both as `duplicate(request-ref)`. The user hears one sound and sees one notice.
 
 ### Example 2: a client command that picks a catalogue sound
 
@@ -218,7 +218,7 @@ export const { lifecycle, handler } = definePlugin({
 | Dedup key with a disallowed character or over 128 characters | `refused(invalid-argument)` for the lowest-index offender | Every other submission completes as `refused(cancelled)` with the message `batch refused: submission <index>` ([ABI-009]). |
 | More than 6 `notify` submissions per minute per plugin | `refused(rate-limited)` with `retry-after-ms` | Only that submission. |
 | More than 4 `play-sound` submissions per second per plugin | `refused(rate-limited)` with `retry-after-ms` | Only that submission. |
-| Repeat of a reserved key within 10 minutes | `duplicate(original)` | None. Not an error. |
+| Repeat of a reserved key within 10 minutes | `duplicate(request-ref)` | None. Not an error. |
 | Manifest sound file missing or in another format | Package check fails at install with `manifest.sound-format` | The plugin is not installed. |
 
 The sound id check happens per submission, so one bad id never stops a notice from showing. A refused submission does not reserve its key, so the plugin can fix the id and retry with the same key.

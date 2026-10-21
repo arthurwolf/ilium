@@ -449,7 +449,7 @@ The manifest of this tutorial already lists `notify.toast` in `capabilities.serv
 | `notify` or `play-sound` without its grant | `refused(not-permitted)`. The rest of the batch completes as `refused(cancelled)`. | A warn line. The finish raises no notice. |
 | Sound id not in `contributes.sounds` | `refused(not-found)` for that submission only. | A warn line. Other submissions in the batch apply. |
 | Seventh `notify` within one minute | `refused(rate-limited)` with `retry-after-ms`. | A warn line. The notice is dropped. |
-| Same finish delivered twice within 10 minutes | `duplicate(original)`. | A debug line. No second notice. |
+| Same finish delivered twice within 10 minutes | `duplicate(request-ref)`. | A debug line. No second notice. |
 | Compact while the agent is `working` | `refused(conflict)`, message `agent is working`. | A warn line. Nothing is sent. |
 | Pane not restored yet | `refused(pane-not-ready)`. | A warn line. Retry on a later event. |
 | Keys written to the agent fail after acceptance | `failed(code)`. The key stays reserved. | A warn line. The next press uses a new key. |

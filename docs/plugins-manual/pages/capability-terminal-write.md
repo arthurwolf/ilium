@@ -92,7 +92,7 @@ The kernel checks every `send-input` submission in this order. The first failing
 <line x1="212" y1="239" x2="222" y2="239" stroke="currentColor" stroke-dasharray="3 3" marker-end="url(#arr-terminal-write)"/>
 <text x="226" y="27" font-size="11" fill="currentColor">refused: invalid-argument</text>
 <text x="226" y="63" font-size="11" fill="currentColor">refused: not-permitted</text>
-<text x="226" y="99" font-size="11" fill="currentColor">duplicate(original)</text>
+<text x="226" y="99" font-size="11" fill="currentColor">duplicate(request-ref)</text>
 <text x="226" y="135" font-size="11" fill="currentColor">refused: not-found / unsupported</text>
 <text x="226" y="171" font-size="11" fill="currentColor">refused: pane-not-ready</text>
 <text x="226" y="207" font-size="11" fill="currentColor">refused: rate-limited</text>
@@ -110,7 +110,7 @@ A plugin can lose track of whether a send worked, for example after a restart. S
 - The key is mandatory for `send-input` and `agent-action`. A submission without one is malformed.
 - The key has 1 to 128 characters from `[A-Za-z0-9._:/-]`. Another character makes the submission malformed.
 - The key is reserved for the pair of plugin id and key, for the 10-minute reservation window (a different window from the 24-hour dedup journal in the limits table at the end of this page). The kernel also journals `send-input` keys in the session snapshot before the write. A server restart then does not repeat input.
-- A submission whose key is reserved completes as `duplicate(original)`, where `original` names the submission that reserved the key. It has no effect.
+- A submission whose key is reserved completes as `duplicate(request-ref)`, where `request-ref` names the submission that reserved the key. It has no effect.
 - A key is reserved only after every check passed. A refused submission keeps its key free, so a retry is valid. An accepted submission keeps its key reserved even if it later fails, so a retry of a failed send needs a new key.
 
 Derive the key from the work, never from the clock or a random value. A new random key on every attempt defeats the purpose. The SDK helper `dedup::key_for` (Rust) joins its parts with `:` and replaces disallowed characters with `-`. TypeScript has no helper, so the plugin builds the string itself.
@@ -174,7 +174,7 @@ A declined grant refuses the batch with `refused(not-permitted)`, and no text is
 
 ## Worked example in Rust
 
-This server-side function builds the submission for one due run of a scheduled command. The key comes from the schedule id and the due time, so a restart that replays the same due run is answered with `duplicate(original)`.
+This server-side function builds the submission for one due run of a scheduled command. The key comes from the schedule id and the due time, so a restart that replays the same due run is answered with `duplicate(request-ref)`.
 
 **Rust**
 
@@ -293,7 +293,7 @@ The text appears at the pane's prompt as if the user had typed it. With `submitt
 | Outcome | Cause | Retry |
 |---|---|---|
 | `ok` | The text was written. | Not needed. |
-| `duplicate(original)` | The key is reserved within the last 10 minutes. | No. The original was written. |
+| `duplicate(request-ref)` | The key is reserved within the last 10 minutes. | No. The original was written. |
 | `refused(invalid-argument)` | Text over 64 KiB, a missing or malformed key, or a malformed batch. | No. Fix the call. |
 | `refused(not-permitted)` | The grant is missing or declined. | No. Ask the user to grant it. |
 | `refused(not-found)` | The pane no longer exists. | No. |
@@ -303,7 +303,7 @@ The text appears at the pane's prompt as if the user had typed it. With `submitt
 | `refused(conflict)` | The prompt epoch is stale. | Yes, after reading the prompt again. |
 | `refused(cancelled)` | Another submission of the same batch was refused. | Maybe. |
 
-Check `is-restored` again before each write, because a pane can be restored after the plugin read it. Keep the queued text until you see `ok`, `duplicate(original)` or a refusal that will not clear.
+Check `is-restored` again before each write, because a pane can be restored after the plugin read it. Keep the queued text until you see `ok`, `duplicate(request-ref)` or a refusal that will not clear.
 
 Limits:
 

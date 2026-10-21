@@ -140,7 +140,7 @@ A submission may carry a `dedup-key`. The rules:
 - Format: 1 to 128 characters from `A-Z`, `a-z`, `0-9`, `.`, `_`, `:`, `/` and `-`. Any other character makes the submission malformed.
 - Scope: the pair (plugin id, key), at the kernel that applies the intent. The server and each client keep separate tables.
 - Window: 10 minutes from the moment the key is reserved.
-- Duplicate: a submission with a reserved key completes as `duplicate(<original>)` and has no effect. `original` is the `request-ref` of the submission that reserved the key.
+- Duplicate: a submission with a reserved key completes as `duplicate(request-ref)` and has no effect. The `request-ref` payload names the submission that reserved the key.
 - A key is reserved only after every acceptance check passes. A refused submission keeps its key free, so a retry with the same key after fixing the cause is valid. A submission that was accepted keeps its key even if it later fails. Retry a failed action with a new key.
 - `send-input` and `agent-action` require a key. Without one, the batch is refused. The kernel journals these keys before the write, for 24 hours or 4,096 entries per session, whichever is smaller. A restart therefore does not repeat the input.
 
@@ -208,7 +208,7 @@ For a forwarded intent:
 
 For `send-input`, two checks run at batch level before the list below, over the whole batch: shape (key present, total text across all stages at most 65,536 bytes, otherwise `invalid-argument`) and the grants: `terminal.write`, then `terminal.raw-input` if `raw` or `mouse` is set, then `terminal.input-lock` if `lock-user-input` is set (otherwise `not-permitted`). The page [send-input](/pages/api-intent-send-input/) has the full order. The kernel then checks each submission in this order. `agent-action` uses the same order, with its own grant. The first failing check decides the outcome.
 
-1. Dedup key. A reserved key gives `duplicate(<original>)`.
+1. Dedup key. A reserved key gives `duplicate(request-ref)`.
 2. The pane exists and is a terminal pane. Otherwise `not-found` or `unsupported`.
 3. The pane is not waiting to start: `is-restored` is false, which means its process has started. Otherwise `pane-not-ready`.
 4. The rate limit has room: 20 per second per pane and plugin. Otherwise `rate-limited`.
@@ -527,7 +527,7 @@ Illustrative, not generated: the JSONL form follows the harness output of the ex
 - `refused(conflict)` means the state changed. Read the current state, then submit again. A refused submission keeps its key free, so the same key is valid for the retry.
 - `failed(timed-out)` on `invoke-command` means the command did not reply within 30 seconds. The command may still finish later, so check its effect before a retry.
 - `refused(cancelled)` means another submission in the same batch was refused. Fix the refused one, then resubmit the whole group.
-- `duplicate(<original>)` is not an error. It confirms that an earlier submission with the same key already took effect.
+- `duplicate(request-ref)` is not an error. It confirms that an earlier submission with the same key already took effect.
 - A trap ends the plugin instance. The kernel restarts it under the restart rule in [errors and limits](/pages/reference-errors-and-limits/).
 
 ### What the user sees

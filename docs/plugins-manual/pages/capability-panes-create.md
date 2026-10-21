@@ -252,7 +252,7 @@ The grant is recorded per plugin and per side. A revoked grant withdraws any pan
 | `title` longer than 256 characters | `refused(invalid-argument)` |
 | `initial-input` without `terminal.write` | The whole batch is refused as `refused(not-permitted)`. |
 | The program in `command` cannot start | `failed(io)`. |
-| A key was accepted within the last 10 minutes | `duplicate(<original>)`. Nothing is created. |
+| A key was accepted within the last 10 minutes | `duplicate(request-ref)`. Nothing is created. |
 | The batch holds more than 256 submissions | The plugin traps. |
 
 A refused submission does not reserve its dedup key, so a retry with the same key after fixing the cause is valid. A key that was accepted stays reserved even if the pane later fails. Retry a failed creation with a new key.
