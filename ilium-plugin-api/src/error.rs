@@ -179,3 +179,379 @@ impl PartialEq<&str> for Code {
         self.0 == *other
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// REQ: DEV-023
+    #[test]
+    fn severity_all_lists_every_severity_most_severe_first() {
+        assert_eq!(
+            Severity::ALL,
+            [Severity::Error, Severity::Warning, Severity::Info]
+        );
+    }
+
+    /// REQ: DEV-023
+    #[test]
+    fn severity_as_str_uses_the_documented_names() {
+        assert_eq!(Severity::Error.as_str(), "error");
+        assert_eq!(Severity::Warning.as_str(), "warn");
+        assert_eq!(Severity::Info.as_str(), "info");
+    }
+
+    /// REQ: DEV-023
+    #[test]
+    fn severity_display_matches_as_str_for_every_severity() {
+        for severity in Severity::ALL {
+            assert_eq!(format!("{severity}"), severity.as_str());
+        }
+    }
+
+    /// REQ: DEV-023
+    #[test]
+    fn severity_from_str_parses_every_documented_name() {
+        assert_eq!("error".parse::<Severity>(), Ok(Severity::Error));
+        assert_eq!("warn".parse::<Severity>(), Ok(Severity::Warning));
+        assert_eq!("info".parse::<Severity>(), Ok(Severity::Info));
+    }
+
+    /// REQ: DEV-023
+    #[test]
+    fn severity_from_str_rejects_the_long_warning_name() {
+        assert_eq!(
+            "warning".parse::<Severity>(),
+            Err(UnknownName::new("severity", "warning"))
+        );
+    }
+
+    /// REQ: DEV-023
+    #[test]
+    fn severity_from_str_rejects_empty_and_wrong_case_text() {
+        assert_eq!("".parse::<Severity>(), Err(UnknownName::new("severity", "")));
+        assert_eq!(
+            "Error".parse::<Severity>(),
+            Err(UnknownName::new("severity", "Error"))
+        );
+    }
+
+    /// REQ: DEV-023
+    #[test]
+    fn severity_text_round_trips_through_from_str() {
+        for severity in Severity::ALL {
+            assert_eq!(severity.as_str().parse::<Severity>(), Ok(severity));
+        }
+    }
+
+    /// REQ: API-081
+    #[test]
+    fn code_from_static_keeps_the_text_in_as_str_and_display() {
+        let code = Code::from_static("manifest.grant-side");
+        assert_eq!(code.as_str(), "manifest.grant-side");
+        assert_eq!(format!("{code}"), "manifest.grant-side");
+    }
+
+    /// REQ: API-081
+    #[test]
+    fn code_namespace_is_the_part_before_the_first_dot() {
+        assert_eq!(Code::from_static("manifest.grant-side").namespace(), "manifest");
+        assert_eq!(Code::from_static("trap.deadline").namespace(), "trap");
+        assert_eq!(Code::from_static("extension.vetoed.sub").namespace(), "extension");
+    }
+
+    /// REQ: API-081
+    #[test]
+    fn code_namespace_of_empty_or_leading_dot_text_is_empty() {
+        assert_eq!(Code::from_static("").namespace(), "");
+        assert_eq!(Code::from_static(".deadline").namespace(), "");
+    }
+
+    /// REQ: EXT-003
+    #[test]
+    fn code_base_maps_extension_codes_to_their_documented_base_codes() {
+        assert_eq!(Code::from_static("extension.vetoed").base(), ErrorCode::Conflict);
+        assert_eq!(Code::from_static("extension.not-granted").base(), ErrorCode::NotPermitted);
+        assert_eq!(Code::from_static("extension.unknown-point").base(), ErrorCode::NotFound);
+        assert_eq!(
+            Code::from_static("extension.schema-mismatch").base(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(Code::from_static("extension.not-dynamic").base(), ErrorCode::Unsupported);
+        assert_eq!(Code::from_static("extension.reentrant").base(), ErrorCode::Conflict);
+        assert_eq!(Code::from_static("extension.depth-exceeded").base(), ErrorCode::Conflict);
+        assert_eq!(
+            Code::from_static("extension.entry-rejected").base(),
+            ErrorCode::InvalidArgument
+        );
+    }
+
+    /// REQ: API-081
+    #[test]
+    fn code_compares_equal_to_its_text_as_str_and_str_literals() {
+        let code = Code::from_static("trap.deadline");
+        assert!(code == *"trap.deadline");
+        assert!(code == "trap.deadline");
+        assert!(code != "trap.memory");
+    }
+
+    /// REQ: API-001
+    #[test]
+    fn message_max_chars_is_256() {
+        assert_eq!(MESSAGE_MAX_CHARS, 256);
+    }
+
+    /// REQ: API-001
+    #[test]
+    fn plugin_error_new_keeps_a_short_message_and_the_code() {
+        let error = PluginError::new(ErrorCode::NotFound, "pane 4 is gone");
+        assert_eq!(error.code, ErrorCode::NotFound);
+        assert_eq!(error.message, "pane 4 is gone");
+    }
+
+    /// REQ: API-003
+    #[test]
+    fn plugin_error_new_leaves_retry_after_ms_unset() {
+        let error = PluginError::new(ErrorCode::Busy, "queue full");
+        assert_eq!(error.retry_after_ms, None);
+    }
+
+    /// REQ: API-001
+    #[test]
+    fn plugin_error_new_accepts_an_empty_message() {
+        let error = PluginError::new(ErrorCode::Internal, "");
+        assert_eq!(error.message, "");
+    }
+
+    /// REQ: API-001
+    #[test]
+    fn plugin_error_new_keeps_a_message_of_exactly_256_characters() {
+        let message = "a".repeat(256);
+        let error = PluginError::new(ErrorCode::Io, message.as_str());
+        assert_eq!(error.message, message);
+    }
+
+    /// REQ: API-001
+    #[test]
+    fn plugin_error_new_cuts_a_message_over_256_characters() {
+        let message = "a".repeat(300);
+        let error = PluginError::new(ErrorCode::Io, message.as_str());
+        assert_eq!(error.message.chars().count(), 256);
+        assert_eq!(error.message, "a".repeat(256));
+    }
+
+    /// REQ: API-001
+    #[test]
+    fn plugin_error_new_counts_characters_not_bytes_when_cutting() {
+        let message = "é".repeat(300);
+        let error = PluginError::new(ErrorCode::Io, message.as_str());
+        assert_eq!(error.message.chars().count(), 256);
+        assert_eq!(error.message, "é".repeat(256));
+    }
+
+    /// REQ: EXT-003
+    #[test]
+    fn with_prefix_starts_the_message_with_the_extension_code_colon_and_space() {
+        let error = PluginError::with_prefix(
+            ErrorCode::Conflict,
+            &Code::from_static("extension.vetoed"),
+            "quiet hours are on",
+        );
+        assert_eq!(error.code, ErrorCode::Conflict);
+        assert_eq!(error.message, "extension.vetoed: quiet hours are on");
+    }
+
+    /// REQ: EXT-003
+    #[test]
+    fn with_prefix_with_an_empty_message_keeps_only_the_prefix() {
+        let error = PluginError::with_prefix(
+            ErrorCode::Conflict,
+            &Code::from_static("extension.vetoed"),
+            "",
+        );
+        assert_eq!(error.message, "extension.vetoed: ");
+    }
+
+    /// REQ: API-001
+    #[test]
+    fn with_prefix_caps_the_whole_message_at_256_characters() {
+        let long_text = "b".repeat(300);
+        let error = PluginError::with_prefix(
+            ErrorCode::Conflict,
+            &Code::from_static("extension.vetoed"),
+            long_text.as_str(),
+        );
+        assert_eq!(error.message.chars().count(), 256);
+        assert!(error.message.starts_with("extension.vetoed: "));
+    }
+
+    /// REQ: EXT-003
+    #[test]
+    fn extension_code_reads_the_prefix_written_by_with_prefix() {
+        let error = PluginError::with_prefix(
+            ErrorCode::Conflict,
+            &Code::from_static("extension.vetoed"),
+            "quiet hours are on",
+        );
+        assert_eq!(error.extension_code(), Some(Code::from_static("extension.vetoed")));
+    }
+
+    /// REQ: EXT-003
+    #[test]
+    fn extension_code_reads_only_the_leading_code_before_the_plugin_id() {
+        let error = PluginError::new(
+            ErrorCode::Conflict,
+            "extension.vetoed: com.example.quiet-hours: quiet hours are on",
+        );
+        assert_eq!(error.extension_code(), Some(Code::from_static("extension.vetoed")));
+    }
+
+    /// REQ: EXT-003
+    #[test]
+    fn extension_code_is_none_when_the_message_has_no_prefix() {
+        let error = PluginError::new(ErrorCode::NotFound, "pane 4 is gone");
+        assert_eq!(error.extension_code(), None);
+    }
+
+    /// REQ: EXT-003
+    #[test]
+    fn extension_code_is_none_for_an_empty_message() {
+        let error = PluginError::new(ErrorCode::Internal, "");
+        assert_eq!(error.extension_code(), None);
+    }
+
+    /// REQ: EXT-003
+    #[test]
+    fn extension_code_is_none_when_the_colon_is_not_followed_by_a_space() {
+        let error = PluginError::new(ErrorCode::Conflict, "extension.vetoed:quiet");
+        assert_eq!(error.extension_code(), None);
+    }
+
+    /// REQ: EXT-003
+    #[test]
+    fn extension_code_is_none_when_the_code_is_not_at_the_start() {
+        let error = PluginError::new(ErrorCode::Conflict, "failed on extension.vetoed: quiet");
+        assert_eq!(error.extension_code(), None);
+    }
+
+    /// REQ: API-081
+    #[test]
+    fn extension_code_is_none_for_a_prefix_without_a_namespace_dot() {
+        let error = PluginError::new(ErrorCode::Internal, "internal: failure");
+        assert_eq!(error.extension_code(), None);
+    }
+
+    /// REQ: EXT-003
+    #[test]
+    fn registry_maps_extension_codes_to_their_documented_base_codes() {
+        let base_of = |wanted: &str| {
+            registry()
+                .iter()
+                .find(|info| info.code == wanted)
+                .map(|info| info.base)
+        };
+        assert_eq!(base_of("extension.vetoed"), Some(ErrorCode::Conflict));
+        assert_eq!(base_of("extension.schema-mismatch"), Some(ErrorCode::InvalidArgument));
+        assert_eq!(base_of("extension.unknown-point"), Some(ErrorCode::NotFound));
+    }
+
+    /// REQ: API-002
+    #[test]
+    fn registry_codes_are_unique_namespaced_and_name_a_page() {
+        let mut seen = std::collections::HashSet::new();
+        for info in registry() {
+            assert!(seen.insert(info.code), "duplicate registry code {}", info.code);
+            assert!(info.code.contains('.'), "code {} is not namespaced", info.code);
+            assert!(!info.page.is_empty(), "code {} names no page", info.code);
+        }
+        assert!(!seen.is_empty());
+    }
+
+    /// REQ: API-002
+    #[test]
+    fn refusal_reasons_are_the_closed_list_in_table_order() {
+        assert_eq!(
+            REFUSAL_REASONS,
+            [
+                "declined",
+                "revoked",
+                "not-granted",
+                "scope",
+                "policy",
+                "offline",
+                "private-address",
+                "reserved",
+                "downgrade",
+                "not-user-initiated",
+                "file-type",
+                "unavailable",
+                "response-size",
+                "stream-size",
+                "tls",
+            ]
+        );
+    }
+
+    /// REQ: API-002
+    #[test]
+    fn refusal_reason_code_maps_the_not_permitted_reasons() {
+        for reason in [
+            "declined",
+            "revoked",
+            "not-granted",
+            "scope",
+            "policy",
+            "offline",
+            "private-address",
+            "reserved",
+            "downgrade",
+            "not-user-initiated",
+            "file-type",
+            "unavailable",
+        ] {
+            assert_eq!(
+                refusal_reason_code(reason),
+                Some(ErrorCode::NotPermitted),
+                "reason {reason}"
+            );
+        }
+    }
+
+    /// REQ: API-002
+    #[test]
+    fn refusal_reason_code_maps_the_quota_and_network_reasons() {
+        assert_eq!(refusal_reason_code("response-size"), Some(ErrorCode::QuotaExceeded));
+        assert_eq!(refusal_reason_code("stream-size"), Some(ErrorCode::QuotaExceeded));
+        assert_eq!(refusal_reason_code("tls"), Some(ErrorCode::Network));
+    }
+
+    /// REQ: API-002
+    #[test]
+    fn refusal_reason_code_is_none_for_unknown_empty_or_wrong_case_words() {
+        assert_eq!(refusal_reason_code("bogus"), None);
+        assert_eq!(refusal_reason_code(""), None);
+        assert_eq!(refusal_reason_code("Declined"), None);
+    }
+
+    /// REQ: API-002
+    #[test]
+    fn unknown_name_stores_the_kind_and_the_name() {
+        let error = UnknownName::new("tier", "gold");
+        assert_eq!(error.kind, "tier");
+        assert_eq!(error.name, "gold");
+    }
+
+    /// REQ: API-002
+    #[test]
+    fn unknown_name_display_quotes_the_offending_name() {
+        let error = UnknownName::new("severity", "warning");
+        assert_eq!(format!("{error}"), r#"unknown severity name "warning""#);
+    }
+
+    /// REQ: API-002
+    #[test]
+    fn unknown_name_display_handles_an_empty_name() {
+        let error = UnknownName::new("tier", "");
+        assert_eq!(format!("{error}"), r#"unknown tier name """#);
+    }
+}

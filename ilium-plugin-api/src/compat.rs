@@ -42,3 +42,217 @@ pub fn map_reason_for(
 pub fn event_deliverable(_event_case: &str, _plugin_api: ApiVersion) -> bool {
     unimplemented!("api::compat::event_deliverable")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The host's own contract version, `ilium:plugin@0.1.0`. Every stable 0.1.0 item is
+    /// `@since(version = 0.1.0)` (reference-abi-evolution.md section 3).
+    fn host_version() -> ApiVersion {
+        ApiVersion {
+            major: 0,
+            minor: 1,
+            patch: 0,
+        }
+    }
+
+    /// A plugin built before 0.1.0 (the previous minor of the host window). Every 0.1.0 case is
+    /// newer than it, so ABI-029 applies.
+    fn predating_version() -> ApiVersion {
+        ApiVersion {
+            major: 0,
+            minor: 0,
+            patch: 9,
+        }
+    }
+
+    /// REQ: ABI-029
+    #[test]
+    fn case_since_reports_0_1_0_for_stable_event_case() {
+        assert_eq!(
+            case_since(CaseFamily::Event, "tree-changed"),
+            Some(host_version())
+        );
+    }
+
+    /// REQ: ABI-029
+    #[test]
+    fn case_since_reports_0_1_0_for_last_listed_event_case() {
+        assert_eq!(
+            case_since(CaseFamily::Event, "display-mode-changed"),
+            Some(host_version())
+        );
+    }
+
+    /// REQ: ABI-029
+    #[test]
+    fn case_since_reports_0_1_0_for_intent_case() {
+        assert_eq!(
+            case_since(CaseFamily::Intent, "send-input"),
+            Some(host_version())
+        );
+    }
+
+    /// REQ: ABI-029
+    #[test]
+    fn case_since_reports_0_1_0_for_outcome_case_ok_epoch() {
+        assert_eq!(
+            case_since(CaseFamily::Outcome, "ok-epoch"),
+            Some(host_version())
+        );
+    }
+
+    /// REQ: ABI-028
+    #[test]
+    fn case_since_reports_0_1_0_for_reserved_crash_restart() {
+        // The reserved case exists in the enum from 0.1.0 so that numbering never changes.
+        assert_eq!(
+            case_since(CaseFamily::DeactivationReason, "crash-restart"),
+            Some(host_version())
+        );
+    }
+
+    /// REQ: ABI-029
+    #[test]
+    fn case_since_returns_none_for_unknown_case_name() {
+        assert_eq!(case_since(CaseFamily::Event, "no-such-event"), None);
+    }
+
+    /// REQ: ABI-029
+    #[test]
+    fn case_since_returns_none_for_empty_case_name() {
+        assert_eq!(case_since(CaseFamily::Intent, ""), None);
+    }
+
+    /// REQ: ABI-029
+    #[test]
+    fn case_since_is_none_when_name_belongs_to_another_family() {
+        // `tree-changed` is an event case, not an outcome case.
+        assert_eq!(case_since(CaseFamily::Outcome, "tree-changed"), None);
+    }
+
+    /// REQ: ABI-029
+    #[test]
+    fn map_outcome_for_keeps_ok_for_current_api() {
+        assert_eq!(
+            map_outcome_for(&Outcome::Ok, host_version()),
+            Outcome::Ok
+        );
+    }
+
+    /// REQ: ABI-029
+    #[test]
+    fn map_outcome_for_keeps_ok_epoch_for_plugin_built_for_current_api() {
+        assert_eq!(
+            map_outcome_for(&Outcome::OkEpoch(7), host_version()),
+            Outcome::OkEpoch(7)
+        );
+    }
+
+    /// REQ: ABI-029
+    #[test]
+    fn map_outcome_for_maps_ok_epoch_to_ok_for_older_plugin() {
+        // reference-abi-evolution.md section 5: `ok-epoch(n)` reaches an earlier API as `ok`.
+        assert_eq!(
+            map_outcome_for(&Outcome::OkEpoch(5), predating_version()),
+            Outcome::Ok
+        );
+    }
+
+    /// REQ: ABI-029
+    #[test]
+    fn map_outcome_for_leaves_base_cancelled_unchanged_for_older_plugin() {
+        assert_eq!(
+            map_outcome_for(&Outcome::Cancelled, predating_version()),
+            Outcome::Cancelled
+        );
+    }
+
+    /// REQ: ABI-028
+    #[test]
+    fn map_reason_for_never_delivers_crash_restart() {
+        assert_eq!(
+            map_reason_for(DeactivationReason::CrashRestart, host_version()),
+            None
+        );
+    }
+
+    /// REQ: ABI-028
+    #[test]
+    fn map_reason_for_never_delivers_crash_restart_to_older_plugin() {
+        assert_eq!(
+            map_reason_for(DeactivationReason::CrashRestart, predating_version()),
+            None
+        );
+    }
+
+    /// REQ: ABI-029
+    #[test]
+    fn map_reason_for_keeps_shutdown_for_current_api() {
+        assert_eq!(
+            map_reason_for(DeactivationReason::Shutdown, host_version()),
+            Some(DeactivationReason::Shutdown)
+        );
+    }
+
+    /// REQ: ABI-029
+    #[test]
+    fn map_reason_for_keeps_revoked_for_current_api() {
+        assert_eq!(
+            map_reason_for(DeactivationReason::Revoked, host_version()),
+            Some(DeactivationReason::Revoked)
+        );
+    }
+
+    /// REQ: ABI-029
+    #[test]
+    fn map_reason_for_maps_newer_revoked_to_shutdown_for_older_plugin() {
+        // A newer `deactivation-reason` is delivered as `shutdown` (section 5).
+        assert_eq!(
+            map_reason_for(DeactivationReason::Revoked, predating_version()),
+            Some(DeactivationReason::Shutdown)
+        );
+    }
+
+    /// REQ: ABI-029
+    #[test]
+    fn map_reason_for_maps_newer_granted_to_shutdown_for_older_plugin() {
+        assert_eq!(
+            map_reason_for(DeactivationReason::Granted, predating_version()),
+            Some(DeactivationReason::Shutdown)
+        );
+    }
+
+    /// REQ: ABI-029
+    #[test]
+    fn event_deliverable_true_for_known_event_to_current_api() {
+        assert!(event_deliverable("tree-changed", host_version()));
+    }
+
+    /// REQ: ABI-029
+    #[test]
+    fn event_deliverable_true_for_appended_event_to_current_api() {
+        // `screen-changed` is in the appended block of the event variant.
+        assert!(event_deliverable("screen-changed", host_version()));
+    }
+
+    /// REQ: ABI-029
+    #[test]
+    fn event_deliverable_false_for_event_newer_than_older_plugin() {
+        assert!(!event_deliverable("tree-changed", predating_version()));
+    }
+
+    /// REQ: ABI-029
+    #[test]
+    fn event_deliverable_false_for_unknown_event_case() {
+        // An unknown case is not delivered to any plugin.
+        assert!(!event_deliverable("no-such-event", host_version()));
+    }
+
+    /// REQ: ABI-029
+    #[test]
+    fn event_deliverable_false_for_empty_event_name() {
+        assert!(!event_deliverable("", host_version()));
+    }
+}

@@ -166,3 +166,382 @@ impl QueueModel {
         unimplemented!("api::abi::QueueModel::events_dropped_records")
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::generated::types::ErrorCode;
+
+    fn push_times(queue: &mut QueueModel, event_case: &str, key: u64, times: usize) {
+        for _ in 0..times {
+            queue.push(event_case, key);
+        }
+    }
+
+    /// REQ: ABI-008
+    #[test]
+    fn check_submission_count_accepts_empty_batch() {
+        assert_eq!(check_submission_count(0), Ok(()));
+    }
+
+    /// REQ: ABI-008
+    #[test]
+    fn check_submission_count_accepts_exactly_the_limit() {
+        assert_eq!(check_submission_count(SUBMISSION_BATCH_LIMIT), Ok(()));
+        assert_eq!(check_submission_count(256), Ok(()));
+    }
+
+    /// REQ: ABI-008
+    #[test]
+    fn check_submission_count_traps_one_over_the_limit() {
+        let trap = check_submission_count(257).expect_err("257 submissions must trap");
+        assert_eq!(trap.as_str(), "trap.submission-batch");
+    }
+
+    /// REQ: ABI-031
+    #[test]
+    fn batch_verdicts_empty_input_yields_no_verdicts() {
+        assert_eq!(batch_verdicts(&[]), Vec::<BatchVerdict>::new());
+    }
+
+    /// REQ: ABI-032
+    #[test]
+    fn batch_verdicts_all_valid_submissions_proceed() {
+        let valid = BatchCheck { shape_ok: true, grant_ok: true };
+        assert_eq!(
+            batch_verdicts(&[valid, valid, valid]),
+            vec![BatchVerdict::Proceed, BatchVerdict::Proceed, BatchVerdict::Proceed]
+        );
+    }
+
+    /// REQ: ABI-031
+    #[test]
+    fn batch_verdicts_shape_is_checked_over_whole_list_before_grant() {
+        // Index 0 lacks its grant, index 2 is malformed: the shape check decides first,
+        // so index 2 is the offender and index 0 is cancelled with its message.
+        let checks = [
+            BatchCheck { shape_ok: true, grant_ok: false },
+            BatchCheck { shape_ok: true, grant_ok: true },
+            BatchCheck { shape_ok: false, grant_ok: true },
+        ];
+        assert_eq!(
+            batch_verdicts(&checks),
+            vec![
+                BatchVerdict::Cancelled("batch refused: submission 2".to_string()),
+                BatchVerdict::Cancelled("batch refused: submission 2".to_string()),
+                BatchVerdict::Refused(ErrorCode::InvalidArgument),
+            ]
+        );
+    }
+
+    /// REQ: ABI-009
+    #[test]
+    fn batch_verdicts_lowest_grant_failure_is_refused_not_permitted() {
+        let checks = [
+            BatchCheck { shape_ok: true, grant_ok: true },
+            BatchCheck { shape_ok: true, grant_ok: false },
+            BatchCheck { shape_ok: true, grant_ok: false },
+        ];
+        assert_eq!(
+            batch_verdicts(&checks),
+            vec![
+                BatchVerdict::Cancelled("batch refused: submission 1".to_string()),
+                BatchVerdict::Refused(ErrorCode::NotPermitted),
+                BatchVerdict::Cancelled("batch refused: submission 1".to_string()),
+            ]
+        );
+    }
+
+    /// REQ: ABI-009
+    #[test]
+    fn batch_verdicts_lowest_index_shape_offender_is_chosen() {
+        let checks = [
+            BatchCheck { shape_ok: false, grant_ok: true },
+            BatchCheck { shape_ok: true, grant_ok: true },
+            BatchCheck { shape_ok: false, grant_ok: true },
+        ];
+        assert_eq!(
+            batch_verdicts(&checks),
+            vec![
+                BatchVerdict::Refused(ErrorCode::InvalidArgument),
+                BatchVerdict::Cancelled("batch refused: submission 0".to_string()),
+                BatchVerdict::Cancelled("batch refused: submission 0".to_string()),
+            ]
+        );
+    }
+
+    /// REQ: ABI-031
+    #[test]
+    fn batch_verdicts_single_submission_with_both_defects_reports_shape() {
+        let checks = [BatchCheck { shape_ok: false, grant_ok: false }];
+        assert_eq!(batch_verdicts(&checks), vec![BatchVerdict::Refused(ErrorCode::InvalidArgument)]);
+    }
+
+    /// REQ: ABI-011
+    #[test]
+    fn is_sdk_correlation_below_floor_belongs_to_plugin() {
+        assert!(!is_sdk_correlation(0));
+        assert!(!is_sdk_correlation(42));
+        assert!(!is_sdk_correlation(SDK_CORRELATION_FLOOR - 1));
+    }
+
+    /// REQ: ABI-011
+    #[test]
+    fn is_sdk_correlation_from_floor_up_belongs_to_sdk() {
+        assert!(is_sdk_correlation(SDK_CORRELATION_FLOOR));
+        assert!(is_sdk_correlation(1 << 63 | 1));
+        assert!(is_sdk_correlation(u64::MAX));
+    }
+
+    /// REQ: ABI-042
+    #[test]
+    fn deadline_ticks_zero_deadline_is_one_tick() {
+        assert_eq!(deadline_ticks(0), 1);
+    }
+
+    /// REQ: ABI-042
+    #[test]
+    fn deadline_ticks_rounds_up_to_whole_ticks_then_adds_one() {
+        assert_eq!(deadline_ticks(1), 2);
+        assert_eq!(deadline_ticks(10), 2);
+        assert_eq!(deadline_ticks(11), 3);
+        assert_eq!(deadline_ticks(20), 3);
+        assert_eq!(deadline_ticks(21), 4);
+    }
+
+    /// REQ: ABI-042
+    #[test]
+    fn deadline_ticks_handles_u64_max_without_overflow() {
+        // ceil(u64::MAX / 10) = 1844674407370955162, plus one tick.
+        assert_eq!(deadline_ticks(u64::MAX), 1_844_674_407_370_955_163);
+    }
+
+    /// REQ: ABI-045
+    #[test]
+    fn batch_sizes_empty_queue_yields_no_batches() {
+        assert_eq!(batch_sizes(0), Vec::<usize>::new());
+    }
+
+    /// REQ: ABI-045
+    #[test]
+    fn batch_sizes_within_limit_is_one_batch() {
+        assert_eq!(batch_sizes(1), vec![1]);
+        assert_eq!(batch_sizes(256), vec![256]);
+    }
+
+    /// REQ: ABI-045
+    #[test]
+    fn batch_sizes_splits_at_256_in_order() {
+        assert_eq!(batch_sizes(257), vec![256, 1]);
+        assert_eq!(batch_sizes(512), vec![256, 256]);
+        assert_eq!(batch_sizes(600), vec![256, 256, 88]);
+    }
+
+    /// REQ: ABI-044
+    #[test]
+    fn restore_bytes_accepted_up_to_one_mebibyte() {
+        assert!(restore_bytes_accepted(0));
+        assert!(restore_bytes_accepted(1));
+        assert!(restore_bytes_accepted(RESTORE_BYTES_MAX - 1));
+        assert!(restore_bytes_accepted(RESTORE_BYTES_MAX));
+    }
+
+    /// REQ: ABI-044
+    #[test]
+    fn restore_bytes_rejected_above_one_mebibyte() {
+        assert!(!restore_bytes_accepted(RESTORE_BYTES_MAX + 1));
+        assert!(!restore_bytes_accepted(usize::MAX));
+    }
+
+    /// REQ: ABI-048
+    #[test]
+    fn is_pure_export_names_the_three_pure_calls() {
+        assert!(is_pure_export("views.render"));
+        assert!(is_pure_export("annotate"));
+        assert!(is_pure_export("settings-validate"));
+    }
+
+    /// REQ: ABI-048
+    #[test]
+    fn is_pure_export_rejects_other_and_empty_names() {
+        assert!(!is_pure_export("intents.submit"));
+        assert!(!is_pure_export("on-events"));
+        assert!(!is_pure_export("views"));
+        assert!(!is_pure_export(""));
+    }
+
+    /// REQ: ABI-048
+    #[test]
+    fn effectful_import_error_is_not_permitted_with_documented_message() {
+        let error = effectful_import_error();
+        assert_eq!(error.code, ErrorCode::NotPermitted);
+        assert_eq!(error.message, "effectful import in a pure call");
+        assert_eq!(error.retry_after_ms, None);
+    }
+
+    /// REQ: ABI-015
+    #[test]
+    fn delivery_policy_coalesced_cases() {
+        for case in ["screen-changed", "pane-focused", "tree-changed", "events-dropped"] {
+            assert_eq!(delivery_policy(case), Some(DeliveryPolicy::Coalesced), "{case}");
+        }
+    }
+
+    /// REQ: ABI-015
+    #[test]
+    fn delivery_policy_drop_oldest_cases() {
+        for case in ["output-matched", "topic-published", "audio-frames"] {
+            assert_eq!(delivery_policy(case), Some(DeliveryPolicy::DropOldestCounted), "{case}");
+        }
+    }
+
+    /// REQ: ABI-015
+    #[test]
+    fn delivery_policy_never_dropped_cases() {
+        for case in ["agent-activity-changed", "message", "pane-exited", "request-completed"] {
+            assert_eq!(delivery_policy(case), Some(DeliveryPolicy::NeverDropped), "{case}");
+        }
+    }
+
+    /// REQ: ABI-015
+    #[test]
+    fn delivery_policy_unknown_or_empty_name_is_none() {
+        assert_eq!(delivery_policy("no-such-event"), None);
+        assert_eq!(delivery_policy(""), None);
+    }
+
+    /// REQ: ABI-015
+    #[test]
+    fn counted_in_events_dropped_only_for_drop_oldest_events() {
+        assert!(counted_in_events_dropped("output-matched"));
+        assert!(counted_in_events_dropped("topic-published"));
+        assert!(!counted_in_events_dropped("pane-focused"));
+        assert!(!counted_in_events_dropped("agent-activity-changed"));
+        assert!(!counted_in_events_dropped("events-dropped"));
+    }
+
+    /// REQ: ABI-045
+    #[test]
+    fn queue_new_is_empty_and_keeps_capacity() {
+        let queue = QueueModel::new(8);
+        assert_eq!(queue.capacity(), 8);
+        assert!(queue.is_empty());
+        assert_eq!(queue.len(), 0);
+        assert_eq!(queue.dropped_total(), 0);
+        assert_eq!(queue.events_dropped_records(), Vec::<(String, u64)>::new());
+    }
+
+    /// REQ: ABI-033
+    #[test]
+    fn queue_filled_to_exact_capacity_drops_nothing() {
+        let mut queue = QueueModel::new(4);
+        push_times(&mut queue, "output-matched", 0, 4);
+        assert_eq!(queue.len(), 4);
+        assert!(!queue.is_empty());
+        assert_eq!(queue.dropped_total(), 0);
+        assert_eq!(queue.events_dropped_records(), Vec::<(String, u64)>::new());
+    }
+
+    /// REQ: ABI-033
+    #[test]
+    fn queue_overflow_evicts_and_counts_each_drop_oldest_event() {
+        let mut queue = QueueModel::new(4);
+        push_times(&mut queue, "output-matched", 0, 10);
+        assert_eq!(queue.dropped_total(), 6);
+        assert_eq!(
+            queue.events_dropped_records(),
+            vec![("output-matched".to_string(), 6)]
+        );
+    }
+
+    /// REQ: ABI-039
+    #[test]
+    fn queue_coalesced_same_key_merges_without_counting() {
+        let mut queue = QueueModel::new(1024);
+        push_times(&mut queue, "screen-changed", 7, 2000);
+        assert_eq!(queue.len(), 1);
+        assert_eq!(queue.dropped_total(), 0);
+        assert_eq!(queue.events_dropped_records(), Vec::<(String, u64)>::new());
+    }
+
+    /// REQ: ABI-039
+    #[test]
+    fn queue_coalesced_distinct_keys_each_take_a_slot() {
+        let mut queue = QueueModel::new(3);
+        queue.push("pane-focused", 1);
+        queue.push("pane-focused", 2);
+        queue.push("pane-focused", 3);
+        assert_eq!(queue.len(), 3);
+        queue.push("pane-focused", 2);
+        assert_eq!(queue.len(), 3);
+        assert_eq!(queue.dropped_total(), 0);
+    }
+
+    /// REQ: EVT-004
+    #[test]
+    fn queue_coalesced_pending_key_on_full_queue_does_not_evict() {
+        let mut queue = QueueModel::new(2);
+        queue.push("output-matched", 0);
+        queue.push("pane-focused", 1);
+        queue.push("pane-focused", 1);
+        assert_eq!(queue.len(), 2);
+        assert_eq!(queue.dropped_total(), 0);
+        assert_eq!(queue.events_dropped_records(), Vec::<(String, u64)>::new());
+    }
+
+    /// REQ: EVT-004
+    #[test]
+    fn queue_full_without_drop_oldest_pending_discards_incoming_drop_oldest_event() {
+        let mut queue = QueueModel::new(2);
+        queue.push("pane-focused", 1);
+        queue.push("pane-focused", 2);
+        queue.push("output-matched", 0);
+        assert_eq!(queue.len(), 2);
+        assert_eq!(queue.dropped_total(), 1);
+        assert_eq!(
+            queue.events_dropped_records(),
+            vec![("output-matched".to_string(), 1)]
+        );
+    }
+
+    /// REQ: EVT-004
+    #[test]
+    fn queue_never_dropped_events_are_not_evicted() {
+        let mut queue = QueueModel::new(2);
+        queue.push("agent-activity-changed", 1);
+        queue.push("agent-activity-changed", 2);
+        queue.push("topic-published", 0);
+        assert_eq!(queue.len(), 2);
+        assert_eq!(queue.dropped_total(), 1);
+        assert_eq!(
+            queue.events_dropped_records(),
+            vec![("topic-published".to_string(), 1)]
+        );
+    }
+
+    /// REQ: EVT-004
+    #[test]
+    fn queue_zero_capacity_discards_drop_oldest_event() {
+        let mut queue = QueueModel::new(0);
+        queue.push("output-matched", 0);
+        assert!(queue.is_empty());
+        assert_eq!(queue.dropped_total(), 1);
+    }
+
+    /// REQ: ABI-036
+    #[test]
+    fn queue_drop_records_merge_per_event_case_in_first_drop_order() {
+        let mut queue = QueueModel::new(1);
+        for case in ["output-matched", "topic-published", "output-matched", "topic-published", "output-matched"] {
+            queue.push(case, 0);
+        }
+        assert_eq!(queue.dropped_total(), 4);
+        assert_eq!(
+            queue.events_dropped_records(),
+            vec![
+                ("output-matched".to_string(), 2),
+                ("topic-published".to_string(), 2),
+            ]
+        );
+    }
+}

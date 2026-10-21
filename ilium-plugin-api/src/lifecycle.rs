@@ -117,3 +117,554 @@ impl RestartPolicy {
         self.failures_ms.clear();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Shorthand for a documented code literal.
+    fn code(text: &'static str) -> Code {
+        Code::from_static(text)
+    }
+
+    // ----- Instance state machine (reference-plugin-lifecycle-states.md, "Instance-state transitions") -----
+
+    /// REQ: LIF-005
+    /// Row I1: an inactive side with a fired activation trigger starts `activate`.
+    #[test]
+    fn inactive_activate_moves_to_activating() {
+        assert_eq!(
+            next_instance_state(InstanceState::Inactive, &InstanceInput::Activate),
+            Ok(InstanceState::Activating),
+            "row I1: inactive + activation trigger -> activating"
+        );
+    }
+
+    /// REQ: LIF-284
+    /// Row I16: an inactive side whose required provider is not active waits.
+    #[test]
+    fn inactive_missing_dependency_enters_waiting_dependency() {
+        assert_eq!(
+            next_instance_state(InstanceState::Inactive, &InstanceInput::DependencyMissing),
+            Ok(InstanceState::WaitingDependency),
+            "row I16: inactive + dependency missing -> waiting-dependency"
+        );
+    }
+
+    /// REQ: LIF-284
+    /// Row I17: when every requirement is active, the waiting side runs `activate`.
+    #[test]
+    fn waiting_dependency_becomes_activating_when_ready() {
+        assert_eq!(
+            next_instance_state(
+                InstanceState::WaitingDependency,
+                &InstanceInput::DependencyReady
+            ),
+            Ok(InstanceState::Activating),
+            "row I17: waiting-dependency + dependency ready -> activating"
+        );
+    }
+
+    /// REQ: LIF-005
+    /// Row I3: `activate` returning `ok` within its deadline makes the instance active.
+    #[test]
+    fn activating_ok_becomes_active() {
+        assert_eq!(
+            next_instance_state(InstanceState::Activating, &InstanceInput::ActivateOk),
+            Ok(InstanceState::Active),
+            "row I3: activating + activate ok -> active"
+        );
+    }
+
+    /// REQ: LIF-012
+    /// Row I4: an `activate` error or deadline breach drops the instance into `failed`
+    /// (no `deactivate` call is part of the transition).
+    #[test]
+    fn activating_activate_error_fails_without_deactivate() {
+        for error_code in ["trap.deadline", "trap.memory"] {
+            assert_eq!(
+                next_instance_state(
+                    InstanceState::Activating,
+                    &InstanceInput::ActivateErr(code(error_code))
+                ),
+                Ok(InstanceState::Failed),
+                "row I4: activating + activate error {error_code} -> failed"
+            );
+        }
+    }
+
+    /// REQ: LIF-012
+    /// Row I4: a trap while activating drops the instance into `failed`.
+    #[test]
+    fn activating_trap_fails() {
+        assert_eq!(
+            next_instance_state(
+                InstanceState::Activating,
+                &InstanceInput::Trap(code("trap.memory"))
+            ),
+            Ok(InstanceState::Failed),
+            "row I4: activating + trap -> failed"
+        );
+    }
+
+    /// REQ: LIF-012
+    /// Row I5: a trap while active drops the instance into `failed`, not `deactivating`.
+    #[test]
+    fn active_trap_fails_without_deactivate() {
+        assert_eq!(
+            next_instance_state(
+                InstanceState::Active,
+                &InstanceInput::Trap(code("trap.deadline"))
+            ),
+            Ok(InstanceState::Failed),
+            "row I5: active + trap -> failed, with no deactivate call"
+        );
+    }
+
+    /// REQ: LIF-014
+    /// Rows I9 to I13: every deactivation reason from `active` moves the instance to `deactivating`,
+    /// and a disable trigger does the same (row I9).
+    #[test]
+    fn active_deactivation_reasons_move_to_deactivating() {
+        let reasons = [
+            DeactivationReason::Disabled,
+            DeactivationReason::Shutdown,
+            DeactivationReason::Upgrade,
+            DeactivationReason::Revoked,
+            DeactivationReason::Granted,
+        ];
+        for reason in reasons {
+            assert_eq!(
+                next_instance_state(InstanceState::Active, &InstanceInput::Deactivate(reason)),
+                Ok(InstanceState::Deactivating),
+                "rows I9 to I13: active + deactivate({reason:?}) -> deactivating"
+            );
+        }
+        assert_eq!(
+            next_instance_state(InstanceState::Active, &InstanceInput::Disable),
+            Ok(InstanceState::Deactivating),
+            "row I9: active + disable -> deactivating"
+        );
+    }
+
+    /// REQ: LIF-005
+    /// Row I8: when the restart timer fires, the side runs `activate` again.
+    #[test]
+    fn restart_timer_fired_reactivates() {
+        assert_eq!(
+            next_instance_state(
+                InstanceState::RestartScheduled,
+                &InstanceInput::RestartTimerFired
+            ),
+            Ok(InstanceState::Activating),
+            "row I8: restart-scheduled + timer fired -> activating"
+        );
+    }
+
+    /// REQ: LIF-013
+    /// Row I14: disabling while a restart is scheduled cancels the timer, so the restart never begins.
+    /// The resulting state is not named by the manual, so the test only excludes `activating`.
+    #[test]
+    fn restart_scheduled_disable_never_reactivates() {
+        let result = next_instance_state(InstanceState::RestartScheduled, &InstanceInput::Disable);
+        assert_ne!(
+            result,
+            Ok(InstanceState::Activating),
+            "row I14: disable cancels the restart timer, so the side must not activate"
+        );
+    }
+
+    /// REQ: LIF-036
+    /// Row P5 (side effect): enabling a stopped-by-failure side clears its window and sets it `inactive`.
+    #[test]
+    fn stopped_by_failure_enable_sets_inactive() {
+        assert_eq!(
+            next_instance_state(InstanceState::StoppedByFailure, &InstanceInput::Enable),
+            Ok(InstanceState::Inactive),
+            "row P5: stopped-by-failure + enable -> inactive"
+        );
+    }
+
+    /// REQ: LIF-005
+    /// Only the transitions in the tables may occur; every other input/state pair is an illegal transition.
+    #[test]
+    fn transitions_outside_the_tables_are_rejected() {
+        let illegal_pairs = [
+            (InstanceState::Inactive, InstanceInput::ActivateOk),
+            (InstanceState::Inactive, InstanceInput::Trap(code("trap.deadline"))),
+            (InstanceState::Inactive, InstanceInput::RestartTimerFired),
+            (InstanceState::Active, InstanceInput::Activate),
+            (InstanceState::Active, InstanceInput::ActivateOk),
+            (InstanceState::Active, InstanceInput::DependencyReady),
+            (InstanceState::WaitingDependency, InstanceInput::Trap(code("trap.deadline"))),
+            (InstanceState::Stopped, InstanceInput::Trap(code("trap.deadline"))),
+            (InstanceState::Deactivating, InstanceInput::Activate),
+        ];
+        for (state, input) in illegal_pairs {
+            assert!(
+                next_instance_state(state, &input).is_err(),
+                "{state:?} + {input:?} is not in the instance tables, so it must be an illegal transition"
+            );
+        }
+    }
+
+    // ----- Package state machine (reference-plugin-lifecycle-states.md, "Package-state transitions") -----
+
+    /// REQ: LIF-001
+    /// Row P1: installing a new plugin gives it the `installed-enabled` package state.
+    #[test]
+    fn install_moves_not_installed_to_installed_enabled() {
+        assert_eq!(
+            next_package_state(PackageState::NotInstalled, &PackageInput::Install),
+            Ok(PackageState::InstalledEnabled),
+            "row P1: not-installed + install -> installed-enabled"
+        );
+    }
+
+    /// REQ: LIF-001
+    /// Rows P2 and P3: a user disable and enable move between the two user-visible states.
+    #[test]
+    fn user_disable_and_enable_round_trip() {
+        assert_eq!(
+            next_package_state(PackageState::InstalledEnabled, &PackageInput::Disable),
+            Ok(PackageState::InstalledDisabledByUser),
+            "row P2: installed-enabled + disable -> installed-disabled-by-user"
+        );
+        assert_eq!(
+            next_package_state(PackageState::InstalledDisabledByUser, &PackageInput::Enable),
+            Ok(PackageState::InstalledEnabled),
+            "row P3: installed-disabled-by-user + enable -> installed-enabled"
+        );
+    }
+
+    /// REQ: LIF-019
+    /// Enabling an enabled plugin, or disabling a disabled one, returns `ok` and changes nothing.
+    #[test]
+    fn repeated_set_enabled_changes_nothing() {
+        assert_eq!(
+            next_package_state(PackageState::InstalledEnabled, &PackageInput::Enable),
+            Ok(PackageState::InstalledEnabled),
+            "set-enabled(true) on an enabled plugin keeps installed-enabled"
+        );
+        assert_eq!(
+            next_package_state(PackageState::InstalledDisabledByUser, &PackageInput::Disable),
+            Ok(PackageState::InstalledDisabledByUser),
+            "set-enabled(false) on a disabled plugin keeps installed-disabled-by-user"
+        );
+    }
+
+    /// REQ: LIF-283
+    /// Row P13: removing the signing key with `--force` gives `disabled-untrusted`.
+    #[test]
+    fn trust_removed_disables_untrusted() {
+        assert_eq!(
+            next_package_state(PackageState::InstalledEnabled, &PackageInput::TrustRemoved),
+            Ok(PackageState::DisabledUntrusted),
+            "row P13: installed-enabled + trust removed -> disabled-untrusted"
+        );
+    }
+
+    /// REQ: LIF-283
+    /// Row P14: enabling an untrusted plugin with `--accept-risk` returns it to `installed-enabled`.
+    #[test]
+    fn untrusted_enable_returns_to_installed_enabled() {
+        assert_eq!(
+            next_package_state(PackageState::DisabledUntrusted, &PackageInput::Enable),
+            Ok(PackageState::InstalledEnabled),
+            "row P14: disabled-untrusted + enable -> installed-enabled"
+        );
+    }
+
+    /// REQ: LIF-283
+    /// Row P15: a compromised key revocation blocks an installed plugin.
+    #[test]
+    fn revoked_key_blocks_installed_plugin() {
+        assert_eq!(
+            next_package_state(PackageState::InstalledEnabled, &PackageInput::Revoked),
+            Ok(PackageState::DisabledBlocked),
+            "row P15: installed-enabled + revoked -> disabled-blocked"
+        );
+    }
+
+    /// REQ: LIF-283
+    /// Row P16: `enable --accept-risk` clears a blocked plugin back to `installed-enabled`.
+    #[test]
+    fn blocked_enable_returns_to_installed_enabled() {
+        assert_eq!(
+            next_package_state(PackageState::DisabledBlocked, &PackageInput::Enable),
+            Ok(PackageState::InstalledEnabled),
+            "row P16: disabled-blocked + enable -> installed-enabled"
+        );
+    }
+
+    /// REQ: LIF-004
+    /// Row P6: an administrator policy entry moves an enabled plugin to `disabled-by-policy`.
+    #[test]
+    fn policy_deny_moves_to_disabled_by_policy() {
+        assert_eq!(
+            next_package_state(PackageState::InstalledEnabled, &PackageInput::PolicyDeny),
+            Ok(PackageState::DisabledByPolicy),
+            "row P6: installed-enabled + policy deny -> disabled-by-policy"
+        );
+    }
+
+    /// REQ: LIF-007
+    /// Enabling a policy-blocked or refused plugin returns `not-permitted` and changes no state.
+    #[test]
+    fn enable_on_policy_or_refused_plugin_is_not_permitted() {
+        for state in [PackageState::DisabledByPolicy, PackageState::RefusedAtLoad] {
+            assert_eq!(
+                next_package_state(state, &PackageInput::Enable),
+                Err(code("not-permitted")),
+                "enabling {state:?} must return not-permitted"
+            );
+        }
+    }
+
+    /// REQ: LIF-003
+    /// Row P7: each documented load-refusal code moves the package to `refused-at-load`.
+    #[test]
+    fn load_refusal_codes_move_to_refused_at_load() {
+        let refusal_codes = [
+            "package.api-unsupported",
+            "trust.key-revoked",
+            "policy.tier-denied",
+            "package.corrupt",
+            "policy.blocked",
+        ];
+        for refusal_code in refusal_codes {
+            assert_eq!(
+                next_package_state(
+                    PackageState::InstalledEnabled,
+                    &PackageInput::RefuseAtLoad(code(refusal_code))
+                ),
+                Ok(PackageState::RefusedAtLoad),
+                "row P7: installed-enabled + refusal {refusal_code} -> refused-at-load"
+            );
+        }
+    }
+
+    /// REQ: LIF-010
+    /// Rows P8 to P10: staging an update and swapping it in both leave the package `installed-enabled`;
+    /// the package never rests in `update-staged` for a plain update.
+    #[test]
+    fn staging_and_swapping_an_update_keep_installed_enabled() {
+        assert_eq!(
+            next_package_state(PackageState::InstalledEnabled, &PackageInput::StageUpdate),
+            Ok(PackageState::InstalledEnabled),
+            "row P8: staging a verified update changes no visible package state"
+        );
+        assert_eq!(
+            next_package_state(PackageState::InstalledEnabled, &PackageInput::SwapUpdate),
+            Ok(PackageState::InstalledEnabled),
+            "rows P9 and P10: the swap, or its rollback, ends in installed-enabled"
+        );
+    }
+
+    /// REQ: LIF-001
+    /// Row P11: an uninstall request moves an installed plugin to `uninstall-pending`.
+    #[test]
+    fn request_uninstall_moves_to_uninstall_pending() {
+        for state in [
+            PackageState::InstalledEnabled,
+            PackageState::InstalledDisabledByUser,
+        ] {
+            assert_eq!(
+                next_package_state(state, &PackageInput::RequestUninstall),
+                Ok(PackageState::UninstallPending),
+                "row P11: {state:?} + uninstall -> uninstall-pending"
+            );
+        }
+    }
+
+    /// REQ: LIF-020
+    /// While an uninstall is pending, a new enable or disable is refused with `conflict`.
+    #[test]
+    fn uninstall_pending_refuses_set_enabled_with_conflict() {
+        for input in [PackageInput::Enable, PackageInput::Disable] {
+            assert_eq!(
+                next_package_state(PackageState::UninstallPending, &input),
+                Err(code("conflict")),
+                "uninstall-pending + {input:?} must be refused with conflict"
+            );
+        }
+    }
+
+    /// REQ: LIF-001
+    /// Inputs that the package tables do not allow from the given state are illegal transitions.
+    #[test]
+    fn package_transitions_outside_the_tables_are_rejected() {
+        assert!(
+            next_package_state(PackageState::NotInstalled, &PackageInput::Enable).is_err(),
+            "enable of a plugin that is not installed is not in the package tables"
+        );
+        assert!(
+            next_package_state(
+                PackageState::NotInstalled,
+                &PackageInput::RefuseAtLoad(code("package.corrupt"))
+            )
+            .is_err(),
+            "P7 applies to installed states only, so refusal of a not-installed id is illegal"
+        );
+        assert!(
+            next_package_state(PackageState::InstalledEnabled, &PackageInput::Install).is_err(),
+            "an already installed plugin cannot take the install input"
+        );
+    }
+
+    // ----- Restart policy (reference-runtime-model.md "12. Failures and restart", Lifecycle "Failure counting and restart") -----
+
+    /// REQ: LIF-027
+    /// The window constants match the manual: 10 minutes, 1 s and 5 s restart delays.
+    #[test]
+    fn restart_constants_match_the_manual() {
+        assert_eq!(FAILURE_WINDOW_MS, 600_000, "window is 10 minutes");
+        assert_eq!(FIRST_RESTART_DELAY_MS, 1_000, "first restart after 1 s");
+        assert_eq!(SECOND_RESTART_DELAY_MS, 5_000, "second restart after 5 s");
+    }
+
+    /// REQ: LIF-028
+    /// The first counted failure schedules a restart after 1 s.
+    #[test]
+    fn first_failure_restarts_after_one_second() {
+        let mut policy = RestartPolicy::default();
+        assert_eq!(
+            policy.on_failure(0),
+            RestartDecision::RestartAfterMs(1_000),
+            "first failure restarts after 1 s"
+        );
+    }
+
+    /// REQ: LIF-029
+    /// The second counted failure within the window schedules a restart after 5 s.
+    #[test]
+    fn second_failure_restarts_after_five_seconds() {
+        let mut policy = RestartPolicy::default();
+        policy.on_failure(0);
+        assert_eq!(
+            policy.on_failure(60_000),
+            RestartDecision::RestartAfterMs(5_000),
+            "second failure inside 10 minutes restarts after 5 s"
+        );
+    }
+
+    /// REQ: LIF-030
+    /// The third counted failure within the window disables the plugin and schedules no restart.
+    #[test]
+    fn third_failure_inside_window_disables() {
+        let mut policy = RestartPolicy::default();
+        policy.on_failure(0);
+        policy.on_failure(60_000);
+        assert_eq!(
+            policy.on_failure(120_000),
+            RestartDecision::Disable,
+            "third failure within 10 minutes disables the side"
+        );
+    }
+
+    /// REQ: LIF-027
+    /// Failures older than 600 s drop out of the count (manual example: 0 s, 300 s, 660 s).
+    #[test]
+    fn failure_at_660_seconds_sees_only_the_one_at_300_seconds() {
+        let mut policy = RestartPolicy::default();
+        assert_eq!(policy.on_failure(0), RestartDecision::RestartAfterMs(1_000));
+        assert_eq!(policy.on_failure(300_000), RestartDecision::RestartAfterMs(5_000));
+        assert_eq!(
+            policy.on_failure(660_000),
+            RestartDecision::RestartAfterMs(5_000),
+            "the failure at 0 s has aged out, so 660 s is the second counted failure"
+        );
+    }
+
+    /// REQ: LIF-027
+    /// A failure counts while its age is below 600 s: 599 s and 599.999 s count, 600 s does not.
+    #[test]
+    fn failure_age_boundary_is_strictly_below_600_seconds() {
+        let mut policy = RestartPolicy::default();
+        policy.on_failure(0);
+        assert_eq!(policy.failures_in_window(599_000), 1, "age 599 s still counts");
+        assert_eq!(policy.failures_in_window(599_999), 1, "age 599.999 s still counts");
+        assert_eq!(policy.failures_in_window(600_000), 0, "age exactly 600 s no longer counts");
+        assert_eq!(policy.failures_in_window(601_000), 0, "age 601 s does not count");
+    }
+
+    /// REQ: LIF-027
+    /// A failure exactly 600 s old no longer counts, so the next failure is a first failure again.
+    #[test]
+    fn failure_exactly_at_window_end_is_not_counted() {
+        let mut policy = RestartPolicy::default();
+        policy.on_failure(0);
+        assert_eq!(
+            policy.on_failure(600_000),
+            RestartDecision::RestartAfterMs(1_000),
+            "the failure at 0 s is outside the window at 600 s, so this is failure 1"
+        );
+    }
+
+    /// REQ: LIF-037
+    /// A new policy (after a server restart) starts with an empty window.
+    #[test]
+    fn default_policy_has_empty_window() {
+        let policy = RestartPolicy::default();
+        assert_eq!(policy.failures_in_window(0), 0, "empty input: no failures recorded");
+        assert_eq!(policy.failures_in_window(600_000), 0, "empty input at the window end");
+    }
+
+    /// REQ: LIF-027
+    /// Recording a failure makes it count inside the window.
+    #[test]
+    fn recorded_failure_counts_inside_window() {
+        let mut policy = RestartPolicy::default();
+        policy.on_failure(0);
+        assert_eq!(policy.failures_in_window(0), 1, "one failure at time 0");
+        policy.on_failure(10_000);
+        assert_eq!(policy.failures_in_window(10_000), 2, "two failures inside the window");
+    }
+
+    /// REQ: LIF-036
+    /// Manual reset (enable, reset-failures) forgets every failure, so the next failure is a first failure.
+    #[test]
+    fn reset_clears_failures_and_restarts_count() {
+        let mut policy = RestartPolicy::default();
+        policy.on_failure(0);
+        policy.on_failure(1_000);
+        policy.reset();
+        assert_eq!(policy.failures_in_window(1_000), 0, "reset empties the window");
+        assert_eq!(
+            policy.on_failure(2_000),
+            RestartDecision::RestartAfterMs(1_000),
+            "after reset the next failure restarts after 1 s"
+        );
+    }
+
+    /// REQ: LIF-009
+    /// After a reset, the next failure restarts after the first-failure delay, not the second.
+    #[test]
+    fn failure_after_enable_restarts_after_first_delay() {
+        let mut policy = RestartPolicy::default();
+        policy.on_failure(0);
+        policy.reset();
+        assert_eq!(
+            policy.on_failure(500),
+            RestartDecision::RestartAfterMs(1_000),
+            "one failure after enable restarts after the first-failure delay"
+        );
+    }
+
+    /// REQ: LIF-025
+    /// Each side and scope has its own window: failures on one policy do not count on another.
+    #[test]
+    fn separate_policies_keep_separate_windows() {
+        let mut client_policy = RestartPolicy::default();
+        let mut server_policy = RestartPolicy::default();
+        client_policy.on_failure(0);
+        client_policy.on_failure(1_000);
+        assert_eq!(
+            server_policy.on_failure(1_000),
+            RestartDecision::RestartAfterMs(1_000),
+            "a failure on the other side is its first failure"
+        );
+        assert_eq!(server_policy.failures_in_window(1_000), 1, "server side has one failure");
+        assert_eq!(client_policy.failures_in_window(1_000), 2, "client side has two failures");
+    }
+}
