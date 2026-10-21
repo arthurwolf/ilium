@@ -554,7 +554,8 @@ use ilium_plugin_sdk::types::intents::CreatePaneSpec;
 
 fn on_pointer(event: Event) -> Option<Submission> {
     let Event::EditorPointer(pointer) = event else { return None };
-    let text = editor::read_lines(pointer.buffer, pointer.position.line, 1)?;
+    let lines = editor::read_lines(pointer.buffer, pointer.position.line, 1).ok()?;
+    let text = lines.first()?;
     if !text.trim_start().starts_with("TODO") { return None; }
     Some(Submission::keyed(
         Intent::CreatePane(CreatePaneSpec {

@@ -390,7 +390,7 @@ A settings screen uses `list-settings` to find the tabs and sections. A section 
 - [Building settings screens](/pages/settings-screens/) for rows and custom page design.
 - [Plugin settings extension](/pages/settings-extension/) for tabs, sections and anchors.
 - [settings.read-all and settings.write-all](/pages/capability-settings-all/) for the grant rules.
-- [Errors and limits](/pages/reference-errors-and-limits/) for the full code table and the 256 KiB patch cap.
+- [Plugin settings schema](/pages/reference-settings-schema/) for the 256 KiB cap on all values of one plugin, and [Errors and limits](/pages/reference-errors-and-limits/) for the full code table.
 
 ### Security
 

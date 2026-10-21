@@ -115,7 +115,7 @@ Provider manifest:
 }
 ```
 
-The schema file maps each method to its `params` and `result` schemas. It uses the settings subset of the JSON schema, draft 2020-12. Allowed keywords are the keywords of the settings row-schema table ([Plugin settings, row schemas](/pages/api-settings/)): `type`, `enum`, `enum_titles`, `items`, `maxItems`, `title`, `help`, `description`, `default`, `minimum`, `maximum`, `step`, `unit`, `pattern`, `maxLength`, `required`, `secret`, `multiline`, `picker`, `x-visible-when` and `x-scope`. Any other keyword makes install fail with `manifest.schema-keyword`.
+The schema file maps each method to its `params` and `result` schemas. It uses the settings subset of the JSON schema, draft 2020-12. Allowed keywords are the keywords of the settings row-schema table ([Plugin settings, row schemas](/pages/api-settings/)): `type`, `enum`, `enum_titles`, `items`, `maxItems`, `title`, `help`, `description`, `default`, `minimum`, `maximum`, `step`, `unit`, `pattern`, `maxLength`, `required`, `secret`, `multiline`, `picker`, `x-visible-when`, `x-scope`, `x-applies`, `x-steps` and `x-special-values`. Any other keyword makes install fail with `manifest.schema-keyword`.
 
 ```json
 {

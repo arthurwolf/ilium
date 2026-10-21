@@ -121,7 +121,7 @@ The plugin is replaceable. A replacement must provide the report service and bot
         "payload_schema": { "type": "object", "properties": {
           "level": { "type": "string", "enum": ["warn", "error"] }, "plugin": { "type": "string" },
           "target": { "type": "string" }, "message": { "type": "string" }, "time": { "type": "string" } } },
-        "risk": "standard", "deadline_ms": 20, "max_handlers": 8, "version": "0.1.0" },
+        "risk": "high", "deadline_ms": 20, "max_handlers": 8, "version": "0.1.0" },
       { "id": "report-sections", "kind": "collect", "title": "Report sections",
         "entry_schema": { "type": "object", "required": ["id", "title", "service"],
           "properties": { "id": { "type": "string" }, "title": { "type": "string" },

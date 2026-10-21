@@ -163,7 +163,7 @@ A batch of more than 256 submissions traps the call [ABI-008]. A batch is refuse
 | `refused(conflict)` with message prefix `extension.vetoed` | A `veto` handler refused. The message is `extension.vetoed: <contributor>: <reason>`. Do not perform the action |
 | `failed(...)` with an `extension.*` message prefix | The call itself failed, for example `failed(invalid-argument)` with prefix `extension.schema-mismatch` |
 
-A timeout in a handler is never a veto. The chain treats it as a pass. See [extension points](/pages/api-extension-points/).
+A timeout in a handler is a veto only at a high-risk veto or transform point, where the default `on_failure` of `refuse` applies (SEC-287). Elsewhere the chain treats it as a pass. See [extension points](/pages/api-extension-points/).
 
 ## Uncertain input after a restart
 

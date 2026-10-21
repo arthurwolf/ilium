@@ -443,7 +443,7 @@ definePlugin({
 });
 ```
 
-A handler that is late, traps or returns a reply the mode does not allow counts as `pass`. See [Extension points](/pages/api-extension-points/#hooks).
+A handler that is late, traps or returns a reply the mode does not allow counts as `pass`, except at a high-risk veto or transform point, where the default `on_failure` of `refuse` refuses the plugin-initiated action. `before-fire` is such a point. See [Extension points](/pages/api-extension-points/#hooks).
 
 ### Extension points this plugin owns
 
