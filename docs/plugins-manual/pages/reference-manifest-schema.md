@@ -1005,7 +1005,7 @@ Stage 2 stops at its first error. Stage 3 collects all errors. Every message car
 | `manifest.settings-key` | 3 | 1 | `{pointer}: "{value}" is not a valid settings key.` |
 | `manifest.settings-help` | 3 | 1 | `{pointer}: the help topic "{topic}" is not listed under contributes.help.` |
 | `manifest.settings-command` | 3 | 1 | `{pointer}: the command "{command}" is not declared by this plugin.` |
-| `manifest.settings-glyph` | 3 | 1 | `{pointer}: "{value}" is not a single-cell glyph.` |
+| `manifest.settings-glyph` | 3 | 1 | `{pointer}: "{value}" must be one character 1 or 2 cells wide.` |
 | `manifest.settings-source` | 3 | 1 | `{pointer}: a row needs exactly one of options and source.` |
 | `manifest.sound-id-taken` | 3 | 1 | `{pointer}: the sound id "{id}" is used twice or is reserved.` |
 | `manifest.sound-format` | 3 | 1 | `{pointer}: the sound file "{path}" is missing or is not WAV PCM or OGG Vorbis.` |

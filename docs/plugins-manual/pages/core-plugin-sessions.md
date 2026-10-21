@@ -53,7 +53,7 @@ The snapshot files, the rolling backups, the ordered event journal and the `iliu
 
 This block is a fragment. It lists the contributions. The whole manifest is in [Complete manifest](#complete-manifest).
 
-The contract version is 0.1. The plugin has a server side and a client side. The server side owns the session logic; the client side only writes the `session` kernel setting.
+The contract version is 0.1. The plugin has a server side and a client side. The server side owns the session logic and holds `settings.write-kernel:session`; the client side needs no grants of its own.
 
 ```json
 {

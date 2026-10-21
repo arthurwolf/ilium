@@ -55,7 +55,7 @@ This block is a fragment. It lists the contributions. The whole manifest is in [
   "id": "ilium.core.voice",
   "capabilities": {
     "server": ["cli.contribute"],
-    "client": ["audio.microphone", "keys.intercept", "commands.invoke:*",
+    "client": ["audio.capture", "keys.intercept", "commands.invoke:*",
                "inference", "jobs.run", "settings.write-kernel:voice-control"]
   }
 }
@@ -89,7 +89,7 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "cli.contribute"
     ],
     "client": [
-      "audio.microphone",
+      "audio.capture",
       "keys.intercept",
       "commands.invoke:*",
       "inference",
@@ -280,7 +280,7 @@ Audio frames feed the speech model in a job. The plugin opens a 16 kHz capture w
 use ilium_plugin_sdk::host::{audio, jobs, log::{self, Level}};
 use ilium_plugin_sdk::prelude::*;
 
-// manifest: "capabilities": { "client": ["audio.microphone", "jobs.run",
+// manifest: "capabilities": { "client": ["audio.capture", "jobs.run",
 //   "inference"] }, "contributes": { "jobs": [{ "kind": "transcribe",
 //   "deadline_ms": 30000, "memory_mib": 512 }] }
 impl Voice {
@@ -322,7 +322,7 @@ import * as audio from '@ilium/plugin-sdk/host/audio';
 import { start } from '@ilium/plugin-sdk/host/jobs';
 import { log } from '@ilium/plugin-sdk/host/log';
 
-// manifest: "capabilities": { "client": ["audio.microphone", "jobs.run",
+// manifest: "capabilities": { "client": ["audio.capture", "jobs.run",
 //   "inference"] }, "contributes": { "jobs": [{ "kind": "transcribe",
 //   "deadline_ms": 30000, "memory_mib": 512 }] }
 let capture: bigint | undefined;
@@ -578,7 +578,7 @@ The table gives the values that [EXT-052] requires for each point this plugin ow
 | `ilium.core.voice/transcript` | client | 0.1.0 (default) | 20 ms (default) | 8 handlers (default) | no (default) |
 | `ilium.core.voice/voice-intents` | client | 0.1.0 (default) | none (default) | 64 entries (default) | no (default) |
 
-Side basis: `ilium.core.voice/transcript` is client because the manifest's server capabilities hold only `cli.contribute`, and the transcript comes from the client-side `transcribe` job (`audio.microphone`, `jobs.run`, `inference`) before the client matches commands in its `on_transcript` handler.
+Side basis: `ilium.core.voice/transcript` is client because the manifest's server capabilities hold only `cli.contribute`, and the transcript comes from the client-side `transcribe` job (`audio.capture`, `jobs.run`, `inference`) before the client matches commands in its `on_transcript` handler.
 Side basis: `ilium.core.voice/voice-intents` is client because the manifest grants `extensions.provide` for it on the client side, and the phrase-to-command matching that consumes these entries runs in the client's `on_transcript` handler, which holds the `commands.invoke:*` grant.
 
 ### ABI used

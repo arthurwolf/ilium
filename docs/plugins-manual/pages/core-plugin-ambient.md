@@ -309,7 +309,7 @@ The schema file for `set-setting` (`schemas/set-setting.json`, shown here becaus
 
 ### Kernel tabs this plugin owns
 
-This plugin is the single owner of the following built-in Settings tabs. Its server part holds `settings.write-kernel:<tab>` for each one (T1 only, one holder per tab, see [kernel settings](/pages/api-kernel-settings-and-keymap/#writing-a-kernel-tab)). The values stay in the same `config.toml` tables as before, so no user setting moves. [COR-030] [COR-033]
+This plugin is the single owner of the following built-in Settings tabs. Its server part holds `settings.write-kernel:<tab>` for each one (T1 only, one holder per tab, see [kernel settings](/pages/api-kernel-settings-and-keymap/#writing-a-kernel-tab)). The values stay in the same tables as before (the project YAML `animation` key, see the table above), so no user setting moves. [COR-030] [COR-033]
 
 | Tab id | Label | Config table | Readers |
 |---|---|---|---|

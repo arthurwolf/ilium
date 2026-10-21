@@ -227,7 +227,7 @@ Illustrative, not generated: the help pane for the quick start topic, and the Se
 | Revocation during the call | `revoked`. The plugin is re-activated with the reduced grant set. |
 | Host fault inside the call | `internal`. |
 
-`not-permitted`, `revoked` and `internal` are universal codes for every call that returns a `result`. Only `not-found` is specific to `set-enabled`. The full table of codes and limits is in [errors and limits](/pages/reference-errors-and-limits/).
+`not-permitted`, `revoked` and `internal` are universal codes for every call that returns a `result`. `not-found`, and `invalid-argument` for a scope other than the three listed, are specific to `set-enabled`. The full table of codes and limits is in [errors and limits](/pages/reference-errors-and-limits/).
 
 ### Help topics and settings rows
 
