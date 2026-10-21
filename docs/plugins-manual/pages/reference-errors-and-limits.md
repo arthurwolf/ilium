@@ -282,7 +282,7 @@ Some caps are fixed and no manifest or user setting changes them: 256 submission
 | `history-text` over 4 MiB | Keeps the newest 4 MiB |
 | `clipboard.read-text` over 1 MiB | Cuts the text at a character boundary within 1 MiB |
 | Transcript over 512 turns or 4 MiB | Drops the oldest turns |
-| Catalogue results over 256 items, geocode results over 8 | Clamps the count |
+| Catalogue results over 256 items, geocode results returned over 8 | Clamps the returned count |
 | Virtual-rows page over 256 children | Cuts the page to 256 |
 | A `debounce-ms` field of a widget outside 0 to 2,000 ms, or a settings row `debounce_ms` outside 300 to 2,000 ms | Clamps the value to the nearest bound of that range |
 | Layout percentage above 100 | Clamps it to 100 |
@@ -574,7 +574,7 @@ Fixed caps. They are the same for every tier unless `limits_tier` is `first-part
 | Video from bytes | 16 MiB | `invalid-argument` |
 | Font asset | 4 MiB | `quota-exceeded`, `manifest.asset-size` |
 | `status_segments`, `pane_frame_slots`, `tree_toolbar`, `row_actions`, `tree_orderings`, `display_modes` | 2, 4, 4, 4, 4, 2 | `manifest.contribution-limit` |
-| Geocode results | 8 | clamped |
+| Geocode results returned | 8 | clamped |
 | Popup stack per view | 4 | `quota-exceeded` |
 | Widget `debounce-ms`; settings row `debounce_ms` | 0 to 2,000 ms; 300 to 2,000 ms | clamped to the nearest bound |
 | `restructure` operations | 256 | `invalid-argument` |

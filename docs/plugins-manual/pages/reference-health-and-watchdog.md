@@ -86,7 +86,6 @@ Third-party plugins run in a helper process. Each T2 or T3 plugin side runs in i
 | Hung helper | 3 missed answers (3 s) or a call that exceeds its deadline by 500 ms without a trap. The server terminates the helper with SIGTERM, then SIGKILL after 2 s ([HST-171]). |
 | Crash | A crash, a kill or an out-of-memory kill of the helper. |
 | Effect on the plugin whose export was running | one counted failure |
-| Effect on the other plugins in the helper | their instances are dropped and restarted in a new helper without a counted failure and without a delay; their pending requests complete as `cancelled` |
 | Idle helper crash (no export running) | no counted failure for anyone |
 
 - [LIF-132] A hung helper MUST be killed after 3 missed heartbeats or 500 ms past a deadline, whichever is first. Test: a helper that stops answering.

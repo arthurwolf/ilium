@@ -29,7 +29,7 @@ When an agent finishes, the plugin plays a sound and shows a desktop notice. Bot
 | `agent-activity-changed` | event | `node: node-id`, `previous`, `current: agent-activity`, `revision: u64` | Fires on every activity change. This step acts when `current` is `done`. |
 | `command-invoked` | event | `command: string`, `context.pane: option<node-id>` | Delivers a press of the Compact button. The command is `compact-agent`. |
 | `request-completed` | event | `request: request-ref`, `outcome: outcome` | Completes each submission exactly once. |
-| `notify` | intent | `title` (1 to 256 characters), `body` (0 to 2,048), `urgency` (`low`, `normal`, `high`), `sound: option<string>` | Shows a desktop notice. Needs `notify.desktop`. Limit: 6 per minute. |
+| `notify` | intent | `title` (1 to 80 characters), `body` (0 to 2,048), `urgency` (`low`, `normal`, `high`), `sound: option<string>` | Shows a desktop notice. Needs `notify.desktop`. Limit: 6 per minute. |
 | `play-sound` | intent | sound id: `string` | Plays a sound from the catalogue. Needs `sound.play`. Limit: 4 per second. |
 | `agent-action` | intent | `pane: node-id`, `action-id: string`, and a mandatory `dedup-key` | Presses the keys that the pane's signature declares for the action. Needs `agent.control`. |
 | `outcome` | variant | `ok`, `ok-node`, `duplicate(request-ref)`, `refused(plugin-error)`, `failed(plugin-error)`, `cancelled`, `ok-epoch(u64)` | The result of one submission. `ok-epoch` is returned only by `send-input` on an agent pane; this step never sees it. A submission whose grant was revoked before it applied completes as `refused(revoked)`. |

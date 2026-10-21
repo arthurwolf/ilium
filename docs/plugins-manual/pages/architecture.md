@@ -101,7 +101,7 @@ Illustrative, not generated. A host log that shows which plugins load, which one
 
 ### The sandbox helper
 
-T2 and T3 components run in a separate helper process. The helper confines itself with a seccomp filter and a bubblewrap mount namespace. The namespace holds only the scopes that the plugin was granted, mounted read-only for read grants, plus read-only `/usr`, `/bin`, `/lib*` and `/etc`. A component that imports `wasi:sockets` or `wasi:http` is refused at install, so network access goes through the `http` import, which the kernel performs for the plugin.
+T2 and T3 components run in a separate helper process. The helper confines itself with a seccomp filter and a bubblewrap mount namespace. The namespace holds only the scopes that the plugin was granted, mounted read-only for read grants, plus read-only `/usr`, `/bin`, `/lib*` and `/etc`. A component that imports `wasi:sockets` or `wasi:http` is refused at load, so network access goes through the `http` import, which the kernel performs for the plugin.
 
 Child processes that a plugin starts with `process.run` inherit the same confinement. T1 children run without confinement, at low priority.
 
