@@ -26,11 +26,11 @@ The keymap itself is kernel-native: the kernel matches chords, applies the tmux 
 <figure><pre class="term">╭─ Key reference ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
 │                                                                                                                                                                                                           │
 │ <span class="t-hi">Panes</span>                                                                                                                                                                                                     │
-│ Split vertically ……………………………………………… Prefix  %                                                                                                                                                             │
-│ Split horizontally ………………………………………… Prefix  "                                                                                                                                                             │
+│ New split view   ……………………………………………… Prefix  "                                                                                                                                                             │
+│ Close pane         ………………………………………… Prefix  x                                                                                                                                                             │
 │ <span class="t-hi">Tree</span>                                                                                                                                                                                                      │
 │ Move up …………………………………………………………………… Prefix  Up                                                                                                                                                             │
-│ Rename ………………………………………………………………………… Prefix  r                                                                                                                                                             │
+│ Rename ………………………………………………………………………… Prefix  ,                                                                                                                                                             │
 │                                                                                                                                                                                                           │
 │ <span class="t-dim">Prefix is Ctrl+B. Preset: tmux.</span>                                                                                                                                                                           │
 │                                                                                                                                                                                                           │
@@ -39,7 +39,7 @@ The keymap itself is kernel-native: the kernel matches chords, applies the tmux 
 │                                                                                                                                                                                                                  │
 │ Prefix ………………………………………………………………………………… Ctrl+B                                                                                                                                                                    │
 │ Preset …………………………………………………………………………… ‹ tmux ›                                                                                                                                                                    │
-│ Split vertically ……………………………………………… Prefix  %                                                                                                                                                                    │
+│ New split view   ……………………………………………… Prefix  "                                                                                                                                                                    │
 │                                                                                                                                                                                                                  │
 │ Press the new key chord.                                                                                                                                                                                         │
 │                                                                                                                                                                                                                  │
@@ -239,7 +239,7 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
 
 ### Action names, command ids and presets
 
-The kernel owns the keymap table. The plugin owns the Keyboard tab and the key reference screen, so it shows exactly these 35 actions. Each action has a stable name (the key in `[keybindings]`), a global command id `kernel.<name>` that a plugin can read from `keymap.bindings`, and a default key after the prefix. [COR-011]
+The kernel owns the keymap table. The plugin owns the Keyboard tab and the key reference screen, so it shows exactly these 35 actions. Each action has a stable name (the key in `[keybindings]`), a global command id `kernel.<name>` that a plugin can read from `keymap.bindings`, and a default key after the prefix, except `rename`, which has none. [COR-011]
 
 <figure>
 <pre class="term"><span class="t-dim">╭──────────────────────────────────────────────╮</span>

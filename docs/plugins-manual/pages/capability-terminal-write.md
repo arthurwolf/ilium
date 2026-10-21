@@ -51,7 +51,7 @@ The kernel checks every `send-input` submission in this order. The first failing
 <figure>
 <svg viewBox="0 0 420 330" role="img" aria-label="Checks that send-input passes before the text reaches the pane">
 <title>How send-input is checked</title>
-<desc>Eight checks run in order. A failed check refuses the submission with a named outcome. Only a submission that passes all checks is written to the pane.</desc>
+<desc>The main checks run in order; the full list of eleven is on the send-input page. A failed check refuses the submission with a named outcome. Only a submission that passes all checks is written to the pane.</desc>
 <defs>
 <marker id="arr-terminal-write" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
 <path d="M0 0 L10 5 L0 10 z" fill="currentColor"/>
@@ -98,7 +98,7 @@ The kernel checks every `send-input` submission in this order. The first failing
 <text x="226" y="207" font-size="11" fill="currentColor">refused: rate-limited</text>
 <text x="226" y="243" font-size="11" fill="currentColor">refused: conflict</text>
 </svg>
-<figcaption>The eight checks of a send-input submission. A failed check stops the submission and returns the outcome beside it. The key of a refused submission is not reserved, so a retry with the same key is valid after the cause is fixed.</figcaption>
+<figcaption>The main checks of a send-input submission; the full list of eleven is on the send-input page. A failed check stops the submission and returns the outcome beside it. The key of a refused submission is not reserved, so a retry with the same key is valid after the cause is fixed.</figcaption>
 </figure>
 
 Two rules apply to the whole batch, not to one submission. A batch is refused as a whole when a submission is malformed (wrong shape, or a missing `dedup-key`; more than 256 submissions is a trap, not a refusal) or when the plugin lacks the grant. In that case every submission of the batch completes as `refused(cancelled)` with the message `batch refused: submission <index>`. The offending submission itself completes as `refused(invalid-argument)` when it is malformed, or as `refused(not-permitted)` when the grant is missing; this is the same whole-batch refusal that [Errors and limits](#errors-and-edge-cases) lists. All other checks run per submission.

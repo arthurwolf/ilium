@@ -707,7 +707,7 @@ export const { lifecycle, handler, views } = definePlugin({
 |---|---|
 | A `layout` has a different number of children from constraints | `trap.invalid-ui-tree` (detail `ui.invalid-tree`). The instance traps. The builders stop the render first and name the layout key. |
 | A `ratio` has denominator 0 | `ui.invalid-tree`. The instance traps. |
-| The tree has more than 4,096 nodes or 1 MiB | `ui.too-large`. The instance traps. |
+| More nodes than the effective `ui_tree_nodes` limit (4,096 by default, 16,384 for T1), or more bytes than `ui_tree_kib` (1 MiB by default, 4,096 KiB for T1) | `trap.invalid-ui-tree` (detail `ui.too-large`). The instance traps. |
 | Two nodes anywhere in one tree share a `key` | `ui.duplicate-key`. The instance traps. |
 | A `split` has a number of children other than two | `ui.invalid-tree`. The instance traps. |
 | A `tabs` has a different number of titles and children | `ui.invalid-tree`. The instance traps. |

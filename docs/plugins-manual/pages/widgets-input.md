@@ -839,7 +839,7 @@ export const { lifecycle, handler, views } = definePlugin({
 | Typed number outside `minimum` and `maximum` | The entry dialog shows its error line and nothing is sent. A step stops at the bound. |
 | A `validation` pattern that is not a valid regular expression | `ui.invalid-tree`. The instance traps, the previous tree stays (stale) and one error is logged. |
 | Two widgets with the same key anywhere in one view | `ui.duplicate-key`. The instance traps. |
-| A tree with more than 4,096 nodes or 1 MiB | `ui.too-large`. The instance traps. |
+| More nodes than the effective `ui_tree_nodes` limit (4,096 by default, 16,384 for T1), or more bytes than `ui_tree_kib` (1 MiB by default, 4,096 KiB for T1) | `trap.invalid-ui-tree` (detail `ui.too-large`). The instance traps. |
 | `choice` with `selected-id` that is not in `items` | The first option is shown and nothing is sent. |
 | `set-widget-state` with a key the view does not have | `not-found` |
 | `set-widget-state` with a state the widget does not take | `invalid-argument` |

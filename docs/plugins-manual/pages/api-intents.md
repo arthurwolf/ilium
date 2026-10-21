@@ -85,7 +85,7 @@ Import paths:
 - Rust: `ilium_plugin_sdk::types::intents::{Intent, Submission}` and `ilium_plugin_sdk::host::intents::submit`. The prelude (`use ilium_plugin_sdk::prelude::*;`) also brings in `Intent`, `Submission`, `Outcome` and `RequestRef`.
 - TypeScript: `Submission` and `Intent` from `@ilium/plugin-sdk/types`, and `submit` from `@ilium/plugin-sdk/host/intents`.
 
-`submit` returns a `request-id` at once. Its completion arrives later as `request-completed`, with `request-ref` set to `call(<request-id>)`. Use it only from timers and request callbacks. Inside `on-events`, return submissions instead.
+`submit` returns a `request-id` at once. Its completion arrives later as `request-completed`, with `request-ref` set to `submission(<correlation>)` from the submission passed in. Use it only from timers and request callbacks. Inside `on-events`, return submissions instead.
 
 ### Batches
 
