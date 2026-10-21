@@ -104,6 +104,8 @@ pub enum NamingWorkerEvent {
     },
     Restructure(RestructureWorkerResult),
     Recap(crate::recap_worker::RecapWorkerResult),
+    /// A Turbo attention batch finished; see `attention::runtime`.
+    Attention(crate::attention::LlmReply),
     LastPromptTranscript(LastPromptTranscriptWorkerResult),
     ExactPrepared {
         result: ExactAgentPromptTranscriptResult,
@@ -159,6 +161,9 @@ pub struct RestructureWorkerResult {
     /// captured when the request was built.
     pub recaps: Vec<crate::restructure::BatchRecap>,
     pub recap_stamps: std::collections::HashMap<ilium_core::NodeId, (String, u64)>,
+    /// The raw optional `attention` list of the same reply (Shared attention
+    /// mode). Kept apart from `result` so a bad list can never fail the sort.
+    pub attention: Option<serde_json::Value>,
 }
 
 /// Immutable inputs for one last-prompt-from-transcript check -- see

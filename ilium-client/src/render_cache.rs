@@ -585,6 +585,7 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             pane_id,
             last_prompt,
         } => {
+            app.record_last_prompt(pane_id, last_prompt.as_deref());
             if let Err(error) = app.tree.set_last_prompt(pane_id, last_prompt) {
                 tracing::warn!("dropping PaneLastPromptChanged for pane {pane_id:?}: {error}");
             }

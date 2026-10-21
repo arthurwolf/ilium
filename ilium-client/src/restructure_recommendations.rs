@@ -65,13 +65,16 @@ pub struct RecommendationContext {
     pub snapshot: RecommendationSnapshot,
     pub authored: AnimationSettings,
 }
-pub fn infer_project_restructure<G: RestructureCompletionClient>(
+/// Infers one project's plan. With `include_attention` the reply may also
+/// carry the attention list, returned raw and unparsed.
+pub fn infer_project_restructure_with_attention<G: RestructureCompletionClient>(
     generator: &G,
     contexts: &[LeafContext],
     structure: &str,
     splits: &[ProtectedSplitViewContext],
     snapshot: &RecommendationSnapshot,
     animation_home: &Path,
+    include_attention: bool,
 ) -> anyhow::Result<super::RestructureInference> {
     let authored = crate::project_config::load(animation_home)?.animation;
     let recommendation_context = RecommendationContext {
@@ -84,6 +87,7 @@ pub fn infer_project_restructure<G: RestructureCompletionClient>(
         structure,
         splits,
         &recommendation_context,
+        include_attention,
     )
 }
 fn collect_pointers(

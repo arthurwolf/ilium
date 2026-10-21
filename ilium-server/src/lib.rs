@@ -1238,7 +1238,7 @@ mod restore_tests {
     }
 
     #[tokio::test]
-    async fn restore_retains_the_actual_repository_admission_error() {
+    async fn restore_starts_terminals_under_unusable_git_metadata() {
         let directory = tempfile::tempdir().expect("create tempdir");
         let (sound_requests, _playback_task) = crate::sounds::spawn(
             Arc::new(NoopSoundPlayer),
@@ -1278,15 +1278,11 @@ mod restore_tests {
             PaneSnapshotKind::Terminal(TerminalOrigin::Command(long_running_pane_command())),
         )
         .await;
-        let SnapshotPaneStart::Failed(reason) = result else {
-            panic!("corrupt repository must refuse terminal admission");
-        };
-        assert!(
-            reason.contains("launch repository cannot be verified"),
-            "{reason}"
-        );
-        assert!(reason.contains("invalid gitfile"), "{reason}");
-        assert!(!state.panes.read().await.contains_key(&pane_id));
+        // A corrupt gitfile cannot describe a managed checkout, so the saved
+        // terminal still acquires a PTY instead of failing every restore.
+        assert!(matches!(result, SnapshotPaneStart::Started { .. }));
+        let resource = state.panes.write().await.remove(&pane_id).unwrap();
+        crate::ipc::handlers::teardown_pane_resource(pane_id, resource);
         // An empty ancestor .git directory is not a repository to Git. It
         // must not prevent an ordinary saved terminal from acquiring a PTY.
         std::fs::remove_file(directory.path().join(".git")).unwrap();
@@ -1315,6 +1311,48 @@ mod restore_tests {
         assert!(matches!(result, SnapshotPaneStart::Started { .. }));
         let resource = state.panes.write().await.remove(&pane_id).unwrap();
         assert!(matches!(&resource, crate::pane::PaneResource::Terminal(_)));
+        crate::ipc::handlers::teardown_pane_resource(pane_id, resource);
+
+        // A repository whose `core.worktree` points elsewhere (a config repo
+        // tracking another folder) used to fail this restore every 5 minutes.
+        std::fs::remove_dir(directory.path().join(".git")).unwrap();
+        let elsewhere = tempfile::tempdir().expect("work tree elsewhere");
+        for arguments in [
+            vec!["init", "-q"],
+            vec![
+                "config",
+                "core.worktree",
+                elsewhere.path().to_str().unwrap(),
+            ],
+        ] {
+            let status = std::process::Command::new("git")
+                .args(&arguments)
+                .current_dir(directory.path())
+                .status()
+                .expect("run git");
+            assert!(status.success(), "{arguments:?}");
+        }
+        let pane_id = {
+            let mut tree = state.tree.write().await;
+            let group = tree.add_group(ROOT_ID, "config repo").unwrap();
+            let pane_id = tree
+                .add_pane(group, "Saved", PaneContentKind::Terminal)
+                .unwrap();
+            tree.set_pane_launch_cwd(
+                pane_id,
+                ilium_platform::paths::canonicalize(&launch).unwrap(),
+            )
+            .unwrap();
+            pane_id
+        };
+        let result = start_snapshot_pane(
+            &state,
+            pane_id,
+            PaneSnapshotKind::Terminal(TerminalOrigin::Command(long_running_pane_command())),
+        )
+        .await;
+        assert!(matches!(result, SnapshotPaneStart::Started { .. }));
+        let resource = state.panes.write().await.remove(&pane_id).unwrap();
         crate::ipc::handlers::teardown_pane_resource(pane_id, resource);
     }
 

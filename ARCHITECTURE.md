@@ -2895,6 +2895,12 @@ The sound studio edits the same bounded `SoundDesign` that `ilium-sound` synthes
 
 Keyboard practice owns a private `ilium-core::Tree` and resolves the real configured prefixes and bindings. It has no PTY or outbound IPC. The voice demo owns a separate `VoiceService`, only a `set_lightbulb` capability, and an idempotent local executor. Explicit Test starts audio; page exit, configuration changes and terminal failure stop that actor. Normal voice service is suspended during setup and resumes from the saved preference afterward. Demo transcripts and receipts remain separate from application control.
 
+## Attention queue
+
+`ilium-client/src/attention/` holds a pure core with no I/O: `item` (kinds Question > Stuck > WaitingOn > Changed, evidence fingerprint, generation), `queue` (ordering, merge, stale/generation rejection, persistence validation), `instant` (deterministic items from `AgentState`), `parse` (lenient parsing of the optional `attention` list), `refresh` (coalescing gate), `turbo` (AIMD concurrency limiter and per-pane scheduler) and `settings`. The queue is client-side and global across projects; the server and IPC protocol are unchanged.
+
+Shared mode adds an `attention` key to the Sort reply. `restructure.rs` strips it from the raw JSON before the strict `LlmRestructurePlan` parse (which denies unknown fields), so a bad list never fails the sort and never enters the IPC `RecommendedRestructurePlan`. Turbo mode makes separate per-agent calls under its own limiter, independent of the naming workers' limiter. Instant items are never removed by the model, replies carry the fingerprint they analysed and are dropped per pane when it moved, and agents with unchanged fingerprints are always skipped.
+
 ## Non-goals (for now)
 
 - This worker/service architecture does not alter or absorb the existing user-written JavaScript animation-package system (`animation_plugins`, `plugin_backend`, and `ilium-animation-js`). Its package format, JavaScript ABI, V8 runtime, permissions, and activation lifecycle remain separate. A Zellij-style WASM plugin system is outside scope.

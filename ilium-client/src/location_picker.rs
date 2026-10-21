@@ -2546,10 +2546,10 @@ mod tests {
         let mut app = App::new("test".into(), project.path().to_path_buf());
         app.set_screen_area(SCREEN);
         app.animation_settings.kind = AnimationKind::Stars;
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::Animations,
             ..Default::default()
-        });
+        }));
         (app, project)
     }
 
@@ -2558,10 +2558,10 @@ mod tests {
         let mut app = App::new("osm-picker-test".into(), project.path().to_path_buf());
         app.set_screen_area(SCREEN);
         app.animation_settings.kind = AnimationKind::OpenStreetMap;
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::Animations,
             ..Default::default()
-        });
+        }));
         (app, project)
     }
 
@@ -3010,10 +3010,10 @@ mod tests {
                 home.path().to_path_buf(),
                 Ok(home_before.clone()),
             );
-            app.mode = Mode::Settings(SettingsState {
+            app.mode = Mode::Settings(Box::new(SettingsState {
                 tab: SettingsTab::Animations,
                 ..Default::default()
-            });
+            }));
             app.open_location_picker();
             let Mode::LocationPicker(picker) = &mut app.mode else {
                 panic!("location picker must open")

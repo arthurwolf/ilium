@@ -46,6 +46,9 @@ pub enum AgentToolbarAction {
     /// configured inference provider. Entirely client-side.
     SmartCopy,
     CopyLastMessage,
+    /// Re-opens the last-prompt banner closed for this agent. Client-side;
+    /// only drawn while the banner is enabled but closed for the pane.
+    ShowLastPrompt,
     Compact,
     Clear,
     Config,
@@ -334,6 +337,7 @@ pub fn command_for(
         | AgentToolbarAction::Stop
         | AgentToolbarAction::CopyScreen
         | AgentToolbarAction::SmartCopy
+        | AgentToolbarAction::ShowLastPrompt
         | AgentToolbarAction::CycleEffort
         | AgentToolbarAction::ToggleTextSelection
         | AgentToolbarAction::CodexModelTier(_)
@@ -380,6 +384,7 @@ pub const fn action_label(action: AgentToolbarAction) -> &'static str {
         AgentToolbarAction::CopyScreen => "Screen",
         AgentToolbarAction::SmartCopy => "Smart copy",
         AgentToolbarAction::CopyLastMessage => "Copy",
+        AgentToolbarAction::ShowLastPrompt => "Prompt",
         AgentToolbarAction::Compact => "Compact",
         AgentToolbarAction::Clear => "Clear",
         AgentToolbarAction::Config => "Config",
@@ -422,6 +427,9 @@ pub fn tooltip_for(
         }
         AgentToolbarAction::CopyLastMessage => {
             "Copy the agent's last message (sends /copy)".to_string()
+        }
+        AgentToolbarAction::ShowLastPrompt => {
+            "Show the last-prompt banner again for this agent".to_string()
         }
         AgentToolbarAction::Compact => {
             "Compact the conversation (remote model when enabled in settings, else /compact)"
@@ -476,6 +484,9 @@ pub struct ToolbarContext<'a> {
     /// Mirrors `UiSettings::terminal_text_selection_enabled` -- drives both
     /// the `ToggleTextSelection` button's on/off state text and its tooltip.
     pub selection_enabled: bool,
+    /// The last-prompt banner is enabled but closed for this pane: offer a
+    /// button that re-opens it.
+    pub show_prompt_reopen: bool,
 }
 
 /// The centered button group: universal actions available for every pane
@@ -491,6 +502,7 @@ fn center_buttons(ctx: ToolbarContext) -> Vec<Button> {
         effort,
         show_labels,
         selection_enabled,
+        show_prompt_reopen,
     } = ctx;
     let mut buttons = vec![
         Button {
@@ -526,6 +538,16 @@ fn center_buttons(ctx: ToolbarContext) -> Vec<Button> {
             ),
         },
     ];
+    if show_prompt_reopen {
+        buttons.push(Button {
+            action: AgentToolbarAction::ShowLastPrompt,
+            text: button_text(
+                crate::last_prompt_toolbar::REOPEN_GLYPH,
+                AgentToolbarAction::ShowLastPrompt,
+                show_labels,
+            ),
+        });
+    }
     let Some(provider) = provider else {
         return buttons;
     };
@@ -989,6 +1011,7 @@ fn rendered_texts(
             effort,
             show_labels,
             selection_enabled: true,
+            show_prompt_reopen: false,
         },
     )
     .into_iter()
@@ -1013,6 +1036,7 @@ mod tests {
             effort,
             show_labels,
             selection_enabled: true,
+            show_prompt_reopen: false,
         }
     }
 

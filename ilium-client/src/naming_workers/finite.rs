@@ -319,9 +319,10 @@ fn run_request(
                 current_structure,
                 inference_activity_revisions,
                 recap_stamps,
+                include_attention,
                 ..
             } = *request;
-            let result = provider_allowed(cancelled, decision, word).and_then(|()| {
+            let outcome = provider_allowed(cancelled, decision, word).and_then(|()| {
                 // Context mutations are job-local and discarded on panic; no
                 // shared state can observe a half-resolved context vector.
                 catch_worker_panic(
@@ -329,20 +330,21 @@ fn run_request(
                     AssertUnwindSafe(|| {
                         crate::restructure::resolve_content_extracts(&mut contexts, &home);
                         provider_allowed(context.stop_requested(), decision, word)?;
-                        crate::restructure::infer_project_restructure(
+                        crate::restructure::infer_project_restructure_with_attention(
                             settings,
                             &contexts,
                             &current_structure,
                             &protected_split_views,
                             &recommendation_snapshot,
                             &animation_home,
+                            include_attention,
                         )
                     }),
                 )
             });
-            let (result, recaps) = match result {
-                Ok(inference) => (Ok(inference.plan), inference.recaps),
-                Err(error) => (Err(error), Vec::new()),
+            let (result, recaps, attention) = match outcome {
+                Ok(inference) => (Ok(inference.plan), inference.recaps, inference.attention),
+                Err(error) => (Err(error), Vec::new(), None),
             };
             NamingWorkerEvent::Restructure(RestructureWorkerResult {
                 project_id,
@@ -352,6 +354,7 @@ fn run_request(
                 result,
                 recaps,
                 recap_stamps,
+                attention,
             })
         }
         #[cfg(test)]
@@ -624,6 +627,7 @@ impl Kind {
                     result: Err(error),
                     recaps: Vec::new(),
                     recap_stamps: Default::default(),
+                    attention: None,
                 })
             }
             #[cfg(test)]

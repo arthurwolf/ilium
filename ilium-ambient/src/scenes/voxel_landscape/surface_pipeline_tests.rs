@@ -20,6 +20,7 @@ use super::{
     surface_raster::{
         draw_fluid_mesh, draw_mesh, draw_mesh_inner, linear_to_srgb_byte, DirectionalLight,
         FlatShader, FragmentShader, PixelResult, RasterFrame, RasterLimits, Vertex,
+        MAX_TRANSLUCENT_LAYERS,
     },
 };
 use std::{

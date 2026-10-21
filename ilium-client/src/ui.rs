@@ -40,6 +40,10 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 #[path = "ui_openstreetmap_tests.rs"]
 mod osm_attribution_tests;
 
+#[cfg(test)]
+#[path = "ui_polish_tests.rs"]
+mod polish_tests;
+
 /// Share the event loop's sampled animation time while retaining the public renderer.
 pub(crate) fn draw_at(frame: &mut Frame, app: &mut App, animation_elapsed: Duration) {
     draw_at_with_cursor(frame, app, animation_elapsed);
@@ -53,6 +57,9 @@ pub(crate) fn draw_at_with_cursor(
 ) -> Option<Position> {
     app.composed_tree_rows = None;
     app.composed_terminal_sources.clear();
+    // The attention button's row is part of the tree panel's geometry, so the
+    // reservation must match the mode before anything is measured or drawn.
+    tree_ui::set_attention_button_reserved(app.attention_enabled());
     app.reconcile_animation_presentation();
     app.composed_editor_sources.clear();
     let area = frame.area();
@@ -464,15 +471,21 @@ fn draw_worktree_tooltip(frame: &mut Frame, app: &App) {
         if let Some(explanation) = app.emitted_worktree_tooltip(hit.id) {
             crate::status_icons::render_tooltip(frame, app.layout.screen_area, anchor, explanation);
         }
-        return;
     }
     #[cfg(test)]
-    if let Some(workspace) = app.tree.pane_workspace(hit.id) {
-        let explanation = crate::status_icons::workspace_explanation(
-            workspace,
-            app.workspace_git_statuses.get(&hit.id),
-        );
-        crate::status_icons::render_tooltip(frame, app.layout.screen_area, anchor, &explanation);
+    if app.emitted_geometry.is_none() {
+        if let Some(workspace) = app.tree.pane_workspace(hit.id) {
+            let explanation = crate::status_icons::workspace_explanation(
+                workspace,
+                app.workspace_git_statuses.get(&hit.id),
+            );
+            crate::status_icons::render_tooltip(
+                frame,
+                app.layout.screen_area,
+                anchor,
+                &explanation,
+            );
+        }
     }
 }
 
@@ -488,11 +501,12 @@ fn draw_status_tooltip(frame: &mut Frame, app: &App) {
         if let Some(tooltip) = app.emitted_status_tooltip(node_id, slot) {
             crate::status_icons::render_tooltip(frame, app.layout.screen_area, anchor, tooltip);
         }
-        return;
     }
     #[cfg(test)]
-    if let Some(tooltip) = status_tooltip_content(app, node_id, slot) {
-        crate::status_icons::render_tooltip(frame, app.layout.screen_area, anchor, &tooltip);
+    if app.emitted_geometry.is_none() {
+        if let Some(tooltip) = status_tooltip_content(app, node_id, slot) {
+            crate::status_icons::render_tooltip(frame, app.layout.screen_area, anchor, &tooltip);
+        }
     }
 }
 fn status_tooltip_content(
@@ -884,6 +898,9 @@ fn draw_base_layer(frame: &mut Frame, area: Rect, app: &mut App) -> Option<Posit
             panes: &app.panes,
         },
     );
+    if let Some(button_area) = app.attention_button_rect() {
+        crate::attention::panel::render_button(frame, button_area, app.attention_count());
+    }
     let values = painted_rows
         .node_ids()
         .map(|node_id| {
@@ -1010,6 +1027,7 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) -> O
         Mode::AgentToolbarModelSubmenu(state) => draw_agent_toolbar_model_submenu(frame, state),
         Mode::SmartCopy => {}
         Mode::AgentDebugLog(_) => {}
+        Mode::LastPromptDialog(state) => draw_last_prompt_dialog(frame, area, state),
         Mode::AgentDebugSavePath(_, state) => {
             cursor = modal::render_text_prompt_cursor(
                 frame,
@@ -2507,6 +2525,49 @@ fn draw_create_group(frame: &mut Frame, app: &App, state: &CreateGroupState) -> 
 fn draw_pane(frame: &mut Frame, area: Rect, app: &App) {
     let _ = draw_pane_sources(frame, area, app);
 }
+/// Centred dialog with the full, wrapped text of a pane's last prompt and
+/// Copy / Close buttons on its bottom border.
+fn draw_last_prompt_dialog(
+    frame: &mut Frame,
+    screen: Rect,
+    state: &crate::last_prompt_toolbar::LastPromptDialogState,
+) {
+    let dialog = crate::last_prompt_toolbar::dialog_area(screen);
+    frame.render_widget(Clear, dialog);
+    let block = theme::block(true).title(theme::chrome_title("Last prompt"));
+    let inner = block.inner(dialog);
+    frame.render_widget(block, dialog);
+    let total_lines = u16::try_from(
+        crate::last_prompt_banner::wrap_lines(&state.text, inner.width.saturating_sub(2)).len(),
+    )
+    .unwrap_or(u16::MAX);
+    let max_scroll = total_lines.saturating_sub(inner.height);
+    let text_area = Rect::new(
+        inner.x + 1,
+        inner.y,
+        inner.width.saturating_sub(2),
+        inner.height,
+    );
+    frame.render_widget(
+        Paragraph::new(state.text.as_str())
+            .wrap(ratatui::widgets::Wrap { trim: false })
+            .scroll((state.scroll.min(max_scroll), 0)),
+        text_area,
+    );
+    for (rect, label) in [
+        (
+            crate::last_prompt_toolbar::dialog_copy_button(dialog),
+            crate::last_prompt_toolbar::dialog_copy_label(),
+        ),
+        (
+            crate::last_prompt_toolbar::dialog_close_button(dialog),
+            crate::last_prompt_toolbar::dialog_close_label(),
+        ),
+    ] {
+        frame.render_widget(Paragraph::new(label), rect);
+    }
+}
+
 fn draw_pane_sources(
     frame: &mut Frame,
     area: Rect,
@@ -2521,6 +2582,16 @@ fn draw_pane_sources(
         crate::chatroom_ui::render(frame, area, app, *project_id);
         return Vec::new();
     }
+    if matches!(app.right_panel_target, RightPanelTarget::Attention) {
+        crate::attention::panel::render_panel(
+            frame,
+            area,
+            &app.attention_panel_rows(),
+            app.attention.panel_selected,
+            matches!(app.focus, FocusTarget::Pane),
+        );
+        return Vec::new();
+    }
     let viewports = app.pane_viewports();
     if viewports.is_empty() {
         let (title, message) = match app.right_panel_target {
@@ -2533,8 +2604,14 @@ fn draw_pane_sources(
             ),
             _ => ("Terminal", "no pane selected"),
         };
-        let placeholder =
-            Paragraph::new(message).block(theme::block(false).title(theme::chrome_title(title)));
+        // Placeholder copy gets the same inner breathing room as the pane frames.
+        let placeholder = Paragraph::new(message)
+            .block(
+                theme::block(false)
+                    .title(theme::chrome_title(title))
+                    .padding(ratatui::widgets::Padding::new(2, 1, 1, 0)),
+            )
+            .style(Style::new().add_modifier(Modifier::DIM));
         frame.render_widget(placeholder, area);
         return Vec::new();
     }
@@ -2849,6 +2926,7 @@ fn draw_pane_runtime(
                             .unwrap_or_default(),
                         show_labels: app.ui_settings.show_toolbar_labels,
                         selection_enabled: app.ui_settings.terminal_text_selection_enabled,
+                        show_prompt_reopen: app.last_prompt_reopen_available(viewport.pane_id),
                     },
                     hovered,
                 );
@@ -2870,7 +2948,25 @@ fn draw_pane_runtime(
                 app.display_last_agent_prompt(viewport.pane_id),
                 app.ui_settings.last_prompt_max_lines.into(),
                 app.ui_settings.color_scheme,
+                crate::last_prompt_toolbar::has_toolbar(last_prompt_area.width)
+                    .then(|| app.last_prompt_toolbar_visibility(viewport.pane_id)),
+                app.hovered_last_prompt_button
+                    .and_then(|(pane_id, button)| (pane_id == viewport.pane_id).then_some(button)),
             );
+        }
+    }
+
+    // A newly arrived attention item announces itself on the focused pane's
+    // rule beside the last-prompt banner; never over terminal content.
+    if pane_focused && matches!(runtime, PaneRuntime::Terminal(_)) {
+        if let (Some(rule), Some((kind, title, reason))) = (
+            viewport
+                .last_prompt_bottom_rule
+                .or(viewport.toolbar_rule)
+                .or(viewport.progress_rule),
+            app.attention_arrival_view(),
+        ) {
+            crate::attention::panel::render_arrival(frame, rule, kind, &title, &reason);
         }
     }
 
@@ -3180,7 +3276,7 @@ fn draw_editor(frame: &mut Frame, area: Rect, editor: &EditorPane) {
                     editor.textarea.selection_range(),
                     current,
                 );
-                draw_source_scrollbar(frame, chrome.content_area, editor);
+                draw_source_scrollbar(frame, chrome.scrollbar_area, editor);
             } else {
                 frame.render_widget(
                     Paragraph::new(editor.preparation_error.as_deref().map_or_else(
@@ -3201,7 +3297,13 @@ fn draw_editor(frame: &mut Frame, area: Rect, editor: &EditorPane) {
                     editor.rendered_scroll,
                     editor.line_display,
                 );
-                draw_rendered_scrollbar(frame, chrome.content_area, document, editor);
+                draw_rendered_scrollbar(
+                    frame,
+                    chrome.content_area,
+                    chrome.scrollbar_area,
+                    document,
+                    editor,
+                );
             }
             None => {
                 frame.render_widget(
@@ -3269,12 +3371,14 @@ fn draw_source_scrollbar(frame: &mut Frame, area: Rect, editor: &EditorPane) {
 /// that already fits" rule.
 fn draw_rendered_scrollbar(
     frame: &mut Frame,
-    area: Rect,
+    text_area: Rect,
+    scrollbar_area: Rect,
     document: &markdown::render::RenderedDocument,
     editor: &EditorPane,
 ) {
-    let total_height = markdown::view::content_height(document, area.width, editor.line_display);
-    if total_height <= area.height {
+    let total_height =
+        markdown::view::content_height(document, text_area.width, editor.line_display);
+    if total_height <= text_area.height {
         return;
     }
     let mut scrollbar_state = ScrollbarState::new(usize::from(total_height))
@@ -3283,7 +3387,7 @@ fn draw_rendered_scrollbar(
         .begin_symbol(None)
         .end_symbol(None)
         .track_symbol(Some("│"));
-    frame.render_stateful_widget(scrollbar, area, &mut scrollbar_state);
+    frame.render_stateful_widget(scrollbar, scrollbar_area, &mut scrollbar_state);
 }
 
 /// The source line the minimap should mark as "you are here": the cursor
@@ -3389,6 +3493,7 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         Mode::AgentToolbarModelSubmenu(..) => "MODEL STRENGTH",
         Mode::SmartCopy => "SMART COPY",
         Mode::AgentDebugLog(..) => "AGENT DEBUG LOG",
+        Mode::LastPromptDialog(..) => "LAST PROMPT",
         Mode::AgentDebugSavePath(..) => "SAVE AGENT DEBUG LOG",
         Mode::SchedulePaneInput(..) => "SCHEDULE INPUT",
         Mode::QueuePrompt(..) => "QUEUE PROMPT",
@@ -4504,11 +4609,11 @@ mod tests {
     fn stacked_voice_credential_prompt_renders_over_live_settings() {
         let mut app = App::new("test".to_owned(), std::env::temp_dir());
         app.set_screen_area(Rect::new(0, 0, 120, 40));
-        app.mode = Mode::Settings(crate::app::SettingsState {
+        app.mode = Mode::Settings(Box::new(crate::app::SettingsState {
             tab: crate::app::SettingsTab::VoiceControl,
             selected_row: 1,
             ..crate::app::SettingsState::default()
-        });
+        }));
         app.settings_adjust_voice_row(crate::voice_settings::VoiceRow::ApiKey, 1);
         let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
 
@@ -5027,7 +5132,14 @@ pub(crate) fn test_source_window_pixels(
     height: u16,
 ) -> ratatui::buffer::Buffer {
     editor.show_minimap = false;
-    let area = Rect::new(0, 0, width, height + crate::editor_chrome::TOOLBAR_HEIGHT);
+    // One extra column: the editor reserves it for the scrollbar, so the
+    // text window keeps the requested width.
+    let area = Rect::new(
+        0,
+        0,
+        width + 1,
+        height + crate::editor_chrome::TOOLBAR_HEIGHT,
+    );
     let content = crate::editor_chrome::compute(area, false).content_area;
     assert_eq!(content.width, width);
     assert_eq!(content.height, height);

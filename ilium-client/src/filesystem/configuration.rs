@@ -10,6 +10,7 @@ pub enum ConfigurationChange {
     Terminal(crate::config::TerminalSettings),
     Git(crate::config::GitSettings),
     ResetPlanning(crate::reset_planning::ResetPlanningSettings),
+    Attention(crate::attention::AttentionSettings),
     Cost(crate::cost_settings::CostSettings),
     RemoteCompaction(crate::remote_compaction_settings::RemoteCompactionSettings),
     Editor(crate::config::EditorSettings),
@@ -91,6 +92,8 @@ impl Job for ConfigurationWrite {
             Git(value) => crate::config::save_git_settings(directory, &value)
                 .map(|()| ConfigurationSaved::Plain),
             ResetPlanning(value) => crate::config::save_reset_planning_settings(directory, &value)
+                .map(|()| ConfigurationSaved::Plain),
+            Attention(value) => crate::config::save_attention_settings(directory, &value)
                 .map(|()| ConfigurationSaved::Plain),
             Cost(value) => crate::config::save_cost_settings(directory, &value)
                 .map(|()| ConfigurationSaved::Plain),
@@ -302,6 +305,7 @@ impl ConfigurationChange {
             }
             Git(value) => serialized_bound(value)?,
             ResetPlanning(value) => serialized_bound(value)?,
+            Attention(value) => serialized_bound(value)?,
             Cost(value) => serialized_bound(value)?,
             RemoteCompaction(value) => serialized_bound(value)?,
             Onboarding(value) => serialized_bound(value)?,
@@ -359,6 +363,7 @@ impl ConfigurationChange {
         Ok(match self {
             Git(value) => Git(normalize(&value)?),
             ResetPlanning(value) => ResetPlanning(normalize(&value)?),
+            Attention(value) => Attention(normalize(&value)?.normalized()),
             Cost(mut value) => {
                 value.prices = value
                     .prices
