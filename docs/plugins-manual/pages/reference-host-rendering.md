@@ -42,7 +42,7 @@ A plugin replaces the whole contribution list of one kind per call, or sends per
 | Entry size | 16 KiB |
 | Contribution update rate | Status segments and frame slots: 10 per second per slot. Info, choices, row notes, row and item states, choice items, rich info and meters: 10 per second per plugin, shared together |
 
-Over a cap the update is refused with `contribution.too-many` (count) or `contribution.too-large` (entry size) or `rate-limited`. The earlier contributions stay.
+Over a cap the update is refused: `contribution.too-many` for a count cap, except the decorations count cap, which returns `refused(quota-exceeded)` ([errors and limits](/pages/reference-errors-and-limits/)); `contribution.too-large` for an entry size; or `rate-limited`. The earlier contributions stay.
 
 - **[HST-252]** Retained contributions MUST be held by the owner of the point (server registry or client store) and drawn from a copy in the client.
 - **[HST-253]** The host MUST enforce the contribution caps above and MUST keep the previous contributions on refusal.
@@ -204,7 +204,7 @@ The client applies theme tokens and the accessibility settings to every plugin t
 
 | Id | When | Effect |
 |---|---|---|
-| `contribution.too-many` | A count cap is exceeded | Update refused |
+| `contribution.too-many` | A count cap is exceeded, other than the decorations cap | Update refused |
 | `contribution.too-large` | An entry is over 16 KiB | Update refused |
 | `ui.invalid-tree` | Bad structure or prop (see Views) | Trap; counts as a failure |
 | `ui.too-large` | More than `ui_tree_nodes` nodes or `ui_tree_kib` KiB | Trap; counts as a failure |

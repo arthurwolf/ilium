@@ -526,7 +526,7 @@ Illustrative, not generated: the JSONL form follows the harness output of the ex
 - `refused(rate-limited)` always carries `retry-after-ms`. Wait that long before retrying.
 - `refused(conflict)` means the state changed. Read the current state, then submit again. A refused submission keeps its key free, so the same key is valid for the retry.
 - `failed(timed-out)` on `invoke-command` means the command did not reply within 30 seconds. The command may still finish later, so check its effect before a retry.
-- `cancelled` means another submission in the same batch was refused. Fix the refused one, then resubmit the whole group.
+- `refused(cancelled)` means another submission in the same batch was refused. Fix the refused one, then resubmit the whole group.
 - `duplicate(<original>)` is not an error. It confirms that an earlier submission with the same key already took effect.
 - A trap ends the plugin instance. The kernel restarts it under the restart rule in [errors and limits](/pages/reference-errors-and-limits/).
 

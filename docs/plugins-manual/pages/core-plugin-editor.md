@@ -289,7 +289,9 @@ If the plugin is disabled, the tab stays in the rail with its stored values show
 
 ### Samples
 
-#### Be the editor provider
+#### Be the editor provider (reserved role, not installable in 0.1.0)
+
+The `editor.provide` grant is reserved: in 0.1.0 the host refuses it at install, so this sample cannot be installed yet. It shows the shape the role takes after v1 ([design decisions](/pages/design-decisions/)).
 
 The plugin owns buffer text and answers every editor call. It exports the editor provider, loads text on `editor-opened`, drops it on `editor-closed` and answers reads from its own rope. See [editor.provide](/pages/capability-editor-provide/), the [editor primitive](/pages/primitives-editor/), [editor.read](/pages/capability-editor-read/) and the [events](/pages/api-events/). The `editor-provider` service is described on the editor.provide page.
 

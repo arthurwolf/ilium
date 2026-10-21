@@ -154,7 +154,7 @@ write returns unsupported and a read returns nothing.</figcaption>
 | Grant held, text on the clipboard | Writes the text. Returns `ok`. | Returns the text. |
 | Clipboard holds no text (an image, or nothing) | Not applicable. | Returns `none`. No error. |
 | Empty string written | Accepted. Replaces the clipboard text with an empty text. Returns `ok`. | Returns an empty string. |
-| Text larger than 1 MiB (1,048,576 UTF-8 bytes) | `invalid-argument`. Nothing is written. The text is never truncated. | Not applicable. |
+| Text larger than 1 MiB (1,048,576 UTF-8 bytes) | `invalid-argument`. Nothing is written. The text is never truncated. | Cut at a character boundary to at most 1 MiB, and the cut text is returned. |
 | No route on this client | `unsupported`. | Returns `none`. |
 | Grant declined by the user | `not-permitted`. | Returns `none`. A warn line goes to the plugin log. |
 | Grant revoked during the call | `revoked`. The plugin is re-activated with the reduced grant set. | Returns `none`, because `read-text` has no error result. A warn line goes to the plugin log. |
