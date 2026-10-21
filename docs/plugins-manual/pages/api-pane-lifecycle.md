@@ -298,7 +298,7 @@ export function tidy(idle: bigint[], archive: bigint): Submission {
 }
 
 export function undo(token: bigint): Submission {
-  return { intent: { tag: 'revert-restructure', val: { token } }, correlation: 2n, dedupKey: undefined };
+  return { intent: { tag: 'revert-restructure', val: token }, correlation: 2n, dedupKey: undefined };
 }
 ```
 

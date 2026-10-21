@@ -590,7 +590,7 @@ export const { lifecycle, handler, views } = definePlugin({
 | A grant is missing or declined | The widget draws an empty frame with the text `not permitted`. |
 | An image asset or file is missing, or its data is corrupt, unsupported or over 16 MiB | The widget draws an empty frame with the text `image not available`. The plugin log gets one warn line that names the source. |
 | An `rgba` picture has a length other than `width x height x 4` | The same as a corrupt image. |
-| A video source is missing, not decodable or over 16 MiB from bytes | An empty frame, and `invalid-argument` or `quota-exceeded` from the open call. |
+| A video source is missing, not decodable or over 16 MiB from bytes | An empty frame, and `invalid-argument` from the open call. |
 | A `code-view` names a buffer that does not exist | Empty frame with the text `not found`. |
 | A `terminal-view` names a pane that is closed or was never created | Empty frame with the text `not found`. |
 | `interactive` without `terminal.raw-input` | The view stays read-only. |

@@ -144,7 +144,7 @@ For a 640 × 480 picture, `image_info` returns `width 640, height 480, frames 1`
 <span class="t-dim">│</span>· - = ≡ ≣ █ █ █ █ █ █ █ █ █ █ █ ≣ ≡ = - ·        <span class="t-dim">       │</span>
 <span class="t-dim">│</span>frame 1 of 1                                      <span class="t-dim">      │</span>
 <span class="t-dim">╰────────────────────────────────────────────────────    ╯</span>
-<span class="t-err">error</span> the picture has more than 4 megapixels, nothing was drawn
+<span class="t-err">error</span> picture.png 2,400 x 2,000 has more than 4 megapixels, nothing was drawn
 </pre>
 <figcaption>Illustrative, not generated. The rounded border and the chrome title (the three icons, then the label) follow the client's panel code. The tone ramp is the client's minimap density ramp; the picture itself is invented.</figcaption>
 </figure>

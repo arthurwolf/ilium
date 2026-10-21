@@ -61,7 +61,7 @@ The two labels have different scopes: a grant row in the review dialog keeps "Bl
 
 ### How the keys combine
 
-At install the host evaluates the policy at the policy step (step 6 of the 11 steps of SEC-100) of the install pipeline, after the signature and manifest checks and before any prompt. Inside that step it checks these keys in this order and stops at the first failure.
+At install the host evaluates the policy at the policy step (step 7 of the 11 steps of SEC-100) of the install pipeline, after the signature and manifest checks and before any prompt. Inside that step it checks these keys in this order and stops at the first failure.
 
 1. `packages.allow_third_party`
 2. `plugins.deny_ids`
