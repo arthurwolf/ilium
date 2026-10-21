@@ -40,7 +40,7 @@ A plugin replaces the whole contribution list of one kind per call, or sends per
 | Status segments per plugin | 2 |
 | Virtual rows per parent | 1,024 |
 | Entry size | 16 KiB |
-| Contribution update rate | Status segments and frame slots: 10 per second per slot. Info, choices, row notes, row and item states, choice items, rich info and meters: 10 per second per plugin, shared together, burst 30 |
+| Contribution update rate | Status segments and frame slots: 10 per second per slot. Info, choices, row notes, row and item states, choice items, rich info and meters: 10 per second per plugin, shared together |
 
 Over a cap the update is refused with `contribution.too-many` (count) or `contribution.too-large` (entry size) or `rate-limited`. The earlier contributions stay.
 

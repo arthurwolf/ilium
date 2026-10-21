@@ -99,7 +99,7 @@ A message can contain line breaks, but the log stores one entry per line. The ho
 
 ### Standard output and standard error
 
-A WASI component writes standard output and standard error to the plugin log through the `wasi:cli` imports. Standard output is written at level `info`, and standard error at level `error`. These writes count against the same rate budget and the same size limit as `log`. Use `log` when you want a level of your choice or a message that stands out in the log.
+A WASI component writes standard output and standard error to the plugin log through the `wasi:cli` imports. Standard output is written at level `info`, and standard error at level `warn`. These writes count against the same rate budget and the same size limit as `log`. Use `log` when you want a level of your choice or a message that stands out in the log.
 
 ### Examples
 

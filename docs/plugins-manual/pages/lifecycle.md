@@ -131,7 +131,7 @@ A consumer is a plugin that requires a service interface. A consumer is never de
 | Provider state | What a call to the service returns |
 |---|---|
 | `activating` or `inactive` | The call waits for activation, up to the call deadline (`service:` trigger). |
-| `restart-scheduled` | `busy` with `retry-after-ms` set to the time left on the timer. |
+| `restart-scheduled` | `busy`. No `retry-after-ms` is set; the caller retries after the restart timer fires. |
 | `stopped-by-failure`, `installed-disabled-by-user`, `disabled-untrusted`, `disabled-blocked`, refused or uninstalled | `not-found`. |
 
 - [LIF-051] A consumer MUST stay active when its provider fails, is disabled or is uninstalled. Test: disable the provider and assert the consumer state.

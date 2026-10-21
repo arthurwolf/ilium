@@ -336,7 +336,7 @@ Each stub exposes exactly the extension points of [Core extension points](/pages
 | Core plugin | Extension points (kind) | Services | Stub reply |
 |---|---|---|---|
 | `ilium.core.tree` | `before-move` (veto), `before-close` (veto), `node-sorts` (collect) | none | collect: empty list; hooks: `pass` |
-| `ilium.core.layout` | `layout-presets` (collect), `before-split` (veto) | none | collect: empty list; hooks: `pass` |
+| `ilium.core.layout` | `layout-presets` (collect), `before-split` (veto) | `presets` (list, apply) | collect: empty list; hooks: `pass` |
 | `ilium.core.terminal` | `before-send-input` (veto), `open-link` (first), `link-actions` (collect) | none | collect: empty list; hooks: `pass` |
 | `ilium.core.smart-copy` | `recognisers` (collect), `after-copy` (transform) | none | collect: empty list; hooks: `pass` |
 | `ilium.core.editor` | `before-save` (transform), `file-openers` (collect), `line-badges` (collect) | none | collect: empty list; hooks: `pass` |
@@ -350,7 +350,7 @@ Each stub exposes exactly the extension points of [Core extension points](/pages
 | `ilium.core.notifications` | `before-notify` (veto), `channels` (collect) | none | collect: empty list; hooks: `pass` |
 | `ilium.core.voice` | `transcript` (transform), `voice-intents` (collect) | none | collect: empty list; hooks: `pass` |
 | `ilium.core.scheduler` | `schedule-sources` (collect), `before-send-scheduled` (veto) | none | collect: empty list; hooks: `pass` |
-| `ilium.core.text-triggers` | `rule-packs` (collect), `before-fire` (veto) | none | collect: empty list; hooks: `pass` |
+| `ilium.core.text-triggers` | `rule-packs` (collect), `before-fire` (veto) | `test-rule` (test) | collect: empty list; hooks: `pass` |
 | `ilium.core.progress` | `footer-segments` (collect), `probe-kinds` (collect) | none | collect: empty list |
 | `ilium.core.chatroom` | `before-post` (transform), `message-renderers` (collect) | none | collect: empty list; hooks: `pass` |
 | `ilium.core.worktrees` | `before-create` (transform), `post-create-steps` (collect), `before-remove` (veto) | none | collect: empty list; hooks: `pass` |
@@ -358,7 +358,7 @@ Each stub exposes exactly the extension points of [Core extension points](/pages
 | `ilium.core.compaction` | `techniques` (collect), `before-compact` (veto) | none | collect: empty list; hooks: `pass` |
 | `ilium.core.settings` | `config-importers` (collect), `onboarding-steps` (collect) | none | collect: empty list |
 | `ilium.core.keys-and-help` | `key-hints` (collect), `help-sources` (collect) | none | collect: empty list |
-| `ilium.core.search` | `sources` (collect), `rank` (transform) | none | collect: empty list; hooks: `pass` |
+| `ilium.core.search` | `sources` (collect), `rank` (transform) | `query` (query) | collect: empty list; hooks: `pass` |
 | `ilium.core.ambient` | `palettes` (collect), `style-presets` (collect) | none | collect: empty list |
 | `ilium.core.scenes` | `scene-packs` (collect), `scene-data-sources` (collect) | none | collect: empty list |
 | `ilium.core.recap` | `fact-sources` (collect), `before-recap` (transform) | `recap` | collect: empty list; hooks: `pass`; service: `{"ok":true}` |

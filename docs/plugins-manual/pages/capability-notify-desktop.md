@@ -72,7 +72,7 @@ The core payload is a record with these four fields. The WIT form is `record not
 
 ### Urgency
 
-The urgency sets the form that the desktop uses for the notice. The host does not change the text.
+The urgency sets the form that the desktop uses for the notice. The host does not change the body text. It prefixes the title with the plugin display name and a colon, and the plugin cannot supply that prefix ([SEC-045]).
 
 | Urgency | Linux (freedesktop) | Windows (toast) | macOS |
 |---|---|---|---|
@@ -91,7 +91,7 @@ A notice is shown in one of two places:
 
 `notify-spec` has no pane field, so the host cannot tell which pane a notice concerns. The rule therefore applies to every notice. A plugin cannot choose the place.
 
-The host passes `title` and `body` to the desktop unchanged. How a desktop shortens a long line is up to that desktop.
+The host passes `body` to the desktop unchanged. How a desktop shortens a long line is up to that desktop.
 
 ### Sound
 
