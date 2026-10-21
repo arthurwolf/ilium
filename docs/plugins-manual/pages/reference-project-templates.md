@@ -419,7 +419,7 @@ The manifest differs from `server` in these keys:
 
 ```json
 {
-  "scene": { "entry": "scene.wasm", "world": "ilium:scene/base@0.1.0", "exports": [] },
+  "scene": { "entry": "scene.wasm", "world": "ilium:anim/base@0.1.0", "exports": [] },
   "contributes": {
     "scenes": [
       {
