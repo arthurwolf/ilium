@@ -1251,7 +1251,7 @@ Raised by commands before any work starts.
 | `usage.subject-unavailable` | C | 2 | `{subject} is not available here.` |
 | `usage.release-build-required` | C | 2 | `This command needs a release build.` |
 | `session.unreachable` | C | 6 | `No session answers at {path}.` |
-| `session.not-found` | C | 5 | `No session named {name}.` |
+| `session.not-found` | C | 6 | `No session named {name}.` |
 | `session.version-mismatch` | C | 1 | `The session runs {server}. This command is {client}.` |
 | `session.memory-exceeded` | C | 1 | `The session uses more memory than its limit of {limit}.` |
 | `toolchain.bun-missing` | T | 4 | `Bun is not installed.` |
