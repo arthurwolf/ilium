@@ -24,7 +24,7 @@ See [terminal.write](/pages/capability-terminal-write/) and [Capabilities](/page
 lock-input: func(pane: node-id, millis: u16) -> result<_, plugin-error>;   // at most 2,000 ms
 unlock-input: func(pane: node-id);
 
-record input-stage { text: string, delay-ms: u16, delivery: input-delivery }
+record input-stage { text: string, delay-ms: u16, delivery: delivery }
 record terminal-mouse { kind: pointer-kind, button: pointer-button, column: u16, row: u16, modifiers: pointer-modifiers }
 record input-precondition { activity: option<agent-activity>, screen-revision: option<u64>, foreground: option<string> }
 ```

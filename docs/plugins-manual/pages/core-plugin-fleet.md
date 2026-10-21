@@ -791,8 +791,8 @@ The table gives the values for the two points this plugin owns. A value marked (
 
 | Point | Side | Version | Deadline | Max | Dynamic |
 |---|---|---|---|---|---|
-| `ilium.core.fleet/selectors` | server | 0.1.0 (default) | none (default) | 64 entries (default) | no (default) |
-| `ilium.core.fleet/before-broadcast` | server | 0.1.0 (default) | 20 ms (default) | 8 handlers (default) | no (default) |
+| `ilium.core.fleet/selectors` | server | 0.1.0 | none (default) | 64 entries | no |
+| `ilium.core.fleet/before-broadcast` | server | 0.1.0 | 20 ms | 8 handlers | no (default) |
 
 Side basis: `ilium.core.fleet/selectors` is server because its rules are applied by `ilium panes` and `ilium broadcast`, which the page documents as server commands (`requires_server: true`, with the panes and broadcast samples written as server code).
 Side basis: `ilium.core.fleet/before-broadcast` is server because it changes a message before `ilium broadcast` sends it, a server-side command in the broadcast sample; the client side only draws the Ask for update dialog.

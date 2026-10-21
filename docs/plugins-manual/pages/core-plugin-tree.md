@@ -666,9 +666,9 @@ Values marked (default) are not stated on this page; they are the defaults of [E
 
 | Point | Side | Version | Deadline | Max | Dynamic |
 |---|---|---|---|---|---|
-| `ilium.core.tree/before-move` | server | 0.1.0 (default) | 20 ms (default) | 8 handlers (default) | no (default) |
-| `ilium.core.tree/before-close` | server | 0.1.0 (default) | 20 ms (default) | 8 handlers (default) | no (default) |
-| `ilium.core.tree/node-sorts` | server | 0.1.0 (default) | none (default) | 64 entries (default) | no (default) |
+| `ilium.core.tree/before-move` | server | 0.1.0 | 20 ms | 8 handlers | no (default) |
+| `ilium.core.tree/before-close` | server | 0.1.0 | 20 ms | 8 handlers | no (default) |
+| `ilium.core.tree/node-sorts` | server | 0.1.0 | none (default) | 64 entries | no |
 
 Side basis: the page routes every move and close through server-side intents, and the "Order the tree" sample is a server handler, so the server runs all three points.
 

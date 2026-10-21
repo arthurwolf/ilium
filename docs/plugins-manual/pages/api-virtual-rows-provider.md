@@ -208,7 +208,7 @@ The glyph set for the group and agent rows is the one the real client draws (see
 |---|---|
 | Row kind not declared | `set-virtual-rows` completes as `refused(invalid-argument)`. |
 | More than 256 children in a page | The page is cut to 256. |
-| Deadline of 20 ms exceeded | The breach is counted; the host shows `…` with a spinner while the page is pending. |
+| Deadline of 20 ms exceeded | The breach is counted; the page ends as the row `Could not load` when no cached page exists. |
 | Trap in the provider | The plugin restarts under the usual rule. |
 
 ### See also

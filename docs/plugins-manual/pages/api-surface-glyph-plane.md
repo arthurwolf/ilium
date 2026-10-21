@@ -132,7 +132,7 @@ export function markLanes(surface: Surface, width: number, height: number): void
 
 ### Fonts
 
-Fonts are package assets (TTF or OTF, at most 4 MiB each; `manifest.asset-size` otherwise). `rasterize` returns `(width, height, gray8)`, which a scene blends into its raster with its own colour. Package assets as a whole may be up to 64 MiB.
+Fonts are package assets (TTF or OTF, at most 4 MiB each; `manifest.asset-size` otherwise). `rasterize` returns `(width, height, gray8)`, which a scene blends into its raster with its own colour. Package assets as a whole may be up to 64 MiB for T2 and T3 packages and 256 MiB for T1 bundled plugins.
 
 ### Pre-rendered loops
 

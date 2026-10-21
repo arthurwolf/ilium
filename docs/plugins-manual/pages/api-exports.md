@@ -336,7 +336,7 @@ Each export runs under a deadline. The default is the same for every tier. The v
 | `settings-validate` | 100 ms | the save is refused and the previous value kept |
 | `catalog-provider.query-catalog` | 20 ms | cached page used, breach counted |
 | `menu-provider.menu-items` | 20 ms | static entries only, breach counted |
-| `virtual-rows-provider.list-virtual-children` | 20 ms | spinner row stays, breach counted |
+| `virtual-rows-provider.list-virtual-children` | 20 ms | `Could not load` row when no cached page exists, breach counted |
 | `token-provider.tokens` | 10 ms per call | lines stay plain, host retries |
 | `job-runner.run` | 2,000 ms CPU (60,000 ms), 20,000 ms wall (600,000 ms) | `failed(timed-out)` |
 

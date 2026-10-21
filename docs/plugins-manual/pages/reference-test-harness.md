@@ -335,36 +335,36 @@ Each stub exposes exactly the extension points of [Core extension points](/pages
 
 | Core plugin | Extension points (kind) | Services | Stub reply |
 |---|---|---|---|
-| `ilium.core.tree` | `before-move` (veto), `before-close` (veto), `node-sorts` (collect) | none | collect: empty list; hooks: `pass` |
-| `ilium.core.layout` | `layout-presets` (collect), `before-split` (veto) | `presets` (list, apply) | collect: empty list; hooks: `pass` |
-| `ilium.core.terminal` | `before-send-input` (veto), `open-link` (first), `link-actions` (collect) | none | collect: empty list; hooks: `pass` |
+| `ilium.core.tree` | `before-move` (veto), `before-close` (veto), `node-sorts` (collect) | `bookmarks` (list, add, remove) | collect: empty list; hooks: `pass`; service: `{"ok":true}` |
+| `ilium.core.layout` | `layout-presets` (collect), `before-split` (veto) | `presets` (list, apply) | collect: empty list; hooks: `pass`; service: `{"ok":true}` |
+| `ilium.core.terminal` | `before-send-input` (veto), `open-link` (first), `link-actions` (collect) | `transfer` (send-screen) | collect: empty list; hooks: `pass`; service: `{"ok":true}` |
 | `ilium.core.smart-copy` | `recognisers` (collect), `after-copy` (transform) | none | collect: empty list; hooks: `pass` |
-| `ilium.core.editor` | `before-save` (transform), `file-openers` (collect), `line-badges` (collect) | none | collect: empty list; hooks: `pass` |
-| `ilium.core.kanban` | `card-actions` (collect), `card-moved` (observe) | none | collect: empty list; hooks: `pass` |
-| `ilium.core.agent-detect` | `activity-rules` (collect), `classify` (transform) | none | collect: empty list; hooks: `pass` |
-| `ilium.core.agent-toolbar` | `toolbar-actions` (collect), `banner-segments` (collect) | none | collect: empty list |
-| `ilium.core.fleet` | `selectors` (collect), `before-broadcast` (transform) | none | collect: empty list; hooks: `pass` |
-| `ilium.core.cost` | `price-sources` (collect), `quota-sources` (collect) | `usage` | collect: empty list; service: `{"ok":true}` |
-| `ilium.core.titles` | `before-apply-title` (transform), `title-styles` (collect) | none | collect: empty list; hooks: `pass` |
-| `ilium.core.inference` | `before-request` (transform), `after-response` (observe), `provider-profiles` (collect) | none | collect: empty list; hooks: `pass` |
-| `ilium.core.notifications` | `before-notify` (veto), `channels` (collect) | none | collect: empty list; hooks: `pass` |
-| `ilium.core.voice` | `transcript` (transform), `voice-intents` (collect) | none | collect: empty list; hooks: `pass` |
-| `ilium.core.scheduler` | `schedule-sources` (collect), `before-send-scheduled` (veto) | none | collect: empty list; hooks: `pass` |
-| `ilium.core.text-triggers` | `rule-packs` (collect), `before-fire` (veto) | `test-rule` (test) | collect: empty list; hooks: `pass` |
-| `ilium.core.progress` | `footer-segments` (collect), `probe-kinds` (collect) | none | collect: empty list |
-| `ilium.core.chatroom` | `before-post` (transform), `message-renderers` (collect) | none | collect: empty list; hooks: `pass` |
-| `ilium.core.worktrees` | `before-create` (transform), `post-create-steps` (collect), `before-remove` (veto) | none | collect: empty list; hooks: `pass` |
-| `ilium.core.sessions` | `snapshot-sections` (collect), `before-restore` (observe) | none | collect: empty list; hooks: `pass` |
-| `ilium.core.compaction` | `techniques` (collect), `before-compact` (veto) | none | collect: empty list; hooks: `pass` |
-| `ilium.core.settings` | `config-importers` (collect), `onboarding-steps` (collect) | none | collect: empty list |
-| `ilium.core.keys-and-help` | `key-hints` (collect), `help-sources` (collect) | none | collect: empty list |
-| `ilium.core.search` | `sources` (collect), `rank` (transform) | `query` (query) | collect: empty list; hooks: `pass` |
-| `ilium.core.ambient` | `palettes` (collect), `style-presets` (collect) | none | collect: empty list |
-| `ilium.core.scenes` | `scene-packs` (collect), `scene-data-sources` (collect) | none | collect: empty list |
-| `ilium.core.recap` | `fact-sources` (collect), `before-recap` (transform) | `recap` | collect: empty list; hooks: `pass`; service: `{"ok":true}` |
-| `ilium.core.session-convert` | `formats` (collect), `after-convert` (observe) | `convert` | collect: empty list; hooks: `pass`; service: `{"ok":true}` |
-| `ilium.core.agent-setup` | `instruction-blocks` (collect), `targets` (collect), `before-install` (veto) | `install` | collect: empty list; hooks: `pass`; service: `{"ok":true}` |
-| `ilium.core.diagnostics` | `log-sinks` (observe), `report-sections` (collect) | `report` | collect: empty list; hooks: `pass`; service: `{"ok":true}` |
+| `ilium.core.editor` | `before-save` (transform), `file-openers` (collect), `line-badges` (collect) | `buffers` (list, read, replace-range) | collect: empty list; hooks: `pass`; service: `{"ok":true}` |
+| `ilium.core.kanban` | `card-actions` (collect), `card-moved` (observe) | `boards` (list, get, move-card, add-card) | collect: empty list; hooks: `pass`; service: `{"ok":true}` |
+| `ilium.core.agent-detect` | `activity-rules` (collect), `classify` (transform) | `state` (get, list) | collect: empty list; hooks: `pass`; service: `{"ok":true}` |
+| `ilium.core.agent-toolbar` | `toolbar-actions` (collect), `banner-segments` (collect) | `last-prompt` (get) | collect: empty list; service: `{"ok":true}` |
+| `ilium.core.fleet` | `selectors` (collect), `before-broadcast` (transform) | `broadcast` (send), `panes` (list) | collect: empty list; hooks: `pass`; service: `{"ok":true}` |
+| `ilium.core.cost` | `price-sources` (collect), `quota-sources` (collect) | `usage` (get) | collect: empty list; service: `{"ok":true}` |
+| `ilium.core.titles` | `before-apply-title` (transform), `title-styles` (collect) | `suggest` (title) | collect: empty list; hooks: `pass`; service: `{"ok":true}` |
+| `ilium.core.inference` | `before-request` (transform), `after-response` (observe), `provider-profiles` (collect) | `complete` (complete) | collect: empty list; hooks: `pass`; service: `{"ok":true}` |
+| `ilium.core.notifications` | `before-notify` (veto), `channels` (collect) | `notify` (send) | collect: empty list; hooks: `pass`; service: `{"ok":true}` |
+| `ilium.core.voice` | `transcript` (transform), `voice-intents` (collect) | `say` (type) | collect: empty list; hooks: `pass`; service: `{"ok":true}` |
+| `ilium.core.scheduler` | `schedule-sources` (collect), `before-send-scheduled` (veto) | `queue` (enqueue, list, cancel) | collect: empty list; hooks: `pass`; service: `{"ok":true}` |
+| `ilium.core.text-triggers` | `rule-packs` (collect), `before-fire` (veto) | `test-rule` (test) | collect: empty list; hooks: `pass`; service: `{"ok":true}` |
+| `ilium.core.progress` | `footer-segments` (collect), `probe-kinds` (collect) | `report` (start, update, finish) | collect: empty list; service: `{"ok":true}` |
+| `ilium.core.chatroom` | `before-post` (transform), `message-renderers` (collect) | `post` (send), `tail` (get) | collect: empty list; hooks: `pass`; service: `{"ok":true}` |
+| `ilium.core.worktrees` | `before-create` (transform), `post-create-steps` (collect), `before-remove` (veto) | `create` (create) | collect: empty list; hooks: `pass`; service: `{"ok":true}` |
+| `ilium.core.sessions` | `snapshot-sections` (collect), `before-restore` (observe) | `snapshots` (list, save, restore) | collect: empty list; hooks: `pass`; service: `{"ok":true}` |
+| `ilium.core.compaction` | `techniques` (collect), `before-compact` (veto) | `compact` (start) | collect: empty list; hooks: `pass`; service: `{"ok":true}` |
+| `ilium.core.settings` | `config-importers` (collect), `onboarding-steps` (collect) | `get` (get), `set` (set) | collect: empty list; service: `{"ok":true}` |
+| `ilium.core.keys-and-help` | `key-hints` (collect), `help-sources` (collect) | `bindings` (list) | collect: empty list; service: `{"ok":true}` |
+| `ilium.core.search` | `sources` (collect), `rank` (transform) | `query` (query) | collect: empty list; hooks: `pass`; service: `{"ok":true}` |
+| `ilium.core.ambient` | `palettes` (collect), `style-presets` (collect) | `look` (get) | collect: empty list; service: `{"ok":true}` |
+| `ilium.core.scenes` | `scene-packs` (collect), `scene-data-sources` (collect) | `catalog` (list) | collect: empty list; service: `{"ok":true}` |
+| `ilium.core.recap` | `fact-sources` (collect), `before-recap` (transform) | `recap` (get) | collect: empty list; hooks: `pass`; service: `{"ok":true}` |
+| `ilium.core.session-convert` | `formats` (collect), `after-convert` (observe) | `convert` (start) | collect: empty list; hooks: `pass`; service: `{"ok":true}` |
+| `ilium.core.agent-setup` | `instruction-blocks` (collect), `targets` (collect), `before-install` (veto) | `install` (install, remove, status) | collect: empty list; hooks: `pass`; service: `{"ok":true}` |
+| `ilium.core.diagnostics` | `log-sinks` (observe), `report-sections` (collect) | `report` (build) | collect: empty list; hooks: `pass`; service: `{"ok":true}` |
 
 
 ## Traps, restarts and failure injection

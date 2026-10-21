@@ -14,7 +14,7 @@ Use a scene for an animated background the user can choose and tune. Use a clien
 
 - **Package:** a `scene` component (`scene.wasm`) with the world `ilium:anim/base@0.1.0`, and a `contributes.scenes` entry for each scene.
 - **Language:** Rust stable 1.90 or later with the `wasm32-wasip2` target, using `ilium-plugin-sdk`; or TypeScript with Bun 1.2 or later and `@ilium/plugin-sdk`. The SDK pins the binding generator versions, so `bun install` is the only install step.
-- **Imports:** `ilium:anim/base` allows `log`, `clock`, `storage`, `fs`, `codec`, `jobs`, `http`, `audio`, `media`, `location` and the surface. Nothing else is linked.
+- **Imports:** `ilium:anim/base` allows `log`, `clock`, `storage`, `fs`, `codec`, `jobs`, `http`, `audio`, `media`, `location`, `geocode`, `gpu` and the surface. Nothing else is linked.
 - **Exports:** `lifecycle` and `renderer` are required, and the manifest `exports` list never names a required export, so `"exports": []` is correct for a scene with only those two. The optional `job-runner` export needs `jobs.run`.
 - **Grants:** the scene side always has `log`, `clock`, `storage` (own buckets), `codec`, and the `fs` scopes `package`, `data` and `cache`. Every other grant goes in `capabilities.scene`, for example `jobs.run`, `http:api.example.com` or `media.video`. `audio.capture` and `location.observer` are high risk and need an explicit user grant.
 

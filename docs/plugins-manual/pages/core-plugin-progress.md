@@ -509,12 +509,12 @@ A package adds this entry in its manifest. It needs no code.
 
 ### Extension points this plugin owns
 
-The values below are the ones the core extension points table uses for these two points. The page states no version, deadline, max or dynamic value for them, so the defaults from [Extension points](/pages/api-extension-points/) apply and are marked (default). The side follows the page: the footer is drawn on the client side, and the probes run on the server side. The complete manifest holds the matching grants, `extensions.provide:ilium.core.progress/footer-segments` in the client list and `extensions.provide:ilium.core.progress/probe-kinds` in the server list, and declares both points in `contributes.extension_points`.
+The values below are the ones the core extension points table uses for these two points. The manifest states the version, max and dynamic values; the deadline is not stated, so the default from [Extension points](/pages/api-extension-points/) applies and is marked (default). The side follows the page: the footer is drawn on the client side, and the probes run on the server side. The complete manifest holds the matching grants, `extensions.provide:ilium.core.progress/footer-segments` in the client list and `extensions.provide:ilium.core.progress/probe-kinds` in the server list, and declares both points in `contributes.extension_points`.
 
 | Point | Side | Version | Deadline | Max | Dynamic |
 |---|---|---|---|---|---|
-| `ilium.core.progress/footer-segments` | client | 0.1.0 (default) | none (default) | 64 entries (default) | no (default) |
-| `ilium.core.progress/probe-kinds` | server | 0.1.0 (default) | none (default) | 64 entries (default) | no (default) |
+| `ilium.core.progress/footer-segments` | client | 0.1.0 | none (default) | 64 entries | no |
+| `ilium.core.progress/probe-kinds` | server | 0.1.0 | none (default) | 64 entries | no |
 
 ### ABI used
 
