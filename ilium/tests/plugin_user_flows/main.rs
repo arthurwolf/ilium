@@ -5,6 +5,7 @@
 
 mod blocked_state_guidance;
 mod guide_administration;
+mod guide_admin_failure_runbook;
 mod lifecycle_and_security;
 mod reference_plugin_files;
 mod reference_plugin_policy;
@@ -18,3 +19,4 @@ mod user_permissions_explained;
 mod user_plugins_overview;
 mod user_privacy;
 mod user_troubleshooting;
+mod reference_core_replacement_matrix;

@@ -18,3 +18,4 @@ mod reference_core_extension_points;
 mod reference_extension_security;
 mod reference_wit_exports;
 mod wit_extensions_register;
+mod reference_core_replacement_matrix;

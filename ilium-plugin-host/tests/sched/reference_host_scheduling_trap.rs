@@ -433,3 +433,20 @@ fn hst_201_contributions_without_a_trap_are_not_stale() {
         .iter()
         .all(|entry| !entry.stale));
 }
+
+// ---- DEV-839 (plugin concurrency rules, documented in concurrency-for-plugin-authors) ----------
+
+/// REQ: DEV-839
+#[test]
+fn dev_839_event_sent_during_activate_runs_only_after_activate_returns_ok() {
+    let scheduler = Scheduler::new(10);
+    let who = plugin("demo.yielding");
+    let base = Instant::now();
+    scheduler.begin_activation(&who);
+    scheduler.enqueue(&who, CallKind::OnEvents, base, sleeper(300));
+    scheduler.tick(base);
+    assert_eq!(executed_count(&scheduler, &who), 0);
+    scheduler.finish_activation(&who, true);
+    drain(&scheduler, base, 2);
+    assert_eq!(kinds_run(&scheduler), vec![CallKind::OnEvents]);
+}

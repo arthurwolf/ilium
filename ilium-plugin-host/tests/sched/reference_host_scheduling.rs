@@ -733,3 +733,47 @@ fn hst_187_on_events_and_render_have_no_caller_deadline() {
     scheduler.tick(at(base, 12 * 900));
     assert_eq!(executed_count(&scheduler, &who), 2);
 }
+
+// ---- DEV-834, DEV-835 (plugin concurrency rules, documented in concurrency-for-plugin-authors) ---
+
+/// REQ: DEV-834
+#[test]
+fn dev_834_slow_handler_leaves_the_last_tree_on_screen_for_the_next_frame() {
+    let kernel = kernel_with_nodes(1);
+    kernel.declare_panel("demo");
+    kernel.commit_view_tree("demo", &[("title", "held")], &[]);
+    let handle = build_with(
+        HostHarness::new().kernel(kernel.clone()),
+        ScriptedGuest::new(Shared::new()).sleeping(200),
+    );
+    let painted_before = kernel.render_count("demo");
+    handle.deliver(vec![theme()]);
+    let frame_started = Instant::now();
+    handle.pump(1);
+    assert!(
+        frame_started.elapsed() < ms(10),
+        "the frame waited for the plugin: {:?}",
+        frame_started.elapsed()
+    );
+    assert!(
+        kernel.render_count("demo") > painted_before,
+        "the frame did not paint the last tree the plugin holds"
+    );
+}
+
+/// REQ: DEV-835
+#[test]
+fn dev_835_two_events_and_a_render_of_one_instance_never_overlap() {
+    let scheduler = Scheduler::new(10);
+    let who = plugin("demo.exports");
+    let base = Instant::now();
+    scheduler.enqueue(&who, CallKind::OnEvents, base, sleeper(20));
+    scheduler.enqueue(&who, CallKind::OnEvents, base, noop());
+    scheduler.enqueue(&who, CallKind::Render, base, noop());
+    drain(&scheduler, base, 8);
+    assert_eq!(scheduler.max_concurrent_calls_in_store(&who), 1);
+    assert_eq!(
+        kinds_run(&scheduler),
+        vec![CallKind::OnEvents, CallKind::OnEvents, CallKind::Render]
+    );
+}

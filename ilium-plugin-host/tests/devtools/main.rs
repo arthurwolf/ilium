@@ -2,6 +2,7 @@
 //! debugging, trace and doctor files added by the second writer of this lane.
 
 mod common;
+mod guide_backwards_compatibility_test_matrix;
 mod guide_ci_recipes;
 mod guide_plugin_documentation;
 mod guide_plugin_documentation_p2;

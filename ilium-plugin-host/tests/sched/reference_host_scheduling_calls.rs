@@ -702,3 +702,28 @@ fn hst_196_non_yielding_calls_stay_on_one_thread_until_they_return() {
     assert_eq!(ids.len(), 4);
     assert!(ids.iter().all(|id| *id == ids[0]));
 }
+
+// ---- DEV-836 (plugin concurrency rules, documented in concurrency-for-plugin-authors) ----------
+
+/// REQ: DEV-836
+#[test]
+fn dev_836_batch_over_its_20_ms_deadline_breaches_and_its_submissions_are_dropped() {
+    let kernel = kernel_with_nodes(1);
+    let guest = ScriptedGuest::new(Shared::new())
+        .sleeping(40)
+        .submitting(vec![play_sound_submission(1)]);
+    let handle = build_with(HostHarness::new().kernel(kernel.clone()), guest);
+    handle.deliver(vec![key_pressed()]);
+    handle.pump(16);
+    assert!(
+        kernel.applied_intents().is_empty(),
+        "a submission from a batch past its deadline was applied"
+    );
+    assert!(
+        handle
+            .logs()
+            .iter()
+            .any(|line| line.message.contains("deadline")),
+        "the deadline breach was not logged"
+    );
+}

@@ -367,3 +367,39 @@ fn jobs_job_instance_may_call_clock_and_log() {
         .iter()
         .any(|line| line.message == "from the job"));
 }
+
+// ---- DEV-837, DEV-838 (plugin concurrency rules, documented in concurrency-for-plugin-authors) --
+
+/// REQ: DEV-837
+#[test]
+fn dev_837_slow_work_started_from_a_handler_returns_at_once_and_its_result_comes_later() {
+    let mut fixture = job_fixture(Box::new(|_kind, input| {
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        Ok(input.to_vec())
+    }));
+    let started = std::time::Instant::now();
+    let job = expect_ok(fixture.jobs().start(KIND.to_owned(), b"input".to_vec()));
+    assert!(
+        started.elapsed() < std::time::Duration::from_millis(20),
+        "start waited {:?} for the slow work",
+        started.elapsed()
+    );
+    assert!(is_ok(&complete(&mut fixture, job)));
+    assert_eq!(fixture.jobs().take_output(job), Some(b"input".to_vec()));
+}
+
+/// REQ: DEV-838
+#[test]
+fn dev_838_second_job_run_does_not_see_state_of_the_first() {
+    let mut remembered: Option<Vec<u8>> = None;
+    let mut fixture = job_fixture(Box::new(move |_kind, input| {
+        let previous = remembered.clone().unwrap_or_default();
+        remembered = Some(input.to_vec());
+        Ok(previous)
+    }));
+    let first = expect_ok(fixture.jobs().start(KIND.to_owned(), b"first".to_vec()));
+    assert!(is_ok(&complete(&mut fixture, first)));
+    let second = expect_ok(fixture.jobs().start(KIND.to_owned(), b"second".to_vec()));
+    assert!(is_ok(&complete(&mut fixture, second)));
+    assert_eq!(fixture.jobs().take_output(second), Some(Vec::new()));
+}
