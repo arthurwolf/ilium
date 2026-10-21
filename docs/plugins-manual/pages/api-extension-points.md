@@ -197,7 +197,7 @@ For `transform`, a `replace` carries the whole payload. The host validates it ag
 - **[HST-475]** A chain started inside a handler MUST be limited to depth 3. The inner chain MUST run after the handler returns and MUST NOT count toward the outer deadline.
 - **Contributions change.** The kernel sends the topic `ilium.extensions/changed` to the owner once per point after any change to its active set: install, uninstall, update, enable or disable of a contributor, `register`, `unregister`, a user toggle or reorder, a breach stop, a Reset, or a dormant/active change. The payload is `{ "point": "<global point name>" }`. Changes within 50 ms are merged into one event. Nobody but the owner gets it. No `contributes.topics.subscribes` entry or grant is needed; listing it is allowed and has no effect. The owner calls `list` again. [EXT-026]
 - **Dormant contributions.** A contribution is dormant when its owner is not installed, is disabled, or does not satisfy its `@version`. An inactive owner does not make it dormant. A dormant contribution stays in the package and counts for nothing. It becomes active when the owner appears. Install never fails because an owner is missing.
-- **Point full.** Install never fails because a point is full. The active set is the first `max_handlers` handlers (or `max_entries` entries) in run order. The rest are dormant with the reason `point full (<n>)`. A reorder by the user or a removal recomputes the set and sends `ilium.extensions/changed`. [EXT-030]
+- **Point full.** Install never fails because a point is full. The active set is the first `max_handlers` handlers (or `max_entries` entries) in run order. The rest are dormant with the reason `point full (<n> handlers)`. A reorder by the user or a removal recomputes the set and sends `ilium.extensions/changed`. [EXT-030]
 
 ### Diagram: owner, registry and contributors
 
@@ -534,7 +534,7 @@ Two states need a note.
 
 Extension codes do not add a case to the 15-case `error-code` enum. Each extension code is carried by a normal `plugin-error`: the `code` field holds the mapped base code from the table below, and the `message` field starts with the extension code, a colon and a space, for example `extension.vetoed: com.example.quiet-hours: quiet hours are on` [EXT-003]. The message names the contributor's plugin id; the user interface shows the display name instead (host prefix rule [SEC-292]). The SDKs parse this prefix and expose it as `error.extension_code()` in Rust and `error.extensionCode` in TypeScript, so a plugin never matches on free text. The prefix is the only part of `message` that is a contract.
 
-The WIT `extension-error` variant (7 cases) is the sync result of `list`, `run-hook`, `register` and `unregister`; the SDK converts each case to the mapped `plugin-error`. Codes found later arrive as `refused(...)` or `failed(...)` in the completion of the `run-hook` request, with the same mapping. Codes marked log-only never reach the caller; they are written to the log of the plugin that caused them.
+The WIT `extension-error` enum (7 cases) is the sync result of `list`, `run-hook`, `register` and `unregister`; the SDK converts each case to the mapped `plugin-error`. Codes found later arrive as `refused(...)` or `failed(...)` in the completion of the `run-hook` request, with the same mapping. Codes marked log-only never reach the caller; they are written to the log of the plugin that caused them.
 
 | Extension code | Base `code` | Where it appears |
 |---|---|---|

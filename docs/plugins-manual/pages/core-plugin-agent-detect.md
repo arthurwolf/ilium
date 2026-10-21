@@ -743,6 +743,7 @@ A package adds this entry in its manifest. It needs no code.
         "id": "build-waiting",
         "priority": 50,
         "entry": {
+          "id": "build-waiting",
           "signature": "claude",
           "state": "awaiting-approval",
           "regex": "Do you want to proceed\\?",

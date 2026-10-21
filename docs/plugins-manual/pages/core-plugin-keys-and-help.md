@@ -680,6 +680,7 @@ A package adds this entry in its manifest. It needs no code.
         "id": "board-hints",
         "priority": 50,
         "entry": {
+          "id": "board-hints",
           "context": "pane:board",
           "chord": "n",
           "label": "New card"

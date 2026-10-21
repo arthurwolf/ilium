@@ -288,7 +288,7 @@ Some caps are fixed and no manifest or user setting changes them: 256 submission
 | Layout percentage above 100 | Clamps it to 100 |
 | `limits` request above the tier ceiling | Clamps it and logs it; the install never fails |
 | Event queues, journal, shared cache | Drop or evict the oldest entry and count it |
-| `fs.scan` over 65,536 entries | Completes as `failed(quota-exceeded)`; `max-entries` above 65,536 is `invalid-argument` |
+| `fs.scan` finds more matches than `max_entries` | Completes as `failed(quota-exceeded)`; `max_entries` above 65,536 is `invalid-argument` |
 
 Per-call caps that a plugin can check before the call return `invalid-argument`. The caps that return `quota-exceeded` instead (`read-cells` rows, which return `none` and log the code, CLI stdin, `write-glyphs` cells, the popup stack) do so because they depend on held or cumulative state that the plugin cannot see in advance: other panes' frozen snapshots, bytes already written to the invocation, cells already queued in the frame, and popups already open [API-061].
 
@@ -550,7 +550,7 @@ Fixed caps. They are the same for every tier unless `limits_tier` is `first-part
 | `send-input` text or raw bytes per intent | 64 KiB | `refused(invalid-argument)` |
 | Codec input | 16 MiB | `invalid-argument` |
 | Events per `on-events` batch | 256 | the excess is split into later batches |
-| `fs.scan` entries | 65,536 | more matches complete as `failed(quota-exceeded)` |
+| `fs.scan` `max_entries` | 65,536 (ceiling) | more matches than `max_entries` complete as `failed(quota-exceeded)` |
 | Journal payload | 4 KiB | `invalid-argument` |
 | Message payload | 1 MiB | `refused(invalid-argument)` |
 | Topic payload | 64 KiB | `invalid-argument` |

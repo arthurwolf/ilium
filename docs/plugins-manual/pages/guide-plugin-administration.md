@@ -86,7 +86,7 @@ Automatic updates are off. A user can set `[plugins] auto_update` to `notify` or
 
 | Case | Result |
 |---|---|
-| Policy file is invalid | The host refuses to start plugins and shows `policy.invalid`. See [Plugin policy](/pages/reference-plugin-policy/#errors-and-edge-cases). |
+| Policy file is invalid | Third-party plugins (T2 and T3) refuse to load with `policy.invalid`; bundled T1 plugins run normally. See [Plugin policy](/pages/reference-plugin-policy/#errors-and-edge-cases). |
 | Two policies conflict | The stricter value wins. |
 | User adds a registry not in `packages.allowed_sources` | `policy.source-denied`, exit 7. |
 | Mirror is missing a dependency | `dependency.unsatisfied` names the id. Add the id to the mirror's `--allow` list and run `ilium plugin mirror sync` again; a partial mirror includes its dependencies ([PKG-409]). For an air-gapped bundle, export with `ilium plugin export-bundle <dir> <id> --with-deps` ([PKG-412]). |

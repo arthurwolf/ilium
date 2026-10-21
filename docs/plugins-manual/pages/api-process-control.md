@@ -17,7 +17,7 @@ A second capability lives in the `signal-pane` intent. It sends an interrupt, te
 - **Grant `panes.signal`** for `signal-pane`. Also hold `panes.read` to receive `pane-focused` events.
 - **Risk.** `process.run` and `panes.signal` are both high risk (H). The user checks each one in the review dialog. A bundled T1 plugin is asked once, at first activation.
 - **Language.** Rust crate `ilium-plugin-sdk`, module `ilium_plugin_sdk::host::process`, or TypeScript `@ilium/plugin-sdk/host/process`. The intent uses `Intent::SignalPane` in Rust and `signal-pane` in TypeScript.
-- **Side.** Server and client. Both sides use the same grants.
+- **Side.** `process.run` runs on the server and the client; `panes.signal` runs on the server only. Each side is granted only the capabilities listed for it.
 
 ### The surface
 

@@ -701,9 +701,11 @@ A package adds this entry in its manifest. It needs no code.
         "id": "local-llm",
         "priority": 50,
         "entry": {
+          "id": "local-llm",
           "model_pattern": "qwen3-*",
           "input_per_mtok": 0,
           "output_per_mtok": 0,
+          "cache_read_per_mtok": 0,
           "currency": "USD"
         }
       }
