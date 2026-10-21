@@ -275,6 +275,7 @@ fn wit_hook_handler_error_return_is_distinct_from_a_trap() {
     let call = HookCall {
         call: 3,
         point: POINT.to_owned(),
+        extension: GUEST.to_owned(),
         payload_json: "{}".to_owned(),
     };
     assert!(matches!(

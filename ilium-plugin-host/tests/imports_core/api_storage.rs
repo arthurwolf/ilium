@@ -834,7 +834,7 @@ proptest! {
         for (key, value) in &entries {
             match value {
                 Some(value) => { prop_assert!(single.storage().put(Bucket::Global, key.clone(), value.clone()).is_ok()); }
-                None => single.storage().remove(Bucket::Global, key.clone()),
+                None => { prop_assert!(single.storage().remove(Bucket::Global, key.clone()).is_ok()); }
             }
         }
         let batched_keys = all_keys(&mut batched, Bucket::Global);
