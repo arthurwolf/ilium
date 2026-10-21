@@ -1163,7 +1163,6 @@ pub fn infer_restructure_with_recaps<G: RestructureCompletionClient>(
 /// fence, or stray prose before/after the object -- rather than failing on
 /// the first byte that isn't `{`. The shared structured-output parser keeps
 /// title and restructure inference on the same contract.
-#[cfg(test)]
 fn parse_restructure_response(
     response: &str,
     contexts: &[LeafContext],
