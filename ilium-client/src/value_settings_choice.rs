@@ -1,6 +1,6 @@
 //! Closed settings catalogs with stable enum identities and fresh commit validation.
 use crate::app::{
-    AgentMonitoringRow, App, AppearanceRow, EditorRow, Mode, SettingsTab, TerminalRow,
+    AgentMonitoringRow, App, AppearanceRow, AttentionRow, EditorRow, Mode, SettingsTab, TerminalRow,
 };
 use crate::config::{
     AgentIdentifierMode, LineDisplay, MotionLevel, NewPaneDirectory, SidebarDensity, TreeOrder,
@@ -47,6 +47,37 @@ pub enum SettingsChoice {
     SessionRecovery,
     SmartCopyModifier,
     RemoteTechnique(TechniqueTarget),
+    AttentionMode,
+    AttentionPressSorts,
+    AttentionModel,
+    AttentionShowBriefing,
+}
+
+/// Model ids offered for the attention queue: the models of the provider that
+/// currently names threads, plus the saved override when it is outside that list.
+pub(crate) fn attention_model_ids(app: &App) -> Vec<String> {
+    // OpenRouter has no discovered catalogue; only a saved override is offered.
+    let no_models = Vec::new();
+    let discovered = match app.inference_settings.selected_provider {
+        ilium_inference::InferenceProviderKind::KiloGateway => &app.kilo_gateway_models,
+        ilium_inference::InferenceProviderKind::Ollama => &app.ollama_models,
+        ilium_inference::InferenceProviderKind::OpenAi => &app.openai_models,
+        ilium_inference::InferenceProviderKind::Anthropic => &app.anthropic_models,
+        ilium_inference::InferenceProviderKind::OpenRouter => &no_models,
+    };
+    let mut ids: Vec<String> = Vec::new();
+    for model in app
+        .attention_settings
+        .model_override
+        .iter()
+        .chain(discovered.iter())
+        .filter(|model| !model.trim().is_empty())
+    {
+        if !ids.contains(model) {
+            ids.push(model.clone());
+        }
+    }
+    ids
 }
 
 fn sound_file_id(path: &std::path::Path) -> String {
@@ -148,7 +179,7 @@ fn catalog<T: Copy + std::fmt::Debug + PartialEq>(
 }
 
 impl SettingsChoice {
-    pub const ALL: [Self; 38] = [
+    pub const ALL: [Self; 42] = [
         Self::TerminalDirectory,
         Self::EditorLineDisplay,
         Self::EditorMarkdown,
@@ -187,6 +218,10 @@ impl SettingsChoice {
         Self::RemoteTechnique(TechniqueTarget::Claude),
         Self::RemoteTechnique(TechniqueTarget::Codex),
         Self::RemoteTechnique(TechniqueTarget::Other),
+        Self::AttentionMode,
+        Self::AttentionPressSorts,
+        Self::AttentionModel,
+        Self::AttentionShowBriefing,
     ];
 
     pub fn at(app: &App, tab: SettingsTab, row: usize) -> Option<Self> {
@@ -238,6 +273,13 @@ impl SettingsChoice {
                 }
             }
             SettingsTab::ResetPlanning if row == 2 => Some(Self::ResetTimeDisplay),
+            SettingsTab::Attention => match AttentionRow::ALL.get(row) {
+                Some(AttentionRow::Mode) => Some(Self::AttentionMode),
+                Some(AttentionRow::PressSorts) => Some(Self::AttentionPressSorts),
+                Some(AttentionRow::Model) => Some(Self::AttentionModel),
+                Some(AttentionRow::ShowBriefing) => Some(Self::AttentionShowBriefing),
+                _ => None,
+            },
             SettingsTab::Sound => match crate::app::SoundRow::ALL.get(row) {
                 Some(crate::app::SoundRow::Source) => Some(Self::SoundSource),
                 Some(crate::app::SoundRow::File) => Some(Self::SoundFile),
@@ -312,6 +354,10 @@ impl SettingsChoice {
             Self::OpenAiModel => "OpenAI model",
             Self::AnthropicModel => "Anthropic model",
             Self::ResetTimeDisplay => "Time display",
+            Self::AttentionMode => "Attention mode",
+            Self::AttentionPressSorts => "Sort refreshes attention",
+            Self::AttentionModel => "Attention model",
+            Self::AttentionShowBriefing => "Show briefing on arrival",
             Self::SoundSource => "Sound source",
             Self::SoundFile => "Sound file",
             Self::TitleStyle => "Title style",
@@ -434,6 +480,43 @@ impl SettingsChoice {
                 crate::value_inference::OnboardingInference::KiloModel.options(app),
                 app.inference_settings.kilo_gateway.model.clone(),
             ),
+            Self::AttentionMode => catalog(
+                &crate::attention::AttentionMode::ALL,
+                app.attention_settings.mode,
+                |value| value.label().into(),
+            ),
+            Self::AttentionPressSorts => catalog(
+                &[true, false],
+                app.attention_settings.press_sorts,
+                |value| if value { "☑ On" } else { "☐ Off" }.into(),
+            ),
+            Self::AttentionShowBriefing => catalog(
+                &[true, false],
+                app.attention_settings.show_briefing,
+                |value| if value { "☑ On" } else { "☐ Off" }.into(),
+            ),
+            Self::AttentionModel => {
+                let mut options = vec![ChoiceOption {
+                    id: "none".into(),
+                    label: "Same as titles".into(),
+                    disabled_reason: None,
+                }];
+                options.extend(
+                    attention_model_ids(app)
+                        .into_iter()
+                        .map(|model| ChoiceOption {
+                            id: model.clone(),
+                            label: model,
+                            disabled_reason: None,
+                        }),
+                );
+                let selected = app
+                    .attention_settings
+                    .model_override
+                    .clone()
+                    .unwrap_or_else(|| "none".into());
+                (options, selected)
+            }
             Self::ResetTimeDisplay => catalog(
                 &[
                     crate::reset_planning::ResetTimeStyle::Exact,
@@ -842,6 +925,7 @@ impl App {
         let mut sound = self.sound_settings.clone();
         let mut resets = self.reset_planning_settings.clone();
         let mut remote_compaction = self.remote_compaction_settings.clone();
+        let mut attention = self.attention_settings.clone();
         match field {
             SettingsChoice::GitDefaultWhere => {
                 select!(crate::config::GitDefaultWhere::ALL, git.default_where)
@@ -870,6 +954,18 @@ impl App {
             | SettingsChoice::OpenAiModel
             | SettingsChoice::AnthropicModel => {
                 return Err("Inference choice was not dispatched".into());
+            }
+            SettingsChoice::AttentionMode => {
+                select!(crate::attention::AttentionMode::ALL, attention.mode);
+            }
+            SettingsChoice::AttentionPressSorts => {
+                select!([true, false], attention.press_sorts);
+            }
+            SettingsChoice::AttentionShowBriefing => {
+                select!([true, false], attention.show_briefing);
+            }
+            SettingsChoice::AttentionModel => {
+                attention.set_model_override((id != "none").then(|| id.to_owned()));
             }
             SettingsChoice::ResetTimeDisplay => {
                 select!(
@@ -1011,6 +1107,17 @@ impl App {
                     intent,
                 )?;
                 self.apply_git_settings(git);
+            }
+            SettingsChoice::AttentionMode
+            | SettingsChoice::AttentionPressSorts
+            | SettingsChoice::AttentionShowBriefing
+            | SettingsChoice::AttentionModel => {
+                self.enqueue_configuration(
+                    directory,
+                    ConfigurationChange::Attention(attention.clone()),
+                    intent,
+                )?;
+                self.apply_attention_settings(attention);
             }
             SettingsChoice::ResetTimeDisplay => {
                 self.enqueue_configuration(
@@ -1197,11 +1304,11 @@ mod tests {
             app.config_dir = Some(directory.path().into());
             app.set_screen_area(Rect::new(0, 0, width, 60));
             app.terminal_settings.new_pane_directory = NewPaneDirectory::LastUsed;
-            app.mode = Mode::Settings(SettingsState {
+            app.mode = Mode::Settings(Box::new(SettingsState {
                 tab: SettingsTab::Terminal,
                 selected_row: 1,
                 ..SettingsState::default()
-            });
+            }));
             for (button, expected) in [
                 (MouseButton::Left, NewPaneDirectory::ProjectRoot),
                 (MouseButton::Right, NewPaneDirectory::LastUsed),
@@ -1340,11 +1447,11 @@ mod tests {
                         crate::config::LeftPanelSizingMode::Fixed;
                 }
                 app.set_screen_area(Rect::new(0, 0, width, 80));
-                app.mode = Mode::Settings(SettingsState {
+                app.mode = Mode::Settings(Box::new(SettingsState {
                     tab,
                     selected_row: 0,
                     ..SettingsState::default()
-                });
+                }));
                 // Wide Settings screens show the sizing policy as cards, not as
                 // this selector; the card clicks have their own test below.
                 let selector_present = {
@@ -1609,6 +1716,7 @@ mod tests {
             1,
             2,
             2,
+            2,
             ilium_inference::InferenceProviderKind::ALL.len(),
             crate::value_inference::OnboardingInference::KiloModel
                 .options(&app)
@@ -1626,6 +1734,11 @@ mod tests {
             ilium_remote_compaction::Technique::ALL.len(),
             ilium_remote_compaction::Technique::ALL.len(),
             ilium_remote_compaction::Technique::ALL.len(),
+            crate::attention::AttentionMode::ALL.len(),
+            2,
+            // Depends on the selected provider; recomputed inside the loop below.
+            0,
+            2,
         ];
         assert_eq!(expected.len(), SettingsChoice::ALL.len());
         for (field, expected) in SettingsChoice::ALL.into_iter().zip(expected) {
@@ -1635,6 +1748,11 @@ mod tests {
                 SettingsChoice::OpenAiModel => ilium_inference::InferenceProviderKind::OpenAi,
                 SettingsChoice::AnthropicModel => ilium_inference::InferenceProviderKind::Anthropic,
                 _ => app.inference_settings.selected_provider,
+            };
+            let expected = if field == SettingsChoice::AttentionModel {
+                1 + attention_model_ids(&app).len()
+            } else {
+                expected
             };
             let (options, selected) = field.options(&app);
             assert_eq!(options.len(), expected, "{field:?}");
@@ -1665,11 +1783,11 @@ mod tests {
                         .map(|row| (tab, row))
                 })
                 .unwrap_or_else(|| panic!("{field:?} must have a settings row"));
-            app.mode = Mode::Settings(SettingsState {
+            app.mode = Mode::Settings(Box::new(SettingsState {
                 tab: location.0,
                 selected_row: location.1,
                 ..SettingsState::default()
-            });
+            }));
             app.begin_settings_choice_dialog(field);
             let Mode::ValueDialog(host) = std::mem::replace(&mut app.mode, Mode::Normal) else {
                 panic!("{field:?} plus control must open a dialog");
@@ -1731,11 +1849,11 @@ mod tests {
         app.config_dir = Some(directory.path().into());
         app.ui_settings.left_panel_sizing.mode = LeftPanelSizingMode::Fixed;
         app.set_screen_area(Rect::new(0, 0, 200, 80));
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::Appearance,
             selected_row: 0,
             ..SettingsState::default()
-        });
+        }));
         let content = {
             let Mode::Settings(state) = &app.mode else {
                 panic!("settings mode");
@@ -1936,11 +2054,11 @@ mod tests {
         let mut app = App::new("choice-retry".into(), directory.path().into());
         app.config_dir = Some(directory.path().into());
         app.terminal_settings.scrollback_budget_mib = 17;
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::Terminal,
             selected_row: 1,
             ..SettingsState::default()
-        });
+        }));
         app.begin_settings_choice_dialog(SettingsChoice::TerminalDirectory);
         let Mode::ValueDialog(host) = std::mem::replace(&mut app.mode, Mode::Normal) else {
             panic!("choice modal");
@@ -2041,11 +2159,11 @@ mod tests {
         let mut concurrent = previous;
         concurrent.backups_enabled = !previous.backups_enabled;
         crate::config::save_session_settings(directory.path(), &previous, &concurrent).unwrap();
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::Session,
             selected_row: 0,
             ..SettingsState::default()
-        });
+        }));
         app.begin_settings_choice_dialog(SettingsChoice::SessionRecovery);
         let Mode::ValueDialog(host) = std::mem::replace(&mut app.mode, Mode::Normal) else {
             panic!("choice child");
@@ -2084,11 +2202,11 @@ mod tests {
         std::fs::create_dir(&config_path).unwrap();
         let mut app = App::new("synthetic-session-failure".into(), directory.path().into());
         app.config_dir = Some(directory.path().into());
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::Session,
             selected_row: 0,
             ..SettingsState::default()
-        });
+        }));
         app.begin_settings_choice_dialog(SettingsChoice::SessionRecovery);
         let Mode::ValueDialog(host) = std::mem::replace(&mut app.mode, Mode::Normal) else {
             panic!("choice child");
@@ -2172,11 +2290,11 @@ mod tests {
             directory.path().into(),
         );
         app.config_dir = Some(directory.path().into());
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::Session,
             selected_row: 0,
             ..SettingsState::default()
-        });
+        }));
         app.begin_settings_choice_dialog(SettingsChoice::SessionRecovery);
         let old = std::sync::Arc::new(());
         if let Mode::ValueDialog(host) = &mut app.mode {

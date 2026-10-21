@@ -31,7 +31,10 @@ impl App {
     fn stats_ui_active(&self) -> bool {
         self.modal_stack.is_empty()
             && matches!(self.mode, Mode::Normal)
-            && !matches!(self.right_panel_target, RightPanelTarget::Chatroom { .. })
+            && !matches!(
+                self.right_panel_target,
+                RightPanelTarget::Chatroom { .. } | RightPanelTarget::Attention
+            )
     }
 
     /// The pane whose second header icon sits under `position`, when that

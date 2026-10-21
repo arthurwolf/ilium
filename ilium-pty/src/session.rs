@@ -425,6 +425,12 @@ impl OutputJournal {
     /// than ordinary 10,000-line agent transcripts.
     const MAX_RETAINED_BYTES: usize = 32 * 1024 * 1024;
 
+    /// Full terminal reset (`ESC c`) that opens every replay of a truncated
+    /// journal. The estimate and both replay builders must all use this one
+    /// value: a replay whose length differs from its estimate is rejected as
+    /// "moved", which made every truncated pane impossible to resynchronize.
+    const RESET_PREFIX: &'static [u8] = b"\x1bc";
+
     /// Takes the reader's borrowed slice rather than an owned `Vec` so the
     /// chunk really is allocated once: `Arc<[u8]>` cannot adopt a `Vec`'s
     /// allocation (it needs room for the reference count in front of the
@@ -453,11 +459,17 @@ impl OutputJournal {
         chunk
     }
 
+    /// The reset prefix a replay needs, given whether its journal start is complete.
+    fn reset_prefix(is_complete: bool) -> Option<&'static [u8]> {
+        (!is_complete).then_some(Self::RESET_PREFIX)
+    }
+
     fn replay_estimate(&self) -> PtyOutputReplayEstimate {
         PtyOutputReplayEstimate {
             through_sequence: self.next_sequence,
             first_sequence: self.chunks.front().map(|chunk| chunk.sequence),
-            byte_len: self.retained_bytes + usize::from(!self.is_complete) * 3,
+            byte_len: self.retained_bytes
+                + Self::reset_prefix(self.is_complete).map_or(0, <[u8]>::len),
             is_complete: self.is_complete,
         }
     }
@@ -467,7 +479,7 @@ impl OutputJournal {
         // depend on a mode established before the byte cap. Reset the client
         // parser first in that exceptional case so it never inherits a bogus
         // half-state from bytes that are no longer available.
-        let reset_prefix = (!self.is_complete).then_some(b"\x1bc".as_slice());
+        let reset_prefix = Self::reset_prefix(self.is_complete);
         let mut bytes =
             Vec::with_capacity(self.retained_bytes + reset_prefix.map_or(0, |prefix| prefix.len()));
         if let Some(prefix) = reset_prefix {
@@ -536,7 +548,7 @@ impl OutputJournal {
         if through_sequence > self.next_sequence {
             return None;
         }
-        let reset_prefix = (!self.is_complete).then_some(b"\x1bc".as_slice());
+        let reset_prefix = Self::reset_prefix(self.is_complete);
         let reset_len = reset_prefix.map_or(0, <[u8]>::len);
         if max_bytes < reset_len {
             return None;
@@ -597,7 +609,7 @@ impl OutputJournal {
             .take_while(|chunk| chunk.sequence <= expected.through_sequence)
             .map(|chunk| chunk.bytes.len())
             .sum();
-        let reset_prefix = (!expected.is_complete).then_some(b"\x1bc".as_slice());
+        let reset_prefix = Self::reset_prefix(expected.is_complete);
         let expected_len = retained_bytes + reset_prefix.map_or(0, |prefix| prefix.len());
         if expected_len != expected.byte_len {
             return None;
@@ -1881,6 +1893,23 @@ mod tests {
         assert_eq!(replay.through_sequence, current.through_sequence);
         assert_eq!(replay.bytes.len(), current.byte_len);
         assert_eq!(replay.bytes, b"first-later");
+    }
+
+    #[test]
+    fn replay_estimate_of_truncated_journal_matches_retained_replay() {
+        let mut journal = journal();
+        journal.append(b"first");
+        journal.append(b"-second");
+        discard_oldest_chunk(&mut journal);
+
+        let estimate = journal.replay_estimate();
+        assert!(!estimate.is_complete);
+        assert_eq!(estimate.byte_len, b"\x1bc-second".len());
+        let replay = journal
+            .replay_through_if_retained(estimate)
+            .expect("an unchanged truncated journal must still produce its estimated replay");
+        assert_eq!(replay.bytes, b"\x1bc-second");
+        assert_eq!(replay.bytes.len(), estimate.byte_len);
     }
 
     /// Models the real safety-cap path: the oldest chunk is discarded and only

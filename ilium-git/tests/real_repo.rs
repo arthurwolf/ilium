@@ -250,7 +250,8 @@ async fn optional_discovery_allows_an_ordinary_directory() {
     assert!(discover_optional(&launch).await.unwrap().is_none());
     std::fs::remove_dir(temporary.path().join(".git")).unwrap();
     std::fs::write(temporary.path().join(".git"), "invalid gitfile\n").unwrap();
-    assert!(discover_optional(&launch).await.is_err());
+    // A corrupt gitfile cannot describe a managed checkout: ordinary folder.
+    assert!(discover_optional(&launch).await.unwrap().is_none());
     assert!(discover(&launch).await.is_err());
 }
 
@@ -266,4 +267,34 @@ async fn optional_discovery_preserves_real_and_bare_repositories() {
     git(bare.path(), &["init", "--bare", "-q"]);
     let repository = discover_optional(bare.path()).await.unwrap().unwrap();
     assert!(repository.is_bare);
+}
+
+#[tokio::test]
+async fn directory_outside_a_repository_work_tree_is_an_ordinary_folder() {
+    // A repository whose `.git` sits in a folder but whose work tree is
+    // elsewhere (`core.worktree`), as with a config repo tracking another path.
+    let work_tree = TempDir::new().expect("work tree");
+    let holder = TempDir::new().expect("holder");
+    let git_dir = holder.path().join(".git");
+    git(holder.path(), &["init", "-q", "-b", "main"]);
+    git(
+        holder.path(),
+        &[
+            "config",
+            "core.worktree",
+            work_tree.path().to_str().unwrap(),
+        ],
+    );
+    assert!(matches!(
+        discover(holder.path()).await,
+        Err(GitError::OutsideWorktree)
+    ));
+    assert!(discover_optional(holder.path())
+        .await
+        .expect("outside work tree is not an error")
+        .is_none());
+    assert!(discover_optional(&git_dir.join("info"))
+        .await
+        .expect("inside the git directory is not an error")
+        .is_none());
 }

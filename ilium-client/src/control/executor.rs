@@ -317,13 +317,13 @@ fn execute_ui(app: &mut App, command: UiCommand) -> Result<ExecutionReceipt, Str
                     .ok_or(ilium_prompts::voice::VOICE_EXECUTOR_TAB_IS_REQUIRED)?,
             )?;
             let mut state = match std::mem::replace(&mut app.mode, Mode::Normal) {
-                Mode::Settings(state) => state,
+                Mode::Settings(state) => *state,
                 _ => SettingsState::new(),
             };
             state.tab = tab;
             state.selected_row = 0;
             state.scroll = 0;
-            app.mode = Mode::Settings(state);
+            app.mode = Mode::Settings(Box::new(state));
             Ok(ExecutionReceipt::immediate(ilium_prompts::render_value(
                 "voice/executor/opened-v0-settings",
                 &serde_json::json!({"v0": (tab.label()).to_string()}),

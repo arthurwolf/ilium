@@ -34,11 +34,11 @@ fn open_number(app: &mut App) {
         .iter()
         .position(|row| *row == TerminalRow::EngineMemoryBudget)
         .unwrap();
-    app.mode = Mode::Settings(SettingsState {
+    app.mode = Mode::Settings(Box::new(SettingsState {
         tab: SettingsTab::Terminal,
         selected_row,
         ..SettingsState::default()
-    });
+    }));
     app.begin_settings_number_dialog(SettingsNumber::TerminalEngineMemory);
 }
 //
