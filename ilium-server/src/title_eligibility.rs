@@ -655,7 +655,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn oversized_transcript_line_fails_closed_without_partial_authorization() {
+    async fn oversized_transcript_line_is_skipped_and_readable_records_still_count() {
         const SESSION_ID: &str = "33333333-3333-4333-8333-333333333333";
         // Must exceed the evidence reader's per-line cap (16 MiB, see
         // ilium-agent-session/src/request_evidence.rs), so the line is skipped.
@@ -708,11 +708,15 @@ mod tests {
         )
         .await;
 
+        // Master's design (CHANGELOG: "skips oversized records") skips the
+        // oversized record and keeps the readable records before it usable.
         assert_eq!(collected.len(), 1);
-        assert_eq!(
-            collected[0].transcript,
-            GenuineRequestEvidence::Unavailable,
-            "an oversized real transcript must not authorize from its readable prefix",
+        assert!(
+            matches!(
+                collected[0].transcript,
+                GenuineRequestEvidence::Present { .. }
+            ),
+            "an oversized record is skipped; the readable records before it must still count",
         );
     }
 
