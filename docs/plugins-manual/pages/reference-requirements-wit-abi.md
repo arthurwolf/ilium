@@ -68,6 +68,9 @@ This page lists every normative rule of the WIT contract and the binary interfac
 | ABI-049 | The host MUST NOT call an export of an instance while another export of that instance is on the stack. | [reference-runtime-model](/pages/reference-runtime-model/) | call an export from an import |
 | ABI-050 | A services.call to the caller's own service and an invoke-command for the caller's own command MUST be queued and run as later calls. | [reference-runtime-model](/pages/reference-runtime-model/) | invoke own command inside on-events |
 | ABI-051 | Every WIT function that returns `request-id` MUST have an awaiting wrapper with the WIT name and a starting wrapper with the suffix `_request` in Rust and `Request` in TypeScript. A WIT name that ends in `-json` MUST keep the suffix as `_json` in Rust and `Json` in TypeScript. | [reference-wit](/pages/reference-wit/#wrapper-names-in-the-sdks) | SDK binding test: list the wrappers of `http`, `jobs`, `services`, `inference` and `settings` |
+| ABI-052 | A feature marked for removal MUST be listed in the release notes with the minor in which it stops working, at least two minors after the marking release. | [reference-abi-evolution](/pages/reference-abi-evolution/) | Read the release notes for a marked feature and check the version gap. |
+| ABI-053 | A marked feature MUST keep working until its removal minor, and the host MUST log one `deprecated` record per plugin and feature at load time, naming the feature and that minor. | [reference-abi-evolution](/pages/reference-abi-evolution/) | Load a plugin that uses a marked feature and count the records. |
+| ABI-054 | Removing a feature MUST move the affected refusals to the codes of section 4 and MUST NOT change any other code. | [reference-abi-evolution](/pages/reference-abi-evolution/) | Remove a fixture feature and assert the refusal code and the other codes. |
 
 ## How the rows are tested
 

@@ -96,6 +96,14 @@ There is one refusal for each situation. A single package never gets two codes: 
 <figcaption>Rendered at 48 columns. Illustrative. A plugin built for a newer minor than the window is refused.</figcaption>
 </figure>
 
+### Notice and removal
+
+A host API, a WIT interface, a grant or a manifest field is never removed in a minor release that is still inside the window. Authors get warning before the window moves.
+
+- [ABI-052] A feature that a release marks for removal MUST be listed in that release's notes with the minor version in which it stops working, and that minor MUST be at least two minors after the marking release.
+- [ABI-053] A marked feature MUST keep working until the minor in its notice, and the host MUST log a `deprecated` record once per plugin and feature at load time, naming the feature and the removal minor.
+- [ABI-054] Removing a feature MUST also move the affected package refusals to the codes of section 4, and the removal MUST NOT change any other code.
+
 ## 5. What an older plugin sees from a newer host
 
 A host of minor N+1 runs plugins built for N. To keep them correct, the host adapts what it sends:
