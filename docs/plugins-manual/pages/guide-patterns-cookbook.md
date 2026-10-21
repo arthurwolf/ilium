@@ -162,7 +162,7 @@ fn unknown_timer_is_ignored() {
 
 **Traps.**
 
-- A debounce delay MUST be 50 ms or more, because a shorter delay is refused with `invalid-argument`. [AUT-004]
+- A debounce delay outside the range of its field is clamped to the nearest bound, never refused: 0 to 2,000 ms for a widget `debounce-ms`, 300 to 2,000 ms for a settings row `debounce_ms`. [AUT-004]
 - Timers are lost on restart. A debounce that was pending when the plugin restarted does not fire. Treat the next change as the start of a new quiet period.
 - Do not use a repeating timer and a "last change" stamp to simulate a debounce. It wakes the plugin every period for nothing.
 

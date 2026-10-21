@@ -150,7 +150,7 @@ continues with empty answers:
 Because the reads have no error channel, a missing grant gives an empty answer, not an error code.
 
 - **Declined at install or on the prompt.** `get` returns `none`. `children`, `roots` and `find`
-  return empty lists. The first refused call of each plugin instance writes one warn line that
+  return empty lists. Each refused call writes one warn line that
   names `tree.read` and the reason (`declined`). No tree events are delivered.
 - **Revoked while running.** The next read returns `none` or an empty list (reads have no error channel, so this is the read-side form of the revoked outcome in ABI-043). The plugin receives
   `deactivate(revoked)`, and it is activated again with the reduced grant set. The restart does not

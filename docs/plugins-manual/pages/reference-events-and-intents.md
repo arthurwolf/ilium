@@ -426,7 +426,7 @@ The manifest grants `panes.read` and `notify.desktop` on the `client` side. Ever
 
 ## Edge cases and errors
 
-- **Declined or revoked grant.** No events of that kind are delivered. A revoked grant stops them from the next batch. The first refused call of each plugin instance writes one warn line naming the grant and the reason, `declined` or `revoked`.
+- **Declined or revoked grant.** No events of that kind are delivered. A revoked grant stops them from the next batch. Each refused call writes one warn line naming the grant and the reason, `declined` or `revoked`.
 - **Stale state.** `conflict` means the state changed or is held. Re-read the node, then decide. For `editor-apply-edits`, `conflict` always means a stale base revision.
 - **Restored panes.** `send-input` and `signal-pane` return `pane-not-ready` until the pane has started its process. Retry after `pane-created` or `tree-changed` for that node.
 - **Retries.** A refused submission does not reserve its key, so retry it unchanged. A failed submission needs a new key.

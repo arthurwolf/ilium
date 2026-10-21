@@ -213,7 +213,7 @@ The grant changes no pane. The user sees the plugin's log lines with `ilium plug
 
 ## Edge cases and errors
 
-- **Grant declined or revoked.** `info` and `focused` return `none`, because their signatures have no error channel. The first refused call of each plugin instance writes one warn line to the plugin log, naming `panes.read` and the reason (`declined`). Pane events are not delivered. A grant revoked while the plugin runs stops events from the next batch on.
+- **Grant declined or revoked.** `info` and `focused` return `none`, because their signatures have no error channel. Each refused call writes one warn line to the plugin log, naming `panes.read` and the reason (`declined`). Pane events are not delivered. A grant revoked while the plugin runs stops events from the next batch on.
 - **Node that is not a pane.** `info` returns `none` for a folder, a container, a removed node or an unknown id.
 - **Exited pane.** A pane node stays in the tree after its process exits, until it is closed. `info` still returns it, with its last title and size. `is-restored` is `false`.
 - **Restored pane.** `is-restored` is `true` while a restored pane waits for its first process start. Input to such a pane is refused with `pane-not-ready` by the sending grant, such as `terminal.write`. Re-check `is-restored` before each write.

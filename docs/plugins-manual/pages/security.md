@@ -294,7 +294,7 @@ A declined or revoked grant changes what a call returns. The function's signatur
 | A submission with an extended intent | `refused(not-permitted)`. The key is not reserved | `freeze-pane` without `panes.lifecycle` |
 | Function whose grant the manifest never requested on that side (also when requested only for the other side) | A trap `host.capability-not-requested`. The instance ends and restarts after a delay. An import of an interface that no requested capability unlocks fails the install with `manifest.import-not-requested` | `process.spawn` called without a request |
 
-The first refused call of each kind writes one `warn` line to the plugin log for each plugin instance. The line names the grant, the function and the reason.
+Each refused call writes one `warn` line to the plugin log for each plugin instance. The line names the grant, the function and the reason.
 
 <figure>
 <pre class="term"><span class="t-prompt">$</span> ilium plugin logs pane-tools --tail 4

@@ -313,7 +313,7 @@ The mode of the point decides what a chain does with your reply.
 
 Three rules limit the damage that a handler can do.
 
-1. **Fail open.** A timeout, a trap or an error counts as `pass`. A slow handler never blocks a notice. It is logged as `extension.handler-timeout`.
+1. **Fail open.** A timeout, a trap or an error counts as `pass`, except at a high-risk veto point whose `on_failure` is `refuse` (SEC-287). A slow handler never blocks a notice. It is logged as `extension.handler-timeout`.
 2. **Three strikes.** Three breaches in a row disable that extension until the plugin restarts. The Plugins screen shows `stopped after 3 failures` and a Reset button. The other two extensions of the package keep running.
 3. **A 100 ms chain.** The whole chain has a cap of 100 ms. Handlers after the cap are skipped and logged, so the action goes on.
 

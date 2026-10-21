@@ -252,7 +252,7 @@ Points to notice:
 
 - Normal rows are checked by default. HIGH rows are unchecked, and the user checks each one. `agent.control` is HIGH in this example.
 - Keys: Up and Down move between rows, Space toggles a row, Enter activates the focused button and Escape cancels.
-- A declined capability stays unchecked and dimmed. The plugin still loads without it. Its calls for that capability return `not-permitted`, and each first refusal writes a warn line to the log.
+- A declined capability stays unchecked and dimmed. The plugin still loads without it. Its calls for that capability return `not-permitted`, and each refusal writes a warn line to the log.
 - Grants are per side. `agent.read` on the server and `agent.read` on the client are two separate rows.
 - The high-risk grants (`agent.transcript` above) are drawn the same way as `agent.control`: unchecked, with the word HIGH.
 - `Details` shows the description, the publisher key, the number and size of the files, the requested limits and the contributions.
