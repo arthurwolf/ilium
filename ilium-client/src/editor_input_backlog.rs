@@ -96,16 +96,16 @@ impl EditorInputBacklog {
         target_pane: Option<NodeId>,
         layout_revision: Option<u64>,
         loan_identity: Option<Arc<()>>,
-    ) -> Result<(), Result<InputEvent, InputFailure>> {
+    ) -> Result<(), Box<Result<InputEvent, InputFailure>>> {
         let payload_bytes = match &event {
             Ok(event) => event.retained_payload_bytes(),
-            Err(_) => return Err(event),
+            Err(_) => return Err(Box::new(event)),
         };
         let Some(total_payload_bytes) = self.payload_bytes.checked_add(payload_bytes) else {
-            return Err(event);
+            return Err(Box::new(event));
         };
         if self.events.len() >= self.max_events || total_payload_bytes > self.max_bytes {
-            return Err(event);
+            return Err(Box::new(event));
         }
         self.payload_bytes = total_payload_bytes;
         self.events.push_back(QueuedEditorInput {
@@ -186,7 +186,7 @@ mod tests {
         let mut queue = EditorInputBacklog::begin_with_limits(quota, 1, 0).unwrap();
         queue.push(Ok(first), None, None, None).unwrap();
 
-        let returned = queue.push(Ok(event), None, None, None).unwrap_err();
+        let returned = *queue.push(Ok(event), None, None, None).unwrap_err();
         assert_eq!(
             queue
                 .pop()
@@ -212,7 +212,7 @@ mod tests {
         let mut queue = EditorInputBacklog::begin_with_limits(quota, 4, 4).unwrap();
         queue.push(Ok(first), None, None, None).unwrap();
 
-        let returned = queue.push(Ok(paste), None, None, None).unwrap_err();
+        let returned = *queue.push(Ok(paste), None, None, None).unwrap_err();
         assert_eq!(
             queue
                 .pop()

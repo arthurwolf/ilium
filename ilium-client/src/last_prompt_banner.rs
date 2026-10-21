@@ -14,6 +14,7 @@ use ratatui::Frame;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
+use crate::last_prompt_toolbar::{PromptToolbarButton, ToolbarVisibility};
 use crate::theme::{self, ColorScheme};
 
 /// Splits `text` into logical lines (`\n`, `\r\n`, or a lone `\r` -- see
@@ -164,6 +165,8 @@ pub fn render(
     prompt: Option<&str>,
     max_lines: u16,
     scheme: ColorScheme,
+    toolbar: Option<ToolbarVisibility>,
+    hovered: Option<PromptToolbarButton>,
 ) {
     if area.height == 0 {
         return;
@@ -181,12 +184,17 @@ pub fn render(
     } else {
         (0, 0)
     };
-    let text_area = Rect::new(
+    let mut text_area = Rect::new(
         area.x + inset_left,
         area.y,
         area.width - inset_left - inset_right,
         area.height,
     );
+    if toolbar.is_some() && crate::last_prompt_toolbar::has_toolbar(area.width) {
+        text_area.width = text_area
+            .width
+            .saturating_sub(crate::last_prompt_toolbar::TOOLBAR_WIDTH.saturating_sub(inset_right));
+    }
     let rows = layout(prompt, text_area.width, max_lines.min(area.height));
     let gutter_style = Style::new()
         .fg(theme::accent_bg())
@@ -218,6 +226,26 @@ pub fn render(
         Paragraph::new(lines).style(theme::last_prompt_style(scheme)),
         text_area,
     );
+    if let Some(visibility) = toolbar {
+        render_toolbar(frame, area, visibility, hovered, scheme);
+    }
+}
+
+/// Draws the banner's mini toolbar in its bottom-right corner.
+fn render_toolbar(
+    frame: &mut Frame,
+    area: Rect,
+    visibility: ToolbarVisibility,
+    hovered: Option<PromptToolbarButton>,
+    scheme: ColorScheme,
+) {
+    for (button, rect) in crate::last_prompt_toolbar::visible_buttons(area, visibility) {
+        let mut style = theme::last_prompt_style(scheme);
+        if hovered == Some(button) {
+            style = style.add_modifier(Modifier::BOLD | Modifier::REVERSED);
+        }
+        frame.render_widget(Paragraph::new(Span::styled(button.glyph(), style)), rect);
+    }
 }
 
 #[cfg(test)]
@@ -231,7 +259,15 @@ mod tests {
         terminal
             .draw(|frame| {
                 let area = frame.area();
-                render(frame, area, Some("hello world"), 3, ColorScheme::Dark);
+                render(
+                    frame,
+                    area,
+                    Some("hello world"),
+                    3,
+                    ColorScheme::Dark,
+                    None,
+                    None,
+                );
             })
             .unwrap();
         let buffer = terminal.backend().buffer();
@@ -241,6 +277,37 @@ mod tests {
         let (gutter_x, text_x) = (gutter_x.expect("gutter"), text_x.expect("text"));
         assert!(gutter_x < text_x);
         assert!(text_x >= usize::from(TEXT_INSET_LEFT));
+    }
+
+    #[test]
+    fn toolbar_draws_its_buttons_in_the_bottom_right_corner() {
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(60, 3)).unwrap();
+        let visibility = ToolbarVisibility {
+            older: false,
+            newer: false,
+        };
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                render(
+                    frame,
+                    area,
+                    Some("hello"),
+                    3,
+                    ColorScheme::Dark,
+                    Some(visibility),
+                    None,
+                );
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let bottom: String = (0..60).map(|x| buffer[(x, 2)].symbol()).collect();
+        assert!(bottom.contains(PromptToolbarButton::Copy.glyph()));
+        assert!(bottom.contains(PromptToolbarButton::Close.glyph()));
+        assert!(!bottom.contains(PromptToolbarButton::Older.glyph()));
+        let top: String = (0..60).map(|x| buffer[(x, 0)].symbol()).collect();
+        assert!(!top.contains(PromptToolbarButton::Close.glyph()));
     }
 
     #[test]
@@ -256,6 +323,8 @@ mod tests {
                     Some("FIRST\nSECOND\nTHIRD\nLAST"),
                     4,
                     ColorScheme::Dark,
+                    None,
+                    None,
                 );
             })
             .unwrap();

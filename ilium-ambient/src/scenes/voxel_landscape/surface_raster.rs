@@ -13,7 +13,7 @@ use super::{
     surface_mesh::{AlphaMode, BoundQuad, FaceOwner, PreparedMesh},
 };
 use std::time::Duration;
-const MAX_TRANSLUCENT_LAYERS: u8 = 12;
+pub(super) const MAX_TRANSLUCENT_LAYERS: u8 = 12;
 #[derive(Clone, Copy, Debug)]
 pub struct RasterLimits {
     pub pixels: usize,

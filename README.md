@@ -113,6 +113,7 @@ All keys, mouse use and remapping: [Getting started](src/docs/getting-started.md
 
 Also included:
 
+- An [attention queue](src/docs/attention-queue.md): one list of the agents that ask you a question, keep failing, wait on another agent, or changed, with a jump button and shortcut.
 - Agent [cost tracking](src/docs/agent-cost.md) and [notifications](src/docs/notifications.md).
 - Optional remote compaction of Claude and Codex sessions through your Inference model, configured in [Settings](src/docs/settings.md#remote-compaction).
 - A compaction optimizer (**Settings → Optimization**) that scans your Codex and Claude Code transcripts and recommends the cheapest auto-compaction threshold, applied to the agent's own config only after you confirm, with one-click revert. See [Settings](src/docs/settings.md#optimization).

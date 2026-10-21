@@ -50,10 +50,10 @@ impl Fixture {
             record_dir: Some(root.path().join("data")),
             config: Some(paths),
         };
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::Optimization,
             ..SettingsState::default()
-        });
+        }));
         Self {
             root,
             app,

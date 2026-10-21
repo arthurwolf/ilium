@@ -33,7 +33,7 @@ use ilium_core::animation_recommendation::RecommendedRestructurePlan;
 #[path = "restructure_recommendations.rs"]
 mod recommendations;
 pub use recommendations::{
-    infer_project_restructure, RecommendationContext, RecommendationSnapshot,
+    infer_project_restructure_with_attention, RecommendationContext, RecommendationSnapshot,
 };
 
 #[cfg(test)]
@@ -592,6 +592,7 @@ struct RestructurePromptContext {
     naming_and_organization: String,
     title_instructions: &'static str,
     output_example: &'static str,
+    attention_enabled: bool,
     items: Vec<PromptLeafContext>,
     current_structure: String,
     protected_split_views: Vec<PromptProtectedSplitViewContext>,
@@ -635,6 +636,7 @@ impl RestructurePromptContext {
             entry_naming: String::new(),
             organization: String::new(),
             naming_and_organization: String::new(),
+            attention_enabled: false,
             title_instructions: match title_style {
                 TitleStyle::Labeling => crate::session_naming::LABEL_INSTRUCTIONS,
                 TitleStyle::Summarization => ilium_prompts::naming::RESTRUCTURE_SUMMARY,
@@ -786,6 +788,7 @@ fn render_restructure_prompt(
         RestructurePromptPolicy {
             instructions: &ilium_inference::PromptInstructions::default(),
             prompt_token_limit: ilium_inference::DEFAULT_RESTRUCTURE_PROMPT_TOKEN_LIMIT,
+            include_attention: false,
         },
         items,
         current_structure,
@@ -799,6 +802,8 @@ fn render_restructure_prompt(
 struct RestructurePromptPolicy<'a> {
     instructions: &'a ilium_inference::PromptInstructions,
     prompt_token_limit: u32,
+    /// Asks the model for the optional `attention` list (shared attention mode).
+    include_attention: bool,
 }
 
 fn render_restructure_prompt_with_instructions(
@@ -813,6 +818,7 @@ fn render_restructure_prompt_with_instructions(
     let RestructurePromptPolicy {
         instructions,
         prompt_token_limit,
+        include_attention,
     } = policy;
     let mut item_evidence_budget = MAXIMUM_ITEM_EVIDENCE_CHARACTERS;
     let mut structure_evidence_budget = MAXIMUM_STRUCTURE_EVIDENCE_CHARACTERS;
@@ -835,6 +841,7 @@ fn render_restructure_prompt_with_instructions(
         prompt_context.resource_capabilities =
             crate::semantic_animation::authored_capabilities(&recommendation_context.authored)
                 .to_string();
+        prompt_context.attention_enabled = include_attention;
         prompt_context.organization = instructions.organization.trim().to_owned();
         prompt_context.naming_and_organization =
             instructions.naming_and_organization.trim().to_owned();
@@ -969,6 +976,31 @@ pub fn infer_restructure_plan_with_protected_splits<G: RestructureCompletionClie
     protected_split_views: &[ProtectedSplitViewContext],
     recommendation_context: &RecommendationContext,
 ) -> anyhow::Result<RecommendedRestructurePlan> {
+    infer_restructure_plan_with_attention(
+        generator,
+        contexts,
+        current_structure,
+        protected_split_views,
+        recommendation_context,
+        false,
+    )
+    .map(|(plan, _attention)| plan)
+}
+
+/// Same as [`infer_restructure_plan_with_protected_splits`], and when
+/// `include_attention` is set the prompt also asks for the optional
+/// `attention` list. The raw list is returned unparsed (parsing is lenient and
+/// needs live pane fingerprints, see `attention::parse_attention`); it is
+/// stripped before the strict plan parse, so a bad list can never fail the
+/// sort or trigger a corrective retry.
+pub fn infer_restructure_plan_with_attention<G: RestructureCompletionClient>(
+    generator: &G,
+    contexts: &[LeafContext],
+    current_structure: &str,
+    protected_split_views: &[ProtectedSplitViewContext],
+    recommendation_context: &RecommendationContext,
+    include_attention: bool,
+) -> anyhow::Result<(RecommendedRestructurePlan, Option<serde_json::Value>)> {
     if contexts.is_empty() {
         anyhow::bail!(ilium_prompts::naming::NAMING_RESTRUCTURE_NO_PANES_OR_FOLDERS_TO_RESTRUCTURE);
     }
@@ -983,6 +1015,7 @@ pub fn infer_restructure_plan_with_protected_splits<G: RestructureCompletionClie
             RestructurePromptPolicy {
                 instructions: &generator.prompt_instructions(),
                 prompt_token_limit: generator.restructure_prompt_token_limit(),
+                include_attention,
             },
             contexts,
             current_structure,
@@ -1024,20 +1057,20 @@ pub fn infer_restructure_plan_with_protected_splits<G: RestructureCompletionClie
         );
         tracing::info!(operation_id, attempt, response = %response, "restructure inference response");
 
-        match parse_restructure_response(
+        match parse_restructure_response_with_attention(
             &response,
             contexts,
             protected_split_views,
             generator.title_style(),
             recommendation_context,
         ) {
-            Ok(plan) => {
+            Ok(parsed) => {
                 tracing::info!(
                     operation_id,
                     attempt,
                     "restructure inference response parsed"
                 );
-                return Ok(plan);
+                return Ok(parsed);
             }
             Err(error) => {
                 tracing::error!(
@@ -1068,7 +1101,27 @@ fn parse_restructure_response(
     title_style: TitleStyle,
     recommendation_context: &RecommendationContext,
 ) -> anyhow::Result<RecommendedRestructurePlan> {
-    let candidate = crate::naming::parse_structured_json_object(response, "restructure")?;
+    parse_restructure_response_with_attention(
+        response,
+        contexts,
+        protected_split_views,
+        title_style,
+        recommendation_context,
+    )
+    .map(|(plan, _attention)| plan)
+}
+
+/// Like [`parse_restructure_response`], also returning the raw optional
+/// `attention` value split off before the strict plan parse.
+fn parse_restructure_response_with_attention(
+    response: &str,
+    contexts: &[LeafContext],
+    protected_split_views: &[ProtectedSplitViewContext],
+    title_style: TitleStyle,
+    recommendation_context: &RecommendationContext,
+) -> anyhow::Result<(RecommendedRestructurePlan, Option<serde_json::Value>)> {
+    let mut candidate = crate::naming::parse_structured_json_object(response, "restructure")?;
+    let attention = crate::attention::take_attention_value(&mut candidate);
     let mut parsed: LlmRestructurePlan =
         serde_json::from_value(candidate.clone()).map_err(|error| {
             anyhow::anyhow!(ilium_prompts::render_value(
@@ -1192,7 +1245,7 @@ fn parse_restructure_response(
     };
     preserve_protected_leaf_titles(&mut plan.structure.children, contexts);
     plan.validate_assignments()?;
-    Ok(plan)
+    Ok((plan, attention))
 }
 
 /// Restore exact bundles after normalization, including empty short names and icons.
@@ -1750,6 +1803,7 @@ mod tests {
                 RestructurePromptPolicy {
                     instructions: &instructions,
                     prompt_token_limit: limit,
+                    include_attention: false,
                 },
                 std::slice::from_ref(&item),
                 "",
@@ -2843,6 +2897,66 @@ mod tests {
             assert!(prompt.contains("Organize by feature"));
             assert!(prompt.contains("Shared vocabulary"));
             assert!(!prompt.contains("Project only"));
+        }
+    }
+
+    const ATTENTION_SORT_REPLY: &str = r#"{"children":[{"kind":"pane","id":1,"title":"Backend Agent","short_title":null,"icon":"🔧"},{"kind":"pane","id":2,"title":"Frontend Shell","short_title":"Frontend","icon":"🖥️"}]"#;
+
+    fn attention_sort_reply(attention_json: Option<&str>) -> String {
+        match attention_json {
+            Some(list) => format!("{ATTENTION_SORT_REPLY},\"attention\":{list}}}"),
+            None => format!("{ATTENTION_SORT_REPLY}}}"),
+        }
+    }
+
+    fn infer_with_attention(
+        reply: String,
+        include_attention: bool,
+    ) -> (anyhow::Result<(RecommendedRestructurePlan, Option<serde_json::Value>)>, u8, String) {
+        let generator = FakeGenerator::new(reply);
+        let contexts = vec![leaf(1, "shell-a"), leaf(2, "shell-b")];
+        let outcome = infer_restructure_plan_with_attention(
+            &generator,
+            &contexts,
+            "",
+            &[],
+            &RecommendationContext::default(),
+            include_attention,
+        );
+        let prompt = generator.last_prompt.borrow().clone().unwrap_or_default();
+        (outcome, generator.calls.get(), prompt)
+    }
+
+    #[test]
+    fn the_attention_list_rides_along_without_changing_the_sort() {
+        let plain = infer_with_attention(attention_sort_reply(None), false);
+        let list = r#"[{"id":1,"kind":"stuck","reason":"loops on a failing test"}]"#;
+        let shared = infer_with_attention(attention_sort_reply(Some(list)), true);
+
+        let (plain_plan, plain_attention) = plain.0.unwrap();
+        let (shared_plan, shared_attention) = shared.0.unwrap();
+        assert_eq!(plain_plan.structure, shared_plan.structure);
+        assert!(plain_attention.is_none());
+        assert_eq!(shared_attention.unwrap().as_array().map(Vec::len), Some(1));
+        assert_eq!(shared.1, 1, "one call serves both the sort and the list");
+    }
+
+    #[test]
+    fn off_and_instant_only_never_put_the_attention_section_in_the_prompt() {
+        let (_, _, without) = infer_with_attention(attention_sort_reply(None), false);
+        let (_, _, with) = infer_with_attention(attention_sort_reply(None), true);
+        assert!(!without.contains("<attention-queue>"), "{without}");
+        assert!(with.contains("<attention-queue>"));
+    }
+
+    #[test]
+    fn a_malformed_attention_list_never_fails_or_retries_the_sort() {
+        let plain = infer_with_attention(attention_sort_reply(None), false);
+        for bad in [r#""not a list""#, r#"[1,"x",{"id":"nope"}]"#, "null", r#"{"id":1}"#] {
+            let shared = infer_with_attention(attention_sort_reply(Some(bad)), true);
+            let (plan, _) = shared.0.unwrap_or_else(|error| panic!("{bad}: {error}"));
+            assert_eq!(plan.structure, plain.0.as_ref().unwrap().0.structure, "{bad}");
+            assert_eq!(shared.1, 1, "{bad}: no corrective retry");
         }
     }
 }

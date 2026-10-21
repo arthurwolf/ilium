@@ -2097,25 +2097,60 @@ fn agent_title(class: &AgentClass, title: &str, mode: AgentIdentifierMode) -> St
     }
 }
 
-/// Splits the tree panel's interior into the list, the frame rule above the
-/// toolbar (zero rows when frames are off or the panel is too short), and the
-/// toolbar. The single source for `list_area`, `toolbar_rule_area` and
-/// `toolbar_area`, so drawing and hit testing cannot disagree.
-fn vertical_sections(area: Rect) -> [Rect; 3] {
+thread_local! {
+    /// Whether the attention queue's one-row button is reserved above the
+    /// toolbar. Thread-local, not a process global: the UI is single-threaded
+    /// and parallel tests must not see each other's setting.
+    static ATTENTION_BUTTON_RESERVED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Reserves (or releases) the attention queue's button row. The app calls
+/// this at the start of every frame and whenever the attention mode changes,
+/// so the drawn layout, pointer hit testing and every other consumer of this
+/// module's geometry read the same value. Absent a call the tree panel is laid
+/// out exactly as before.
+pub fn set_attention_button_reserved(reserved: bool) {
+    ATTENTION_BUTTON_RESERVED.with(|cell| cell.set(reserved));
+}
+
+/// Splits the tree panel's interior into the list, the attention button row
+/// (zero rows unless reserved and the panel is tall enough), the frame rule
+/// above the toolbar (zero rows when frames are off or the panel is too
+/// short), and the toolbar. The single source for `list_area`,
+/// `attention_button_area`, `toolbar_rule_area` and `toolbar_area`, so drawing
+/// and hit testing cannot disagree.
+fn vertical_sections_with_button(area: Rect) -> [Rect; 4] {
     // Padding moves the list, rule and toolbar in from the border together.
     let inner = crate::padding::tree_padding().inset(theme::block(false).inner(area));
     let rule_rows = u16::from(
         theme::section_frames_enabled() && inner.height >= TOOLBAR_HEIGHT.saturating_add(3),
     );
-    let [list, rule, toolbar] = Layout::default()
+    let button_rows = u16::from(
+        ATTENTION_BUTTON_RESERVED.with(std::cell::Cell::get)
+            && inner.height >= TOOLBAR_HEIGHT.saturating_add(rule_rows).saturating_add(3),
+    );
+    let [list, button, rule, toolbar] = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Min(1),
+            Constraint::Length(button_rows),
             Constraint::Length(rule_rows),
             Constraint::Length(TOOLBAR_HEIGHT),
         ])
         .areas(inner);
+    [list, button, rule, toolbar]
+}
+
+fn vertical_sections(area: Rect) -> [Rect; 3] {
+    let [list, _button, rule, toolbar] = vertical_sections_with_button(area);
     [list, rule, toolbar]
+}
+
+/// The one-row strip between the list and the toolbar that holds the
+/// attention queue button, when it is reserved and fits.
+pub fn attention_button_area(area: Rect) -> Option<Rect> {
+    let button = vertical_sections_with_button(area)[1];
+    (button.height > 0).then_some(button)
 }
 
 /// Returns the interior list region, excluding the persistent two-row hover
@@ -7070,5 +7105,47 @@ mod cost_indicator_tests {
             TreeOrder::CostDescending,
         );
         assert!(row_of(&by_cost, fixture.second_shell) < row_of(&by_cost, fixture.shell));
+    }
+}
+
+#[cfg(test)]
+mod attention_button_tests {
+    use super::*;
+
+    #[test]
+    fn the_button_row_is_absent_until_reserved() {
+        set_attention_button_reserved(false);
+        let area = Rect::new(0, 0, 40, 20);
+        assert_eq!(attention_button_area(area), None);
+        let list_without = list_area(area);
+        let toolbar_without = toolbar_area(area);
+
+        set_attention_button_reserved(true);
+        let button = attention_button_area(area).expect("a tall panel holds the button row");
+        assert_eq!(button.height, 1);
+        assert_eq!(list_area(area).height + 1, list_without.height);
+        assert_eq!(toolbar_area(area), toolbar_without);
+
+        set_attention_button_reserved(false);
+        assert_eq!(list_area(area), list_without);
+    }
+
+    #[test]
+    fn the_button_sits_between_the_list_and_the_toolbar() {
+        set_attention_button_reserved(true);
+        let area = Rect::new(0, 0, 40, 20);
+        let button = attention_button_area(area).unwrap();
+        assert_eq!(list_area(area).bottom(), button.y);
+        assert!(button.bottom() <= toolbar_area(area).y);
+        assert_eq!(button.width, list_area(area).width);
+        set_attention_button_reserved(false);
+    }
+
+    #[test]
+    fn a_panel_too_short_for_the_row_keeps_its_old_layout() {
+        set_attention_button_reserved(true);
+        let area = Rect::new(0, 0, 40, 5);
+        assert_eq!(attention_button_area(area), None);
+        set_attention_button_reserved(false);
     }
 }

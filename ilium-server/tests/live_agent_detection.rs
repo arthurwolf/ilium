@@ -747,7 +747,7 @@ async fn a_real_process_named_codex_preserves_its_pursuing_goal_status_through_t
 /// Installs a fixture named exactly `name` (same absolute-path-spawn
 /// rationale as [`write_fake_codex_binary`]) that just idles -- the
 /// argument-based session-ID-discovery tests below only care about
-/// `ilium_server::session_id::discover_with_trace`'s second admissible source
+/// `ilium_server::session_id::discover_with_trace_staged`'s second admissible source
 /// (an explicit resume argument on the command line), not activity
 /// classification, so unlike [`write_fake_codex_binary`] neither ever needs
 /// to print the "esc to interrupt" working marker.

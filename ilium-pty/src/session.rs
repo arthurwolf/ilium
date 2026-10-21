@@ -1883,6 +1883,23 @@ mod tests {
         assert_eq!(replay.bytes, b"first-later");
     }
 
+    #[test]
+    fn replay_estimate_of_truncated_journal_matches_retained_replay() {
+        let mut journal = journal();
+        journal.append(b"first");
+        journal.append(b"-second");
+        discard_oldest_chunk(&mut journal);
+
+        let estimate = journal.replay_estimate();
+        assert!(!estimate.is_complete);
+        assert_eq!(estimate.byte_len, b"\x1bc-second".len());
+        let replay = journal
+            .replay_through_if_retained(estimate)
+            .expect("an unchanged truncated journal must still produce its estimated replay");
+        assert_eq!(replay.bytes, b"\x1bc-second");
+        assert_eq!(replay.bytes.len(), estimate.byte_len);
+    }
+
     /// Models the real safety-cap path: the oldest chunk is discarded and only
     /// then does `is_complete` become false. Flipping the flag while the oldest
     /// chunk is still retained describes a state the journal cannot reach.

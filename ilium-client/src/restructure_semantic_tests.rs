@@ -310,6 +310,7 @@ fn semantic_contract_budget_retains_fixed_group_and_all_leaf_ids() {
         RestructurePromptPolicy {
             instructions: &ilium_inference::PromptInstructions::default(),
             prompt_token_limit: ilium_inference::DEFAULT_RESTRUCTURE_PROMPT_TOKEN_LIMIT,
+            include_attention: false,
         },
         &contexts,
         &"y".repeat(30_000),
@@ -327,4 +328,60 @@ fn semantic_contract_budget_retains_fixed_group_and_all_leaf_ids() {
         assert!(prompt.contains(&format!("<item id=\"{}\"", item.id.0)));
     }
     assert!(prompt.contains(crate::semantic_animation::catalog().unwrap()));
+}
+
+fn prompt_with_attention(include_attention: bool) -> String {
+    render_restructure_prompt_with_instructions(
+        TitleStyle::Summarization,
+        RestructurePromptPolicy {
+            instructions: &ilium_inference::PromptInstructions::default(),
+            prompt_token_limit: ilium_inference::DEFAULT_RESTRUCTURE_PROMPT_TOKEN_LIMIT,
+            include_attention,
+        },
+        &[context()],
+        "",
+        &[],
+        None,
+        &RecommendationContext::default(),
+    )
+    .expect("the small real project context renders")
+}
+
+#[test]
+fn attention_prompt_section_appears_only_when_requested() {
+    assert!(prompt_with_attention(true).contains("<attention-queue>"));
+    assert!(!prompt_with_attention(false).contains("attention-queue"));
+}
+
+#[test]
+fn attention_list_never_fails_or_alters_the_sort_parse() {
+    for attention in [
+        serde_json::json!([{"id": 1, "kind": "question", "reason": "asks"}]),
+        serde_json::json!("garbage"),
+        serde_json::json!([{"id": "x"}, 7, null]),
+        serde_json::json!({"unexpected": true}),
+    ] {
+        let mut value = valid_response();
+        value["attention"] = attention;
+        let (plan, raw) = parse_restructure_response_with_attention(
+            &value.to_string(),
+            &[context()],
+            &[],
+            TitleStyle::Summarization,
+            &RecommendationContext::default(),
+        )
+        .expect("the attention key must not affect the strict sort parse");
+        assert!(raw.is_some());
+        let plain = parse_value(&valid_response()).unwrap();
+        assert_eq!(plan.structure.children.len(), plain.structure.children.len());
+    }
+    let (_, raw) = parse_restructure_response_with_attention(
+        &valid_response().to_string(),
+        &[context()],
+        &[],
+        TitleStyle::Summarization,
+        &RecommendationContext::default(),
+    )
+    .unwrap();
+    assert!(raw.is_none(), "a reply without the key is normal");
 }

@@ -169,7 +169,7 @@ fn settings_and_fullscreen_osm_credit_have_separate_hint_and_voice_rows() {
             animation_fullscreen: fullscreen,
             ..Default::default()
         };
-        app.mode = Mode::Settings(state);
+        app.mode = Mode::Settings(Box::new(state));
         let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("backend");
         draw_buffer(&mut terminal, &mut app);
         let buffer = terminal.backend().buffer();

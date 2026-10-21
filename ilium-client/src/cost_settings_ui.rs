@@ -1135,10 +1135,10 @@ mod tests {
         app.config_dir = Some(directory.path().to_owned());
         app.cost_settings.metric = CostMetric::Dollars;
         app.set_screen_area(Rect::new(0, 0, 130, 260));
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::Cost,
             ..SettingsState::default()
-        });
+        }));
         let Mode::Settings(state) = &app.mode else {
             panic!("Cost settings fixture");
         };
@@ -1241,10 +1241,10 @@ mod tests {
         app.config_dir = Some(directory.path().to_owned());
         app.cost_settings.calibration = Calibration::Budget;
         app.set_screen_area(Rect::new(0, 0, 130, 260));
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::Cost,
             ..SettingsState::default()
-        });
+        }));
         let Mode::Settings(state) = &app.mode else {
             panic!("Cost settings fixture");
         };

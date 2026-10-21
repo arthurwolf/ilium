@@ -1,7 +1,7 @@
 //! Numeric settings binding. Rendering never owns persistence or runtime effects.
 use crate::app::{
-    AgentMonitoringRow, App, AppearanceRow, EditorRow, KanbanBoardRow, Mode, SettingsTab,
-    TerminalRow,
+    AgentMonitoringRow, App, AppearanceRow, AttentionRow, EditorRow, KanbanBoardRow, Mode,
+    SettingsTab, TerminalRow,
 };
 use crate::value_config::{self, BoardNumber, PanelNumber, ScalarNumber};
 use crate::value_number::{NumberSpec, NumberValue};
@@ -21,6 +21,8 @@ pub enum SettingsNumber {
     InferenceTokenBudget,
     WorkingPollSeconds,
     IdlePollSeconds,
+    AttentionTurboConcurrency,
+    AttentionExpirySeconds,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -138,6 +140,11 @@ impl SettingsNumber {
                 }
                 None => None,
             },
+            SettingsTab::Attention => match AttentionRow::ALL.get(row) {
+                Some(AttentionRow::TurboConcurrency) => Some(Self::AttentionTurboConcurrency),
+                Some(AttentionRow::ExpirySeconds) => Some(Self::AttentionExpirySeconds),
+                _ => None,
+            },
             SettingsTab::Api if row == 0 => Some(Self::ApiPort),
             _ => None,
         }
@@ -167,6 +174,8 @@ impl SettingsNumber {
             Self::Board(BoardNumber::CardPreviewLines) => "Card preview lines",
             Self::Board(BoardNumber::MinimumColumnWidth) => "Minimum column width",
             Self::ApiPort => "HTTP API port",
+            Self::AttentionTurboConcurrency => "Turbo parallel calls",
+            Self::AttentionExpirySeconds => "Forget stale items after",
         }
     }
 
@@ -287,6 +296,14 @@ impl SettingsNumber {
                 ScalarNumber::ApiPort.spec(),
                 app.api_settings.port.to_string(),
             ),
+            Self::AttentionTurboConcurrency => (
+                ScalarNumber::AttentionTurboConcurrency.spec(),
+                app.attention_settings.turbo_concurrency.to_string(),
+            ),
+            Self::AttentionExpirySeconds => (
+                ScalarNumber::AttentionExpirySeconds.spec(),
+                app.attention_settings.expiry_seconds.to_string(),
+            ),
         }
     }
 
@@ -343,6 +360,7 @@ impl SettingsNumber {
             Self::TerminalScrollback => 4,
             Self::Ui(UiNumber::CompletedProgressHideAfter) => 30,
             Self::Ui(UiNumber::AutoFreezeAfter) => 15 * 60,
+            Self::AttentionExpirySeconds => 60,
             _ => 1,
         };
         match spec.stepped(spec.parse(&text)?, NumberValue::Integer(step), direction)? {
@@ -705,6 +723,20 @@ impl App {
                     .map_err(|_| "API port exceeds its storage range".to_owned())?;
                 ConfigurationChange::Api(settings)
             }
+            SettingsNumber::AttentionTurboConcurrency => {
+                let mut settings = self.attention_settings.clone();
+                settings.turbo_concurrency =
+                    u8::try_from(ScalarNumber::AttentionTurboConcurrency.parse(text)?)
+                        .map_err(|_| "Parallel call count exceeds storage range")?;
+                ConfigurationChange::Attention(settings)
+            }
+            SettingsNumber::AttentionExpirySeconds => {
+                let mut settings = self.attention_settings.clone();
+                settings.expiry_seconds =
+                    u32::try_from(ScalarNumber::AttentionExpirySeconds.parse(text)?)
+                        .map_err(|_| "Duration exceeds storage range")?;
+                ConfigurationChange::Attention(settings)
+            }
         };
         let intent = match token {
             Some(token) => ConfigurationIntent::ValueDialog { token },
@@ -784,6 +816,14 @@ impl App {
             ConfigurationChange::Api(settings) => {
                 self.enqueue_configuration(directory, ConfigurationChange::Api(settings), intent)?;
                 self.api_settings = settings;
+            }
+            ConfigurationChange::Attention(settings) => {
+                self.enqueue_configuration(
+                    directory,
+                    ConfigurationChange::Attention(settings.clone()),
+                    intent,
+                )?;
+                self.apply_attention_settings(settings);
             }
             _ => return Err("Unsupported numeric settings destination".into()),
         }
@@ -890,11 +930,11 @@ mod tests {
                     }
                 }
 
-                app.mode = Mode::Settings(SettingsState {
+                app.mode = Mode::Settings(Box::new(SettingsState {
                     tab,
                     selected_row: row,
                     ..SettingsState::default()
-                });
+                }));
                 app.begin_settings_number_dialog(field);
                 let Mode::ValueDialog(host) = std::mem::replace(&mut app.mode, Mode::Normal) else {
                     panic!("{tab:?}/{row} must open its numeric dialog");
@@ -916,7 +956,7 @@ mod tests {
             }
         }
 
-        assert_eq!(binding_count, 26, "all numeric settings rows must be bound");
+        assert_eq!(binding_count, 28, "all numeric settings rows must be bound");
     }
 
     #[test]
@@ -1098,11 +1138,11 @@ mod tests {
         std::fs::write(&path, "[editor\n").unwrap();
         let mut app = App::new("numeric-settings-test".into(), directory.path().into());
         app.config_dir = Some(directory.path().into());
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::Editor,
             selected_row: 4,
             ..SettingsState::default()
-        });
+        }));
         app.begin_settings_number_dialog(SettingsNumber::EditorAutosaveDelay);
         let Mode::ValueDialog(mut host) = std::mem::replace(&mut app.mode, Mode::Normal) else {
             panic!("numeric editor");
@@ -1140,10 +1180,10 @@ mod tests {
     fn numeric_settings_validation_and_changed_parent_cannot_mutate_or_enqueue() {
         let mut app = App::new("numeric-settings-test".into(), std::env::temp_dir());
         app.config_dir = Some(std::env::temp_dir());
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::Terminal,
             ..SettingsState::default()
-        });
+        }));
         app.begin_settings_number_dialog(SettingsNumber::TerminalScrollback);
         let Mode::ValueDialog(mut host) = std::mem::replace(&mut app.mode, Mode::Normal) else {
             panic!("dialog");

@@ -260,6 +260,10 @@ pub enum Action {
     /// also reachable via a right-click in the tree panel
     /// (`ContextMenuAction::Settings`), which never goes through this table.
     Settings,
+    /// Jumps to the agent that most needs the user (attention queue press).
+    AttentionNext,
+    /// Shows or hides the attention queue in the right panel.
+    AttentionPanel,
 }
 
 impl Action {
@@ -543,6 +547,16 @@ pub const LEADER_BINDINGS: &[KeyBinding] = &[
         description: "Open settings (also: use the tree footer gear)",
     },
     KeyBinding {
+        key: BindingKey::Character('i'),
+        action: Action::AttentionNext,
+        description: "Jump to the agent that most needs you (attention queue)",
+    },
+    KeyBinding {
+        key: BindingKey::Character('I'),
+        action: Action::AttentionPanel,
+        description: "Show or hide the attention queue panel",
+    },
+    KeyBinding {
         key: BindingKey::Character('?'),
         action: Action::Help,
         description: "Show or hide this help screen",
@@ -601,6 +615,8 @@ pub fn action_name(action: Action) -> &'static str {
         Action::ToggleMinimap => "toggle_minimap",
         Action::ToggleAutosave => "toggle_autosave",
         Action::Settings => "settings",
+        Action::AttentionNext => "attention_next",
+        Action::AttentionPanel => "attention_panel",
     }
 }
 
@@ -644,6 +660,8 @@ pub const fn action_label(action: Action) -> &'static str {
         Action::ToggleMinimap => "Toggle minimap",
         Action::ToggleAutosave => "Toggle autosave",
         Action::Settings => "Open settings",
+        Action::AttentionNext => "Next needing you",
+        Action::AttentionPanel => "Attention panel",
     }
 }
 
@@ -1120,6 +1138,34 @@ pub const fn action_mnemonics(action: Action) -> &'static [ActionMnemonic] {
                 word: "save",
             },
         ],
+        Action::AttentionNext => &[
+            Mnemonic {
+                key: 'a',
+                word: "attention",
+            },
+            Mnemonic {
+                key: 'i',
+                word: "important",
+            },
+            Mnemonic {
+                key: 'n',
+                word: "next",
+            },
+        ],
+        Action::AttentionPanel => &[
+            Mnemonic {
+                key: 'a',
+                word: "attention",
+            },
+            Mnemonic {
+                key: 'i',
+                word: "inbox",
+            },
+            Mnemonic {
+                key: 'p',
+                word: "panel",
+            },
+        ],
         Action::Settings => &[
             Mnemonic {
                 key: 'c',
@@ -1555,5 +1601,58 @@ mod tests {
             ),
             Some(Action::ClosePane)
         );
+    }
+
+    #[test]
+    fn attention_actions_are_bound_to_i_and_capital_i_in_every_preset() {
+        assert_eq!(
+            action_for_table(LEADER_BINDINGS, BindingKey::Character('i')),
+            Some(Action::AttentionNext)
+        );
+        assert_eq!(
+            action_for_table(LEADER_BINDINGS, BindingKey::Character('I')),
+            Some(Action::AttentionPanel)
+        );
+        for preset in KeymapPreset::ALL {
+            let bindings = preset_bindings(preset);
+            assert_eq!(
+                action_for_table(&bindings, BindingKey::Character('i')),
+                Some(Action::AttentionNext)
+            );
+            assert_eq!(
+                action_for_table(&bindings, BindingKey::Character('I')),
+                Some(Action::AttentionPanel)
+            );
+        }
+    }
+
+    #[test]
+    fn attention_actions_round_trip_their_config_names_and_are_remappable() {
+        assert_eq!(
+            action_from_name("attention_next"),
+            Some(Action::AttentionNext)
+        );
+        assert_eq!(
+            action_from_name("attention_panel"),
+            Some(Action::AttentionPanel)
+        );
+        let mut bindings = LEADER_BINDINGS.to_vec();
+        let free_key = *available_keys(&bindings)
+            .first()
+            .expect("the leader table leaves some key free");
+        assert_eq!(
+            assign_key(
+                &mut bindings,
+                Action::AttentionNext,
+                BindingKey::Character(free_key)
+            ),
+            Ok(())
+        );
+        assert_eq!(
+            action_for_table(&bindings, BindingKey::Character(free_key)),
+            Some(Action::AttentionNext)
+        );
+        assert_eq!(mnemonic_for(Action::AttentionNext, 'i'), Some("important"));
+        assert_eq!(mnemonic_for(Action::AttentionPanel, 'I'), Some("inbox"));
     }
 }
