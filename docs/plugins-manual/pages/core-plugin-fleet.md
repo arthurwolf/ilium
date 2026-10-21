@@ -108,11 +108,11 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "panes.read",
       "agent.read",
       "messages.peer:ilium.core.notifications",
-      "services.use:ilium.core.cost/usage"
+      "services.use:ilium.core.cost/usage",
+      "settings.write-kernel:api"
     ],
     "client": [
-      "ui.panels",
-      "settings.write-kernel:api"
+      "ui.panels"
     ]
   },
   "activation": [

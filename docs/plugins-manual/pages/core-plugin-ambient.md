@@ -6,7 +6,7 @@ permalink: /pages/core-plugin-ambient/
 
 ## Ambient look
 
-The Ambient look plugin (id `ilium.core.ambient`, side: client) is the plugin form of the shared look of animated backgrounds. It owns the colour, palette, dithering and display controls that every scene gets, the Animations settings tab with its previews, the shared location that sky and map scenes read, and the semantic animation choice that picks a scene from what the workspace is doing.
+The Ambient look plugin (id `ilium.core.ambient`, sides: client and server, the server part only for settings) is the plugin form of the shared look of animated backgrounds. It owns the colour, palette, dithering and display controls that every scene gets, the Animations settings tab with its previews, the shared location that sky and map scenes read, and the semantic animation choice that picks a scene from what the workspace is doing.
 
 Painting the background and applying colour, filters and dithering to each cell is done by the client kernel. The plugin supplies the controls and the preview. The scenes themselves are in the [Scenes plugin](/pages/core-plugin-scenes/), and they follow the look chosen here without any colour code of their own.
 
@@ -99,8 +99,15 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
   "name": "Ambient look",
   "version": "0.1.0",
   "publisher": "Ilium",
-  "description": "The Ambient look plugin (id ilium.core.ambient, side: client) is the plugin form of the shared look of animated backgrounds.",
+  "description": "The Ambient look plugin (id ilium.core.ambient, sides: client and server) is the plugin form of the shared look of animated backgrounds.",
   "license": "MIT",
+  "server": {
+    "entry": "server.wasm",
+    "world": "ilium:server/base@0.1.0",
+    "exports": [
+      "service-provider"
+    ]
+  },
   "client": {
     "entry": "client.wasm",
     "world": "ilium:client/base@0.1.0",
@@ -113,13 +120,23 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "location.geocode",
       "media.video",
       "ui.panels",
+      "services.use:ilium.core.ambient/set-setting"
+    ],
+    "server": [
+      "services.provide:ilium.core.ambient/set-setting",
       "settings.write-kernel:animations"
     ]
   },
   "activation": [
     "startup"
   ],
+  "unstable": ["plugin-services"],
   "contributes": {
+    "services": {
+      "provides": [
+        { "name": "ilium.core.ambient/set-setting", "version": "0.1.0", "schema": "schemas/set-setting.json" }
+      ]
+    },
     "panels": [
       {
         "id": "gallery",
@@ -200,9 +217,36 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
 }
 ```
 
+### Server part
+
+This plugin has a server part, added only for settings. Its one job is to write the `animations` Settings tab it owns: `settings.write-kernel:animations` is a server-side grant and the client part never holds it (assumption recorded here: the grant is server side only, see [settings.write-kernel](/pages/capability-settings-write-kernel/)). The client part draws the controls. When the user changes a value, the client part sends it to the server part through the plugin service `ilium.core.ambient/set-setting` (grants `services.use:ilium.core.ambient/set-setting` on the client side and `services.provide:ilium.core.ambient/set-setting` on the server side, see [services](/pages/api-services/)). The name follows the rule `<plugin-id>/<name>` with a name of 1 to 64 characters from `a-z`, `0-9` and `-`. The server part validates the value and calls the kernel-settings write.
+
+The schema file for `set-setting` (`schemas/set-setting.json`, shown here because the manual ships no package files):
+
+```json
+{
+  "set": {
+    "params": {
+      "type": "object",
+      "properties": {
+        "tab": { "type": "string" },
+        "key": { "type": "string" },
+        "value": { "type": "string" }
+      },
+      "required": ["tab", "key", "value"]
+    },
+    "result": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  }
+}
+```
+
 ### Kernel tabs this plugin owns
 
-This plugin is the single owner of the following built-in Settings tabs. It holds `settings.write-kernel:<tab>` for each one (T1 only, one holder per tab, see [kernel settings](/pages/api-kernel-settings-and-keymap/#writing-a-kernel-tab)). The values stay in the same `config.toml` tables as before, so no user setting moves. [COR-030] [COR-033]
+This plugin is the single owner of the following built-in Settings tabs. Its server part holds `settings.write-kernel:<tab>` for each one (T1 only, one holder per tab, see [kernel settings](/pages/api-kernel-settings-and-keymap/#writing-a-kernel-tab)). The values stay in the same `config.toml` tables as before, so no user setting moves. [COR-030] [COR-033]
 
 | Tab id | Label | Config table | Readers |
 |---|---|---|---|
@@ -495,7 +539,7 @@ The table gives the values that [EXT-052] requires for each point this plugin ow
 | `ilium.core.ambient/palettes` | client | 0.1.0 (default) | none (default) | 64 entries (default) | no (default) |
 | `ilium.core.ambient/style-presets` | client | 0.1.0 (default) | none (default) | 64 entries (default) | no (default) |
 
-Side basis: `ilium.core.ambient/palettes` is client because the manifest has no `extensions.provide` grant and no server block, the plugin is `side: client` throughout, and the page says the palette choice belongs to the client-scope Animations tab and that the client kernel applies the look to each cell. Side basis: `ilium.core.ambient/style-presets` is client because the manifest has no `extensions.provide` grant and no server block, the plugin is `side: client` throughout, and the page says the entries are full sets of shared look values that the client kernel applies to each cell.
+Side basis: `ilium.core.ambient/palettes` is client because the manifest has no `extensions.provide` grant for it, and the palette is drawn by the client, and the page says the palette choice belongs to the client-scope Animations tab and that the client kernel applies the look to each cell. Side basis: `ilium.core.ambient/style-presets` is client because the manifest has no `extensions.provide` grant for it, and the palette is drawn by the client, and the page says the entries are full sets of shared look values that the client kernel applies to each cell.
 
 ### ABI used
 

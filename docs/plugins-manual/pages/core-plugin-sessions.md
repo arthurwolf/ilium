@@ -90,9 +90,7 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "panes.read",
       "panes.lifecycle",
       "tree.restructure",
-      "agent.read"
-    ],
-    "client": [
+      "agent.read",
       "settings.write-kernel:session"
     ]
   },

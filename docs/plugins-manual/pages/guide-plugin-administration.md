@@ -34,7 +34,7 @@ Put the key of your company in the machine trust store so that users do not see 
 
 | Id | Rule |
 |---|---|
-| [PKG-465] | An administrator MAY add a key with `ilium plugin trust add <file> --tier T2 --system`. A key added this way has `added_by: admin` and the user cannot remove it. |
+| [PKG-465] | An administrator MAY add a key to the system store `/etc/ilium/trust.json` with an entry whose `added_by` is `admin`, in the store format of [Signing and trust](/pages/reference-signing-and-trust/#the-trust-store). The host never writes the system store ([PKG-222]), and the user cannot remove the entry. |
 | [PKG-466] | A key in the trust store never overrides a revocation. A revoked key stays revoked. |
 
 ## Run a private registry
@@ -89,7 +89,7 @@ Automatic updates are off. A user can set `[plugins] auto_update` to `notify` or
 | Policy file is invalid | The host refuses to start plugins and shows `policy.invalid`. See [Plugin policy](/pages/reference-plugin-policy/#errors-and-edge-cases). |
 | Two policies conflict | The stricter value wins. |
 | User adds a registry not in `packages.allowed_sources` | `policy.source-denied`, exit 7. |
-| Mirror is missing a dependency | `dependency.unsatisfied` names the id. Add it with `--with-deps`. |
+| Mirror is missing a dependency | `dependency.unsatisfied` names the id. Add the id to the mirror's `--allow` list and run `ilium plugin mirror sync` again; a partial mirror includes its dependencies ([PKG-409]). For an air-gapped bundle, export with `ilium plugin export-bundle <dir> <id> --with-deps` ([PKG-412]). |
 
 ## See also
 

@@ -6,7 +6,7 @@ permalink: /pages/primitives-terminal/
 
 ## Terminal primitive
 
-A terminal pane shows the output of a program in a pseudo-terminal, usually a shell or an agent CLI. The terminal primitive lets a server-side plugin read the screen and selection, watch output for text, draw highlights, and type input. Highlights work on both sides; claiming the mouse for one pane is client-side only (see [terminal pointer](/pages/primitives-terminal-pointer/)). The kernel parses every output byte. The plugin receives only matches of its output filters, and it reads the screen only when it asks.
+A terminal pane shows the output of a program in a pseudo-terminal, usually a shell or an agent CLI. The terminal primitive lets a server-side plugin read the screen and selection, watch output for text, and type input. Drawing highlights and claiming the mouse for one pane are client-side only (see [terminal pointer](/pages/primitives-terminal-pointer/)). The kernel parses every output byte. The plugin receives only matches of its output filters, and it reads the screen only when it asks.
 
 ### What you need
 
@@ -16,7 +16,7 @@ Declare the grants you use in `capabilities.server` of the manifest. Each grant 
 |---|---|
 | `terminal.read-screen` | `read_screen`, `selection` |
 | `terminal.output-filter` | `add_output_filter`, `remove_output_filter`, `output-matched` events, and manifest `output_filters` |
-| `terminal.pointer` | `set_highlights`, `clear_highlights` (server or client), and `claim_pointer`, `release_pointer` and `pointer` events while a claim is held (client only) |
+| `terminal.pointer` | `set_highlights`, `clear_highlights`, and `claim_pointer`, `release_pointer` and `pointer` events while a claim is held (client only) |
 | `terminal.write` | the `send-input` intent and `prompt_epoch` |
 
 The primitive is available to both the server and the client sides, through the `ilium:server/base` and `ilium:client/base` worlds. Import it from `ilium_plugin_sdk::primitives::terminal` in Rust, or from `@ilium/plugin-sdk/primitives/terminal` in TypeScript. Agent identification is a separate contract, described in [primitives-agent](/pages/primitives-agent/).
@@ -24,8 +24,8 @@ The primitive is available to both the server and the client sides, through the 
 ```json
 {
   "capabilities": {
-    "server": ["terminal.read-screen", "terminal.output-filter", "terminal.pointer",
-               "notify.desktop"]
+    "server": ["terminal.read-screen", "terminal.output-filter", "notify.desktop"],
+    "client": ["terminal.pointer"]
   },
   "output_filters": [{
     "id": "rate-limit", "regex": "rate limit exceeded", "panes": "agents", "rate_per_second": 1
@@ -134,17 +134,16 @@ A link detector sends `link-activated` to its plugin when the user activates a m
 
 ### Examples
 
-#### Example 1: a rate-limit filter with a notice and a highlight
+#### Example 1: a rate-limit filter with a notice
 
-The manifest above installs the `rate-limit` filter on agent panes, at most once per second. When it matches, the plugin highlights the row in a `warning` layer and sends a desktop notice.
+The manifest above installs the `rate-limit` filter on agent panes, at most once per second. When it matches, the plugin sends a desktop notice. Highlights are client-only (`terminal.pointer`), so this server example does not highlight the row.
 
-**Grants:** `terminal.output-filter`, `terminal.pointer`, `terminal.read-screen`, `notify.desktop`
+**Grants:** `terminal.output-filter`, `terminal.read-screen`, `notify.desktop`
 
 **Rust**
 
 ```rust
 use ilium_plugin_sdk::prelude::*;
-use ilium_plugin_sdk::primitives::terminal::{self, CellRegion};
 use ilium_plugin_sdk::types::events::OutputMatchedEvent;
 use ilium_plugin_sdk::types::intents::{NotifySpec, Urgency};
 
@@ -159,12 +158,6 @@ impl Handler for RateLimitWatch {
             let Event::OutputMatched(OutputMatchedEvent { node, filter_id, line, row }) = event
             else { continue };
             if filter_id != "rate-limit" { continue; }
-            let region = CellRegion {
-                first_row: row, first_column: 0, last_row: row, last_column: 79,
-                style: Style::role(ColorRole::Warning), label: Some("rate limit".into()),
-            };
-            // A failed highlight, such as a pane that just closed, must not block the notice.
-            let _ = terminal::set_highlights(node, "warning", vec![region]);
             submissions.push(Submission::new(Intent::Notify(NotifySpec {
                 title: "Rate limit".into(),
                 body: line.chars().take(2048).collect(),
@@ -181,8 +174,6 @@ impl Handler for RateLimitWatch {
 
 ```ts
 import { definePlugin, type Event, type Submission } from '@ilium/plugin-sdk';
-import { role } from '@ilium/plugin-sdk/types';
-import { setHighlights } from '@ilium/plugin-sdk/primitives/terminal';
 
 let nextCorrelation = 1n;
 
@@ -194,16 +185,7 @@ export const { lifecycle, handler } = definePlugin({
       if (event.tag !== 'output-matched' || event.val.filterId !== 'rate-limit') {
         continue;
       }
-      const { node, line, row } = event.val;
-      try {
-        setHighlights(node, 'warning', [{
-          firstRow: row, firstColumn: 0, lastRow: row, lastColumn: 79,
-          style: { fg: role('warning'), bg: undefined, add: undefined, remove: undefined },
-          label: 'rate limit',
-        }]);
-      } catch {
-        // A failed highlight must not block the notice.
-      }
+      const { line } = event.val;
       submissions.push({
         intent: { tag: 'notify', val: {
           title: 'Rate limit', body: Array.from(line).slice(0, 2048).join(''),
@@ -218,7 +200,7 @@ export const { lifecycle, handler } = definePlugin({
 });
 ```
 
-Outcome: the matched row shows the `warning` role with the tooltip `rate limit`, and a desktop notice appears. The filter fires at most once per second, because of `rate_per_second: 1`.
+Outcome: a desktop notice appears. The filter fires at most once per second, because of `rate_per_second: 1`.
 
 #### Example 2: continue an agent only if its prompt has not changed
 
@@ -249,7 +231,7 @@ fn continue_if_unchanged(pane: NodeId, epoch_at_idle: u64) -> Option<Submission>
 
 Store `epoch_at_idle` when the agent becomes idle, and return the submission from `on_events`. A `refused(conflict)` outcome means the agent moved on. In TypeScript the fields are `promptEpoch` and `dedupKey`.
 
-### Simulated render: a highlight and its tooltip
+### Simulated render: a client-side highlight and its tooltip
 
 <figure>
 <pre class="term">╭──≡ ● · Codex──────────────────────────────────────────╮
@@ -259,13 +241,13 @@ Store `epoch_at_idle` when the agent becomes idle, and return the submission fro
 │<span class="t-dim">Retrying the request</span>                                   │
 ╰───────────────────────────────────────────────────────╯
 </pre>
-<figcaption>A terminal pane in its rounded panel with the chrome title. The plugin's warning highlight paints the rate-limit row; its label shows as a tooltip after the pointer rests there for 500 ms.</figcaption>
+<figcaption>A terminal pane in its rounded panel with the chrome title. A client plugin's warning highlight (`terminal.pointer`, client side only) paints the rate-limit row; its label shows as a tooltip after the pointer rests there for 500 ms.</figcaption>
 </figure>
 
 ### Diagram: the output path
 
 <figure>
-<svg viewBox="0 0 400 200" role="img" aria-label="Kernel parses output, the plugin receives matches and sends highlights back">
+<svg viewBox="0 0 400 200" role="img" aria-label="Kernel parses output, the server plugin receives matches and sends submissions back">
 <defs>
 <marker id="term-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
 <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
@@ -279,15 +261,17 @@ Store `epoch_at_idle` when the agent becomes idle, and return the submission fro
 <line x1="269" y1="60" x2="269" y2="126" stroke="currentColor" marker-end="url(#term-arrow)"/>
 <text x="278" y="98" font-size="10" fill="currentColor">output-matched</text>
 <line x1="208" y1="126" x2="208" y2="60" stroke="currentColor" stroke-dasharray="4 3" marker-end="url(#term-arrow)"/>
-<text x="198" y="98" font-size="10" text-anchor="end" fill="currentColor">set-highlights</text>
+<text x="198" y="98" font-size="10" text-anchor="end" fill="currentColor">submissions</text>
 <rect x="148" y="128" width="242" height="40" rx="6" fill="none" stroke="currentColor"/>
 <text x="269" y="152" font-size="12" text-anchor="middle" fill="currentColor">Plugin handler (server side)</text>
 <text x="10" y="192" font-size="11" fill="currentColor">Bytes stay in the kernel. Only matches reach the plugin.</text>
 </svg>
-<figcaption>The plugin receives matches and answers with highlights or submissions.</figcaption>
+<figcaption>A server plugin receives matches and answers with submissions. Highlights come from a client plugin, not from this path.</figcaption>
 </figure>
 
 ### Edge cases and errors
+
+`claim_pointer`, `set_highlights` and `clear_highlights` need `terminal.pointer` and are available to client plugins only.
 
 | Call | Code | When |
 |---|---|---|
@@ -307,7 +291,7 @@ Store `epoch_at_idle` when the agent becomes idle, and return the submission fro
 
 ### What the user sees
 
-- The matched row takes the theme's warning colour. The label appears as a tooltip after the pointer rests on the row for 500 ms.
+- With a client plugin's highlight, the row takes the theme's warning colour, and the label appears as a tooltip after the pointer rests on the row for 500 ms.
 - A desktop notice appears. When an attached client shows the pane and reports focus, the notice appears in the client footer instead (see [notify](/pages/capability-notify-desktop/)).
 - While a claim is held, clicks no longer select text in that pane, and the wheel goes to the plugin. Typing still reaches the program.
 - A highlight stays after `release_pointer`, and disappears when the plugin is disabled, loses the grant, or the pane closes.

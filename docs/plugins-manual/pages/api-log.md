@@ -208,7 +208,7 @@ Each line of the log has five columns: the local timestamp as `YYYY-MM-DD HH:mm:
 <pre class="term"><span class="t-prompt">$</span> ilium plugin logs example.notes --tail 5
 <span class="t-dim">2026-10-11 09:14:02</span> <span class="t-ok">info </span> example.notes activated as server
 <span class="t-dim">2026-10-11 09:14:02</span> <span class="t-warn">warn </span> example.notes tree.read declined; tree badges hidden
-<span class="t-dim">2026-10-11 09:14:09</span> <span class="t-err">error</span> example.notes save failed [quota-exceeded]: disk full
+<span class="t-dim">2026-10-11 09:14:09</span> <span class="t-err">error</span> example.notes save failed [io]: no-space
 <span class="t-dim">2026-10-11 09:14:10</span> <span class="t-warn">warn </span> example.notes 312 lines dropped in the last second
 <span class="t-dim">2026-10-11 09:14:11</span> <span class="t-dim">trace</span> example.notes 3 events received
 <span class="t-prompt">$</span> <span class="t-dim">5 lines shown</span>

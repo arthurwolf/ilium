@@ -301,7 +301,7 @@ The setting row itself looks like any text row, with leaders:
 
 | Code | Where | When |
 |---|---|---|
-| `not-permitted` | `open-stream`, at once | Host not granted, not yet confirmed (setting host), or a redirect led to an ungranted host. |
+| `not-permitted` | `open-stream`, at once | Host not granted, or not yet confirmed (setting host). A redirect to an ungranted host is not this error: the stream completes `failed(not-permitted)`, as the capability table states. |
 | `quota-exceeded` | `open-stream`, at once | `http_streams` reached for the plugin or the session. |
 | `invalid-argument` | `open-stream`, at once | `max-chunk-bytes` over 64 KiB, or the request rules of [http](/pages/api-http/) are broken. |
 | `unsupported` | `open-websocket` | The feature `websocket` is off. |

@@ -361,7 +361,8 @@ footer `Saved` comes from `basic.set_status`. The body is the plugin's tree.
 | `conflict` | The user has set a manual title on the pane. The title is not changed. | Show the user's title. The plugin title appears again after the user clears the manual title. |
 | `quota-exceeded` | The metadata would be over 64 KiB. `set-metadata` writes nothing. | Keep the older notes, show `Not saved`, and ask the user to delete notes. |
 | `not-found` | The node was removed during `set-metadata`. | Drop the node from the plugin's state. |
-| `revoked`, `internal` | The authorization epoch changed, or the kernel failed. | Retry later or wait for the next event. |
+| `revoked` | The authorization epoch changed during the call. The plugin is re-activated. | Do not retry the call. Wait for the re-activation. |
+| `internal` | The kernel failed. | Do not retry. The host logs the failure. |
 
 Other rules:
 
