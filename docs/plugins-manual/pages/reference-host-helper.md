@@ -21,7 +21,7 @@ The helper is the binary `ilium-plugin-helper`, installed beside `ilium`. It con
 | Item | Rule |
 |---|---|
 | Granularity | One helper per plugin per side per hosting process, as in the [Sandbox reference](/pages/reference-sandbox/). The server hosts one helper per T2 or T3 plugin side. Each client that runs a client half starts its own |
-| Platform | Linux only. On Windows and macOS the host refuses T2 and T3 with `sandbox.unavailable` (see [Platform support](/pages/reference-platform-support/)) |
+| Platform | Linux only. On Windows and macOS the host refuses T2 and T3 with `sandbox.unavailable` if one reaches it; install refuses them first with `package.platform-unsupported` (see [Platform support](/pages/reference-platform-support/)) |
 | Start | Lazy, at the first activation of the plugin side |
 | Stop | At deactivation, at a trap, at shutdown, or when the host kills it |
 | Instances | One Store at a time, one call at a time |

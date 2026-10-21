@@ -1424,7 +1424,7 @@ interface process {
     program: string, arguments: list<string>, cwd: option<fs-path>, stdin: option<list<u8>>,
     environment: list<tuple<string, string>>, timeout-millis: u32,
   }
-  /// status none when the process was killed by a signal. stdout and stderr are each capped at 4 MiB by default (`process_output_mib`); more output fails the call with `quota-exceeded`.
+  /// status none when the process was killed by a signal. stdout and stderr together are capped at 4 MiB by default (`process_output_mib`); more output fails the call with `quota-exceeded`.
   record process-exit { status: option<s32>, signal: option<string>, stdout: list<u8>, stderr: list<u8> }
   record spawn-spec { process: process-spec, stdin-open: bool, line-mode: bool }
   /// Async, take-exit.

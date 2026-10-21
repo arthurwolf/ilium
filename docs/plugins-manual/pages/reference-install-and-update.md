@@ -47,7 +47,7 @@ The folder layout, the registry file `installed.json`, the lock `installed.lock`
 | [PKG-266] | The package file is kept as `store/<id>/<version>/package.iliumpkg` next to the unpacked files, so that `verify` and `rollback` need no network. Files in `store/` are written once and made read-only. An update writes a new folder and never changes an old one. |
 | [PKG-267] | The user trust store is `$XDG_STATE_HOME/ilium/trust.json` (Linux `~/.local/state/ilium/trust.json` when `XDG_STATE_HOME` is unset), mode 0600, written atomically. The variable `ILIUM_TRUST_STORE` replaces it and holds an absolute file path. The format is that of [Signing and trust](/pages/reference-signing-and-trust/#the-trust-store). Downloads in progress live in `<cache dir>/ilium/plugins/downloads/`. Cached registry metadata lives in `<cache dir>/ilium/plugins/registry/<hash-of-url>/`. |
 | [PKG-268] | The compiled cache `<cache dir>/ilium/plugins/compile/` is derived data, keyed by the component SHA-256 and an engine id (the Wasmtime version and settings). The host MUST be able to delete it at any time and recompile. |
-| [PKG-269] | A crash leaves `installed.json` unchanged, because the registry file is the single commit point (steps 6 below). Orphans in `staging/` are deleted at the next start. |
+| [PKG-269] | A crash leaves `installed.json` unchanged, because the registry file is the single commit point (steps 6 below). Orphans in `staging/` (older than one hour or whose process is gone) are deleted at the next start. |
 
 ## The install transaction
 
@@ -65,7 +65,7 @@ An install is the following steps in order. A failure at any step leaves the ear
 | Id | Rule |
 |---|---|
 | [PKG-270] | A second install, update or uninstall that starts while the lock is held polls every 100 ms for up to 30 s and then fails with `install.locked`, exit code 4 (LIF-066). The lock is an exclusive OS advisory lock, so a crashed holder releases it by process exit and no takeover rule exists. |
-| [PKG-271] | A crash before step 6 leaves the previous `installed.json`. The next start deletes the `staging/` directories that `installed.json` does not reference. A crash after step 6 and before step 7 leaves a complete install that the running servers see when they watch `installed.json` (LIF-089). |
+| [PKG-271] | A crash before step 6 leaves the previous `installed.json`. The next start deletes the `staging/` directories that `installed.json` does not reference and that are older than one hour or whose process is gone. A crash after step 6 and before step 7 leaves a complete install that the running servers see when they watch `installed.json` (LIF-089). |
 | [PKG-272] | The host MUST NOT instantiate any component before step 6 has finished and step 7 has been sent. |
 | [PKG-273] | The platform gate is stage 9: on Windows and macOS an install of a T2 or T3 package is refused with `package.platform-unsupported` before the review dialog. T1 bundled plugins are not installed by this path. |
 | [PKG-274] | An install of an id that is already installed at the same version with the same manifest SHA-256 is a no-op: it exits 0 and prints `install.already-installed` as a warning. With `--reinstall` it rewrites `store/<id>/<version>/` from the package. A different manifest SHA-256 at the same version is refused at stage 9 with `package.version-reused`, exit 1. The manifest hash is compared, not the package hash, because the signature document changes the package bytes (LIF-072). |
