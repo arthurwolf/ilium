@@ -59,7 +59,7 @@ The first render shows the tree before and after an organisation, as a diff view
 │ │ Keep titles under four words.            │ │
 │ │ Use the repository name first.           │ │
 │ ╰──────────────────────────────────────────╯ │
-│<span class="t-dim">  Each change is saved at once.</span>               │
+│<span class="t-dim">  Saved 600 ms after you stop typing.</span>         │
 ╰──────────────────────────────────────────────╯
 </pre>
 <figcaption>Rendered at 48 columns. Illustrative. Title style, the prompt and session toggles, and the instruction text area, with leaders between label and value.</figcaption>
