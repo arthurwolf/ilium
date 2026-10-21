@@ -298,7 +298,7 @@ pub(crate) fn handle_event_after_intercept(app: &mut App, event: Event) {
         Mode::ConfirmSessionRecovery { pane_count } => {
             handle_session_recovery_event(app, pane_count, &event)
         }
-        Mode::Settings(state) => handle_settings_event(app, state, &event),
+        Mode::Settings(state) => handle_settings_event(app, *state, &event),
         Mode::SettingsHelp(state) => handle_settings_help_event(app, state, &event),
         Mode::Search(state) => handle_search_event(app, state, &event),
         Mode::Move => {
@@ -2559,15 +2559,15 @@ const SETTINGS_PAGE_SCROLL_LINES: u16 = 5;
 fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event) {
     let selected_before = state.selected_row;
     let Event::Key(key) = event else {
-        app.mode = Mode::Settings(state);
+        app.mode = Mode::Settings(Box::new(state));
         return;
     };
     if !is_press(key) {
-        app.mode = Mode::Settings(state);
+        app.mode = Mode::Settings(Box::new(state));
         return;
     }
     if key.code == KeyCode::Char('o') && key.modifiers.contains(KeyModifiers::CONTROL) {
-        app.mode = Mode::Settings(state);
+        app.mode = Mode::Settings(Box::new(state));
         crate::onboarding::integration::open(app, true);
         return;
     }
@@ -2579,25 +2579,25 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
         if matches!(key.code, KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q')) {
             state.padding.dialog = None;
         }
-        app.mode = Mode::Settings(state);
+        app.mode = Mode::Settings(Box::new(state));
         return;
     }
     if state.tab == SettingsTab::Padding && crate::padding_ui::handle_key(app, &mut state, *key) {
-        app.mode = Mode::Settings(state);
+        app.mode = Mode::Settings(Box::new(state));
         return;
     }
 
     // The Optimization tab owns its keys (scroll, sub-tabs, scan/apply/revert)
     // and, while its Apply confirmation is open, every key.
     if state.tab == SettingsTab::Optimization && app.optimization_key(&mut state, *key) {
-        app.mode = Mode::Settings(state);
+        app.mode = Mode::Settings(Box::new(state));
         return;
     }
 
     // The full-screen animation preview hides every control: any key returns.
     if state.tab == SettingsTab::Animations && state.animation_fullscreen {
         state.animation_fullscreen = false;
-        app.mode = Mode::Settings(state);
+        app.mode = Mode::Settings(Box::new(state));
         return;
     }
 
@@ -2611,7 +2611,7 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
             if state.animation_source_tab == AnimationSourceTab::Plugin {
                 app.request_plugin_catalogue();
             }
-            app.mode = Mode::Settings(state);
+            app.mode = Mode::Settings(Box::new(state));
             return;
         }
         if let Some(mut editor) = state.plugin_editor.take() {
@@ -2657,7 +2657,7 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
             if !close {
                 state.plugin_editor = Some(editor);
             }
-            app.mode = Mode::Settings(state);
+            app.mode = Mode::Settings(Box::new(state));
             return;
         }
         if state.animation_source_tab == AnimationSourceTab::Plugin {
@@ -2699,17 +2699,17 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                             ControlAction::OpenChoices | ControlAction::EditNumber => {
                                 if let Some(PluginPanelRow::Common(index)) = model.rows.get(row) {
                                     let index = *index;
-                                    app.mode = Mode::Settings(state);
+                                    app.mode = Mode::Settings(Box::new(state));
                                     app.begin_animation_value_dialog(index);
                                     return;
                                 }
-                                app.mode = Mode::Settings(state);
+                                app.mode = Mode::Settings(Box::new(state));
                                 app.begin_plugin_value_dialog(row);
                                 return;
                             }
                         }
                     }
-                    app.mode = Mode::Settings(state);
+                    app.mode = Mode::Settings(Box::new(state));
                     return;
                 }
             }
@@ -2763,7 +2763,7 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                             )
                         ) {
                             let index = *index;
-                            app.mode = Mode::Settings(state);
+                            app.mode = Mode::Settings(Box::new(state));
                             app.begin_animation_value_dialog(index);
                             return;
                         }
@@ -2780,7 +2780,7 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                 _ => false,
             };
             if handled {
-                app.mode = Mode::Settings(state);
+                app.mode = Mode::Settings(Box::new(state));
                 return;
             }
         }
@@ -2807,7 +2807,7 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
             }
             _ => {}
         }
-        app.mode = Mode::Settings(state);
+        app.mode = Mode::Settings(Box::new(state));
         return;
     }
 
@@ -2829,14 +2829,14 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
             }
             _ => {}
         }
-        app.mode = Mode::Settings(state);
+        app.mode = Mode::Settings(Box::new(state));
         return;
     }
 
     if let Some(mut picker) = state.icon_picker.take() {
         if key.code == KeyCode::Char('+') && !picker.is_searching {
             state.icon_picker = Some(picker);
-            app.mode = Mode::Settings(state);
+            app.mode = Mode::Settings(Box::new(state));
             app.begin_icon_column_dialog();
             return;
         }
@@ -2851,7 +2851,7 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                 if picker.is_searching {
                     picker.is_searching = false;
                 } else {
-                    app.mode = Mode::Settings(state);
+                    app.mode = Mode::Settings(Box::new(state));
                     return;
                 }
             }
@@ -2912,7 +2912,7 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                 if let Some(entry) = picker.search_results.entry(picker.selected_entry) {
                     app.settings_set_icon(picker.target, entry.glyph.to_string());
                 }
-                app.mode = Mode::Settings(state);
+                app.mode = Mode::Settings(Box::new(state));
                 return;
             }
             _ => {}
@@ -2922,7 +2922,7 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                 crate::settings_ui::icon_picker_scroll_for_entry(app.layout.screen_area, &picker);
         }
         state.icon_picker = Some(picker);
-        app.mode = Mode::Settings(state);
+        app.mode = Mode::Settings(Box::new(state));
         return;
     }
 
@@ -2955,7 +2955,7 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
             }
             _ => state.keyboard_picker = Some(action),
         }
-        app.mode = Mode::Settings(state);
+        app.mode = Mode::Settings(Box::new(state));
         return;
     }
 
@@ -2977,7 +2977,7 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                     topic.frames.len(),
                     app.ui_settings.motion_level,
                 );
-                app.push_modal_over(Mode::Settings(state), Mode::SettingsHelp(help));
+                app.push_modal_over(Mode::Settings(Box::new(state)), Mode::SettingsHelp(help));
                 return;
             }
         }
@@ -2991,7 +2991,7 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
             && state.tab != SettingsTab::LlmInstructions
         {
             state.selected_row = base + instruction_fields.len() - 1;
-            app.mode = Mode::Settings(state);
+            app.mode = Mode::Settings(Box::new(state));
             return;
         }
         if key.code == KeyCode::Char('i') {
@@ -3016,7 +3016,7 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                 }
                 KeyCode::Enter | KeyCode::Char(' ') => {
                     let field = instruction_fields[index];
-                    app.mode = Mode::Settings(state);
+                    app.mode = Mode::Settings(Box::new(state));
                     app.settings_open_instruction(field);
                     return;
                 }
@@ -3030,12 +3030,12 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                 key.code,
                 KeyCode::Tab | KeyCode::BackTab | KeyCode::Char('q') | KeyCode::Esc
             ) {
-                app.mode = Mode::Settings(state);
+                app.mode = Mode::Settings(Box::new(state));
                 return;
             }
         }
         if key.code == KeyCode::Char('i') {
-            app.mode = Mode::Settings(state);
+            app.mode = Mode::Settings(Box::new(state));
             return;
         }
     }
@@ -3045,7 +3045,7 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
             .copied()
         {
             if matches!(key.code, KeyCode::Enter | KeyCode::Char('+')) {
-                app.mode = Mode::Settings(state);
+                app.mode = Mode::Settings(Box::new(state));
                 app.begin_keyboard_prefix_dialog(field);
                 return;
             }
@@ -3061,7 +3061,7 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                         1
                     },
                 );
-                app.mode = Mode::Settings(state);
+                app.mode = Mode::Settings(Box::new(state));
                 return;
             }
         }
@@ -3070,7 +3070,7 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
         crate::value_settings::SettingsNumber::at(app, state.tab, state.selected_row)
     {
         if matches!(key.code, KeyCode::Enter | KeyCode::Char('*')) {
-            app.mode = Mode::Settings(state);
+            app.mode = Mode::Settings(Box::new(state));
             app.begin_settings_number_dialog(field);
             return;
         }
@@ -3084,7 +3084,7 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                 1
             };
             app.step_settings_number(field, direction);
-            app.mode = Mode::Settings(state);
+            app.mode = Mode::Settings(Box::new(state));
             return;
         }
     }
@@ -3106,19 +3106,19 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                 _ => None,
             };
             if let Some(manual) = manual {
-                app.mode = Mode::Settings(state);
+                app.mode = Mode::Settings(Box::new(state));
                 app.settings_open_inference_field(manual);
                 return;
             }
         }
         if matches!(key.code, KeyCode::Enter | KeyCode::Char('+')) {
-            app.mode = Mode::Settings(state);
+            app.mode = Mode::Settings(Box::new(state));
             app.begin_settings_choice_dialog(field);
             return;
         }
         if matches!(key.code, KeyCode::Left | KeyCode::Right) {
             app.step_settings_choice(field, if key.code == KeyCode::Left { -1 } else { 1 });
-            app.mode = Mode::Settings(state);
+            app.mode = Mode::Settings(Box::new(state));
             return;
         }
     }
@@ -3178,7 +3178,7 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                 ) =>
         {
             let row = state.selected_row;
-            app.mode = Mode::Settings(state);
+            app.mode = Mode::Settings(Box::new(state));
             app.begin_animation_value_dialog(row);
             return;
         }
@@ -3190,7 +3190,7 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                     .is_some_and(|view| view.number().is_some()) =>
         {
             let row = state.selected_row;
-            app.mode = Mode::Settings(state);
+            app.mode = Mode::Settings(Box::new(state));
             app.begin_animation_value_dialog(row);
             return;
         }
@@ -3225,7 +3225,7 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                 AnimationRowOutcome::Done => {}
                 AnimationRowOutcome::FullScreenPreview => state.animation_fullscreen = true,
                 AnimationRowOutcome::LocationPicker => {
-                    app.mode = Mode::Settings(state);
+                    app.mode = Mode::Settings(Box::new(state));
                     app.open_location_picker();
                     return;
                 }
@@ -3235,7 +3235,7 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                     hint,
                     current,
                 } => {
-                    app.mode = Mode::Settings(state);
+                    app.mode = Mode::Settings(Box::new(state));
                     app.begin_animation_text_prompt(control, label, hint, current);
                     return;
                 }
@@ -3252,7 +3252,7 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
             if let Some(row) = app.agent_setup_rows().get(state.selected_row).cloned() {
                 match row {
                     crate::app::AgentSetupRow::GlobalFile { feature, .. } => {
-                        app.mode = Mode::Settings(state);
+                        app.mode = Mode::Settings(Box::new(state));
                         app.settings_open_agent_setup_path(feature);
                         return;
                     }
@@ -3448,7 +3448,7 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                     app.settings_adjust_anthropic_model(1)
                 }
                 Some(crate::app::InferenceRow::Field(field)) => {
-                    app.mode = Mode::Settings(state);
+                    app.mode = Mode::Settings(Box::new(state));
                     app.settings_open_inference_field(field);
                     return;
                 }
@@ -3507,7 +3507,7 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
         }
         KeyCode::Enter | KeyCode::Char(' ') if state.tab == SettingsTab::TextTriggers => {
             let selected = state.selected_row;
-            app.mode = Mode::Settings(state);
+            app.mode = Mode::Settings(Box::new(state));
             app.open_text_trigger_dialog(
                 (selected < app.text_trigger_settings.triggers.len()).then_some(selected),
             );
@@ -3530,7 +3530,7 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                 .get(state.selected_row)
                 .copied()
             {
-                app.mode = Mode::Settings(state);
+                app.mode = Mode::Settings(Box::new(state));
                 app.settings_adjust_voice_row(row, -1);
                 return;
             }
@@ -3542,7 +3542,7 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                 .get(state.selected_row)
                 .copied()
             {
-                app.mode = Mode::Settings(state);
+                app.mode = Mode::Settings(Box::new(state));
                 app.settings_adjust_voice_row(row, 1);
                 return;
             }
@@ -3566,7 +3566,7 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                     }) =>
         {
             let row = crate::cost_settings_ui::rows(app)[state.selected_row];
-            app.mode = Mode::Settings(state);
+            app.mode = Mode::Settings(Box::new(state));
             app.begin_cost_value_dialog(row);
             return;
         }
@@ -3601,7 +3601,7 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                 {
                     // Enter types an exact value; the arrows step the ladder.
                     app.settings_begin_cost_window_input();
-                    app.mode = Mode::Settings(state);
+                    app.mode = Mode::Settings(Box::new(state));
                     return;
                 }
                 app.settings_adjust_cost_row(row, direction);
@@ -3669,7 +3669,7 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                 if key.code == KeyCode::Enter {
                     match row {
                         RemoteCompactionRow::Technique(target) => {
-                            app.mode = Mode::Settings(state);
+                            app.mode = Mode::Settings(Box::new(state));
                             app.begin_settings_choice_dialog(
                                 crate::value_settings_choice::SettingsChoice::RemoteTechnique(
                                     target,
@@ -3680,7 +3680,7 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                         row if row.kind()
                             == crate::remote_compaction_settings::RemoteCompactionRowKind::Stepper =>
                         {
-                            app.mode = Mode::Settings(state);
+                            app.mode = Mode::Settings(Box::new(state));
                             app.begin_settings_number_dialog(
                                 crate::value_settings::SettingsNumber::Remote(row),
                             );
@@ -3692,7 +3692,7 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                     && row.kind()
                         == crate::remote_compaction_settings::RemoteCompactionRowKind::Stepper
                 {
-                    app.mode = Mode::Settings(state);
+                    app.mode = Mode::Settings(Box::new(state));
                     app.begin_settings_number_dialog(
                         crate::value_settings::SettingsNumber::Remote(row),
                     );
@@ -3705,7 +3705,7 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                 if row == RemoteCompactionRow::CustomPrompt && direction == 0 {
                     // The editor is a modal stacked over Settings, so the
                     // settings state must be back in `app.mode` first.
-                    app.mode = Mode::Settings(state);
+                    app.mode = Mode::Settings(Box::new(state));
                     app.settings_adjust_remote_compaction_row(row, direction);
                     return;
                 }
@@ -3736,7 +3736,7 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
             if state.tab == SettingsTab::ResetPlanning =>
         {
             let row = state.selected_row;
-            app.mode = Mode::Settings(state);
+            app.mode = Mode::Settings(Box::new(state));
             app.settings_adjust_reset_planning_row(row);
             return;
         }
@@ -3758,7 +3758,7 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
         | KeyCode::Char(' ')
             if state.tab == SettingsTab::Api =>
         {
-            app.mode = Mode::Settings(state);
+            app.mode = Mode::Settings(Box::new(state));
             app.settings_open_api_port();
             return;
         }
@@ -3876,7 +3876,7 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                         | crate::app::GitRow::WorktreeLocationTemplate
                         | crate::app::GitRow::SetupCommand
                 ) {
-                    app.mode = Mode::Settings(state);
+                    app.mode = Mode::Settings(Box::new(state));
                     app.settings_adjust_git_row(row, -1);
                     return;
                 }
@@ -3893,7 +3893,7 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                         | crate::app::GitRow::WorktreeLocationTemplate
                         | crate::app::GitRow::SetupCommand
                 ) {
-                    app.mode = Mode::Settings(state);
+                    app.mode = Mode::Settings(Box::new(state));
                     app.settings_adjust_git_row(row, 1);
                     return;
                 }
@@ -4085,7 +4085,7 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
     state.scroll = state.scroll.min(max_scroll);
     app.optimization_sync_visibility(state.tab == SettingsTab::Optimization);
     app.remote_compaction_sync_native(state.tab == SettingsTab::RemoteCompaction);
-    app.mode = Mode::Settings(state);
+    app.mode = Mode::Settings(Box::new(state));
 }
 
 #[cfg(test)]
@@ -4101,11 +4101,11 @@ mod agent_monitoring_status_icon_key_tests {
             .iter()
             .position(|row| *row == crate::app::AgentMonitoringRow::StatusIcon(target))
             .unwrap();
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::AgentMonitoring,
             selected_row,
             ..SettingsState::default()
-        });
+        }));
 
         handle_event(
             &mut app,
@@ -4269,11 +4269,11 @@ mod indent_outdent_tests {
     fn icon_picker_queues_cpu_semantic_search_and_selects_its_result() {
         let mut app = App::new("test".to_string(), std::env::temp_dir());
         app.set_screen_area(ratatui::layout::Rect::new(0, 0, 160, 45));
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::Icons,
             icon_picker: Some(crate::app::IconPickerState::new(IconTarget::Group)),
             ..SettingsState::default()
-        });
+        }));
 
         handle_event(
             &mut app,
@@ -4332,11 +4332,11 @@ mod indent_outdent_tests {
     fn icon_picker_v_switches_between_dense_and_single_column_modes() {
         let mut app = App::new("test".to_string(), std::env::temp_dir());
         app.set_screen_area(ratatui::layout::Rect::new(0, 0, 160, 45));
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::Icons,
             icon_picker: Some(crate::app::IconPickerState::new(IconTarget::Group)),
             ..SettingsState::default()
-        });
+        }));
 
         handle_event(
             &mut app,
@@ -4537,12 +4537,12 @@ mod indent_outdent_tests {
     #[test]
     fn voice_api_key_prompt_preserves_exact_settings_parent_until_commit() {
         let mut app = App::new("test".to_string(), std::env::temp_dir());
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::VoiceControl,
             selected_row: 1,
             scroll: 7,
             ..SettingsState::default()
-        });
+        }));
 
         handle_event(
             &mut app,
@@ -4582,11 +4582,11 @@ mod indent_outdent_tests {
     #[test]
     fn git_text_setting_opens_prompt_and_returns_to_git_tab() {
         let mut app = App::new("test".to_string(), std::env::temp_dir());
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::Git,
             selected_row: 1,
             ..SettingsState::default()
-        });
+        }));
 
         handle_event(
             &mut app,
@@ -4606,11 +4606,8 @@ mod indent_outdent_tests {
             Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
         );
         assert!(matches!(
-            app.mode,
-            Mode::Settings(SettingsState {
-                tab: SettingsTab::Git,
-                ..
-            })
+            &app.mode,
+            Mode::Settings(state) if state.tab == SettingsTab::Git
         ));
         assert_eq!(app.git_settings.branch_prefix, "agent/");
     }
@@ -4618,11 +4615,11 @@ mod indent_outdent_tests {
     #[test]
     fn modal_stack_restores_arbitrary_depth_in_last_opened_first_closed_order() {
         let mut app = App::new("test".to_string(), std::env::temp_dir());
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::VoiceControl,
             selected_row: 1,
             ..SettingsState::default()
-        });
+        }));
         app.push_modal(Mode::VoiceSettingPrompt(
             crate::voice_settings::VoiceSettingField::ApiKey,
             TextPromptState::new(""),
@@ -4634,12 +4631,8 @@ mod indent_outdent_tests {
         assert!(matches!(app.mode, Mode::VoiceSettingPrompt(_, _)));
         app.pop_modal();
         assert!(matches!(
-            app.mode,
-            Mode::Settings(SettingsState {
-                tab: SettingsTab::VoiceControl,
-                selected_row: 1,
-                ..
-            })
+            &app.mode,
+            Mode::Settings(state) if state.tab == SettingsTab::VoiceControl && state.selected_row == 1
         ));
         assert!(app.modal_stack.is_empty());
     }
@@ -4666,12 +4659,12 @@ mod indent_outdent_tests {
                 Arc::clone(&ready),
             ));
             app.mode = Mode::Help;
-            app.push_modal(Mode::Settings(SettingsState {
+            app.push_modal(Mode::Settings(Box::new(SettingsState {
                 tab: SettingsTab::Inference,
                 selected_row: 4,
                 scroll: 3,
                 ..SettingsState::default()
-            }));
+            })));
             app.settings_open_inference_field(InferenceSettingField::RestructurePromptTokenLimit);
             (directory, app, ready)
         }
@@ -5058,12 +5051,12 @@ mod indent_outdent_tests {
                 )
             })
             .expect("OpenAI API key row");
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::Inference,
             selected_row,
             scroll: 3,
             ..SettingsState::default()
-        });
+        }));
 
         handle_event(
             &mut app,
@@ -5107,12 +5100,12 @@ mod indent_outdent_tests {
     #[test]
     fn triggers_keyboard_navigation_toggles_chips_and_none_clears_actions() {
         let mut app = App::new("test".to_owned(), std::env::temp_dir());
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::Triggers,
             selected_row: 6,
             trigger_action_cursor: 0,
             ..SettingsState::default()
-        });
+        }));
 
         handle_event(
             &mut app,
@@ -5159,11 +5152,11 @@ mod indent_outdent_tests {
             .iter()
             .position(|row| *row == crate::cost_settings::CostRow::Budget)
             .unwrap();
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::Cost,
             selected_row: row,
             ..SettingsState::default()
-        });
+        }));
         press(&mut app, KeyCode::Char('*'));
         let Mode::ValueDialog(host) = &mut app.mode else {
             panic!("number dialog");
@@ -5205,10 +5198,10 @@ mod indent_outdent_tests {
 
         let mut app = App::new("test".to_owned(), std::env::temp_dir());
         app.set_screen_area(ratatui::layout::Rect::new(0, 0, 120, 30));
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::Cost,
             ..SettingsState::default()
-        });
+        }));
         let row_index = |app: &App, row: CostRow| {
             crate::cost_settings_ui::rows(app)
                 .iter()
@@ -5276,11 +5269,11 @@ mod indent_outdent_tests {
             .iter()
             .position(|row| *row == CostRow::SparklineWindow)
             .unwrap();
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::Cost,
             selected_row: window_row,
             ..SettingsState::default()
-        });
+        }));
 
         press(&mut app, KeyCode::Enter);
         let Mode::ValueDialog(host) = &app.mode else {
@@ -5642,10 +5635,10 @@ mod text_trigger_draft_tests {
         std::fs::write(&path, invalid_document).unwrap();
         let mut app = App::new("test".to_owned(), directory.path().to_path_buf());
         app.config_dir = Some(directory.path().to_path_buf());
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::TextTriggers,
             ..SettingsState::default()
-        });
+        }));
         app.open_text_trigger_dialog(None);
         let Mode::TextTriggerDialog(editor) = &mut app.mode else {
             panic!("editor should open");
@@ -5678,12 +5671,12 @@ mod text_trigger_draft_tests {
         let directory = tempfile::tempdir().unwrap();
         let mut app = App::new("test".to_owned(), directory.path().to_path_buf());
         app.config_dir = Some(directory.path().to_path_buf());
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::TextTriggers,
             selected_row: 4,
             scroll: 3,
             ..SettingsState::default()
-        });
+        }));
         app.text_trigger_settings
             .triggers
             .push(ilium_ipc::TextTrigger {
@@ -5776,10 +5769,10 @@ mod text_trigger_same_rule_conflict_tests {
         let mut app = App::new("isolated".to_owned(), directory.to_path_buf());
         app.config_dir = Some(directory.to_path_buf());
         app.text_trigger_settings = settings;
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::TextTriggers,
             ..SettingsState::default()
-        });
+        }));
         app.open_text_trigger_dialog(Some(0));
         let Mode::TextTriggerDialog(editor) = &mut app.mode else {
             panic!("editor did not open");
@@ -5880,10 +5873,10 @@ mod text_trigger_retry_and_delete_tests {
         std::fs::write(&path, "[text_triggers\n").unwrap();
         let mut app = App::new("isolated".to_owned(), directory.path().to_path_buf());
         app.config_dir = Some(directory.path().to_path_buf());
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::TextTriggers,
             ..SettingsState::default()
-        });
+        }));
         app.open_text_trigger_dialog(None);
         let Mode::TextTriggerDialog(editor) = &mut app.mode else {
             panic!("editor did not open");
@@ -5966,11 +5959,11 @@ mod text_trigger_retry_and_delete_tests {
         let mut app = App::new("isolated".to_owned(), directory.path().to_path_buf());
         app.config_dir = Some(directory.path().to_path_buf());
         app.text_trigger_settings = settings;
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::TextTriggers,
             selected_row: 0,
             ..SettingsState::default()
-        });
+        }));
         handle_event(
             &mut app,
             Event::Key(KeyEvent::new(KeyCode::Delete, KeyModifiers::NONE)),

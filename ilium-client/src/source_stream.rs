@@ -128,21 +128,33 @@ pub(crate) struct Stream {
     _allocation: Arc<ilium_execution::StorageAdmission>,
     window_allocation: Arc<ilium_execution::StorageAdmission>,
 }
+/// Geometry of the source window a stream projects into.
+pub(crate) struct StreamWindow {
+    pub(crate) width: usize,
+    pub(crate) clip: bool,
+    pub(crate) left: usize,
+    pub(crate) tab: u8,
+    pub(crate) top: usize,
+    pub(crate) height: u16,
+}
 impl Stream {
     #[allow(clippy::too_many_arguments)] // Each stream identity, storage admission and limit stays explicit.
     pub fn new(
         identity: Arc<()>,
         physical_count: usize,
-        width: usize,
-        clip: bool,
-        left: usize,
-        tab: u8,
-        top: usize,
-        height: u16,
+        window: StreamWindow,
         allocation: Arc<ilium_execution::StorageAdmission>,
         window_allocation: Arc<ilium_execution::StorageAdmission>,
         frame_custody: FrameCustody,
     ) -> Result<Self, String> {
+        let StreamWindow {
+            width,
+            clip,
+            left,
+            tab,
+            top,
+            height,
+        } = window;
         let height = usize::from(height);
         let rows_bytes = height
             .checked_mul(std::mem::size_of::<Row>())
@@ -784,12 +796,14 @@ mod tests {
             Stream::new(
                 Arc::new(()),
                 1,
-                4,
-                false,
-                0,
-                4,
-                0,
-                2,
+                StreamWindow {
+                    width: 4,
+                    clip: false,
+                    left: 0,
+                    tab: 4,
+                    top: 0,
+                    height: 2,
+                },
                 state,
                 frame,
                 FrameCustody::reserve(&client).unwrap(),
@@ -905,12 +919,14 @@ mod tests {
             Stream::new(
                 identity.clone(),
                 1,
-                80,
-                false,
-                0,
-                4,
-                0,
-                4,
+                StreamWindow {
+                    width: 80,
+                    clip: false,
+                    left: 0,
+                    tab: 4,
+                    top: 0,
+                    height: 4,
+                },
                 allocation.clone(),
                 allocation,
                 FrameCustody::reserve(&client).unwrap(),

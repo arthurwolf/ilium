@@ -459,7 +459,7 @@ pub enum Mode {
     /// (see `crate::settings_ui`'s module doc comment for the UI/UX brief).
     /// Reached via `Action::Settings`, the tree footer's settings button, or
     /// `ContextMenuAction::Settings` (right-click the tree panel).
-    Settings(SettingsState),
+    Settings(Box<SettingsState>),
     /// Read-only explanation and animated specimen opened from a Settings row.
     /// The parent Settings state remains on the modal stack for exact return.
     SettingsHelp(crate::settings_help::dialog::SettingsHelpState),
@@ -8910,7 +8910,7 @@ impl App {
     /// every setting added to it) must keep matching.
     pub fn action_open_settings(&mut self) {
         self.refresh_agent_setup_statuses();
-        self.mode = Mode::Settings(SettingsState::new());
+        self.mode = Mode::Settings(Box::default());
     }
 
     /// Opens the full-screen workspace finder. Its index is intentionally
@@ -21595,10 +21595,10 @@ mod tests {
                     app.animation_row_context().scene_status.as_deref(),
                     Some(report.as_str())
                 );
-                let parent = Mode::Settings(SettingsState {
+                let parent = Mode::Settings(Box::new(SettingsState {
                     tab: SettingsTab::Animations,
                     ..Default::default()
-                });
+                }));
                 let help = Mode::SettingsHelp(SettingsHelpState::new("AN-37", 1, MotionLevel::Off));
                 if use_parent_transition {
                     app.mode = Mode::Normal;
@@ -22811,11 +22811,11 @@ mod tests {
             .iter()
             .position(|row| *row == InferenceRow::Field(InferenceSettingField::OpenAiModel))
             .unwrap();
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::Inference,
             selected_row: index,
             ..Default::default()
-        });
+        }));
         crate::keys::handle_event(
             &mut app,
             crossterm::event::Event::Key(crossterm::event::KeyEvent::new(
@@ -22882,7 +22882,7 @@ mod tests {
                 ) == Some((InferenceRow::Field(InferenceSettingField::OpenAiModel), 1))
             })
             .expect("model row has a real mouse hit target");
-        app.mode = Mode::Settings(state);
+        app.mode = Mode::Settings(Box::new(state));
         crate::mouse::handle_mouse_event(
             &mut app,
             crossterm::event::MouseEvent {

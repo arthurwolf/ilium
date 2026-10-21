@@ -304,16 +304,19 @@ fn compute_layout_with_attribution(area: Rect, shows_osm: bool) -> SettingsLayou
     let content_inner = theme::block(true).inner(content_frame_area);
     let scrollbar_width = u16::from(content_inner.width >= 4);
     let help_width = if content_inner.width >= 12 { 3 } else { 0 };
+    let scrollbar_x = content_inner
+        .right()
+        .saturating_sub(scrollbar_width + help_width);
+    // The scrollbar track is painted at `content_area.right()`, so the content
+    // column must end exactly where the reserved scrollbar column starts.
     let content_area = Rect::new(
         content_inner.x,
         content_inner.y,
-        content_inner
-            .width
-            .saturating_sub(scrollbar_width + help_width),
+        scrollbar_x.saturating_sub(content_inner.x),
         content_inner.height,
     );
     let content_scrollbar_area = Rect::new(
-        content_area.right(),
+        scrollbar_x,
         content_inner.y,
         scrollbar_width,
         content_inner.height,
@@ -1369,24 +1372,15 @@ fn render_tab_list(frame: &mut Frame, area: Rect, active: SettingsTab) {
         };
         let icon = tab_icon(tab);
         let icon_padding = " ".repeat(2_usize.saturating_sub(icon.width()));
-        let available_label_width = usize::from(label_area.width).saturating_sub(4);
-        let compact_label = compact_tab_label(tab);
-        let full_label = tab.label();
-        let label_source = if full_label.width() > available_label_width
-            && compact_label.width() <= available_label_width
-        {
-            compact_label
-        } else {
-            full_label
-        };
-        let label = if label_source.width() > available_label_width && available_label_width > 1 {
-            format!(
-                "{}…",
-                truncate_icon_text(label_source, available_label_width - 1)
-            )
-        } else {
-            truncate_icon_text(label_source, available_label_width)
-        };
+        // One cell stays free before the overflow scrollbar so labels never touch it.
+        let scrollbar_gap = usize::from(has_overflow);
+        let available_label_width = usize::from(label_area.width).saturating_sub(4 + scrollbar_gap);
+        // A label is shown whole or not at all: a cut word reads as a defect, while
+        // the icon still identifies the tab when no full label fits the column.
+        let label = [tab.label(), compact_tab_label(tab)]
+            .into_iter()
+            .find(|candidate| candidate.width() <= available_label_width)
+            .unwrap_or("");
         lines.push(Line::from(Span::styled(
             pad_icon_text(
                 &format!(" {icon}{icon_padding} {label}"),
@@ -2804,7 +2798,7 @@ pub fn icons_table_hit(area: Rect, scroll: u16, position: Position) -> Option<Ic
     }
 
     let row_offset = usize::from(position.y - table_inner.y - 1);
-    if row_offset % 2 != 0 {
+    if !row_offset.is_multiple_of(2) {
         return None;
     }
     let target_index = row_offset / 2 + usize::from(scroll);
@@ -7496,7 +7490,9 @@ mod tests {
             let screen = Rect::new(0, 0, width, height);
             let layout = compute_layout(screen);
             assert!(layout.tab_list_area.right() <= layout.content_area.x);
-            assert_eq!(layout.content_area.right(), layout.content_scrollbar_area.x);
+            // Text keeps one padding cell before the scrollbar on wide frames.
+            assert!(layout.content_area.right() <= layout.content_scrollbar_area.x);
+            assert!(layout.content_scrollbar_area.x - layout.content_area.right() <= 1);
             assert_eq!(
                 layout.content_scrollbar_area.right(),
                 layout.help_rail_area.x
@@ -7530,10 +7526,9 @@ mod tests {
             layout.tab_list_area.x.saturating_sub(1),
             layout.tab_list_area.y,
         );
-        let preceding_content = (
-            layout.content_area.x.saturating_sub(1),
-            layout.content_area.y,
-        );
+        // Content text starts after the frame border and one padding cell, so
+        // the border sits at the content frame's left edge.
+        let preceding_content = (layout.content_frame_area.x, layout.content_area.y);
         assert_eq!(buffer[preceding_navigation].symbol(), "│");
         assert_eq!(buffer[preceding_content].symbol(), "│");
         assert_eq!(
@@ -7579,12 +7574,12 @@ mod tests {
     }
 
     #[test]
-    fn compute_layout_leaves_no_border_gap_between_tabs_and_content() {
+    fn compute_layout_leaves_one_cell_gap_between_navigation_and_content_frames() {
         let layout = compute_layout(Rect::new(0, 0, 100, 40));
-        assert!(layout.content_area.x > layout.tab_list_area.right());
+        assert!(layout.content_frame_area.x > layout.navigation_frame_area.right());
         assert_eq!(
-            layout.content_area.x - layout.tab_list_area.right(),
-            GAP_WIDTH
+            layout.content_frame_area.x - layout.navigation_frame_area.right(),
+            GAP_WIDTH.saturating_sub(2)
         );
     }
 

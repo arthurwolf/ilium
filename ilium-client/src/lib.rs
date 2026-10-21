@@ -1401,9 +1401,11 @@ async fn run_inner(
                 if let Some(failure) = dispatch_ready_input_events(
                     &mut app,
                     &mut empty_input,
-                    &mut naming_workers,
-                    &mut icon_search_workers,
-                    home_dir.as_deref(),
+                    ReadyInputWorkers {
+                        naming_workers: &mut naming_workers,
+                        icon_search_workers: &mut icon_search_workers,
+                        home_dir: home_dir.as_deref(),
+                    },
                     queued.original,
                     &mut no_deferred,
                     &mut editor_deferred_input,
@@ -1427,8 +1429,16 @@ async fn run_inner(
         {
             if let Some(event) = deferred_input.take_front() {
                 if let Some(failure) = dispatch_ready_input_events(
-                    &mut app, &mut input_rx, &mut naming_workers, &mut icon_search_workers,
-                    home_dir.as_deref(), event, &mut deferred_input, &mut editor_deferred_input,
+                    &mut app,
+                    &mut input_rx,
+                    ReadyInputWorkers {
+                        naming_workers: &mut naming_workers,
+                        icon_search_workers: &mut icon_search_workers,
+                        home_dir: home_dir.as_deref(),
+                    },
+                    event,
+                    &mut deferred_input,
+                    &mut editor_deferred_input,
                 ) {
                     input_failure = Some(failure);
                     break;
@@ -1556,9 +1566,11 @@ async fn run_inner(
                         if let Some(failure) = dispatch_ready_input_events(
                             &mut app,
                             &mut input_rx,
-                            &mut naming_workers,
-                            &mut icon_search_workers,
-                            home_dir.as_deref(),
+                            ReadyInputWorkers {
+                                naming_workers: &mut naming_workers,
+                                icon_search_workers: &mut icon_search_workers,
+                                home_dir: home_dir.as_deref(),
+                            },
                             event,
                             &mut deferred_input,
                             &mut editor_deferred_input,
@@ -2692,7 +2704,7 @@ async fn finish_input_retirement(
             report.complete_exit_click_release(exit_click_release);
             return report
                 .into_result()
-                .map_err(crate::error::InputRetirementError::Failed);
+                .map_err(|failure| crate::error::InputRetirementError::Failed(failure));
         }
         if tokio::time::Instant::now() >= deadline {
             return Err(crate::error::InputRetirementError::Deadline(
@@ -4318,6 +4330,15 @@ fn synchronize_debug_logging_from_server(app: &mut App, enabled: bool) {
     mark_debug_logging_pending(app);
 }
 
+/// The workers and launch context that `dispatch_ready_input_events` forwards
+/// to `dispatch_pending_app_work`, grouped to keep the dispatcher's argument
+/// list short.
+struct ReadyInputWorkers<'a> {
+    naming_workers: &'a mut NamingWorkers,
+    icon_search_workers: &'a mut IconSearchWorkers,
+    home_dir: Option<&'a std::path::Path>,
+}
+
 /// Retain the original mouse event until its live interaction surface has an
 /// actual matching output acknowledgement. Keeping it in native FIFO custody
 /// also preserves a drag's later motion/release instead of replaying only Down.
@@ -4337,9 +4358,7 @@ fn native_input_geometry_ready(
 fn dispatch_ready_input_events<S>(
     app: &mut App,
     input_rx: &mut S,
-    naming_workers: &mut NamingWorkers,
-    icon_search_workers: &mut IconSearchWorkers,
-    home_dir: Option<&std::path::Path>,
+    workers: ReadyInputWorkers<'_>,
     first: Result<terminal_input_owner::InputEvent, terminal_input_owner::InputFailure>,
     deferred: &mut input_backlog::InputBacklog<
         Result<terminal_input_owner::InputEvent, terminal_input_owner::InputFailure>,
@@ -4351,6 +4370,11 @@ where
         Item = Result<terminal_input_owner::InputEvent, terminal_input_owner::InputFailure>,
     >,
 {
+    let ReadyInputWorkers {
+        naming_workers,
+        icon_search_workers,
+        home_dir,
+    } = workers;
     let mut failure = None;
     let mut overflow = None;
     let lookahead = {
@@ -4410,7 +4434,7 @@ where
                     ) {
                         Ok(()) => true,
                         Err(original) => {
-                            overflow = Some(original);
+                            overflow = Some(*original);
                             false
                         }
                     };
@@ -5185,9 +5209,11 @@ mod responsiveness_tests {
         assert!(dispatch_ready_input_events(
             &mut app,
             &mut rx,
-            &mut naming,
-            &mut icons,
-            None,
+            ReadyInputWorkers {
+                naming_workers: &mut naming,
+                icon_search_workers: &mut icons,
+                home_dir: None,
+            },
             release,
             &mut deferred,
             &mut editor
@@ -5238,9 +5264,11 @@ mod responsiveness_tests {
         assert!(dispatch_ready_input_events(
             &mut app,
             &mut rx,
-            &mut naming,
-            &mut icons,
-            None,
+            ReadyInputWorkers {
+                naming_workers: &mut naming,
+                icon_search_workers: &mut icons,
+                home_dir: None,
+            },
             Ok(press),
             &mut deferred,
             &mut editor
@@ -5273,9 +5301,11 @@ mod responsiveness_tests {
         assert!(dispatch_ready_input_events(
             &mut app,
             &mut rx,
-            &mut naming,
-            &mut icons,
-            None,
+            ReadyInputWorkers {
+                naming_workers: &mut naming,
+                icon_search_workers: &mut icons,
+                home_dir: None,
+            },
             first,
             &mut deferred,
             &mut editor
