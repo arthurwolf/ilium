@@ -339,7 +339,7 @@ A `load-file` completes once the buffer is open. If the plugin does not call `ta
 | Buffers created or held per plugin | 64 | `quota-exceeded` |
 | Text in `create-buffer` | 16 MiB | `invalid-argument` |
 | Edits in one `editor-apply-edits` | 10,000 | `refused(invalid-argument)` |
-| Annotator calls per buffer | once per 100 ms | Extra calls are not made. |
+| Annotator calls per view | once per 100 ms | Extra calls are not made. |
 
 ### Viewport, pointer and tokens
 

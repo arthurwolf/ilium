@@ -105,7 +105,7 @@ interface ids {
   /// The id of a slow host call. Unique per plugin side for the whole server run, starting at 1 at
   /// server start, and never reused, also across instance restarts.
   type request-id = u64;
-  /// Reverse-DNS style plugin id, 3 to 64 characters from [a-z0-9.-].
+  /// Reverse-DNS style plugin id, 3 to 128 characters from [a-z0-9.-].
   type plugin-id = string;
   /// One attached client of the session.
   type client-id = u64;
