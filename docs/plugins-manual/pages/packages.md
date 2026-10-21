@@ -81,7 +81,7 @@ The `exports` list names only the optional exports: `detector`, `views`, `annota
 | `link_detectors` | `{ id, regex, command }`. |
 | `editor_line_actions` | `{ id, title, regex?, command }`. |
 | `sounds` | `{ id, file }`. |
-| `cli` | `{ name, summary, arguments_schema, output }`. One subcommand, output `jsonl`. |
+| `cli` | `{ name, summary, arguments_schema, output }`, or a list of at most 16 such objects. `output` is `jsonl`, `text` or `mixed`. |
 | `http_routes` | `{ method, path }`. Needs the matching `http-api.route:<path>` grant. |
 | `services` | `{ provides }`. Interface names. |
 | `topics` | `{ publishes, subscribes }`. Publishing stays under the plugin's id prefix. |

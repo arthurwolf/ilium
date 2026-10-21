@@ -205,8 +205,7 @@ the granted list.
 
 For a T1 bundled plugin, activation starts without its H capabilities. The first activation shows
 one prompt per plugin, `Plugin <name> asks for: <list>`, with the buttons `Allow selected` and
-`Not now`. `Not now` asks again at the next server start, at most three times, and then never
-again. The user can grant the capability at any time from Settings > Plugins.
+`Not now`. `Not now` asks again at the next server start; the user sees at most three prompts in total, and then no more. The user can grant the capability at any time from Settings > Plugins.
 
 There is no prompt per call. A grant stays in force until it is revoked. The dialog below is drawn
 at 72 columns for a signed notes package.
