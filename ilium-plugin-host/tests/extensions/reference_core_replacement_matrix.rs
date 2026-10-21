@@ -76,11 +76,20 @@ fn core_pages() -> Vec<(String, String)> {
             continue;
         }
         let text = page(&name);
-        let id = text
-            .split("(id `")
-            .nth(1)
-            .and_then(|rest| rest.split('`').next())
-            .unwrap_or_default()
+        let plugin_folder = name
+            .trim_start_matches("core-plugin-")
+            .trim_end_matches(".md");
+        let manifest_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../plugins/core")
+            .join(plugin_folder)
+            .join("manifest.json");
+        let manifest_text = std::fs::read_to_string(&manifest_path)
+            .unwrap_or_else(|error| panic!("read {}: {error}", manifest_path.display()));
+        let manifest: serde_json::Value = serde_json::from_str(&manifest_text)
+            .unwrap_or_else(|error| panic!("parse {}: {error}", manifest_path.display()));
+        let id = manifest["id"]
+            .as_str()
+            .unwrap_or_else(|| panic!("no id in {}", manifest_path.display()))
             .to_owned();
         pages.push((id, text));
     }
