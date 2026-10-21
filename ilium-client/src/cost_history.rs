@@ -1195,7 +1195,16 @@ mod tests {
         claude_file(home.path(), "-proj", "a", Some(4.0));
         let mut history = CostHistory::default();
         let start = Instant::now();
-        assert!(history.request_scan(home.path().to_path_buf(), None, 30, start));
+        // The shared test budget can be briefly full while parallel tests run;
+        // wait for the reservation instead of treating that as a refused scan.
+        let admission_deadline = Instant::now() + Duration::from_secs(20);
+        while !history.request_scan(home.path().to_path_buf(), None, 30, start) {
+            assert!(
+                Instant::now() < admission_deadline,
+                "cost history scan was never admitted"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
         assert!(!history.request_scan(home.path().to_path_buf(), None, 30, start));
         let deadline = Instant::now() + Duration::from_secs(10);
         while history.is_scanning() && Instant::now() < deadline {
