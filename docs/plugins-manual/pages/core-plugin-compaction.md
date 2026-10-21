@@ -545,6 +545,17 @@ definePlugin({
 
 A handler that is late, traps or returns a reply the mode does not allow counts as `pass`. See [Extension points](/pages/api-extension-points/#hooks).
 
+### Extension points this plugin owns
+
+Values marked (default) are not stated on this page; they are the defaults of [Extension points](/pages/api-extension-points/). Side is `server` where the sample above declares the handler on the server, and `unknown` where this page does not say which side runs the handler.
+
+| Point | Side | Version | Deadline | Max | Dynamic |
+|---|---|---|---|---|---|
+| `ilium.core.compaction/techniques` | server | 0.1.0 (default) | none (default) | 64 entries (default) | no (default) |
+| `ilium.core.compaction/before-compact` | server | 0.1.0 (default) | 20 ms (default) | 8 handlers (default) | no (default) |
+
+Side basis: `ilium.core.compaction/techniques` is server because the manifest lists no `extensions.provide` grant or `contributes.extension_points` entry for it, and the technique's service summarises a transcript inside the server-side job runner (`JobRunner::run` calls `summarise`, and the server starts the compact job). Side basis: `ilium.core.compaction/before-compact` is server because the manifest lists no `extensions.provide` grant or `contributes.extension_points` entry for it, and the veto handler sample is declared in the server capabilities and runs as a server-side `HookHandler`.
+
 ### ABI used
 
 - [Jobs](/pages/api-jobs/) and the [jobs.run grant](/pages/capability-jobs-run/)

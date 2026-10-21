@@ -135,11 +135,11 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "http:status.openai.com",
       "services.provide:ilium.core.cost/usage",
       "settings.contribute:agent-cost",
-      "settings.write-kernel:agent-cost"
+      "settings.write-kernel:agent-cost",
+      "settings.write-kernel:reset-planning"
     ],
     "client": [
-      "ui.panels",
-      "settings.write-kernel:reset-planning"
+      "ui.panels"
     ]
   },
   "activation": [
@@ -668,6 +668,15 @@ A package adds this entry in its manifest. It needs no code.
   }
 }
 ```
+
+### Extension points this plugin owns
+
+| Point | Side | Version | Deadline | Max | Dynamic |
+|---|---|---|---|---|---|
+| `ilium.core.cost/price-sources` | server | 0.1.0 (default) | none (default) | 64 entries (default) | no (default) |
+| `ilium.core.cost/quota-sources` | server | 0.1.0 (default) | none (default) | 64 entries (default) | no (default) |
+
+Side basis: ilium.core.cost/quota-sources is server because neither the manifest nor the page lists an extensions.provide grant or contribution for it on either side, so the side is taken from the owning logic: each entry names a service the plugin provides (ilium.core.cost/usage), which the server-side service provider serves, and the server side computes the quota percentages from transcript facts.
 
 ### ABI used
 

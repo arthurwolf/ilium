@@ -530,6 +530,19 @@ A package adds this entry in its manifest. It needs no code.
 }
 ```
 
+### Extension points this plugin owns
+
+The plugin owns the two points below (grant `extensions.provide:ilium.core.search/<point>`). The manifest above declares no `extensions.provide` grant and the page does not name a side for either point, so the side is unknown. Values marked (default) are the defaults of [Extension points](/pages/api-extension-points/), because this page does not state them.
+
+| Point | Side | Version | Deadline | Max | Dynamic |
+|---|---|---|---|---|---|
+| `ilium.core.search/sources` | server | 0.1.0 (default) | none (default) | 64 entries (default) | no (default) |
+| `ilium.core.search/rank` | server | 0.1.0 (default) | 20 ms (default) | 8 handlers (default) | no (default) |
+
+Side basis: `ilium.core.search/sources` is server because the manifest declares no `extensions.provide` grant and names no side for the point, and the page describes a source entry's `service` as the handler that answers a query with ranked hits, while the server keeps the index and answers queries (Samples 2 and Services).
+
+Side basis: `ilium.core.search/rank` is server because the manifest declares no grant and the page names no handler side, so the side where the calling logic runs decides it, and the server answers the query and holds the hits before the client panel shows them.
+
 ### ABI used
 
 - [UI API](/pages/api-ui/) and [ui.panels](/pages/capability-ui-panels/)

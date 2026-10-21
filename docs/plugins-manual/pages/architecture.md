@@ -74,7 +74,7 @@ The host sorts plugins into four tiers. The tier decides where a plugin runs and
 | Tier | Who signs it | Where it runs | How it installs |
 |---|---|---|---|
 | T0 | The kernel itself | Native code in the server and the client | Not a plugin |
-| T1 | Ilium, embedded in the release as precompiled `.cwasm` | The process that hosts its side (server, client or CLI process), on every platform | Granted up to the manifest ceiling; high-risk grants asked once |
+| T1 | Ilium, embedded in the release as precompiled `.cwasm` | The process that hosts its side (server, client or CLI process), on every platform | Granted up to the manifest ceiling; high-risk grants asked at first activation and at later starts, at most three prompts in total |
 | T2 | A publisher key that the user trusts | The sandbox helper process | Review dialog; grants are remembered |
 | T3 | Nobody (unsigned local package) | The sandbox helper process | Only with `--allow-unsigned` or `ilium plugin dev`; shown with a `dev` badge |
 

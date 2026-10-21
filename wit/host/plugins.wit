@@ -8,7 +8,7 @@ interface plugins {
     disabled-blocked, disabled-by-policy, refused-at-load, update-staged, uninstall-pending,
   }
   enum instance-state {
-    inactive, activating, waiting-dependency, active, deactivating, restart-scheduled,
+    inactive, activating, waiting-dependency, active, deactivating, failed, restart-scheduled,
     stopped-by-failure, stopped,
   }
   enum health-state { healthy, degraded, restarting, failed, disabled, dormant, refused }

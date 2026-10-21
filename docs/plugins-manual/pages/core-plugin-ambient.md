@@ -486,6 +486,17 @@ A package adds this entry in its manifest. It needs no code.
 }
 ```
 
+### Extension points this plugin owns
+
+The table gives the values that [EXT-052] requires for each point this plugin owns. The page does not state them, so the values come from the defaults in [Extension points](/pages/api-extension-points/) and are marked (default). Side is unknown because the manifest has no `extensions.provide` grant for these points and the page does not state the side on which their handlers run.
+
+| Point | Side | Version | Deadline | Max | Dynamic |
+|---|---|---|---|---|---|
+| `ilium.core.ambient/palettes` | client | 0.1.0 (default) | none (default) | 64 entries (default) | no (default) |
+| `ilium.core.ambient/style-presets` | client | 0.1.0 (default) | none (default) | 64 entries (default) | no (default) |
+
+Side basis: `ilium.core.ambient/palettes` is client because the manifest has no `extensions.provide` grant and no server block, the plugin is `side: client` throughout, and the page says the palette choice belongs to the client-scope Animations tab and that the client kernel applies the look to each cell. Side basis: `ilium.core.ambient/style-presets` is client because the manifest has no `extensions.provide` grant and no server block, the plugin is `side: client` throughout, and the page says the entries are full sets of shared look values that the client kernel applies to each cell.
+
 ### ABI used
 
 - [Media and embedded widgets](/pages/widgets-media-and-embedded/) and [media.video](/pages/capability-media-video/)

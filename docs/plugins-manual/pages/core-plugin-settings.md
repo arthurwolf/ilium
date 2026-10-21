@@ -570,6 +570,15 @@ A package adds this entry in its manifest. The entry names a service, so the pac
 }
 ```
 
+### Extension points this plugin owns
+
+The table gives the values that [EXT-052] requires for each point this plugin owns. The page does not state the version, deadline, max or dynamic values, so they come from the defaults in [Extension points](/pages/api-extension-points/) and are marked (default). The side of `config-importers` is `server` because the example above answers its service from a server component. The side of `onboarding-steps` is `client` because the plugin fills each step with a view, and the plugin's views are client exports. The manifest has no `extensions.provide` grant for either point.
+
+| Point | Side | Version | Deadline | Max | Dynamic |
+|---|---|---|---|---|---|
+| `ilium.core.settings/config-importers` | server | 0.1.0 (default) | none (default) | 64 entries (default) | no (default) |
+| `ilium.core.settings/onboarding-steps` | client | 0.1.0 (default) | none (default) | 64 entries (default) | no (default) |
+
 ### ABI used
 
 - [Settings API](/pages/api-settings/) and [settings.contribute grant](/pages/capability-settings-contribute/)

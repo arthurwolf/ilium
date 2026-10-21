@@ -595,6 +595,19 @@ definePlugin({
 
 A handler that is late, traps or returns a reply the mode does not allow counts as `pass`. See [Extension points](/pages/api-extension-points/#hooks).
 
+### Extension points this plugin owns
+
+Values marked (default) are not stated on this page; they are the defaults of [Extension points](/pages/api-extension-points/). Side is `server` where the sample above declares the handler on the server, and `unknown` where this page does not say which side runs the handler.
+
+| Point | Side | Version | Deadline | Max | Dynamic |
+|---|---|---|---|---|---|
+| `ilium.core.tree/before-move` | server | 0.1.0 (default) | 20 ms (default) | 8 handlers (default) | no (default) |
+| `ilium.core.tree/before-close` | server | 0.1.0 (default) | 20 ms (default) | 8 handlers (default) | no (default) |
+| `ilium.core.tree/node-sorts` | server | 0.1.0 (default) | none (default) | 64 entries (default) | no (default) |
+
+Side basis: ilium.core.tree/before-move is server because the manifest has no extensions.provide grant or contributes.extension_points entry for it, and the page does not name the side that runs its handler, so the side where the tree plugin's logic that drives moves runs decides it: the page routes every move through server-side intents (the client command only forwards a message to its server side, and the tree is changed only through intents submitted by the server).
+Side basis: ilium.core.tree/node-sorts is server because the manifest has no grant or entry for it, and the page does not name the handler's side, so the side where the sort logic runs decides it: the "Order the tree" sample is a server handler that reads the tree and submits set-decoration with the sort-key that orders siblings.
+
 ### ABI used
 
 - [Tree import](/pages/api-tree/), [tree.read](/pages/capability-tree-read/), [tree.write](/pages/capability-tree-write/), [tree.metadata](/pages/capability-tree-metadata/), [tree.decorate](/pages/capability-tree-decorate/), [tree.restructure](/pages/capability-tree-restructure/)

@@ -1524,7 +1524,7 @@ interface commands {
   use ilium:types/errors@0.1.0.{plugin-error};
   /// Own commands only. Client only.
   set-state: func(command: string, enabled: bool, checked: option<bool>) -> result<_, plugin-error>;
-  /// Async. Completes with ok once the command has run. Errors: not-found. Times out after 30 s.
+  /// Async. Returns the request id at once; the event `request-completed` reports when the command has run. Errors: not-found. Times out after 30 s.
   invoke: func(command: string, arguments-json: string) -> result<request-id, plugin-error>;
 }
 ```
@@ -1746,7 +1746,7 @@ interface plugins {
     disabled-blocked, disabled-by-policy, refused-at-load, update-staged, uninstall-pending,
   }
   enum instance-state {
-    inactive, activating, waiting-dependency, active, deactivating, restart-scheduled,
+    inactive, activating, waiting-dependency, active, deactivating, failed, restart-scheduled,
     stopped-by-failure, stopped,
   }
   enum health-state { healthy, degraded, restarting, failed, disabled, dormant, refused }

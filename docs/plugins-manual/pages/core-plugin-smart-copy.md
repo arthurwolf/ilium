@@ -490,6 +490,15 @@ definePlugin({
 
 A handler that is late, traps or returns a reply the mode does not allow counts as `pass`. See [Extension points](/pages/api-extension-points/#hooks).
 
+### Extension points this plugin owns
+
+The plugin owns the two points below. A value marked (default) is not stated on this page; it takes the default from [Extension points](/pages/api-extension-points/).
+
+| Point | Side | Version | Deadline | Max | Dynamic |
+|---|---|---|---|---|---|
+| `ilium.core.smart-copy/recognisers` | server | 0.1.0 (default) | none (default) | 64 entries (default) | no (default) |
+| `ilium.core.smart-copy/after-copy` | server | 0.1.0 (default) | 20 ms (default) | 8 handlers (default) | no (default) |
+
 ### ABI used
 
 - [Menus](/pages/api-menus/), [Menu provider](/pages/api-menu-provider/), [Collections](/pages/widgets-collections/), [Text](/pages/widgets-text/), [Layout and containers](/pages/widgets-layout-and-containers/)

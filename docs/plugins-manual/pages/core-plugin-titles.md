@@ -563,6 +563,18 @@ A package adds this entry in its manifest. It needs no code.
 }
 ```
 
+### Extension points this plugin owns
+
+Values marked (default) come from the defaults in [Extension points](/pages/api-extension-points/). The page does not state the side that runs these points, so it is marked unknown.
+
+| Point | Side | Version | Deadline | Max | Dynamic |
+|---|---|---|---|---|---|
+| `ilium.core.titles/before-apply-title` | server | 0.1.0 (default) | 20 ms (default) | 8 handlers (default) | no (default) |
+| `ilium.core.titles/title-styles` | server | 0.1.0 (default) | none (default) | 64 entries (default) | no (default) |
+
+Side basis: `ilium.core.titles/before-apply-title` is server because the page has no manifest entry or `contributes.extension_points` naming it, and the server side generates the proposed title and submits the `rename-node` that applies it, so the hook runs on the server before that apply step.
+Side basis: `ilium.core.titles/title-styles` is server because the page has no manifest entry naming it, and the style `instruction` text it collects is the text the server side sends to the model when it asks for a title.
+
 ### ABI used
 
 - [inference](/pages/api-inference/) and [the inference grant](/pages/capability-inference/)

@@ -369,6 +369,18 @@ A package adds this entry in its manifest. The manifest only declares the sectio
 }
 ```
 
+### Extension points this plugin owns
+
+The table gives the values that [EXT-052] requires for each point this plugin owns. The page does not state them, so the values come from the defaults in [Extension points](/pages/api-extension-points/) and are marked (default). Side is unknown because the manifest has no `extensions.provide` grant for these points and the page does not state the side on which their handlers run.
+
+| Point | Side | Version | Deadline | Max | Dynamic |
+|---|---|---|---|---|---|
+| `ilium.core.sessions/snapshot-sections` | server | 0.1.0 (default) | none (default) | 64 entries (default) | no (default) |
+| `ilium.core.sessions/before-restore` | server | 0.1.0 (default) | 20 ms (default) | 8 handlers (default) | no (default) |
+
+Side basis: `ilium.core.sessions/snapshot-sections` is server because the manifest grants no `extensions.provide` for it and lists no extension points, so the evidence comes from the page text: the snapshot is session logic, and the server side owns the session logic while the client side only writes the `session` kernel setting.
+Side basis: `ilium.core.sessions/before-restore` is server because the manifest grants no `extensions.provide` for it and lists no extension points, so the evidence comes from the page text: the restore is driven by the server side, which rebuilds the layout, freezes and thaws panes and relaunches agents through its `panes.lifecycle` and `agent.read` capabilities.
+
 ### ABI used
 
 - [Pane lifecycle](/pages/api-pane-lifecycle/), [panes.lifecycle](/pages/capability-panes-lifecycle/) and [pane lifecycle intents](/pages/api-intent-pane-lifecycle/)

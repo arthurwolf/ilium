@@ -44,17 +44,16 @@ trusted_keys = ["3f2a91c07b6d1e44a1b20c9e55d3f7a8b6c102e94d7798af13c56e0bd2f48a1
 
 The key in `trusted_keys` needs no user prompt. Everything else fails at install with `policy.publisher-denied`.
 
-### Block all high-risk grants except a list
+### Block some high-risk grants
 
 ```toml
 version = 1
 [grants]
-max_risk = "normal"
-[grants.preapproved]
-"example.git-tools" = ["process.run:git"]
+max_risk = "high"
+deny = ["process.run"]
 ```
 
-`max_risk = "normal"` refuses high-risk grants. To give one plugin a high-risk grant such as `process.run:git`, leave `max_risk` at `high` and list the grant in `preapproved`. `max_risk` has no exception: it locks off every high-risk grant, and a `preapproved` entry for such a grant is locked off too ([SEC-198]). Use `preapproved` for normal-risk grants you reviewed.
+`deny` locks off every grant that matches its pattern: `process.run` matches the bare grant and each of its arguments. The other high-risk grants stay available, subject to review. To block every high-risk grant, set `max_risk = "normal"`; that setting has no exception, and a `preapproved` entry cannot override it ([SEC-198]). Use `preapproved` for normal-risk grants you reviewed.
 
 ### An offline site
 

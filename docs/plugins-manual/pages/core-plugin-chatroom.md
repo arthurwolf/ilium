@@ -519,6 +519,15 @@ definePlugin({
 
 A handler that is late, traps or returns a reply the mode does not allow counts as `pass`. See [Extension points](/pages/api-extension-points/#hooks).
 
+### Extension points this plugin owns
+
+The table gives the values that [EXT-052] requires for each point this plugin owns. The page does not state the version, deadline, max or dynamic values for these points, so those come from the defaults in [Extension points](/pages/api-extension-points/) and are marked (default). The side comes from the page: the `before-post` example declares its handler under the server side, and the message view that draws `message-renderers` entries runs on the client side.
+
+| Point | Side | Version | Deadline | Max | Dynamic |
+|---|---|---|---|---|---|
+| `ilium.core.chatroom/before-post` | server | 0.1.0 (default) | 20 ms (default) | 8 handlers (default) | no (default) |
+| `ilium.core.chatroom/message-renderers` | client | 0.1.0 (default) | none (default) | 64 entries (default) | no (default) |
+
 ### ABI used
 
 - [Virtual rows](/pages/api-virtual-rows-provider/), [exports](/pages/api-exports/) and [tree structure intents](/pages/api-intent-tree-structure/)

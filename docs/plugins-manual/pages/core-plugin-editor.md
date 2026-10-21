@@ -10,7 +10,7 @@ permalink: /pages/core-plugin-editor/
 <p>Status: the editor is native in v1. This page describes the plugin form that arrives in Phase 7 (see the <a href="/pages/roadmap/">roadmap</a>).</p>
 </div>
 
-The Editor plugin (`ilium.core.editor`, side client) owns editor panes: buffers, syntax highlighting through a token provider, line numbers and the minimap, Markdown source and rendered views, the file explorer and picker, and creating an agent from an editor line. As the editor provider it owns buffer text while it runs.
+The Editor plugin (`ilium.core.editor`, client part plus a small server part for settings) owns editor panes: buffers, syntax highlighting through a token provider, line numbers and the minimap, Markdown source and rendered views, the file explorer and picker, and creating an agent from an editor line. As the editor provider it owns buffer text while it runs.
 
 ### What it covers
 
@@ -88,8 +88,15 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
   "name": "Editor",
   "version": "0.1.0",
   "publisher": "Ilium",
-  "description": "The Editor plugin (ilium.core.editor, side client) owns editor panes: buffers, syntax highlighting through a token provider, line numbers and the minimap, Markdown source and rendered views, the file explorer and picker, and creating an age",
+  "description": "The Editor plugin (ilium.core.editor, client plus a small server part) owns editor panes: buffers, syntax highlighting through a token provider, line numbers and the minimap, Markdown source and rendered views, the file explorer and picker, and creating an age",
   "license": "MIT",
+  "server": {
+    "entry": "server.wasm",
+    "world": "ilium:server/base@0.1.0",
+    "exports": [
+      "service-provider"
+    ]
+  },
   "client": {
     "entry": "client.wasm",
     "world": "ilium:client/base@0.1.0",
@@ -107,13 +114,52 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "panes.create",
       "terminal.write",
       "ui.panels",
+      "services.use:ilium.core.editor/set-setting"
+    ],
+    "server": [
+      "services.provide:ilium.core.editor/set-setting",
       "settings.write-kernel:editor"
     ]
   },
   "activation": [
     "pane-kind:editor"
   ],
+  "unstable": ["plugin-services"],
+  "contributes": {
+    "services": {
+      "provides": [
+        { "name": "ilium.core.editor/set-setting", "version": "0.1.0", "schema": "schemas/set-setting.json" }
+      ]
+    }
+  },
   "limits_tier": "first-party"
+}
+```
+
+### Server part
+
+This plugin has a server part, added only for settings. Its one job is to write the `editor` Settings tab it owns: `settings.write-kernel:editor` is a server-side grant and the client part never holds it (assumption recorded here: the grant is server side only, see [settings.write-kernel](/pages/capability-settings-write-kernel/)). The client part draws the controls. When the user changes a value, the client part sends it to the server part through the plugin service `ilium.core.editor/set-setting` (grants `services.use:ilium.core.editor/set-setting` on the client side and `services.provide:ilium.core.editor/set-setting` on the server side, see [services](/pages/api-services/)). The name follows the rule `<plugin-id>/<name>` with a name of 1 to 64 characters from `a-z`, `0-9` and `-`. The server part validates the value and calls the kernel-settings write.
+
+The schema file for `set-setting` (`schemas/set-setting.json`, shown here because the manual ships no package files):
+
+```json
+{
+  "set": {
+    "params": {
+      "type": "object",
+      "properties": {
+        "tab": { "type": "string" },
+        "key": { "type": "string" },
+        "value": { "type": "string" }
+      },
+      "required": ["tab", "key", "value"]
+    },
+    "result": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  }
 }
 ```
 
@@ -551,6 +597,20 @@ definePlugin({
 ```
 
 A handler that is late, traps or returns a reply the mode does not allow counts as `pass`. See [Extension points](/pages/api-extension-points/#hooks).
+
+### Extension points this plugin owns
+
+The table gives each point's side, version, deadline, maximum and dynamic value. A value marked (default) is not stated on this page; it is the default from [Extension points](/pages/api-extension-points/): version 0.1.0, a 20 ms deadline for hook points, no deadline for collect points, 8 handlers for hook points, 64 entries for collect points, and not dynamic.
+
+| Point | Side | Version | Deadline | Max | Dynamic |
+|---|---|---|---|---|---|
+| `ilium.core.editor/before-save` | client | 0.1.0 (default) | 20 ms (default) | 8 handlers (default) | no (default) |
+| `ilium.core.editor/file-openers` | client | 0.1.0 (default) | none (default) | 64 entries (default) | no (default) |
+| `ilium.core.editor/line-badges` | client | 0.1.0 (default) | none (default) | 64 entries (default) | no (default) |
+
+Side basis: `ilium.core.editor/file-openers` is client because the manifest gives the server part only `services.provide` and `settings.write-kernel:editor` (no `extensions.provide` for it), and the page says the server part's one job is settings, while the client part owns the editor panes that pick which pane kind opens a file. Side basis: `ilium.core.editor/line-badges` is client because the manifest gives the server part no `extensions.provide` for it, and the gutter markers it adds belong to the editor panes the client part draws.
+
+The side of `before-save` is client because the example above contributes that point from the client capabilities. This page does not state a side for `file-openers` or `line-badges`, so their side is unknown.
 
 ### ABI used
 

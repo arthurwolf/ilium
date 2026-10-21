@@ -649,6 +649,15 @@ A package adds this entry in its manifest. It needs no code.
 }
 ```
 
+### Extension points this plugin owns
+
+The table gives the values that [EXT-052] requires for each point this plugin owns. Side is `client`, the side the page states for this plugin; the manifest has no `extensions.provide` grant for these points. The other values are not stated on the page, so they come from the defaults in [Extension points](/pages/api-extension-points/) and are marked (default).
+
+| Point | Side | Version | Deadline | Max | Dynamic |
+|---|---|---|---|---|---|
+| `ilium.core.keys-and-help/key-hints` | client | 0.1.0 (default) | none (default) | 64 entries (default) | no (default) |
+| `ilium.core.keys-and-help/help-sources` | client | 0.1.0 (default) | none (default) | 64 entries (default) | no (default) |
+
 ### ABI used
 
 - [Kernel settings and keymap](/pages/api-kernel-settings-and-keymap/)

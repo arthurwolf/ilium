@@ -485,6 +485,18 @@ A package adds this entry in its manifest. It needs no code.
 }
 ```
 
+### Extension points this plugin owns
+
+The table gives the values that [EXT-052] requires for each point this plugin owns. The page does not state them, so the values come from the defaults in [Extension points](/pages/api-extension-points/) and are marked (default). Side is unknown because the manifest has no `extensions.provide` grant for these points and the page does not state the side on which their handlers run.
+
+| Point | Side | Version | Deadline | Max | Dynamic |
+|---|---|---|---|---|---|
+| `ilium.core.terminal/before-send-input` | server | 0.1.0 (default) | 20 ms (default) | 8 handlers (default) | no (default) |
+| `ilium.core.terminal/open-link` | client | 0.1.0 (default) | 20 ms (default) | 8 handlers (default) | no (default) |
+| `ilium.core.terminal/link-actions` | client | 0.1.0 (default) | none (default) | 64 entries (default) | no (default) |
+
+Side basis: ilium.core.terminal/before-send-input is server because the manifest has no `extensions.provide` grant for it and the page does not state where its handlers run, but input reaches a pane through the `send-input` intent that the server submits (the paste sample) and the server holds `terminal.write`. Side basis: ilium.core.terminal/open-link is client because the manifest has no grant for it and the page does not state where its handlers run, but the click is handled on the client, which submits `editor-open` on `link-activated` (the Clickable links sample). Side basis: ilium.core.terminal/link-actions is client because the manifest has no grant for it and the page does not state where its handlers run, but the point feeds the terminal right-click menu, which is client UI (the point's own row in the table above).
+
 ### ABI used
 
 - [Terminal primitive](/pages/primitives-terminal/), [Terminal reads](/pages/primitives-terminal-reads/), [Terminal input](/pages/primitives-terminal-input/)

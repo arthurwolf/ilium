@@ -497,6 +497,17 @@ definePlugin({
 
 A handler that is late, traps or returns a reply the mode does not allow counts as `pass`. See [Extension points](/pages/api-extension-points/#hooks).
 
+### Extension points this plugin owns
+
+The table gives the values that [EXT-052] requires for each point this plugin owns. The page does not state them, so the values come from the defaults in [Extension points](/pages/api-extension-points/) and are marked (default). Side for `before-notify` is server because the page's contributor example grants `extensions.contribute` on the server side and its handler runs there. The manifest has no `extensions.provide` grant for these points. The side for `channels` is server because the notify service that raises a notice runs on the server, and the client only draws toasts (see the Side basis sentence after the table).
+
+| Point | Side | Version | Deadline | Max | Dynamic |
+|---|---|---|---|---|---|
+| `ilium.core.notifications/before-notify` | server | 0.1.0 (default) | 20 ms (default) | 8 handlers (default) | no (default) |
+| `ilium.core.notifications/channels` | server | 0.1.0 (default) | none (default) | 64 entries (default) | no (default) |
+
+Side basis: `ilium.core.notifications/channels` is server because the manifest has no `extensions.provide` grant or `extension_points` entry for it, and the page states no channel handler side, so the side comes from the owning plugin logic that delivers notices: the page says the server side "submits sounds, notices and marks" and the `notify` service that raises a notice is server-side, while the client side only draws toasts.
+
 ### ABI used
 
 - [notifications and sounds](/pages/api-notifications/), [sound.play](/pages/capability-sound-play/) and [notify.desktop](/pages/capability-notify-desktop/)

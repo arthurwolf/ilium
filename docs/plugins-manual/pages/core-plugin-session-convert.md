@@ -150,7 +150,7 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
 {
   "api": "ilium:plugin@0.1.0",
   "id": "ilium.core.session-convert",
-  "name": "Session convert",
+  "name": "Session conversion",
   "version": "0.1.0",
   "publisher": "Ilium",
   "description": "Session conversion lets a conversation continue under the other agent.",

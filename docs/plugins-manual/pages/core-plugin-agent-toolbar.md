@@ -602,6 +602,17 @@ A package adds this entry in its manifest. It needs no code.
 }
 ```
 
+### Extension points this plugin owns
+
+The plugin owns both collect points above. The values come from the page where it states them; a value the page does not state is the kernel default and is marked (default).
+
+| Point | Side | Version | Deadline | Max | Dynamic |
+|---|---|---|---|---|---|
+| `ilium.core.agent-toolbar/toolbar-actions` | client | 0.1.0 (default) | none (default) | 64 entries (default) | no (default) |
+| `ilium.core.agent-toolbar/banner-segments` | client | 0.1.0 (default) | none (default) | 64 entries (default) | no (default) |
+
+The side is client for both points because the page declares the toolbar buttons under `ui.chrome` (granted only to the client side) and fills the banner slot with `set-frame-slot`. The page grants no `extensions.provide` for either point.
+
 ### ABI used
 
 - [agent.read-prompts](/pages/capability-agent-read-prompts/), [agent.control](/pages/capability-agent-control/) and [agent.transcript](/pages/capability-agent-transcript/)

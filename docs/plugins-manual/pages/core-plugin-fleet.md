@@ -710,6 +710,18 @@ A package adds this entry in its manifest. It needs no code.
 }
 ```
 
+### Extension points this plugin owns
+
+The table gives the values for the two points this plugin owns. A value marked (default) is not stated on this page; it comes from the defaults in [Extension points](/pages/api-extension-points/). Side is unknown: this page names no `extensions.provide` grant for either point and does not say which side runs the handlers.
+
+| Point | Side | Version | Deadline | Max | Dynamic |
+|---|---|---|---|---|---|
+| `ilium.core.fleet/selectors` | server | 0.1.0 (default) | none (default) | 64 entries (default) | no (default) |
+| `ilium.core.fleet/before-broadcast` | server | 0.1.0 (default) | 20 ms (default) | 8 handlers (default) | no (default) |
+
+Side basis: `ilium.core.fleet/selectors` is server because the manifest names no `extensions.provide` grant or extension-point entry for it, and its rules are applied by `ilium panes` and `ilium broadcast`, which the page documents as server commands (`requires_server: true`, with the panes and broadcast samples written as server code).
+Side basis: `ilium.core.fleet/before-broadcast` is server because the manifest names no `extensions.provide` grant or extension-point entry for it, and it changes a message before `ilium broadcast` sends it, a server-side command in the broadcast sample; the client side only draws the Ask for update dialog.
+
 ### ABI used
 
 - [CLI](/pages/api-cli/) and [cli.contribute](/pages/capability-cli-contribute/)

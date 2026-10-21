@@ -69,7 +69,7 @@ Every grant name is in the [capability index](/pages/capabilities/). A slow call
 | 36 | `keymap` | no | yes | no | `keymap.read` | none |
 | 37 | `gpu` (unstable `gpu-kernels`) | no | yes | yes | `gpu.kernels` | none |
 | 38 | `client-requests` | yes | yes | no | none for declared kinds | `request` (`take-answer`, server side) |
-| 39 | `extensions` | yes | yes | no | `extensions.provide:<point>`, `extensions.contribute:<point>` | `run-hook` (`take-reply`) |
+| 39 | `extensions` | yes | yes | no | `extensions.provide:<plugin-id>/<point>`, `extensions.contribute:<plugin-id>/<point>` | `run-hook` (`take-reply`) |
 | 40 | `terminal` (primitive) | yes | yes | no | `terminal.read-screen`, `terminal.read-cells`, `terminal.history`, `terminal.output-filter`, `terminal.pointer`, `terminal.input-lock` | `history-text` (`take-history`), `search-history` (`take-matches`) |
 | 41 | `agent` (primitive) | yes | yes | no | `agent.read`, `agent.read-prompts`, `agent.transcript`, `agent.signatures`, `agent.control` | `transcript` (`take-transcript`) |
 | 42 | `editor` (primitive) | no | yes | no | `editor.read`, `editor.edit` | `load-file` (`take-buffer`), `save-buffer` |

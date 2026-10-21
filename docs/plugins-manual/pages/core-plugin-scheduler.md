@@ -593,6 +593,19 @@ definePlugin({
 
 A handler that is late, traps or returns a reply the mode does not allow counts as `pass`. See [Extension points](/pages/api-extension-points/#hooks).
 
+### Extension points this plugin owns
+
+The table gives the values that [EXT-052] requires for each point this plugin owns. The page does not state the version, deadline, max or dynamic values, so they come from the defaults in [Extension points](/pages/api-extension-points/) and are marked (default). The side of `before-send-scheduled` is `server` because the page's example contributor manifest declares its handler on the server side. The side of `schedule-sources` is unknown because the page does not state the side on which its service runs, and the manifest has no `extensions.provide` grant for either point.
+
+| Point | Side | Version | Deadline | Max | Dynamic |
+|---|---|---|---|---|---|
+| `ilium.core.scheduler/schedule-sources` | server | 0.1.0 (default) | none (default) | 64 entries (default) | no (default) |
+| `ilium.core.scheduler/before-send-scheduled` | server | 0.1.0 (default) | 20 ms (default) | 8 handlers (default) | no (default) |
+
+Side basis: ilium.core.scheduler/schedule-sources is server because the manifest has no `extensions.provide` grant or `extension_points` entry for it and the page does not name the side that runs its `service`; the trigger sources feed the fire times that the scheduler's timers use, and the page places those timers on the server side ("the server side owns the timers", and "The server arms a durable timer").
+
+Side basis: ilium.core.scheduler/before-send-scheduled is server because the manifest has no `extensions.provide` grant or `extension_points` entry for it and the page does not name the side that runs its handler directly; the sample veto handler is declared with `extensions.contribute` in the server capabilities, and the point refuses input at the moment the server would send it to the terminal.
+
 ### ABI used
 
 - [durable timers and input journal](/pages/api-durable-timers/) and [clock and timers](/pages/api-clock-and-timers/)

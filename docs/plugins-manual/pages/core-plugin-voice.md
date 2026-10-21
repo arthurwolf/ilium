@@ -522,6 +522,18 @@ A package adds this entry in its manifest. It needs no code.
 }
 ```
 
+### Extension points this plugin owns
+
+The table gives the values that [EXT-052] requires for each point this plugin owns. The page does not state them, so the values come from the defaults in [Extension points](/pages/api-extension-points/) and are marked (default). Side is unknown because the manifest has no `extensions.provide` grant for these points and the page does not state the side on which their handlers run.
+
+| Point | Side | Version | Deadline | Max | Dynamic |
+|---|---|---|---|---|---|
+| `ilium.core.voice/transcript` | client | 0.1.0 (default) | 20 ms (default) | 8 handlers (default) | no (default) |
+| `ilium.core.voice/voice-intents` | client | 0.1.0 (default) | none (default) | 64 entries (default) | no (default) |
+
+Side basis: `ilium.core.voice/transcript` is client because the manifest's server capabilities hold only `cli.contribute`, and the transcript comes from the client-side `transcribe` job (`audio.microphone`, `jobs.run`, `inference`) before the client matches commands in its `on_transcript` handler.
+Side basis: `ilium.core.voice/voice-intents` is client because the manifest gives no `extensions.provide` grant on either side, and the phrase-to-command matching that consumes these entries runs in the client's `on_transcript` handler, which holds the `commands.invoke:*` grant.
+
 ### ABI used
 
 - [keys](/pages/api-keys/) and [keys.intercept](/pages/capability-keys-intercept/)

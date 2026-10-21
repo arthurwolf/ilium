@@ -47,74 +47,74 @@ Read [Extension points](/pages/api-extension-points/) for the mechanism, [Extend
 
 ### All points
 
-| Point | Kind | Risk | What it does |
-|---|---|---|---|
-| `ilium.core.tree/before-move` | hook: veto | standard | Refuse a drag or move of a node before the tree applies it. |
-| `ilium.core.tree/before-close` | hook: veto | standard | Refuse closing a pane or group, for example while work is unsaved. |
-| `ilium.core.tree/node-sorts` | collect | standard | Add a sort order to the tree Order By choice. |
-| `ilium.core.layout/layout-presets` | collect | standard | Offer a named split layout in the layout chooser. |
-| `ilium.core.layout/before-split` | hook: veto | standard | Refuse a split, for example above a pane count the plugin allows. |
-| `ilium.core.terminal/before-send-input` | hook: veto | high | Refuse or end input that the user or a plugin sends to a terminal pane. |
-| `ilium.core.terminal/open-link` | hook: first | high | Decide how a clicked link opens. The first handler that answers wins. |
-| `ilium.core.terminal/link-actions` | collect | standard | Offer actions for a detected link kind in the terminal right-click menu. |
-| `ilium.core.smart-copy/recognisers` | collect | standard | Teach Smart Copy a new kind of structure to select. |
-| `ilium.core.smart-copy/after-copy` | hook: transform | high | Change the copied text before it reaches the clipboard, for example to remove secrets. |
-| `ilium.core.editor/before-save` | hook: transform | high | Change buffer text just before it is written, for example to format it. |
-| `ilium.core.editor/file-openers` | collect | standard | Choose which pane kind opens files with certain extensions. |
-| `ilium.core.editor/line-badges` | collect | standard | Add a marker in the editor gutter for lines that match. |
-| `ilium.core.kanban/card-actions` | collect | standard | Add an action to the card context menu. |
-| `ilium.core.kanban/card-moved` | hook: observe | standard | Learn that a card changed column. |
-| `ilium.core.agent-detect/activity-rules` | collect | standard | Add screen patterns that mean working, idle or awaiting approval for one signature. |
-| `ilium.core.agent-detect/classify` | hook: transform | high | Adjust the detected activity before it is published. |
-| `ilium.core.agent-toolbar/toolbar-actions` | collect | standard | Add a button to the toolbar of panes that run a signature. |
-| `ilium.core.agent-toolbar/banner-segments` | collect | standard | Add a short segment to the last-prompt banner. |
-| `ilium.core.fleet/selectors` | collect | standard | Add a named selector to `ilium panes`, `ilium broadcast` and the dialogs. |
-| `ilium.core.fleet/before-broadcast` | hook: transform | high | Change or end a message before it goes to many agents. |
-| `ilium.core.cost/price-sources` | collect | standard | Supply a price table for models the built-in table does not know. |
-| `ilium.core.cost/quota-sources` | collect | standard | Supply a plan quota or remaining allowance for a provider. |
-| `ilium.core.titles/before-apply-title` | hook: transform | standard | Change a generated title before it is applied. |
-| `ilium.core.titles/title-styles` | collect | standard | Add a title style to the style choice. |
-| `ilium.core.inference/before-request` | hook: transform | high | Rewrite or refuse an outgoing model request, for example to remove private text. |
-| `ilium.core.inference/after-response` | hook: observe | standard | Learn that a request finished, with its token counts. |
-| `ilium.core.inference/provider-profiles` | collect | high | Offer a ready-made provider setup in the provider chooser. |
-| `ilium.core.notifications/before-notify` | hook: veto | standard | Mute or refuse a notification, for example at night. |
-| `ilium.core.notifications/channels` | collect | high | Add a delivery channel such as a chat webhook. |
-| `ilium.core.voice/transcript` | hook: transform | high | Correct the transcript before commands are matched. |
-| `ilium.core.voice/voice-intents` | collect | standard | Add a spoken phrase that runs a command. |
-| `ilium.core.scheduler/schedule-sources` | collect | standard | Add a trigger source such as a calendar or a reset forecast. |
-| `ilium.core.scheduler/before-send-scheduled` | hook: veto | high | Refuse a scheduled or queued input at the moment it would be sent. |
-| `ilium.core.text-triggers/rule-packs` | collect | high | Ship a group of rules the user can enable as a set. |
-| `ilium.core.text-triggers/before-fire` | hook: veto | high | Refuse or end a rule that is about to send text. |
-| `ilium.core.progress/footer-segments` | collect | standard | Add a segment to the progress footer. |
-| `ilium.core.progress/probe-kinds` | collect | standard | Add a ready-made probe, such as a CI run or a build. |
-| `ilium.core.chatroom/before-post` | hook: transform | high | Change a message before it is written to the room. |
-| `ilium.core.chatroom/message-renderers` | collect | standard | Draw a message kind in a special way, such as a task claim. |
-| `ilium.core.worktrees/before-create` | hook: transform | standard | Choose the branch name or refuse a new worktree. |
-| `ilium.core.worktrees/post-create-steps` | collect | high | Add a step that runs after a worktree is created. |
-| `ilium.core.worktrees/before-remove` | hook: veto | standard | Refuse removing a worktree. |
-| `ilium.core.sessions/snapshot-sections` | collect | standard | Store extra JSON in the session snapshot and receive it back on restore. |
-| `ilium.core.sessions/before-restore` | hook: observe | standard | Learn that a restore starts, to prepare state. |
-| `ilium.core.compaction/techniques` | collect | standard | Add a compaction technique. |
-| `ilium.core.compaction/before-compact` | hook: veto | standard | Refuse a compaction, for example while a task is mid-way. |
-| `ilium.core.settings/config-importers` | collect | standard | Offer to import settings from another tool. |
-| `ilium.core.settings/onboarding-steps` | collect | standard | Add a step to the guided setup. |
-| `ilium.core.keys-and-help/key-hints` | collect | standard | Add a hint to the status bar in a context. |
-| `ilium.core.keys-and-help/help-sources` | collect | standard | Add a help source, such as a remote documentation index. |
-| `ilium.core.search/sources` | collect | standard | Add a source of results, such as issues or notes. |
-| `ilium.core.search/rank` | hook: transform | standard | Change the order of results before they are shown. |
-| `ilium.core.ambient/palettes` | collect | standard | Add a palette to the shared palette choice. |
-| `ilium.core.ambient/style-presets` | collect | standard | Add a style preset: a full set of shared look values. |
-| `ilium.core.scenes/scene-packs` | collect | standard | Offer a bundle of scenes with preset controls. |
-| `ilium.core.scenes/scene-data-sources` | collect | standard | Provide live data to data scenes, such as a feed. |
-| `ilium.core.recap/fact-sources` | collect | standard | Add facts to a recap, such as the ticket of a branch. |
-| `ilium.core.recap/before-recap` | hook: transform | standard | Change the recap text before it is shown or returned. |
-| `ilium.core.session-convert/formats` | collect | standard | Add a transcript format that conversion can read or write. |
-| `ilium.core.session-convert/after-convert` | hook: observe | standard | Learn that a conversion finished. |
-| `ilium.core.agent-setup/instruction-blocks` | collect | high | Add a marker-delimited instruction block that Setup installs. |
-| `ilium.core.agent-setup/targets` | collect | high | Add a file that Setup can edit, such as a new agent config file. |
-| `ilium.core.agent-setup/before-install` | hook: veto | high | Refuse writing a block to a file. |
-| `ilium.core.diagnostics/log-sinks` | hook: observe | high | Receive log records, for example to forward them. |
-| `ilium.core.diagnostics/report-sections` | collect | standard | Add a section to the diagnostics report. |
+| Point | Kind | Risk | Side | Version | Deadline | Max | Dynamic | User override | What it does |
+|---|---|---|---|---|---|---|---|---|---|
+| `ilium.core.tree/before-move` | hook: veto | standard | server | 0.1.0 (default) | 20 ms (default) | 8 handlers (default) | no (default) | yes | Refuse a drag or move of a node before the tree applies it. |
+| `ilium.core.tree/before-close` | hook: veto | standard | server | 0.1.0 (default) | 20 ms (default) | 8 handlers (default) | no (default) | yes | Refuse closing a pane or group, for example while work is unsaved. |
+| `ilium.core.tree/node-sorts` | collect | standard | server | 0.1.0 (default) | none | 64 entries (default) | no (default) | no | Add a sort order to the tree Order By choice. |
+| `ilium.core.layout/layout-presets` | collect | standard | server | 0.1.0 (default) | none | 64 entries (default) | no (default) | no | Offer a named split layout in the layout chooser. |
+| `ilium.core.layout/before-split` | hook: veto | standard | server | 0.1.0 (default) | 20 ms (default) | 8 handlers (default) | no (default) | yes | Refuse a split, for example above a pane count the plugin allows. |
+| `ilium.core.terminal/before-send-input` | hook: veto | high | server | 0.1.0 (default) | 20 ms (default) | 8 handlers (default) | no (default) | yes | Refuse or end input that the user or a plugin sends to a terminal pane. |
+| `ilium.core.terminal/open-link` | hook: first | high | client | 0.1.0 (default) | 20 ms (default) | 8 handlers (default) | no (default) | no | Decide how a clicked link opens. The first handler that answers wins. |
+| `ilium.core.terminal/link-actions` | collect | standard | client | 0.1.0 (default) | none | 64 entries (default) | no (default) | no | Offer actions for a detected link kind in the terminal right-click menu. |
+| `ilium.core.smart-copy/recognisers` | collect | standard | server | 0.1.0 (default) | none | 64 entries (default) | yes | no | Teach Smart Copy a new kind of structure to select. |
+| `ilium.core.smart-copy/after-copy` | hook: transform | high | server | 0.1.0 (default) | 20 ms (default) | 8 handlers (default) | no (default) | no | Change the copied text before it reaches the clipboard, for example to remove secrets. |
+| `ilium.core.editor/before-save` | hook: transform | high | client | 0.1.0 (default) | 20 ms (default) | 8 handlers (default) | no (default) | no | Change buffer text just before it is written, for example to format it. |
+| `ilium.core.editor/file-openers` | collect | standard | client | 0.1.0 (default) | none | 64 entries (default) | no (default) | no | Choose which pane kind opens files with certain extensions. |
+| `ilium.core.editor/line-badges` | collect | standard | client | 0.1.0 (default) | none | 64 entries (default) | no (default) | no | Add a marker in the editor gutter for lines that match. |
+| `ilium.core.kanban/card-actions` | collect | standard | client | 0.1.0 (default) | none | 64 entries (default) | no (default) | no | Add an action to the card context menu. |
+| `ilium.core.kanban/card-moved` | hook: observe | standard | client | 0.1.0 (default) | 20 ms (default) | 8 handlers (default) | no (default) | no | Learn that a card changed column. |
+| `ilium.core.agent-detect/activity-rules` | collect | standard | server | 0.1.0 (default) | none | 64 entries (default) | no (default) | no | Add screen patterns that mean working, idle or awaiting approval for one signature. |
+| `ilium.core.agent-detect/classify` | hook: transform | high | server | 0.1.0 (default) | 20 ms (default) | 8 handlers (default) | no (default) | no | Adjust the detected activity before it is published. |
+| `ilium.core.agent-toolbar/toolbar-actions` | collect | standard | client | 0.1.0 (default) | none | 64 entries (default) | no (default) | no | Add a button to the toolbar of panes that run a signature. |
+| `ilium.core.agent-toolbar/banner-segments` | collect | standard | client | 0.1.0 (default) | none | 64 entries (default) | no (default) | no | Add a short segment to the last-prompt banner. |
+| `ilium.core.fleet/selectors` | collect | standard | server | 0.1.0 (default) | none | 64 entries (default) | no (default) | no | Add a named selector to `ilium panes`, `ilium broadcast` and the dialogs. |
+| `ilium.core.fleet/before-broadcast` | hook: transform | high | server | 0.1.0 (default) | 20 ms (default) | 8 handlers (default) | no (default) | no | Change or end a message before it goes to many agents. |
+| `ilium.core.cost/price-sources` | collect | standard | server | 0.1.0 (default) | none | 64 entries (default) | no (default) | no | Supply a price table for models the built-in table does not know. |
+| `ilium.core.cost/quota-sources` | collect | standard | server | 0.1.0 (default) | none | 64 entries (default) | no (default) | no | Supply a plan quota or remaining allowance for a provider. |
+| `ilium.core.titles/before-apply-title` | hook: transform | standard | server | 0.1.0 (default) | 20 ms (default) | 8 handlers (default) | no (default) | no | Change a generated title before it is applied. |
+| `ilium.core.titles/title-styles` | collect | standard | server | 0.1.0 (default) | none | 64 entries (default) | no (default) | no | Add a title style to the style choice. |
+| `ilium.core.inference/before-request` | hook: transform | high | server | 0.1.0 (default) | 20 ms (default) | 8 (default) | no (default) | no | Rewrite or refuse an outgoing model request, for example to remove private text. |
+| `ilium.core.inference/after-response` | hook: observe | standard | server | 0.1.0 (default) | 20 ms (default) | 8 (default) | no (default) | no | Learn that a request finished, with its token counts. |
+| `ilium.core.inference/provider-profiles` | collect | high | client | 0.1.0 (default) | none | 64 (default) | no (default) | no | Offer a ready-made provider setup in the provider chooser. |
+| `ilium.core.notifications/before-notify` | hook: veto | standard | server | 0.1.0 (default) | 20 ms (default) | 8 handlers (default) | no (default) | no | Mute or refuse a notification, for example at night. |
+| `ilium.core.notifications/channels` | collect | high | server | 0.1.0 (default) | none | 64 entries (default) | no (default) | no | Add a delivery channel such as a chat webhook. |
+| `ilium.core.voice/transcript` | hook: transform | high | client | 0.1.0 (default) | 20 ms (default) | 8 handlers (default) | no (default) | no | Correct the transcript before commands are matched. |
+| `ilium.core.voice/voice-intents` | collect | standard | client | 0.1.0 (default) | none | 64 entries (default) | no (default) | no | Add a spoken phrase that runs a command. |
+| `ilium.core.scheduler/schedule-sources` | collect | standard | server | 0.1.0 (default) | none | 64 entries (default) | no (default) | no | Add a trigger source such as a calendar or a reset forecast. |
+| `ilium.core.scheduler/before-send-scheduled` | hook: veto | high | server | 0.1.0 (default) | 20 ms (default) | 8 handlers (default) | no (default) | no | Refuse a scheduled or queued input at the moment it would be sent. |
+| `ilium.core.text-triggers/rule-packs` | collect | high | server | 0.1.0 (default) | none | 64 entries (default) | no (default) | no | Ship a group of rules the user can enable as a set. |
+| `ilium.core.text-triggers/before-fire` | hook: veto | high | server | 0.1.0 (default) | 20 ms (default) | 8 handlers (default) | no (default) | no | Refuse or end a rule that is about to send text. |
+| `ilium.core.progress/footer-segments` | collect | standard | client | 0.1.0 (default) | none | 64 entries (default) | no (default) | no | Add a segment to the progress footer. |
+| `ilium.core.progress/probe-kinds` | collect | standard | server | 0.1.0 (default) | none | 64 entries (default) | no (default) | no | Add a ready-made probe, such as a CI run or a build. |
+| `ilium.core.chatroom/before-post` | hook: transform | high | server | 0.1.0 (default) | 20 ms (default) | 8 handlers (default) | no (default) | no | Change a message before it is written to the room. |
+| `ilium.core.chatroom/message-renderers` | collect | standard | client | 0.1.0 (default) | none | 64 entries (default) | no (default) | no | Draw a message kind in a special way, such as a task claim. |
+| `ilium.core.worktrees/before-create` | hook: transform | standard | server | 0.1.0 (default) | 20 ms (default) | 8 handlers (default) | no (default) | no | Choose the branch name or refuse a new worktree. |
+| `ilium.core.worktrees/post-create-steps` | collect | high | server | 0.1.0 (default) | none | 64 entries (default) | no (default) | no | Add a step that runs after a worktree is created. |
+| `ilium.core.worktrees/before-remove` | hook: veto | standard | server | 0.1.0 (default) | 20 ms (default) | 8 handlers (default) | no (default) | yes | Refuse removing a worktree. |
+| `ilium.core.sessions/snapshot-sections` | collect | standard | server | 0.1.0 (default) | none | 64 entries (default) | no (default) | no | Store extra JSON in the session snapshot and receive it back on restore. |
+| `ilium.core.sessions/before-restore` | hook: observe | standard | server | 0.1.0 (default) | 20 ms (default) | 8 handlers (default) | no (default) | no | Learn that a restore starts, to prepare state. |
+| `ilium.core.compaction/techniques` | collect | standard | server | 0.1.0 (default) | none | 64 entries (default) | no (default) | no | Add a compaction technique. |
+| `ilium.core.compaction/before-compact` | hook: veto | standard | server | 0.1.0 (default) | 20 ms (default) | 8 handlers (default) | no (default) | yes | Refuse a compaction, for example while a task is mid-way. |
+| `ilium.core.settings/config-importers` | collect | standard | server | 0.1.0 (default) | none | 64 entries (default) | no (default) | no | Offer to import settings from another tool. |
+| `ilium.core.settings/onboarding-steps` | collect | standard | client | 0.1.0 (default) | none | 64 entries (default) | no (default) | no | Add a step to the guided setup. |
+| `ilium.core.keys-and-help/key-hints` | collect | standard | client | 0.1.0 (default) | none | 64 entries (default) | no (default) | no | Add a hint to the status bar in a context. |
+| `ilium.core.keys-and-help/help-sources` | collect | standard | client | 0.1.0 (default) | none | 64 entries (default) | no (default) | no | Add a help source, such as a remote documentation index. |
+| `ilium.core.search/sources` | collect | standard | server | 0.1.0 (default) | none | 64 entries (default) | no (default) | no | Add a source of results, such as issues or notes. |
+| `ilium.core.search/rank` | hook: transform | standard | server | 0.1.0 (default) | 20 ms (default) | 8 handlers (default) | no (default) | no | Change the order of results before they are shown. |
+| `ilium.core.ambient/palettes` | collect | standard | client | 0.1.0 (default) | none | 64 entries (default) | no (default) | no | Add a palette to the shared palette choice. |
+| `ilium.core.ambient/style-presets` | collect | standard | client | 0.1.0 (default) | none | 64 entries (default) | no (default) | no | Add a style preset: a full set of shared look values. |
+| `ilium.core.scenes/scene-packs` | collect | standard | scene | 0.1.0 (default) | none | 64 entries (default) | no (default) | no | Offer a bundle of scenes with preset controls. |
+| `ilium.core.scenes/scene-data-sources` | collect | standard | scene | 0.1.0 (default) | none | 64 entries (default) | no (default) | no | Provide live data to data scenes, such as a feed. |
+| `ilium.core.recap/fact-sources` | collect | standard | server | 0.1.0 | none | 16 | no | no | Add facts to a recap, such as the ticket of a branch. |
+| `ilium.core.recap/before-recap` | hook: transform | standard | server | 0.1.0 | 20 | 8 | no | no | Change the recap text before it is shown or returned. |
+| `ilium.core.session-convert/formats` | collect | standard | server | 0.1.0 | none | 8 | no | no | Add a transcript format that conversion can read or write. |
+| `ilium.core.session-convert/after-convert` | hook: observe | standard | server | 0.1.0 | 20 | 8 | no | no | Learn that a conversion finished. |
+| `ilium.core.agent-setup/instruction-blocks` | collect | high | server | 0.1.0 | none | 8 | no | no | Add a marker-delimited instruction block that Setup installs. |
+| `ilium.core.agent-setup/targets` | collect | high | server | 0.1.0 | none | 16 | no | no | Add a file that Setup can edit, such as a new agent config file. |
+| `ilium.core.agent-setup/before-install` | hook: veto | high | server | 0.1.0 | 20 | 4 | no | no | Refuse writing a block to a file. |
+| `ilium.core.diagnostics/log-sinks` | hook: observe | high | server | 0.1.0 | 20 | 8 | no | no | Receive log records, for example to forward them. |
+| `ilium.core.diagnostics/report-sections` | collect | standard | server | 0.1.0 | none | 32 | no | no | Add a section to the diagnostics report. |
 
 ### All services
 

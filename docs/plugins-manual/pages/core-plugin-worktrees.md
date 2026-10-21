@@ -404,6 +404,22 @@ A package adds this entry in its manifest. It needs no code.
 }
 ```
 
+### Extension points this plugin owns
+
+The table gives the values that [EXT-052] requires for each point this plugin owns. The page does not state the version, deadline, max or dynamic values, so they come from the defaults in [Extension points](/pages/api-extension-points/) and are marked (default). Side is unknown because the manifest has no `extensions.provide` grant for these points and the page does not state the side on which their handlers run.
+
+| Point | Side | Version | Deadline | Max | Dynamic |
+|---|---|---|---|---|---|
+| `ilium.core.worktrees/before-create` | server | 0.1.0 (default) | 20 ms (default) | 8 handlers (default) | no (default) |
+| `ilium.core.worktrees/post-create-steps` | server | 0.1.0 (default) | none (default) | 64 entries (default) | no (default) |
+| `ilium.core.worktrees/before-remove` | server | 0.1.0 (default) | 20 ms (default) | 8 handlers (default) | no (default) |
+
+Side basis: `before-create` is server because the `create` service that runs this hook runs on the server side (it runs `git worktree add`, and the server holds `workspace.manage` and `process.run:git`), and the manifest has no `extensions.provide` grant for it.
+
+Side basis: `post-create-steps` is server because the `create` service runs these steps after the worktree is created, inside the new worktree, and the server side holds `process.run:sh` and `fs.write:worktrees` for that work, and the manifest has no `extensions.provide` grant for it.
+
+Side basis: `before-remove` is server because the `remove` service that runs this hook reads the worktree state (`dirty`, `merged`, running processes) on the server side, which holds `process.run:git` and `fs.read:project`, and the manifest has no `extensions.provide` grant for it.
+
 ### ABI used
 
 - [Commands](/pages/api-commands/) and [the command palette](/pages/api-command-palette/)

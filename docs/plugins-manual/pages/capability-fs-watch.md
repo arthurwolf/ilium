@@ -59,7 +59,8 @@ Every `u64` is a `bigint` in TypeScript. The `path` argument is an `fs-path` rec
 | Worktrees | `fs.watch:worktrees` | yes |
 | Plugin data and cache | `fs.watch:data`, `fs.watch:cache` | yes |
 | Picked folder | `fs.watch:picked` with `picked/<n>` | yes, folders only |
-| Agent transcripts and configuration | `fs.watch:agent-sessions:claude` | yes |
+| Agent transcripts | `fs.watch:agent-sessions:claude` | yes |
+| Agent configuration | `fs.watch:agent-config:<agent>` | no; refused with `manifest.grant-scope` |
 | Minecraft saves | `fs.watch:minecraft-saves` | yes |
 | Literal or template path | `fs.watch:path:{home}/notes/**` | yes |
 | Plugin package | `fs.watch:package` | no |

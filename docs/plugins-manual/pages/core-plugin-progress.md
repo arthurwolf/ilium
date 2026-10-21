@@ -466,6 +466,15 @@ A package adds this entry in its manifest. It needs no code.
 }
 ```
 
+### Extension points this plugin owns
+
+The values below are the ones the core extension points table uses for these two points. The page states no version, deadline, max or dynamic value for them, so the defaults from [Extension points](/pages/api-extension-points/) apply and are marked (default). The side follows the page: the footer is drawn on the client side, and the probes run on the server side.
+
+| Point | Side | Version | Deadline | Max | Dynamic |
+|---|---|---|---|---|---|
+| `ilium.core.progress/footer-segments` | client | 0.1.0 (default) | none (default) | 64 entries (default) | no (default) |
+| `ilium.core.progress/probe-kinds` | server | 0.1.0 (default) | none (default) | 64 entries (default) | no (default) |
+
 ### ABI used
 
 - [CLI API](/pages/api-cli/) and [cli.contribute](/pages/capability-cli-contribute/)

@@ -611,6 +611,15 @@ A package adds this entry in its manifest. It needs no code.
 }
 ```
 
+### Extension points this plugin owns
+
+The table gives the values that the core extension points table requires for each point this plugin owns. The page does not state the version, deadline, max or dynamic values, so they come from the defaults in [Extension points](/pages/api-extension-points/) and are marked (default). The side is `scene` because the page states that the Scenes plugin runs on the scene side. The manifest has no `extensions.provide` grant for these points.
+
+| Point | Side | Version | Deadline | Max | Dynamic |
+|---|---|---|---|---|---|
+| `ilium.core.scenes/scene-packs` | scene | 0.1.0 (default) | none (default) | 64 entries (default) | no (default) |
+| `ilium.core.scenes/scene-data-sources` | scene | 0.1.0 (default) | none (default) | 64 entries (default) | no (default) |
+
 ### ABI used
 
 - [Scenes API](/pages/api-scenes/) and [always-granted capabilities](/pages/capability-always-granted/)

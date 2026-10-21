@@ -415,6 +415,17 @@ A package adds this entry in its manifest. It needs no code.
 }
 ```
 
+### Extension points this plugin owns
+
+The table gives the side, version, deadline, maximum and dynamic setting of each point this plugin owns. Values marked (default) are the defaults of the extension point mechanism, because this page does not state them. A side of unknown means the page does not state which side runs the handler.
+
+| Point | Side | Version | Deadline | Max | Dynamic |
+|---|---|---|---|---|---|
+| `ilium.core.layout/layout-presets` | server | 0.1.0 (default) | none (default) | 64 entries (default) | no (default) |
+| `ilium.core.layout/before-split` | server | 0.1.0 (default) | 20 ms (default) | 8 handlers (default) | no (default) |
+
+Side basis: `layout-presets` is server because the manifest grants no `extensions.provide` entry and the page does not name the handler side, so the owning logic decides: the presets service that lists and applies the contributed templates runs server side, where the `tree.restructure` and `panes.create` grants live, while the client only draws the chooser panel with `ui.panels`. Side basis: `before-split` is server because the manifest grants no `extensions.provide` entry and the page does not name the handler side, and the page states that the server side submits `create-split` for every split (see Split four ways), so the veto runs where the split is decided.
+
 ### ABI used
 
 - [Panes](/pages/api-panes/), [panes.read](/pages/capability-panes-read/), [panes.lifecycle](/pages/capability-panes-lifecycle/), [Pane lifecycle intents](/pages/api-intent-pane-lifecycle/)

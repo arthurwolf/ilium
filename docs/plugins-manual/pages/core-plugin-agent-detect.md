@@ -120,12 +120,12 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "agent.signatures",
       "tree.decorate",
       "panes.read",
-      "terminal.write"
+      "terminal.write",
+      "settings.write-kernel:agent-monitoring"
     ],
     "client": [
       "agent.read",
-      "ui.panels",
-      "settings.write-kernel:agent-monitoring"
+      "ui.panels"
     ]
   },
   "activation": [
@@ -664,6 +664,13 @@ A package adds this entry in its manifest. It needs no code.
   }
 }
 ```
+
+### Extension points this plugin owns
+
+| Point | Side | Version | Deadline | Max | Dynamic |
+|---|---|---|---|---|---|
+| `ilium.core.agent-detect/activity-rules` | server | 0.1.0 (default) | none (default) | 64 entries (default) | no (default) |
+| `ilium.core.agent-detect/classify` | server | 0.1.0 (default) | 20 ms (default) | 8 handlers (default) | no (default) |
 
 ### ABI used
 

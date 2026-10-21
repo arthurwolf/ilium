@@ -38,7 +38,7 @@ The table uses these side letters: `S` is the server side, `C` the client side a
 | `log` | S C A | `log(level, message)`, `level` is `trace`, `debug`, `info`, `warn` or `error` | One log line per call. |
 | `clock` | S C A | `now-unix-millis() -> u64`, `monotonic-millis() -> u64` | Wall-clock and monotonic time in milliseconds. |
 | `timers` | S C | `set(after-millis, repeat-millis?) -> result<timer-id, plugin-error>`, `cancel(timer)` | Timers that fire as the `timer-fired` event. |
-| `storage` | S C A | `get`, `put`, `remove`, `keys`, `write-batch` and `lease` on `bucket`: `global`, `project`, `session`, `shared` | Key-value entries that only this plugin can see. |
+| `storage` | S C A | `get`, `put`, `remove`, `keys` and `write-batch` on `bucket`: `global`, `project`, `session`, `shared`; `lease` takes a key and a TTL, with no bucket | Key-value entries that only this plugin can see. |
 | `settings` | S C | `get-json() -> string`, `set-json(patch)` | Read and write the plugin's own setting values. |
 | `codec` | S C A | `inflate`, `deflate`, `image-info`, `decode-image`, `sha256`, `rasterize-text` | Compression, images, hashes and text as pixels. |
 | `fs.read:package` | S C A | The read functions of `fs` (`read`, `read-all`, `list-dir`, `metadata`) | Read only, on the package's `assets/` directory. |

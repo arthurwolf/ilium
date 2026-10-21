@@ -565,6 +565,22 @@ definePlugin({
 
 A handler that is late, traps or returns a reply the mode does not allow counts as `pass`. See [Extension points](/pages/api-extension-points/#hooks).
 
+### Extension points this plugin owns
+
+The page does not state the side that runs these points, and its manifest has no `extensions.provide` grant for them, so the side is `unknown`. The page also gives no version, deadline, max or dynamic values, so those are the documented defaults and are marked `(default)`.
+
+| Point | Side | Version | Deadline | Max | Dynamic |
+|---|---|---|---|---|---|
+| `ilium.core.inference/before-request` | server | 0.1.0 (default) | 20 ms (default) | 8 (default) | no (default) |
+| `ilium.core.inference/after-response` | server | 0.1.0 (default) | 20 ms (default) | 8 (default) | no (default) |
+| `ilium.core.inference/provider-profiles` | client | 0.1.0 (default) | none (default) | 64 (default) | no (default) |
+
+Side basis: `ilium.core.inference/before-request` is server because the point rewrites the outgoing model request, which the server side sends to the provider over HTTP, and the page's handler example is granted `extensions.contribute` on the server.
+
+Side basis: `ilium.core.inference/after-response` is server because it observes the finished request and its token counts, which come from the server-side HTTP reply.
+
+Side basis: `ilium.core.inference/provider-profiles` is client because its entries feed the provider chooser, which the page draws in a client panel with a `choice` control.
+
 ### ABI used
 
 - [inference](/pages/api-inference/) and [inference.provide](/pages/capability-inference-provide/)

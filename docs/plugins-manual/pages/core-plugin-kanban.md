@@ -10,7 +10,7 @@ permalink: /pages/core-plugin-kanban/
 <p>Status: the board is native in v1. This page describes the plugin form that arrives in Phase 7 (see the <a href="/pages/roadmap/">roadmap</a>).</p>
 </div>
 
-The Kanban plugin has the id `ilium.core.kanban` and runs on the client side. It owns the board pane: a basic pane that draws cards in To do, Doing and Done columns. A board can be backed by a Markdown file. The plugin reloads the board when that file changes, and it adds the Kanban Board tab to the settings. Drawing a pane body and reading files are plain plugin work, so the board is a good first example of a pane kind that a plugin provides.
+The Kanban plugin has the id `ilium.core.kanban`. It draws on the client side and has a small server part that only writes its Settings tab. It owns the board pane: a basic pane that draws cards in To do, Doing and Done columns. A board can be backed by a Markdown file. The plugin reloads the board when that file changes, and it adds the Kanban Board tab to the settings. Drawing a pane body and reading files are plain plugin work, so the board is a good first example of a pane kind that a plugin provides.
 
 The pane itself, its place in the tree and its focus are kernel-native. The plugin declares a `board` pane kind and draws the body of that pane through the contract. It never touches the PTY or the layout solver.
 
@@ -100,8 +100,15 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
   "name": "Kanban",
   "version": "0.1.0",
   "publisher": "Ilium",
-  "description": "The Kanban plugin has the id ilium.core.kanban and runs on the client side.",
+  "description": "The Kanban plugin has the id ilium.core.kanban. It draws on the client side and has a small server part for settings.",
   "license": "MIT",
+  "server": {
+    "entry": "server.wasm",
+    "world": "ilium:server/base@0.1.0",
+    "exports": [
+      "service-provider"
+    ]
+  },
   "client": {
     "entry": "client.wasm",
     "world": "ilium:client/base@0.1.0"
@@ -115,13 +122,23 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "fs.pick",
       "fs.read:picked",
       "editor.read",
+      "services.use:ilium.core.kanban/set-setting"
+    ],
+    "server": [
+      "services.provide:ilium.core.kanban/set-setting",
       "settings.write-kernel:kanban-board"
     ]
   },
   "activation": [
     "pane-kind:board"
   ],
+  "unstable": ["plugin-services"],
   "contributes": {
+    "services": {
+      "provides": [
+        { "name": "ilium.core.kanban/set-setting", "version": "0.1.0", "schema": "schemas/set-setting.json" }
+      ]
+    },
     "pane_kinds": [
       {
         "id": "board",
@@ -160,6 +177,33 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
     ]
   },
   "limits_tier": "first-party"
+}
+```
+
+### Server part
+
+This plugin has a server part, added only for settings. Its one job is to write the `kanban-board` Settings tab it owns: `settings.write-kernel:kanban-board` is a server-side grant and the client part never holds it (assumption recorded here: the grant is server side only, see [settings.write-kernel](/pages/capability-settings-write-kernel/)). The client part draws the controls. When the user changes a value, the client part sends it to the server part through the plugin service `ilium.core.kanban/set-setting` (grants `services.use:ilium.core.kanban/set-setting` on the client side and `services.provide:ilium.core.kanban/set-setting` on the server side, see [services](/pages/api-services/)). The name follows the rule `<plugin-id>/<name>` with a name of 1 to 64 characters from `a-z`, `0-9` and `-`. The server part validates the value and calls the kernel-settings write.
+
+The schema file for `set-setting` (`schemas/set-setting.json`, shown here because the manual ships no package files):
+
+```json
+{
+  "set": {
+    "params": {
+      "type": "object",
+      "properties": {
+        "tab": { "type": "string" },
+        "key": { "type": "string" },
+        "value": { "type": "string" }
+      },
+      "required": ["tab", "key", "value"]
+    },
+    "result": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  }
 }
 ```
 
@@ -629,6 +673,15 @@ definePlugin({
 ```
 
 A handler that is late, traps or returns a reply the mode does not allow counts as `pass`. See [Extension points](/pages/api-extension-points/#hooks).
+
+### Extension points this plugin owns
+
+The plugin owns both points below. The manifest on this page has no `extensions.provide` grant for them, so the side is the client side that the page gives the plugin: the board pane is drawn on the client, and the `card-moved` example declares its handler under `capabilities.client`. The page states no version, deadline, max or dynamic value for either point, so those values are the defaults from [Extension points](/pages/api-extension-points/), marked (default).
+
+| Point | Side | Version | Deadline | Max | Dynamic |
+|---|---|---|---|---|---|
+| `ilium.core.kanban/card-actions` | client | 0.1.0 (default) | none (default) | 64 entries (default) | no (default) |
+| `ilium.core.kanban/card-moved` | client | 0.1.0 (default) | 20 ms (default) | 8 handlers (default) | no (default) |
 
 ### ABI used
 
