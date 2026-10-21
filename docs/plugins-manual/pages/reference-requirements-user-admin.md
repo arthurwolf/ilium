@@ -35,6 +35,7 @@ Contract version: `ilium:plugin@0.1.0`. The platform is not implemented yet, so 
 | USR-170, USR-171, USR-173 | Install check order and update | [Security](/pages/security/), [Lifecycle](/pages/lifecycle/) |
 | USR-200 to USR-209 | Files on disk | [Plugin files](/pages/reference-plugin-files/) |
 | USR-210 to USR-220 | Policy file and audit log | [Plugin policy](/pages/reference-plugin-policy/) |
+| USR-221 to USR-229 | Support bundle and crash records | [Plugin diagnostics](/pages/core-plugin-diagnostics/) |
 
 ### Requirements
 
@@ -134,6 +135,15 @@ Contract version: `ilium:plugin@0.1.0`. The platform is not implemented yet, so 
 | USR-218 | The policy MUST NOT stop a core plugin or a bundled T1 plugin from running. | set `packages.allow_third_party = false` and `packages.allowed_tiers = []`; assert all 30 core plugins still start. | [reference-plugin-policy](/pages/reference-plugin-policy/) |
 | USR-219 | The host MUST write a `policy-loaded` audit record at start when a policy file exists, and a `policy-violation` record when a plugin or file violates it, and MUST NOT write plugin data into either. | start with a policy that denies one installed plugin and count the two records. | [reference-plugin-policy](/pages/reference-plugin-policy/) |
 | USR-220 | The host MUST delete rotated audit files older than `audit.keep_days` at server start ([SEC-224]). | age a rotated file by 366 days and restart. | [reference-plugin-policy](/pages/reference-plugin-policy/) |
+| USR-221 | `support-bundle <id> --out <file>` MUST write one zip with exactly `summary.txt`, `log.txt`, `stats.txt` and `crashes.txt`. | Run the command on a fixture plugin and list the archive entries. | [Plugin diagnostics](/pages/core-plugin-diagnostics/) |
+| USR-222 | The bundle MUST redact credential headers, URL parameters and home-directory paths, show `~` for home paths, and show payloads as a byte count only. | Seed a fixture with a token, a URL secret and a home path; grep the archive for each. | [Plugin diagnostics](/pages/core-plugin-diagnostics/) |
+| USR-223 | The bundle MUST NOT contain the plugin data folder, trace recordings, grant secrets or file contents. | Put a sentinel file in the data folder and assert it is absent from the archive. | [Plugin diagnostics](/pages/core-plugin-diagnostics/) |
+| USR-224 | The bundle MUST be 8 MiB or smaller, dropping the oldest log lines first and recording the drop count in `summary.txt`. | Write a log over 8 MiB and check the size, the drop order and the recorded count. | [Plugin diagnostics](/pages/core-plugin-diagnostics/) |
+| USR-225 | Writing a bundle MUST NOT change plugin state, grants or health counters, and a failed write MUST leave no file at the target. | Snapshot status, grants and counters before and after a forced write failure. | [Plugin diagnostics](/pages/core-plugin-diagnostics/) |
+| USR-226 | The Diagnostics "Build support bundle" dialog MUST list the files and size before writing, and its default button MUST be Cancel. | Open the dialog and assert the default button and the listing. | [Plugin diagnostics](/pages/core-plugin-diagnostics/) |
+| USR-227 | Each helper crash, kill or out-of-memory kill MUST append one crash record with UTC time, plugin id and version, side, reason, exit status and export name, and no payloads. | Kill a fixture helper three ways and check each record's fields. | [Plugin diagnostics](/pages/core-plugin-diagnostics/) |
+| USR-228 | Crash records MUST be kept for 30 days and at most 200, removing the oldest first. | Insert 201 records and 31-day-old records; assert the survivors. | [Plugin diagnostics](/pages/core-plugin-diagnostics/) |
+| USR-229 | Crash records MUST live in the server state folder, never in a plugin data folder, and MUST appear in the support bundle. | Assert the record path and its presence in `crashes.txt`. | [Plugin diagnostics](/pages/core-plugin-diagnostics/) |
 
 ### Pending decisions
 

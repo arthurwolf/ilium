@@ -616,6 +616,27 @@ export const renderAttach = (state: AttachState) =>
 ```
 
 
+#### Support bundle
+
+A support request needs several facts at once. The bundle gathers them into one archive, so the user sends one file and you read one file. Nothing leaves the machine unless the user sends it.
+
+`ilium plugin support-bundle <id> --out <file>`
+
+- [USR-221] `support-bundle` MUST write one zip archive to `<file>` that holds exactly these entries: `summary.txt` (plugin id, version and digest; Ilium version; operating system; grants; the output of `ilium plugin status` and `ilium plugin doctor`), `log.txt` (the newest 200 log lines of the plugin), `stats.txt` (the output of `ilium plugin stats`) and `crashes.txt` (the crash records under [USR-227]). It MUST NOT hold any other entry.
+- [USR-222] The archive MUST redact every credential header, URL parameter and home-directory path before it is written. A home-directory path MUST appear as `~`. Plugin payloads MUST appear as a byte count only.
+- [USR-223] The archive MUST NOT contain the plugin's data folder, its trace recordings, grant secrets, or file contents.
+- [USR-224] The archive MUST be 8 MiB or smaller. When the log would exceed that limit, the command MUST drop the oldest log lines first and MUST write the number of dropped lines into `summary.txt`.
+- [USR-225] Writing a bundle MUST NOT change the plugin's state, grants, or health counters. A failed write MUST leave no partial file at `<file>`.
+- [USR-226] In the Diagnostics screen the "Build support bundle" button MUST show the file list and the size before writing, and its default button MUST be Cancel. The write follows the same rules as the command.
+
+#### Crash records
+
+A helper that dies leaves a record, so that support can tell a crash from a deadline breach or a refusal.
+
+- [USR-227] Each helper crash, kill or out-of-memory kill MUST append one crash record to the server's state folder. A record MUST hold the time in UTC (RFC 3339), the plugin id and version, the side (`t1`, `t2` or `t3`), the reason (`crash`, `kill` or `out-of-memory`), the exit status, and the name of the export that was running. A record MUST NOT hold payloads, stack memory or file contents.
+- [USR-228] Crash records MUST be kept for 30 days, and at most 200 records MUST be kept. The oldest record MUST be removed first when either limit is passed.
+- [USR-229] Crash records MUST NOT be written into any plugin's data folder. A crash record MUST be included in the support bundle under [USR-221].
+
 ### Extension points
 
 Other plugins change what `ilium.core.diagnostics` does through the points below. The plugin owns each point (grant `extensions.provide:ilium.core.diagnostics/<point>`). Contributors need `extensions.contribute:ilium.core.diagnostics/<point>`. See [Extension points](/pages/api-extension-points/) for the mechanism and [Extending core plugins](/pages/extending-core-plugins/) for the five ways to work with a core feature.

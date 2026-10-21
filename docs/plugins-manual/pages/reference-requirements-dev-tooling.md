@@ -461,6 +461,9 @@ Words: MUST and MUST NOT are required. SHOULD is expected unless a reason is rec
 | DEV-822 | `--record <file>` MUST write a replay file of the recorded events and MUST print an `artifact` record of kind `replay`. | [reference-plugin-cli](/pages/reference-plugin-cli/) | Run with --json and assert the records and their field order |
 | DEV-823 | `--unredacted` MUST be refused with `trace.unredacted-denied` for a plugin that is not a `dev` install. | [reference-plugin-cli](/pages/reference-plugin-cli/) | Run the command in a scratch project and assert the output and exit code |
 | DEV-830 | `profile` MUST default to `--duration 10`, MUST accept 1 to 600, and MUST print one `timing` record per export that ran, then a summary. | [reference-plugin-cli](/pages/reference-plugin-cli/) | Run with --json and assert the records and their field order |
+| DEV-831 | `support-bundle <id> --out <file>` MUST write the archive that USR-221 defines and MUST print one `support-bundle` record with the path and size. | [reference-plugin-cli](/pages/reference-plugin-cli/) | Run it and parse the record. |
+| DEV-832 | A `<file>` that already exists MUST NOT be overwritten; the command MUST fail with `support-bundle.exists` and exit 2. | [reference-plugin-cli](/pages/reference-plugin-cli/) | Create the file first and assert the exit code and the unchanged file. |
+| DEV-833 | An archive over 8 MiB MUST be trimmed as USR-224 says, and the `support-bundle` record MUST say so. | [reference-plugin-cli](/pages/reference-plugin-cli/) | Use an oversized log and read the record. |
 
 ## Performance of tooling
 

@@ -438,6 +438,12 @@ These commands print text by default and JSONL with `--json`. Their output conte
 - **[DEV-802]** `--view <target>` and `--memory` need a session and the content of the sections is in the debugging tools page.
 - **[DEV-803]** `inspect` of an unreadable file MUST fail with `inspect.file-unreadable`, and of a file that is neither a package nor a component with `inspect.not-a-package`.
 
+`ilium plugin support-bundle <id> --out <file>`
+
+- **[DEV-831]** `support-bundle` MUST write the archive that [USR-221] defines to `<file>` and MUST print one `support-bundle` record with the path and the size. It needs a session.
+- **[DEV-832]** A `<file>` that already exists MUST NOT be overwritten. The command MUST fail with `support-bundle.exists` and exit with 2.
+- **[DEV-833]** An archive over 8 MiB MUST be trimmed as [USR-224] says, and the `support-bundle` record MUST say so.
+
 `ilium plugin doctor [--json]`
 
 - **[DEV-810]** `doctor` MUST work offline and MUST print one `doctor-check` record per item in the table below, in this order.
