@@ -376,17 +376,18 @@ pub fn processes_using_directory_bounded(
         let cwd_matches = match std::fs::read_link(entry.path().join("cwd")) {
             Ok(cwd) => cwd.starts_with(&root),
             Err(error) if process_vanished(&error) => {
-                // A vanished proc entry is normal; an existing live process
-                // with an unreadable cwd is not proof that the path is free.
-                match read_linux_process(process_id) {
-                    Ok(process) if matches!(process.state, 'Z' | 'X') => {}
-                    Err(error) if process_vanished(&error) => {}
-                    Ok(_) => {
-                        return Err(io::Error::other(format!(
-                            "cwd of live process {process_id} is unavailable"
-                        )))
-                    }
-                    Err(error) => return Err(error),
+                // A process that is exiting loses its cwd before its state
+                // becomes a zombie, so give it a bounded moment to finish. An
+                // unreadable cwd on a process that stays alive is not proof
+                // that the path is free, so it still blocks removal.
+                if linux_process_still_running_without_cwd(
+                    process_id,
+                    read_linux_process,
+                    EXITING_PROCESS_SETTLE_BUDGET,
+                )? {
+                    return Err(io::Error::other(format!(
+                        "cwd of live process {process_id} is unavailable"
+                    )));
                 }
                 false
             }
@@ -462,6 +463,32 @@ pub fn processes_using_directory_bounded(
 #[cfg(target_os = "linux")]
 fn process_vanished(error: &io::Error) -> bool {
     error.kind() == io::ErrorKind::NotFound || error.raw_os_error() == Some(libc::ESRCH)
+}
+
+/// How long a process whose cwd has disappeared may keep running before the
+/// scan treats it as live. Measured: an exiting process shows no cwd for
+/// tens of milliseconds while its state is still running.
+#[cfg(target_os = "linux")]
+const EXITING_PROCESS_SETTLE_BUDGET: Duration = Duration::from_secs(1);
+
+/// Reports whether a process with no readable cwd is still running after the
+/// budget. A zombie, a dead process or a vanished entry is not running.
+#[cfg(target_os = "linux")]
+fn linux_process_still_running_without_cwd(
+    process_id: u32,
+    mut read_process: impl FnMut(u32) -> io::Result<LinuxProcess>,
+    budget: Duration,
+) -> io::Result<bool> {
+    let deadline = Instant::now() + budget;
+    loop {
+        match read_process(process_id) {
+            Ok(process) if matches!(process.state, 'Z' | 'X') => return Ok(false),
+            Err(error) if process_vanished(&error) => return Ok(false),
+            Err(error) => return Err(error),
+            Ok(_) if Instant::now() >= deadline => return Ok(true),
+            Ok(_) => std::thread::sleep(Duration::from_millis(10)),
+        }
+    }
 }
 
 /// Open descriptors matter even when a process changed its cwd out of the worktree.
@@ -1547,5 +1574,64 @@ mod tests {
         assert!(!super::process_vanished(&io::Error::from(
             io::ErrorKind::PermissionDenied
         )));
+    }
+
+    #[cfg(target_os = "linux")]
+    fn linux_process_in_state(state: char) -> super::LinuxProcess {
+        super::LinuxProcess {
+            process_id: 7,
+            parent_id: 1,
+            session_id: 7,
+            state,
+            start_ticks: 0,
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn exiting_process_without_cwd_settles_before_the_scan_decides() {
+        let states = std::cell::RefCell::new(vec!['R', 'S', 'Z'].into_iter());
+        let still_running = super::linux_process_still_running_without_cwd(
+            7,
+            |_| Ok(linux_process_in_state(states.borrow_mut().next().unwrap())),
+            Duration::from_secs(5),
+        )
+        .unwrap();
+        assert!(!still_running);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn process_that_vanishes_while_exiting_does_not_block_removal() {
+        let still_running = super::linux_process_still_running_without_cwd(
+            7,
+            |_| Err(io::Error::from(io::ErrorKind::NotFound)),
+            Duration::from_secs(5),
+        )
+        .unwrap();
+        assert!(!still_running);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn process_still_running_without_cwd_after_budget_blocks_removal() {
+        let still_running = super::linux_process_still_running_without_cwd(
+            7,
+            |_| Ok(linux_process_in_state('S')),
+            Duration::ZERO,
+        )
+        .unwrap();
+        assert!(still_running);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn unexpected_stat_read_error_is_not_mistaken_for_an_exited_process() {
+        let outcome = super::linux_process_still_running_without_cwd(
+            7,
+            |_| Err(io::Error::from(io::ErrorKind::PermissionDenied)),
+            Duration::from_secs(5),
+        );
+        assert!(outcome.is_err());
     }
 }

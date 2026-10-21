@@ -19,6 +19,7 @@ development period. Dates are commit dates (`YYYY-MM-DD`).
 - The F9 "Full diagnostic" overlay, which every dialog and error popover opens for its full text, now has a clickable `[ Copy ]` button and a `c` key that copy the whole diagnostic to the clipboard.
 
 ### Fixed
+- Removing a worktree with `ilium close-pane --worktree remove` no longer refuses while a process in that worktree is still exiting. A process whose working directory has already disappeared gets up to one second to finish; a process still running after that still blocks removal, as before.
 - Codex agents with large transcripts are auto-named again: the title-eligibility scan no longer gives up at 1 MiB per line or 16 MiB in total, it skips oversized records and streams up to 2 GiB.
 - Closing a pane that is already gone (a duplicate close racing a restructure) is now a quiet no-op, and a failed request aimed at a removed node no longer becomes a session-wide blocking error that put the yellow warning triangle on every agent until the server restarted.
 - A window the server drops while it is running (for example after a failed lag resynchronization) is relaunched automatically when the session server is still live, at most five times per ten minutes, instead of leaving a dead terminal. The exit error now reads "lost the connection to the ilium server" rather than "failed to enter raw/alternate-screen terminal mode".
