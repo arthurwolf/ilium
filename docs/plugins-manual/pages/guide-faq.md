@@ -30,7 +30,7 @@ Short answers to questions that plugin authors ask often. Each answer points to 
 
 **How long may a handler run?** Events 20 ms (T1: 50 ms), commands 50 ms, render 10 ms, `activate` 2 s, `deactivate` 500 ms. Longer work goes to jobs. See [Performance](/pages/performance/).
 
-**What happens when I break a limit?** The instance traps and restarts after 1 s, then 5 s. The third failure in 10 minutes disables the plugin on that side.
+**What happens when I break a limit?** Most limits make the call fail with an error code, such as `quota-exceeded` or `busy`. A few limits trap the instance instead: memory, table size, the deadlines of `activate`, events, commands and rendering, and the UI tree size. A trap restarts the side after 1 s, then 5 s. The third failure in 10 minutes disables the plugin on that side.
 
 **Can I use threads?** No. A component is single-threaded. Use jobs or requests for background work.
 

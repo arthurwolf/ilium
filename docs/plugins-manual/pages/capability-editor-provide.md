@@ -247,7 +247,7 @@ Install errors:
 
 | Code | Cause |
 |---|---|
-| `manifest.grant-tier` | A T2 or T3 package asks for the grant. |
+| `manifest.grant-tier` | Once the grant exists in a later API version: a T2 or T3 package asks for it. |
 | `manifest.grant-side` | The grant or export is on the server side. |
 | `manifest.grant-unknown` | The grant name is not a capability of this API version (for `editor.provide`, it is reserved in `ilium:plugin@0.1.0`). An unknown `api` version is a different error. |
 | `manifest.export-grant` | `editor-provider` is listed without the grant. |
@@ -274,11 +274,10 @@ When a T1 plugin with the grant starts for the first time, the user gets one pro
 <figcaption>The review dialog for a package that requests editor.provide, drawn with the client's dialog characters: rounded corners, dotted leaders and the hint bar. Checked rows are granted; a high-risk row starts unchecked.</figcaption>
 </figure>
 
-A T2 package that asks for the grant fails at install instead of showing a prompt:
+In `ilium:plugin@0.1.0` a package that names the grant is refused at install, whatever its tier:
 
 <pre class="term"><span class="t-prompt">$</span> ilium plugin install ./editor-demo.iliumpkg
-<span class="t-err">error</span> manifest.grant-tier capability "editor.provide" is available to
-      bundled plugins only
+<span class="t-err">error</span> manifest.grant-unknown capability "editor.provide" is reserved in ilium:plugin@0.1.0
 </pre>
 
 The user can check the grants of an installed plugin with `ilium plugin grants <id>`. Grants are recorded per plugin, per side and per user configuration (see [Capabilities reference](/pages/reference-capabilities/)).

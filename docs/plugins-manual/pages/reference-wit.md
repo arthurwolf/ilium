@@ -1196,7 +1196,7 @@ S C A (A: `get` only). Grant: none. API page: [Storage](/pages/api-storage/).
 ```wit
 interface storage {
   use ilium:types/errors@0.1.0.{plugin-error};
-  /// shared is visible to every plugin that holds the grant `storage.shared:<name>`.
+  /// shared is this plugin's own cache: its server side, its client sides and every session of the same user see it, and the host may clear it at any time.
   enum bucket { global, project, session, shared }
   /// key is 1 to 256 bytes. A value is at most 1 MiB. A bucket holds 16 MiB by default (limits.storage_bucket_mib).
   get: func(bucket: bucket, key: string) -> option<list<u8>>;
