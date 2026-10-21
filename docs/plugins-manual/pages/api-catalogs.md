@@ -71,7 +71,7 @@ Plugin catalogues have the global id `<plugin-id>/<id>`. An unknown catalogue re
 
 - **Filter.** Case-insensitive substring over title, id and keywords. Entries whose title starts with the filter rank first. A plugin catalogue does not implement filtering: the host applies it to the items the provider returns, except that a provider may narrow its work using `filter`.
 - **Paging.** `limit` is 1 to 256. `next` holds the cursor for the following page, `total` the full count when known.
-- **Deadline.** The export has 20 ms. A slow source returns the page it has cached and calls `ui.invalidate` (or `settings.set-choice-items`) when fresh data arrives.
+- **Deadline.** The export has 20 ms. A slow source returns the page it has cached and calls `ui.invalidate` (or `settings.set-choice-items`) when fresh data arrives. With no cached page, the request fails with `timed-out`.
 - **Use in rows and widgets.** A `choice` row names a catalogue with `"source": { "catalog": "ilium.palettes" }`, and the widget uses `source: "ilium.palettes"`. A source that names neither a host catalogue nor one of the plugin's own fails the install with `manifest.catalog-unknown`.
 - **Activation.** The trigger `catalog:<id>` starts a stopped instance when a row or widget opens one of its catalogues.
 
@@ -209,13 +209,13 @@ The text lines are those of the client's choice dialog (`value_dialog.rs`). Swat
 |---|---|---|
 | `query`, `query-async` | `not-found` | The catalogue does not exist. |
 | `query`, `query-async` | `invalid-argument` | `limit` is 0 or above 256. |
-| `query-async`, export | `timed-out` | The provider missed its 20 ms deadline. |
+| `query-async`, export | `timed-out` | The provider missed its 20 ms deadline and had no cached page. |
 | `query` | `not-permitted` | The catalogue belongs to a plugin. The synchronous `query` serves host catalogues only and has no deadline; use `query-async` for a plugin catalogue. |
 | `query`, `query-async` | `not-permitted` | `ilium.models` without `inference`. |
 | `query-async` | `not-permitted` | Another plugin's catalogue without `services.use`. |
 | any | `internal` | A host bug. |
 
-Failure path of `query-async`: the failure never comes back from `take-page`, which returns only a page or nothing. When the provider misses its deadline, the host completes the request with the outcome `failed(timed-out)` (see [requests and outcomes](/pages/requests-and-outcomes/)) and `take-page` for that request id returns `none` from then on. A plugin calls `take-page` only after it saw the completion, and treats `none` after a `failed` completion as the end of the request.
+Failure path of `query-async`: the failure never comes back from `take-page`, which returns only a page or nothing. When the provider misses its deadline and has no cached page, the host completes the request with the outcome `failed(timed-out)` (see [requests and outcomes](/pages/requests-and-outcomes/)) and `take-page` for that request id returns `none` from then on. A plugin calls `take-page` only after it saw the completion, and treats `none` after a `failed` completion as the end of the request.
 
 Caps: 8 catalogues per plugin, 256 items per page, `description` 120 characters, `group` 32, `disabled-reason` 40, 8 keywords per item. Install errors: `manifest.catalog-unknown`, `manifest.contribution-limit`.
 

@@ -232,6 +232,8 @@ pub mod manifest {
     pub const EXPORTS_MISMATCH: &str = "manifest.exports-mismatch";
     /// `manifest.export-grant`.
     pub const EXPORT_GRANT: &str = "manifest.export-grant";
+    /// `manifest.route-grant`.
+    pub const ROUTE_GRANT: &str = "manifest.route-grant";
     /// `manifest.import-not-requested`.
     pub const IMPORT_NOT_REQUESTED: &str = "manifest.import-not-requested";
     /// `manifest.unstable-missing`.
@@ -844,6 +846,7 @@ pub const ALL: &[&str] = &[
     manifest::API_VERSION,
     manifest::EXPORTS_MISMATCH,
     manifest::EXPORT_GRANT,
+    manifest::ROUTE_GRANT,
     manifest::IMPORT_NOT_REQUESTED,
     manifest::UNSTABLE_MISSING,
     package::API_UNSUPPORTED,

@@ -1069,6 +1069,7 @@ Stage 5 compares `files` with the archive. Stage 6 reads the components without 
 | `manifest.api-version` | 6 | 1 | `{path} was built for {found}. The manifest says {expected}.` |
 | `manifest.exports-mismatch` | 6 | 1 | `{path}: exports differ from the manifest. Missing: {missing}. Extra: {extra}.` |
 | `manifest.export-grant` | 6 | 1 | `{path} exports {export}, which needs the grant {grant}.` |
+| `manifest.route-grant` | 6 | 1 | `{path}: route {route} and grant {grant} do not match.` |
 | `manifest.import-not-requested` | 6 | 1 | `{path} imports {interface}, which no requested capability unlocks.` |
 | `manifest.unstable-missing` | 6 | 1 | `{path} imports {item}, which the unstable list does not name.` |
 

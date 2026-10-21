@@ -226,7 +226,7 @@ Compatibility works in two steps:
 - The host loads the current minor version and the previous one through hand-written adapters.
 - A plugin built for a newer minor than the host is refused at install. The message names both versions.
 
-Experimental items carry `@unstable(feature = <name>)` instead. Such an item is visible only to a plugin whose manifest lists the feature in the `unstable` key. In 0.1 there are two feature-gated items: `ui-calendar`, which enables the `calendar` widget, and `plugin-services`, which enables `services.call`. The `chart` widget is stable. `gpu` and WebSocket are also marked `@unstable`, but they are not part of the 0.1 contract and no manifest can enable them.
+Experimental items carry `@unstable(feature = <name>)` instead. Such an item is visible only to a plugin whose manifest lists the feature in the `unstable` key. In 0.1 there are four feature-gated items: `ui-calendar`, which enables the `calendar` widget, `plugin-services`, which enables `services.call`, `gpu-kernels`, which enables the GPU kernel API, and `websocket`, which enables the WebSocket API. A manifest opts in with the feature name in the same way for all four. The `chart` widget is stable.
 
 ## The restart rule
 

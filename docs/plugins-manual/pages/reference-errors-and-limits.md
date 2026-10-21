@@ -700,6 +700,7 @@ Older drafts used other spellings for these codes. The current names are `manife
 | `manifest.key-missing` | A packed manifest has no `files` key | [Package format](/pages/reference-package-format/) |
 | `manifest.unknown-key` | A manifest key is outside the schema, or a key under `limits` is unknown | [Manifest](/pages/reference-manifest/) |
 | `manifest.grant-argument` | A grant argument is malformed, or `http:setting:<key>` names a setting the plugin lacks | [Capabilities](/pages/capabilities/) |
+| `manifest.route-grant` | An `http_routes` entry has no `http-api.route` grant for its path, or a route grant has no entry | [HTTP API routes](/pages/capability-http-api-route/) |
 | `manifest.grant-argument-missing` | A grant that needs an argument has none | [Capabilities](/pages/capabilities/) |
 | `manifest.grant-dependency` | A grant needs another grant that is not requested, for example `fs.pick` without `fs.read:picked` | [fs](/pages/api-fs/) |
 | `manifest.grant-program` | A `process.run` grant has arguments, a wildcard or a relative path with a separator in the program name | [process.run](/pages/capability-process-run/) |

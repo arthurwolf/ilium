@@ -32,7 +32,7 @@ The argument is the route path. It starts with `/`, may contain `{name}` segment
 
 ### Manifest entry
 
-Each route needs one `http_routes` entry and one grant. The manifest must contain both. Install refuses a manifest where they do not match (`manifest.grant-argument`).
+Each route needs one `http_routes` entry and one grant. The manifest must contain both. Install refuses a manifest where they do not match (`manifest.route-grant`).
 
 ```json
 {
