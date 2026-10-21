@@ -9,7 +9,7 @@ pub const PACKAGES: &[(&str, &str, &str)] = &[
     (
         "beach",
         "beach-1.0.0.iliumanim",
-        "15c81ff5a9aa329aa4451c5e19405be4f6957a8f617ce4bff94b02be5b39612f",
+        "a744b574dae0f55505c86ec2c2d77555b0c11e1800b0b306273112d8ae1b06a2",
     ),
     (
         "carpet",

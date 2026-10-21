@@ -12,7 +12,11 @@ use ratatui::{
 pub(crate) struct DiagnosticView {
     text: String,
     scroll: usize,
+    /// Screen cells of the "Copy" button from the last render, for hit-testing.
+    copy_button: Option<Rect>,
 }
+
+const COPY_BUTTON_LABEL: &str = "[ Copy ]";
 
 pub(crate) fn current_text(app: &App) -> Option<String> {
     use crate::value_dialog::ValueDialogState;
@@ -175,7 +179,11 @@ pub(crate) fn intercept_event(app: &mut App, event: &Event) -> bool {
             if app.diagnostic_view.is_some() {
                 app.diagnostic_view = None;
             } else if let Some(text) = current_text(app) {
-                app.diagnostic_view = Some(DiagnosticView { text, scroll: 0 });
+                app.diagnostic_view = Some(DiagnosticView {
+                    text,
+                    scroll: 0,
+                    copy_button: None,
+                });
             } else {
                 return false;
             }
@@ -185,8 +193,10 @@ pub(crate) fn intercept_event(app: &mut App, event: &Event) -> bool {
     let Some(view) = &mut app.diagnostic_view else {
         return false;
     };
+    let mut is_copy_requested = false;
     match event {
         Event::Key(key) => match key.code {
+            KeyCode::Char('c') | KeyCode::Char('C') => is_copy_requested = true,
             KeyCode::Esc => app.diagnostic_view = None,
             KeyCode::Up => view.scroll = view.scroll.saturating_sub(1),
             KeyCode::Down => view.scroll = view.scroll.saturating_add(1),
@@ -199,9 +209,22 @@ pub(crate) fn intercept_event(app: &mut App, event: &Event) -> bool {
         Event::Mouse(mouse) => match mouse.kind {
             MouseEventKind::ScrollUp => view.scroll = view.scroll.saturating_sub(3),
             MouseEventKind::ScrollDown => view.scroll = view.scroll.saturating_add(3),
+            MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
+                is_copy_requested = view.copy_button.is_some_and(|button| {
+                    button.contains(ratatui::layout::Position::new(mouse.column, mouse.row))
+                });
+            }
             _ => {}
         },
         _ => {}
+    }
+    if is_copy_requested {
+        if let Some(text) = app.diagnostic_view.as_ref().map(|view| view.text.clone()) {
+            app.copy_terminal_text_to_clipboard(
+                text,
+                "Copied the full diagnostic to the clipboard",
+            );
+        }
     }
     // Resize still reaches the client lifecycle; input cannot reach the draft.
     !matches!(event, Event::Resize(_, _))
@@ -237,11 +260,27 @@ pub(crate) fn render(frame: &mut Frame, view: &mut DiagnosticView) {
         .collect::<Vec<_>>()
         .join("\n");
     frame.render_widget(Paragraph::new(visible), body);
+    view.copy_button = None;
     if height >= 3 {
+        let footer_y = area.bottom().saturating_sub(2);
+        let button_width = COPY_BUTTON_LABEL.chars().count() as u16;
+        let hint_width = body.width.saturating_sub(button_width + 1);
         frame.render_widget(
-            Paragraph::new("↑↓ scroll · PgUp/PgDn · Home/End · Esc close"),
-            Rect::new(body.x, area.bottom().saturating_sub(2), body.width, 1),
+            Paragraph::new("↑↓ scroll · PgUp/PgDn · c copy · Esc close"),
+            Rect::new(body.x, footer_y, hint_width, 1),
         );
+        if body.width > button_width {
+            let button = Rect::new(body.right() - button_width, footer_y, button_width, 1);
+            frame.render_widget(
+                Paragraph::new(COPY_BUTTON_LABEL).style(
+                    ratatui::style::Style::default()
+                        .fg(crate::theme::accent_fg())
+                        .bg(crate::theme::accent_bg()),
+                ),
+                button,
+            );
+            view.copy_button = Some(button);
+        }
     }
 }
 
@@ -318,5 +357,46 @@ mod tests {
         );
         assert!(app.diagnostic_view.is_none());
         assert!(matches!(app.mode, Mode::Normal));
+    }
+    #[test]
+    fn copy_button_and_key_both_request_the_clipboard() {
+        let mut app = App::new("test".into(), std::env::temp_dir());
+        app.status_message = Some("storage unavailable".into());
+        intercept_event(
+            &mut app,
+            &Event::Key(KeyEvent::new(KeyCode::F(9), KeyModifiers::NONE)),
+        );
+        let mut terminal = Terminal::new(TestBackend::new(48, 16)).unwrap();
+        terminal
+            .draw(|frame| render(frame, app.diagnostic_view.as_mut().unwrap()))
+            .unwrap();
+        let button = app.diagnostic_view.as_ref().unwrap().copy_button.unwrap();
+        let text: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(text.contains("[ Copy ]"));
+        // No clipboard service exists in tests, so a request shows up as the
+        // "unavailable" status instead of the old message.
+        app.status_message = None;
+        intercept_event(
+            &mut app,
+            &Event::Mouse(crossterm::event::MouseEvent {
+                kind: MouseEventKind::Down(crossterm::event::MouseButton::Left),
+                column: button.x,
+                row: button.y,
+                modifiers: KeyModifiers::NONE,
+            }),
+        );
+        assert!(app.status_message.is_some(), "button click must copy");
+        app.status_message = None;
+        intercept_event(
+            &mut app,
+            &Event::Key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE)),
+        );
+        assert!(app.status_message.is_some(), "c key must copy");
     }
 }

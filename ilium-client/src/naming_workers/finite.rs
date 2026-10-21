@@ -198,7 +198,13 @@ fn run_request(
                     result: Err(error),
                 },
                 Ok(()) => panic::catch_unwind(AssertUnwindSafe(|| {
-                    crate::session_naming::infer_pane_title_with_trace(settings, &home, &input)
+                    if settings.codex_official_thread_names
+                        && input.agent_class == ilium_core::AgentClass::Codex
+                    {
+                        crate::session_naming::official_codex_thread_title(&home, &input)
+                    } else {
+                        crate::session_naming::infer_pane_title_with_trace(settings, &home, &input)
+                    }
                 }))
                 .unwrap_or_else(|_| {
                     crate::session_naming::SessionTitleInferenceTrace {
@@ -296,9 +302,10 @@ fn run_request(
                 protected_split_views,
                 current_structure,
                 inference_activity_revisions,
+                include_attention,
                 ..
             } = *request;
-            let result = provider_allowed(cancelled, decision, word).and_then(|()| {
+            let outcome = provider_allowed(cancelled, decision, word).and_then(|()| {
                 // Context mutations are job-local and discarded on panic; no
                 // shared state can observe a half-resolved context vector.
                 catch_worker_panic(
@@ -306,23 +313,29 @@ fn run_request(
                     AssertUnwindSafe(|| {
                         crate::restructure::resolve_content_extracts(&mut contexts, &home);
                         provider_allowed(context.stop_requested(), decision, word)?;
-                        crate::restructure::infer_project_restructure(
+                        crate::restructure::infer_project_restructure_with_attention(
                             settings,
                             &contexts,
                             &current_structure,
                             &protected_split_views,
                             &recommendation_snapshot,
                             &animation_home,
+                            include_attention,
                         )
                     }),
                 )
             });
+            let (result, attention) = match outcome {
+                Ok((plan, attention)) => (Ok(plan), attention),
+                Err(error) => (Err(error), None),
+            };
             NamingWorkerEvent::Restructure(RestructureWorkerResult {
                 project_id,
                 title_observations,
                 inference_activity_revisions,
                 automatic_ai_decision: decision,
                 result,
+                attention,
             })
         }
         #[cfg(test)]
@@ -577,6 +590,7 @@ impl Kind {
                     inference_activity_revisions: request.inference_activity_revisions.clone(),
                     automatic_ai_decision: decision,
                     result: Err(error),
+                    attention: None,
                 })
             }
             #[cfg(test)]

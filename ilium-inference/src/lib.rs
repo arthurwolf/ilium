@@ -119,6 +119,9 @@ fn deserialize_positive_token_limit<'de, D: serde::Deserializer<'de>>(
 pub struct InferenceSettings {
     pub selected_provider: InferenceProviderKind,
     pub title_style: TitleStyle,
+    /// When set, Codex panes take the official thread name Codex stores on disk
+    /// instead of asking the model. User-written titles still win.
+    pub codex_official_thread_names: bool,
     /// Rough input-token budget (four Unicode characters per token).
     #[serde(deserialize_with = "deserialize_positive_token_limit")]
     pub restructure_prompt_token_limit: u32,
@@ -135,6 +138,7 @@ impl Default for InferenceSettings {
         Self {
             selected_provider: InferenceProviderKind::KiloGateway,
             title_style: TitleStyle::default(),
+            codex_official_thread_names: false,
             restructure_prompt_token_limit: DEFAULT_RESTRUCTURE_PROMPT_TOKEN_LIMIT,
             instructions: PromptInstructions::default(),
             kilo_gateway: KiloGatewaySettings::default(),

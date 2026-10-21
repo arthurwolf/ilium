@@ -171,11 +171,20 @@ pub async fn handle_request(
     direct_tx: &DirectEventSender,
 ) -> bool {
     let operation = request.diagnostic_name();
+    let requested_node = request_error_node(&request);
     let target = {
         let tree = state.tree.read().await;
-        request_error_node(&request).filter(|node_id| tree.get(*node_id).is_some())
+        requested_node.filter(|node_id| tree.get(*node_id).is_some())
     };
-    let scoped_tx = direct_tx.with_error_scope(state, target, operation);
+    // A request aimed at a node that no longer exists (a duplicate close, a
+    // click racing a restructure) has no node to attach a retained error to.
+    // Filing it as session-wide would mark every node with a blocking error
+    // that nothing ever clears, so its failure stays a transient status line.
+    let scoped_tx = if requested_node.is_some() && target.is_none() {
+        direct_tx.clone()
+    } else {
+        direct_tx.with_error_scope(state, target, operation)
+    };
     let should_close = handle_scoped_request(state, request, &scoped_tx).await;
     if matches!(
         operation,
@@ -205,6 +214,45 @@ async fn handle_scoped_request(
         // Plugin envelopes are routed by the plugin kernel once it exists (skeleton: ignored).
         ClientRequest::Plugin(_) => {
             tracing::debug!("plugin envelope ignored: plugin kernel not implemented");
+            false
+        }
+        ClientRequest::TerminalHistory {
+            pane_id,
+            before_sequence,
+            max_bytes,
+        } => {
+            let max_bytes = usize::try_from(max_bytes)
+                .unwrap_or(usize::MAX)
+                .min(TERMINAL_HISTORY_MAX_BYTES);
+            let history = {
+                let panes = state.panes.read().await;
+                match panes.get(&pane_id) {
+                    Some(PaneResource::Terminal(runtime)) => Some(
+                        runtime
+                            .session
+                            .output_history_before(before_sequence, max_bytes),
+                    ),
+                    _ => None,
+                }
+            };
+            let event = match history {
+                Some(history) => ServerEvent::TerminalHistory {
+                    pane_id,
+                    first_sequence: history.first_sequence,
+                    before_sequence: history.before_sequence,
+                    bytes: history.bytes,
+                    reaches_journal_start: history.reaches_journal_start,
+                },
+                // A pane that no longer exists has no older output to show.
+                None => ServerEvent::TerminalHistory {
+                    pane_id,
+                    first_sequence: before_sequence,
+                    before_sequence,
+                    bytes: Vec::new(),
+                    reaches_journal_start: true,
+                },
+            };
+            send_direct(direct_tx, event).await;
             false
         }
         ClientRequest::GetPaneRecapScreen { pane_id } => {
@@ -1603,6 +1651,14 @@ async fn send_initial_state(
     }
 }
 
+/// Extra bytes reserved per synchronized pane for output that arrives between
+/// the size estimate and the event build.
+const SYNCHRONIZATION_OUTPUT_GROWTH_ALLOWANCE_BYTES: usize = 1024 * 1024;
+
+/// Largest raw history reply one `TerminalHistory` request may return. Clients
+/// ask again for older output, so a large scroll never needs a large frame.
+const TERMINAL_HISTORY_MAX_BYTES: usize = 1024 * 1024;
+
 /// Selects how terminal journals synchronize for one connection. Attach has
 /// no prior parser and needs full replays; live recovery appends exact missing
 /// deltas while retained, falling back to replay only past the journal window.
@@ -1612,10 +1668,14 @@ enum TerminalOutputSynchronization<'a> {
     RecoverAfter(&'a HashMap<NodeId, u64>),
 }
 
+#[derive(Clone)]
 struct TerminalOutputEstimate {
     input: PtyInput,
     estimate: PtyOutputRecoveryEstimate,
     after_sequence: u64,
+    /// The screen built during estimation, so admission reserves its exact
+    /// size and the event carries the same bytes without a second capture.
+    snapshot: Option<ilium_pty::PtyScreenSnapshot>,
 }
 
 impl TerminalOutputSynchronization<'_> {
@@ -1624,11 +1684,24 @@ impl TerminalOutputSynchronization<'_> {
         pane_id: NodeId,
         session: &ilium_pty::PtySession,
     ) -> Option<TerminalOutputEstimate> {
-        let (after_sequence, estimate) = match self {
-            Self::All => (
-                0,
-                PtyOutputRecoveryEstimate::Replay(session.output_replay_estimate()),
-            ),
+        let (after_sequence, estimate, snapshot) = match self {
+            Self::All => match session.attach_snapshot() {
+                Some(snapshot) => (
+                    0,
+                    PtyOutputRecoveryEstimate::Snapshot {
+                        through_sequence: snapshot.through_sequence,
+                        byte_len: snapshot.bytes.len(),
+                    },
+                    Some(snapshot),
+                ),
+                // An unreadable parser cannot rebuild its screen; the retained
+                // journal is the only remaining evidence of what it showed.
+                None => (
+                    0,
+                    PtyOutputRecoveryEstimate::Replay(session.output_replay_estimate()),
+                    None,
+                ),
+            },
             Self::None => return None,
             Self::RecoverAfter(delivered_sequences) => {
                 let after_sequence = delivered_sequences
@@ -1638,6 +1711,7 @@ impl TerminalOutputSynchronization<'_> {
                 (
                     after_sequence,
                     session.output_recovery_estimate_after(after_sequence)?,
+                    None,
                 )
             }
         };
@@ -1645,6 +1719,7 @@ impl TerminalOutputSynchronization<'_> {
             input: session.input_handle(),
             estimate,
             after_sequence,
+            snapshot,
         })
     }
 
@@ -1655,13 +1730,16 @@ impl TerminalOutputSynchronization<'_> {
         estimated: &TerminalOutputEstimate,
     ) -> Option<ServerEvent> {
         match self {
-            Self::All => {
-                let PtyOutputRecoveryEstimate::Replay(replay_estimate) = estimated.estimate else {
-                    return None;
-                };
-                let replay = session.output_replay_through_if_retained(replay_estimate)?;
-                Some(terminal_replay_event(pane_id, replay))
-            }
+            Self::All => match (&estimated.estimate, &estimated.snapshot) {
+                (PtyOutputRecoveryEstimate::Snapshot { .. }, Some(snapshot)) => {
+                    Some(terminal_snapshot_event(pane_id, snapshot.clone()))
+                }
+                (PtyOutputRecoveryEstimate::Replay(replay_estimate), None) => {
+                    let replay = session.output_replay_through_if_retained(*replay_estimate)?;
+                    Some(terminal_replay_event(pane_id, replay))
+                }
+                _ => None,
+            },
             Self::None => None,
             Self::RecoverAfter(_) => match session
                 .output_recovery_if_unchanged(estimated.after_sequence, estimated.estimate)?
@@ -1683,7 +1761,10 @@ impl TerminalOutputSynchronization<'_> {
     #[cfg(test)]
     fn event_for(&self, pane_id: NodeId, session: &ilium_pty::PtySession) -> Option<ServerEvent> {
         match self {
-            Self::All => Some(terminal_replay_event(pane_id, session.output_replay())),
+            Self::All => match session.attach_snapshot() {
+                Some(snapshot) => Some(terminal_snapshot_event(pane_id, snapshot)),
+                None => Some(terminal_replay_event(pane_id, session.output_replay())),
+            },
             Self::None => None,
             Self::RecoverAfter(delivered_sequences) => {
                 let after_sequence = delivered_sequences
@@ -1776,6 +1857,7 @@ pub(crate) async fn admitted_terminal_recovery_prefix(
         };
         let byte_len = match estimate {
             PtyOutputRecoveryEstimate::Delta { byte_len, .. } => byte_len,
+            PtyOutputRecoveryEstimate::Snapshot { byte_len, .. } => byte_len,
             PtyOutputRecoveryEstimate::Replay(replay) => replay.byte_len,
         }
         .min(TERMINAL_RECOVERY_EVENT_MAX_BYTES);
@@ -1819,9 +1901,15 @@ pub(crate) async fn admitted_terminal_recovery_prefix(
                         sequence: chunk.sequence,
                         bytes: chunk.bytes.to_vec(),
                     }),
-                    Some(PtyOutputRecovery::Replay(replay)) => {
-                        Some(terminal_replay_event(pane_id, replay))
-                    }
+                    // A replay rebuilds the whole journal on the client; the
+                    // current screen snapshot shows the same state at once.
+                    // The journal replay remains only when no snapshot exists.
+                    Some(PtyOutputRecovery::Replay(replay)) => Some(
+                        match runtime.session.attach_snapshot() {
+                            Some(snapshot) => terminal_snapshot_event(pane_id, snapshot),
+                            None => terminal_replay_event(pane_id, replay),
+                        },
+                    ),
                     None => None,
                 }
             }
@@ -1855,6 +1943,7 @@ pub(crate) async fn admitted_terminal_recovery_event(
         };
         let byte_len = match estimate {
             PtyOutputRecoveryEstimate::Delta { byte_len, .. } => byte_len,
+            PtyOutputRecoveryEstimate::Snapshot { byte_len, .. } => byte_len,
             PtyOutputRecoveryEstimate::Replay(replay) => replay.byte_len,
         };
         let producer_storage = reserve_connection_event_storage(
@@ -1973,6 +2062,9 @@ async fn admitted_state_synchronization_events(
     ),
     String,
 > {
+    // Why each discarded attempt was discarded, so a final failure can say
+    // whether pane output, the pane set or the tree kept moving.
+    let mut discarded_attempts: Vec<(&'static str, Option<NodeId>)> = Vec::new();
     for _attempt in 0..8 {
         let (estimates, snapshot_bytes) = {
             let tree = state.tree.read().await;
@@ -2005,12 +2097,19 @@ async fn admitted_state_synchronization_events(
         let estimated_payload_bytes = estimates.values().try_fold(0usize, |total, estimate| {
             let bytes = match estimate.estimate {
                 PtyOutputRecoveryEstimate::Delta { byte_len, .. } => byte_len,
+                PtyOutputRecoveryEstimate::Snapshot { byte_len, .. } => byte_len,
                 PtyOutputRecoveryEstimate::Replay(replay) => replay.byte_len,
             };
             total.checked_add(bytes)
         });
+        // Output keeps arriving while admission waits, so each estimated pane
+        // reserves headroom for the bytes it will have gained by build time.
+        let output_growth_allowance = estimates
+            .len()
+            .checked_mul(SYNCHRONIZATION_OUTPUT_GROWTH_ALLOWANCE_BYTES);
         let estimated_payload_bytes = estimated_payload_bytes
             .and_then(|bytes| bytes.checked_add(snapshot_bytes))
+            .and_then(|bytes| output_growth_allowance.and_then(|growth| bytes.checked_add(growth)))
             .ok_or_else(|| "state synchronization admission size overflow".to_owned())?;
         let producer_storage = reserve_connection_event_storage(
             state,
@@ -2030,6 +2129,7 @@ async fn admitted_state_synchronization_events(
             if current_tree_bytes > snapshot_bytes / 2 {
                 drop(tree);
                 drop(producer_storage);
+                discarded_attempts.push(("tree grew while admission waited", None));
                 continue;
             }
             tree.clone()
@@ -2038,6 +2138,7 @@ async fn admitted_state_synchronization_events(
         let built = {
             let tree = state.tree.read().await;
             if *tree != expected_tree {
+                discarded_attempts.push(("tree changed before the snapshot", None));
                 None
             } else {
                 let panes = state.panes.read().await;
@@ -2055,6 +2156,7 @@ async fn admitted_state_synchronization_events(
                 let mut matched_estimates = HashSet::new();
                 let mut replay_events = Vec::new();
                 let mut stale = false;
+                let mut stale_reason: Option<(&'static str, Option<NodeId>)> = None;
                 for (pane_id, resource) in panes.iter() {
                     match resource {
                         PaneResource::Terminal(runtime) => {
@@ -2067,17 +2169,32 @@ async fn admitted_state_synchronization_events(
                             if let Some(estimate) = estimates.get(pane_id) {
                                 if !estimate.input.same_session(&runtime.session.input_handle()) {
                                     stale = true;
+                                    stale_reason =
+                                        Some(("pane session was replaced", Some(*pane_id)));
                                     break;
                                 }
                                 matched_estimates.insert(*pane_id);
+                                // A busy pane has advanced (or evicted its oldest
+                                // journal chunks) since the estimate, which was taken
+                                // before an awaited reservation. Estimating again and
+                                // building from that fresh estimate shrinks the race to
+                                // two adjacent journal reads; the reservation headroom
+                                // and the final byte check bound the growth.
+                                let fresh = synchronization
+                                    .estimate_for(*pane_id, &runtime.session)
+                                    .unwrap_or_else(|| estimate.clone());
                                 match synchronization.event_from_estimate(
                                     *pane_id,
                                     &runtime.session,
-                                    estimate,
+                                    &fresh,
                                 ) {
                                     Some(event) => replay_events.push(event),
                                     None => {
                                         stale = true;
+                                        stale_reason = Some((
+                                            "pane output moved after the estimate",
+                                            Some(*pane_id),
+                                        ));
                                         break;
                                     }
                                 }
@@ -2102,6 +2219,9 @@ async fn admitted_state_synchronization_events(
                     }
                 }
                 if stale || matched_estimates.len() != estimates.len() {
+                    discarded_attempts.push(
+                        stale_reason.unwrap_or(("a pane with an estimate left the pane set", None)),
+                    );
                     None
                 } else {
                     let mut events = vec![ServerEvent::PaneStateSnapshot {
@@ -2156,13 +2276,23 @@ async fn admitted_state_synchronization_events(
             let admitted_bytes = producer_storage
                 .as_ref()
                 .map_or(0, |storage| storage.resident_bytes());
-            if retained_event_bytes.is_none_or(|bytes| bytes > admitted_bytes) {
+            if retained_event_bytes.is_none() {
                 return Err("state synchronization exceeded byte admission".to_owned());
+            }
+            if retained_event_bytes.is_some_and(|bytes| bytes > admitted_bytes) {
+                // Output outgrew the reservation; reserve again from a new estimate.
+                discarded_attempts.push(("pane output outgrew the reservation", None));
+                drop(producer_storage);
+                continue;
             }
             return Ok((events, producer_storage));
         }
         drop(producer_storage);
     }
+    tracing::warn!(
+        discarded_attempts = ?discarded_attempts,
+        "state synchronization gave up: every attempt was invalidated by concurrent changes"
+    );
     Err("state synchronization changed repeatedly; retry attach".to_owned())
 }
 
@@ -3194,6 +3324,12 @@ async fn idempotent_install_progress_monitor(
     request_id: u64,
     identity: ProgressSetRequestIdentity,
 ) -> Result<ilium_ipc::ProgressMonitorAccepted, ilium_ipc::ProgressMonitorRejection> {
+    // Cold path, one value per progress registration: boxing would only add
+    // indirection at every match site.
+    #[allow(clippy::large_enum_variant)]
+    // Cold path, one value per progress registration: boxing would only add
+    // indirection at every match site.
+    #[allow(clippy::large_enum_variant)]
     enum Decision {
         Lead,
         Wait(tokio::sync::watch::Receiver<Option<ProgressSetResult>>),
@@ -6086,6 +6222,18 @@ fn terminal_recovery_from_session(
     }
 }
 
+/// Converts one screen snapshot into the attach-time protocol event. The
+/// client applies it at once; output after `through_sequence` follows as live
+/// `ScreenUpdate`s.
+fn terminal_snapshot_event(pane_id: NodeId, snapshot: ilium_pty::PtyScreenSnapshot) -> ServerEvent {
+    ServerEvent::TerminalSnapshot {
+        pane_id,
+        through_sequence: snapshot.through_sequence,
+        bytes: snapshot.bytes,
+        is_complete: snapshot.is_complete,
+    }
+}
+
 /// Converts one atomically captured PTY journal snapshot into the protocol
 /// event used by both attach-time reconstruction and live lag recovery.
 fn terminal_replay_event(pane_id: NodeId, replay: ilium_pty::PtyOutputReplay) -> ServerEvent {
@@ -6280,7 +6428,14 @@ async fn handle_close_pane_with_spawn_guard(
     let mut tree = state.tree.write().await;
     if tree.get(pane_id).is_none() {
         drop(tree);
-        send_direct_error(direct_tx, format!("no such node {pane_id:?}")).await;
+        // Closing is idempotent: the pane is already gone, which is the
+        // requested outcome. Re-broadcasting the tree ends the client's
+        // pending "Closing" spinner.
+        tracing::info!(
+            ?pane_id,
+            "close requested for a pane that is already removed"
+        );
+        broadcast_and_persist(state).await;
         return;
     }
     let descendant_pane_ids = collect_pane_descendants(&tree, pane_id);
@@ -8331,6 +8486,8 @@ async fn handle_kill_session(state: &Arc<ServerState>) -> crate::recovery::Resol
 
 #[cfg(test)]
 mod tests {
+    // The `unwrap`s sit inside closures that are only sized, never called.
+    #[allow(clippy::unnecessary_literal_unwrap)]
     #[test]
     fn request_future_stack_budget() {
         fn future_bytes<F: std::future::Future>(_: impl FnOnce() -> F) -> usize {
@@ -8420,6 +8577,50 @@ mod tests {
         state.clear_blocking_error(Some(group), "new_pane");
         let events = initial_state_events(&state, false, false).await;
         assert!(events.iter().any(|event| matches!(event, ServerEvent::BlockingErrorsSnapshot { errors } if errors.is_empty())));
+    }
+
+    #[tokio::test]
+    async fn closing_a_removed_pane_leaves_no_retained_blocking_error() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = snapshot_io_handler_state(&directory);
+        let (sender, mut replies) = DirectEventSender::channel(16);
+        let removed_pane = NodeId(987_654);
+        for _ in 0..2 {
+            handle_request(
+                &state,
+                ClientRequest::ClosePane {
+                    pane_id: removed_pane,
+                },
+                &sender,
+            )
+            .await;
+        }
+        assert!(state.blocking_errors_snapshot().is_empty());
+        while let Ok(event) = replies.try_recv() {
+            assert!(!matches!(event, ServerEvent::Error { .. }));
+        }
+    }
+
+    #[tokio::test]
+    async fn failed_request_for_a_removed_node_is_not_filed_session_wide() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = snapshot_io_handler_state(&directory);
+        let (sender, _replies) = DirectEventSender::channel(16);
+        handle_request(
+            &state,
+            ClientRequest::RenameNode {
+                node_id: NodeId(987_655),
+                title: "gone".into(),
+                short_title: None,
+                inferred_icon: None,
+            },
+            &sender,
+        )
+        .await;
+        assert!(state
+            .blocking_errors_snapshot()
+            .iter()
+            .all(|error| error.node_id.is_some()));
     }
 
     #[cfg(unix)]

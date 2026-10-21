@@ -35,6 +35,10 @@ use crate::terminal_activity::{VisibleRowEvidence, VisibleTextEvidence};
 #[path = "terminal_view_parser_pressure_regressions.rs"]
 mod parser_pressure_regressions;
 
+#[cfg(test)]
+#[path = "terminal_history_paging_regressions.rs"]
+mod history_paging_regressions;
+
 /// Starting geometry for a freshly created pane, before the first real
 /// `ResizePane` request (sent once the client knows the pane's actual
 /// on-screen content box) corrects it.
@@ -261,7 +265,7 @@ impl TerminalHistorySnapshot {
 /// caller-supplied `budget_mib` of `0` doesn't collapse search history to
 /// nothing; `TerminalSettings::MIN_SCROLLBACK_BUDGET_MIB` (4) already keeps
 /// the settings UI well above that floor.
-fn history_budget_bytes(budget_mib: u16) -> usize {
+pub(crate) fn history_budget_bytes(budget_mib: u16) -> usize {
     usize::from(budget_mib)
         .saturating_mul(1024 * 1024)
         .max(1024 * 1024)
@@ -363,6 +367,10 @@ pub(crate) struct TerminalState {
     /// Cached heap capacities keep per-slice admission independent of history length.
     history_allocation_bytes: usize,
     history_origin: Arc<()>,
+    /// Journal sequence the held raw history continues from, set only when it
+    /// begins with a complete snapshot. Older output may be spliced in only
+    /// when a request names exactly this sequence.
+    history_base_sequence: Option<u64>,
     /// Current raw-history retention cap in bytes, derived from the
     /// configured MiB budget via `history_budget_bytes`. Stored so
     /// `set_scrollback_budget_mib` can re-trim retained segments in place
@@ -425,6 +433,7 @@ impl TerminalState {
             history_retained_len: 0,
             history_allocation_bytes: 0,
             history_origin: Arc::new(()),
+            history_base_sequence: None,
             history_budget_bytes: history_budget_bytes(budget_mib),
             osc8_links: VecDeque::new(),
             osc8_link_allocation_bytes: 0,
@@ -1517,6 +1526,8 @@ impl TerminalState {
             self.osc8_links.clear();
             self.osc8_link_allocation_bytes = 0;
             self.osc8_stream.clear();
+            // A replay in progress has no trustworthy base until it completes.
+            self.history_base_sequence = None;
             self.render_scrollback_rows =
                 render_scrollback_rows(cols.max(self.allocated_max_columns));
             // Release the old replay generation before allocating its replacement.
@@ -1550,6 +1561,81 @@ impl TerminalState {
         self.refresh_visible_text_fingerprint();
         Ok(())
     }
+    pub(crate) fn history_base_sequence(&self) -> Option<u64> {
+        self.history_base_sequence
+    }
+
+    pub(crate) fn set_history_base(&mut self, base: Option<u64>) {
+        self.history_base_sequence = base;
+    }
+
+    /// Bytes an older-history splice needs while the rebuilt parser and the
+    /// combined history coexist with the current generation.
+    pub(crate) fn prepend_peak_bytes(&self, older_len: usize) -> usize {
+        self.retained_allocation_bytes().saturating_add(
+            older_len
+                .saturating_add(self.history_retained_len)
+                .saturating_mul(2),
+        )
+    }
+
+    /// Splices older journal output in front of the held history and rebuilds
+    /// the parser so its scrollback reaches those rows. The snapshot begins by
+    /// clearing the screen, so the rebuilt visible rows equal the live ones.
+    /// Claims the older output only when the budget trimmed none of it; once
+    /// trimmed, no further older history is claimed, which ends the paging.
+    pub(crate) fn prepend_history(&mut self, older: &[u8], first_sequence: u64) {
+        if older.is_empty() {
+            return;
+        }
+        const FEED_CHUNK_BYTES: usize = 64 * 1024;
+        let mut combined =
+            Vec::with_capacity(older.len().saturating_add(self.history_retained_len));
+        combined.extend_from_slice(older);
+        for segment in &self.history_segments {
+            combined.extend_from_slice(&segment.bytes[segment.start..]);
+        }
+        let (rows, cols) = self.parser.screen().size();
+        // Release the old parser before the rebuilt one allocates.
+        self.parser = vt100::Parser::new(1, 1, 0);
+        self.parser = vt100::Parser::new(rows, cols, self.render_scrollback_rows);
+        self.history_segments.clear();
+        self.history_segments.push_back(HistorySegment {
+            bytes: Arc::new(Vec::new()),
+            start: 0,
+        });
+        self.history_retained_len = 0;
+        self.history_allocation_bytes = 0;
+        self.history_origin = Arc::new(());
+        self.osc8_links.clear();
+        self.osc8_link_allocation_bytes = 0;
+        self.osc8_stream.clear();
+        self.scrollback_total = 0;
+        for chunk in combined.chunks(FEED_CHUNK_BYTES) {
+            self.append_history(chunk);
+            self.observe_osc8_links(chunk);
+            self.parser.process(chunk);
+        }
+        self.history_base_sequence =
+            (self.history_retained_len == combined.len()).then_some(first_sequence);
+        self.refresh_scrollback_total();
+        self.refresh_visible_text_fingerprint();
+        if let Some(offset) = self
+            .historical_viewport
+            .as_ref()
+            .map(|viewport| viewport.screen.scrollback())
+        {
+            let mut screen = self.parser.screen().clone();
+            screen.set_scrollback(offset);
+            let scrollback_total = Self::measure_scrollback_total(&mut screen);
+            self.historical_viewport = Some(HistoricalViewport {
+                screen,
+                scrollback_total,
+            });
+        }
+        self.invalidate_live_render_if_visible();
+    }
+
     /// Recovers an engine whose retained allocation exceeds `limit` so its
     /// completed command can publish instead of being deferred forever (which
     /// fenced the pane and, through the shared parser queue, the whole client).
@@ -2333,6 +2419,64 @@ mod tests {
     }
 }
 
+/// App-side paging state for one pane's older output. The engine also checks
+/// every reply against its own base, so a stale reply is dropped, not spliced.
+#[derive(Debug, Default)]
+pub(crate) struct HistoryPaging {
+    next_before_sequence: Option<u64>,
+    retained_bytes: usize,
+    request_in_flight: bool,
+}
+
+impl HistoryPaging {
+    /// The `before` sequence for the next older-history request, or `None`
+    /// when a request is pending, the budget is full, or the journal start is reached.
+    pub(crate) fn next_request(&self, budget_bytes: usize) -> Option<u64> {
+        if self.request_in_flight || self.retained_bytes >= budget_bytes {
+            return None;
+        }
+        self.next_before_sequence
+    }
+
+    pub(crate) fn mark_request_sent(&mut self) {
+        self.request_in_flight = true;
+    }
+
+    pub(crate) fn reply_arrived(&mut self) {
+        self.request_in_flight = false;
+    }
+
+    pub(crate) fn snapshot_applied(&mut self, through_sequence: u64, byte_len: usize) {
+        self.next_before_sequence = Some(through_sequence.saturating_add(1));
+        self.retained_bytes = byte_len;
+        self.request_in_flight = false;
+    }
+
+    /// A delta replay does not start from a snapshot, so no older output can
+    /// be requested until the next snapshot.
+    pub(crate) fn replay_applied(&mut self, byte_len: usize) {
+        self.next_before_sequence = None;
+        self.retained_bytes = byte_len;
+        self.request_in_flight = false;
+    }
+
+    pub(crate) fn output_applied(&mut self, byte_len: usize) {
+        self.retained_bytes = self.retained_bytes.saturating_add(byte_len);
+    }
+
+    pub(crate) fn history_applied(
+        &mut self,
+        first_sequence: u64,
+        byte_len: usize,
+        reaches_journal_start: bool,
+    ) {
+        self.next_before_sequence =
+            (!reaches_journal_start && byte_len > 0).then_some(first_sequence);
+        self.retained_bytes = self.retained_bytes.saturating_add(byte_len);
+        self.request_in_flight = false;
+    }
+}
+
 /// Interactive facade: reads immutable published state and submits ordered
 /// semantic commands. Standalone mutable engines exist only in test fixtures.
 pub struct TerminalView {
@@ -2344,6 +2488,7 @@ pub struct TerminalView {
     pub(crate) admission_error: Option<String>,
     pub(crate) admission_pressure: Option<crate::terminal_parsing::ParserPressure>,
     pub(crate) applied_ordinal: u64,
+    pub(crate) history_paging: HistoryPaging,
     render_cache: RefCell<Option<TerminalRenderCache>>,
     #[cfg(any(test, feature = "ui-capture"))]
     standalone: Option<TerminalState>,
@@ -2366,6 +2511,7 @@ impl TerminalView {
             admission_error: None,
             admission_pressure: None,
             applied_ordinal: 0,
+            history_paging: HistoryPaging::default(),
             render_cache: RefCell::new(None),
             #[cfg(any(test, feature = "ui-capture"))]
             standalone: Some(TerminalState::with_scrollback_budget_mib(

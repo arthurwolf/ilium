@@ -95,12 +95,83 @@ pub(crate) fn terminal_parser_retry_order(
 
 #[path = "app_semantic_animation.rs"]
 mod semantic_presentation;
+// A child module of `app` so it can use the private restructure request path.
+#[path = "app_attention.rs"]
+mod attention_app;
 use ilium_ipc::TextTriggerSettings;
 
 /// Rows scrolled per wheel notch over a terminal pane's own scrollback --
 /// matches `tree_state.scroll_up(3)`/`scroll_down(3)`'s existing per-notch
 /// amount elsewhere in this crate.
 const TERMINAL_WHEEL_SCROLL_LINES: u16 = 3;
+/// Largest older-output reply asked for per scroll; the server caps it again.
+const TERMINAL_HISTORY_REQUEST_BYTES: u32 = 1024 * 1024;
+
+/// What an accepted terminal command means for its pane's older-history paging.
+enum HistoryPagingChange {
+    Snapshot {
+        through_sequence: u64,
+        byte_len: usize,
+    },
+    Replay {
+        byte_len: usize,
+    },
+    Output {
+        byte_len: usize,
+    },
+    History {
+        first_sequence: u64,
+        byte_len: usize,
+        reaches_journal_start: bool,
+    },
+}
+
+impl HistoryPagingChange {
+    fn of(body: &crate::terminal_parsing::PaneCommand) -> Option<Self> {
+        use crate::terminal_parsing::PaneCommand;
+        match body {
+            PaneCommand::Snapshot {
+                sequence, bytes, ..
+            } => Some(Self::Snapshot {
+                through_sequence: *sequence,
+                byte_len: bytes.len(),
+            }),
+            PaneCommand::Replay { bytes, .. } => Some(Self::Replay {
+                byte_len: bytes.len(),
+            }),
+            PaneCommand::Output { bytes, .. } => Some(Self::Output {
+                byte_len: bytes.len(),
+            }),
+            PaneCommand::PrependHistory {
+                first_sequence,
+                bytes,
+                reaches_journal_start,
+                ..
+            } => Some(Self::History {
+                first_sequence: *first_sequence,
+                byte_len: bytes.len(),
+                reaches_journal_start: *reaches_journal_start,
+            }),
+            _ => None,
+        }
+    }
+
+    fn apply(self, paging: &mut crate::terminal_view::HistoryPaging) {
+        match self {
+            Self::Snapshot {
+                through_sequence,
+                byte_len,
+            } => paging.snapshot_applied(through_sequence, byte_len),
+            Self::Replay { byte_len } => paging.replay_applied(byte_len),
+            Self::Output { byte_len } => paging.output_applied(byte_len),
+            Self::History {
+                first_sequence,
+                byte_len,
+                reaches_journal_start,
+            } => paging.history_applied(first_sequence, byte_len, reaches_journal_start),
+        }
+    }
+}
 
 /// File-backed chatrooms need eventual observation of external agent writes,
 /// but filesystem repair and parsing do not belong on animation cadences.
@@ -226,6 +297,10 @@ pub enum RightPanelTarget {
     Chatroom {
         project_id: NodeId,
     },
+    /// The global attention queue: every agent that needs the user, listed in
+    /// the order the "Next: needs you" button visits them. Like the chatroom
+    /// it owns no PTY, snapshot or split-view slot.
+    Attention,
     Pane {
         pane_id: NodeId,
     },
@@ -240,6 +315,7 @@ impl RightPanelTarget {
         match self {
             Self::Empty
             | Self::Chatroom { .. }
+            | Self::Attention
             | Self::SplitView {
                 active_pane_id: None,
                 ..
@@ -336,6 +412,8 @@ pub enum Mode {
     SmartCopy,
     /// Full right-panel semantic history for one exact agent pane.
     AgentDebugLog(AgentDebugLogViewState),
+    /// Full, untruncated text of a pane's displayed last prompt.
+    LastPromptDialog(crate::last_prompt_toolbar::LastPromptDialogState),
     /// Destination path prompt layered over its exact debug-log view state.
     AgentDebugSavePath(NodeId, TextPromptState),
     /// Form for one server-owned terminal input countdown.
@@ -381,7 +459,7 @@ pub enum Mode {
     /// (see `crate::settings_ui`'s module doc comment for the UI/UX brief).
     /// Reached via `Action::Settings`, the tree footer's settings button, or
     /// `ContextMenuAction::Settings` (right-click the tree panel).
-    Settings(SettingsState),
+    Settings(Box<SettingsState>),
     /// Read-only explanation and animated specimen opened from a Settings row.
     /// The parent Settings state remains on the modal stack for exact return.
     SettingsHelp(crate::settings_help::dialog::SettingsHelpState),
@@ -484,6 +562,8 @@ pub enum SettingsTab {
     VoiceControl,
     ResetPlanning,
     AgentMonitoring,
+    /// Attention queue: mode, press-to-sort, turbo width, expiry and model.
+    Attention,
     /// Agent spend indicators and how "expensive" is decided.
     Cost,
     /// Scans agent transcripts and recommends the auto-compaction threshold
@@ -653,11 +733,12 @@ impl InferenceTestState {
 
 impl SettingsTab {
     /// Every tab, in the order the tab list renders them.
-    pub const ALL: [SettingsTab; 26] = [
+    pub const ALL: [SettingsTab; 27] = [
         Self::Appearance,
         Self::Padding,
         Self::Icons,
         Self::AgentMonitoring,
+        Self::Attention,
         Self::Cost,
         Self::Optimization,
         Self::RemoteCompaction,
@@ -704,6 +785,7 @@ impl SettingsTab {
             Self::VoiceControl => "Voice control",
             Self::ResetPlanning => "Reset planning",
             Self::AgentMonitoring => "Agent Monitoring",
+            Self::Attention => "Attention",
             Self::Cost => "Agent Cost",
             Self::Optimization => "Optimization",
             Self::RemoteCompaction => "Remote compaction",
@@ -891,6 +973,26 @@ impl TerminalRow {
         Self::SmartCopyLight,
         Self::SmartCopyLightKey,
         Self::EngineMemoryBudget,
+    ];
+}
+/// Rows of the Attention settings tab, in display order. All five are generic
+/// choice/number rows (`SettingsChoice` / `SettingsNumber`), so keyboard,
+/// mouse and dialogs need no tab-specific handlers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AttentionRow {
+    Mode,
+    PressSorts,
+    TurboConcurrency,
+    ExpirySeconds,
+    Model,
+}
+impl AttentionRow {
+    pub const ALL: [Self; 5] = [
+        Self::Mode,
+        Self::PressSorts,
+        Self::TurboConcurrency,
+        Self::ExpirySeconds,
+        Self::Model,
     ];
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1954,6 +2056,9 @@ pub struct PendingRestructureRequest {
     /// The worker returns it unchanged so the server can preserve anything
     /// that arrived after inference began as dirty for the next pass.
     pub inference_activity_revisions: Vec<ilium_core::NodeActivityRevision>,
+    /// Shared attention mode: the prompt also asks for the optional
+    /// `attention` list, which rides back on the worker result.
+    pub include_attention: bool,
 }
 
 /// Distinguishes an explicit user action from a passive lifecycle trigger.
@@ -2048,6 +2153,14 @@ pub(crate) struct FrozenDialogLayout {
 pub(crate) const FROZEN_DIALOG_BUTTON_LABEL: &str = "      [ Unfreeze agent ]      ";
 /// Shown while an unfreeze replacement is in flight; cleared once the replacement pane takes its tree slot.
 pub(crate) const UNFREEZING_AGENT_STATUS: &str = "Unfreezing agent…";
+
+/// Earlier prompts of one agent session, read from its transcript off the
+/// UI thread.
+struct LastPromptBackfill {
+    pane_id: NodeId,
+    session_id: String,
+    prompts: Vec<String>,
+}
 
 pub struct App {
     /// The session this client is attached to (used to resolve the UDS
@@ -2233,6 +2346,10 @@ pub struct App {
     /// used for IPC and background workers.
     pub voice_settings: VoiceSettings,
     pub reset_planning_settings: ResetPlanningSettings,
+    /// Attention-queue mode, press-to-sort, turbo width, expiry and model.
+    pub attention_settings: crate::attention::AttentionSettings,
+    /// Live attention queue, refresh gate, persistence and arrival state.
+    pub attention: crate::attention::state::AttentionState,
     /// Agent-spend indicator settings (the Agent Cost tab).
     pub cost_settings: CostSettings,
     /// Text being typed into the sparkline-window field of the Agent Cost
@@ -2390,6 +2507,19 @@ pub struct App {
     /// the hover tooltip. Scoped by pane so more than one visible toolbar
     /// (a split view) can't leave a stale hover on an unrelated pane.
     pub hovered_agent_toolbar_action: Option<(NodeId, AgentToolbarAction)>,
+    /// Submitted prompts per agent pane, navigated by the banner toolbar.
+    pub last_prompt_history: HashMap<NodeId, crate::last_prompt_toolbar::PromptHistory>,
+    /// Agent session whose transcript was already requested for each pane's
+    /// prompt history, so each session is read once.
+    last_prompt_backfill_requested: HashMap<NodeId, String>,
+    last_prompt_backfill_sender: tokio::sync::mpsc::UnboundedSender<LastPromptBackfill>,
+    last_prompt_backfill_receiver: tokio::sync::mpsc::UnboundedReceiver<LastPromptBackfill>,
+    /// Panes whose last-prompt banner the user closed. Per agent and per
+    /// client run; the global setting is untouched.
+    pub last_prompt_banner_closed: HashSet<NodeId>,
+    /// The banner toolbar button under the pointer, for its hover highlight.
+    pub hovered_last_prompt_button:
+        Option<(NodeId, crate::last_prompt_toolbar::PromptToolbarButton)>,
     /// Active frozen viewport and progressively validated semantic regions.
     pub smart_copy_session: Option<crate::smart_copy::SmartCopySession>,
     /// Set while Smart Copy light (no model call) owns [`Mode::SmartCopy`].
@@ -2784,6 +2914,7 @@ impl App {
         let started_at = Instant::now();
         #[cfg(test)]
         let (test_request_execution, test_request_client) = crate::execution::test_request_bank();
+        let last_prompt_backfill_channel = tokio::sync::mpsc::unbounded_channel();
         Self {
             session_name,
             tree: Tree::new(),
@@ -2904,6 +3035,8 @@ impl App {
             git_settings_error: None,
             voice_settings: VoiceSettings::default(),
             reset_planning_settings: ResetPlanningSettings::default(),
+            attention_settings: crate::attention::AttentionSettings::default(),
+            attention: crate::attention::state::AttentionState::default(),
             cost_settings: CostSettings::default(),
             cost_window_input: None,
             remote_compaction_settings:
@@ -2991,6 +3124,12 @@ impl App {
             agent_toolbar_latched_panes: HashSet::new(),
             agent_toolbar_effort: HashMap::new(),
             hovered_agent_toolbar_action: None,
+            last_prompt_history: HashMap::new(),
+            last_prompt_backfill_requested: HashMap::new(),
+            last_prompt_backfill_sender: last_prompt_backfill_channel.0,
+            last_prompt_backfill_receiver: last_prompt_backfill_channel.1,
+            last_prompt_banner_closed: HashSet::new(),
+            hovered_last_prompt_button: None,
             smart_copy_session: None,
             smart_copy_light: None,
             diagnostic_view: None,
@@ -4372,7 +4511,9 @@ impl App {
     /// comparison without a heap allocation on every output turn.
     pub(crate) fn displayed_pane_slots(&self) -> [Option<NodeId>; 4] {
         match self.right_panel_target {
-            RightPanelTarget::Empty | RightPanelTarget::Chatroom { .. } => [None; 4],
+            RightPanelTarget::Empty
+            | RightPanelTarget::Chatroom { .. }
+            | RightPanelTarget::Attention => [None; 4],
             RightPanelTarget::Pane { pane_id } => [Some(pane_id), None, None, None],
             RightPanelTarget::SplitView { split_id, .. } => {
                 let mut pane_slots = [None; 4];
@@ -4426,7 +4567,9 @@ impl App {
             RightPanelTarget::SplitView { split_id, .. } => {
                 self.tree.parent_of(pane_id) == Some(split_id)
             }
-            RightPanelTarget::Empty | RightPanelTarget::Chatroom { .. } => false,
+            RightPanelTarget::Empty
+            | RightPanelTarget::Chatroom { .. }
+            | RightPanelTarget::Attention => false,
         }
     }
 
@@ -4580,7 +4723,9 @@ impl App {
 
     pub fn pane_viewports(&self) -> Vec<PaneViewport> {
         let viewports = match self.right_panel_target {
-            RightPanelTarget::Empty | RightPanelTarget::Chatroom { .. } => Vec::new(),
+            RightPanelTarget::Empty
+            | RightPanelTarget::Chatroom { .. }
+            | RightPanelTarget::Attention => Vec::new(),
             RightPanelTarget::Pane { pane_id } => split_layout::allocate_viewports(
                 self.layout.pane_area,
                 SplitOrientation::Vertical,
@@ -4619,7 +4764,9 @@ impl App {
                 } else {
                     viewport
                 };
-                let viewport = if self.ui_settings.last_prompt_enabled {
+                let viewport = if self.ui_settings.last_prompt_enabled
+                    && !self.last_prompt_banner_closed.contains(&viewport.pane_id)
+                {
                     // In a physically clipped pane, leave room for the progress
                     // gauge and a detail row as well as the terminal itself.
                     let minimum_progress_rows = if self.ui_settings.progress_monitor_enabled {
@@ -4698,8 +4845,184 @@ impl App {
         };
         match status {
             PaneStatus::AgentUnavailable(recovery) => recovery.last_prompt.as_deref(),
-            PaneStatus::Agent(_) => self.tree.last_prompt(pane_id),
+            PaneStatus::Agent(_) => self
+                .last_prompt_history
+                .get(&pane_id)
+                .and_then(crate::last_prompt_toolbar::PromptHistory::displayed)
+                .or_else(|| self.tree.last_prompt(pane_id)),
             _ => None,
+        }
+    }
+
+    /// Adds the pane's newest submitted prompt to its history; `None`
+    /// (pane recreation) forgets the history.
+    pub(crate) fn record_last_prompt(&mut self, pane_id: NodeId, prompt: Option<&str>) {
+        match prompt {
+            Some(prompt) => self
+                .last_prompt_history
+                .entry(pane_id)
+                .or_default()
+                .record(prompt),
+            None => {
+                self.last_prompt_history.remove(&pane_id);
+            }
+        }
+    }
+
+    /// Catches prompts that reached the tree without a live event (the
+    /// initial snapshot) so they join the history.
+    pub(crate) fn sync_last_prompt_histories(&mut self) {
+        self.apply_last_prompt_backfills();
+        self.request_last_prompt_backfills();
+        let missing: Vec<(NodeId, String)> = self
+            .panes
+            .keys()
+            .filter_map(|pane_id| {
+                let prompt = self.tree.last_prompt(*pane_id).filter(|p| !p.is_empty())?;
+                let newest_known = self
+                    .last_prompt_history
+                    .get(pane_id)
+                    .is_some_and(|history| history.newest() == Some(prompt));
+                (!newest_known).then(|| (*pane_id, prompt.to_string()))
+            })
+            .collect();
+        for (pane_id, prompt) in missing {
+            self.record_last_prompt(pane_id, Some(&prompt));
+        }
+    }
+
+    /// Starts one background read of the transcript of every agent pane
+    /// whose session has not been read yet; its earlier prompts become the
+    /// banner's browsable history.
+    fn request_last_prompt_backfills(&mut self) {
+        let Some(home_dir) = directories::BaseDirs::new().map(|dirs| dirs.home_dir().to_path_buf())
+        else {
+            return;
+        };
+        let pane_ids: Vec<NodeId> = self.panes.keys().copied().collect();
+        for pane_id in pane_ids {
+            let Some((agent_class, session_id, project_path)) =
+                self.known_agent_history_context(pane_id)
+            else {
+                continue;
+            };
+            if self.last_prompt_backfill_requested.get(&pane_id) == Some(&session_id) {
+                continue;
+            }
+            self.last_prompt_backfill_requested
+                .insert(pane_id, session_id.clone());
+            let transcript_hint = self.agent_transcript_paths.get(&pane_id).cloned();
+            let sender = self.last_prompt_backfill_sender.clone();
+            let home_dir = home_dir.clone();
+            let spawned = std::thread::Builder::new()
+                .name("last-prompt-history".into())
+                .spawn(move || {
+                    let Some(path) =
+                        crate::agent_history_path::verified_jsonl_history_path_with_hint(
+                            &home_dir,
+                            &project_path,
+                            &agent_class,
+                            &session_id,
+                            transcript_hint.as_deref(),
+                        )
+                    else {
+                        return;
+                    };
+                    let Ok(prompts) = crate::transcript_context::user_prompt_history(
+                        &agent_class,
+                        &path,
+                        crate::last_prompt_toolbar::MAX_HISTORY_ENTRIES,
+                    ) else {
+                        return;
+                    };
+                    // The receiver is gone only when the app is shutting down.
+                    let _ = sender.send(LastPromptBackfill {
+                        pane_id,
+                        session_id,
+                        prompts,
+                    });
+                });
+            if spawned.is_err() {
+                self.last_prompt_backfill_requested.remove(&pane_id);
+            }
+        }
+    }
+
+    fn apply_last_prompt_backfills(&mut self) {
+        while let Ok(backfill) = self.last_prompt_backfill_receiver.try_recv() {
+            // A pane that moved to another session meanwhile is not this result's.
+            if self.last_prompt_backfill_requested.get(&backfill.pane_id)
+                != Some(&backfill.session_id)
+            {
+                continue;
+            }
+            self.last_prompt_history
+                .entry(backfill.pane_id)
+                .or_default()
+                .backfill(&backfill.prompts);
+        }
+    }
+
+    /// Which banner-toolbar navigation buttons have somewhere to go.
+    pub(crate) fn last_prompt_toolbar_visibility(
+        &self,
+        pane_id: NodeId,
+    ) -> crate::last_prompt_toolbar::ToolbarVisibility {
+        self.last_prompt_history
+            .get(&pane_id)
+            .map(crate::last_prompt_toolbar::PromptHistory::visibility)
+            .unwrap_or(crate::last_prompt_toolbar::ToolbarVisibility {
+                older: false,
+                newer: false,
+            })
+    }
+
+    /// Whether the agent toolbar offers a button re-opening the banner:
+    /// enabled in Settings but closed for this agent.
+    pub(crate) fn last_prompt_reopen_available(&self, pane_id: NodeId) -> bool {
+        self.ui_settings.last_prompt_enabled && self.last_prompt_banner_closed.contains(&pane_id)
+    }
+
+    pub(crate) fn close_last_prompt_banner(&mut self, pane_id: NodeId) {
+        self.last_prompt_banner_closed.insert(pane_id);
+        self.hovered_last_prompt_button = None;
+    }
+
+    pub(crate) fn reopen_last_prompt_banner(&mut self, pane_id: NodeId) {
+        self.last_prompt_banner_closed.remove(&pane_id);
+    }
+
+    /// Runs one banner-toolbar button for `pane_id`.
+    pub(crate) fn execute_last_prompt_button(
+        &mut self,
+        pane_id: NodeId,
+        button: crate::last_prompt_toolbar::PromptToolbarButton,
+    ) {
+        use crate::last_prompt_toolbar::PromptToolbarButton as Button;
+        match button {
+            Button::Older => {
+                if let Some(history) = self.last_prompt_history.get_mut(&pane_id) {
+                    history.show_older();
+                }
+            }
+            Button::Newer => {
+                if let Some(history) = self.last_prompt_history.get_mut(&pane_id) {
+                    history.show_newer();
+                }
+            }
+            Button::Copy => {
+                if let Some(text) = self.display_last_agent_prompt(pane_id).map(str::to_owned) {
+                    self.copy_terminal_text_to_clipboard(text, "Prompt copied to clipboard");
+                }
+            }
+            Button::Expand => {
+                if let Some(text) = self.display_last_agent_prompt(pane_id).map(str::to_owned) {
+                    self.mode = Mode::LastPromptDialog(
+                        crate::last_prompt_toolbar::LastPromptDialogState::new(pane_id, text),
+                    );
+                }
+            }
+            Button::Close => self.close_last_prompt_banner(pane_id),
         }
     }
 
@@ -4707,6 +5030,7 @@ impl App {
     /// never changes terminal dimensions.
     pub fn shows_last_prompt_banner(&self, pane_id: NodeId) -> bool {
         self.ui_settings.last_prompt_enabled
+            && !self.last_prompt_banner_closed.contains(&pane_id)
             && self
                 .display_last_agent_prompt(pane_id)
                 .is_some_and(|text| !text.is_empty())
@@ -5173,6 +5497,8 @@ impl App {
     pub fn reconcile_right_panel_target(&mut self) {
         self.right_panel_target = match self.right_panel_target.clone() {
             RightPanelTarget::Empty => RightPanelTarget::Empty,
+            // Turning the feature off closes its panel.
+            RightPanelTarget::Attention if self.attention_enabled() => RightPanelTarget::Attention,
             RightPanelTarget::Chatroom { project_id }
                 if self.tree.get(project_id).is_some_and(Node::is_project)
                     && self
@@ -6005,6 +6331,24 @@ impl App {
 
     pub fn apply_reset_planning_settings(&mut self, settings: ResetPlanningSettings) {
         self.reset_planning_settings = settings;
+    }
+
+    /// Installs loaded or edited attention settings, clamped into range.
+    pub fn apply_attention_settings(&mut self, settings: crate::attention::AttentionSettings) {
+        self.attention_settings = settings.normalized();
+        self.sync_attention_mode();
+    }
+
+    /// Stores and persists one attention-settings edit made by a Settings row
+    /// or the control API.
+    pub fn save_attention_settings(&mut self, settings: crate::attention::AttentionSettings) {
+        self.apply_attention_settings(settings);
+        self.persist_configuration(
+            crate::filesystem::configuration::ConfigurationChange::Attention(
+                self.attention_settings.clone(),
+            ),
+            "attention settings",
+        );
     }
 
     pub fn apply_cost_settings(&mut self, settings: CostSettings) {
@@ -8566,7 +8910,7 @@ impl App {
     /// every setting added to it) must keep matching.
     pub fn action_open_settings(&mut self) {
         self.refresh_agent_setup_statuses();
-        self.mode = Mode::Settings(SettingsState::new());
+        self.mode = Mode::Settings(Box::default());
     }
 
     /// Opens the full-screen workspace finder. Its index is intentionally
@@ -10151,6 +10495,7 @@ impl App {
                 | AgentToolbarAction::ToggleTextSelection
                 | AgentToolbarAction::CopyScreen
                 | AgentToolbarAction::SmartCopy
+                | AgentToolbarAction::ShowLastPrompt
         );
         let agent_is_gone = self.tree.get(pane_id).is_some_and(|node| match &node.kind {
             NodeKind::Pane { status, .. } => status.agent_recovery().is_some(),
@@ -10167,6 +10512,7 @@ impl App {
         }
         match action {
             AgentToolbarAction::Close => self.settings_toggle_agent_toolbar(),
+            AgentToolbarAction::ShowLastPrompt => self.reopen_last_prompt_banner(pane_id),
             AgentToolbarAction::ToggleTextSelection => {
                 self.settings_toggle_terminal_text_selection()
             }
@@ -11900,6 +12246,34 @@ impl App {
                     complete: is_complete,
                 },
             ),
+            ilium_ipc::ServerEvent::TerminalSnapshot {
+                pane_id,
+                through_sequence,
+                bytes,
+                is_complete,
+            } => (
+                pane_id,
+                PaneCommand::Snapshot {
+                    sequence: through_sequence,
+                    bytes,
+                    complete: is_complete,
+                },
+            ),
+            ilium_ipc::ServerEvent::TerminalHistory {
+                pane_id,
+                before_sequence,
+                first_sequence,
+                bytes,
+                reaches_journal_start,
+            } => (
+                pane_id,
+                PaneCommand::PrependHistory {
+                    before_sequence,
+                    first_sequence,
+                    bytes,
+                    reaches_journal_start,
+                },
+            ),
             other => return Err(Box::new(other)),
         };
         let is_displayed = self.is_pane_displayed(pane_id);
@@ -11943,13 +12317,19 @@ impl App {
                 view.admission_error = Some(error);
             }
         }
+        let paging_change = HistoryPagingChange::of(&body);
         let rejected = if let Some(frontend) = &mut view.frontend {
             frontend.submit(body).err()
         } else {
             Some(body)
         };
         match rejected {
-            None => Ok(()),
+            None => {
+                if let Some(change) = paging_change {
+                    change.apply(&mut view.history_paging);
+                }
+                Ok(())
+            }
             Some(PaneCommand::Output {
                 first,
                 sequence,
@@ -11960,6 +12340,28 @@ impl App {
                 first_sequence: first,
                 sequence,
                 bytes,
+            })),
+            Some(PaneCommand::Snapshot {
+                sequence,
+                bytes,
+                complete,
+            }) => Err(Box::new(ilium_ipc::ServerEvent::TerminalSnapshot {
+                pane_id,
+                through_sequence: sequence,
+                bytes,
+                is_complete: complete,
+            })),
+            Some(PaneCommand::PrependHistory {
+                before_sequence,
+                first_sequence,
+                bytes,
+                reaches_journal_start,
+            }) => Err(Box::new(ilium_ipc::ServerEvent::TerminalHistory {
+                pane_id,
+                before_sequence,
+                first_sequence,
+                bytes,
+                reaches_journal_start,
             })),
             Some(PaneCommand::Replay {
                 sequence,
@@ -11972,6 +12374,28 @@ impl App {
                 is_complete: complete,
             })),
             _ => Ok(()),
+        }
+    }
+    /// Asks the server for older output of one terminal pane when the user
+    /// scrolls up and the pane's retained history is still below its budget.
+    fn request_older_terminal_history(&mut self, pane_id: NodeId) {
+        let Some(PaneRuntime::Terminal(view)) = self.panes.get_mut(&pane_id) else {
+            return;
+        };
+        let budget_bytes = crate::terminal_view::history_budget_bytes(view.budget_mib);
+        let Some(before_sequence) = view.history_paging.next_request(budget_bytes) else {
+            return;
+        };
+        view.history_paging.mark_request_sent();
+        let queued = self.queue_request(ClientRequest::TerminalHistory {
+            pane_id,
+            before_sequence,
+            max_bytes: TERMINAL_HISTORY_REQUEST_BYTES,
+        });
+        if !queued {
+            if let Some(PaneRuntime::Terminal(view)) = self.panes.get_mut(&pane_id) {
+                view.history_paging.reply_arrived();
+            }
         }
     }
     /// The start-up dialog shows until the server's initial state has arrived.
@@ -12623,6 +13047,9 @@ impl App {
                         }
                     }
                     self.clear_terminal_selection_for(pane_id);
+                    if up {
+                        self.request_older_terminal_history(pane_id);
+                    }
                 } else {
                     self.queue_preflighted_terminal_request(request);
                 }
@@ -15350,7 +15777,7 @@ impl App {
 
     /// Uses the host clipboard for terminal text while keeping UI feedback at
     /// the terminal interaction boundary.
-    fn copy_terminal_text_to_clipboard(&mut self, text: String, success_message: &str) {
+    pub(crate) fn copy_terminal_text_to_clipboard(&mut self, text: String, success_message: &str) {
         if success_message.len() > 1024 {
             self.status_message =
                 Some("Clipboard acknowledgement label exceeds its admission limit".into());
@@ -17457,8 +17884,13 @@ impl App {
 
     pub fn handle_pane_key(&mut self, key: crossterm::event::KeyEvent) {
         use crossterm::event::{KeyCode, KeyModifiers};
+        self.dismiss_attention_arrival();
         if matches!(self.right_panel_target, RightPanelTarget::Chatroom { .. }) {
             self.handle_chatroom_key(key);
+            return;
+        }
+        if matches!(self.right_panel_target, RightPanelTarget::Attention) {
+            self.handle_attention_key(key);
             return;
         }
         let Some(id) = self.active_pane_id() else {
@@ -18298,6 +18730,35 @@ impl App {
         project_id: NodeId,
         request_origin: RestructureRequestOrigin,
     ) {
+        let attention = self.default_restructure_attention();
+        self.request_project_restructure_with_attention(project_id, request_origin, attention);
+    }
+
+    /// Queues one restructure call for `project_id`. With `attention` set the
+    /// same call also asks for the attention list; `apply_plan: false` makes
+    /// it an attention-only call that skips the "nothing changed" shortcut,
+    /// shows no restructure job and discards the sort plan. Returns whether a
+    /// worker request was queued.
+    fn request_project_restructure_with_attention(
+        &mut self,
+        project_id: NodeId,
+        request_origin: RestructureRequestOrigin,
+        attention: Option<attention_app::AttentionRequest>,
+    ) -> bool {
+        let is_attention_only = attention.is_some_and(|request| !request.apply_plan);
+        // The worker silently ignores a second request for a project it is
+        // already working on, so two calls for one project must never overlap.
+        if self
+            .attention
+            .shared_calls
+            .get(&project_id)
+            .is_some_and(|call| is_attention_only || !call.apply_plan)
+        {
+            if !request_origin.is_automatic() {
+                self.status_message = Some("That project is already restructuring".to_string());
+            }
+            return false;
+        }
         if self
             .project_restructure_jobs
             .get(&project_id)
@@ -18313,19 +18774,19 @@ impl App {
             if !request_origin.is_automatic() {
                 self.status_message = Some("That project is already restructuring".to_string());
             }
-            return;
+            return false;
         }
         let Some(project) = self.tree.get(project_id) else {
             if !request_origin.is_automatic() {
                 self.status_message = Some("Project no longer exists".to_string());
             }
-            return;
+            return false;
         };
         let Some(_project_path) = project.project_path() else {
             if !request_origin.is_automatic() {
                 self.status_message = Some("That entry is not a project".to_string());
             }
-            return;
+            return false;
         };
         let project_name = project.name.clone();
         let has_unrestructured_activity =
@@ -18336,14 +18797,14 @@ impl App {
                         self.status_message =
                             Some(format!("Could not read project activity: {error}"));
                     }
-                    return;
+                    return false;
                 }
             };
         let has_recommendations = self
             .tree
             .project_has_complete_animation_recommendations(project_id)
             .unwrap_or(false);
-        if !has_unrestructured_activity && has_recommendations {
+        if !is_attention_only && !has_unrestructured_activity && has_recommendations {
             self.project_restructure_jobs.insert(
                 project_id,
                 ProjectRestructureJob {
@@ -18356,7 +18817,7 @@ impl App {
                 },
             );
             self.refresh_structure_loading();
-            return;
+            return false;
         }
         let contexts = crate::restructure::gather_project_leaf_contexts(
             &self.tree,
@@ -18372,7 +18833,7 @@ impl App {
                         self.status_message =
                             Some(format!("Could not read project structure: {error}"));
                     }
-                    return;
+                    return false;
                 }
             };
         let protected_split_views =
@@ -18383,7 +18844,7 @@ impl App {
                         self.status_message =
                             Some(format!("Could not read project split views: {error}"));
                     }
-                    return;
+                    return false;
                 }
             };
         let recommendation_snapshot =
@@ -18395,7 +18856,7 @@ impl App {
                             "Could not capture project recommendations: {error}"
                         ));
                     }
-                    return;
+                    return false;
                 }
             };
         let input_fingerprint =
@@ -18406,19 +18867,23 @@ impl App {
                 if !request_origin.is_automatic() {
                     self.status_message = Some(format!("Could not read project activity: {error}"));
                 }
-                return;
+                return false;
             }
         };
         if request_origin.is_automatic()
+            && !is_attention_only
             && !self.automatic_restructure_retry_allows(
                 project_id,
                 input_fingerprint,
                 Instant::now(),
             )
         {
-            return;
+            return false;
         }
         if contexts.is_empty() {
+            if is_attention_only {
+                return false;
+            }
             self.project_restructure_jobs.insert(
                 project_id,
                 ProjectRestructureJob {
@@ -18429,17 +18894,26 @@ impl App {
                 },
             );
             self.refresh_structure_loading();
-            return;
+            return false;
         }
-        self.project_restructure_jobs.insert(
-            project_id,
-            ProjectRestructureJob {
-                project_name: project_name.clone(),
-                state: ProjectRestructureState::Queued,
-                request_origin,
-                input_fingerprint,
-            },
-        );
+        let include_attention = match attention {
+            Some(request) => self.register_shared_attention_call(project_id, request),
+            None => false,
+        };
+        if is_attention_only && !include_attention {
+            return false;
+        }
+        if !is_attention_only {
+            self.project_restructure_jobs.insert(
+                project_id,
+                ProjectRestructureJob {
+                    project_name: project_name.clone(),
+                    state: ProjectRestructureState::Queued,
+                    request_origin,
+                    input_fingerprint,
+                },
+            );
+        }
         let title_observations = self.capture_title_observations(&contexts);
         self.pending_restructure_requests
             .push(PendingRestructureRequest {
@@ -18452,8 +18926,10 @@ impl App {
                 current_structure,
                 recommendation_snapshot,
                 inference_activity_revisions,
+                include_attention,
             });
         self.refresh_structure_loading();
+        true
     }
 
     /// Returns whether an automatic request may spend another provider call.
@@ -18620,6 +19096,7 @@ impl App {
     /// Cancellation must not enter failure memory, so a later opt-in can
     /// request a fresh plan with the same input.
     pub fn cancel_project_restructure_after_ai_decision(&mut self, project_id: NodeId) {
+        self.complete_shared_attention(project_id, crate::attention::runtime::SharedOutcome::Failed);
         self.project_restructure_jobs.remove(&project_id);
         self.refresh_structure_loading();
     }
@@ -18627,6 +19104,7 @@ impl App {
     /// Records a failure that happened before a restructure worker could be
     /// started, where no inference-time hierarchy snapshot exists to compare.
     pub fn fail_project_restructure(&mut self, project_id: NodeId, error: anyhow::Error) {
+        self.complete_shared_attention(project_id, crate::attention::runtime::SharedOutcome::Failed);
         let Some(job) = self.project_restructure_jobs.get(&project_id) else {
             return;
         };
@@ -18792,6 +19270,31 @@ impl App {
             self.settings_toggle_agent_toolbar();
             return;
         }
+        if let Some(banner) = viewport
+            .last_prompt_area
+            .filter(|banner| banner.contains(position) && self.shows_last_prompt_banner(id))
+        {
+            let button = crate::last_prompt_toolbar::button_at(
+                banner,
+                self.last_prompt_toolbar_visibility(id),
+                position,
+            );
+            self.hovered_last_prompt_button = button.map(|button| (id, button));
+            if let Some(button) = button {
+                if matches!(
+                    mouse.kind,
+                    crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left)
+                ) {
+                    self.execute_last_prompt_button(id, button);
+                }
+                return;
+            }
+        } else if self
+            .hovered_last_prompt_button
+            .is_some_and(|(hovered_id, _)| hovered_id == id)
+        {
+            self.hovered_last_prompt_button = None;
+        }
         if self
             .completed_agent_close_action(viewport)
             .is_some_and(|action| action.button_area.contains(position))
@@ -18843,6 +19346,7 @@ impl App {
                     effort,
                     show_labels: self.ui_settings.show_toolbar_labels,
                     selection_enabled: self.ui_settings.terminal_text_selection_enabled,
+                    show_prompt_reopen: self.last_prompt_reopen_available(id),
                 };
                 if let crossterm::event::MouseEventKind::Down(
                     button @ (crossterm::event::MouseButton::Left
@@ -21091,10 +21595,10 @@ mod tests {
                     app.animation_row_context().scene_status.as_deref(),
                     Some(report.as_str())
                 );
-                let parent = Mode::Settings(SettingsState {
+                let parent = Mode::Settings(Box::new(SettingsState {
                     tab: SettingsTab::Animations,
                     ..Default::default()
-                });
+                }));
                 let help = Mode::SettingsHelp(SettingsHelpState::new("AN-37", 1, MotionLevel::Off));
                 if use_parent_transition {
                     app.mode = Mode::Normal;
@@ -22307,11 +22811,11 @@ mod tests {
             .iter()
             .position(|row| *row == InferenceRow::Field(InferenceSettingField::OpenAiModel))
             .unwrap();
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::Inference,
             selected_row: index,
             ..Default::default()
-        });
+        }));
         crate::keys::handle_event(
             &mut app,
             crossterm::event::Event::Key(crossterm::event::KeyEvent::new(
@@ -22378,7 +22882,7 @@ mod tests {
                 ) == Some((InferenceRow::Field(InferenceSettingField::OpenAiModel), 1))
             })
             .expect("model row has a real mouse hit target");
-        app.mode = Mode::Settings(state);
+        app.mode = Mode::Settings(Box::new(state));
         crate::mouse::handle_mouse_event(
             &mut app,
             crossterm::event::MouseEvent {
@@ -27332,6 +27836,7 @@ mod tests {
             effort: EffortLevel::Auto,
             show_labels: app.ui_settings.show_toolbar_labels,
             selection_enabled: app.ui_settings.terminal_text_selection_enabled,
+            show_prompt_reopen: false,
         };
         let sol_rect = crate::agent_toolbar::button_rect_for(
             toolbar_area,
@@ -28276,7 +28781,9 @@ mod tests {
         assert_eq!(SettingsTab::Padding.next(), SettingsTab::Icons);
         assert_eq!(SettingsTab::Animations.next(), SettingsTab::Sound);
         assert_eq!(SettingsTab::Icons.next(), SettingsTab::AgentMonitoring);
-        assert_eq!(SettingsTab::AgentMonitoring.next(), SettingsTab::Cost);
+        assert_eq!(SettingsTab::AgentMonitoring.next(), SettingsTab::Attention);
+        assert_eq!(SettingsTab::Attention.next(), SettingsTab::Cost);
+        assert_eq!(SettingsTab::Cost.previous(), SettingsTab::Attention);
         assert_eq!(SettingsTab::Cost.next(), SettingsTab::Optimization);
         assert_eq!(
             SettingsTab::Optimization.next(),
@@ -28335,6 +28842,108 @@ mod tests {
                 .unwrap()
                 .reset_planning,
             app.reset_planning_settings
+        );
+    }
+
+    #[test]
+    fn attention_rows_persist_immediately_and_reject_out_of_range_numbers() {
+        use crate::attention::AttentionMode;
+        use crate::value_settings::SettingsNumber;
+        use crate::value_settings_choice::SettingsChoice;
+
+        let config_dir = tempfile::tempdir().unwrap();
+        let mut app = app();
+        app.config_dir = Some(config_dir.path().to_path_buf());
+        let directory = config_dir.path().to_path_buf();
+        assert_eq!(app.attention_settings.mode, AttentionMode::Shared);
+
+        // The Attention tab exposes five rows and the closed catalogs resolve each.
+        for (index, row) in AttentionRow::ALL.into_iter().enumerate() {
+            let choice = SettingsChoice::at(&app, SettingsTab::Attention, index);
+            let number = SettingsNumber::at(&app, SettingsTab::Attention, index);
+            assert_eq!(
+                (choice.is_some(), number.is_some()),
+                match row {
+                    AttentionRow::TurboConcurrency | AttentionRow::ExpirySeconds => (false, true),
+                    _ => (true, false),
+                },
+                "{row:?}"
+            );
+        }
+
+        app.save_settings_choice(
+            SettingsChoice::AttentionMode,
+            "InstantOnly",
+            directory.clone(),
+            None,
+        )
+        .unwrap();
+        app.save_settings_choice(
+            SettingsChoice::AttentionPressSorts,
+            "false",
+            directory.clone(),
+            None,
+        )
+        .unwrap();
+        app.save_settings_number(
+            SettingsNumber::AttentionTurboConcurrency,
+            "7",
+            directory.clone(),
+            None,
+        )
+        .unwrap();
+        app.save_settings_number(
+            SettingsNumber::AttentionExpirySeconds,
+            "900",
+            directory.clone(),
+            None,
+        )
+        .unwrap();
+        app.attention_settings.model_override = Some("synthetic-model".into());
+        app.save_settings_choice(
+            SettingsChoice::AttentionModel,
+            "synthetic-model",
+            directory.clone(),
+            None,
+        )
+        .unwrap();
+        assert!(app
+            .save_settings_number(
+                SettingsNumber::AttentionTurboConcurrency,
+                "65",
+                directory.clone(),
+                None
+            )
+            .is_err());
+        assert!(app
+            .save_settings_number(
+                SettingsNumber::AttentionExpirySeconds,
+                "59",
+                directory.clone(),
+                None
+            )
+            .is_err());
+        assert_eq!(app.attention_settings.turbo_concurrency, 7);
+        assert_eq!(app.attention_settings.expiry_seconds, 900);
+
+        app.settle_filesystem_for_test();
+        let loaded = crate::config::load(config_dir.path()).unwrap().attention;
+        assert_eq!(loaded, app.attention_settings);
+        assert_eq!(loaded.mode, AttentionMode::InstantOnly);
+        assert!(!loaded.press_sorts);
+        assert_eq!(loaded.model_override.as_deref(), Some("synthetic-model"));
+
+        // Choosing "Same as titles" clears the override again.
+        app.save_settings_choice(SettingsChoice::AttentionModel, "none", directory, None)
+            .unwrap();
+        app.settle_filesystem_for_test();
+        assert_eq!(app.attention_settings.model_override, None);
+        assert_eq!(
+            crate::config::load(config_dir.path())
+                .unwrap()
+                .attention
+                .model_override,
+            None
         );
     }
 

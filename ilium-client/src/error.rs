@@ -103,6 +103,12 @@ pub enum ClientError {
     Input(#[source] Box<InputRunError>),
     #[error("failed to enter raw/alternate-screen terminal mode: {0}")]
     TerminalSetup(#[source] std::io::Error),
+    /// The server closed or reset the connection while the window was
+    /// running (for example after it could not resynchronize a window that
+    /// fell behind). The terminal had been set up long before, so this is
+    /// not a `TerminalSetup` failure; the CLI may relaunch the window.
+    #[error("lost the connection to the ilium server: {0}")]
+    ServerConnectionLost(#[source] ilium_ipc::IpcError),
     #[error(transparent)]
     Connection(#[from] crate::connection::ConnectionError),
     #[error("session directory {0:?} is not a valid directory")]
@@ -137,6 +143,18 @@ pub enum ClientError {
     },
     #[error("failed to load Kilo Gateway paid proxies from MongoDB: {0}")]
     ProxyDatabase(#[from] crate::proxy_database::ProxyDatabaseError),
+}
+
+#[cfg(test)]
+mod connection_lost_message {
+    #[test]
+    fn lost_connection_is_not_reported_as_a_terminal_setup_failure() {
+        let reset =
+            ilium_ipc::IpcError::Io(std::io::Error::from(std::io::ErrorKind::ConnectionReset));
+        let message = super::ClientError::ServerConnectionLost(reset).to_string();
+        assert!(message.starts_with("lost the connection to the ilium server: "));
+        assert!(!message.contains("raw/alternate-screen"));
+    }
 }
 
 #[cfg(test)]

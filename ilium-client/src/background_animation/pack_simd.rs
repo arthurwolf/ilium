@@ -140,13 +140,13 @@ mod tests {
         let row_width = width * 2;
         let mut cells = vec![0; width * height];
         for cell_row in 0..height {
-            for dy in 0..4 {
+            for (dy, bit_row) in BITS.iter().enumerate() {
                 let row = cell_row * 4 + dy;
                 for column in 0..width {
-                    for dx in 0..2 {
+                    for (dx, &bit) in bit_row.iter().enumerate() {
                         let index = row * row_width + column * 2 + dx;
                         if dots[index] * density > thresholds[index] {
-                            cells[cell_row * width + column] |= BITS[dy][dx];
+                            cells[cell_row * width + column] |= bit;
                         }
                     }
                 }

@@ -214,8 +214,10 @@ impl Job for PreparationJob {
                         &loaded.images,
                         &self.picker,
                         rasterizer,
-                        self.key.width,
-                        self.key.heading,
+                        crate::markdown::render::PreparedRenderOptions {
+                            width: self.key.width,
+                            heading: self.key.heading,
+                        },
                         || context.stop_requested(),
                         text,
                     )

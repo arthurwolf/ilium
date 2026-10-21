@@ -521,6 +521,11 @@ mod tests {
                 monitor_id: 7,
             },
             ClientRequest::GetPaneRecapScreen { pane_id: NodeId(2) },
+            ClientRequest::TerminalHistory {
+                pane_id: NodeId(2),
+                before_sequence: 42,
+                max_bytes: 1024 * 1024,
+            },
             ClientRequest::PasteTerminalText {
                 pane_id: NodeId(2),
                 text: "first line\nsecond line".to_string(),
@@ -771,6 +776,19 @@ mod tests {
                 through_sequence: 7,
                 bytes: b"hello from the pty".to_vec(),
                 is_complete: true,
+            },
+            ServerEvent::TerminalSnapshot {
+                pane_id: NodeId(2),
+                through_sequence: 7,
+                bytes: b"\x1b[H\x1b[Jhello from the pty".to_vec(),
+                is_complete: false,
+            },
+            ServerEvent::TerminalHistory {
+                pane_id: NodeId(2),
+                before_sequence: 7,
+                first_sequence: 3,
+                bytes: b"older output".to_vec(),
+                reaches_journal_start: true,
             },
             ServerEvent::PaneStatusChanged {
                 pane_id: NodeId(2),
@@ -1601,5 +1619,78 @@ mod tests {
             result.is_err(),
             "decoding a ServerEvent frame as a ClientRequest should fail, got {result:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn attach_snapshot_and_history_frames_round_trip_exactly() {
+        let snapshot = ServerEvent::TerminalSnapshot {
+            pane_id: NodeId(9),
+            through_sequence: 41,
+            bytes: b"\x1b[H\x1b[2Jvisible screen".to_vec(),
+            is_complete: true,
+        };
+        let history = ServerEvent::TerminalHistory {
+            pane_id: NodeId(9),
+            before_sequence: 41,
+            first_sequence: 12,
+            bytes: b"older output".to_vec(),
+            reaches_journal_start: false,
+        };
+        let request = ClientRequest::TerminalHistory {
+            pane_id: NodeId(9),
+            before_sequence: 41,
+            max_bytes: 1024 * 1024,
+        };
+        for event in [snapshot, history] {
+            let mut buffer = Vec::new();
+            write_frame(&mut buffer, &event).await.unwrap();
+            let mut cursor = Cursor::new(buffer);
+            let decoded: ServerEvent = read_frame(&mut cursor).await.unwrap();
+            assert_eq!(decoded, event);
+        }
+        let mut buffer = Vec::new();
+        write_frame(&mut buffer, &request).await.unwrap();
+        let mut cursor = Cursor::new(buffer);
+        let decoded: ClientRequest = read_frame(&mut cursor).await.unwrap();
+        assert_eq!(decoded, request);
+    }
+
+    #[tokio::test]
+    async fn a_frame_from_a_different_protocol_schema_is_refused_loudly() {
+        // The schema tag lives in the top bits of the frame's length word. A
+        // peer built from another protocol generation writes a different tag,
+        // so the frame must be refused before any payload is decoded.
+        let mut buffer = Vec::new();
+        write_frame(
+            &mut buffer,
+            &ServerEvent::TerminalSnapshot {
+                pane_id: NodeId(9),
+                through_sequence: 1,
+                bytes: b"x".to_vec(),
+                is_complete: true,
+            },
+        )
+        .await
+        .unwrap();
+        buffer[..4].copy_from_slice(&0x0000_0001_u32.to_le_bytes());
+
+        let mut cursor = Cursor::new(buffer);
+        let result: Result<ServerEvent, IpcError> = read_frame(&mut cursor).await;
+        assert!(
+            result.is_err(),
+            "a frame with another schema tag must be refused, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn an_unknown_server_event_variant_fails_to_decode() {
+        // Variants are appended in bincode order, so a discriminant past the
+        // last variant must fail loudly instead of decoding as a neighbour.
+        let mut bytes = bincode::serialize(&ServerEvent::Error {
+            message: "probe".to_string(),
+        })
+        .unwrap();
+        bytes[..4].copy_from_slice(&u32::MAX.to_le_bytes());
+        assert!(bincode::deserialize::<ServerEvent>(&bytes).is_err());
     }
 }

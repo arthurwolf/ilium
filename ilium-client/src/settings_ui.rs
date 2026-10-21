@@ -304,16 +304,19 @@ fn compute_layout_with_attribution(area: Rect, shows_osm: bool) -> SettingsLayou
     let content_inner = theme::block(true).inner(content_frame_area);
     let scrollbar_width = u16::from(content_inner.width >= 4);
     let help_width = if content_inner.width >= 12 { 3 } else { 0 };
+    let scrollbar_x = content_inner
+        .right()
+        .saturating_sub(scrollbar_width + help_width);
+    // The scrollbar track is painted at `content_area.right()`, so the content
+    // column must end exactly where the reserved scrollbar column starts.
     let content_area = Rect::new(
         content_inner.x,
         content_inner.y,
-        content_inner
-            .width
-            .saturating_sub(scrollbar_width + help_width),
+        scrollbar_x.saturating_sub(content_inner.x),
         content_inner.height,
     );
     let content_scrollbar_area = Rect::new(
-        content_area.right(),
+        scrollbar_x,
         content_inner.y,
         scrollbar_width,
         content_inner.height,
@@ -466,6 +469,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
             layout.content_area,
             title_style_lines(
                 app.inference_settings.title_style,
+                app.inference_settings.codex_official_thread_names,
                 layout.content_area.width,
                 state.selected_row,
             ),
@@ -511,6 +515,12 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
             frame,
             layout.content_area,
             session_lines(&app.session_settings, state.selected_row),
+            state.scroll,
+        ),
+        SettingsTab::Attention => render_scrollable(
+            frame,
+            layout.content_area,
+            attention_lines(&app.attention_settings, state.selected_row),
             state.scroll,
         ),
         SettingsTab::Git => render_scrollable(
@@ -817,6 +827,18 @@ pub fn settings_help_anchors(
                 );
             }
         }
+        SettingsTab::Attention => {
+            for (i, id) in simple_rows("ATT-", 5) {
+                push_help_anchor(
+                    &mut anchors,
+                    layout,
+                    &id,
+                    1 + i as u16 * 3,
+                    state.scroll,
+                    state.selected_row == i,
+                );
+            }
+        }
         SettingsTab::Session => {
             for (i, id) in simple_rows("SES-", 2) {
                 push_help_anchor(
@@ -1101,7 +1123,22 @@ pub fn settings_help_anchors(
             }
         }
         SettingsTab::Titles => {
-            push_help_anchor(&mut anchors, layout, "TITLE-01", 8, state.scroll, true)
+            push_help_anchor(
+                &mut anchors,
+                layout,
+                "TITLE-01",
+                TITLE_STYLE_CONTROL_LINE as u16,
+                state.scroll,
+                state.selected_row == 0,
+            );
+            push_help_anchor(
+                &mut anchors,
+                layout,
+                "TITLE-02",
+                CODEX_THREAD_NAME_CONTROL_LINE as u16,
+                state.scroll,
+                state.selected_row == 1,
+            );
         }
         SettingsTab::Triggers => {
             for i in 0..crate::trigger_settings::TriggerEvent::ALL.len() {
@@ -1275,6 +1312,7 @@ fn tab_icon(tab: SettingsTab) -> &'static str {
         SettingsTab::Terminal => "❯",
         SettingsTab::Editor => "✎",
         SettingsTab::Session => "▣",
+        SettingsTab::Attention => "◎",
         SettingsTab::Git => "⑂",
         SettingsTab::KanbanBoard => "▥",
         SettingsTab::Animations => "▷",
@@ -1297,6 +1335,7 @@ fn compact_tab_label(tab: SettingsTab) -> &'static str {
     match tab {
         SettingsTab::Appearance => "Display",
         SettingsTab::AgentMonitoring => "Agents",
+        SettingsTab::Attention => "Queue",
         SettingsTab::Cost => "Cost",
         SettingsTab::Optimization => "Optimize",
         SettingsTab::RemoteCompaction => "Remote",
@@ -1333,24 +1372,15 @@ fn render_tab_list(frame: &mut Frame, area: Rect, active: SettingsTab) {
         };
         let icon = tab_icon(tab);
         let icon_padding = " ".repeat(2_usize.saturating_sub(icon.width()));
-        let available_label_width = usize::from(label_area.width).saturating_sub(4);
-        let compact_label = compact_tab_label(tab);
-        let full_label = tab.label();
-        let label_source = if full_label.width() > available_label_width
-            && compact_label.width() <= available_label_width
-        {
-            compact_label
-        } else {
-            full_label
-        };
-        let label = if label_source.width() > available_label_width && available_label_width > 1 {
-            format!(
-                "{}…",
-                truncate_icon_text(label_source, available_label_width - 1)
-            )
-        } else {
-            truncate_icon_text(label_source, available_label_width)
-        };
+        // One cell stays free before the overflow scrollbar so labels never touch it.
+        let scrollbar_gap = usize::from(has_overflow);
+        let available_label_width = usize::from(label_area.width).saturating_sub(4 + scrollbar_gap);
+        // A label is shown whole or not at all: a cut word reads as a defect, while
+        // the icon still identifies the tab when no full label fits the column.
+        let label = [tab.label(), compact_tab_label(tab)]
+            .into_iter()
+            .find(|candidate| candidate.width() <= available_label_width)
+            .unwrap_or("");
         lines.push(Line::from(Span::styled(
             pad_icon_text(
                 &format!(" {icon}{icon_padding} {label}"),
@@ -1695,6 +1725,7 @@ pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area
         .len() as u16,
         SettingsTab::Titles => title_style_lines(
             app.inference_settings.title_style,
+            app.inference_settings.codex_official_thread_names,
             content_area.width,
             selected_row,
         )
@@ -1732,6 +1763,9 @@ pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area
         SettingsTab::Terminal => terminal_lines(&app.terminal_settings, selected_row).len() as u16,
         SettingsTab::Editor => editor_lines(&app.editor_settings, selected_row).len() as u16,
         SettingsTab::Session => session_lines(&app.session_settings, selected_row).len() as u16,
+        SettingsTab::Attention => {
+            attention_lines(&app.attention_settings, selected_row).len() as u16
+        }
         SettingsTab::Git => git_lines(
             &app.git_settings,
             app.git_settings_error.as_deref(),
@@ -2764,7 +2798,7 @@ pub fn icons_table_hit(area: Rect, scroll: u16, position: Position) -> Option<Ic
     }
 
     let row_offset = usize::from(position.y - table_inner.y - 1);
-    if row_offset % 2 != 0 {
+    if !row_offset.is_multiple_of(2) {
         return None;
     }
     let target_index = row_offset / 2 + usize::from(scroll);
@@ -2845,6 +2879,7 @@ pub fn icons_preview_mode_hit(
 /// rather than abstract promises about what each mode might do.
 fn title_style_lines(
     active: ilium_inference::TitleStyle,
+    use_codex_thread_names: bool,
     width: u16,
     _selected_row: usize,
 ) -> Vec<Line<'static>> {
@@ -2923,8 +2958,35 @@ fn title_style_lines(
             "  Your fixed titles stay yours.",
             Style::new().add_modifier(Modifier::DIM),
         )),
+        Line::from(""),
+        column(
+            "For Codex, use the official thread name",
+            if use_codex_thread_names {
+                "☑ On"
+            } else {
+                "☐ Off"
+            },
+            Style::new().add_modifier(Modifier::BOLD),
+        ),
+        Line::from(Span::styled(
+            if is_narrow {
+                "  Codex panes skip the AI call."
+            } else {
+                "  Codex panes read the name Codex saved on disk instead of calling the AI."
+            },
+            Style::new().add_modifier(Modifier::DIM),
+        )),
+        Line::from(Span::styled(
+            "  Panes without a saved Codex name stay untitled for now.",
+            Style::new().add_modifier(Modifier::DIM),
+        )),
     ]
 }
+
+/// Line index of the Title style control inside [`title_style_lines`].
+const TITLE_STYLE_CONTROL_LINE: usize = 8;
+/// Line index of the Codex thread-name control inside [`title_style_lines`].
+const CODEX_THREAD_NAME_CONTROL_LINE: usize = 15;
 
 /// Visible settings depend on the selected provider. This keeps Kilo's
 /// no-key configuration honest and prevents irrelevant empty fields.
@@ -4893,8 +4955,13 @@ fn settings_control_row(
             )
         }
         SettingsTab::Titles if row == 0 => (
-            8,
+            TITLE_STYLE_CONTROL_LINE,
             "Title style".into(),
+            LABEL_COLUMN_WIDTH.saturating_sub(1),
+        ),
+        SettingsTab::Titles if row == 1 => (
+            CODEX_THREAD_NAME_CONTROL_LINE,
+            "For Codex, use the official thread name".into(),
             LABEL_COLUMN_WIDTH.saturating_sub(1),
         ),
         _ => {
@@ -4927,6 +4994,12 @@ fn settings_control_row(
                     BoardNumber::MinimumColumnWidth,
                 )) => "Minimum column width",
                 Some(crate::value_settings::SettingsNumber::ApiPort) => "HTTP API port",
+                Some(crate::value_settings::SettingsNumber::AttentionTurboConcurrency) => {
+                    "Turbo parallel calls"
+                }
+                Some(crate::value_settings::SettingsNumber::AttentionExpirySeconds) => {
+                    "Forget stale items after"
+                }
                 _ => crate::value_settings_choice::SettingsChoice::at(app, state.tab, row)?.title(),
             };
             (
@@ -4986,7 +5059,8 @@ pub(crate) fn settings_number_control(
             }
         }
         crate::value_settings::SettingsNumber::VoiceVolume => format!("{text}%"),
-        crate::value_settings::SettingsNumber::NotificationCoalesce => format!("{text} s"),
+        crate::value_settings::SettingsNumber::NotificationCoalesce
+        | crate::value_settings::SettingsNumber::AttentionExpirySeconds => format!("{text} s"),
         crate::value_settings::SettingsNumber::TerminalScrollback => format!("{text} MiB"),
         crate::value_settings::SettingsNumber::TerminalEngineMemory => format!("{text} MiB"),
         crate::value_settings::SettingsNumber::EditorAutosaveDelay => format!("{text} ms"),
@@ -5128,7 +5202,7 @@ pub(crate) fn settings_choice_control(
 pub(crate) fn settings_number_row_count(app: &App, tab: SettingsTab) -> usize {
     match tab {
         SettingsTab::Inference => inference_rows(&app.inference_settings).len(),
-        SettingsTab::Titles => 1,
+        SettingsTab::Titles => 2,
         SettingsTab::VoiceControl => crate::voice_settings::VoiceRow::ALL.len(),
         SettingsTab::Sound => SoundRow::ALL.len(),
         SettingsTab::ResetPlanning => 3,
@@ -5138,6 +5212,7 @@ pub(crate) fn settings_number_row_count(app: &App, tab: SettingsTab) -> usize {
         SettingsTab::AgentMonitoring => agent_monitoring_rows(app).len(),
         SettingsTab::Terminal => crate::app::TerminalRow::ALL.len(),
         SettingsTab::Session => crate::app::SessionRow::ALL.len(),
+        SettingsTab::Attention => crate::app::AttentionRow::ALL.len(),
         SettingsTab::Git => crate::app::GitRow::ALL.len(),
         SettingsTab::Editor => crate::app::EditorRow::ALL.len(),
         SettingsTab::KanbanBoard => KanbanBoardRow::ALL.len(),
@@ -5462,6 +5537,45 @@ fn session_lines(settings: &SessionSettings, selected: usize) -> Vec<Line<'stati
                 "Automatic backups",
                 on_off(settings.backups_enabled),
                 "Copy this project's native session snapshot every 30 minutes. Older copies thin to daily, weekly, monthly, then yearly history.",
+            ),
+        ],
+        selected,
+    )
+}
+
+fn attention_lines(
+    settings: &crate::attention::AttentionSettings,
+    selected: usize,
+) -> Vec<Line<'static>> {
+    setting_lines(
+        &[
+            (
+                "Attention mode",
+                settings.mode.label().to_string(),
+                "Instant only calls no LLM and uses only what agent detection already knows; Shared adds the question to Sort; Turbo asks one call per agent.",
+            ),
+            (
+                "Sort refreshes attention",
+                on_off(settings.press_sorts),
+                "Pressing Sort also refreshes the attention queue.",
+            ),
+            (
+                "Turbo parallel calls",
+                settings.turbo_concurrency.to_string(),
+                "Most LLM calls in flight at once in Turbo mode (1 to 64).",
+            ),
+            (
+                "Forget stale items after",
+                format!("{} s", settings.expiry_seconds),
+                "An item the live state no longer supports is dropped after this long (60 to 86400).",
+            ),
+            (
+                "Attention model",
+                settings
+                    .model_override
+                    .clone()
+                    .unwrap_or_else(|| "Same as titles".to_string()),
+                "Model used for attention calls; Same as titles follows the title naming model.",
             ),
         ],
         selected,
@@ -6808,6 +6922,7 @@ mod number_control_tests {
             SettingsTab::Sound,
             SettingsTab::Titles,
             SettingsTab::ResetPlanning,
+            SettingsTab::Attention,
         ]
         .into_iter()
         .map(|tab| (tab, app.inference_settings.selected_provider))
@@ -6911,6 +7026,7 @@ mod number_control_tests {
             SettingsTab::VoiceControl,
             SettingsTab::Sound,
             SettingsTab::ResetPlanning,
+            SettingsTab::Attention,
         ]
         .into_iter()
         .map(|tab| (tab, app.inference_settings.selected_provider))
@@ -7051,17 +7167,17 @@ mod tests {
     #[test]
     fn settings_navigation_has_semantic_icons_for_every_tab() {
         let expected_icons = [
-            "◐", "▢", "▦", "◉", "¤", "↗", "⇥", "⌨", "❯", "✎", "▣", "⑂", "▥", "▷", "♪", "🎙", "↻",
-            "⚡", "≡", "≔", "⚑", "¶", "⌕", "⇄", "ⓘ", "⚙",
+            "◐", "▢", "▦", "◉", "◎", "¤", "↗", "⇥", "⌨", "❯", "✎", "▣", "⑂", "▥", "▷", "♪", "🎙",
+            "↻", "⚡", "≡", "≔", "⚑", "¶", "⌕", "⇄", "ⓘ", "⚙",
         ];
         assert_eq!(SettingsTab::ALL.len(), expected_icons.len());
         for (tab, expected_icon) in SettingsTab::ALL.into_iter().zip(expected_icons) {
             assert_eq!(tab_icon(tab), expected_icon, "semantic icon for {tab:?}");
         }
 
-        let area = Rect::new(0, 0, 30, 54);
+        let area = Rect::new(0, 0, 30, 56);
         for active in SettingsTab::ALL {
-            let mut terminal = Terminal::new(TestBackend::new(30, 54)).unwrap();
+            let mut terminal = Terminal::new(TestBackend::new(30, 56)).unwrap();
             terminal
                 .draw(|frame| render_tab_list(frame, area, active))
                 .unwrap();
@@ -7259,7 +7375,7 @@ mod tests {
 
     #[test]
     fn compact_navigation_keeps_distinct_icon_labels_readable() {
-        let area = Rect::new(0, 0, 12, 54);
+        let area = Rect::new(0, 0, 12, 56);
         let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
         terminal
             .draw(|frame| render_tab_list(frame, area, SettingsTab::Appearance))
@@ -7374,7 +7490,9 @@ mod tests {
             let screen = Rect::new(0, 0, width, height);
             let layout = compute_layout(screen);
             assert!(layout.tab_list_area.right() <= layout.content_area.x);
-            assert_eq!(layout.content_area.right(), layout.content_scrollbar_area.x);
+            // Text keeps one padding cell before the scrollbar on wide frames.
+            assert!(layout.content_area.right() <= layout.content_scrollbar_area.x);
+            assert!(layout.content_scrollbar_area.x - layout.content_area.right() <= 1);
             assert_eq!(
                 layout.content_scrollbar_area.right(),
                 layout.help_rail_area.x
@@ -7408,10 +7526,9 @@ mod tests {
             layout.tab_list_area.x.saturating_sub(1),
             layout.tab_list_area.y,
         );
-        let preceding_content = (
-            layout.content_area.x.saturating_sub(1),
-            layout.content_area.y,
-        );
+        // Content text starts after the frame border and one padding cell, so
+        // the border sits at the content frame's left edge.
+        let preceding_content = (layout.content_frame_area.x, layout.content_area.y);
         assert_eq!(buffer[preceding_navigation].symbol(), "│");
         assert_eq!(buffer[preceding_content].symbol(), "│");
         assert_eq!(
@@ -7429,7 +7546,7 @@ mod tests {
 
     #[test]
     fn title_style_control_row_shows_shared_choice_and_examples() {
-        let lines = title_style_lines(ilium_inference::TitleStyle::Summarization, 120, 1);
+        let lines = title_style_lines(ilium_inference::TitleStyle::Summarization, false, 120, 1);
         let rendered = lines
             .iter()
             .map(ToString::to_string)
@@ -7450,19 +7567,19 @@ mod tests {
             ),
             Some(crate::value_settings_choice::SettingsChoice::TitleStyle)
         );
-        let narrow = title_style_lines(ilium_inference::TitleStyle::Labeling, 49, 0);
+        let narrow = title_style_lines(ilium_inference::TitleStyle::Labeling, true, 49, 0);
         for line in &narrow[4..13] {
             assert!(UnicodeWidthStr::width(line.to_string().as_str()) <= 49);
         }
     }
 
     #[test]
-    fn compute_layout_leaves_no_border_gap_between_tabs_and_content() {
+    fn compute_layout_leaves_one_cell_gap_between_navigation_and_content_frames() {
         let layout = compute_layout(Rect::new(0, 0, 100, 40));
-        assert!(layout.content_area.x > layout.tab_list_area.right());
+        assert!(layout.content_frame_area.x > layout.navigation_frame_area.right());
         assert_eq!(
-            layout.content_area.x - layout.tab_list_area.right(),
-            GAP_WIDTH
+            layout.content_frame_area.x - layout.navigation_frame_area.right(),
+            GAP_WIDTH.saturating_sub(2)
         );
     }
 

@@ -1,0 +1,892 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>13. Keybindings, chords and when expressions | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details open><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/" aria-current="page">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Tutorials</b></p>
+<h1>13. Keybindings, chords and when expressions</h1>
+
+<p>This tutorial binds keys to a command. The command is tiny: it shows a short message called a toast. The point is the keys. You will bind one command to a global key, then to a key behind the prefix key, then to a key that works only in one kind of pane. You will also limit when the command is offered, and see what happens when two plugins want the same key.</p>
+<p>This tutorial is standalone. It starts a fresh plugin, so you do not need the earlier tutorials. You only need to have finished <a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a>.</p>
+<p>Some words first.</p>
+<ul>
+<li>A <strong>command</strong> is a named action that a plugin adds. The user can run it from the command palette, from a key, from a menu and from other places.</li>
+<li>A <strong>keybinding</strong> joins a command to a <strong>chord</strong>. A chord is one key press, such as <code>p</code>, or a press with modifier keys held down, such as <code>ctrl+alt+p</code>.</li>
+<li>A <strong>toast</strong> is a short message that Ilium draws over the workspace for a few seconds.</li>
+<li>A <strong>grant</strong> is a permission that the user allows when the plugin is installed.</li>
+<li>A <strong>when expression</strong> is a small condition, such as <code>pane.primitive == "terminal"</code>. It decides when a command is shown.</li>
+</ul>
+<p>The plugin never reads the keyboard. Ilium reads the keys, finds the binding, and sends the plugin a <code>command-invoked</code> event. That is why one command can run from a key, the palette and a menu with no extra code.</p>
+<p>Tutorial plugin: <code>example.key-demo</code>. Side: client, because keys belong to the client. Languages: Rust (target <code>wasm32-wasip2</code>) and TypeScript. Every listing is given in both.</p>
+<h3 id="you-will-need">You will need</h3>
+<ul>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a> finished. Nothing else.</li>
+<li>One grant, on the client side: <code>notify.toast</code>. It lets the plugin show toasts. Keybindings and commands need no grant.</li>
+<li>Create the project with <code>--side client</code>:</li>
+</ul>
+<pre><code class="language-bash">ilium plugin new key-demo --id example.key-demo --lang rust --side client --name &quot;Key demo&quot;
+</code></pre>
+<p>Use <code>--lang typescript</code> for the TypeScript version.</p>
+<h3 id="what-this-plugin-does">What this plugin does</h3>
+<p>The plugin has one command, <code>ping</code>. Pressing the key shows a toast with the title <code>Ping</code>. The tutorial then adds a second command that only some panes offer.</p>
+<h3 id="the-surface-this-step-uses">The surface this step uses</h3>
+<table>
+<thead>
+<tr>
+<th>Name</th>
+<th>Kind</th>
+<th>Fields and types</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>contributes.commands</code></td>
+<td>manifest key</td>
+<td><code>id</code>, <code>title</code>, <code>palette</code>, <code>when</code>, <code>category</code>, <code>keywords</code></td>
+<td>Declares a command. Its global id is <code>&lt;plugin-id&gt;/&lt;id&gt;</code>.</td>
+</tr>
+<tr>
+<td><code>contributes.keybindings</code></td>
+<td>manifest key</td>
+<td><code>command</code>, <code>chord</code>, <code>mode</code></td>
+<td>Joins a chord to a command.</td>
+</tr>
+<tr>
+<td><code>mode</code></td>
+<td>string</td>
+<td><code>global</code> (default), <code>prefix</code> or <code>pane:&lt;kind&gt;</code></td>
+<td>Where the chord is active.</td>
+</tr>
+<tr>
+<td><code>command-invoked</code></td>
+<td>event</td>
+<td><code>command: string</code>, <code>arguments-json: string</code>, <code>origin</code>, <code>context</code></td>
+<td>Delivered to the plugin that owns the command. <code>origin</code> is <code>keybinding</code> for a key.</td>
+</tr>
+<tr>
+<td><code>toast</code></td>
+<td>intent</td>
+<td><code>id</code>, <code>tone</code>, <code>title</code>, <code>body</code>, <code>actions</code>, <code>duration-ms</code></td>
+<td>Shows a toast. Needs <code>notify.toast</code>.</td>
+</tr>
+<tr>
+<td><code>when</code></td>
+<td>expression</td>
+<td>keys <code>pane.primitive</code>, <code>pane.kind</code>, <code>agent.activity</code> and more</td>
+<td>Shows the command only when it holds.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="the-grammar-of-a-chord">The grammar of a chord</h3>
+<p>A chord is written in lower case. It has zero or more modifiers, each followed by <code>+</code>, and then one key.</p>
+<ul>
+<li>The modifiers are <code>ctrl</code>, <code>alt</code>, <code>shift</code> and <code>super</code>, in any order.</li>
+<li>A key is one printable character, such as <code>p</code> or <code>1</code>. Shift plus a letter is <code>shift+p</code>. The plus sign itself is written <code>plus</code>, and the space bar is <code>space</code>.</li>
+<li>A named key is one of <code>enter</code>, <code>escape</code>, <code>tab</code>, <code>backspace</code>, <code>delete</code>, <code>insert</code>, <code>home</code>, <code>end</code>, <code>page-up</code>, <code>page-down</code>, <code>up</code>, <code>down</code>, <code>left</code>, <code>right</code>, or <code>f1</code> to <code>f24</code>.</li>
+</ul>
+<p>Examples: <code>p</code>, <code>ctrl+alt+p</code>, <code>shift+tab</code>, <code>ctrl+plus</code>, <code>f5</code>.</p>
+<h3 id="manifest-one-global-key">Manifest: one global key</h3>
+<p>The smallest version has one command and one global binding. A <strong>global</strong> binding is active wherever the focus is.</p>
+<pre><code class="language-json">{
+  &quot;api&quot;: &quot;ilium:plugin@0.1.0&quot;,
+  &quot;id&quot;: &quot;example.key-demo&quot;,
+  &quot;name&quot;: &quot;Key demo&quot;,
+  &quot;version&quot;: &quot;0.1.0&quot;,
+  &quot;publisher&quot;: &quot;Example Developer&quot;,
+  &quot;client&quot;: {
+    &quot;entry&quot;: &quot;client.wasm&quot;,
+    &quot;world&quot;: &quot;ilium:client/base@0.1.0&quot;,
+    &quot;exports&quot;: []
+  },
+  &quot;capabilities&quot;: {
+    &quot;client&quot;: [&quot;notify.toast&quot;]
+  },
+  &quot;contributes&quot;: {
+    &quot;commands&quot;: [
+      { &quot;id&quot;: &quot;ping&quot;, &quot;title&quot;: &quot;Ping toast&quot;, &quot;category&quot;: &quot;Key demo&quot; }
+    ],
+    &quot;keybindings&quot;: [
+      { &quot;command&quot;: &quot;example.key-demo/ping&quot;, &quot;chord&quot;: &quot;ctrl+alt+p&quot;, &quot;mode&quot;: &quot;global&quot; }
+    ]
+  }
+}
+</code></pre>
+<p>The binding uses the global command id, which is the plugin id, a slash, and the local id from <code>commands</code>.</p>
+<h3 id="the-smallest-plugin">The smallest plugin</h3>
+<p>The handler waits for <code>command-invoked</code>. When the command is <code>ping</code>, it returns one toast intent. An <strong>intent</strong> is a request the plugin hands back to Ilium, such as "show this toast". The plugin returns a list of intents, and Ilium carries them out.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">// src/lib.rs. The ping command shows a toast.
+use ilium_plugin_sdk::prelude::*;
+use ilium_plugin_sdk::types::events::CommandInvokedEvent;
+use ilium_plugin_sdk::types::intents::{Intent, ToastSpec};
+use ilium_plugin_sdk::types::text::Tone;
+
+const PING: &amp;str = &quot;example.key-demo/ping&quot;;
+
+#[ilium_plugin(side = &quot;client&quot;)]
+#[derive(Default)]
+struct KeyDemo;
+
+impl Lifecycle for KeyDemo {}
+
+impl Handler for KeyDemo {
+    fn on_events(&amp;mut self, batch: Vec&lt;Event&gt;) -&gt; Vec&lt;Submission&gt; {
+        let mut submissions = Vec::new();
+        for event in batch {
+            let Event::CommandInvoked(CommandInvokedEvent { command, .. }) = event else {
+                continue;
+            };
+            if command == PING {
+                submissions.push(ping_toast(&quot;Ping&quot;));
+            }
+        }
+        submissions
+    }
+}
+
+fn ping_toast(title: &amp;str) -&gt; Submission {
+    Submission::new(Intent::Toast(ToastSpec {
+        id: Some(&quot;ping&quot;.into()),
+        tone: Tone::Info,
+        title: title.into(),
+        body: None,
+        actions: vec![],
+        duration_ms: None,
+    }))
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">// src/client.ts. The ping command shows a toast.
+import { definePlugin, type Event, type Submission } from '@ilium/plugin-sdk';
+
+const PING = 'example.key-demo/ping';
+let nextCorrelation = 1n;
+
+function pingToast(title: string): Submission {
+  return {
+    intent: {
+      tag: 'toast',
+      val: { id: 'ping', tone: 'info', title, body: undefined, actions: [], durationMs: undefined },
+    },
+    correlation: nextCorrelation++,
+    dedupKey: undefined,
+  };
+}
+
+export const { lifecycle, handler } = definePlugin({
+  side: 'client',
+  onEvents(batch: Event[]): Submission[] {
+    const submissions: Submission[] = [];
+    for (const event of batch) {
+      if (event.tag === 'command-invoked' &amp;&amp; event.val.command === PING) {
+        submissions.push(pingToast('Ping'));
+      }
+    }
+    return submissions;
+  },
+});
+</code></pre>
+<h3 id="line-by-line">Line by line</h3>
+<ol>
+<li>The <code>id: "ping"</code> on the toast is a stable name. Pressing the key twice replaces the toast on screen instead of stacking two copies.</li>
+<li><code>tone</code> picks the border colour. <code>info</code> is neutral and calm.</li>
+<li><code>body</code>, <code>actions</code> and <code>duration-ms</code> are empty. A toast with no duration stays 5,000 ms.</li>
+<li>The handler ignores every event that is not <code>command-invoked</code>. It never asks which key was pressed. The key already became a command.</li>
+</ol>
+<h3 id="three-modes-of-binding">Three modes of binding</h3>
+<p>The <code>mode</code> key says where a chord is active.</p>
+<table>
+<thead>
+<tr>
+<th>Mode</th>
+<th>Active when</th>
+<th>Chord means</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>global</code></td>
+<td>Always. This is the default.</td>
+<td>The full chord, usually with modifiers, such as <code>ctrl+alt+p</code>.</td>
+</tr>
+<tr>
+<td><code>prefix</code></td>
+<td>After the user presses the prefix key.</td>
+<td>The key after the prefix. The default prefix is <code>ctrl+b</code>.</td>
+</tr>
+<tr>
+<td><code>pane:&lt;kind&gt;</code></td>
+<td>Only while a pane of that kind has focus.</td>
+<td>The full chord. The kind is the global id of a pane kind.</td>
+</tr>
+</tbody>
+</table>
+<p>Why three? A global key must not collide with what you type into a terminal, so global chords carry modifiers. The <strong>prefix</strong> key is a held-back first press: the user presses <code>ctrl+b</code>, lets go, and then a single plain key such as <code>p</code> runs the command. That leaves plain letters free. A <strong>pane-kind</strong> key is for a pane that owns its own screen, such as a notes board, where a plain letter is safe.</p>
+<h3 id="one-improvement-three-bindings-and-a-when-expression">One improvement: three bindings and a when expression</h3>
+<p>Add a second binding for the same command in prefix mode, a second command that only some panes offer, and a pane-kind binding for it.</p>
+<p>The pane-kind binding needs the id of a pane kind. This page uses <code>example.notes.note</code> as a stand-in, the kind from the notes plugin of the manual. Use the id of any pane kind you have installed. The binding is active only while a pane of that kind has focus.</p>
+<pre><code class="language-json">&quot;contributes&quot;: {
+  &quot;commands&quot;: [
+    { &quot;id&quot;: &quot;ping&quot;, &quot;title&quot;: &quot;Ping toast&quot;, &quot;category&quot;: &quot;Key demo&quot; },
+    {
+      &quot;id&quot;: &quot;note-ping&quot;,
+      &quot;title&quot;: &quot;Ping from a note&quot;,
+      &quot;category&quot;: &quot;Key demo&quot;,
+      &quot;when&quot;: &quot;pane.kind == \&quot;example.notes.note\&quot;&quot;
+    },
+    {
+      &quot;id&quot;: &quot;terminal-ping&quot;,
+      &quot;title&quot;: &quot;Ping from a terminal&quot;,
+      &quot;category&quot;: &quot;Key demo&quot;,
+      &quot;when&quot;: &quot;pane.primitive == \&quot;terminal\&quot; &amp;&amp; !(agent.activity == \&quot;working\&quot;)&quot;
+    }
+  ],
+  &quot;keybindings&quot;: [
+    { &quot;command&quot;: &quot;example.key-demo/ping&quot;, &quot;chord&quot;: &quot;ctrl+alt+p&quot;, &quot;mode&quot;: &quot;global&quot; },
+    { &quot;command&quot;: &quot;example.key-demo/ping&quot;, &quot;chord&quot;: &quot;p&quot;, &quot;mode&quot;: &quot;prefix&quot; },
+    { &quot;command&quot;: &quot;example.key-demo/note-ping&quot;, &quot;chord&quot;: &quot;k&quot;, &quot;mode&quot;: &quot;pane:example.notes.note&quot; }
+  ]
+}
+</code></pre>
+<p>Now the handler shows a different title for each command. Only the part that changes is shown.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">const NOTE_PING: &amp;str = &quot;example.key-demo/note-ping&quot;;
+const TERMINAL_PING: &amp;str = &quot;example.key-demo/terminal-ping&quot;;
+
+/// The toast title for each of our commands.
+fn title_for(command: &amp;str) -&gt; Option&lt;&amp;'static str&gt; {
+    match command {
+        PING =&gt; Some(&quot;Ping&quot;),
+        NOTE_PING =&gt; Some(&quot;Ping from a note&quot;),
+        TERMINAL_PING =&gt; Some(&quot;Ping from a terminal&quot;),
+        _ =&gt; None,
+    }
+}
+
+// In on_events, replace the single `if command == PING` check with:
+//     if let Some(title) = title_for(&amp;command) {
+//         submissions.push(ping_toast(title));
+//     }
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">const TITLES: Record&lt;string, string&gt; = {
+  'example.key-demo/ping': 'Ping',
+  'example.key-demo/note-ping': 'Ping from a note',
+  'example.key-demo/terminal-ping': 'Ping from a terminal',
+};
+
+// In onEvents, replace the single PING check with:
+//     const title = TITLES[event.val.command];
+//     if (event.tag === 'command-invoked' &amp;&amp; title !== undefined) submissions.push(pingToast(title));
+</code></pre>
+<h3 id="the-when-grammar">The when grammar</h3>
+<p>A <code>when</code> value joins comparisons with <code>&amp;&amp;</code> (and), <code>||</code> (or), <code>!</code> (not) and parentheses. A comparison is <code>key == "text"</code> or <code>key != "text"</code>. The text is always in double quotes.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Values</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>pane.primitive</code></td>
+<td><code>basic</code>, <code>terminal</code>, <code>agent</code>, <code>editor</code>, <code>none</code></td>
+</tr>
+<tr>
+<td><code>pane.kind</code></td>
+<td>the global id of a pane kind, such as <code>example.notes.note</code></td>
+</tr>
+<tr>
+<td><code>agent.activity</code></td>
+<td><code>idle</code>, <code>working</code>, <code>awaiting-approval</code>, <code>menu</code>, <code>done</code></td>
+</tr>
+<tr>
+<td><code>node.kind</code></td>
+<td><code>pane</code>, <code>group</code>, <code>folder</code>, <code>project</code></td>
+</tr>
+<tr>
+<td><code>node.file_extension</code></td>
+<td>the extension of the node's file, without the dot</td>
+</tr>
+<tr>
+<td><code>agent.signature</code></td>
+<td>the id of the detected agent signature</td>
+</tr>
+<tr>
+<td><code>view.focused</code></td>
+<td><code>true</code> or <code>false</code></td>
+</tr>
+<tr>
+<td><code>display_mode</code></td>
+<td><code>normal</code>, <code>attention</code> or a plugin mode id</td>
+</tr>
+</tbody>
+</table>
+<p>Rules that are easy to miss:</p>
+<ul>
+<li>A key that refers to a pane is false when no pane is in scope. <code>pane.primitive == "terminal"</code> is false on a group row.</li>
+<li><code>when</code> only decides whether the command is shown in the palette, in menus and for its keybinding. It never blocks another plugin that holds the <code>commands.invoke</code> grant.</li>
+<li>A <code>when</code> with an unknown key is refused at install with <code>manifest.when-key</code>. A <code>when</code> with bad syntax or an unknown value is refused with <code>manifest.when-syntax</code>.</li>
+</ul>
+<h3 id="when-two-plugins-want-the-same-key">When two plugins want the same key</h3>
+<p>Two bindings on the same chord are a conflict. Ilium resolves it in a fixed order:</p>
+<ol>
+<li>The user's own remap wins.</li>
+<li>Then the keys built into the Ilium kernel.</li>
+<li>Then bundled plugins (tier T1), then signed plugins (T2), then local plugins (T3).</li>
+<li>Inside one rank, the plugin installed first wins.</li>
+</ol>
+<p>The losing binding is inactive. It is not an error, and nothing is removed. Ilium lists it in Settings &gt; Keys, so the user can see why a key does nothing. For that reason, give every key a good reason to exist, and prefer a prefix key over a bare global one.</p>
+<h3 id="showing-the-chord-in-the-palette">Showing the chord in the palette</h3>
+<p>You do nothing to get this. The palette lists the command by its title, and draws its binding at the right edge. A command with <code>category</code> is grouped under that heading. A command whose <code>when</code> is false is not listed.</p>
+<h3 id="remapping-by-the-user">Remapping by the user</h3>
+<p>The user can change any binding in Settings &gt; Keys. A remap beats the default chord you wrote. If your plugin shows a hint such as "press ctrl+alt+p", read the live binding instead of hard-coding it:</p>
+<ul>
+<li>With the client grant <code>keymap.read</code>, <code>keymap::bindings()</code> lists the active bindings and <code>keymap::chord_label(chord)</code> gives the form the user sees, such as <code>Ctrl+Alt+P</code>.</li>
+<li>The event <code>keymap-changed</code> tells you to redraw the hint after a remap.</li>
+</ul>
+<p>Your plugin can also put a key-capture row in its own settings page. See <a href="/pages/tutorial-10-settings-new-tab/">Tutorial 10</a> for the <code>keybinding</code> row. Its command must be listed in <code>contributes.commands</code>, or the install fails with <code>manifest.settings-command</code>.</p>
+<h3 id="points-to-notice">Points to notice</h3>
+<ul>
+<li><strong>Keys are data, not code.</strong> The handler has no key logic.</li>
+<li><strong>One command, many ways in.</strong> The same <code>command-invoked</code> event arrives from a key, the palette and a menu. The <code>origin</code> field tells them apart, but this plugin does not need it.</li>
+<li><strong>Plain letters are for prefix and pane modes.</strong> Global chords carry modifiers.</li>
+<li><strong>A stable toast id</strong> keeps repeated presses from filling the screen. At most 3 toasts live at once.</li>
+</ul>
+<h3 id="edge-cases-and-errors">Edge cases and errors</h3>
+<table>
+<thead>
+<tr>
+<th>Case</th>
+<th>What happens</th>
+<th>Code or result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Chord is also a kernel key</td>
+<td>The kernel wins, your binding is inactive</td>
+<td>Listed in Settings &gt; Keys</td>
+</tr>
+<tr>
+<td>Two plugins bind <code>ctrl+alt+p</code></td>
+<td>The first installed wins within the same tier</td>
+<td>The other is inactive</td>
+</tr>
+<tr>
+<td>The command has <code>when</code> that is false</td>
+<td>The palette hides it and the key does nothing</td>
+<td>No event is sent</td>
+</tr>
+<tr>
+<td>Command is disabled with <code>set-state</code></td>
+<td>The key does nothing</td>
+<td><code>refused(conflict)</code> if invoked</td>
+</tr>
+<tr>
+<td>User declined <code>notify.toast</code></td>
+<td>The toast is refused</td>
+<td><code>refused(not-permitted)</code></td>
+</tr>
+<tr>
+<td>Fourth toast of the plugin within 10 seconds</td>
+<td>The toast is dropped</td>
+<td><code>refused(rate-limited)</code></td>
+</tr>
+<tr>
+<td>Press <code>p</code> without pressing the prefix first</td>
+<td>Nothing, the key goes to the pane</td>
+<td>No event</td>
+</tr>
+</tbody>
+</table>
+<h3 id="common-mistakes">Common mistakes</h3>
+<table>
+<thead>
+<tr>
+<th>Mistake</th>
+<th>What you see</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Wrote <code>"when": "pane.type == \"terminal\""</code></td>
+<td>Install refused with <code>manifest.when-key</code></td>
+<td>Use <code>pane.primitive</code>.</td>
+</tr>
+<tr>
+<td>Wrote <code>"when": "pane.primitive = terminal"</code></td>
+<td>Install refused with <code>manifest.when-syntax</code></td>
+<td>Use <code>==</code> and double quotes.</td>
+</tr>
+<tr>
+<td>Used <code>Ctrl+Alt+P</code> as the chord</td>
+<td>The chord does not parse</td>
+<td>Write chords in lower case: <code>ctrl+alt+p</code>.</td>
+</tr>
+<tr>
+<td>Bound a command that is not in <code>commands</code></td>
+<td>The binding does nothing</td>
+<td>Declare the command first.</td>
+</tr>
+<tr>
+<td>Forgot <code>notify.toast</code> in the manifest</td>
+<td><code>refused(not-permitted)</code> on every toast</td>
+<td>Add the grant under <code>capabilities.client</code>.</td>
+</tr>
+<tr>
+<td>Gave a toast title over 60 characters</td>
+<td><code>refused(invalid-argument)</code></td>
+<td>Shorten the title.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="test-it">Test it</h3>
+<p>Press the keys in a running Ilium. Run the plugin in dev mode:</p>
+<pre><code class="language-bash">ilium plugin build
+ilium plugin dev
+</code></pre>
+<p>Press <code>ctrl+alt+p</code>. Press the prefix key and then <code>p</code>. Focus a pane of the kind from your pane-kind binding and press <code>k</code>. Then open the palette and look for the category <code>Key demo</code>. If a key does nothing, open Settings &gt; Keys and look for your chord. Check refusals with <code>ilium plugin logs example.key-demo</code>.</p>
+<h3 id="what-you-see">What you see</h3>
+<p>The palette lists the commands with their bindings. The terminal-only command appears only while a terminal pane is focused.</p>
+<figure>
+<pre class="term">╭  ≡ ● · Command palette ──────────────────────╮
+│ <span class="t-prompt">&gt;</span> ping                                       │
+│                                              │
+│ <span class="t-dim">Key demo</span>                                     │
+│ <span class="t-hi">Ping toast                        ctrl+alt+p </span>│
+│ Ping toast                          prefix p │
+│ Ping from a terminal                         │
+│                                              │
+│ <span class="t-dim">Enter run · Esc close</span>                        │
+╰──────────────────────────────────────────────╯
+</pre>
+<figcaption>Rendered at 48 columns. Illustrative. The palette lists the command with each binding at the right. The third command shows no binding, because only the first two commands have one that is active here.</figcaption>
+</figure>
+
+<p>After the key, the toast appears. It does not take the focus away from the pane you are typing in.</p>
+<figure>
+<pre class="term">╭  ≡ ● · Ping ─────────────────────────────────╮
+│ ━━━━━━━━━━━━━━━━━━━━━━━━━━━──────────────────│
+╰──────────────────────────────────────────────╯
+</pre>
+<figcaption>Rendered at 48 columns. Illustrative. A toast with the title Ping and no body. The bar at the bottom shrinks until the toast closes.</figcaption>
+</figure>
+
+<h3 id="try-it-yourself">Try it yourself</h3>
+<ol>
+<li>Change the global chord to <code>ctrl+alt+shift+p</code> and reload. Open Settings &gt; Keys and find the new chord.</li>
+<li>Change the <code>when</code> of <code>terminal-ping</code> to <code>pane.primitive == "agent"</code> and check which panes list the command.</li>
+<li>Bind a second chord, <code>f6</code>, to <code>ping</code> in global mode. Notice that one command can have several bindings.</li>
+</ol>
+<h3 id="see-also">See also</h3>
+<ul>
+<li><a href="/pages/api-commands/">Commands API</a> has the command fields, the <code>when</code> grammar and the invocation origins.</li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a> has the keybinding chords, the conflict order and the manifest errors.</li>
+<li><a href="/pages/api-toast/">Toast API</a> has every toast field, the rate limit and the errors.</li>
+<li><a href="/pages/api-keys/">Keys API</a> is for plugins that need to grab keys, which is a different job from a binding.</li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">Kernel settings and keymap reads</a> reads the live bindings.</li>
+<li><a href="/pages/api-command-palette/">Command palette</a> explains categories and keywords.</li>
+<li><a href="/pages/tutorial-14-toast-and-status/">Tutorial 14</a> goes deeper into toasts and the status bar.</li>
+</ul>
+<p>API checked against <code>ilium:plugin@0.1.0</code>.</p>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/tutorial-12-hello-cli/"><small>Previous</small>12. Your first CLI subcommand</a><a class="next" href="/pages/tutorial-14-toast-and-status/"><small>Next</small>14. A toast and a status-bar segment</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#you-will-need">You will need</a></li><li class="l2"><a href="#what-this-plugin-does">What this plugin does</a></li><li class="l2"><a href="#the-surface-this-step-uses">The surface this step uses</a></li><li class="l2"><a href="#the-grammar-of-a-chord">The grammar of a chord</a></li><li class="l2"><a href="#manifest-one-global-key">Manifest: one global key</a></li><li class="l2"><a href="#the-smallest-plugin">The smallest plugin</a></li><li class="l2"><a href="#line-by-line">Line by line</a></li><li class="l2"><a href="#three-modes-of-binding">Three modes of binding</a></li><li class="l2"><a href="#one-improvement-three-bindings-and-a-when-expression">One improvement: three bindings and a when expression</a></li><li class="l2"><a href="#the-when-grammar">The when grammar</a></li><li class="l2"><a href="#when-two-plugins-want-the-same-key">When two plugins want the same key</a></li><li class="l2"><a href="#showing-the-chord-in-the-palette">Showing the chord in the palette</a></li><li class="l2"><a href="#remapping-by-the-user">Remapping by the user</a></li><li class="l2"><a href="#points-to-notice">Points to notice</a></li><li class="l2"><a href="#edge-cases-and-errors">Edge cases and errors</a></li><li class="l2"><a href="#common-mistakes">Common mistakes</a></li><li class="l2"><a href="#test-it">Test it</a></li><li class="l2"><a href="#what-you-see">What you see</a></li><li class="l2"><a href="#try-it-yourself">Try it yourself</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

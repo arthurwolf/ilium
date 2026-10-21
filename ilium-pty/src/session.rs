@@ -266,7 +266,6 @@ impl PtyShellObserver {
 pub struct PtySession {
     // The actor owns all parser writes, geometry control, and transport writes.
     // This handle only exposes admission and cancellation to other threads.
-    #[cfg(test)]
     parser: Arc<RwLock<vt100::Parser<TerminalQueryResponder>>>,
     screen_generation: Arc<AtomicU64>,
     screen_reader: ScreenReader,
@@ -349,6 +348,29 @@ pub struct PtyOutputReplay {
     pub is_complete: bool,
 }
 
+/// The live screen rebuilt as escape bytes, with the journal sequence it covers.
+/// See `PtySession::attach_snapshot`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PtyScreenSnapshot {
+    pub through_sequence: u64,
+    pub bytes: Vec<u8>,
+    /// False when the retention cap dropped output older than this screen.
+    pub is_complete: bool,
+}
+
+/// Retained raw output older than some sequence, oldest first.
+/// See `PtySession::output_history_before`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PtyOutputHistory {
+    /// Oldest chunk included; equals `before_sequence` when nothing was older.
+    pub first_sequence: u64,
+    /// Exclusive upper bound that was requested.
+    pub before_sequence: u64,
+    pub bytes: Vec<u8>,
+    /// True when nothing older than `first_sequence` was ever dropped.
+    pub reaches_journal_start: bool,
+}
+
 /// Exact size and sequence of a replay before its bytes are copied. A caller
 /// can reserve byte capacity using this value, then call
 /// [`PtySession::output_replay_if_unchanged`] to avoid cloning stale history.
@@ -368,6 +390,13 @@ pub enum PtyOutputRecoveryEstimate {
         byte_len: usize,
     },
     Replay(PtyOutputReplayEstimate),
+    /// A screen snapshot already built for this estimate. The journal never
+    /// reproduces it from a size estimate, so `output_recovery_if_unchanged`
+    /// declines it; the caller holds the bytes itself.
+    Snapshot {
+        through_sequence: u64,
+        byte_len: usize,
+    },
 }
 
 /// Minimal repair for one downstream consumer that last received
@@ -451,6 +480,43 @@ impl OutputJournal {
             through_sequence: self.next_sequence,
             bytes,
             is_complete: self.is_complete,
+        }
+    }
+
+    /// Copies the newest retained chunks older than `before_sequence` while
+    /// they fit in `max_bytes`, always taking at least one chunk so a caller
+    /// makes progress. Chunks are PTY read boundaries, so after a cap-driven
+    /// drop the first byte can sit mid-escape; the caller renders it as-is.
+    fn history_before(&self, before_sequence: u64, max_bytes: usize) -> PtyOutputHistory {
+        let mut selected: Vec<&PtyOutputChunk> = Vec::new();
+        let mut selected_bytes = 0usize;
+        for chunk in self.chunks.iter().rev() {
+            if chunk.sequence >= before_sequence {
+                continue;
+            }
+            if !selected.is_empty() && selected_bytes.saturating_add(chunk.bytes.len()) > max_bytes
+            {
+                break;
+            }
+            selected_bytes = selected_bytes.saturating_add(chunk.bytes.len());
+            selected.push(chunk);
+        }
+        let first_sequence = selected
+            .last()
+            .map_or(before_sequence, |chunk| chunk.sequence);
+        let mut bytes = Vec::with_capacity(selected_bytes);
+        for chunk in selected.iter().rev() {
+            bytes.extend_from_slice(&chunk.bytes);
+        }
+        PtyOutputHistory {
+            first_sequence,
+            before_sequence,
+            bytes,
+            reaches_journal_start: self.is_complete
+                && self
+                    .chunks
+                    .front()
+                    .is_none_or(|oldest| oldest.sequence >= first_sequence),
         }
     }
 
@@ -681,6 +747,7 @@ impl OutputJournal {
             PtyOutputRecoveryEstimate::Replay(replay) => self
                 .replay_through_if_retained(replay)
                 .map(PtyOutputRecovery::Replay),
+            PtyOutputRecoveryEstimate::Snapshot { .. } => None,
             PtyOutputRecoveryEstimate::Delta {
                 through_sequence,
                 byte_len,
@@ -967,7 +1034,6 @@ impl PtySession {
         .map_err(|error| PtyError::Io(error.into()))?;
 
         Ok(Self {
-            #[cfg(test)]
             parser,
             screen_generation,
             screen_reader,
@@ -1327,6 +1393,41 @@ impl PtySession {
     /// Reserve against `byte_len` before requesting the corresponding replay.
     pub fn output_replay_estimate(&self) -> PtyOutputReplayEstimate {
         self.output_journal.lock().unwrap().replay_estimate()
+    }
+
+    /// Rebuilds the live screen as escape bytes, paired with the journal
+    /// sequence it covers. The owner publishes each output chunk while it
+    /// holds the parser's write lock, so the read lock taken here makes the
+    /// pair consistent: every byte through `through_sequence` is on the
+    /// screen and no later byte is. `None` when the parser cannot be read;
+    /// callers then fall back to a journal replay.
+    ///
+    /// Known edge: if the owner gave up on the parser (`ParserUnavailable`),
+    /// the raw bytes it journaled were never parsed. That session is shutting
+    /// down, and its snapshot must not be trusted.
+    pub fn attach_snapshot(&self) -> Option<PtyScreenSnapshot> {
+        let parser = self.parser.read().ok()?;
+        let estimate = self.output_replay_estimate();
+        Some(PtyScreenSnapshot {
+            through_sequence: estimate.through_sequence,
+            bytes: crate::screen_snapshot::snapshot_bytes(parser.screen()),
+            is_complete: estimate.is_complete,
+        })
+    }
+
+    /// Copies up to `max_bytes` of retained output older than
+    /// `before_sequence`, newest chunks first, returned oldest first. A client
+    /// that scrolls past its attach snapshot asks for this in pieces. At least
+    /// one chunk is always returned when any is older, so the walk advances.
+    pub fn output_history_before(
+        &self,
+        before_sequence: u64,
+        max_bytes: usize,
+    ) -> PtyOutputHistory {
+        self.output_journal
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .history_before(before_sequence, max_bytes)
     }
 
     /// Copies replay bytes only while the journal still matches a prior
@@ -1704,6 +1805,56 @@ mod tests {
     }
 
     #[test]
+    fn history_walks_newest_chunks_first_within_the_byte_budget() {
+        let mut journal = journal();
+        journal.append(b"aaaa"); // sequence 1
+        journal.append(b"bbbb"); // sequence 2
+        journal.append(b"cccc"); // sequence 3
+
+        let newest_two = journal.history_before(4, 8);
+        assert_eq!(newest_two.first_sequence, 2);
+        assert_eq!(newest_two.bytes, b"bbbbcccc");
+        assert!(!newest_two.reaches_journal_start);
+
+        let oldest = journal.history_before(2, 64);
+        assert_eq!(oldest.first_sequence, 1);
+        assert_eq!(oldest.bytes, b"aaaa");
+        assert!(oldest.reaches_journal_start);
+    }
+
+    #[test]
+    fn history_always_takes_one_chunk_so_the_walk_progresses() {
+        let mut journal = journal();
+        journal.append(b"0123456789"); // sequence 1, larger than the budget
+        journal.append(b"xy"); // sequence 2
+
+        let history = journal.history_before(3, 4);
+        assert_eq!(history.first_sequence, 2);
+        assert_eq!(history.bytes, b"xy");
+        let next = journal.history_before(history.first_sequence, 4);
+        assert_eq!(next.first_sequence, 1);
+        assert_eq!(next.bytes, b"0123456789");
+        assert!(next.reaches_journal_start);
+    }
+
+    #[test]
+    fn history_past_the_retention_cap_does_not_claim_the_journal_start() {
+        let mut journal = journal();
+        journal.is_complete = false;
+        journal.append(b"tail");
+
+        let history = journal.history_before(2, 64);
+        assert_eq!(history.first_sequence, 1);
+        assert_eq!(history.bytes, b"tail");
+        assert!(!history.reaches_journal_start);
+
+        let empty = journal.history_before(1, 64);
+        assert_eq!(empty.first_sequence, 1);
+        assert!(empty.bytes.is_empty());
+        assert!(!empty.reaches_journal_start);
+    }
+
+    #[test]
     fn replay_estimate_fences_copy_when_new_output_arrives() {
         let mut journal = journal();
         journal.append(b"first");
@@ -1730,6 +1881,23 @@ mod tests {
         assert_eq!(replay.through_sequence, current.through_sequence);
         assert_eq!(replay.bytes.len(), current.byte_len);
         assert_eq!(replay.bytes, b"first-later");
+    }
+
+    #[test]
+    fn replay_estimate_of_truncated_journal_matches_retained_replay() {
+        let mut journal = journal();
+        journal.append(b"first");
+        journal.append(b"-second");
+        discard_oldest_chunk(&mut journal);
+
+        let estimate = journal.replay_estimate();
+        assert!(!estimate.is_complete);
+        assert_eq!(estimate.byte_len, b"\x1bc-second".len());
+        let replay = journal
+            .replay_through_if_retained(estimate)
+            .expect("an unchanged truncated journal must still produce its estimated replay");
+        assert_eq!(replay.bytes, b"\x1bc-second");
+        assert_eq!(replay.bytes.len(), estimate.byte_len);
     }
 
     /// Models the real safety-cap path: the oldest chunk is discarded and only

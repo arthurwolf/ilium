@@ -1,0 +1,1028 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Sandbox reference | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details open><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/" aria-current="page">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Reference</b></p>
+<h1>Sandbox reference</h1>
+
+<p>This page is the normative definition of the sandbox that confines third-party plugins (tiers T2 and T3). The <a href="/pages/security/">Security model</a> gives the overview. The <a href="/pages/reference-threat-model/">Threat model</a> says why. This page says exactly what the host MUST build, so that an implementer can write it and a tester can check it.</p>
+<p>Terms. A <strong>helper</strong> is a separate operating-system process that hosts the WebAssembly instance of one plugin side. A <strong>namespace</strong> is a Linux kernel feature that gives a process its own private view of one kind of resource (mounts, process ids, network, and so on). <strong>seccomp</strong> is a Linux filter that lets a process make only listed system calls. A <strong>cgroup</strong> is a Linux group of processes with resource limits. <strong>no_new_privs</strong> is a process flag that stops the process and its children from gaining privileges through set-id programs. <strong>Dispatcher protocol</strong> is the message channel between the Ilium server and a helper.</p>
+<h3 id="you-will-need">You will need</h3>
+<ul>
+<li>Linux with user namespaces, cgroup v2 and seccomp. The checks are in the <a href="#sandbox-unavailable">prerequisite section</a>.</li>
+<li>The grant names in the <a href="/pages/reference-capabilities/">Capability table</a>.</li>
+<li>For tests, the hostile fixtures in <a href="/pages/reference-security-testing/">Security testing</a>.</li>
+</ul>
+<h2 id="topology">Topology</h2>
+<p><strong>[SEC-020]</strong> The host MUST start one helper process per T2 or T3 plugin and per side. Plugin A and plugin B never share a helper. The server side and the scene side of one plugin run in separate helpers. Client-side T2 plugins run in a helper started by each attached client, with the same confinement. The reason is decision D5: a shared helper would reduce isolation between plugins to Wasmtime alone, and Wasmtime has had sandbox-escape advisories. With one helper per plugin, an escape from Wasmtime reaches only that plugin's own mount namespace.</p>
+<p>Consequences accepted by this decision:</p>
+<ul>
+<li>Memory use grows with the number of third-party plugins. Each helper has a fixed memory floor of about 20 MiB plus the plugin's <code>memory_mib</code>.</li>
+<li>Start-up takes one process start per plugin side. Lazy activation (D6) keeps this off the start path.</li>
+<li>Plugin to plugin calls (services, peer messages) go through the server, never directly between helpers.</li>
+</ul>
+<figure>
+<svg viewBox="0 0 520 220" role="img" aria-label="One helper per plugin side" width="780" height="330">
+  <title>Helper topology</title>
+  <desc>The server holds the dispatcher. Each T2 or T3 plugin side has its own helper with its own mount namespace.</desc>
+  <defs>
+    <marker id="sb-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <rect x="6" y="80" width="130" height="60" rx="8" fill="none" stroke="currentColor" stroke-width="2"/>
+  <text x="71" y="108" text-anchor="middle" fill="currentColor" font-size="11">Ilium server</text>
+  <text x="71" y="124" text-anchor="middle" fill="currentColor" font-size="10">dispatcher</text>
+  <rect x="200" y="6" width="150" height="56" rx="8" fill="none" stroke="currentColor" stroke-width="3"/>
+  <text x="275" y="30" text-anchor="middle" fill="currentColor" font-size="11">Helper: notes, server</text>
+  <text x="275" y="48" text-anchor="middle" fill="currentColor" font-size="10">mounts: project (ro), data</text>
+  <rect x="200" y="82" width="150" height="56" rx="8" fill="none" stroke="currentColor" stroke-width="3"/>
+  <text x="275" y="106" text-anchor="middle" fill="currentColor" font-size="11">Helper: notes, scene</text>
+  <text x="275" y="124" text-anchor="middle" fill="currentColor" font-size="10">mounts: data only</text>
+  <rect x="200" y="158" width="150" height="56" rx="8" fill="none" stroke="currentColor" stroke-width="3"/>
+  <text x="275" y="182" text-anchor="middle" fill="currentColor" font-size="11">Helper: tidy, server</text>
+  <text x="275" y="200" text-anchor="middle" fill="currentColor" font-size="10">mounts: worktrees, data</text>
+  <path d="M136 100 L200 36" stroke="currentColor" fill="none" marker-end="url(#sb-arrow)"/>
+  <path d="M136 110 L200 110" stroke="currentColor" fill="none" marker-end="url(#sb-arrow)"/>
+  <path d="M136 120 L200 186" stroke="currentColor" fill="none" marker-end="url(#sb-arrow)"/>
+  <rect x="400" y="82" width="112" height="56" rx="8" fill="none" stroke="currentColor" stroke-dasharray="4 3"/>
+  <text x="456" y="106" text-anchor="middle" fill="currentColor" font-size="10">process.run child</text>
+  <text x="456" y="124" text-anchor="middle" fill="currentColor" font-size="10">same confinement</text>
+  <path d="M350 110 L400 110" stroke="currentColor" fill="none" marker-end="url(#sb-arrow)"/>
+</svg>
+<figcaption>Each helper sees only the scopes its own plugin side was granted. Children inherit the confinement of the helper that started them.</figcaption>
+</figure>
+
+<h2 id="process-confinement">Process confinement</h2>
+<p>Every row is a MUST. A helper that cannot be started with all of them is not started ([SEC-055]).</p>
+<table>
+<thead>
+<tr>
+<th>Id</th>
+<th>Requirement</th>
+<th>How a tester checks it</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>[SEC-021]</td>
+<td>The helper runs in new user, mount, PID, IPC, UTS and network namespaces. Inside the user namespace it has no capabilities outside it.</td>
+<td>Hostile fixture reads <code>/proc/self/ns/*</code> and compares to the server's. All six differ.</td>
+</tr>
+<tr>
+<td>[SEC-022]</td>
+<td>The network namespace has no interface except a downed loopback.</td>
+<td>Fixture calls <code>socket</code>+<code>connect</code> to loopback and to a public address. Both fail.</td>
+</tr>
+<tr>
+<td>[SEC-023]</td>
+<td>The mount namespace holds only: read-only <code>/usr</code>, <code>/bin</code>, <code>/lib</code>, <code>/lib64</code> and <code>/etc</code> (a minimal subset, no <code>/etc/passwd</code> home lists beyond uid maps); a fresh <code>/proc</code> for the PID namespace; a minimal <code>/dev</code> with <code>null</code>, <code>zero</code>, <code>urandom</code>, <code>full</code>; a tmpfs <code>/tmp</code> capped at 64 MiB; and the granted scopes, read-only for read grants. The <code>data</code> and <code>cache</code> mounts are <code>noexec,nosuid,nodev</code>.</td>
+<td>Fixture lists <code>/</code>; only these paths exist. Executing a binary from <code>/data</code> fails with <code>EACCES</code>.</td>
+</tr>
+<tr>
+<td>[SEC-024]</td>
+<td>The helper sets <code>no_new_privs</code>, installs a seccomp allowlist, and drops every capability before it reads the first plugin byte.</td>
+<td>Fixture calls <code>prctl(PR_GET_NO_NEW_PRIVS)</code>. Result is 1.</td>
+</tr>
+<tr>
+<td>[SEC-025]</td>
+<td>The sandbox is defence in depth. A bug in Wasmtime that gives native code execution in the helper MUST NOT give access to any asset in the <a href="/pages/reference-threat-model/">threat model</a> without a second bug in the kernel.</td>
+<td>Escape probe suite, see <a href="/pages/reference-security-testing/">Security testing</a>.</td>
+</tr>
+<tr>
+<td>[SEC-026]</td>
+<td>The helper's <code>/proc</code> shows only its own PID namespace. It cannot read <code>/proc/&lt;pid&gt;/environ</code> of any process outside. <code>/sys</code> is not mounted.</td>
+<td>Fixture reads <code>/proc/1/environ</code> (its own init) and the server's PID path. The second does not exist.</td>
+</tr>
+<tr>
+<td>[SEC-027]</td>
+<td>The helper's environment is rebuilt from an allowlist: <code>HOME</code> set to the data mount, <code>TMPDIR=/tmp</code>, <code>LANG=C.UTF-8</code>, <code>PATH</code> set to the fixed value <code>/usr/bin:/bin</code>, <code>ILIUM_PLUGIN_ID</code>. Nothing else is inherited. In particular <code>SSH_AUTH_SOCK</code>, <code>DBUS_SESSION_BUS_ADDRESS</code>, <code>WAYLAND_DISPLAY</code>, <code>DISPLAY</code>, <code>XDG_RUNTIME_DIR</code>, proxy variables and any <code>*_TOKEN</code>, <code>*_KEY</code> or <code>*_SECRET</code> variable are absent.</td>
+<td>Fixture prints <code>environ</code>. Only the allowlist appears.</td>
+</tr>
+<tr>
+<td>[SEC-028]</td>
+<td>All file descriptors except the dispatcher channel and stdio on <code>/dev/null</code> are closed before the Wasmtime engine starts (close-range with no exceptions). The helper calls <code>setsid</code> and has no controlling terminal. Because the helper has no controlling terminal and cannot open the PTY master (it is not inherited), terminal injection through <code>TIOCSTI</code> and <code>TIOCLINUX</code> is impossible. The seccomp filter also denies those ioctl numbers.</td>
+<td>Fixture enumerates <code>/proc/self/fd</code>; only fds 0 to 2 and the channel remain. <code>ioctl(0, TIOCSTI)</code> fails.</td>
+</tr>
+<tr>
+<td>[SEC-029]</td>
+<td>A cgroup v2 leaf is created per helper with: <code>memory.max</code> = plugin <code>memory_mib</code> plus 32 MiB overhead; <code>pids.max</code> = 64 plus 8 per allowed child; <code>cpu.weight</code> = 10 (low priority); <code>cpu.max</code> = the manifest <code>cpu_ms_per_s</code> quota expressed as a period. A memory kill is reported as a trap <code>limit-exceeded(memory)</code> and counts as a failure.</td>
+<td>Fixture allocates past the limit; helper is killed; the log has the code.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="the-seccomp-allowlist">The seccomp allowlist</h3>
+<p><strong>[SEC-067]</strong> The filter is an allowlist of the system calls that Wasmtime, the allocator and the dispatcher channel need. Everything else returns <code>EPERM</code>, or kills the helper for the entries marked kill. The implementation MUST publish the list as a generated file with the release so tests can compare. These calls are always denied, and the fixture suite calls each of them:</p>
+<table>
+<thead>
+<tr>
+<th>Group</th>
+<th>Calls</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Debugging and memory of others</td>
+<td><code>ptrace</code>, <code>process_vm_readv</code>, <code>process_vm_writev</code>, <code>kcmp</code></td>
+</tr>
+<tr>
+<td>Keys and kernel objects</td>
+<td><code>keyctl</code>, <code>add_key</code>, <code>request_key</code>, <code>bpf</code>, <code>perf_event_open</code>, <code>userfaultfd</code>, <code>io_uring_setup</code>, <code>io_uring_enter</code>, <code>io_uring_register</code></td>
+</tr>
+<tr>
+<td>Namespaces and mounts</td>
+<td><code>mount</code>, <code>umount2</code>, <code>pivot_root</code>, <code>chroot</code>, <code>unshare</code>, <code>setns</code>, <code>open_by_handle_at</code></td>
+</tr>
+<tr>
+<td>Kernel modules and boot</td>
+<td><code>init_module</code>, <code>finit_module</code>, <code>delete_module</code>, <code>kexec_load</code>, <code>kexec_file_load</code>, <code>reboot</code></td>
+</tr>
+<tr>
+<td>Sockets (all families except the one dispatcher socketpair, which is inherited, not created)</td>
+<td><code>socket</code>, <code>socketpair</code>, <code>connect</code>, <code>bind</code>, <code>listen</code>, <code>accept</code>, <code>accept4</code></td>
+</tr>
+<tr>
+<td>Terminal injection</td>
+<td><code>ioctl</code> with request <code>TIOCSTI</code> or <code>TIOCLINUX</code> or <code>TIOCSCTTY</code></td>
+</tr>
+<tr>
+<td>Privilege</td>
+<td><code>setuid</code>, <code>setgid</code>, <code>setresuid</code>, <code>capset</code>, <code>personality</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="limits-when-cgroup-delegation-is-missing">Limits when cgroup delegation is missing</h3>
+<p><strong>[SEC-065]</strong> If cgroup v2 is available but the user has no delegated controller (<code>memory</code>, <code>pids</code>, <code>cpu</code>), the host MUST enforce the same limits inside the helper with <code>setrlimit</code> (<code>RLIMIT_AS</code>, <code>RLIMIT_NPROC</code>, <code>RLIMIT_CPU</code>) and a watchdog in the server that samples the helper's RSS once a second. The audit log records <code>sandbox-degraded</code> with the controller list once per start. If the controllers needed for <code>memory.max</code> and <code>pids.max</code> are both missing and <code>setrlimit</code> cannot bound them, the helper is not started ([SEC-055]).</p>
+<h2 id="dispatcher-protocol-trust">Dispatcher protocol trust</h2>
+<p><strong>[SEC-050]</strong> The server MUST treat every message from a helper as hostile. The identity of the plugin comes from the channel the message arrived on, never from a field in the message. A message that names another plugin id is dropped and counts as a failure.</p>
+<p><strong>[SEC-051]</strong> The server MUST enforce a maximum message size of 4 MiB (8 MiB for <code>terminal-view</code> frames) and a rate of 5,000 messages per second per helper. A larger or faster message ends the helper.</p>
+<p><strong>[SEC-052]</strong> A malformed message (bad framing, bad UTF-8, a schema violation, an unknown message kind, an out-of-range resource handle) kills the helper and counts as a failure toward the restart-and-disable rule. The server never tries to repair the message.</p>
+<p><strong>[SEC-053]</strong> Wasmtime configuration, for T1 and for the helper:</p>
+<table>
+<thead>
+<tr>
+<th>Setting</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Linear-memory guard pages</td>
+<td>On, 2 GiB guard region on 64-bit</td>
+</tr>
+<tr>
+<td>Spectre mitigations</td>
+<td>On (bounds-check hardening for table and memory access)</td>
+</tr>
+<tr>
+<td>Epoch interruption</td>
+<td>On, deadlines set per call; a missed deadline traps</td>
+</tr>
+<tr>
+<td><code>wasi:sockets</code>, <code>wasi:http</code> imports</td>
+<td>Refused at load. A component that imports them is not instantiated</td>
+</tr>
+<tr>
+<td><code>wasi:clocks</code>, <code>wasi:random</code></td>
+<td>Virtualised: clocks coarsened ([SEC-370]), random from the host CSPRNG</td>
+</tr>
+<tr>
+<td>Wasmtime version</td>
+<td>Pinned exactly in the release, recorded in the build metadata, see <a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></td>
+</tr>
+<tr>
+<td>Memory and table maximums</td>
+<td>From the manifest <code>limits</code>, clamped to the tier ceiling</td>
+</tr>
+</tbody>
+</table>
+<p><strong>[SEC-054]</strong> Compiled module cache. For T2 and T3 the host MUST NOT load a precompiled artefact that was written by a process it cannot verify. If a cache exists it lives in the host's cache directory, owner-only, keyed by the SHA-256 of the component and the Wasmtime version, and its integrity (an HMAC under a per-install key held by the server) is checked before deserialisation. No plugin scope can reach it. When the check fails the module is recompiled. A deployment MAY disable the cache for T2 and T3 with the policy key <code>[packages] precompiled_cache = false</code>.</p>
+<h2 id="sandbox-unavailable">Sandbox unavailable</h2>
+<p><strong>[SEC-055]</strong> If the host cannot create the sandbox exactly as specified, T2 and T3 plugins MUST refuse to load with error code <code>sandbox.unavailable</code>. The message names the missing prerequisite (for example <code>unprivileged user namespaces are disabled: sysctl kernel.unprivileged_userns_clone</code>). There is no silent fallback to in-process or unconfined execution, on any platform and for any reason.</p>
+<p>Typical prerequisites and the message the host prints:</p>
+<table>
+<thead>
+<tr>
+<th>Prerequisite</th>
+<th>Typical failure</th>
+<th>Message names</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Unprivileged user namespaces</td>
+<td>Ubuntu 24.04 AppArmor restriction, container without <code>CAP_SYS_ADMIN</code>, hardened kernels</td>
+<td><code>user namespaces</code> and the sysctl or AppArmor profile</td>
+</tr>
+<tr>
+<td>cgroup v2</td>
+<td>cgroup v1 only</td>
+<td><code>cgroup v2</code></td>
+</tr>
+<tr>
+<td>seccomp</td>
+<td>Kernel built without it</td>
+<td><code>seccomp</code></td>
+</tr>
+<tr>
+<td>Mount of <code>/proc</code> in a PID namespace</td>
+<td>Locked-down container</td>
+<td><code>procfs mount</code></td>
+</tr>
+</tbody>
+</table>
+<p>T1 plugins and the kernel are unaffected. The Plugins screen shows an installed T2 or T3 plugin as <code>Cannot start: sandbox unavailable</code> with the message. The audit log records <code>sandbox-unavailable</code> once per start and prerequisite.</p>
+<p><strong>[SEC-056]</strong> Running as root. If the server's effective uid is 0, the host MUST refuse T2 and T3 plugins with <code>sandbox.unavailable</code> and the message <code>running as root is not supported for third-party plugins</code>. Root has capabilities that user-namespace rules do not remove for the server itself. A deployment that needs root MAY run Ilium as an unprivileged user instead.</p>
+<p><strong>[SEC-057]</strong> Platform matrix.</p>
+<table>
+<thead>
+<tr>
+<th>Platform</th>
+<th>T1</th>
+<th>T2/T3</th>
+<th>Reason</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Linux, native</td>
+<td>Yes</td>
+<td>Yes, with the prerequisites above</td>
+<td>Full sandbox</td>
+</tr>
+<tr>
+<td>Linux, container</td>
+<td>Yes</td>
+<td>Only if the container grants user namespaces and cgroup delegation</td>
+<td>Many container defaults refuse</td>
+</tr>
+<tr>
+<td>WSL 2</td>
+<td>Yes</td>
+<td>Yes if the kernel prerequisites hold, otherwise <code>sandbox.unavailable</code></td>
+<td>A real Linux kernel</td>
+</tr>
+<tr>
+<td>WSL 1</td>
+<td>Yes</td>
+<td>No</td>
+<td>No namespaces</td>
+</tr>
+<tr>
+<td>macOS</td>
+<td>Yes</td>
+<td>No (decision D5)</td>
+<td>No equivalent sandbox</td>
+</tr>
+<tr>
+<td>Windows</td>
+<td>Yes</td>
+<td>No (decision D5)</td>
+<td>No equivalent sandbox</td>
+</tr>
+</tbody>
+</table>
+<h2 id="file-scopes">File scopes</h2>
+<p>File access is the most common route to harm, so its rules are normative here. The rules apply inside the helper and to the kernel's own file functions for T1.</p>
+<p>The authoritative scope table. Other pages link here.</p>
+<table>
+<thead>
+<tr>
+<th>Scope</th>
+<th>Read</th>
+<th>Write</th>
+<th>Watch</th>
+<th>Tiers</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>package</code></td>
+<td>always</td>
+<td>never</td>
+<td>always</td>
+<td>all</td>
+<td>Unpacked <code>assets/</code>, read only</td>
+</tr>
+<tr>
+<td><code>data</code></td>
+<td>always</td>
+<td>always</td>
+<td>always</td>
+<td>all</td>
+<td>Plugin's private folder, mounted <code>noexec,nosuid,nodev</code></td>
+</tr>
+<tr>
+<td><code>cache</code></td>
+<td>always</td>
+<td>always</td>
+<td>always</td>
+<td>all</td>
+<td>May be evicted</td>
+</tr>
+<tr>
+<td><code>project</code></td>
+<td>normal</td>
+<td>H</td>
+<td>normal</td>
+<td>all</td>
+<td>The session's project folder; <code>.ilium/</code> stays visible but the stores of the deny set do not live there</td>
+</tr>
+<tr>
+<td><code>picked</code></td>
+<td>per pick</td>
+<td>per pick</td>
+<td>per pick</td>
+<td>all</td>
+<td>A path the user chose</td>
+</tr>
+<tr>
+<td><code>worktrees</code></td>
+<td>normal</td>
+<td>H</td>
+<td>normal</td>
+<td>all</td>
+<td>Setting <code>workspace.worktree_root</code></td>
+</tr>
+<tr>
+<td><code>agent-sessions:&lt;agent&gt;</code></td>
+<td>H</td>
+<td>refused</td>
+<td>H</td>
+<td>all</td>
+<td>Transcript folders, read only</td>
+</tr>
+<tr>
+<td><code>agent-config:&lt;agent&gt;</code></td>
+<td>H</td>
+<td>refused</td>
+<td>H</td>
+<td>all</td>
+<td>Configuration folders, credential files excluded ([SEC-063])</td>
+</tr>
+<tr>
+<td><code>minecraft-saves</code></td>
+<td>normal</td>
+<td>H</td>
+<td>normal</td>
+<td>all</td>
+<td>The game's saves folder, for the Minecraft scenes</td>
+</tr>
+<tr>
+<td><code>path:{project}</code> / <code>{data}</code> / <code>{cache}</code></td>
+<td>normal</td>
+<td>H</td>
+<td>normal</td>
+<td>all</td>
+<td>Same as the named scope</td>
+</tr>
+<tr>
+<td><code>path:{config}</code></td>
+<td>H</td>
+<td>H</td>
+<td>H</td>
+<td>all</td>
+<td>The Ilium configuration folder; the deny set still applies</td>
+</tr>
+<tr>
+<td><code>path:{home}/...</code></td>
+<td>normal below a sensitive path-free subtree, H otherwise ([SEC-061], [SEC-062])</td>
+<td>H</td>
+<td>same as read</td>
+<td>all</td>
+<td>Template with <code>{home}</code></td>
+</tr>
+<tr>
+<td>literal absolute path</td>
+<td>H</td>
+<td>H</td>
+<td>H</td>
+<td>all</td>
+<td>Review dialog shows the path</td>
+</tr>
+</tbody>
+</table>
+<p>Writes to <code>agent-sessions</code> fail at install with <code>manifest.grant-scope</code>. Writes to <code>agent-config:&lt;agent&gt;</code> are also refused at install with <code>manifest.grant-scope</code>. This resolves the earlier disagreement between pages: agent scopes are read-only and <code>H</code> for read.</p>
+<p><strong>[SEC-058]</strong> Path resolution uses <code>openat2</code> with <code>RESOLVE_BENEATH | RESOLVE_NO_MAGICLINKS | RESOLVE_NO_XDEV</code> relative to a file descriptor opened on the scope root (or the closest equivalent where <code>openat2</code> is missing, which is an <code>openat</code> walk that checks every component with <code>O_NOFOLLOW</code>). The kernel never checks a path string and then opens it later. A symlink swap between check and open therefore cannot leave the scope.</p>
+<p><strong>[SEC-059]</strong> Hard links. When a file in a scope has a link count above 1, a write or a read-for-write open is refused when the device and inode differ from the scope's recorded inventory for writable scopes, and always refused when the other link is outside every writable mount (the host reads <code>st_nlink</code> and compares <code>st_dev</code> with the scope root). The error is <code>not-permitted</code>.</p>
+<p><strong>[SEC-060]</strong> The deny set. No scope, for any plugin including T1 plugins other than the owning core plugin, reaches: the Ilium configuration (<code>config.toml</code>), the grant store, the trust store, the consent store, the project trust store, the secrets file, the admin policy file, the audit log, the plugin install directory, every other plugin's <code>data</code> and <code>cache</code>, the runtime directory and the Ilium socket, and the HTTP API token file. A template that resolves into the deny set is refused at install with <code>manifest.grant-scope</code>. A path that passes the check at install but resolves into the set at run time (a symlink created later) is refused with <code>not-permitted</code>.</p>
+<p><strong>[SEC-061]</strong> The sensitive path set. A grant whose resolved root is, contains or lies below one of the following is high risk, and the review dialog shows the resolved path: <code>~/.ssh</code>, <code>~/.gnupg</code>, <code>~/.aws</code>, <code>~/.config/gcloud</code>, <code>~/.kube</code>, <code>~/.netrc</code>, <code>~/.git-credentials</code>, <code>~/.docker/config.json</code>, OS keyrings (<code>~/.local/share/keyrings</code>), browser profiles (<code>~/.mozilla</code>, <code>~/.config/google-chrome</code>, <code>~/.config/chromium</code>), password-manager stores, and agent credential files.</p>
+<p><strong>[SEC-062]</strong> A template whose resolved root is <code>$HOME</code>, <code>/</code>, or an ancestor of <code>$HOME</code> is high risk, because it reaches the sensitive set. <code>fs.read:path:{home}</code> is therefore H. <code>fs.read:path:{home}/Pictures/**</code> is normal.</p>
+<p><strong>[SEC-063]</strong> Agent credential files are excluded from <code>agent-config</code> scopes even with the grant. The named lists, relative to each agent's configuration folder:</p>
+<table>
+<thead>
+<tr>
+<th>Agent</th>
+<th>Excluded files</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>claude</code></td>
+<td><code>.credentials.json</code>, <code>credentials.json</code>, <code>.claude.json</code> keys block (the file is served with <code>oauthAccount</code> and key fields removed)</td>
+</tr>
+<tr>
+<td><code>codex</code></td>
+<td><code>auth.json</code></td>
+</tr>
+<tr>
+<td><code>gemini</code></td>
+<td><code>oauth_creds.json</code>, <code>google_accounts.json</code></td>
+</tr>
+<tr>
+<td><code>antigravity</code></td>
+<td><code>auth.json</code>, <code>oauth_creds.json</code></td>
+</tr>
+<tr>
+<td>every agent</td>
+<td>any file whose name matches <code>*credentials*</code>, <code>*token*</code>, <code>*secret*</code>, <code>*.pem</code>, <code>*.key</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>[SEC-064]</strong> Errors never include the resolved absolute path. A failing call returns the scope and the path relative to the scope root only.</p>
+<p>Case-folding filesystems: the scope check compares resolved file identities (device and inode), not names, so <code>Data</code> and <code>data</code> cannot cross a boundary. Bind mounts: an <code>openat2</code> with <code>RESOLVE_NO_XDEV</code> stops at a mount point inside a scope root.</p>
+<h2 id="escape-hatch-review">Escape-hatch review</h2>
+<p>An escape hatch is a feature whose effect leaves the sandbox by design. Each one has a classification and a required mitigation.</p>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Class</th>
+<th>Required mitigation</th>
+<th>Id</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>panes.create</code> with a <code>command</code></td>
+<td>Code execution</td>
+<td>Needs the H grant <code>panes.create-command:&lt;program&gt;</code>; kernel confirmation on first use; see below</td>
+<td>[SEC-040]</td>
+</tr>
+<tr>
+<td><code>panes.lifecycle</code> restart with a new command</td>
+<td>Code execution</td>
+<td>Same program grant; the confirmation names the program</td>
+<td>[SEC-041]</td>
+</tr>
+<tr>
+<td><code>agent.signatures</code> resume argv</td>
+<td>Code execution</td>
+<td>Program must match <code>process_names</code> or a <code>panes.create-command</code> grant; one argv element for <code>{session}</code></td>
+<td>[SEC-042]</td>
+</tr>
+<tr>
+<td><code>terminal.write</code>, <code>terminal.raw-input</code></td>
+<td>Code execution (types into a shell)</td>
+<td>H grants; <code>send-input</code> dedup and journal; lock rules</td>
+<td>existing</td>
+</tr>
+<tr>
+<td><code>agent.control</code></td>
+<td>Code execution (drives an agent)</td>
+<td>H grant</td>
+<td>existing</td>
+</tr>
+<tr>
+<td><code>process.run:&lt;program&gt;</code></td>
+<td>Code execution</td>
+<td>H grant per program; env denylist; fixed PATH; noexec data</td>
+<td>[SEC-031] to [SEC-035]</td>
+</tr>
+<tr>
+<td><code>process.run:sh</code></td>
+<td>Code execution</td>
+<td>T1 only</td>
+<td>existing</td>
+</tr>
+<tr>
+<td><code>fs.write</code> to dotfiles or agent config</td>
+<td>Code execution at next shell start</td>
+<td>Write outside <code>data</code> and <code>cache</code> is H; <code>agent-config</code> writes refused; dotfile paths in <code>{home}</code> are in the sensitive set</td>
+<td>[SEC-061]</td>
+</tr>
+<tr>
+<td><code>clipboard.write</code></td>
+<td>UI integrity (paste hijack)</td>
+<td>Size and control character rules</td>
+<td>[SEC-044]</td>
+</tr>
+<tr>
+<td><code>open-external</code> file targets</td>
+<td>Code execution through the desktop handler</td>
+<td>Scope, mode bit and extension rules</td>
+<td>[SEC-043]</td>
+</tr>
+<tr>
+<td><code>notify.desktop</code></td>
+<td>UI integrity (spoofing)</td>
+<td>Title prefix by the host</td>
+<td>[SEC-045]</td>
+</tr>
+<tr>
+<td><code>keys.intercept</code></td>
+<td>UI integrity (captures keystrokes)</td>
+<td>Review wording names it; only active while the plugin's pane or mode has focus; audit</td>
+<td>existing, [SEC-102]</td>
+</tr>
+<tr>
+<td><code>editor.provide</code></td>
+<td>UI integrity and data (sees file text)</td>
+<td>H, review wording</td>
+<td>[SEC-102]</td>
+</tr>
+<tr>
+<td><code>sessions.cross</code></td>
+<td>Acts in other sessions</td>
+<td>T1 and T2 only; same-plugin commands only</td>
+<td>existing</td>
+</tr>
+<tr>
+<td><code>workspace.manage</code></td>
+<td>Moves or deletes folders</td>
+<td>H, review wording</td>
+<td>existing</td>
+</tr>
+<tr>
+<td><code>cli.contribute</code> output read by agents</td>
+<td>Prompt injection into agents</td>
+<td>Output is plain text with a header <code>from plugin &lt;id&gt;</code>; agents are told by <code>ilium.core.agent-setup</code> instruction blocks</td>
+<td>existing</td>
+</tr>
+<tr>
+<td>http-api routes</td>
+<td>Data egress to local clients</td>
+<td>Routes need the token; see <a href="/pages/reference-network-egress/">Network egress</a></td>
+<td>[SEC-097]</td>
+</tr>
+<tr>
+<td><code>collect</code> entries driving a T1 owner's action</td>
+<td>Code execution via the owner</td>
+<td>Owner validates with an allowlist; dialog shows what the entry can do</td>
+<td>[SEC-283]</td>
+</tr>
+<tr>
+<td>Replacement of a core plugin</td>
+<td>Everything the core plugin could do</td>
+<td>T3 cannot replace; no grant inheritance</td>
+<td>[SEC-300]</td>
+</tr>
+</tbody>
+</table>
+<p><strong>[SEC-030]</strong> Every row in this table MUST have the mitigation implemented. A feature added to the contract later MUST add a row before release.</p>
+<h3 id="process-execution-rules">Process execution rules</h3>
+<p><strong>[SEC-031]</strong> <code>process.run</code> and <code>process.spawn</code> need a grant for the exact program. A bare name such as <code>git</code> is resolved against a fixed system <code>PATH</code> that the server captured at start and filtered to system directories (<code>/usr/bin</code>, <code>/bin</code>, <code>/usr/local/bin</code>). It is never resolved against the plugin's own environment or against any writable scope.</p>
+<p><strong>[SEC-032]</strong> Children of T2 and T3 plugins run in the same confinement as the helper and have no network. A program that needs the network, such as <code>git fetch</code>, therefore fails by design. A plugin that needs a remote operation uses <code>http</code>.</p>
+<p><strong>[SEC-033]</strong> Environment keys are validated. These are refused with <code>invalid-argument</code>: <code>LD_*</code>, <code>DYLD_*</code>, <code>PATH</code>, <code>IFS</code>, <code>BASH_ENV</code>, <code>ENV</code>, <code>PYTHON*</code>, <code>NODE_OPTIONS</code>, <code>PERL5*</code>, <code>RUBY*</code>, <code>GIT_CONFIG*</code>, <code>GIT_SSH*</code>, <code>GIT_EXEC_PATH</code>, <code>GIT_ASKPASS</code>, plus any key that the admin policy adds under <code>[processes] deny_env</code>.</p>
+<p><strong>[SEC-034]</strong> A program may not resolve into <code>package</code>, <code>data</code>, <code>cache</code>, <code>picked</code> or any writable scope. Writable mounts of T2 and T3 are <code>noexec</code>, so a plugin cannot write a binary and run it. Absolute-path grants (<code>process.run:/usr/bin/git</code>) are compared to the resolved real path.</p>
+<p><strong>[SEC-035]</strong> Argument hazards. The review dialog shows for every <code>process.run:&lt;program&gt;</code> the line <code>This program can run other programs.</code> when the program is on the host's list of known launchers (<code>git</code>, <code>sh</code>, <code>bash</code>, <code>python*</code>, <code>node</code>, <code>rg</code> with <code>--pre</code>, <code>find</code>, <code>xargs</code>, <code>env</code>, <code>make</code>, <code>ssh</code>, <code>sudo</code>). The documentation of <code>process.run</code> warns of <code>git -c core.sshCommand=...</code>, <code>git</code> hooks in the repository, and <code>rg --pre</code>. The host does not filter arguments, because that cannot be done in general.</p>
+<p><strong>[SEC-066]</strong> A spawn that leaves the confinement (<code>panes.create</code> command, <code>panes.lifecycle</code> restart) is written to the audit log with the full argv, with secret values replaced by <code>&lt;redacted&gt;</code>.</p>
+<h3 id="pane-commands">Pane commands</h3>
+<p><strong>[SEC-040]</strong> <code>create-pane</code> with a <code>command</code> from a T2 or T3 plugin needs the H grant <code>panes.create-command:&lt;program&gt;</code>. <code>panes.create</code> itself stays normal risk and allows only a shell pane in a cwd below a scope the plugin may read. The pane process starts unconfined, with the user's privileges, so the kernel draws a confirmation the first time each program is started: <code>Notes Panel wants to run git in a new pane.</code> and the full argv. The answer is remembered per plugin and program as a consent. A command whose program matches no <code>panes.create-command</code> grant completes <code>refused(not-permitted)</code> with reason <code>not-granted</code> (<code>declined</code> when the grant was requested but unchecked). A command-less <code>create-pane</code> needs only <code>panes.create</code>. The install fails with <code>manifest.grant-dependency</code> when the manifest lists <code>panes.create-command:&lt;program&gt;</code> without <code>panes.create</code> in the same side. PATH is resolved as in [SEC-031]. T1 plugins follow the same rule: the grant is H and is asked at first activation.</p>
+<p><strong>[SEC-041]</strong> <code>panes.lifecycle</code> restart with a new command uses the same grant and the same confirmation.</p>
+<p><strong>[SEC-042]</strong> <code>agent.signatures</code> rules: the <code>resume</code> argv program must equal one of the signature's <code>process_names</code> or match a <code>panes.create-command:&lt;program&gt;</code> grant of the same plugin, otherwise the resume is not offered. <code>{session}</code> is substituted as exactly one argv element, never through a shell, and it is validated against <code>[A-Za-z0-9._:-]{1,128}</code>; a session id outside it makes the resume unavailable. The resume runs only on an explicit user action, and the confirmation shows the full command the first time. <code>actions.keys</code> are delivered only when the user or a plugin that holds <code>agent.control</code> triggers them. A plugin cannot mark a pane as an agent when the pane's process name does not match the signature's <code>process_names</code>. With these constraints <code>agent.signatures</code> stays normal risk.</p>
+<h3 id="other-hatches">Other hatches</h3>
+<p><strong>[SEC-043]</strong> <code>open-external</code> file targets: only paths in scopes the plugin can read; refused when the file has any executable mode bit; refused for the extensions <code>.desktop</code>, <code>.exe</code>, <code>.bat</code>, <code>.cmd</code>, <code>.com</code>, <code>.sh</code>, <code>.jar</code>, <code>.app</code>, <code>.appimage</code>, <code>.scr</code>, <code>.lnk</code>, <code>.command</code>, <code>.html</code>, <code>.htm</code>, <code>.svg</code>, <code>.js</code>, <code>.py</code>, <code>.pl</code>, <code>.rb</code>; and refused for MIME types the host treats as active content. Outcome code <code>refused(not-permitted)</code> with reason <code>file-type</code>. The origin prompt shows the punycode form for hosts that contain non-ASCII characters and highlights the registrable domain. A plugin may have at most one pending consent prompt and 6 per hour ([SEC-105]).</p>
+<p><strong>[SEC-044]</strong> <code>clipboard.write</code>: text larger than 64 KiB, or containing any control character other than tab, newline and carriage return, is refused with <code>invalid-argument</code>. Text with a newline is allowed. A write is accepted only from a user-initiated command or a keybinding while the user has focus in a terminal pane; a write caused by a timer or an event while the terminal has focus is refused with <code>not-permitted</code> reason <code>not-user-initiated</code>.</p>
+<p><strong>[SEC-045]</strong> <code>notify.desktop</code>: the host prefixes the title with the plugin display name and a colon. The plugin cannot supply the prefix.</p>
+<p><strong>[SEC-046]</strong> Regular expressions supplied by plugins (output filters, settings <code>pattern</code>, schema <code>pattern</code>, <code>when</code> expressions) MUST be compiled with a linear-time engine that has Rust <code>regex</code> semantics: no backreferences and no lookaround. A pattern is at most 1,024 bytes, and its compiled automaton is at most 256 KiB. A pattern that fails any limit is refused with <code>invalid-argument</code> at registration (code <code>regex.too-large</code> or <code>regex.unsupported</code>). Matching against a 1 MiB input finishes in time proportional to the input.</p>
+<h2 id="edge-cases">Edge cases</h2>
+<table>
+<thead>
+<tr>
+<th>Situation</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Two plugins ask for the same scope</td>
+<td>Each helper gets its own bind mount. They never see each other's <code>tmp</code></td>
+</tr>
+<tr>
+<td>A scope root is deleted while a plugin runs</td>
+<td>Reads return <code>not-found</code>; the mount is re-created at next activation</td>
+</tr>
+<tr>
+<td>Plugin exceeds <code>pids.max</code></td>
+<td><code>fork</code> fails inside the helper with <code>EAGAIN</code>; the plugin sees <code>quota-exceeded</code> for spawns</td>
+</tr>
+<tr>
+<td>The server is killed</td>
+<td>Helpers see the dispatcher channel close and exit within 2 s; children get SIGTERM then SIGKILL</td>
+</tr>
+<tr>
+<td>A T2 plugin is installed on a machine with no user namespaces</td>
+<td>Install succeeds (it is only files). Load fails with <code>sandbox.unavailable</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="see-also">See also</h3>
+<ul>
+<li><a href="/pages/security/">Security model</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress</a></li>
+<li><a href="/pages/capability-process-run/">Capability: process.run</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+</ul>
+<p>Contract: <code>ilium:plugin@0.1.0</code>.</p>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/reference-runtime-model/"><small>Previous</small>Runtime model</a><a class="next" href="/pages/reference-secrets/"><small>Next</small>Secrets</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#you-will-need">You will need</a></li><li class="l2"><a href="#topology">Topology</a></li><li class="l2"><a href="#process-confinement">Process confinement</a></li><li class="l3"><a href="#the-seccomp-allowlist">The seccomp allowlist</a></li><li class="l3"><a href="#limits-when-cgroup-delegation-is-missing">Limits when cgroup delegation is missing</a></li><li class="l2"><a href="#dispatcher-protocol-trust">Dispatcher protocol trust</a></li><li class="l2"><a href="#sandbox-unavailable">Sandbox unavailable</a></li><li class="l2"><a href="#file-scopes">File scopes</a></li><li class="l2"><a href="#escape-hatch-review">Escape-hatch review</a></li><li class="l3"><a href="#process-execution-rules">Process execution rules</a></li><li class="l3"><a href="#pane-commands">Pane commands</a></li><li class="l3"><a href="#other-hatches">Other hatches</a></li><li class="l2"><a href="#edge-cases">Edge cases</a></li><li class="l3"><a href="#see-also">See also</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

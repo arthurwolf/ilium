@@ -726,12 +726,12 @@ async fn scheduled_input_executes_after_client_detaches_and_clears_its_countdown
         initial_events.iter().any(|event| {
             matches!(
                 event,
-                ServerEvent::TerminalReplay { pane_id: event_pane_id, bytes, .. }
+                ServerEvent::TerminalSnapshot { pane_id: event_pane_id, bytes, .. }
                     if *event_pane_id == pane_id
                         && String::from_utf8_lossy(bytes).contains("scheduled:<detached payload>")
             )
         }),
-        "initial replay must contain the detached scheduled input"
+        "initial snapshot must show the detached scheduled input"
     );
 
     write_frame(&mut reattached, &ClientRequest::KillSession)
@@ -984,23 +984,22 @@ async fn reattached_client_receives_terminal_output_produced_before_it_connected
     )
     .await
     .expect("attach second client");
-    let replay_event = expect_event(&mut reattached_client, Duration::from_secs(5), |event| {
+    let snapshot_event = expect_event(&mut reattached_client, Duration::from_secs(5), |event| {
         matches!(
             event,
-            ServerEvent::TerminalReplay { pane_id: event_pane_id, bytes, .. }
+            ServerEvent::TerminalSnapshot { pane_id: event_pane_id, bytes, .. }
                 if *event_pane_id == pane_id
-                    && String::from_utf8_lossy(bytes).contains("replay-line-001")
                     && String::from_utf8_lossy(bytes).contains("replay-line-160")
         )
     })
     .await;
-    let ServerEvent::TerminalReplay {
+    let ServerEvent::TerminalSnapshot {
         through_sequence,
         is_complete,
         ..
-    } = replay_event
+    } = snapshot_event
     else {
-        unreachable!("predicate only returns a terminal replay");
+        unreachable!("predicate only returns a terminal snapshot");
     };
     assert!(
         is_complete,
@@ -1008,7 +1007,39 @@ async fn reattached_client_receives_terminal_output_produced_before_it_connected
     );
     assert!(
         through_sequence > 0,
-        "replay must carry a live-output watermark"
+        "snapshot must carry a live-output watermark"
+    );
+
+    // Attach shows only the visible screen; older output is paged in on demand.
+    write_frame(
+        &mut reattached_client,
+        &ClientRequest::TerminalHistory {
+            pane_id,
+            before_sequence: through_sequence + 1,
+            max_bytes: 1024 * 1024,
+        },
+    )
+    .await
+    .expect("request the older transcript");
+    let history_event = expect_event(&mut reattached_client, Duration::from_secs(5), |event| {
+        matches!(
+            event,
+            ServerEvent::TerminalHistory { pane_id: event_pane_id, bytes, .. }
+                if *event_pane_id == pane_id
+                    && String::from_utf8_lossy(bytes).contains("replay-line-001")
+        )
+    })
+    .await;
+    let ServerEvent::TerminalHistory {
+        reaches_journal_start,
+        ..
+    } = history_event
+    else {
+        unreachable!("predicate only returns a terminal history");
+    };
+    assert!(
+        reaches_journal_start,
+        "small text transcript is wholly retained, so history reaches the journal start"
     );
 
     write_frame(&mut reattached_client, &ClientRequest::KillSession)

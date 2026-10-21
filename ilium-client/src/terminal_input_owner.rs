@@ -1674,7 +1674,9 @@ mod tests {
         time::Instant,
     };
 
-    static INPUT_TEST_LOCK: Mutex<()> = Mutex::new(());
+    // Async-aware mutex: several tests hold this serial guard across `.await`,
+    // which a std guard must not do. Same exclusion, same lock order.
+    static INPUT_TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
     fn quota() -> QuotaGroup {
         QuotaGroup::new(ilium_execution::QuotaLimits {
@@ -1963,9 +1965,7 @@ mod tests {
 
     #[test]
     fn admission_refusal_releases_the_exclusive_claim_before_terminal_entry() {
-        let _serial = INPUT_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
+        let _serial = INPUT_TEST_LOCK.blocking_lock();
         let denied = QuotaGroup::new(ilium_execution::QuotaLimits {
             clients: 0,
             jobs: 0,
@@ -1996,9 +1996,7 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     #[allow(clippy::await_holding_lock)] // Serial test guard only; the current-thread runtime never contends it.
     async fn full_queue_preserves_every_paste_and_its_original_allocation() {
-        let _serial = INPUT_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
+        let _serial = INPUT_TEST_LOCK.lock().await;
         let quota = quota();
         let reservation = InputReservation::prepare(&quota).expect("input admission");
         let session = reservation.session_claim();
@@ -2118,9 +2116,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn blocked_read_and_receiver_closure_retain_the_original_for_retirement() {
-        let _serial = INPUT_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
+        let _serial = INPUT_TEST_LOCK.lock().await;
         let quota = quota();
         let reservation = InputReservation::prepare(&quota).expect("input admission");
         let session = reservation.session_claim();
@@ -2187,9 +2183,7 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     #[allow(clippy::await_holding_lock)] // Serial test guard only; the current-thread runtime never contends it.
     async fn read_failure_is_delivered_once_and_does_not_become_normal_end_of_stream() {
-        let _serial = INPUT_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
+        let _serial = INPUT_TEST_LOCK.lock().await;
         let quota = quota();
         let reservation = InputReservation::prepare(&quota).expect("input admission");
         let (owner, mut receiver) = reservation

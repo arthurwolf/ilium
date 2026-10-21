@@ -11,10 +11,10 @@ fn app() -> (App, tempfile::TempDir) {
     let project = tempfile::tempdir().expect("test project");
     let mut app = App::new("plugin-settings-contract".into(), project.path().into());
     app.set_screen_area(Rect::new(0, 0, 120, 40));
-    app.mode = Mode::Settings(SettingsState {
+    app.mode = Mode::Settings(Box::new(SettingsState {
         tab: SettingsTab::Animations,
         ..Default::default()
-    });
+    }));
     (app, project)
 }
 
@@ -88,16 +88,23 @@ fn actual_plugin_issue_hover_dismisses_when_pointer_leaves_content() {
 }
 
 fn retain_catalogue(app: &mut App, catalogue: PluginCatalogue) {
-    app.plugin_catalogue = Some(
-        crate::execution::test_client()
-            .try_reserve_external(ilium_execution::JobCost {
-                input_bytes: 4096,
-                result_bytes: 1024 * 1024,
-            })
-            .expect("test admission")
-            .retain(catalogue)
-            .expect("retained catalogue"),
-    );
+    // The test client is shared by parallel tests; a saturated queue is transient.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let reservation = loop {
+        match crate::execution::test_client().try_reserve_external(ilium_execution::JobCost {
+            input_bytes: 4096,
+            result_bytes: 1024 * 1024,
+        }) {
+            Ok(reservation) => break reservation,
+            Err(ilium_execution::RejectReason::Busy | ilium_execution::RejectReason::QueueFull)
+                if std::time::Instant::now() < deadline =>
+            {
+                std::thread::yield_now();
+            }
+            Err(reason) => panic!("test admission: {reason:?}"),
+        }
+    };
+    app.plugin_catalogue = Some(reservation.retain(catalogue).expect("retained catalogue"));
 }
 
 fn install_metadata(app: &mut App) {

@@ -567,7 +567,7 @@ fn settings_snapshot(app: &App) -> Value {
             "notifications.task_failed", "notifications.suppress_redundant_task_outcomes",
             "notifications.task_coalesce_seconds",
             "triggers.<event_key>",
-            "inference.provider", "inference.title_style", "inference.restructure_prompt_token_limit", "inference.kilo_gateway.model",
+            "inference.provider", "inference.title_style", "inference.codex_official_thread_names", "inference.restructure_prompt_token_limit", "inference.kilo_gateway.model",
             "inference.ollama.url", "inference.ollama.model",
             "inference.openai.url", "inference.openai.api_key", "inference.openai.model",
             "inference.anthropic.url", "inference.anthropic.api_key", "inference.anthropic.model",
@@ -579,6 +579,8 @@ fn settings_snapshot(app: &App) -> Value {
             "voice.custom_prompt",
             "reset_planning.monitor_claude", "reset_planning.monitor_codex",
             "reset_planning.time_style",
+            "attention.mode", "attention.press_sorts", "attention.turbo_concurrency",
+            "attention.expiry_seconds", "attention.model_override",
             "debug.file_logging_enabled",
             "git.default_where", "git.branch_prefix", "git.worktree_location_template",
             "git.default_base", "git.branch_line", "git.setup_command", "git.default_close_policy"
@@ -686,6 +688,7 @@ fn settings_snapshot(app: &App) -> Value {
                 ilium_inference::TitleStyle::Labeling => "labeling",
                 ilium_inference::TitleStyle::Summarization => "summarization",
             },
+            "codex_official_thread_names": app.inference_settings.codex_official_thread_names,
             "restructure_prompt_token_limit": app.inference_settings.restructure_prompt_token_limit,
             "selected_model": app.inference_settings.selected_model(),
             "kilo_gateway": {
@@ -744,12 +747,20 @@ fn settings_snapshot(app: &App) -> Value {
             "claude_last_error": app.reset_monitor_state.claude.last_error,
             "codex_last_error": app.reset_monitor_state.codex.last_error,
         },
+        "attention": {
+            "mode": app.attention_settings.mode.name(),
+            "press_sorts": app.attention_settings.press_sorts,
+            "turbo_concurrency": app.attention_settings.turbo_concurrency,
+            "expiry_seconds": app.attention_settings.expiry_seconds,
+            "model_override": app.attention_settings.model_override,
+        },
     })
 }
 
 fn right_panel_snapshot(target: &RightPanelTarget) -> Value {
     match target {
         RightPanelTarget::Empty => json!({ "kind": "empty" }),
+        RightPanelTarget::Attention => json!({ "kind": "attention" }),
         RightPanelTarget::Chatroom { project_id } => {
             json!({ "kind": "chatroom", "project_id": project_id.0 })
         }
@@ -792,6 +803,7 @@ pub(crate) fn mode_label(mode: &Mode) -> &'static str {
         Mode::AgentToolbarModelSubmenu(_) => "agent_toolbar_model_submenu",
         Mode::SmartCopy => "smart_copy",
         Mode::AgentDebugLog(_) => "agent_debug_log",
+        Mode::LastPromptDialog(_) => "last_prompt_dialog",
         Mode::AgentDebugSavePath(_, _) => "agent_debug_save_path",
         Mode::SchedulePaneInput(_) => "schedule_input",
         Mode::QueuePrompt(_) => "queue_prompt",
@@ -859,6 +871,35 @@ mod tests {
         assert!(snapshot["writable_path_patterns"]
             .as_array()
             .is_some_and(|paths| paths.iter().any(|path| path == "inference.title_style")));
+    }
+
+    #[test]
+    fn settings_snapshot_exposes_the_attention_settings_and_their_paths() {
+        let mut app = App::new(
+            "default".to_owned(),
+            std::path::PathBuf::from("/tmp/project"),
+        );
+        let snapshot = settings_snapshot(&app);
+        assert_eq!(snapshot["attention"]["mode"], "shared");
+        assert_eq!(snapshot["attention"]["press_sorts"], true);
+        assert_eq!(snapshot["attention"]["turbo_concurrency"], 16);
+        assert_eq!(snapshot["attention"]["expiry_seconds"], 1800);
+        assert!(snapshot["attention"]["model_override"].is_null());
+        app.attention_settings.mode = crate::attention::AttentionMode::Turbo;
+        app.attention_settings.model_override = Some("synthetic-model".into());
+        let snapshot = settings_snapshot(&app);
+        assert_eq!(snapshot["attention"]["mode"], "turbo");
+        assert_eq!(snapshot["attention"]["model_override"], "synthetic-model");
+        let paths = snapshot["writable_path_patterns"].as_array().unwrap();
+        for path in [
+            "attention.mode",
+            "attention.press_sorts",
+            "attention.turbo_concurrency",
+            "attention.expiry_seconds",
+            "attention.model_override",
+        ] {
+            assert!(paths.iter().any(|candidate| candidate == path), "{path}");
+        }
     }
 
     #[test]

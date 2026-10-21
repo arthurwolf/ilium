@@ -262,8 +262,18 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let pinned_root = Arc::new(ilium_platform::animation_files::PinnedDirectory::from_host(
         save_root,
     )?);
-    let selected_directory = pinned_root.child(&arguments.world, false)?;
-    let save_identity = format!("{:?}", selected_directory.identity());
+    // `--world all` runs the production unpinned constructor over every save
+    // folder, as the live animation does. Any other value pins one save.
+    let all_worlds = arguments.world == "all";
+    let selected_directory = if all_worlds {
+        None
+    } else {
+        Some(pinned_root.child(&arguments.world, false)?)
+    };
+    let save_identity = selected_directory.as_ref().map_or_else(
+        || "all".to_owned(),
+        |directory| format!("{:?}", directory.identity()),
+    );
     let native_jar = Arc::new(ilium_platform::animation_files::PinnedFile::from_host(
         fs::File::open(&arguments.native_jar)?,
     )?);
@@ -328,10 +338,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         settings.voxel_landscape.pack_root.clear();
         ("java-default", None)
     };
-    let source = PinnedSceneSource {
+    let pinned_source = PinnedSceneSource {
         root_label: arguments.saves_root.clone(),
-        selected_world: Some(arguments.saves_root.join(&arguments.world)),
-        selected_identity: Some(selected_directory.identity()),
+        selected_world: selected_directory
+            .as_ref()
+            .map(|_| arguments.saves_root.join(&arguments.world)),
+        selected_identity: selected_directory
+            .as_ref()
+            .map(|directory| directory.identity()),
         root: pinned_root,
         native_jar,
         history_storage: arguments.output.join("history"),
@@ -339,7 +353,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         stop: None,
         runtime: Arc::new(SavedRuntime::new()),
     };
-    let mut scene = SavedScene::new_pinned(source, &settings.voxel_landscape, &env)?;
+    let mut scene = if all_worlds {
+        SavedScene::new(
+            &settings.voxel_landscape.saved_maps,
+            &settings.voxel_landscape,
+            &env,
+        )
+    } else {
+        SavedScene::new_pinned(pinned_source, &settings.voxel_landscape, &env)?
+    };
     let mut raster = Raster::default();
     let mut cell_colors =
         vec![[0_u8; 3]; usize::from(arguments.width) * usize::from(arguments.height)];

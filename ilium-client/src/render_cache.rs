@@ -155,6 +155,52 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             }
             None
         }
+        event @ ServerEvent::TerminalSnapshot { .. } => {
+            #[cfg(test)]
+            if app.terminal_parsing.is_none() {
+                if let ServerEvent::TerminalSnapshot {
+                    pane_id,
+                    through_sequence,
+                    bytes,
+                    is_complete,
+                } = event
+                {
+                    if let Some(PaneRuntime::Terminal(view)) = app.panes.get_mut(&pane_id) {
+                        view.apply_replay(&bytes, through_sequence, is_complete);
+                        view.history_paging
+                            .snapshot_applied(through_sequence, bytes.len());
+                    }
+                }
+                return None;
+            }
+            if let Err(event) = app.submit_terminal_event(event) {
+                app.pending_terminal_events.push_front(
+                    crate::connection::Received::with_retention(
+                        *event,
+                        app.processing_event_retention.clone(),
+                    ),
+                );
+            }
+            None
+        }
+        event @ ServerEvent::TerminalHistory { .. } => {
+            if let ServerEvent::TerminalHistory { pane_id, .. } = &event {
+                if let Some(PaneRuntime::Terminal(view)) = app.panes.get_mut(pane_id) {
+                    view.history_paging.reply_arrived();
+                }
+            }
+            #[cfg(test)]
+            app.terminal_parsing.as_ref()?;
+            if let Err(event) = app.submit_terminal_event(event) {
+                app.pending_terminal_events.push_front(
+                    crate::connection::Received::with_retention(
+                        *event,
+                        app.processing_event_retention.clone(),
+                    ),
+                );
+            }
+            None
+        }
         event @ ServerEvent::TerminalReplay { .. } => {
             #[cfg(test)]
             if app.terminal_parsing.is_none() {
@@ -539,6 +585,7 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             pane_id,
             last_prompt,
         } => {
+            app.record_last_prompt(pane_id, last_prompt.as_deref());
             if let Err(error) = app.tree.set_last_prompt(pane_id, last_prompt) {
                 tracing::warn!("dropping PaneLastPromptChanged for pane {pane_id:?}: {error}");
             }

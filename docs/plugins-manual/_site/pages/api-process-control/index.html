@@ -1,0 +1,1094 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Process control | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details open><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/" aria-current="page">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Host API</b></p>
+<h1>Process control</h1>
+
+<p>The <code>process</code> import runs a helper program, such as <code>git</code>, and returns its exit status and output to your plugin. The helper never inherits the host environment. It runs at low priority, with a small environment, a hard timeout and a cap on its output. Your plugin receives only the exit status, the signal name if one ended the process, and the two output streams.</p>
+<p>A second capability lives in the <code>signal-pane</code> intent. It sends an interrupt, terminate, kill or hangup signal to the process running inside a terminal pane. Because it can stop work that a user started, it is the high-risk half of this page.</p>
+<h3 id="what-you-need">What you need</h3>
+<ul>
+<li><strong>Grant <code>process.run:&lt;program&gt;</code></strong> for each program, for example <code>process.run:git</code>. The argument is a program name, resolved through <code>PATH</code>, or an absolute path, which runs exactly that file. Wildcards are refused with <code>manifest.grant-wildcard</code>. <code>process.run:sh</code> is valid, but only bundled plugins use it, such as the progress monitor.</li>
+<li><strong>Grant <code>fs.read</code></strong> for the scope that holds the <code>cwd</code> you pass. No separate grant exists per folder.</li>
+<li><strong>Grant <code>panes.signal</code></strong> for <code>signal-pane</code>. Also hold <code>panes.read</code> to receive <code>pane-focused</code> events.</li>
+<li><strong>Risk.</strong> <code>process.run</code> and <code>panes.signal</code> are both high risk (H). The user checks each one in the review dialog. A bundled T1 plugin is asked once, at first activation.</li>
+<li><strong>Language.</strong> Rust crate <code>ilium-plugin-sdk</code>, module <code>ilium_plugin_sdk::host::process</code>, or TypeScript <code>@ilium/plugin-sdk/host/process</code>. The intent uses <code>Intent::SignalPane</code> in Rust and <code>signal-pane</code> in TypeScript.</li>
+<li><strong>Side.</strong> Server and client. Both sides use the same grants.</li>
+</ul>
+<h3 id="the-surface">The surface</h3>
+<table>
+<thead>
+<tr>
+<th>Name (Rust / TypeScript)</th>
+<th>WIT form</th>
+<th>Grant</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>process::run</code> / <code>run</code></td>
+<td><code>run(spec) -&gt; result&lt;request-id, plugin-error&gt;</code>, wrapped as async</td>
+<td><code>process.run:&lt;program&gt;</code></td>
+<td>Starts the program and resolves when it exits. Returns <code>ProcessExit</code>, or throws <code>PluginError</code>. A non-zero exit code is not an error.</td>
+</tr>
+<tr>
+<td><code>process::run_request</code> / <code>runRequest</code></td>
+<td>the raw <code>run</code></td>
+<td><code>process.run:&lt;program&gt;</code></td>
+<td>Returns a <code>RequestId</code>. The exit arrives later as a <code>request-completed</code> event.</td>
+</tr>
+<tr>
+<td><code>process::take_exit</code> / <code>takeExit</code></td>
+<td><code>take-exit(request) -&gt; option&lt;process-exit&gt;</code></td>
+<td><code>process.run:&lt;program&gt;</code></td>
+<td>Returns the exit once, for a raw request id. Async code does not need it.</td>
+</tr>
+<tr>
+<td><code>signal-pane</code> intent</td>
+<td><code>signal-pane(signal-pane-spec)</code></td>
+<td><code>panes.signal</code></td>
+<td>Sends a signal to a pane's process. The outcome is <code>ok</code> or a refusal.</td>
+</tr>
+</tbody>
+</table>
+<p>The spec and result records:</p>
+<table>
+<thead>
+<tr>
+<th>Record and field</th>
+<th>Rust type</th>
+<th>TypeScript type</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>process-spec.program</code></td>
+<td><code>String</code></td>
+<td><code>string</code></td>
+<td>Program name or absolute path. It must match a grant.</td>
+</tr>
+<tr>
+<td><code>process-spec.arguments</code></td>
+<td><code>Vec&lt;String&gt;</code></td>
+<td><code>string[]</code></td>
+<td>Arguments after the program. At most 1,024.</td>
+</tr>
+<tr>
+<td><code>process-spec.cwd</code></td>
+<td><code>Option&lt;FsPath&gt;</code></td>
+<td><code>FsPath \| undefined</code></td>
+<td>Working folder. It must lie in a scope the plugin can read.</td>
+</tr>
+<tr>
+<td><code>process-spec.stdin</code></td>
+<td><code>Option&lt;Vec&lt;u8&gt;&gt;</code></td>
+<td><code>Uint8Array \| undefined</code></td>
+<td>Standard input, at most 4 MiB.</td>
+</tr>
+<tr>
+<td><code>process-spec.environment</code></td>
+<td><code>Vec&lt;(String, String)&gt;</code></td>
+<td><code>[string, string][]</code></td>
+<td>Extra variables, at most 64 pairs.</td>
+</tr>
+<tr>
+<td><code>process-spec.timeout_millis</code></td>
+<td><code>u32</code></td>
+<td><code>number</code></td>
+<td>Required. From 1 to 600,000 ms.</td>
+</tr>
+<tr>
+<td><code>process-exit.status</code></td>
+<td><code>Option&lt;i32&gt;</code></td>
+<td><code>number \| undefined</code></td>
+<td>Exit code. <code>None</code> when a signal ended the process.</td>
+</tr>
+<tr>
+<td><code>process-exit.signal</code></td>
+<td><code>Option&lt;String&gt;</code></td>
+<td><code>string \| undefined</code></td>
+<td>Signal name, for example <code>SIGKILL</code>, when a signal ended the process.</td>
+</tr>
+<tr>
+<td><code>process-exit.stdout</code></td>
+<td><code>Vec&lt;u8&gt;</code></td>
+<td><code>Uint8Array</code></td>
+<td>Standard output.</td>
+</tr>
+<tr>
+<td><code>process-exit.stderr</code></td>
+<td><code>Vec&lt;u8&gt;</code></td>
+<td><code>Uint8Array</code></td>
+<td>Standard error, kept apart from stdout.</td>
+</tr>
+<tr>
+<td><code>signal-pane-spec.pane</code></td>
+<td><code>NodeId</code></td>
+<td><code>bigint</code></td>
+<td>The pane whose process receives the signal.</td>
+</tr>
+<tr>
+<td><code>signal-pane-spec.signal</code></td>
+<td><code>Signal</code></td>
+<td><code>'interrupt' \| 'terminate' \| 'kill' \| 'hangup'</code></td>
+<td>The signal to send.</td>
+</tr>
+</tbody>
+</table>
+<p>The <code>signal</code> values map to POSIX signals as follows:</p>
+<table>
+<thead>
+<tr>
+<th>Value</th>
+<th>Signal</th>
+<th>Can the process catch it</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>interrupt</code></td>
+<td><code>SIGINT</code></td>
+<td>yes</td>
+</tr>
+<tr>
+<td><code>terminate</code></td>
+<td><code>SIGTERM</code></td>
+<td>yes</td>
+</tr>
+<tr>
+<td><code>kill</code></td>
+<td><code>SIGKILL</code></td>
+<td>no</td>
+</tr>
+<tr>
+<td><code>hangup</code></td>
+<td><code>SIGHUP</code></td>
+<td>yes</td>
+</tr>
+</tbody>
+</table>
+<p>The signal goes to the child process that the pane started. Use <code>kill</code> only when <code>terminate</code> has failed to end the process.</p>
+<h3 id="limits">Limits</h3>
+<table>
+<thead>
+<tr>
+<th>Limit</th>
+<th>Value</th>
+<th>Breach</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>timeout_millis</code></td>
+<td>1 to 600,000 ms, required</td>
+<td><code>invalid-argument</code></td>
+</tr>
+<tr>
+<td>Standard input</td>
+<td>4 MiB</td>
+<td><code>invalid-argument</code></td>
+</tr>
+<tr>
+<td>Arguments and environment pairs</td>
+<td>1,024 and 64</td>
+<td><code>invalid-argument</code></td>
+</tr>
+<tr>
+<td>Output, stdout and stderr together</td>
+<td>4 MiB by default, 32 MiB at the T1 ceiling (<code>process_output_mib</code>)</td>
+<td>process killed, <code>failed(quota-exceeded)</code></td>
+</tr>
+<tr>
+<td>Concurrent children, per session (<code>session_processes</code>)</td>
+<td>16 per session, shared by <code>process.run</code> (<code>busy</code>) and <code>process.spawn</code> (<code>quota-exceeded</code>)</td>
+<td><code>busy</code> or <code>quota-exceeded</code></td>
+</tr>
+<tr>
+<td>Pending requests, per plugin</td>
+<td>64 by default (<code>pending_requests</code>)</td>
+<td><code>busy</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="how-the-helper-runs">How the helper runs</h3>
+<ol>
+<li><strong>Grant check.</strong> A <code>run</code> call that names no program of the plugin's grants is refused at once with <code>invalid-argument</code>. A <code>cwd</code> outside a readable scope is <code>not-permitted</code>.</li>
+<li><strong>Program lookup.</strong> A bare name is resolved through <code>PATH</code>. An absolute path runs exactly that file.</li>
+<li><strong>Environment.</strong> The helper starts with only <code>PATH</code>, <code>HOME</code> and <code>LANG</code>. Each entry in <code>environment</code> replaces the value of the same name.</li>
+<li><strong>Priority and quota.</strong> The helper runs at low priority, and its CPU time is charged to the plugin's quota.</li>
+<li><strong>Confinement.</strong> On T2 and T3 packages, the helper runs in a bubblewrap mount namespace. It sees only the plugin's granted scopes (read-only for read grants), plus read-only <code>/usr</code>, <code>/bin</code>, <code>/lib*</code> and <code>/etc</code>. It has no network and a seccomp filter. On T1 bundled plugins, the helper runs unconfined at low priority.</li>
+<li><strong>Timeout.</strong> The helper is killed when <code>timeout_millis</code> passes. The completion is <code>failed(timed-out)</code>.</li>
+<li><strong>Logging.</strong> Each run is logged at level info with the program and its full argument list.</li>
+</ol>
+<figure>
+<svg viewBox="0 0 400 200" role="img" aria-label="Helper process confinement" width="600" height="300">
+<defs>
+<marker id="pc-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+<path d="M0,0 L8,4 L0,8 z" fill="currentColor"/>
+</marker>
+</defs>
+<rect x="8" y="10" width="110" height="40" rx="6" fill="none" stroke="currentColor" stroke-dasharray="4 3"/>
+<text x="63" y="34" font-size="12" text-anchor="middle" fill="currentColor">Plugin</text>
+<rect x="150" y="10" width="120" height="40" rx="6" fill="none" stroke="currentColor"/>
+<text x="210" y="34" font-size="12" text-anchor="middle" fill="currentColor">Grant check</text>
+<rect x="290" y="10" width="102" height="40" rx="6" fill="none" stroke="currentColor"/>
+<text x="341" y="34" font-size="12" text-anchor="middle" fill="currentColor">Exit result</text>
+<rect x="8" y="110" width="384" height="60" rx="6" fill="none" stroke="currentColor" stroke-width="2"/>
+<text x="20" y="134" font-size="11" fill="currentColor">Helper: low priority, small environment, timeout,</text>
+<text x="20" y="154" font-size="11" fill="currentColor">output cap; no network and own scopes on T2 and T3</text>
+<line x1="118" y1="30" x2="150" y2="30" stroke="currentColor" marker-end="url(#pc-arrow)"/>
+<text x="122" y="24" font-size="10" fill="currentColor">run</text>
+<line x1="210" y1="50" x2="210" y2="110" stroke="currentColor" marker-end="url(#pc-arrow)"/>
+<text x="218" y="84" font-size="10" fill="currentColor">starts program</text>
+<line x1="341" y1="110" x2="341" y2="50" stroke="currentColor" marker-end="url(#pc-arrow)"/>
+<text x="349" y="84" font-size="10" fill="currentColor">exit</text>
+<line x1="63" y1="110" x2="63" y2="50" stroke="currentColor" stroke-dasharray="4 3" marker-end="url(#pc-arrow)"/>
+<text x="69" y="84" font-size="10" fill="currentColor">output</text>
+</svg>
+<figcaption>The grant check runs before the helper starts. The helper runs inside the confinement box, and the plugin receives only the exit and the output.</figcaption>
+</figure>
+
+<h3 id="example-1-git-status-and-an-interrupt-in-rust">Example 1: git status and an interrupt in Rust</h3>
+<p><strong>Grants:</strong> <code>process.run:git</code> and <code>panes.signal</code></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::host::log::{self, Level};
+use ilium_plugin_sdk::host::process::{self, ProcessSpec};
+use ilium_plugin_sdk::prelude::*;
+use ilium_plugin_sdk::types::tree::Signal;
+use ilium_plugin_sdk::types::intents::SignalPaneSpec;
+
+/// Returns the short git status of a project, or None when git fails.
+async fn project_status(project: FsPath) -&gt; Option&lt;String&gt; {
+    let spec = ProcessSpec {
+        program: &quot;git&quot;.to_string(),
+        arguments: vec![&quot;status&quot;.to_string(), &quot;--short&quot;.to_string()],
+        cwd: Some(project),
+        stdin: None,
+        environment: Vec::new(),
+        timeout_millis: 10_000,
+    };
+    let exit = match process::run(spec).await {
+        Ok(exit) =&gt; exit,
+        Err(error) =&gt; {
+            log::log(Level::Warn, &amp;format!(&quot;git could not run: {:?}&quot;, error.code));
+            return None;
+        }
+    };
+    if exit.status != Some(0) {
+        log::log(Level::Warn, &amp;format!(&quot;git status exited with {:?}&quot;, exit.status));
+        return None;
+    }
+    String::from_utf8(exit.stdout).ok()
+}
+
+/// Called from a command handler. The task runs on the SDK executor.
+fn on_refresh_requested(project: FsPath) {
+    task::spawn(async move {
+        if let Some(status) = project_status(project).await {
+            log::log(Level::Info, &amp;format!(&quot;git status:\n{status}&quot;));
+        }
+    });
+}
+
+/// Builds the submission that sends SIGINT to a pane's process.
+fn interrupt_pane(pane: NodeId) -&gt; Submission {
+    Submission::new(Intent::SignalPane(SignalPaneSpec { pane, signal: Signal::Interrupt }))
+}
+</code></pre>
+<p>The SDK resolves <code>process::run(spec).await</code> when the completion arrives. The plugin does not call <code>take_exit</code>. <code>Submission::new</code> assigns the next correlation number, so the plugin needs no counter of its own.</p>
+<h3 id="example-2-git-status-and-an-interrupt-in-typescript">Example 2: git status and an interrupt in TypeScript</h3>
+<p><strong>Grants:</strong> <code>process.run:git</code>, <code>panes.read</code> and <code>panes.signal</code></p>
+<pre><code class="language-ts">import { definePlugin, PluginError, type Event, type Submission } from '@ilium/plugin-sdk';
+import { run, type ProcessExit } from '@ilium/plugin-sdk/host/process';
+import { log } from '@ilium/plugin-sdk/host/log';
+import type { FsPath, NodeId } from '@ilium/plugin-sdk/types';
+
+const INTERRUPT_COMMAND = 'com.example.runner/interrupt';
+let focusedPane: NodeId | undefined;
+let nextCorrelation = 1n;
+
+export async function projectStatus(project: FsPath): Promise&lt;string | undefined&gt; {
+  let exit: ProcessExit;
+  try {
+    exit = await run({
+      program: 'git',
+      arguments: ['status', '--short'],
+      cwd: project,
+      stdin: undefined,
+      environment: [],
+      timeoutMillis: 10_000,
+    });
+  } catch (error) {
+    log('warn', `git could not run: ${(error as PluginError).code}`);
+    return undefined;
+  }
+  if (exit.status !== 0) {
+    log('warn', `git status exited with ${exit.status}`);
+    return undefined;
+  }
+  return new TextDecoder().decode(exit.stdout);
+}
+
+export const { handler } = definePlugin({
+  side: 'server',
+  onEvents(batch: Event[]): Submission[] {
+    const submissions: Submission[] = [];
+    for (const event of batch) {
+      if (event.tag === 'pane-focused') {
+        focusedPane = event.val;
+        continue;
+      }
+      if (event.tag !== 'command-invoked' || event.val.command !== INTERRUPT_COMMAND) continue;
+      if (focusedPane === undefined) continue;
+      submissions.push({
+        intent: { tag: 'signal-pane', val: { pane: focusedPane, signal: 'interrupt' } },
+        correlation: nextCorrelation,
+        dedupKey: undefined,
+      });
+      nextCorrelation += 1n;
+    }
+    return submissions;
+  },
+});
+</code></pre>
+<p><code>run</code> in TypeScript returns a <code>Promise</code> that resolves with <code>ProcessExit</code>. A refused or failed run rejects with <code>PluginError</code>, whose <code>code</code> field holds the error code. The <code>signal-pane</code> submission carries no dedup key, because only <code>send-input</code> and <code>agent-action</code> require one.</p>
+<h3 id="long-lived-child-processes">Long-lived child processes</h3>
+<p><code>process.run</code> starts one program and returns when it ends. Some jobs need a process that stays: a language server, a file watcher, a log follower, a transcoder that reports progress. <code>process.spawn</code> starts such a child and streams its output as events. It is on both sides, and it needs two grants: <code>process.long-lived</code> and <code>process.run:&lt;program&gt;</code> for the program itself.</p>
+<pre><code class="language-wit">// Excerpt of ilium:host/process in reference-wit
+// ilium:host/process
+record spawn-spec { process: process-spec, stdin-open: bool, line-mode: bool }
+resource child {
+  pid-hint: func() -&gt; u32;                                   // for display only
+  write-stdin: func(bytes: list&lt;u8&gt;) -&gt; result&lt;_, plugin-error&gt;;
+  close-stdin: func();
+  signal: func(signal: string) -&gt; result&lt;_, plugin-error&gt;;   // interrupt, terminate, kill, hangup
+}
+spawn: func(spec: spawn-spec) -&gt; result&lt;child, plugin-error&gt;;
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Rust (<code>host::process</code>)</th>
+<th>TypeScript (<code>host/process</code>)</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>spawn</code></td>
+<td><code>spawn(spec)</code></td>
+<td><code>spawn(spec)</code></td>
+<td>Starts the child. Returns a handle or an error.</td>
+</tr>
+<tr>
+<td><code>child.pid_hint</code></td>
+<td><code>child.pid_hint()</code></td>
+<td><code>child.pidHint()</code></td>
+<td>An id to show in the UI. Never use it to signal.</td>
+</tr>
+<tr>
+<td><code>child.write_stdin</code></td>
+<td><code>child.write_stdin(bytes)</code></td>
+<td><code>child.writeStdin(bytes)</code></td>
+<td>Needs <code>stdin-open: true</code>.</td>
+</tr>
+<tr>
+<td><code>child.close_stdin</code></td>
+<td><code>child.close_stdin()</code></td>
+<td><code>child.closeStdin()</code></td>
+<td>Sends end of input.</td>
+</tr>
+<tr>
+<td><code>child.signal</code></td>
+<td><code>child.signal("interrupt")</code></td>
+<td><code>child.signal('interrupt')</code></td>
+<td><code>interrupt</code>, <code>terminate</code>, <code>kill</code> or <code>hangup</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>Output and the end arrive as events, delivered to <code>on-events</code>:</p>
+<table>
+<thead>
+<tr>
+<th>Event</th>
+<th>Payload</th>
+<th>Delivery</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>child-output</code></td>
+<td><code>child</code>, <code>stream</code> (<code>stdout</code> or <code>stderr</code>), <code>bytes</code></td>
+<td>Never dropped. The host stops reading the pipe while the plugin's queue is full, so the child slows down instead of losing output.</td>
+</tr>
+<tr>
+<td><code>child-exited</code></td>
+<td><code>child</code>, <code>status</code>, <code>signal</code></td>
+<td>Never dropped.</td>
+</tr>
+</tbody>
+</table>
+<p>With <code>line-mode: true</code>, each <code>child-output</code> is one whole line. <code>timeout-millis</code> of the <code>process-spec</code> is ignored for a spawned child. The child runs at low priority under the plugin's CPU quota, with the same environment rules as <code>run</code>. When the plugin drops the <code>child</code> handle or stops, the host sends SIGTERM and, after 2 seconds, SIGKILL.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::prelude::*;
+use ilium_plugin_sdk::host::process::{self, ProcessSpec, SpawnSpec, Child};
+use ilium_plugin_sdk::types::events::{Event, OutputStream};
+use ilium_plugin_sdk::host::log::{self, Level};
+
+struct LogFollower { child: Option&lt;Child&gt; }
+
+impl LogFollower {
+    fn start(&amp;mut self, file: &amp;str) -&gt; Result&lt;(), PluginError&gt; {
+        let child = process::spawn(&amp;SpawnSpec {
+            process: ProcessSpec {
+                program: &quot;tail&quot;.into(),
+                arguments: vec![&quot;-F&quot;.into(), file.into()],
+                cwd: None,
+                stdin: None,
+                environment: Vec::new(),
+                timeout_millis: 0, // ignored for spawned children
+            },
+            stdin_open: false,
+            line_mode: true,
+        })?;
+        self.child = Some(child);
+        Ok(())
+    }
+
+    fn on_event(&amp;mut self, event: &amp;Event) {
+        match event {
+            Event::ChildOutput(output) if output.stream == OutputStream::Stdout =&gt; {
+                log::log(Level::Info, &amp;format!(&quot;line: {}&quot;, String::from_utf8_lossy(&amp;output.bytes)));
+            }
+            Event::ChildExited(exit) =&gt; {
+                log::log(Level::Warn, &amp;format!(&quot;child ended: status {:?}, signal {:?}&quot;, exit.status, exit.signal));
+                self.child = None;
+            }
+            _ =&gt; {}
+        }
+    }
+
+    fn stop(&amp;mut self) {
+        if let Some(child) = self.child.take() {
+            let _ = child.signal(&quot;terminate&quot;);
+        }
+    }
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import * as process from '@ilium/plugin-sdk/host/process';
+import type { Child } from '@ilium/plugin-sdk/host/process';
+import type { PluginEvent } from '@ilium/plugin-sdk';
+
+let child: Child | undefined;
+
+export function start(file: string): void {
+  child = process.spawn({
+    process: { program: 'tail', arguments: ['-F', file], cwd: undefined, stdin: undefined, environment: [], timeoutMillis: 0 },
+    stdinOpen: false,
+    lineMode: true,
+  });
+}
+
+export function onEvent(event: PluginEvent): void {
+  if (event.tag === 'child-output' &amp;&amp; event.val.stream === 'stdout') {
+    console.info('line:', new TextDecoder().decode(event.val.bytes));
+  } else if (event.tag === 'child-exited') {
+    console.warn('child ended', event.val.status, event.val.signal);
+    child = undefined;
+  }
+}
+
+export function stop(): void {
+  child?.signal('terminate');
+  child = undefined;
+}
+</code></pre>
+<figure>
+<svg viewBox="0 0 430 120" role="img" aria-label="A spawned child sends output events to the plugin and the plugin signals or writes to it" width="645" height="180">
+  <title>Spawned child</title>
+  <desc>The plugin calls spawn and receives a child handle. The child process sends child-output events while it runs and a child-exited event at the end. The plugin can write stdin and signal the child. Dropping the handle sends terminate, then kill after two seconds.</desc>
+  <defs><marker id="pc-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="currentColor"/></marker></defs>
+  <rect x="8" y="30" width="120" height="60" rx="6" fill="none" stroke="currentColor"/><text x="68" y="55" font-size="11" text-anchor="middle" fill="currentColor">plugin</text><text x="68" y="72" font-size="10" text-anchor="middle" fill="currentColor">holds child handle</text>
+  <rect x="300" y="30" width="120" height="60" rx="6" fill="none" stroke="currentColor"/><text x="360" y="55" font-size="11" text-anchor="middle" fill="currentColor">child process</text><text x="360" y="72" font-size="10" text-anchor="middle" fill="currentColor">low priority</text>
+  <line x1="128" y1="42" x2="300" y2="42" stroke="currentColor" marker-end="url(#pc-arrow)"/><text x="214" y="36" font-size="10" text-anchor="middle" fill="currentColor">write-stdin, signal</text>
+  <line x1="300" y1="62" x2="128" y2="62" stroke="currentColor" marker-end="url(#pc-arrow)"/><text x="214" y="58" font-size="10" text-anchor="middle" fill="currentColor">child-output (events)</text>
+  <line x1="300" y1="80" x2="128" y2="80" stroke="currentColor" marker-end="url(#pc-arrow)" stroke-dasharray="3 3"/><text x="214" y="96" font-size="10" text-anchor="middle" fill="currentColor">child-exited</text>
+  <text x="8" y="112" font-size="10" fill="currentColor">drop handle or stop: SIGTERM, then SIGKILL after 2 s</text>
+</svg>
+<figcaption>Output flows to the plugin as events with back-pressure. Control flows the other way through the handle.</figcaption>
+</figure>
+
+<figure>
+<pre class="term"><span class="t-dim">plugin log, ilium plugin logs log-follower</span>
+2026-10-12 10:14:02 <span class="t-ok">info</span>  line: build started
+2026-10-12 10:14:09 <span class="t-ok">info</span>  line: 3 tests failed
+2026-10-12 10:14:09 <span class="t-warn">warn</span>  child ended: status Some(0), signal None
+</pre>
+<figcaption>Illustrative plugin log of the follower above. The format shows the timestamp, level and message.</figcaption>
+</figure>
+
+<p>Errors and limits of <code>spawn</code>:</p>
+<table>
+<thead>
+<tr>
+<th>Situation</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Missing <code>process.long-lived</code> or <code>process.run:&lt;program&gt;</code></td>
+<td><code>not-permitted</code></td>
+</tr>
+<tr>
+<td>More children than <code>children</code> (default 2, T1 ceiling 8, T2/T3 ceiling 2)</td>
+<td><code>quota-exceeded</code></td>
+</tr>
+<tr>
+<td>More than 16 children per session (<code>session_processes</code>), shared by <code>process.run</code> (<code>busy</code>) and <code>process.spawn</code> (<code>quota-exceeded</code>)</td>
+<td><code>quota-exceeded</code> for <code>process.spawn</code></td>
+</tr>
+<tr>
+<td>Program not found</td>
+<td><code>not-found</code></td>
+</tr>
+<tr>
+<td><code>write-stdin</code> when <code>stdin-open</code> was false</td>
+<td><code>invalid-argument</code></td>
+</tr>
+<tr>
+<td>Chunk of output larger than 1 MiB</td>
+<td>Split into several events</td>
+</tr>
+<tr>
+<td>Child ends</td>
+<td><code>child-exited</code> with <code>status</code> or <code>signal</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="what-the-user-sees">What the user sees</h3>
+<p>Installing the plugin opens the review dialog. It lists the program named in each grant. Arguments are not known at install time, so the dialog does not show them.</p>
+<pre class="term"><span class="t-dim">╭  ≡ ● · Plugin demo-git asks for high-risk grants───────────────╮</span>
+<span class="t-dim">│</span>                                                                <span class="t-dim">│</span>
+<span class="t-dim">│</span> [x] process.run:git     run the program git                    <span class="t-dim">│</span>
+<span class="t-dim">│</span> [x] panes.signal        interrupt or stop programs             <span class="t-dim">│</span>
+<span class="t-dim">│</span>                                                                <span class="t-dim">│</span>
+<span class="t-dim">│</span> Arguments are not known at install and are not shown.          <span class="t-dim">│</span>
+<span class="t-dim">│</span> Each run and each signal is written to the plugin log.         <span class="t-dim">│</span>
+<span class="t-dim">│</span>                                                                <span class="t-dim">│</span>
+<span class="t-dim">│</span>                         Esc Not now   Enter Allow selected     <span class="t-dim">│</span>
+<span class="t-dim">│</span> <span class="t-dim">Space toggle · Enter allow · Esc cancel</span>                        <span class="t-dim">│</span>
+<span class="t-dim">╰────────────────────────────────────────────────────────────────╯</span>
+</pre>
+
+<p>Illustrative, not generated. The review dialog for a T1 bundled plugin. The user checks each grant before it is allowed.</p>
+<p>At run time, every helper run and every refusal appears in the plugin log:</p>
+<pre class="term"><span class="t-prompt">$</span> ilium plugin logs demo-git --tail 4
+<span class="t-ok">run</span>  git status --short (cwd /home/arthur/dev/demo)
+<span class="t-ok">exit</span> request 5, status 0, stdout 0 bytes
+<span class="t-ok">exit</span> request 6, status 0, stdout 12 bytes
+<span class="t-dim">       " M notes.md"</span>
+<span class="t-err">refused</span> process.run sh: invalid-argument, no grant
+</pre>
+
+<p>Illustrative, not generated. A plugin log for two git runs and one refused run. The refusal names <code>sh</code>, because no grant of this plugin names it.</p>
+<h3 id="errors-and-edge-cases">Errors and edge cases</h3>
+<table>
+<thead>
+<tr>
+<th>Where</th>
+<th>Code</th>
+<th>When it happens</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Sync, <code>run</code></td>
+<td><code>invalid-argument</code></td>
+<td>Program matches no grant, timeout is 0 or over 600,000 ms, stdin over 4 MiB, too many arguments or variables.</td>
+</tr>
+<tr>
+<td>Sync, <code>run</code></td>
+<td><code>not-permitted</code></td>
+<td><code>cwd</code> lies outside a scope the plugin can read.</td>
+</tr>
+<tr>
+<td>Sync, <code>run</code></td>
+<td><code>busy</code></td>
+<td>The session already runs 16 children, or the plugin has too many pending requests.</td>
+</tr>
+<tr>
+<td>Completion</td>
+<td><code>failed(not-found)</code></td>
+<td>The program is missing from <code>PATH</code>, or <code>cwd</code> does not exist.</td>
+</tr>
+<tr>
+<td>Completion</td>
+<td><code>failed(io)</code></td>
+<td>The program exists but could not be started.</td>
+</tr>
+<tr>
+<td>Completion</td>
+<td><code>failed(timed-out)</code></td>
+<td>The timeout passed. The helper was killed first.</td>
+</tr>
+<tr>
+<td>Completion</td>
+<td><code>failed(quota-exceeded)</code></td>
+<td>Output passed the cap. The helper was killed and no partial output is delivered.</td>
+</tr>
+<tr>
+<td>Completion</td>
+<td><code>cancelled</code></td>
+<td>The plugin was disabled or stopped while the helper ran.</td>
+</tr>
+<tr>
+<td>Outcome, <code>signal-pane</code></td>
+<td><code>ok</code></td>
+<td>The signal was sent. The process may still be running.</td>
+</tr>
+<tr>
+<td>Outcome, <code>signal-pane</code></td>
+<td><code>refused(not-found)</code></td>
+<td>No such pane, or the process has exited. The message is <code>no running process</code>.</td>
+</tr>
+<tr>
+<td>Outcome, <code>signal-pane</code></td>
+<td><code>refused(pane-not-ready)</code></td>
+<td>The pane was restored and its process has not started yet. Retry after the process starts.</td>
+</tr>
+<tr>
+<td>Outcome, <code>signal-pane</code></td>
+<td><code>refused(not-permitted)</code></td>
+<td>The batch lacks the <code>panes.signal</code> grant.</td>
+</tr>
+</tbody>
+</table>
+<p>Edge cases to handle in code:</p>
+<ul>
+<li><strong>Non-zero exit is success at the API level.</strong> Check <code>status</code> yourself. Exit code 1 from <code>grep</code>, for example, means no match, not a failure.</li>
+<li><strong>Signal-ended processes.</strong> <code>status</code> is <code>None</code> and <code>signal</code> holds a name such as <code>SIGKILL</code>.</li>
+<li><strong>Output and exit ordering.</strong> The completion arrives once, after the helper exits. A partial stream is never delivered.</li>
+<li><strong>Disabling the plugin.</strong> Pending runs are cancelled and their helpers are killed.</li>
+</ul>
+<h3 id="used-by">Used by</h3>
+<ul>
+<li>The progress monitor (feature 59) runs its probe commands with <code>process.run:sh</code>. This is a high-risk grant that only a bundled plugin holds.</li>
+<li>Worktree status and branch line (feature 69) and worktree cleanup (feature 70) run <code>git</code> with <code>process.run:git</code>.</li>
+<li>Agent in a new Git worktree (feature 67) runs <code>git</code> to create the worktree.</li>
+</ul>
+<h3 id="see-also">See also</h3>
+<ul>
+<li>Long-lived children use the grant <code>process.long-lived</code>; see the <a href="/pages/reference-capabilities/">capability reference</a>. The pane-process intents <code>terminate-pane-process</code> and <code>replace-pane-command</code> are on <a href="/pages/api-pane-lifecycle/">pane lifecycle</a>.</li>
+<li><a href="/pages/api-intents/">Intents</a> for the submission and outcome shapes, and the full <code>signal-pane</code> catalogue entry.</li>
+<li><a href="/pages/capability-process-run/">Capability: process run</a> for grant rules, confinement and the review dialog.</li>
+<li><a href="/pages/capability-panes-signal/">Capability: signal panes</a> for the <code>panes.signal</code> grant.</li>
+<li><a href="/pages/api-workspace/">Workspace</a> for worktree custody records, which go with <code>git</code> work.</li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a> for the full error table.</li>
+<li><a href="/pages/security/">Security</a> for the risk tiers behind high-risk grants.</li>
+</ul>
+<p>Targets <code>ilium:plugin@0.1.0</code>.</p>
+<h3 id="security">Security</h3>
+<p>Children run with a fixed <code>PATH</code>, no network, and a data mount that is <code>noexec</code> ([SEC-033]). Output is redacted ([SEC-243]). See <a href="/pages/reference-sandbox/">Sandbox reference</a>.</p>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/api-panes/"><small>Previous</small>panes</a><a class="next" href="/pages/api-scenes/"><small>Next</small>Scenes</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#what-you-need">What you need</a></li><li class="l2"><a href="#the-surface">The surface</a></li><li class="l2"><a href="#limits">Limits</a></li><li class="l2"><a href="#how-the-helper-runs">How the helper runs</a></li><li class="l2"><a href="#example-1-git-status-and-an-interrupt-in-rust">Example 1: git status and an interrupt in Rust</a></li><li class="l2"><a href="#example-2-git-status-and-an-interrupt-in-typescript">Example 2: git status and an interrupt in TypeScript</a></li><li class="l2"><a href="#long-lived-child-processes">Long-lived child processes</a></li><li class="l2"><a href="#what-the-user-sees">What the user sees</a></li><li class="l2"><a href="#errors-and-edge-cases">Errors and edge cases</a></li><li class="l2"><a href="#used-by">Used by</a></li><li class="l2"><a href="#see-also">See also</a></li><li class="l2"><a href="#security">Security</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

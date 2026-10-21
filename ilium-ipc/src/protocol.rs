@@ -1039,6 +1039,17 @@ pub enum ClientRequest {
     /// One envelope of plugin traffic from the client half (reference-host-ipc.md HST-100).
     /// Appended to preserve all prior request discriminants.
     Plugin(crate::plugin::PluginEnvelope),
+    /// Asks for up to `max_bytes` of retained raw PTY output for `pane_id`
+    /// whose journal sequences are below `before_sequence`, newest chunks
+    /// first. Scrollback above a client's snapshot is loaded only when the
+    /// user scrolls past what the client already holds, so attach never pays
+    /// for it. The server answers with `TerminalHistory`.
+    /// Appended to preserve all prior request discriminants.
+    TerminalHistory {
+        pane_id: NodeId,
+        before_sequence: u64,
+        max_bytes: u32,
+    },
 }
 
 impl ClientRequest {
@@ -1048,6 +1059,7 @@ impl ClientRequest {
     pub const fn diagnostic_name(&self) -> &'static str {
         match self {
             Self::Plugin(_) => "plugin",
+            Self::TerminalHistory { .. } => "terminal_history",
             Self::GetPaneRecapScreen { .. } => "get_pane_recap_screen",
             Self::Attach { .. } => "attach",
             Self::UserKeyInput { .. } => "user_key_input",
@@ -1569,4 +1581,32 @@ pub enum ServerEvent {
     Contributions(crate::plugin::ContributionDelta),
     /// The server refused the connection or an envelope (reference-host-ipc.md HST-103).
     Rejected(crate::plugin::Rejection),
+    /// The current screen of a pane at `through_sequence`, rebuilt as escape
+    /// bytes (see `ilium-pty`'s snapshot encoding). Sent on attach instead of
+    /// the whole retained journal: the client applies it at once and renders
+    /// the pane, and live `ScreenUpdate`s with `sequence <= through_sequence`
+    /// are duplicates to ignore. `is_complete` is false when output older than
+    /// this screen was dropped by the server's retention cap.
+    /// Appended to preserve all prior event discriminants.
+    TerminalSnapshot {
+        pane_id: NodeId,
+        through_sequence: u64,
+        #[serde(with = "crate::terminal_bytes")]
+        bytes: Vec<u8>,
+        is_complete: bool,
+    },
+    /// Raw retained output answering `ClientRequest::TerminalHistory`:
+    /// chunks `first_sequence..before_sequence` concatenated oldest first.
+    /// `reaches_journal_start` is true when nothing older than `first_sequence`
+    /// was ever dropped, so the client can stop asking. An empty `bytes` with
+    /// `reaches_journal_start` also covers a pane that no longer exists.
+    /// Appended to preserve all prior event discriminants.
+    TerminalHistory {
+        pane_id: NodeId,
+        first_sequence: u64,
+        before_sequence: u64,
+        #[serde(with = "crate::terminal_bytes")]
+        bytes: Vec<u8>,
+        reaches_journal_start: bool,
+    },
 }
