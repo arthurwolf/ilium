@@ -1621,11 +1621,16 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     tui.write(b"\x1b")
         .expect("closing mouse-opened Settings with Esc");
     assert!(
-        wait_until(|| !tui.screen_text().contains("⚙ Settings"), WAIT_TIMEOUT).await,
-        "expected mouse-opened Settings to close before continuing"
-    );
-    assert!(
-        tui.screen_text().contains("VOICE OFF") && tui.screen_text().contains("F8"),
+        wait_until(
+            || {
+                let screen = tui.screen_text();
+                !screen.contains("⚙ Settings")
+                    && screen.contains("VOICE OFF")
+                    && screen.contains("F8")
+            },
+            WAIT_TIMEOUT,
+        )
+        .await,
         "expected the global voice control after Settings closed, got: {:?}",
         tui.screen_text()
     );

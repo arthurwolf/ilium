@@ -68,6 +68,8 @@ impl Sandbox {
             .env_remove("ILIUM_SAFE_PLUGINS")
             .env_remove("ILIUM_NO_PLUGINS")
             .env_remove("ILIUM_PANE_ID")
+            .env_remove("ILIUM_CHATROOM_AUTHOR")
+            .env_remove("AGENT_NAME")
             .env_remove("ILIUM_SESSION_SOCKET");
         for (key, value) in envs {
             command.env(key, value);

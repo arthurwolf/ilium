@@ -616,7 +616,7 @@ mod render_tests {
             .map(|index| TreeItem::new_leaf(index, format!("row {index}")))
             .collect();
         let area = Rect::new(0, 0, 20, 9);
-        let mut render = |selected: usize| {
+        let render = |selected: usize| {
             let mut state = TreeState::default();
             state.select(vec![selected]);
             state.center_selected_on_next_render();

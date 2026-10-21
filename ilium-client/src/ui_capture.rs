@@ -86,17 +86,3 @@ pub(crate) fn save_with_env(
         );
     }
 }
-
-fn print_text_frame(name: &str, terminal: &Terminal<TestBackend>) {
-    let buffer = terminal.backend().buffer();
-    let width = usize::from(buffer.area.width).max(1);
-    println!(
-        "ui-frame-begin {name} {}x{}",
-        buffer.area.width, buffer.area.height
-    );
-    for row in buffer.content.chunks(width) {
-        let line: String = row.iter().map(|cell| cell.symbol()).collect();
-        println!("{}", line.trim_end());
-    }
-    println!("ui-frame-end {name}");
-}
