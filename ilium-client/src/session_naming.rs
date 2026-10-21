@@ -146,8 +146,8 @@ fn official_codex_thread_dual_title(
     home: &Path,
     input: &SessionTitleInput,
 ) -> anyhow::Result<DualTitle> {
-    let name = ilium_agent_session::official_thread_name(home, &input.session_id)
-        .ok_or_else(|| {
+    let name =
+        ilium_agent_session::official_thread_name(home, &input.session_id).ok_or_else(|| {
             anyhow::anyhow!(
                 "Codex has not saved a thread name for session {} yet",
                 input.session_id
@@ -963,14 +963,15 @@ mod tests {
         assert_eq!(title.short, "Fix the login");
         assert_eq!(title.icon, "🔐");
         assert!(trace.rendered_prompt.is_none());
-        assert!(trace.raw_response.unwrap().contains("official Codex thread name"));
+        assert!(trace
+            .raw_response
+            .unwrap()
+            .contains("official Codex thread name"));
     }
 
     #[test]
     fn official_codex_thread_title_errors_when_codex_has_not_named_the_session() {
-        let home = home_with_codex_index(
-            "{\"id\":\"other\",\"thread_name\":\"Elsewhere\"}\n",
-        );
+        let home = home_with_codex_index("{\"id\":\"other\",\"thread_name\":\"Elsewhere\"}\n");
         let trace = official_codex_thread_title(home.path(), &input(PathBuf::from("/tmp/x")));
         assert!(trace.result.is_err());
         assert!(trace.raw_response.is_none());
@@ -983,7 +984,9 @@ mod tests {
         );
         let mut request = input(PathBuf::from("/tmp/x"));
         request.current_icon = None;
-        let title = official_codex_thread_title(home.path(), &request).result.unwrap();
+        let title = official_codex_thread_title(home.path(), &request)
+            .result
+            .unwrap();
         assert_eq!(title.icon, OFFICIAL_THREAD_NAME_ICON);
     }
 }

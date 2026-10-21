@@ -1919,12 +1919,12 @@ pub(crate) async fn admitted_terminal_recovery_prefix(
                     // A replay rebuilds the whole journal on the client; the
                     // current screen snapshot shows the same state at once.
                     // The journal replay remains only when no snapshot exists.
-                    Some(PtyOutputRecovery::Replay(replay)) => Some(
-                        match runtime.session.attach_snapshot() {
+                    Some(PtyOutputRecovery::Replay(replay)) => {
+                        Some(match runtime.session.attach_snapshot() {
                             Some(snapshot) => terminal_snapshot_event(pane_id, snapshot),
                             None => terminal_replay_event(pane_id, replay),
-                        },
-                    ),
+                        })
+                    }
                     None => None,
                 }
             }
