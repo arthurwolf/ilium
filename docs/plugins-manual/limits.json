@@ -1,0 +1,205 @@
+{
+  "source": "docs/plugins-manual/pages/reference-errors-and-limits.md",
+  "limits": {
+    "activate_deadline_ms": {
+      "default": 2000,
+      "ceiling_t1": 5000,
+      "ceiling_t2_t3": 2000
+    },
+    "annotate_deadline_ms": {
+      "default": 10,
+      "ceiling_t1": 20,
+      "ceiling_t2_t3": 10
+    },
+    "audio_captures": {
+      "default": 2,
+      "ceiling_t1": 4,
+      "ceiling_t2_t3": 2
+    },
+    "children": {
+      "default": 2,
+      "ceiling_t1": 8,
+      "ceiling_t2_t3": 2
+    },
+    "command_deadline_ms": {
+      "default": 50,
+      "ceiling_t1": 100,
+      "ceiling_t2_t3": 50
+    },
+    "concurrent_jobs": {
+      "default": 2,
+      "ceiling_t1": 8,
+      "ceiling_t2_t3": 2
+    },
+    "deactivate_deadline_ms": {
+      "default": 500,
+      "ceiling_t1": 1000,
+      "ceiling_t2_t3": 500
+    },
+    "decorations": {
+      "default": 4096,
+      "ceiling_t1": 16384,
+      "ceiling_t2_t3": 4096
+    },
+    "detector_deadline_ms": {
+      "default": 20,
+      "ceiling_t1": 50,
+      "ceiling_t2_t3": 20
+    },
+    "durable_timers": {
+      "default": 64,
+      "ceiling_t1": 256,
+      "ceiling_t2_t3": 64
+    },
+    "event_deadline_ms": {
+      "default": 20,
+      "ceiling_t1": 50,
+      "ceiling_t2_t3": 20
+    },
+    "event_queue": {
+      "default": 1024,
+      "ceiling_t1": 4096,
+      "ceiling_t2_t3": 1024
+    },
+    "fs_read_all_mib": {
+      "default": 64,
+      "ceiling_t1": 512,
+      "ceiling_t2_t3": 64
+    },
+    "http_response_mib": {
+      "default": 8,
+      "ceiling_t1": 64,
+      "ceiling_t2_t3": 8
+    },
+    "http_streams": {
+      "default": 4,
+      "ceiling_t1": 16,
+      "ceiling_t2_t3": 4
+    },
+    "job_memory_mib": {
+      "default": 64,
+      "ceiling_t1": 512,
+      "ceiling_t2_t3": 256
+    },
+    "job_queue": {
+      "default": 16,
+      "ceiling_t1": 64,
+      "ceiling_t2_t3": 16
+    },
+    "job_wall_ms": {
+      "default": 20000,
+      "ceiling_t1": 600000,
+      "ceiling_t2_t3": 100000
+    },
+    "journal_entries": {
+      "default": 5000,
+      "ceiling_t1": 20000,
+      "ceiling_t2_t3": 5000
+    },
+    "key_grabs": {
+      "default": 8,
+      "ceiling_t1": 32,
+      "ceiling_t2_t3": 8
+    },
+    "log_lines_per_second": {
+      "default": 200,
+      "ceiling_t1": 1000,
+      "ceiling_t2_t3": 200
+    },
+    "memory_mib": {
+      "default": 32,
+      "ceiling_t1": 256,
+      "ceiling_t2_t3": 128
+    },
+    "migrate_deadline_ms": {
+      "default": 30000,
+      "ceiling_t1": 60000,
+      "ceiling_t2_t3": 30000
+    },
+    "node_metadata_kib": {
+      "default": 64,
+      "ceiling_t1": 256,
+      "ceiling_t2_t3": 64
+    },
+    "open_videos": {
+      "default": 2,
+      "ceiling_t1": 8,
+      "ceiling_t2_t3": 2
+    },
+    "output_filters": {
+      "default": 32,
+      "ceiling_t1": 128,
+      "ceiling_t2_t3": 32
+    },
+    "package_assets_mib": {
+      "default": 64,
+      "ceiling_t1": 256,
+      "ceiling_t2_t3": 64
+    },
+    "process_output_mib": {
+      "default": 4,
+      "ceiling_t1": 32,
+      "ceiling_t2_t3": 4
+    },
+    "render_deadline_ms": {
+      "default": 10,
+      "ceiling_t1": 20,
+      "ceiling_t2_t3": 10
+    },
+    "shared_cache_mib": {
+      "default": 64,
+      "ceiling_t1": 256,
+      "ceiling_t2_t3": 128
+    },
+    "storage_bucket_mib": {
+      "default": 16,
+      "ceiling_t1": 256,
+      "ceiling_t2_t3": 16
+    },
+    "table_elements": {
+      "default": 10000,
+      "ceiling_t1": 50000,
+      "ceiling_t2_t3": 20000
+    },
+    "timers": {
+      "default": 64,
+      "ceiling_t1": 256,
+      "ceiling_t2_t3": 64
+    },
+    "toasts_pending": {
+      "default": 3,
+      "ceiling_t1": 3,
+      "ceiling_t2_t3": 3
+    },
+    "ui_tree_kib": {
+      "default": 1024,
+      "ceiling_t1": 4096,
+      "ceiling_t2_t3": 1024
+    },
+    "ui_tree_nodes": {
+      "default": 4096,
+      "ceiling_t1": 16384,
+      "ceiling_t2_t3": 4096
+    },
+    "vector_entries": {
+      "default": 10000,
+      "ceiling_t1": 200000,
+      "ceiling_t2_t3": 50000
+    },
+    "vector_indexes": {
+      "default": 4,
+      "ceiling_t1": 16,
+      "ceiling_t2_t3": 4
+    },
+    "video_buffer_mib": {
+      "default": 64,
+      "ceiling_t1": 256,
+      "ceiling_t2_t3": 64
+    },
+    "watches": {
+      "default": 64,
+      "ceiling_t1": 256,
+      "ceiling_t2_t3": 64
+    }
+  }
+}
