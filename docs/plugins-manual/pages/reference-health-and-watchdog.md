@@ -89,7 +89,7 @@ Third-party plugins run in a helper process. Each T2 or T3 plugin side runs in i
 | Idle helper crash (no export running) | no counted failure for anyone |
 
 - [LIF-132] A hung helper MUST be killed after 3 missed heartbeats or 500 ms past a deadline, whichever is first. Test: a helper that stops answering.
-- [LIF-133] After a helper dies, the host MUST count one failure for the plugin side that was running and MUST restart that side at once in a new helper. Test: crash a helper and read the failure window of its plugin side.
+- [LIF-133] After a helper dies, the host MUST count one failure for the plugin side that was running and MUST restart that side in a new helper on the schedule of LIF-028 and LIF-029 (1 s after the first counted failure in a window, 5 s after the second). Test: crash a helper and read the failure window of its plugin side.
 - [LIF-134] The host MUST restart a helper after a crash at most 5 times in 10 minutes. After that, the T2 and T3 plugins of the session MUST move to the instance state `stopped-by-failure` on the server side with the reason `helper.unstable`. Test: kill the helper six times.
 
 ### Metrics
