@@ -33,7 +33,7 @@ Every server and client plugin implements `lifecycle` and `handler`. A scene plu
 | `renderer` | scene | yes | none | none | draw frames of a background scene |
 | `catalog-provider` | server, client | no | `catalog-provider` | none; ids must be in `contributes.catalogs` | serve a page of an option catalogue |
 | `menu-provider` | client | no | `menu-provider` | none | build a dynamic context menu or toolbar submenu |
-| `virtual-rows-provider` | server, client | no | `virtual-rows-provider` | `tree.decorate` for the rows themselves | return a page of children of a virtual tree row |
+| `virtual-rows-provider` | server, client | no | `virtual-rows-provider` | none; `set-virtual-rows` needs `tree.decorate` | return a page of children of a virtual tree row |
 | `token-provider` | client | no | `token-provider` | `editor.read` | return syntax tokens for lines of a language the host does not know |
 | `migrator` | server, client | no | `migrator` | none | convert stored data once before `activate` when `data_version` rose (WIT fragment `with-migrator`) |
 

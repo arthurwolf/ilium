@@ -101,7 +101,7 @@ An export is named in the manifest `exports` list unless the Required column say
 | 10 | `renderer` | no | no | yes | yes | none | none | frame budget, at most 50 ms |
 | 11 | `catalog-provider` | yes | yes | no | no | `catalog-provider` | none (ids in `contributes.catalogs`) | 20 ms |
 | 12 | `menu-provider` | no | yes | no | no | `menu-provider` | none | 20 ms |
-| 13 | `virtual-rows-provider` | yes | yes | no | no | `virtual-rows-provider` | `tree.decorate` | 20 ms |
+| 13 | `virtual-rows-provider` | yes | yes | no | no | `virtual-rows-provider` | none | 20 ms |
 | 14 | `token-provider` | no | yes | no | no | `token-provider` | `editor.read` | 10 ms |
 | 15 | `hook-handler` | yes | yes | no | no | `hook-handler` | `extensions.contribute:<point>` | 20 ms |
 | 16 | `migrator` | yes | yes | no | no | `migrator` | none | 60 s for T1, 30 s for T2 and T3, before `activate` |
