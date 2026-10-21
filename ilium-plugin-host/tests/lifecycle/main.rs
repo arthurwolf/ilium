@@ -3,6 +3,7 @@
 
 mod support;
 
+mod crash_records;
 mod lifecycle;
 mod reference_health_and_watchdog;
 mod reference_plugin_lifecycle_states;

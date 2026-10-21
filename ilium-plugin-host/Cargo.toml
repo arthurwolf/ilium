@@ -25,6 +25,7 @@ tokio = { version = "1", features = ["rt", "sync", "time"] }
 loom = { version = "0.7", optional = true }
 
 [dev-dependencies]
+zip = "8.6"
 # Test lanes of the plugin platform (test-plan.md sections 2.4 and 2.13).
 proptest = "1"
 # Signatures with other keys, prefixes and malformed scalars in the package lane (PKG-203, PKG-250..252).

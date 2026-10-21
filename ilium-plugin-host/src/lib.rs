@@ -21,6 +21,7 @@ pub mod audit;
 pub mod autoupdate;
 pub mod calls;
 pub mod cli;
+pub mod crash_records;
 pub mod conformance_hooks;
 pub mod consent;
 pub mod devtools;

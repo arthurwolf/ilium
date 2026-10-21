@@ -9,6 +9,7 @@ use ilium_plugin_api::{PluginError, ProcessKind, Side, Tier};
 
 use crate::lifecycle::{ShutdownReport, StartMode, StartReport};
 use crate::telemetry::LogLine;
+use crate::crash_records::CrashRecord;
 
 pub use ilium_plugin_api::generated::types::ClientId;
 
@@ -537,6 +538,11 @@ impl BootRun {
     /// Kills the helper process.
     pub fn kill_helper(&mut self) {
         unimplemented!("host::testing::boot::BootRun::kill_helper")
+    }
+
+    /// The crash records the host wrote during this run (USR-227).
+    pub fn crash_records(&self) -> Vec<CrashRecord> {
+        unimplemented!("host::testing::boot::BootRun::crash_records")
     }
 
     /// Hangs the helper process.

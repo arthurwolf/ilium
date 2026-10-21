@@ -8,3 +8,4 @@ mod reference_debugging_tools_log;
 mod reference_debugging_tools_trace;
 mod reference_host_telemetry;
 mod reference_plugin_cli;
+mod support_bundle;
