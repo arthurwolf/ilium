@@ -428,3 +428,172 @@ impl ScreensRig {
         unimplemented!("client::plugin_host::screens_rig::ScreensRig::pane_received_input")
     }
 }
+
+#[cfg(test)]
+mod spec_tests {
+    use super::*;
+
+    /// A 64-character lowercase hexadecimal fingerprint in groups of four (USR-120).
+    const HEX_FINGERPRINT: &str =
+        "0123 4567 89ab cdef 0123 4567 89ab cdef 0123 4567 89ab cdef 0123 4567 89ab cdef";
+
+    /// REQ: USR-014
+    #[test]
+    fn first_start_prompt_stops_after_third_not_now() {
+        let mut rig = ScreensRig::new(100, 30);
+        rig.start_client();
+        let prompt_screen = rig.screen_text();
+        rig.confirm_no();
+        rig.stop_client();
+        rig.start_client();
+        rig.confirm_no();
+        rig.stop_client();
+        rig.start_client();
+        rig.confirm_no();
+        rig.stop_client();
+        rig.start_client();
+        assert_ne!(rig.screen_text(), prompt_screen);
+    }
+
+    /// REQ: USR-022, USR-012
+    #[test]
+    fn review_dialog_starts_high_rows_unchecked_and_records_defaults() {
+        let mut rig = ScreensRig::new(100, 30);
+        let grants = ["http:api.example.com", "terminal.write"];
+        assert!(!rig.grant_is_high("http:api.example.com"));
+        assert!(rig.grant_is_high("terminal.write"));
+        rig.open_review_dialog("ilium.test.review", &grants);
+        rig.press_enter();
+        let grants_file = String::from_utf8_lossy(&rig.grants_file_bytes()).into_owned();
+        assert_eq!(grants_file.matches("granted").count(), 1);
+        assert_eq!(grants_file.matches("declined").count(), 1);
+    }
+
+    /// REQ: USR-031
+    #[test]
+    fn safe_mode_labels_third_party_rows_off_with_reason() {
+        let mut rig = ScreensRig::new(100, 30);
+        rig.install_plugin("ilium.test.third", "T2");
+        rig.start_client_safe_mode();
+        assert!(rig.screen_text().contains("safe-mode"));
+        assert!(rig
+            .plugin_state_word("ilium.test.third")
+            .to_lowercase()
+            .contains("off"));
+        assert!(!rig.plugin_is_running("ilium.test.third"));
+    }
+
+    /// REQ: USR-041
+    #[test]
+    fn plugins_tab_refuses_to_switch_off_core_plugin_and_says_why() {
+        let mut rig = ScreensRig::new(100, 30);
+        rig.start_client();
+        rig.open_plugins_tab();
+        rig.select_plugin("ilium.core.tree");
+        rig.press_space();
+        assert!(rig.plugin_is_running("ilium.core.tree"));
+        assert!(rig.last_notice().is_some_and(|text| !text.is_empty()));
+    }
+
+    /// REQ: USR-050, USR-051
+    #[test]
+    fn user_moved_run_order_wins_over_priority_and_survives_restart() {
+        let mut rig = ScreensRig::new(100, 30);
+        rig.start_client();
+        rig.install_owner_with_point("ilium.test.owner", "Owner", "greet");
+        rig.install_contributor("ilium.test.a", "ilium.test.owner", "greet", "hook_a", 10);
+        rig.install_contributor("ilium.test.b", "ilium.test.owner", "greet", "hook_b", 20);
+        assert_eq!(
+            rig.run_order_of_point("ilium.test.owner", "greet"),
+            vec!["ilium.test.a".to_string(), "ilium.test.b".to_string()]
+        );
+        rig.open_extensions_owner_view("ilium.test.owner");
+        rig.move_selection_to("ilium.test.b");
+        rig.activate("Move up");
+        let expected = vec!["ilium.test.b".to_string(), "ilium.test.a".to_string()];
+        assert_eq!(rig.run_order_of_point("ilium.test.owner", "greet"), expected);
+        rig.restart_client();
+        assert_eq!(rig.run_order_of_point("ilium.test.owner", "greet"), expected);
+    }
+
+    /// REQ: USR-053
+    #[test]
+    fn three_breaches_stop_extension_with_notice_and_not_on_disk() {
+        let mut rig = ScreensRig::new(100, 30);
+        rig.start_client();
+        rig.install_owner_with_point("ilium.test.owner", "Owner", "greet");
+        rig.install_contributor("ilium.test.c", "ilium.test.owner", "greet", "hook_c", 10);
+        rig.breach_extension("ilium.test.c", "ilium.test.owner", "greet", 3);
+        assert!(!rig
+            .run_order_of_point("ilium.test.owner", "greet")
+            .contains(&"ilium.test.c".to_string()));
+        assert!(rig.last_notice().is_some());
+        assert!(rig.screen_text().contains("Reset"));
+        rig.restart_client();
+        assert!(rig
+            .run_order_of_point("ilium.test.owner", "greet")
+            .contains(&"ilium.test.c".to_string()));
+    }
+
+    /// REQ: USR-080, USR-082
+    #[test]
+    fn capabilities_tab_shows_plain_wording_and_exact_grant_string() {
+        let mut rig = ScreensRig::new(100, 30);
+        rig.install_plugin_with_grants(
+            "ilium.test.caps",
+            &["terminal.write", "http:api.example.com"],
+        );
+        rig.open_capabilities_tab("ilium.test.caps");
+        let wording = rig.plain_wording("http:api.example.com");
+        assert!(!wording.is_empty());
+        assert_ne!(wording, "http:api.example.com");
+        assert!(rig.screen_text().contains(&wording));
+        assert!(rig.screen_text().contains("http:api.example.com"));
+        assert!(rig.grant_is_high("terminal.write"));
+    }
+
+    /// REQ: USR-087, USR-061
+    #[test]
+    fn clipboard_footer_indicator_lasts_three_seconds_and_needs_grant() {
+        let mut rig = ScreensRig::new(100, 30);
+        rig.start_client();
+        rig.install_plugin_with_grants("ilium.test.clip", &["clipboard.read"]);
+        rig.install_plugin("ilium.test.noclip", "T2");
+        let quiet_footer = rig.footer_text();
+        rig.plugin_reads_clipboard("ilium.test.noclip");
+        assert_eq!(rig.footer_text(), quiet_footer);
+        rig.plugin_reads_clipboard("ilium.test.clip");
+        assert_ne!(rig.footer_text(), quiet_footer);
+        rig.advance_ms(3000);
+        assert_eq!(rig.footer_text(), quiet_footer);
+    }
+
+    /// REQ: USR-088
+    #[test]
+    fn toasts_capped_at_three_per_window_and_input_lock_ends_after_two_seconds() {
+        let mut rig = ScreensRig::new(100, 30);
+        rig.start_client();
+        rig.install_plugin("ilium.test.toaster", "T2");
+        for index in 0..10 {
+            rig.plugin_toasts("ilium.test.toaster", &format!("toast-{index}"));
+        }
+        assert_eq!(rig.screen_text().matches("toast-").count(), 3);
+        rig.plugin_locks_input("ilium.test.toaster");
+        assert!(!rig.pane_received_input('x'));
+        rig.advance_ms(2000);
+        assert!(rig.pane_received_input('x'));
+    }
+
+    /// REQ: USR-120
+    #[test]
+    fn declining_unknown_signing_key_installs_nothing() {
+        let mut rig = ScreensRig::new(100, 30);
+        rig.start_client();
+        let rows_before = rig.plugin_row_count();
+        rig.open_trust_prompt("Example Publisher", HEX_FINGERPRINT);
+        assert!(rig.screen_text().contains(HEX_FINGERPRINT));
+        rig.confirm_no();
+        assert_eq!(rig.trust_answers(), vec![false]);
+        assert_eq!(rig.plugin_row_count(), rows_before);
+    }
+}

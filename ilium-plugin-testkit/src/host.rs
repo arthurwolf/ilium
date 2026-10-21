@@ -1575,3 +1575,112 @@ impl CallOrder {
         unimplemented!("harness.call-order-process-before-submission")
     }
 }
+
+#[cfg(test)]
+mod spec_tests {
+    use super::*;
+
+    /// Builds a screen whose cells hold the given one-grapheme symbols, row-major.
+    fn screen_from_symbols(columns: u16, rows: u16, symbols: &[&str]) -> Screen {
+        Screen {
+            columns,
+            rows,
+            cells: symbols
+                .iter()
+                .map(|symbol| ScreenCell {
+                    symbol: symbol.to_string(),
+                    ..ScreenCell::default()
+                })
+                .collect(),
+        }
+    }
+
+    /// A 3x2 screen holding "ab " on row 0 and " c " on row 1; trailing blanks are trimmed when read.
+    fn sample_screen() -> Screen {
+        screen_from_symbols(3, 2, &["a", "b", " ", " ", "c", " "])
+    }
+
+    /// REQ: reference-test-harness.md "Harness types" (Screen.text)
+    #[test]
+    fn screen_text_joins_rows_and_trims_trailing_spaces() {
+        assert_eq!(sample_screen().text(), "ab\n c");
+    }
+
+    /// REQ: DEV-440
+    #[test]
+    fn screen_cell_takes_row_before_column_from_zero() {
+        let screen = screen_from_symbols(2, 2, &["a", "b", "c", "d"]);
+        assert_eq!(screen.cell(1, 0).symbol, "c");
+        assert_eq!(screen.cell(0, 1).symbol, "b");
+    }
+
+    /// REQ: reference-test-harness.md "Harness types" (Screen.lines, Screen.row)
+    #[test]
+    fn screen_lines_and_row_return_every_row_trimmed() {
+        let screen = sample_screen();
+        assert_eq!(screen.lines(), vec!["ab".to_string(), " c".to_string()]);
+        assert_eq!(screen.row(1), " c");
+    }
+
+    /// REQ: reference-test-harness.md "Harness types" (Screen.find); an absent text yields no position.
+    #[test]
+    fn screen_find_returns_first_position_or_none_for_missing_text() {
+        let screen = sample_screen();
+        assert_eq!(screen.find("c"), Some((1, 1)));
+        assert_eq!(screen.find("zz"), None);
+    }
+
+    /// REQ: DEV-400, DEV-404, DEV-413
+    #[test]
+    fn default_host_uses_seed_one_and_native_mode_under_cargo_test() {
+        let host = FakeHost::new();
+        if std::env::var_os("ILIUM_PLUGIN_TEST_SEED").is_none() {
+            assert_eq!(host.current_seed(), 1);
+        }
+        assert_eq!(host.current_mode(), Mode::Native);
+    }
+
+    /// REQ: DEV-410, DEV-413 (an explicit seed call wins)
+    #[test]
+    fn builder_methods_chain_and_explicit_seed_wins() {
+        let host = FakeHost::new()
+            .tier("T2")
+            .side("client")
+            .platform("linux")
+            .seed(3)
+            .build();
+        assert_eq!(host.current_seed(), 3);
+    }
+
+    /// REQ: DEV-412 (unknown grant name fails with harness.grant-unknown)
+    #[test]
+    fn grant_now_refuses_a_grant_name_outside_the_catalogue() {
+        let mut host = FakeHost::new();
+        let error = host
+            .grant_now("no.such.grant")
+            .expect_err("an unknown grant name must fail");
+        assert_eq!(error.code, "harness.grant-unknown");
+    }
+
+    /// REQ: DEV-411 (for_manifest returns Result; an unreadable manifest path is an error)
+    #[test]
+    fn for_manifest_with_missing_file_returns_an_error() {
+        assert!(FakeHost::for_manifest("does-not-exist/manifest.json").is_err());
+    }
+
+    /// REQ: DEV-520 (same seed gives the same batch)
+    #[test]
+    fn fuzz_events_same_seed_gives_same_batch() {
+        let host = FakeHost::new();
+        let first = host.fuzz_events(42, 8);
+        assert_eq!(first.len(), 8);
+        assert_eq!(first, host.fuzz_events(42, 8));
+    }
+
+    /// REQ: DEV-520 (empty input: a zero-count request builds an empty batch)
+    #[test]
+    fn fuzz_events_with_zero_count_is_empty() {
+        let host = FakeHost::new();
+        assert!(host.fuzz_events(42, 0).is_empty());
+    }
+}

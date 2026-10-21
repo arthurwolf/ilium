@@ -345,3 +345,114 @@ impl WidgetRig {
         unimplemented!("client::plugin_host::widget_rig::WidgetRig::tooltip_text")
     }
 }
+
+#[cfg(test)]
+mod spec_tests {
+    use super::*;
+    use ilium_plugin_api::generated::types::Constraint;
+
+    /// REQ: WID-007 (fixed and fill solved in order; cells sum to the area width)
+    #[test]
+    fn solve_row_fixed_then_fill_takes_the_remaining_width() {
+        let widths = solve_row(40, &[Constraint::Length(10), Constraint::Fill(1)]);
+        assert_eq!(widths, vec![10, 30]);
+        assert_eq!(widths.iter().sum::<u16>(), 40);
+    }
+
+    /// REQ: WID-006 (a percentage above 100 is clamped to 100)
+    #[test]
+    fn solve_row_clamps_percentage_above_100_to_the_full_width() {
+        let widths = solve_row(40, &[Constraint::Percentage(150)]);
+        assert_eq!(widths, vec![40]);
+    }
+
+    /// REQ: WID-005 (a child and constraint count mismatch is an error, never a silent layout)
+    #[test]
+    fn show_layout_with_mismatched_constraint_count_is_an_error() {
+        let mut rig = WidgetRig::new(40, 10);
+        let result = rig.show_layout(3, &[Constraint::Length(10), Constraint::Fill(1)]);
+        assert!(result.is_err(), "3 children with 2 constraints must fail");
+    }
+
+    /// REQ: WID-022 (calendar needs the unstable list; without it the install fails)
+    #[test]
+    fn install_with_calendar_not_listed_in_unstable_is_rejected() {
+        let result = install_with_widget("calendar", false);
+        let diagnostic = result.expect_err("calendar without unstable listing must fail");
+        assert!(diagnostic.contains("manifest.unstable-missing"));
+    }
+
+    /// REQ: WID-008 and WID-027 (a toggle click reaches the plugin as a ui-action with key and action-id)
+    #[test]
+    fn clicking_a_toggle_sends_one_ui_action_with_key_as_action_id() {
+        let mut rig = WidgetRig::new(40, 10);
+        rig.show_toggle("dark", "Dark", false);
+        rig.click_text("Dark");
+        let actions = rig.actions();
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].key, "dark");
+        assert_eq!(actions[0].action_id, "dark");
+        assert_eq!(actions[0].value, "true");
+    }
+
+    /// REQ: WID-027 (the ui-action event carries five fields)
+    #[test]
+    fn ui_action_event_has_five_fields() {
+        let record = UiActionRecord {
+            key: "dark".to_string(),
+            action_id: "dark".to_string(),
+            value: "true".to_string(),
+        };
+        assert_eq!(record.field_count(), 5);
+    }
+
+    /// REQ: WID-023 (ratio above 1 is drawn full; NaN is drawn empty)
+    #[test]
+    fn gauge_clamps_ratio_above_one_and_draws_nan_as_empty() {
+        let mut rig = WidgetRig::new(40, 10);
+        rig.show_gauge(1.0);
+        let full_cells = rig.gauge_filled_cells();
+        rig.show_gauge(1.5);
+        assert_eq!(rig.gauge_filled_cells(), full_cells);
+        rig.show_gauge(f64::NAN);
+        assert_eq!(rig.gauge_filled_cells(), 0);
+    }
+
+    /// REQ: WID-012 (more than 4 open popups in one view fails with quota-exceeded)
+    #[test]
+    fn fifth_open_popup_in_one_view_fails_with_quota_exceeded() {
+        let mut rig = WidgetRig::new(40, 10);
+        for index in 1..=4 {
+            let popup_id = format!("p{index}");
+            rig.open_popup_in_view(0, &popup_id)
+                .expect("the first four popups in a view must open");
+        }
+        let fifth = rig.open_popup_in_view(0, "p5");
+        let diagnostic = fifth.expect_err("the fifth popup in one view must be refused");
+        assert!(diagnostic.contains("quota-exceeded"));
+    }
+
+    /// REQ: WID-011 (Escape closes a modal popup, which must send closed)
+    #[test]
+    fn escape_closes_modal_popup_and_sends_closed() {
+        let mut rig = WidgetRig::new(40, 10);
+        rig.show_modal_popup("confirm");
+        rig.press_escape();
+        let closed = rig.closed_events();
+        assert!(
+            closed.iter().any(|event| event.contains("confirm")),
+            "closed events were {closed:?}"
+        );
+    }
+
+    /// REQ: WID-015 (a tooltip over 200 scalar values is cut at 199 and ends with the ellipsis)
+    #[test]
+    fn tooltip_longer_than_200_scalars_is_cut_to_200_ending_in_ellipsis() {
+        let mut rig = WidgetRig::new(40, 10);
+        let long_tooltip = "x".repeat(300);
+        rig.show_button_with_tooltip("save", "Save", &long_tooltip);
+        let shown = rig.tooltip_text().expect("tooltip must be shown");
+        assert_eq!(shown.chars().count(), 200);
+        assert!(shown.ends_with('\u{2026}'));
+    }
+}

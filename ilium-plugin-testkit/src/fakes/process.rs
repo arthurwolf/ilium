@@ -92,3 +92,85 @@ impl FakeProcess {
         unimplemented!("DEV-464")
     }
 }
+
+#[cfg(test)]
+mod spec_tests {
+    use super::*;
+    use crate::host::FakeHost;
+    use ilium_plugin_sdk_core::types::ErrorCode;
+
+    fn exit_with_stdout(stdout: &[u8]) -> ProcessExit {
+        ProcessExit {
+            status: Some(0),
+            signal: None,
+            stdout: stdout.to_vec(),
+            stderr: Vec::new(),
+        }
+    }
+
+    /// REQ: [DEV-464] Registering an expectation with `returns` MUST NOT record a call; `calls()` only lists runs that were requested.
+    #[test]
+    fn expect_returns_registers_without_recording_a_call() {
+        let mut host = FakeHost::new().grant("process.run:git");
+        host.process()
+            .expect("git", &["status"])
+            .returns(exit_with_stdout(b"clean\n"));
+        assert!(host.process().calls().is_empty());
+    }
+
+    /// REQ: [DEV-464] An expectation that finishes with `fails` MUST register the error without recording a call.
+    #[test]
+    fn expect_fails_registers_a_permission_error_without_recording_a_call() {
+        let mut host = FakeHost::new().grant("process.run:rm");
+        let denied = PluginError {
+            code: ErrorCode::NotPermitted,
+            message: "denied".to_string(),
+            retry_after_ms: None,
+        };
+        host.process().expect("rm", &["-rf", "/data"]).fails(denied);
+        assert!(host.process().calls().is_empty());
+    }
+
+    /// REQ: [DEV-464] An empty program name and an empty argument list are valid exact-match inputs; registration MUST accept them without recording a call.
+    #[test]
+    fn expect_accepts_empty_program_and_arguments() {
+        let mut host = FakeHost::new();
+        host.process().expect("", &[]).returns(exit_with_stdout(b""));
+        assert!(host.process().calls().is_empty());
+    }
+
+    /// REQ: [DEV-460] `allow_unexpected` MUST be a setting only: it MUST NOT by itself record a run or a child.
+    #[test]
+    fn allow_unexpected_records_nothing_by_itself() {
+        let mut host = FakeHost::new();
+        host.process().allow_unexpected();
+        assert!(host.process().calls().is_empty());
+        assert!(host.process().children().is_empty());
+    }
+
+    /// REQ: [reference-test-harness "Fake process"] `default_exit`, `on_args`, `on_program` and `on_program_timeout` are catch-all rules and MUST NOT count as runs in flight.
+    #[test]
+    fn catch_all_rules_do_not_count_as_runs() {
+        let mut host = FakeHost::new();
+        host.process().default_exit(exit_with_stdout(b"ok"));
+        host.process().on_args(&["--version"], exit_with_stdout(b"1.0"));
+        host.process().on_program("ls", exit_with_stdout(b""));
+        host.process().on_program_timeout("sleep");
+        assert_eq!(host.process().max_concurrent(), 0);
+        assert!(host.process().calls().is_empty());
+    }
+
+    /// REQ: [reference-wit.md section 5.14] `children()` MUST be empty until the plugin spawns a long-lived child (`process.spawn`).
+    #[test]
+    fn children_is_empty_before_any_spawn() {
+        let mut host = FakeHost::new().grant("process.long-lived");
+        assert!(host.process().children().is_empty());
+    }
+
+    /// REQ: [reference-test-harness "Fake process"] `max_concurrent` MUST be 0 when no run was in flight, so an unused fake reports no concurrency.
+    #[test]
+    fn max_concurrent_is_zero_when_no_run_happened() {
+        let mut host = FakeHost::new().grant("process.run:git");
+        assert_eq!(host.process().max_concurrent(), 0);
+    }
+}

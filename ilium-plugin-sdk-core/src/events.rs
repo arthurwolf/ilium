@@ -290,3 +290,115 @@ pub fn input_uncertain(payload: InputUncertainEvent) -> Event {
 pub fn display_mode_changed(payload: Option<String>) -> Event {
     Event::DisplayModeChanged(payload)
 }
+
+#[cfg(test)]
+mod spec_tests {
+    use super::*;
+
+    /// REQ: EVT-044 (agent-activity-changed carries node, previous, current; reference-events-and-intents "Event catalogue")
+    #[test]
+    fn activity_carries_node_and_both_states() {
+        let event = activity(7, AgentActivity::Working, AgentActivity::Idle);
+        match event {
+            Event::AgentActivityChanged(payload) => {
+                assert_eq!(payload.node, NodeId(7));
+                assert_eq!(payload.previous, AgentActivity::Working);
+                assert_eq!(payload.current, AgentActivity::Idle);
+            }
+            other => panic!("expected AgentActivityChanged, got {other:?}"),
+        }
+    }
+
+    /// REQ: EVT-044 (agent-activity-changed is an event kind; every AgentActivity state is representable as current)
+    #[test]
+    fn activity_accepts_every_agent_activity_state() {
+        let all_states = [
+            AgentActivity::None,
+            AgentActivity::Working,
+            AgentActivity::Idle,
+            AgentActivity::AwaitingApproval,
+            AgentActivity::Done,
+            AgentActivity::Menu,
+        ];
+        for state in all_states {
+            match activity(1, AgentActivity::None, state) {
+                Event::AgentActivityChanged(payload) => assert_eq!(payload.current, state),
+                other => panic!("expected AgentActivityChanged, got {other:?}"),
+            }
+        }
+    }
+
+    /// REQ: Event catalogue, command-invoked row (command, arguments-json, origin, context)
+    #[test]
+    fn command_carries_name_and_arguments_json() {
+        let event = command("example.plugin/start", r#"{"count":2}"#);
+        match event {
+            Event::CommandInvoked(payload) => {
+                assert_eq!(payload.command, "example.plugin/start");
+                assert_eq!(payload.arguments_json, r#"{"count":2}"#);
+            }
+            other => panic!("expected CommandInvoked, got {other:?}"),
+        }
+    }
+
+    /// REQ: Event catalogue, command-invoked row (arguments-json is an opaque JSON string, carried as given)
+    #[test]
+    fn command_passes_empty_and_malformed_arguments_through_verbatim() {
+        for arguments in ["", "{not json"] {
+            match command("example.plugin/start", arguments) {
+                Event::CommandInvoked(payload) => assert_eq!(payload.arguments_json, arguments),
+                other => panic!("expected CommandInvoked, got {other:?}"),
+            }
+        }
+    }
+
+    /// REQ: EVT-049 (pending tree-changed lists keep first-seen order without duplicates)
+    #[test]
+    fn tree_changed_keeps_first_seen_node_order() {
+        let event = tree_changed(vec![NodeId(5), NodeId(3)]);
+        assert_eq!(event, Event::TreeChanged(vec![NodeId(5), NodeId(3)]));
+    }
+
+    /// REQ: EVT-041 (node-removed names exactly the removed node id)
+    #[test]
+    fn node_removed_wraps_the_removed_node_id() {
+        assert_eq!(node_removed(NodeId(3)), Event::NodeRemoved(NodeId(3)));
+    }
+
+    /// REQ: Event catalogue, theme-changed and keymap-changed rows (payload-free events)
+    #[test]
+    fn payload_free_events_have_no_fields() {
+        assert_eq!(theme_changed(), Event::ThemeChanged);
+        assert_eq!(keymap_changed(), Event::KeymapChanged);
+    }
+
+    /// REQ: EVT-044 (agent-activity-changed is never dropped, so the builder must not alter its payload)
+    #[test]
+    fn agent_activity_changed_keeps_payload_unchanged() {
+        let payload = AgentActivityEvent {
+            node: NodeId(9),
+            previous: AgentActivity::Idle,
+            current: AgentActivity::AwaitingApproval,
+            revision: 42,
+        };
+        assert_eq!(
+            agent_activity_changed(payload.clone()),
+            Event::AgentActivityChanged(payload)
+        );
+    }
+
+    /// REQ: Event catalogue, command-invoked row (command-invoked is never dropped; builder keeps origin and context)
+    #[test]
+    fn command_invoked_builder_keeps_origin_and_context() {
+        let payload = CommandInvokedEvent {
+            command: "example.plugin/open".to_string(),
+            arguments_json: "{}".to_string(),
+            origin: CommandOrigin::Palette,
+            context: CommandContext::default(),
+        };
+        assert_eq!(
+            command_invoked(payload.clone()),
+            Event::CommandInvoked(payload)
+        );
+    }
+}

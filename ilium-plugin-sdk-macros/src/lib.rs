@@ -120,3 +120,113 @@ pub fn ilium_plugin(args: TokenStream, item: TokenStream) -> TokenStream {
     }
     .into()
 }
+
+#[cfg(test)]
+mod spec_tests {
+    use super::PluginArgs;
+
+    fn parse_args(source: &str) -> syn::Result<PluginArgs> {
+        syn::parse_str::<PluginArgs>(source)
+    }
+
+    fn parse_error_message(source: &str) -> String {
+        match parse_args(source) {
+            Ok(_) => panic!("expected `{source}` to be rejected"),
+            Err(error) => error.to_string(),
+        }
+    }
+
+    /// REQ: rust-sdk.md "Exports and entry points" (side and exports are read from the attribute)
+    #[test]
+    fn side_and_exports_are_read_in_declared_order() {
+        let args = parse_args(
+            r#"side = "client", exports = ["views", "catalog-provider", "token-provider"]"#,
+        )
+        .expect("a client plugin with three exports must parse");
+
+        assert_eq!(args.side, "client");
+        assert_eq!(
+            args.exports,
+            vec!["views", "catalog-provider", "token-provider"]
+        );
+    }
+
+    /// REQ: rust-sdk.md "Exports and entry points" (exports names the optional exports; none is the default)
+    #[test]
+    fn omitted_or_empty_exports_mean_no_optional_exports() {
+        let omitted = parse_args(r#"side = "server""#).expect("side alone must parse");
+        let empty = parse_args(r#"side = "server", exports = []"#)
+            .expect("an empty exports list must parse");
+
+        assert!(omitted.exports.is_empty());
+        assert!(empty.exports.is_empty());
+    }
+
+    /// REQ: rust-sdk.md "Exports and entry points" (side is "server", "client" or "scene")
+    #[test]
+    fn every_documented_side_is_accepted() {
+        for side in ["server", "client", "scene"] {
+            let args = parse_args(&format!(r#"side = "{side}""#))
+                .expect("each documented side must parse");
+            assert_eq!(args.side, side);
+        }
+    }
+
+    /// REQ: rust-sdk.md "Modules, import paths and names" (the SDK crate is ilium_plugin_sdk)
+    #[test]
+    fn generated_code_refers_to_the_sdk_crate_by_its_absolute_path() {
+        let args = parse_args(r#"side = "server""#).expect("side alone must parse");
+
+        assert!(args.krate.leading_colon.is_some());
+        let segment_names: Vec<String> = args
+            .krate
+            .segments
+            .iter()
+            .map(|segment| segment.ident.to_string())
+            .collect();
+        assert_eq!(segment_names, vec!["ilium_plugin_sdk"]);
+    }
+
+    /// REQ: rust-sdk.md "Exports and entry points" (side is required)
+    #[test]
+    fn missing_side_is_a_compile_error_including_for_empty_input() {
+        let without_side = parse_error_message(r#"exports = ["views"]"#);
+        let empty_input = parse_error_message("");
+
+        assert!(without_side.contains("requires side"), "got: {without_side}");
+        assert!(empty_input.contains("requires side"), "got: {empty_input}");
+    }
+
+    /// REQ: rust-sdk.md "Exports and entry points" (side must be server, client or scene; "both" is a CLI value only)
+    #[test]
+    fn side_outside_the_three_documented_values_is_rejected() {
+        let message = parse_error_message(r#"side = "both""#);
+
+        assert!(
+            message.contains(r#"side must be "server", "client" or "scene""#),
+            "got: {message}"
+        );
+    }
+
+    /// REQ: rust-sdk.md "Exports and entry points" (unknown attribute arguments are a compile error)
+    #[test]
+    fn unknown_argument_is_a_compile_error() {
+        let message = parse_error_message(r#"side = "server", colour = "red""#);
+
+        assert!(
+            message.contains("unknown ilium_plugin argument `colour`"),
+            "got: {message}"
+        );
+    }
+
+    /// REQ: rust-sdk.md "Exports and entry points" (exports are manifest names, so they must be string literals)
+    #[test]
+    fn non_string_export_entry_is_a_compile_error() {
+        let message = parse_error_message(r#"side = "server", exports = ["views", 3]"#);
+
+        assert!(
+            message.contains("exports must be string literals"),
+            "got: {message}"
+        );
+    }
+}

@@ -67,3 +67,101 @@ impl FakeScene {
         unimplemented!("DEV-560")
     }
 }
+
+#[cfg(test)]
+mod spec_tests {
+    use super::FakeScene;
+    use ilium_plugin_sdk_core::anim::FrameInput;
+    use ilium_plugin_sdk_core::plugin::NativeSurface;
+    use ilium_plugin_sdk_core::SceneRenderer;
+
+    /// Paints every cell with `x`; writes the palette length into the first cell so that palette delivery is observable.
+    #[derive(Default)]
+    struct MarkingRenderer {
+        palette_length: usize,
+    }
+
+    impl SceneRenderer for MarkingRenderer {
+        fn new(_spec_json: &str) -> Self {
+            Self::default()
+        }
+
+        fn render(&mut self, _frame: &FrameInput, surface: &mut NativeSurface) {
+            for cell in surface.cells.iter_mut() {
+                cell.0 = 'x';
+            }
+            if let Some(first_cell) = surface.cells.first_mut() {
+                first_cell.0 = char::from_digit(self.palette_length as u32, 10).unwrap();
+            }
+        }
+
+        fn set_palette(&mut self, palette_rgb: Vec<u32>) {
+            self.palette_length = palette_rgb.len();
+        }
+
+        fn frames_per_second(&self) -> u32 {
+            30
+        }
+    }
+
+    /// REQ: reference-test-harness.md [DEV-560] (`FakeScene::frame` calls `render` once and returns a `Screen` of the scene size)
+    #[test]
+    fn frame_returns_screen_of_scene_size_filled_by_render() {
+        let mut scene = FakeScene::new::<MarkingRenderer>("scene", 4, 2);
+        let screen = scene.frame(FrameInput::default());
+        assert_eq!(screen.columns, 4);
+        assert_eq!(screen.rows, 2);
+        assert_eq!(screen.cells.len(), 8);
+        assert_eq!(screen.cell(0, 0).symbol, "0");
+        assert_eq!(screen.cell(1, 3).symbol, "x");
+    }
+
+    /// REQ: reference-test-harness.md [DEV-560] (empty input: a zero-size scene gives a `Screen` with no cells)
+    #[test]
+    fn frame_of_zero_size_scene_has_no_cells() {
+        let mut scene = FakeScene::new::<MarkingRenderer>("scene", 0, 0);
+        let screen = scene.frame(FrameInput::default());
+        assert_eq!(screen.columns, 0);
+        assert_eq!(screen.rows, 0);
+        assert!(screen.cells.is_empty());
+    }
+
+    /// REQ: reference-test-harness.md [DEV-561] (equal inputs on the fake clock give equal screens)
+    #[test]
+    fn equal_inputs_give_equal_screens() {
+        let mut scene = FakeScene::new::<MarkingRenderer>("scene", 4, 2);
+        let first_screen = scene.frame(FrameInput::default());
+        let second_screen = scene.frame(FrameInput::default());
+        assert_eq!(first_screen, second_screen);
+    }
+
+    /// REQ: reference-test-harness.md [DEV-562] (`set_palette` passes the palette to the renderer before the next frame)
+    #[test]
+    fn set_palette_reaches_renderer_before_next_frame() {
+        let mut scene = FakeScene::new::<MarkingRenderer>("scene", 4, 2);
+        scene.set_palette(vec![0x112233, 0x445566]);
+        let screen = scene.frame(FrameInput::default());
+        assert_eq!(screen.cell(0, 0).symbol, "2");
+    }
+
+    /// REQ: reference-test-harness.md "Scenes" (`FakeScene::frames_per_second` reports the frame rate the renderer asks for; scene.rs doc comment)
+    #[test]
+    fn frames_per_second_reports_renderer_request() {
+        let scene = FakeScene::new::<MarkingRenderer>("scene", 4, 2);
+        assert_eq!(scene.frames_per_second(), 30);
+    }
+
+    /// REQ: scene.rs `reconfigure` doc comment (returns `true` only when the renderer accepted the settings in place; a renderer without that support gives `false`)
+    #[test]
+    fn reconfigure_is_false_when_renderer_cannot_accept_in_place() {
+        let mut scene = FakeScene::new::<MarkingRenderer>("scene", 4, 2);
+        assert!(!scene.reconfigure("{}"));
+    }
+
+    /// REQ: scene.rs `status` doc comment (status text the renderer reported after the frames so far; none before any frame reports one)
+    #[test]
+    fn status_is_none_before_renderer_reports_any() {
+        let scene = FakeScene::new::<MarkingRenderer>("scene", 4, 2);
+        assert_eq!(scene.status(), None);
+    }
+}

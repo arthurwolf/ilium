@@ -118,3 +118,240 @@ pub trait NativeEntry: Sized {
     /// Dispatches `on-events`.
     fn native_on_events(&mut self, batch: Vec<Event>) -> Vec<Submission>;
 }
+
+#[cfg(test)]
+mod spec_tests {
+    use super::*;
+    use crate::generated::types::{ErrorCode, PluginId};
+
+    fn activation_for_test() -> Activation {
+        Activation {
+            plugin: PluginId("test.plugin".to_string()),
+            api: "ilium:plugin@0.1.0".to_string(),
+            instance: 1,
+            side: "server".to_string(),
+            settings_json: "{}".to_string(),
+            granted: Vec::new(),
+            restored: None,
+        }
+    }
+
+    fn plugin_error(code: ErrorCode, message: &str) -> PluginError {
+        PluginError {
+            code,
+            message: message.to_string(),
+            retry_after_ms: None,
+        }
+    }
+
+    /// Overrides only `activate`, so `deactivate` runs the trait default.
+    #[derive(Default)]
+    struct QuietPlugin;
+
+    impl Lifecycle for QuietPlugin {
+        fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
+            Ok(())
+        }
+    }
+
+    /// REQ: rust-sdk.md "Traits" (`Lifecycle`: `deactivate` has a default that saves no state)
+    #[test]
+    fn default_deactivate_saves_no_state_for_every_delivered_reason() {
+        let mut plugin = QuietPlugin::default();
+        for reason in [
+            DeactivationReason::Shutdown,
+            DeactivationReason::Disabled,
+            DeactivationReason::Upgrade,
+            DeactivationReason::Revoked,
+            DeactivationReason::Granted,
+        ] {
+            assert_eq!(Lifecycle::deactivate(&mut plugin, reason), None);
+        }
+    }
+
+    #[derive(Default)]
+    struct CountingPlugin {
+        activations: u32,
+    }
+
+    impl Lifecycle for CountingPlugin {
+        fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
+            self.activations += 1;
+            Ok(())
+        }
+    }
+
+    /// REQ: rust-sdk.md "Exports and entry points" (`lifecycle` is always exported) and exports.rs
+    /// `ExportLifecycle::activate` ("Called once per instance, before any event")
+    #[test]
+    fn export_lifecycle_activate_reaches_the_plugin_once() {
+        let mut plugin = CountingPlugin::default();
+        ExportLifecycle::activate(&mut plugin, activation_for_test()).expect("activation succeeds");
+        assert_eq!(plugin.activations, 1);
+    }
+
+    struct RefusingPlugin;
+
+    impl Lifecycle for RefusingPlugin {
+        fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
+            Err(plugin_error(ErrorCode::InvalidArgument, "settings do not parse"))
+        }
+    }
+
+    /// REQ: exports.rs `ExportLifecycle::activate` ("An error stops the activation and counts as a failure")
+    #[test]
+    fn export_lifecycle_activate_returns_the_plugin_error_unchanged() {
+        let mut plugin = RefusingPlugin;
+        let outcome = ExportLifecycle::activate(&mut plugin, activation_for_test());
+        assert_eq!(
+            outcome,
+            Err(plugin_error(ErrorCode::InvalidArgument, "settings do not parse"))
+        );
+    }
+
+    #[derive(Default)]
+    struct KeepingPlugin;
+
+    impl Lifecycle for KeepingPlugin {
+        fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
+            Ok(())
+        }
+
+        fn deactivate(&mut self, reason: DeactivationReason) -> Option<Vec<u8>> {
+            match reason {
+                DeactivationReason::Upgrade => Some(vec![1, 2, 3]),
+                _ => None,
+            }
+        }
+    }
+
+    /// REQ: exports.rs `ExportLifecycle::deactivate` ("The returned bytes arrive in the next activation as
+    /// restored") and reference-test-harness.md [DEV-424] (the default reason is `shutdown`, which keeps no bytes here)
+    #[test]
+    fn export_lifecycle_deactivate_returns_restore_bytes_from_the_plugin() {
+        let mut plugin = KeepingPlugin;
+        assert_eq!(
+            ExportLifecycle::deactivate(&mut plugin, DeactivationReason::Upgrade),
+            Some(vec![1, 2, 3])
+        );
+        assert_eq!(
+            ExportLifecycle::deactivate(&mut plugin, DeactivationReason::Shutdown),
+            None
+        );
+    }
+
+    fn accept_host_api(_handle: &dyn HostApi) {}
+
+    /// REQ: rust-sdk.md "Calling the host" (named at plugin.rs:64; no heading of that name in the page) and
+    /// plugin.rs `set_host` ("Installs the host handle for the current thread")
+    #[test]
+    fn set_host_installs_the_handle_that_host_returns() {
+        set_host(Box::new(()));
+        let handle = host();
+        accept_host_api(&*handle);
+    }
+
+    struct SceneEntry;
+
+    impl NativeEntry for SceneEntry {
+        const SIDE: &'static str = "scene";
+        const EXPORTS: &'static [&'static str] = &["renderer"];
+
+        fn native_activate(&mut self, _context: Activation) -> Result<(), PluginError> {
+            Ok(())
+        }
+
+        fn native_deactivate(&mut self, _reason: DeactivationReason) -> Option<Vec<u8>> {
+            None
+        }
+
+        fn native_on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
+            Vec::new()
+        }
+    }
+
+    /// REQ: rust-sdk.md "The ilium_plugin macro" (named at plugin.rs:108; no heading of that name in the page):
+    /// the side is "server", "client" or "scene"
+    #[test]
+    fn native_entry_side_is_server_client_or_scene() {
+        assert!(matches!(SceneEntry::SIDE, "server" | "client" | "scene"));
+        assert_eq!(SceneEntry::EXPORTS, &["renderer"]);
+    }
+
+    struct DeniedEntry;
+
+    impl NativeEntry for DeniedEntry {
+        const SIDE: &'static str = "server";
+        const EXPORTS: &'static [&'static str] = &[];
+
+        fn native_activate(&mut self, _context: Activation) -> Result<(), PluginError> {
+            Err(plugin_error(ErrorCode::NotPermitted, "grant not requested"))
+        }
+
+        fn native_deactivate(&mut self, _reason: DeactivationReason) -> Option<Vec<u8>> {
+            None
+        }
+
+        fn native_on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
+            Vec::new()
+        }
+    }
+
+    /// REQ: exports.rs `ExportLifecycle::activate` ("An error stops the activation and counts as a failure"),
+    /// reached through the native dispatch of `NativeEntry::native_activate`
+    #[test]
+    fn native_activate_error_reaches_the_caller() {
+        let mut entry = DeniedEntry;
+        let outcome = NativeEntry::native_activate(&mut entry, activation_for_test());
+        assert_eq!(
+            outcome,
+            Err(plugin_error(ErrorCode::NotPermitted, "grant not requested"))
+        );
+    }
+
+    #[derive(Default)]
+    struct SolidRenderer {
+        palette_rgb: Vec<u32>,
+    }
+
+    impl NativeRenderer for SolidRenderer {
+        fn new(_spec_json: &str) -> Self {
+            Self::default()
+        }
+
+        fn render(&mut self, _frame: &FrameInput, surface: &mut NativeSurface) {
+            let colour = self.palette_rgb.first().copied().unwrap_or(0);
+            for cell in surface.cells.iter_mut() {
+                cell.1 = colour;
+            }
+        }
+
+        fn set_palette(&mut self, palette_rgb: Vec<u32>) {
+            self.palette_rgb = palette_rgb;
+        }
+
+        fn frames_per_second(&self) -> u32 {
+            30
+        }
+    }
+
+    fn blank_surface(columns: u16, rows: u16) -> NativeSurface {
+        NativeSurface {
+            columns,
+            rows,
+            cells: vec![(' ', 0, 0); usize::from(columns) * usize::from(rows)],
+        }
+    }
+
+    /// REQ: reference-test-harness.md [DEV-562] (`set_palette` reaches the renderer before the next frame) and
+    /// [DEV-560] (`frame` returns the surface cells in the scene size)
+    #[test]
+    fn palette_set_before_a_frame_colours_that_frame() {
+        let mut renderer = SolidRenderer::new("{}");
+        renderer.set_palette(vec![0x00ff00]);
+        let mut surface = blank_surface(2, 1);
+        renderer.render(&FrameInput::default(), &mut surface);
+        assert_eq!(surface.cells.len(), 2);
+        assert!(surface.cells.iter().all(|cell| cell.1 == 0x00ff00));
+    }
+}

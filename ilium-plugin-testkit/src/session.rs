@@ -213,3 +213,134 @@ impl Default for FakeSession {
         FakeSession::new()
     }
 }
+
+#[cfg(test)]
+mod spec_tests {
+    use super::*;
+    use crate::errors::codes;
+    use ilium_plugin_sdk_core::types::ErrorCode;
+
+    /// Runs an action that must panic and returns the panic text.
+    fn panic_message<F: FnOnce()>(action: F) -> String {
+        let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(action))
+            .expect_err("the call was expected to fail");
+        if let Some(text) = payload.downcast_ref::<&str>() {
+            return text.to_string();
+        }
+        payload.downcast_ref::<String>().cloned().unwrap_or_default()
+    }
+
+    /// REQ: DEV-480 (services.use is resolved against services.provide: an active core stub lists its service)
+    #[test]
+    fn core_stub_service_is_listed_once_active() {
+        let mut session = FakeSession::new();
+        session.install_core("ilium.core.tree").start();
+        assert!(session
+            .services()
+            .iter()
+            .any(|name| name.as_str() == "bookmarks"));
+    }
+
+    /// REQ: DEV-483 (the stub exposes the services of its core plugin and nothing else)
+    #[test]
+    fn core_stub_exposes_only_its_own_services() {
+        let mut session = FakeSession::new();
+        session.install_core("ilium.core.tree").start();
+        assert_eq!(session.services(), vec!["bookmarks".to_string()]);
+    }
+
+    /// REQ: DEV-483 (an unknown core plugin name fails with harness.core-unknown)
+    #[test]
+    fn install_core_rejects_unknown_core_name() {
+        let mut session = FakeSession::new();
+        let message = panic_message(|| {
+            session.install_core("ilium.core.does-not-exist");
+        });
+        assert!(
+            message.contains(codes::CORE_UNKNOWN),
+            "panic message was: {message}"
+        );
+    }
+
+    /// REQ: DEV-484 (pump moves every queue until empty; an empty session settles without error)
+    #[test]
+    fn pump_on_empty_session_succeeds() {
+        let mut session = FakeSession::new();
+        assert_eq!(session.pump(), Ok(()));
+    }
+
+    /// REQ: DEV-486 (an id that is not installed fails with harness.plugin-unknown)
+    #[test]
+    fn server_of_uninstalled_plugin_fails_with_plugin_unknown() {
+        let mut session = FakeSession::new();
+        let message = panic_message(|| {
+            session.server("ilium.test.absent");
+        });
+        assert!(
+            message.contains(codes::PLUGIN_UNKNOWN),
+            "panic message was: {message}"
+        );
+    }
+
+    /// REQ: DEV-487 (run_hook returns the HookReply of the handler; a core stub hook replies pass, see DEV-489)
+    #[test]
+    fn run_hook_returns_pass_from_core_stub() {
+        let mut session = FakeSession::new();
+        session.install_core("ilium.core.tree").start();
+        let call = HookCall {
+            call: 1,
+            point: "before-move".to_string(),
+            extension: String::new(),
+            payload_json: "{}".to_string(),
+        };
+        let reply = session
+            .run_hook("ilium.core.tree", call)
+            .expect("the stub hook runs");
+        assert_eq!(reply, HookReply::Pass);
+    }
+
+    /// REQ: DEV-487 (a plugin without a hook handler fails with harness.not-a-hook-handler)
+    #[test]
+    fn run_hook_on_plugin_without_hook_handler_fails() {
+        let mut session = FakeSession::new();
+        session.install_core("ilium.core.agent-toolbar").start();
+        let call = HookCall {
+            call: 2,
+            point: "toolbar-actions".to_string(),
+            extension: String::new(),
+            payload_json: "{}".to_string(),
+        };
+        let error = session
+            .run_hook("ilium.core.agent-toolbar", call)
+            .expect_err("the stub has no hook handler");
+        assert_eq!(error.code, codes::NOT_A_HOOK_HANDLER);
+    }
+
+    /// REQ: DEV-488 (call_service routes to the provider and returns its ServiceReply; the stub service replies {"ok":true}, see DEV-489)
+    #[test]
+    fn call_service_returns_stub_provider_reply() {
+        let mut session = FakeSession::new();
+        session.install_core("ilium.core.tree").start();
+        session.grant_service("ilium.test.caller", "bookmarks");
+        let reply = session.call_service("ilium.test.caller", "bookmarks", "*", "{}");
+        match reply {
+            Ok(ServiceReply::Done(payload)) => {
+                let value: serde_json::Value =
+                    serde_json::from_str(&payload).expect("the reply is JSON");
+                assert_eq!(value, serde_json::json!({"ok": true}));
+            }
+            other => panic!("expected a done reply, got {other:?}"),
+        }
+    }
+
+    /// REQ: DEV-488 (a missing provider returns Err(not-found))
+    #[test]
+    fn call_service_without_provider_is_not_found() {
+        let mut session = FakeSession::new();
+        session.grant_service("ilium.test.caller", "no-such-service");
+        let error = session
+            .call_service("ilium.test.caller", "no-such-service", "*", "{}")
+            .expect_err("no provider is installed");
+        assert_eq!(error.code, ErrorCode::NotFound);
+    }
+}
