@@ -79,7 +79,7 @@ Case ids have the form `CONF-<AREA>-<nn>`. The tables list the id, the claim, th
 | Id | Claim | Stimulus | Expected | Subject |
 |---|---|---|---|---|
 | CONF-GRANT-01 | An import whose grant the user declined is refused | The manifest requests `fs.read:project`, the test declines it, the plugin calls `fs.read` | `Err(not-permitted)` | P S H |
-| CONF-GRANT-02 | Revocation takes effect at once | Revoke, then call | `Err(revoked)` for an import (HST-075), `refused(plugin-error{code: not-permitted})` for an intent | H |
+| CONF-GRANT-02 | Revocation takes effect at once | Revoke, then call | `Err(not-permitted)` with reason `revoked` for an import made after the revocation, `Err(revoked)` only for a call already in flight (HST-075), `refused(plugin-error{code: not-permitted})` for an intent | H |
 | CONF-GRANT-03 | Grant arguments are matched exactly | Grant `fs.read:project`, read `FsPath{scope: "data"}` | `Err(not-permitted)` | H |
 | CONF-GRANT-04 | A grant absent from the manifest cannot be gained | `host.grant_now` of a grant not in the manifest | `harness.grant-not-declared` | H |
 | CONF-GRANT-05 | A function of a capability never requested traps | Call a function of a capability the manifest never requested | `host.capability-not-requested` | H |

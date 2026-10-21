@@ -20,7 +20,7 @@ Requirement ids of this page are in the range `AUT-001` to `AUT-099`. The comple
 
 | Limit | Value | Page |
 |---|---|---|
-| Timer minimum, timers per plugin | 50 ms, 64 | [Clock and timers](/pages/api-clock-and-timers/) |
+| Timer minimum, timers per plugin | 50 ms, 64 (256 on tier 1) | [Clock and timers](/pages/api-clock-and-timers/) |
 | `on-events` deadline | 20 ms by default (a tier 1 plugin may ask for up to 50 ms) | [Performance](/pages/performance/) |
 | Storage key, value, bucket | 256 bytes, 1 MiB, 16 MiB (`storage_bucket_mib`) | [Storage](/pages/api-storage/) |
 | Restore bytes from `deactivate` | 1 MiB | [Lifecycle](/pages/lifecycle/) |
@@ -59,7 +59,7 @@ A core MUST NOT call the clock itself, and a handler SHOULD read the clock once 
 
 **Problem.** The user types or resizes, and your plugin gets an event for every change. You want to act once, a short time after the last change.
 
-**Constraints.** A timer needs at least 50 ms. A plugin holds at most 64 timers. Timer events coalesce while they wait, so a late handler sees one `timer-fired`. There is no "reset" call. You restart a debounce by cancelling the old timer and setting a new one.
+**Constraints.** A timer needs at least 50 ms. A plugin holds at most 64 timers by default; a tier 1 manifest can request up to 256. Timer events coalesce while they wait, so a late handler sees one `timer-fired`. There is no "reset" call. You restart a debounce by cancelling the old timer and setting a new one.
 
 **Rule.** A debounce MUST cancel the pending timer before it arms a new one. Otherwise each change leaves a timer behind, and a busy editor reaches the limit of 64 held timers. [AUT-002]
 

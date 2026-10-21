@@ -115,7 +115,7 @@ The trigger column names who or what causes the change. The effect column is wha
 | P10 | `installed-enabled` with `update.state: staged` (or `update-staged` after a grant-expansion review) | swap | the first `activate` fails, traps or misses its deadline | Roll back at once to the previous version and its pre-update data snapshot. Mark the candidate `skip`. Do not count the failure. | log `update.rolled-back` | Toast: `Update failed, rolled back` |
 | P11 | any installed state | uninstall | no uninstall already pending | Set `uninstall-pending`. Stop all sides. Remove files. | log `uninstall.ok` | Plugin disappears |
 | P12 | `uninstall-pending` | server start after a crash | files still present | Finish the uninstall | log `uninstall.recovered` | none |
-| P13 | `installed-enabled` | `trust remove <key_id> --force` | the key signed this plugin | Stop all sides. Record `state`. | `plugin-state-changed` reason `policy`, log `trust.removed` | Row shows `Untrusted`, with a badge |
+| P13 | `installed-enabled` | `trust remove <key_id> --force` | the key signed this plugin | Stop all sides. Record `state`. | `plugin-state-changed` reason `policy`, log `trust.removed` | Row shows `Publisher no longer trusted`, with a badge |
 | P14 | `disabled-untrusted` | the key is trusted again, or `enable --accept-risk` | none | Record `installed-enabled`. Clear the failure windows. Activate per trigger rules. | `plugin-state-changed` reason `user` | Switch on |
 | P15 | any installed state | key revoked as `compromised`, or registry takedown of this version | none | Stop all sides. Record `disabled-blocked` and the reason. | `plugin-state-changed` reason `policy`, log `trust.key-revoked` or `registry.takedown` | Row shows `Blocked`, with the reason |
 | P16 | `disabled-blocked` | `enable --accept-risk`, or an update signed by another trusted key of the same publisher | none | Record `installed-enabled`. Clear the failure windows. | `plugin-state-changed` reason `user` or `update` | Switch on |
@@ -160,7 +160,7 @@ The trigger column names who or what causes the change. The effect column is wha
 
 ### Events and counters
 
-Two events report state changes. Both are delivered only to plugins that hold `plugins.manage` ([capability](/pages/capability-plugins-manage/)). The kernel also publishes the first one on the topic `ilium.plugins/state` for the settings screens.
+Two events report state changes. The first is delivered only to plugins that hold `plugins.manage` ([capability](/pages/capability-plugins-manage/)); the second, `ilium.extensions/changed`, is delivered only to the owner of the extension point. The kernel also publishes the first one on the topic `ilium.plugins/state` for the settings screens.
 
 | Event | Fields | When |
 |---|---|---|

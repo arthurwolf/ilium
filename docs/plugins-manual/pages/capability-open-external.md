@@ -134,7 +134,7 @@ Both submissions are independent. If the user declines the first open of `status
 |---|---|---|
 | Grant missing or declined | `refused(not-permitted)` | Show the address as text the user can copy. |
 | User declines the origin confirmation | `refused(not-permitted)` | Do not ask again in a loop. |
-| Scheme other than http, https or mailto in a `url` | `refused(not-permitted)` ([SEC-043]) | Use `file` or `settings` targets for those. |
+| Scheme other than http, https or mailto in a `url` | `refused(not-permitted)` ([PAN-026]) | Use `file` or `settings` targets for those. |
 | Settings link to an unknown tab | `refused(not-found)` | Use a tab id from the settings reference. |
 | No desktop handler | `refused(unsupported)` | Show the target as text. |
 | More than 10 opens in 60 seconds for one plugin (sliding window) | `refused(rate-limited)` with `retry-after-ms` | Open once per user action. |
@@ -183,4 +183,4 @@ The user can change the grant at any time in Settings > Plugins > com.example.li
 
 ### Security
 
-**[SEC-043]** `open-external` accepts only `https`, `http`, `mailto` and file paths inside granted scopes; each origin needs consent (SEC-043). See [Network egress](/pages/reference-network-egress/).
+**[SEC-043]** `open-external` file targets must be in scopes the plugin can read, must not carry an executable mode bit, and must not use a refused extension. **[PAN-026]** accepts only `https`, `http` and `mailto` URLs. Each origin needs consent. See [Network egress](/pages/reference-network-egress/).

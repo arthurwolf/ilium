@@ -72,7 +72,7 @@ A finding record:
 | `lint.settings-help-missing` | warn | manifest | A settings row has no `help` id | Add a topic id, see [guide](/pages/guide-plugin-documentation/) |
 | `lint.limit-above-ceiling` | warn | manifest | A `limits` value is above the ceiling of the tier, so the host clamps it | Lower the value |
 | `lint.debug-info-in-release` | warn | `dist/`, `build.json` | A release build carries DWARF or a source map | Rebuild with `--release` |
-| `lint.package-size-near-cap` | warn | files | The files sum to more than 100 MiB | Reduce assets |
+| `lint.package-size-near-cap` | warn | files | The files sum to 100 MiB or more | Reduce assets |
 | `lint.unstable-feature` | warn | manifest | `unstable` lists a name | Expect change before 1.0 |
 | `lint.dedup-key-charset` | warn | replayed fixtures | A submission carries a dedup key with a character outside `[A-Za-z0-9._:/-]` or longer than 128 characters | Fix the key |
 | `lint.icon-name-unknown` | warn | manifest | An `icon` is not a Tabler icon name that the host ships | Choose a listed name |

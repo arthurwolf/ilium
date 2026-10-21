@@ -208,7 +208,7 @@ The rule applies to each plugin on each side. A client counts its own failures s
 |---|---|
 | First failure in a 10-minute window | Restart after 1 s |
 | Second failure in the window | Restart after 5 s |
-| Third failure in the window | Disable the plugin on that side and show a notice (an essential core plugin restarts after 5 s instead, LIF-042) |
+| Third failure in the window | Disable the plugin on that side and show a notice (an essential core plugin restarts after 5 s instead, LIF-042; in a development build the third and later failures restart after 5 s instead, LIF-226) |
 | A failure when all earlier failures are older than 10 minutes | Counts as a first failure: restart after 1 s. No 30 s step exists |
 
 Test vectors. Times are measured from the first failure. Failures at 0, 2 and 4 minutes: restart after 1 s, restart after 5 s, disabled. Failures at 0 and 11 minutes: both restart after 1 s, because the first failure has expired. Failures at 0, 6 and 11 minutes: restart 1 s, restart 5 s, restart 5 s (the failure at 0 has expired, the one at 6 minutes counts), never disabled. A scene, view or inference-provider failure counts as a failure of the whole plugin on that side. The client and the server keep independent counts. A user turn-off persists across restarts of Ilium; re-enabling in Settings resets the count to zero.
@@ -316,7 +316,7 @@ Counting a failure, in one list. A **failure** is one of: a trap; a hard deadlin
 
 Restart delay, per side, within a window of 10 minutes: the first failure restarts after 1 s, the second after 5 s, and the third disables the side. There is no 30 s step. A failure expires 10 minutes after it happened.
 
-- **[HST-400]** The host MUST apply the restart rule per plugin per side: 1 s after the first failure, 5 s after the second, disabled at the third failure inside 10 minutes, and MUST NOT insert any other step. An essential core plugin is never disabled: its third and later failures restart after 5 s [LIF-042].
+- **[HST-400]** The host MUST apply the restart rule per plugin per side: 1 s after the first failure, 5 s after the second, disabled at the third failure inside 10 minutes, and MUST NOT insert any other step. An essential core plugin is never disabled: its third and later failures restart after 5 s [LIF-042]. In a development build the third and later failures restart after 5 s instead [LIF-226].
 - **[HST-401]** The host MUST count as failures exactly the list above and MUST NOT count the listed non-failures.
 - **[HST-402]** A failure MUST expire 10 minutes after it happened, and a successful run MUST NOT clear it sooner.
 - **[HST-403]** A breach or trap in `deactivate` MUST drop the instance, discard its restore bytes, and MUST NOT count as a failure.
@@ -420,7 +420,7 @@ Codes of the component checks, of the host runtime and of the grant and trust st
 | `grants.unreadable` | The grant store file cannot be parsed. It is renamed to `<name>.corrupt-<YYYYMMDD-HHmmss>`, starts with no entries and the grants are asked again (SEC-114) |
 | `grants.unsafe-permissions` | Another user can write the grant file or the trust store. T2 and T3 plugins are refused at load until the file is fixed (USR-207) |
 | `trust.unreadable` | The trust store file cannot be parsed. It is handled like the grant store (SEC-114) |
-| `trust.removed` | A trusted key was removed with `trust remove <key_id> --force`. A plugin that it signed is shown as `Untrusted` |
+| `trust.removed` | A trusted key was removed with `trust remove <key_id> --force`. A plugin that it signed is shown as `Publisher no longer trusted` |
 
 ### Install, migration and registry log codes
 

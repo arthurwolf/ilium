@@ -61,7 +61,7 @@ The server start in [Host architecture](/pages/reference-host-architecture/) has
 
 | Step | Owner | What happens | If it fails |
 |---|---|---|---|
-| 1 | Kernel | Resolve runtime, config and data folders. Take the session lock. Read `config.toml` and `.ilium/config.yaml` | A file that fails to parse is moved aside as `config.toml.broken-<timestamp>` and defaults are used. The recovery page shows the message |
+| 1 | Kernel | Resolve runtime, config and data folders. Take the session lock. Read `config.toml` and `.ilium/config.yaml` | A file that fails to parse is left unchanged on disk, defaults are used for the run, and the recovery page shows the message (COR-090) |
 | 2 | Kernel | Restore the snapshot into the tree. Plugin sections stay as stored JSON. No plugin runs | A snapshot that fails to parse is moved aside the same way, and the session starts with one empty shell pane |
 | 3 | Kernel | Apply the start flags `--no-plugins` and `--safe-plugins` and their environment variables | Both given: `--no-plugins` wins |
 | 4 | Plugin host | Create the Engine, verify packages, register static contributions, build the service graph | A plugin that fails verification stays off. The others continue |
@@ -265,11 +265,13 @@ Two properties are different.
 
 Replaceable is stricter than disableable, because a replacement takes over stored data and a surface that other plugins call. Sessions and Settings are not replaceable (`replaceable: false`) because they own the stored sections and the settings screen that every other plugin depends on. The rest are replaceable. The rule for thin plugins that mostly drive a kernel part (Terminal, Tree, Layout) is: they are replaceable only if the replacement provides every service and point in their `surface`. A replacement that omits one is refused with `manifest.replaces-surface-incomplete`.
 
-| Property | Sessions | Settings | Tree | All other core plugins |
+| Property | Sessions | Settings | Tree | All other core plugins except Layout |
 |---|---|---|---|---|
 | Disableable | no | no | no | yes |
 | Replaceable | no | no | yes | yes |
 | Kernel fallback when off | snapshot writer | recovery page | plain rows | see the table above |
+
+Layout is the exception in the last column: it is essential, so it is not disableable, and it is replaceable ([Layout](/pages/core-plugin-layout/)).
 
 ### Scene world and extension points
 
@@ -333,7 +335,7 @@ Code that reads a restart-only value gets the value that was current at the star
 | A cycle of non-optional `requires.services` entries | Install is refused at stage 10, so the cycle never reaches boot | `manifest.service-cycle` |
 | `snapshot-sections` entry has an unknown `schema_version` | Section kept unchanged | `section-unsupported` |
 | A route for `/create_agent` is registered twice | The second registration is refused | `http-api.route-taken` |
-| `config.toml` fails to parse at boot | Moved aside, defaults used, recovery page opens | `config.parse-error` |
+| `config.toml` fails to parse at boot | Left unchanged, defaults used for the run, recovery page opens | `config.parse-error` |
 | A startup plugin takes longer than `HOST-START` | Boot continues. The plugin is reported late | `host.start-slow` (logged) |
 | A scene side declares `extensions.provide` | Install refused | `manifest.grant-side` |
 
