@@ -50,6 +50,7 @@ The bucket type is the enum `Bucket` with the variants `Global`, `Project`, `Ses
 | `global` | every project on this machine, for this plugin | until the plugin's data is deleted | a preference that applies everywhere |
 | `project` | every session that opens the same canonical project directory | until the project's data is deleted | counters, last-run markers, per-project state |
 | `session` | only the one named session | deleted when that session is deleted | cursors, pane state |
+| `shared` | the plugin's server side, all its client sides and every session of the same user | cleared by the host at any time, so it holds only rebuildable data | a downloaded index, a rendered image, a geocoding answer |
 
 A session's name comes from its file under `.ilium/sessions/`. The bare `ilium` command owns the `default` session. The kernel does not delete a plugin's storage keys when a pane closes; a plugin that keys data by pane removes it itself.
 
@@ -75,7 +76,7 @@ A storage database that fails its integrity check is moved aside and the plugin 
 <figure>
 <svg viewBox="0 0 400 230" role="img" aria-label="A plugin calls the storage import, which routes each value to one of three buckets">
 <title>Storage buckets and their reach</title>
-<desc>The plugin calls get, put, remove and keys. The storage import sends each call to one of three buckets: global for all projects, project for one project directory, and session for one named session.</desc>
+<desc>The plugin calls get, put, remove and keys. The storage import sends each call to one of four buckets: global for all projects, project for one project directory, session for one named session, and shared for the plugin's cache.</desc>
 <defs>
 <marker id="storage-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
 <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
@@ -101,7 +102,7 @@ A storage database that fails its integrity check is moved aside and the plugin 
 <text x="336" y="180" font-size="10" text-anchor="middle" fill="currentColor">one session</text>
 <text x="8" y="222" font-size="10" fill="currentColor">The bucket decides which projects or sessions see a value.</text>
 </svg>
-<figcaption>One storage import serves three buckets. The bucket argument, not the plugin's code, sets
+<figcaption>One storage import serves four buckets. The bucket argument, not the plugin's code, sets
 the scope of each value.</figcaption>
 </figure>
 

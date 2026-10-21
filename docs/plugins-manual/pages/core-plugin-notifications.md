@@ -94,11 +94,11 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "tree.read",
       "tree.attention",
       "extensions.provide:ilium.core.notifications/before-notify",
-      "extensions.provide:ilium.core.notifications/channels"
+      "extensions.provide:ilium.core.notifications/channels",
+      "settings.write-kernel:sound"
     ],
     "client": [
-      "notify.toast",
-      "settings.write-kernel:sound"
+      "notify.toast"
     ]
   },
   "contributes": {
@@ -182,7 +182,7 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
 
 ### Kernel tabs this plugin owns
 
-This plugin is the single owner of the following built-in Settings tabs. It holds `settings.write-kernel:<tab>` for each one (T1 only, one holder per tab, see [kernel settings](/pages/api-kernel-settings-and-keymap/#writing-a-kernel-tab)). The values stay in the same `config.toml` tables as before, so no user setting moves. [COR-030] [COR-033]
+This plugin is the single owner of the following built-in Settings tabs. Its server part holds `settings.write-kernel:<tab>` for each one (T1 only, one holder per tab, see [kernel settings](/pages/api-kernel-settings-and-keymap/#writing-a-kernel-tab)). The values stay in the same `config.toml` tables as before, so no user setting moves. [COR-030] [COR-033]
 
 | Tab id | Label | Config table | Readers |
 |---|---|---|---|

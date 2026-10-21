@@ -266,7 +266,7 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
             }
           }
         },
-        "risk": "standard",
+        "risk": "high",
         "deadline_ms": 20,
         "max_handlers": 8,
         "version": "0.1.0"
