@@ -1,0 +1,1352 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Package format reference | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details open><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/" aria-current="page">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Reference</b></p>
+<h1>Package format reference</h1>
+
+<p>This page is the byte-level specification of the <code>.iliumpkg</code> file for contract <code>ilium:plugin@0.1.0</code>. A host developer can write a reader from it. A tool author can write a packer. A test author can derive hostile-archive tests from it. Statements that tests can cite carry a requirement id such as <code>PKG-101</code>. The full list, with test methods, is in <a href="/pages/reference-requirements-manifest-package/">Requirements: manifest and package</a>.</p>
+<p>The words MUST, MUST NOT, SHOULD and MAY are used in the sense of RFC 2119.</p>
+<p>A <strong>package</strong> is one file that holds one plugin version. A <strong>component</strong> is a WebAssembly component, the compiled code for one side of the plugin. The <strong>inventory</strong> is the <code>files</code> list in the manifest: one line per other entry, with its length and SHA-256 hash. The <strong>manifest</strong> is the <code>manifest.json</code> entry, described in <a href="/pages/reference-manifest/">Manifest reference</a>.</p>
+<h3 id="you-will-need">You will need</h3>
+<ul>
+<li>The layout overview in <a href="/pages/packages/">Packages and manifests</a>.</li>
+<li>The signing rules in <a href="/pages/reference-signing-and-trust/">Signing and trust</a>, because the signature is one entry of the archive.</li>
+<li>The error codes are collected, with message templates, in <a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a>.</li>
+</ul>
+<h2 id="design-goals">Design goals</h2>
+<p>The format has three goals. The host must be able to refuse a hostile file before it runs any plugin code. Two builds of the same sources must give the same bytes. A package must install the same way on every operating system.</p>
+<p>To reach them the format is a small subset of ZIP. The subset removes compression, extra fields, comments, directory entries and everything else that two ZIP libraries read differently.</p>
+<h2 id="the-container">The container</h2>
+<p>The container is a ZIP archive as described by the PKWARE APPNOTE 6.3.x, restricted as follows.</p>
+<table>
+<thead>
+<tr>
+<th>Id</th>
+<th>Rule</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>[PKG-100]</td>
+<td>Every entry MUST use compression method 0 (stored). Any other method is refused with <code>package.zip-compressed</code>.</td>
+</tr>
+<tr>
+<td>[PKG-101]</td>
+<td>General-purpose flag bit 11 (UTF-8 names) MUST be set on every entry. Bit 0 (encryption) and bit 3 (data descriptor) MUST NOT be set. They are refused with <code>package.zip-encrypted</code> and <code>package.zip-descriptor</code>. All other flag bits MUST be zero.</td>
+</tr>
+<tr>
+<td>[PKG-102]</td>
+<td>The archive MUST NOT use ZIP64. A ZIP64 end record, a ZIP64 locator or a size field of <code>0xFFFFFFFF</code> is refused with <code>package.zip64</code>.</td>
+</tr>
+<tr>
+<td>[PKG-103]</td>
+<td>Local headers and central directory headers MUST NOT carry extra fields. The extra field length MUST be 0. Refused with <code>package.zip-extra</code>.</td>
+</tr>
+<tr>
+<td>[PKG-104]</td>
+<td>The end-of-central-directory record MUST have a comment length of 0. No per-entry comment is allowed. Refused with <code>package.zip-comment</code>.</td>
+</tr>
+<tr>
+<td>[PKG-105]</td>
+<td>The archive MUST NOT contain directory entries (names ending in <code>/</code>). Refused with <code>package.entry-directory</code>.</td>
+</tr>
+<tr>
+<td>[PKG-106]</td>
+<td>The DOS modification time of every entry MUST be 1980-01-01 00:00:00 (time field <code>0x0000</code>, date field <code>0x0021</code>).</td>
+</tr>
+<tr>
+<td>[PKG-107]</td>
+<td>The external attributes of every entry MUST be <code>0x81A40000</code> (Unix mode <code>0100644</code>, a regular file with mode 0644). A symbolic link, a device or any other mode is refused with <code>package.entry-symlink</code>.</td>
+</tr>
+<tr>
+<td>[PKG-108]</td>
+<td>The "version made by" field MUST be <code>0x0314</code> (Unix, specification 2.0) and "version needed to extract" MUST be 20. The disk number fields MUST be 0 and the internal attributes MUST be 0.</td>
+</tr>
+<tr>
+<td>[PKG-109]</td>
+<td>For every entry the local header and the central directory header MUST agree on the name, the CRC-32, the compressed size and the uncompressed size. For a stored entry the two sizes are equal. A mismatch is refused with <code>package.header-mismatch</code>.</td>
+</tr>
+<tr>
+<td>[PKG-110]</td>
+<td>The CRC-32 of every entry MUST be correct. A wrong CRC is refused with <code>package.crc-mismatch</code>. The host checks it while it reads the entry, before it parses the content.</td>
+</tr>
+<tr>
+<td>[PKG-111]</td>
+<td>The archive MUST consist of the local entries, then the central directory, then the end record, with no other bytes. Bytes before the first local header, between records or after the end record are refused with <code>package.zip-trailing</code>.</td>
+</tr>
+<tr>
+<td>[PKG-112]</td>
+<td>The local entries MUST be adjacent and in the same order as the central directory, and their byte ranges MUST NOT overlap. A central directory entry whose local header offset does not point to the next unread byte is refused with <code>package.header-mismatch</code>.</td>
+</tr>
+<tr>
+<td>[PKG-113]</td>
+<td>The count of entries in the end record MUST equal the count of central directory headers, and the central directory size and offset MUST match the real positions. A truncated or inconsistent central directory is refused with <code>package.zip-invalid</code>.</td>
+</tr>
+<tr>
+<td>[PKG-114]</td>
+<td>The reader MUST locate the end record by reading the last 22 bytes of the file. Because the comment length is 0, the end record always starts exactly 22 bytes before the end. A file in which that position does not hold the signature <code>PK\x05\x06</code> is refused with <code>package.zip-invalid</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>A reader MUST NOT fall back to a more lenient parse when one of these rules fails. A package either meets the subset or is refused.</p>
+<h3 id="why-stored-and-not-compressed">Why stored and not compressed</h3>
+<p>Deflate output depends on the compressor version, so two correct tools give different bytes. A stored archive does not. WebAssembly components compress poorly after a good optimiser run, and the size cap in this page is large enough for that. A transport may compress the file (HTTPS does so already). The format does not.</p>
+<h3 id="entry-layout-on-disk">Entry layout on disk</h3>
+<p>The following diagram shows the byte order of a package with two entries.</p>
+<figure>
+<pre class="term">offset  record
+0       local header "manifest.json" + data
+...     local header "server.wasm"   + data
+...     central header "manifest.json"
+...     central header "server.wasm"
+end-22  end record (22 bytes, comment length 0)
+</pre>
+<figcaption>Rendered at 48 columns. Illustrative. Records of a two-entry package in file order.</figcaption>
+</figure>
+
+<p>Header field layouts follow APPNOTE sections 4.3.7 (local), 4.3.12 (central) and 4.3.16 (end record). All integers are little-endian. The 30-byte local header and the 46-byte central header are written with these values:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Local header</th>
+<th>Central header</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Signature</td>
+<td><code>50 4B 03 04</code></td>
+<td><code>50 4B 01 02</code></td>
+</tr>
+<tr>
+<td>Version made by</td>
+<td>not present</td>
+<td><code>14 03</code></td>
+</tr>
+<tr>
+<td>Version needed</td>
+<td><code>14 00</code></td>
+<td><code>14 00</code></td>
+</tr>
+<tr>
+<td>Flags</td>
+<td><code>00 08</code></td>
+<td><code>00 08</code></td>
+</tr>
+<tr>
+<td>Method</td>
+<td><code>00 00</code></td>
+<td><code>00 00</code></td>
+</tr>
+<tr>
+<td>Time, date</td>
+<td><code>00 00</code>, <code>21 00</code></td>
+<td><code>00 00</code>, <code>21 00</code></td>
+</tr>
+<tr>
+<td>CRC-32, sizes</td>
+<td>real values</td>
+<td>real values</td>
+</tr>
+<tr>
+<td>Name length, extra length</td>
+<td>name bytes, <code>00 00</code></td>
+<td>name bytes, <code>00 00</code></td>
+</tr>
+<tr>
+<td>Comment length, disk, internal</td>
+<td>not present</td>
+<td><code>00 00</code>, <code>00 00</code>, <code>00 00</code></td>
+</tr>
+<tr>
+<td>External attributes</td>
+<td>not present</td>
+<td><code>00 00 A4 81</code></td>
+</tr>
+<tr>
+<td>Local header offset</td>
+<td>not present</td>
+<td>real offset</td>
+</tr>
+</tbody>
+</table>
+<h2 id="paths">Paths</h2>
+<p>A path is the name of an entry. It is relative to the package root.</p>
+<table>
+<thead>
+<tr>
+<th>Id</th>
+<th>Rule</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>[PKG-115]</td>
+<td>A path MUST use <code>/</code> as its separator and be made of components of the characters <code>A-Z</code>, <code>a-z</code>, <code>0-9</code>, <code>.</code>, <code>_</code> and <code>-</code> only. Any other byte, including backslash, NUL, a space, a control character or a non-ASCII character, is refused with <code>package.path-invalid</code>.</td>
+</tr>
+<tr>
+<td>[PKG-116]</td>
+<td>A path MUST NOT start with <code>/</code>, MUST NOT contain an empty component, and MUST NOT contain a component equal to <code>.</code> or <code>..</code>.</td>
+</tr>
+<tr>
+<td>[PKG-117]</td>
+<td>No component may start with <code>.</code> or end with <code>.</code>. This keeps hidden files and Windows trailing-dot names out of the package.</td>
+</tr>
+<tr>
+<td>[PKG-118]</td>
+<td>A component MUST NOT be a name that Windows reserves (<code>CON</code>, <code>PRN</code>, <code>AUX</code>, <code>NUL</code>, <code>COM1</code> to <code>COM9</code>, <code>LPT1</code> to <code>LPT9</code>), with or without an extension, in any letter case.</td>
+</tr>
+<tr>
+<td>[PKG-119]</td>
+<td>A path is at most 255 bytes long and has at most 16 components.</td>
+</tr>
+<tr>
+<td>[PKG-120]</td>
+<td>No two paths may be equal, and no two paths may be equal after ASCII case folding. A duplicate is refused with <code>package.path-duplicate</code>. A case-only collision is refused with <code>package.path-case-collision</code>, so that the package unpacks the same way on a case-insensitive file system.</td>
+</tr>
+<tr>
+<td>[PKG-121]</td>
+<td>A path that is a prefix of another path followed by <code>/</code> (a file that is also a folder) is refused with <code>package.path-invalid</code>.</td>
+</tr>
+<tr>
+<td>[PKG-122]</td>
+<td>Entries MUST be ordered by the bytewise comparison of their UTF-8 paths, which for this character set is ASCII order. <code>Z</code> sorts before <code>a</code>, and <code>/</code> (0x2F) sorts before digits. Out-of-order entries are refused with <code>package.entry-order</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>The character set is deliberately ASCII. It removes Unicode normalisation (NFC and NFD) and confusable-name problems from the file system level. Display names and descriptions in the manifest may use any Unicode text.</p>
+<h2 id="reserved-names-and-allowed-folders">Reserved names and allowed folders</h2>
+<table>
+<thead>
+<tr>
+<th>Path</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>manifest.json</code></td>
+<td>The manifest. Required.</td>
+</tr>
+<tr>
+<td><code>server.wasm</code>, <code>client.wasm</code>, <code>scene.wasm</code></td>
+<td>The component of that side. Required when the side is declared.</td>
+</tr>
+<tr>
+<td><code>signature</code></td>
+<td>The signature document. Required for tier T2. See <a href="/pages/reference-signing-and-trust/">Signing and trust</a>.</td>
+</tr>
+<tr>
+<td><code>assets/**</code></td>
+<td>Read-only data, visible through the <code>package</code> file scope.</td>
+</tr>
+<tr>
+<td><code>help/*.md</code></td>
+<td>Help topics.</td>
+</tr>
+<tr>
+<td><code>sounds/*</code></td>
+<td>Sound files.</td>
+</tr>
+<tr>
+<td><code>screenshots/*</code></td>
+<td>PNG images for the store. Not loaded by the plugin.</td>
+</tr>
+<tr>
+<td><code>src/**</code></td>
+<td>Sources and source maps, for review only. Never loaded.</td>
+</tr>
+<tr>
+<td><code>README.md</code>, <code>CHANGELOG.md</code>, <code>LICENSE</code>, <code>NOTICE</code></td>
+<td>Documents shown by Settings &gt; Plugins and the store.</td>
+</tr>
+<tr>
+<td><code>sbom.json</code></td>
+<td>The software bill of materials. See <a href="/pages/guide-publishing/">Publishing guide</a>.</td>
+</tr>
+<tr>
+<td><code>build-info.json</code></td>
+<td>The build record. See <a href="/pages/guide-publishing/">Publishing guide</a>.</td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr>
+<th>Id</th>
+<th>Rule</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>[PKG-123]</td>
+<td>Any top-level entry that is not in the table, and any entry under a top-level folder that the table does not list, is refused with <code>package.entry-unexpected</code>.</td>
+</tr>
+<tr>
+<td>[PKG-124]</td>
+<td><code>help/</code> MUST hold only files whose names end in <code>.md</code>. <code>sounds/</code> MUST hold only <code>.wav</code> and <code>.ogg</code> files. <code>screenshots/</code> MUST hold only <code>.png</code> files. These folders are flat: a nested folder is refused with <code>package.entry-unexpected</code>.</td>
+</tr>
+<tr>
+<td>[PKG-125]</td>
+<td>A component MUST be named after its side. A file named <code>server.wasm</code> that is declared as the <code>client</code> entry is refused with <code>manifest.entry-invalid</code>.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="size-caps">Size caps</h2>
+<table>
+<thead>
+<tr>
+<th>Id</th>
+<th>Cap</th>
+<th>Value</th>
+<th>Code</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>[PKG-126]</td>
+<td>Entries in the archive</td>
+<td>4,096</td>
+<td><code>package.entry-limit</code></td>
+</tr>
+<tr>
+<td>[PKG-127]</td>
+<td><code>manifest.json</code></td>
+<td>1 MiB (1,048,576 bytes)</td>
+<td><code>package.manifest-size</code></td>
+</tr>
+<tr>
+<td>[PKG-128]</td>
+<td>One component</td>
+<td>64 MiB</td>
+<td><code>package.size-limit</code></td>
+</tr>
+<tr>
+<td>[PKG-129]</td>
+<td>One non-component entry</td>
+<td>64 MiB</td>
+<td><code>package.size-limit</code></td>
+</tr>
+<tr>
+<td>[PKG-130]</td>
+<td>The package file</td>
+<td>300 MiB</td>
+<td><code>package.size-limit</code></td>
+</tr>
+<tr>
+<td>[PKG-131]</td>
+<td><code>signature</code></td>
+<td>16 KiB</td>
+<td><code>package.size-limit</code></td>
+</tr>
+<tr>
+<td>[PKG-132]</td>
+<td>Asset bytes (<code>assets/**</code>, <code>help/*.md</code>, <code>sounds/*</code>, fonts)</td>
+<td>64 MiB, or 256 MiB for T1 (decision D24)</td>
+<td><code>manifest.asset-size</code></td>
+</tr>
+</tbody>
+</table>
+<p>The asset total in [PKG-132] counts the uncompressed bytes of <code>assets/**</code>, <code>help/*.md</code>, <code>sounds/*</code> and any font file. It does not count components, <code>src/**</code>, <code>screenshots/*</code>, the documents of the table above, <code>signature</code> or the manifest. Those count only toward the 300 MiB package cap. The reader checks every cap from the central directory, before it reads any entry data.</p>
+<h2 id="the-inventory">The inventory</h2>
+<p>The manifest key <code>files</code> lists every entry except <code>manifest.json</code> and <code>signature</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Id</th>
+<th>Rule</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>[PKG-133]</td>
+<td>Each <code>files</code> item has exactly the keys <code>path</code>, <code>length</code> and <code>sha256</code>. <code>path</code> is an archive path. <code>length</code> is the size in bytes of the uncompressed data and is an integer from 0 to 67,108,864. <code>sha256</code> is 64 characters of lowercase hexadecimal.</td>
+</tr>
+<tr>
+<td>[PKG-134]</td>
+<td><code>files</code> MUST list the paths in the same order as the archive (the bytewise order of [PKG-122]), and MUST NOT contain a path twice. A packed manifest whose list is unsorted is refused with <code>manifest.files-order</code>.</td>
+</tr>
+<tr>
+<td>[PKG-135]</td>
+<td>Every archive entry except <code>manifest.json</code> and <code>signature</code> MUST be in <code>files</code> (<code>manifest.file-unlisted</code>). Every <code>files</code> item MUST name an archive entry (<code>manifest.file-missing</code>). <code>files</code> MUST NOT list <code>manifest.json</code> or <code>signature</code> (<code>manifest.file-self</code>).</td>
+</tr>
+<tr>
+<td>[PKG-136]</td>
+<td>The length of each entry MUST equal <code>length</code> (<code>manifest.file-length</code>), and its SHA-256 MUST equal <code>sha256</code> (<code>manifest.file-hash</code>).</td>
+</tr>
+<tr>
+<td>[PKG-137]</td>
+<td>A packed manifest MUST contain <code>files</code>. A source manifest MAY omit it, and <code>ilium plugin pack</code> then writes it. The installer refuses a manifest without <code>files</code> with <code>manifest.key-missing</code> (pointer <code>/files</code>).</td>
+</tr>
+</tbody>
+</table>
+<p>Because the signature covers the exact bytes of <code>manifest.json</code> and the manifest holds the SHA-256 of every other entry, the signature covers every file of the package, transitively. Changing one byte of any listed file changes its hash, which changes the manifest, which breaks the signature.</p>
+<h2 id="the-api-version-section">The api-version section</h2>
+<p>Every component carries a WebAssembly custom section that states which contract version it was built for.</p>
+<table>
+<thead>
+<tr>
+<th>Id</th>
+<th>Rule</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>[PKG-138]</td>
+<td>A component MUST contain exactly one custom section named <code>ilium:api-version</code>. None gives <code>package.api-section-missing</code>. A second one gives <code>package.api-section-repeated</code>.</td>
+</tr>
+<tr>
+<td>[PKG-139]</td>
+<td>The payload (after the section name) is exactly 6 bytes: three unsigned 16-bit integers in big-endian order, for major, minor and patch. For <code>ilium:plugin@0.1.0</code> the bytes are <code>00 00 00 01 00 00</code>. Another length gives <code>package.api-section-invalid</code>.</td>
+</tr>
+<tr>
+<td>[PKG-140]</td>
+<td>The three integers MUST equal the version in the manifest <code>api</code> key, or the install is refused with <code>manifest.api-version</code>.</td>
+</tr>
+<tr>
+<td>[PKG-141]</td>
+<td>A file named <code>*.wasm</code> that is a WebAssembly core module, and not a component, is refused with <code>package.component-invalid</code>. The check reads the 8-byte preamble: the magic <code>00 61 73 6D</code>, then the layer field. Layer 0 is a core module. Layer 1 is a component.</td>
+</tr>
+<tr>
+<td>[PKG-142]</td>
+<td>The component MUST validate as a component against the world named in the manifest. A component that fails validation is refused with <code>package.component-invalid</code>. A component that exports something that the manifest does not list, or the reverse, is refused with <code>manifest.exports-mismatch</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>The minimal component of the test vector below is the 8-byte preamble <code>00 61 73 6D 0D 00 01 00</code> (component, layer 1) followed by one custom section. It is a valid empty component for the purposes of the container tests. It is not a working plugin.</p>
+<h2 id="the-ilium-plugin-pack-algorithm">The <code>ilium plugin pack</code> algorithm</h2>
+<p>Packing is a pure function of the project directory. The same inputs give the same bytes.</p>
+<table>
+<thead>
+<tr>
+<th>Id</th>
+<th>Rule</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>[PKG-143]</td>
+<td><strong>Input set.</strong> <code>pack</code> includes: the source <code>manifest.json</code>; the built components <code>server.wasm</code>, <code>client.wasm</code> and <code>scene.wasm</code> for each declared side, taken from the build output folder; every file under <code>assets/</code>, <code>help/</code>, <code>sounds/</code>, <code>screenshots/</code> and <code>src/</code>; and <code>README.md</code>, <code>CHANGELOG.md</code>, <code>LICENSE</code>, <code>NOTICE</code>, <code>sbom.json</code> and <code>build-info.json</code> when present. Nothing else is included.</td>
+</tr>
+<tr>
+<td>[PKG-144]</td>
+<td><strong>Ignore rules.</strong> Inside the included folders <code>pack</code> skips files whose name starts with <code>.</code>, <code>*~</code>, <code>*.swp</code>, <code>*.tmp</code>, and the folders <code>.git</code>, <code>target</code>, <code>node_modules</code> and <code>dist</code>. A skipped file is reported as a <code>warning</code> line. A file that remains and breaks a path rule of this page stops <code>pack</code> with the code of that rule.</td>
+</tr>
+<tr>
+<td>[PKG-145]</td>
+<td><strong>Manifest serialisation.</strong> <code>pack</code> parses the source manifest, removes any <code>files</code> key, builds the inventory, and writes the packed manifest as UTF-8 without a byte order mark, with 2-space indentation, <code>\n</code> line endings and one final <code>\n</code>. Top-level keys are written in the order of the table in <a href="/pages/reference-manifest/#top-level-keys">Manifest reference</a>, and <code>files</code> last. Keys of nested objects keep the order of their schema table; unknown nested maps (settings values, extension entries) sort by key in byte order. Arrays hold one item per line, except that an empty array prints <code>[]</code> and an empty object prints <code>{}</code> on the key line. Strings escape only <code>"</code>, <code>\</code> and U+0000 to U+001F; the control characters use <code>\uXXXX</code> with lowercase hexadecimal, except <code>\n</code>, <code>\t</code>, <code>\r</code>, <code>\b</code> and <code>\f</code>. Non-ASCII text is written as UTF-8. Numbers are integers in decimal without a sign <code>+</code> and without an exponent; a non-integer number is refused.</td>
+</tr>
+<tr>
+<td>[PKG-146]</td>
+<td><strong>Archive order and fields.</strong> Entries are written in the order of [PKG-122] with the header values of [PKG-100] to [PKG-108].</td>
+</tr>
+<tr>
+<td>[PKG-147]</td>
+<td><strong>Determinism.</strong> Two runs of <code>pack</code> over identical inputs MUST give byte-identical files. The test is to compare the SHA-256 of two outputs.</td>
+</tr>
+<tr>
+<td>[PKG-148]</td>
+<td><strong>Signing.</strong> <code>ilium plugin sign</code> adds the <code>signature</code> entry by writing a new archive: it reads the package, adds the entry in its sorted position (it sorts between <code>server.wasm</code> and <code>sounds/</code>, as byte order requires) and rewrites the central directory. Unsigned entries keep their bytes. The result is again a valid, deterministic package.</td>
+</tr>
+</tbody>
+</table>
+<p>A source manifest and its packed form are different files. The signature is made over the packed manifest, so a package cannot be signed before it is packed.</p>
+<h2 id="the-validation-order">The validation order</h2>
+<p>The installer validates in a fixed order. The full pipeline has eleven stages. A stage collects all of its errors, and the install stops after the first stage that found any. This rule reconciles two older statements: a single stage can print several errors, and no later stage runs after a failing one.</p>
+<table>
+<thead>
+<tr>
+<th>Stage</th>
+<th>Name</th>
+<th>What it checks</th>
+<th>Codes (families)</th>
+<th>Collects errors</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>archive</td>
+<td>The container, paths, caps ([PKG-100] to [PKG-132])</td>
+<td><code>package.*</code></td>
+<td>yes</td>
+</tr>
+<tr>
+<td>2</td>
+<td>manifest-parse</td>
+<td>UTF-8, size, JSON syntax, duplicate keys</td>
+<td><code>manifest.json-*</code></td>
+<td>no (first error)</td>
+</tr>
+<tr>
+<td>3</td>
+<td>schema</td>
+<td>Keys, types, ranges, grammars of <a href="/pages/reference-manifest/">Manifest reference</a></td>
+<td><code>manifest.*</code></td>
+<td>yes</td>
+</tr>
+<tr>
+<td>4</td>
+<td>semantic</td>
+<td>Cross references, uniqueness, side and export rules</td>
+<td><code>manifest.*</code></td>
+<td>yes</td>
+</tr>
+<tr>
+<td>5</td>
+<td>inventory</td>
+<td><code>files</code> against the entries; lengths and hashes ([PKG-133] to [PKG-137])</td>
+<td><code>manifest.file-*</code></td>
+<td>yes</td>
+</tr>
+<tr>
+<td>6</td>
+<td>components</td>
+<td>Preamble, api-version section, exports ([PKG-138] to [PKG-142])</td>
+<td><code>package.*</code>, <code>manifest.api-version</code>, <code>manifest.exports-mismatch</code></td>
+<td>yes</td>
+</tr>
+<tr>
+<td>7</td>
+<td>signature</td>
+<td>Format and Ed25519 verification</td>
+<td><code>package.signature-format</code>, <code>manifest.signature-invalid</code></td>
+<td>no (first error)</td>
+</tr>
+<tr>
+<td>8</td>
+<td>trust</td>
+<td>Key trust, publisher binding, tier assignment</td>
+<td><code>trust.*</code>, <code>manifest.publisher-mismatch</code>, <code>package.publisher-key-changed</code></td>
+<td>no</td>
+</tr>
+<tr>
+<td>9</td>
+<td>policy</td>
+<td>Platform gate, tier grant rules, administrator policy, version rules</td>
+<td><code>package.platform-unsupported</code>, <code>manifest.grant-*</code>, <code>manifest.limits-tier</code>, <code>policy.*</code>, <code>package.downgrade</code>, <code>package.version-reused</code></td>
+<td>yes</td>
+</tr>
+<tr>
+<td>10</td>
+<td>dependencies</td>
+<td><code>requires.plugins</code>, host version, cycles</td>
+<td><code>dependency.*</code></td>
+<td>yes</td>
+</tr>
+<tr>
+<td>11</td>
+<td>review</td>
+<td>The user reviews grants</td>
+<td>none</td>
+<td>not applicable</td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr>
+<th>Id</th>
+<th>Rule</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>[PKG-149]</td>
+<td>The installer MUST run the stages in the order of the table. A stage MUST NOT run when an earlier stage reported an error.</td>
+</tr>
+<tr>
+<td>[PKG-150]</td>
+<td>Within a stage that collects errors, the installer MUST report every error it finds, up to 100 per stage. The 101st is replaced by one <code>warning</code> line that says how many more exist.</td>
+</tr>
+<tr>
+<td>[PKG-151]</td>
+<td>No plugin code MUST run before stage 11 has finished. Components are not instantiated, and no import is called.</td>
+</tr>
+<tr>
+<td>[PKG-152]</td>
+<td>Tier-dependent rules (T1-only grants, <code>limits_tier</code>) run in stage 9, after the tier is known from stages 7 and 8. A source of tier that the user cannot influence MUST NOT be read from the manifest.</td>
+</tr>
+<tr>
+<td>[PKG-153]</td>
+<td><code>ilium plugin check</code> runs stages 2 to 4 on a source manifest (it needs no archive) and, with <code>--package &lt;file&gt;</code>, all stages up to 6. It never contacts the network and never writes state.</td>
+</tr>
+</tbody>
+</table>
+<p>The three older orders in <code>reference-manifest</code>, <code>packages</code> and <code>security</code> are replaced by this table. Those pages now link here.</p>
+<h2 id="error-codes-of-this-page">Error codes of this page</h2>
+<p>The codes below belong to the <code>package.*</code> family. Message templates are in <a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a>.</p>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Cause</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>package.zip-invalid</code></td>
+<td>The file is not a ZIP archive, or the end record or central directory is inconsistent or truncated</td>
+</tr>
+<tr>
+<td><code>package.zip64</code></td>
+<td>ZIP64 structures or sentinels were found</td>
+</tr>
+<tr>
+<td><code>package.zip-compressed</code></td>
+<td>An entry uses a method other than stored</td>
+</tr>
+<tr>
+<td><code>package.zip-encrypted</code></td>
+<td>An entry is encrypted</td>
+</tr>
+<tr>
+<td><code>package.zip-descriptor</code></td>
+<td>An entry uses a data descriptor</td>
+</tr>
+<tr>
+<td><code>package.zip-extra</code></td>
+<td>An extra field is present</td>
+</tr>
+<tr>
+<td><code>package.zip-comment</code></td>
+<td>An archive or entry comment is present</td>
+</tr>
+<tr>
+<td><code>package.zip-trailing</code></td>
+<td>Bytes exist outside the record structure</td>
+</tr>
+<tr>
+<td><code>package.header-mismatch</code></td>
+<td>A local header disagrees with its central header, or entries overlap</td>
+</tr>
+<tr>
+<td><code>package.crc-mismatch</code></td>
+<td>A CRC-32 is wrong</td>
+</tr>
+<tr>
+<td><code>package.path-invalid</code>, <code>package.path-duplicate</code>, <code>package.path-case-collision</code></td>
+<td>A path breaks the path rules</td>
+</tr>
+<tr>
+<td><code>package.entry-directory</code>, <code>package.entry-symlink</code>, <code>package.entry-order</code>, <code>package.entry-unexpected</code></td>
+<td>An entry type, order or location is not allowed</td>
+</tr>
+<tr>
+<td><code>package.entry-limit</code>, <code>package.size-limit</code>, <code>package.manifest-size</code></td>
+<td>A cap was exceeded</td>
+</tr>
+<tr>
+<td><code>package.manifest-missing</code></td>
+<td>There is no <code>manifest.json</code> entry</td>
+</tr>
+<tr>
+<td><code>package.component-invalid</code></td>
+<td>A <code>.wasm</code> entry is not a valid component</td>
+</tr>
+<tr>
+<td><code>package.api-section-missing</code>, <code>package.api-section-repeated</code>, <code>package.api-section-invalid</code></td>
+<td>The <code>ilium:api-version</code> section is absent, repeated or malformed</td>
+</tr>
+<tr>
+<td><code>package.api-unsupported</code></td>
+<td>The <code>api</code> is outside the host window. See <a href="/pages/versioning/">Versioning</a></td>
+</tr>
+<tr>
+<td><code>package.signature-format</code></td>
+<td>The <code>signature</code> entry is not a valid signature document</td>
+</tr>
+<tr>
+<td><code>package.old-format</code></td>
+<td>The file is an <code>.iliumanim</code> package. See <a href="/pages/porting-iliumanim/">Porting from .iliumanim</a></td>
+</tr>
+</tbody>
+</table>
+<p>The install error catalogue in <a href="/pages/reference-manifest-schema/#error-catalogue">Manifest schema</a> is the only list of codes. It also has a table of retired spellings.</p>
+<h2 id="offline-verification-ilium-plugin-verify">Offline verification: <code>ilium plugin verify</code></h2>
+<p><code>ilium plugin verify &lt;file&gt;</code> runs stages 1 to 8 on a package without installing it. It needs no network and changes no state. It prints JSONL lines.</p>
+<table>
+<thead>
+<tr>
+<th>Id</th>
+<th>Rule</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>[PKG-154]</td>
+<td><code>verify</code> prints one <code>progress</code> line per stage with <code>stage</code> (1 to 8) and <code>name</code>, then one <code>error</code> line per error, then one <code>result</code> line.</td>
+</tr>
+<tr>
+<td>[PKG-155]</td>
+<td>The <code>result</code> line has <code>ok</code> (boolean), <code>id</code>, <code>version</code>, <code>sha256</code> (of the package file), <code>manifest_sha256</code>, <code>tier</code> (<code>T2</code>, <code>T3</code> or <code>untrusted</code>), <code>signer_key_id</code> (or null) and <code>publisher_id</code> (or null).</td>
+</tr>
+<tr>
+<td>[PKG-156]</td>
+<td>The exit code is 0 when stages 1 to 7 pass, and 1 when any of them fails. For <code>verify</code>, a key that is not in the trust store prints <code>trust.key-unknown</code> as a <code>warning</code> line, reports <code>tier: untrusted</code> and keeps the exit code 0. A revoked key prints <code>trust.key-revoked</code> as an <code>error</code> line and exits 1. During <code>install</code>, <code>trust.key-unknown</code> without an answer to the trust prompt is an <code>error</code> line and exits 1 (PKG-230).</td>
+</tr>
+</tbody>
+</table>
+<figure>
+<pre class="term"><span class="t-prompt">$</span> ilium plugin verify example.minimal.iliumpkg
+<span class="t-dim">stage</span> 1 archive          <span class="t-ok">ok</span>
+<span class="t-dim">stage</span> 2 manifest-parse   <span class="t-ok">ok</span>
+<span class="t-dim">stage</span> 3 schema           <span class="t-ok">ok</span>
+<span class="t-dim">stage</span> 4 semantic         <span class="t-ok">ok</span>
+<span class="t-dim">stage</span> 5 inventory        <span class="t-ok">ok</span>
+<span class="t-dim">stage</span> 6 components       <span class="t-ok">ok</span>
+<span class="t-dim">stage</span> 7 signature        <span class="t-ok">ok</span>
+<span class="t-dim">stage</span> 8 trust            <span class="t-warn">untrusted</span>
+<span class="t-hi">result</span> example.minimal 0.1.0 untrusted
+</pre>
+<figcaption>Rendered at 48 columns. Illustrative. Verification of a signed package whose key is not trusted yet.</figcaption>
+</figure>
+
+<h2 id="test-vector-a-minimal-package">Test vector: a minimal package</h2>
+<p>This vector is real. Every value was computed with a reference script. A reader that implements the page MUST accept it, and a packer MUST reproduce it.</p>
+<p>The component is 34 bytes (hex):</p>
+<pre><code class="language-text">0061736d0d000100001811696c69756d3a6170692d76657273696f6e000000010000
+</code></pre>
+<p>Its SHA-256 is <code>028fb8ab3e154570597f3cc09ad59782ab44d9a6873f1834490da625ef3c6cd8</code>. The api-version payload is <code>000000010000</code>.</p>
+<p>The packed manifest is 402 bytes with this text (the final newline included):</p>
+<pre><code class="language-json">{
+  &quot;api&quot;: &quot;ilium:plugin@0.1.0&quot;,
+  &quot;id&quot;: &quot;example.minimal&quot;,
+  &quot;name&quot;: &quot;Minimal&quot;,
+  &quot;version&quot;: &quot;0.1.0&quot;,
+  &quot;publisher&quot;: &quot;Example Labs&quot;,
+  &quot;server&quot;: {
+    &quot;entry&quot;: &quot;server.wasm&quot;,
+    &quot;world&quot;: &quot;ilium:server/base@0.1.0&quot;,
+    &quot;exports&quot;: []
+  },
+  &quot;files&quot;: [
+    {
+      &quot;path&quot;: &quot;server.wasm&quot;,
+      &quot;length&quot;: 34,
+      &quot;sha256&quot;: &quot;028fb8ab3e154570597f3cc09ad59782ab44d9a6873f1834490da625ef3c6cd8&quot;
+    }
+  ]
+}
+</code></pre>
+<p>The SHA-256 of these manifest bytes is <code>350b5e47c5781e72a9bb7b3d6630335fca0390402d0f625a48857a234f99c99d</code>.</p>
+<p>The unsigned package is 658 bytes, with SHA-256 <code>58aa1172e083701a96593f7531f21c0f3668e2f66c3166899f9b90ee3fe5616a</code>. In hexadecimal, 32 bytes per line:</p>
+<pre><code class="language-text">504b03041400000800000000210072c5884392010000920100000d0000006d61
+6e69666573742e6a736f6e7b0a202022617069223a2022696c69756d3a706c75
+67696e40302e312e30222c0a2020226964223a20226578616d706c652e6d696e
+696d616c222c0a2020226e616d65223a20224d696e696d616c222c0a20202276
+657273696f6e223a2022302e312e30222c0a2020227075626c6973686572223a
+20224578616d706c65204c616273222c0a202022736572766572223a207b0a20
+20202022656e747279223a20227365727665722e7761736d222c0a2020202022
+776f726c64223a2022696c69756d3a7365727665722f6261736540302e312e30
+222c0a20202020226578706f727473223a205b5d0a20207d2c0a20202266696c
+6573223a205b0a202020207b0a2020202020202270617468223a202273657276
+65722e7761736d222c0a202020202020226c656e677468223a2033342c0a2020
+2020202022736861323536223a20223032386662386162336531353435373035
+3937663363633039616435393738326162343464396136383733663138333434
+393064613632356566336336636438220a202020207d0a20205d0a7d0a504b03
+041400000800000000210017cea50d22000000220000000b0000007365727665
+722e7761736d0061736d0d000100001811696c69756d3a6170692d7665727369
+6f6e000000010000504b010214031400000800000000210072c5884392010000
+920100000d0000000000000000000000a481000000006d616e69666573742e6a
+736f6e504b010214031400000800000000210017cea50d22000000220000000b
+0000000000000000000000a481bd0100007365727665722e7761736d504b0506
+000000000200020074000000080200000000
+</code></pre>
+<p>The signed form of the same package adds the <code>signature</code> entry of <a href="/pages/reference-signing-and-trust/#test-vector">Signing and trust</a>. It is 1,114 bytes with SHA-256 <code>d2238076eea48c58ceb4416dbb50438c6ffee23028051d7e9a0cb1f9ae7fc408</code>.</p>
+<h2 id="hostile-archive-matrix">Hostile archive matrix</h2>
+<p>Each row is one test. The package is the vector above with the change given. The last column lists every code the failing stage prints, in print order ([PKG-578]), not only the first.</p>
+<p>Rules that apply to every row:</p>
+<ul>
+<li>A mutation that adds an entry writes it at its sorted position with a correct CRC-32 and correct headers. The entry is not listed in <code>files</code> unless the row says so. Only the rows that change a component rebuild the package.</li>
+<li>For one entry, the checks of stage 1 run in this order: entry type (directory, symlink), path rules, duplicate and case collision, entry order, location, caps. An entry that fails a check takes no later check of the stage. For a colliding pair, the code is printed for the second entry in central directory order.</li>
+<li>Stage 6 checks one component in this order: preamble, api-version section, exports. The first failing check ends the checks of that component.</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Id</th>
+<th>Mutation</th>
+<th>Expected codes, in print order</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>[PKG-157]</td>
+<td>An entry named <code>../evil.wasm</code> (zip slip)</td>
+<td><code>package.path-invalid</code></td>
+</tr>
+<tr>
+<td>[PKG-158]</td>
+<td>An entry named <code>/etc/passwd</code></td>
+<td><code>package.path-invalid</code></td>
+</tr>
+<tr>
+<td>[PKG-159]</td>
+<td>An entry named <code>assets\x.png</code> (backslash)</td>
+<td><code>package.path-invalid</code></td>
+</tr>
+<tr>
+<td>[PKG-160]</td>
+<td>An entry name that holds a NUL byte</td>
+<td><code>package.path-invalid</code></td>
+</tr>
+<tr>
+<td>[PKG-161]</td>
+<td>Two entries <code>Server.wasm</code> and <code>server.wasm</code></td>
+<td><code>package.entry-unexpected</code> (for <code>Server.wasm</code>), <code>package.path-case-collision</code> (for <code>server.wasm</code>)</td>
+</tr>
+<tr>
+<td>[PKG-162]</td>
+<td>The entry <code>server.wasm</code> written twice</td>
+<td><code>package.path-duplicate</code></td>
+</tr>
+<tr>
+<td>[PKG-163]</td>
+<td>A central header whose local offset points into another entry (overlap)</td>
+<td><code>package.header-mismatch</code></td>
+</tr>
+<tr>
+<td>[PKG-164]</td>
+<td>One data byte changed, CRC unchanged</td>
+<td><code>package.crc-mismatch</code></td>
+</tr>
+<tr>
+<td>[PKG-165]</td>
+<td>The central directory cut in half</td>
+<td><code>package.zip-invalid</code></td>
+</tr>
+<tr>
+<td>[PKG-166]</td>
+<td><code>manifest.json</code> with 0 bytes</td>
+<td><code>manifest.json-invalid</code> (stage 2)</td>
+</tr>
+<tr>
+<td>[PKG-167]</td>
+<td>An archive with no <code>manifest.json</code></td>
+<td><code>package.manifest-missing</code></td>
+</tr>
+<tr>
+<td>[PKG-168]</td>
+<td>The method field of one entry set to 8 (deflate) in both headers, data unchanged</td>
+<td><code>package.zip-compressed</code></td>
+</tr>
+<tr>
+<td>[PKG-169]</td>
+<td>Bit 0 set on one entry</td>
+<td><code>package.zip-encrypted</code></td>
+</tr>
+<tr>
+<td>[PKG-170]</td>
+<td>An archive comment of 4 bytes</td>
+<td><code>package.zip-comment</code></td>
+</tr>
+<tr>
+<td>[PKG-171]</td>
+<td>16 bytes appended after the end record</td>
+<td><code>package.zip-trailing</code></td>
+</tr>
+<tr>
+<td>[PKG-172]</td>
+<td>A symbolic link entry <code>assets/link</code> (mode <code>0120777</code>)</td>
+<td><code>package.entry-symlink</code></td>
+</tr>
+<tr>
+<td>[PKG-173]</td>
+<td>A directory entry <code>assets/</code></td>
+<td><code>package.entry-directory</code></td>
+</tr>
+<tr>
+<td>[PKG-174]</td>
+<td>An unlisted file <code>extra.txt</code> at the top level</td>
+<td><code>package.entry-unexpected</code></td>
+</tr>
+<tr>
+<td>[PKG-175]</td>
+<td>The entries <code>manifest.json</code> and <code>server.wasm</code> swapped, headers rewritten</td>
+<td><code>package.entry-order</code> (for <code>manifest.json</code>)</td>
+</tr>
+<tr>
+<td>[PKG-176]</td>
+<td>An archive with 4,097 entries: the vector plus 4,095 files <code>assets/f0001.bin</code> to <code>assets/f4095.bin</code></td>
+<td><code>package.entry-limit</code></td>
+</tr>
+<tr>
+<td>[PKG-177]</td>
+<td><code>server.wasm</code> replaced by a core module (layer 0). Rebuild with <code>pack</code> after the change, so <code>files</code> lists the new length and SHA-256 and the CRC-32 is correct</td>
+<td><code>package.component-invalid</code></td>
+</tr>
+<tr>
+<td>[PKG-178]</td>
+<td>The api-version section duplicated. Rebuild with <code>pack</code> after the change, so <code>files</code> lists the new length and SHA-256 and the CRC-32 is correct</td>
+<td><code>package.api-section-repeated</code></td>
+</tr>
+<tr>
+<td>[PKG-179]</td>
+<td>The api-version payload 5 bytes long. Rebuild with <code>pack</code> after the change, so <code>files</code> lists the new length and SHA-256 and the CRC-32 is correct</td>
+<td><code>package.api-section-invalid</code></td>
+</tr>
+<tr>
+<td>[PKG-180]</td>
+<td>The api-version payload <code>00 00 00 02 00 00</code>. Rebuild with <code>pack</code> after the change, so <code>files</code> lists the new length and SHA-256 and the CRC-32 is correct</td>
+<td><code>manifest.api-version</code></td>
+</tr>
+<tr>
+<td>[PKG-181]</td>
+<td>One byte of <code>server.wasm</code> changed, with a matching CRC-32 in both headers and <code>files</code> left as it was</td>
+<td><code>manifest.file-hash</code></td>
+</tr>
+<tr>
+<td>[PKG-182]</td>
+<td>A signed package with one manifest byte changed: the letter <code>M</code> of <code>"name": "Minimal"</code> becomes <code>N</code>, and the correct CRC-32 is written to both headers, so that stages 1 to 6 pass and only stage 7 fails</td>
+<td><code>manifest.signature-invalid</code></td>
+</tr>
+</tbody>
+</table>
+<p>These rows are the minimum matrix. A host MAY add more rows and MUST NOT remove any.</p>
+<h2 id="edge-cases">Edge cases</h2>
+<table>
+<thead>
+<tr>
+<th>Situation</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A 0-byte file in <code>assets/</code></td>
+<td>Allowed. <code>length</code> is 0 and <code>sha256</code> is the hash of the empty string</td>
+</tr>
+<tr>
+<td>A package with only a <code>scene</code> side</td>
+<td>Allowed. Only <code>manifest.json</code> and <code>scene.wasm</code> are required</td>
+</tr>
+<tr>
+<td>A <code>.iliumanim</code> file</td>
+<td>Refused with <code>package.old-format</code> by the signature of its first bytes. See <a href="/pages/porting-iliumanim/">Porting from .iliumanim</a></td>
+</tr>
+<tr>
+<td>Two packs of the same sources on two operating systems</td>
+<td>Identical bytes, because paths, order and times are fixed</td>
+</tr>
+<tr>
+<td>A package renamed to another file name</td>
+<td>Valid. The host reads the manifest, never the file name</td>
+</tr>
+<tr>
+<td>A path that is valid on Linux but reserved on Windows</td>
+<td>Refused on every system ([PKG-118])</td>
+</tr>
+</tbody>
+</table>
+<h2 id="what-the-user-sees">What the user sees</h2>
+<p>The user sees a package only through the install dialog and the CLI. A refused package prints the failing stage, the code and the path of the offending entry. No plugin code has run.</p>
+<h2 id="see-also">See also</h2>
+<ul>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command line</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+</ul>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/reference-offline-and-low-disk/"><small>Previous</small>Reference, offline and low disk</a><a class="next" href="/pages/reference-persistence-and-restart/"><small>Next</small>Reference, persistence and restart</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#you-will-need">You will need</a></li><li class="l2"><a href="#design-goals">Design goals</a></li><li class="l2"><a href="#the-container">The container</a></li><li class="l3"><a href="#why-stored-and-not-compressed">Why stored and not compressed</a></li><li class="l3"><a href="#entry-layout-on-disk">Entry layout on disk</a></li><li class="l2"><a href="#paths">Paths</a></li><li class="l2"><a href="#reserved-names-and-allowed-folders">Reserved names and allowed folders</a></li><li class="l2"><a href="#size-caps">Size caps</a></li><li class="l2"><a href="#the-inventory">The inventory</a></li><li class="l2"><a href="#the-api-version-section">The api-version section</a></li><li class="l2"><a href="#the-ilium-plugin-pack-algorithm">The ilium plugin pack algorithm</a></li><li class="l2"><a href="#the-validation-order">The validation order</a></li><li class="l2"><a href="#error-codes-of-this-page">Error codes of this page</a></li><li class="l2"><a href="#offline-verification-ilium-plugin-verify">Offline verification: ilium plugin verify</a></li><li class="l2"><a href="#test-vector-a-minimal-package">Test vector: a minimal package</a></li><li class="l2"><a href="#hostile-archive-matrix">Hostile archive matrix</a></li><li class="l2"><a href="#edge-cases">Edge cases</a></li><li class="l2"><a href="#what-the-user-sees">What the user sees</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

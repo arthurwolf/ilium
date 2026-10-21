@@ -1,0 +1,726 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Grant review and consent | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details open><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/" aria-current="page">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Reference</b></p>
+<h1>Grant review and consent</h1>
+
+<p>This page defines how a user decides what a plugin may do, how those decisions are stored, and how they are withdrawn. It replaces the three slightly different install descriptions in earlier pages with one pipeline. Mechanisms for enforcement are in the <a href="/pages/security/">Security model</a>. The attacker classes this page defends against are A1, A2 and A8 in the <a href="/pages/reference-threat-model/">Threat model</a>.</p>
+<p>A <strong>grant</strong> is a standing permission that the user gives a plugin at install, for example <code>fs.read:project</code>. A <strong>consent</strong> is a one-off answer to a question asked at first use, for example whether a plugin may open <code>https://status.example.com</code>. The <strong>review dialog</strong> is the kernel-drawn screen that lists the grants a package asks for. The <strong>authorization epoch</strong> is the counter that changes when a grant changes (<a href="/pages/security/">Security model</a>).</p>
+<h3 id="you-will-need">You will need</h3>
+<ul>
+<li>A package, local or signed. See <a href="/pages/packages/">Packages</a>.</li>
+<li>An attached Ilium client (the TUI). Decisions about grants and trust need one ([SEC-116]).</li>
+<li>The capability table in <a href="/pages/reference-capabilities/">Capability table</a>.</li>
+</ul>
+<h2 id="the-install-pipeline">The install pipeline</h2>
+<p><strong>[SEC-100]</strong> <code>ilium plugin install</code>, the Plugins screen and <code>ilium plugin update</code> MUST run this one pipeline, in this order. The first failing step stops the install and writes one JSONL <code>error</code> line with the code. Nothing is written to the install directory before step 11.</p>
+<table>
+<thead>
+<tr>
+<th>Step</th>
+<th>Check</th>
+<th>Failure code</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>Open the archive with the hardened reader</td>
+<td><code>package.path-invalid</code>, <code>package.path-duplicate</code>, <code>package.entry-symlink</code> or <code>package.entry-directory</code>, <code>package.zip-invalid</code></td>
+</tr>
+<tr>
+<td>2</td>
+<td>Layout and API version; unknown manifest keys</td>
+<td><code>manifest.api-version</code>, <code>manifest.unknown-key</code></td>
+</tr>
+<tr>
+<td>3</td>
+<td>Inventory: every file listed with length and SHA-256; asset size</td>
+<td><code>manifest.file-unlisted</code>, <code>manifest.file-missing</code>, <code>manifest.file-length</code>, <code>manifest.file-hash</code>, <code>manifest.asset-size</code></td>
+</tr>
+<tr>
+<td>4</td>
+<td>Signature (T2) verifies; publisher name matches the key's record</td>
+<td><code>manifest.signature-invalid</code>, <code>manifest.publisher-mismatch</code></td>
+</tr>
+<tr>
+<td>5</td>
+<td>Blocklist (release and policy)</td>
+<td><code>package.blocked</code></td>
+</tr>
+<tr>
+<td>6</td>
+<td>Policy: tier, id, publisher, source</td>
+<td><code>policy.tier-denied</code>, <code>policy.id-denied</code>, <code>policy.publisher-denied</code>, <code>policy.source-denied</code></td>
+</tr>
+<tr>
+<td>7</td>
+<td>Key trust and key pinning: an untrusted key is offered for trust; an installed id signed by another key is refused</td>
+<td><code>trust.declined</code>, <code>package.publisher-key-changed</code></td>
+</tr>
+<tr>
+<td>8</td>
+<td>Grant strings parse and fit the tier; dependencies between grants</td>
+<td><code>manifest.grant-tier</code>, <code>manifest.grant-argument</code>, <code>manifest.grant-argument-missing</code>, <code>manifest.grant-wildcard</code>, <code>manifest.grant-scope</code>, <code>manifest.grant-dependency</code>, <code>manifest.limits-tier</code>, <code>manifest.secret-scope</code>, <code>manifest.replaces-tier</code></td>
+</tr>
+<tr>
+<td>9</td>
+<td>Policy: replacement. A grant denied by <code>grants.deny</code> is not checked here and does not fail the install; step 10 shows it locked off</td>
+<td><code>policy.replacement</code></td>
+</tr>
+<tr>
+<td>10</td>
+<td>Review dialog (see below)</td>
+<td>user cancels: exit code 1, audit <code>install</code> with result <code>cancelled</code></td>
+</tr>
+<tr>
+<td>11</td>
+<td>Commit: unpack into the install directory, write the grants, bump the epoch, write the audit line</td>
+<td><code>install.write-failed</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>[SEC-123]</strong> Declining to trust a key at step 7 refuses the install with <code>trust.declined</code>. The package is never downgraded to T3 silently. A user who wants it as a local package passes <code>--allow-unsigned</code> explicitly, which strips the signature view and gives a T3 install with the <code>dev</code> badge.</p>
+<p><strong>[SEC-124]</strong> <code>sessions.cross</code> in a T3 package is refused at step 8 with <code>manifest.grant-tier</code>. <code>sessions.cross</code> is for T1 and T2 only.</p>
+<h2 id="the-review-dialog">The review dialog</h2>
+<figure>
+<pre class="term"><span class="t-hi">╭─ Install example.pane-tools 2.0.0 ───────────╮</span>
+│ Name (self-declared): Example Corp           │
+│ Signed T2 · key 3F2A91C0 · Tab for Details   │
+│                                              │
+│ <span class="t-dim">Server</span>                                       │
+│ [x] Read terminal text   terminal.read-cells │
+│ [ ] <span class="t-warn">HIGH</span> Read scrollback    terminal.history │
+│ [ ] <span class="t-warn">HIGH</span> Run rg ………………………………… process.run:rg │
+│ [x] Send data to api.example.com ……………… http │
+│ <span class="t-dim">Client</span>                                       │
+│ [x] Show toasts ……………………………………… notify.toast │
+│                                              │
+│ <span class="t-warn">This plugin can read your data and send</span>      │
+│ <span class="t-warn">data out.</span>                                    │
+│                                              │
+│ <span class="t-hi"> Esc </span> Cancel   <span class="t-hi"> Enter </span> Install               │
+╰──────────────────────────────────────────────╯
+</pre>
+<figcaption>Rendered at 48 columns. Illustrative. The review dialog of a signed plugin. Focus starts on Cancel.</figcaption>
+</figure>
+
+<p><strong>[SEC-102]</strong> The review dialog MUST be drawn by the kernel (the client) only. It is modal over every plugin widget. No plugin widget can draw inside, over or in the reserved dialog border. No plugin input event reaches the dialog. The same holds for the consent prompts, breach notices, the recovery page and policy lock marks.</p>
+<p><strong>[SEC-106]</strong> Rows. Sections by side (Server, Client, Scene). A high-risk grant row starts unchecked and carries the text <code>HIGH</code> (not a symbol). Normal rows start checked. A row for a grant that the policy denies (<code>grants.deny</code>, see [SEC-198]) is locked off and reads <code>Blocked by your administrator</code>. Each row names the grant in the right column. The dialog also shows, as separate groups: <strong>Adds to other plugins</strong> (extension contributions), <strong>Replaces</strong> (a core plugin), <strong>Receives data from other plugins</strong>, and the <strong>toxic combination</strong> row ([SEC-004]) when the requested set holds, in the same side, at least one grant of the data-read set and at least one grant of the egress set, both enumerated in [SEC-006]. The toxic row is informational and has no checkbox of its own: it cannot be unchecked, and it disappears when the user unchecks either member grant.</p>
+<p><strong>[SEC-103]</strong> Protection against accidental approval. The default focus is on <strong>Cancel</strong>. The dialog ignores <code>Enter</code> and <code>Space</code> for 500 ms after it opens and while a key is auto-repeating (a second press of the same key within 80 ms of the previous one, without release). The dialog ignores input that arrived before it was drawn. A plugin cannot open the dialog while the user types in a terminal (see [SEC-377]). At most one review dialog is open at a time; others queue.</p>
+<p><strong>[SEC-104]</strong> Names. The publisher is shown as <code>Name (self-declared)</code> next to the verified fingerprint. Display names, plugin titles and publisher names shown in the dialog have control characters, bidirectional overrides and isolates, and zero-width joiners removed; they are limited to 64 characters; and they are refused (the install fails with <code>manifest.display-name</code>) when they equal or are confusable with a kernel name (<code>Ilium</code>, <code>Settings</code>, <code>Plugins</code>, <code>Security</code>, <code>Kernel</code>, <code>Ilium Team</code>) after case-folding and removal of spaces and punctuation.</p>
+<p><strong>[SEC-107]</strong> Details (reachable with Tab) shows: full SHA-256 fingerprint in groups of 4 hex digits, package SHA-256, the tier, <code>security_contact</code> if present, <code>data_use</code> if present, each grant with its risk, each file's size, and the optional provenance entries (<a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a>).</p>
+<p><strong>[SEC-121]</strong> Accessibility. Every row has a text label that a screen reader announces as <code>&lt;state&gt;, &lt;risk&gt;, &lt;title&gt;, &lt;grant name&gt;</code>. The dialog never relies on colour alone.</p>
+<p><strong>[SEC-122]</strong> If rows exceed the height of the terminal, the list scrolls. A scroll indicator shows <code>n of m</code>. The footer stays visible.</p>
+<h3 id="trust-dialog">Trust dialog</h3>
+<figure>
+<pre class="term"><span class="t-hi">╭─ Trust this publisher? ──────────────────────╮</span>
+│ Self-declared name: Example Corp             │
+│ Key fingerprint (SHA-256):                   │
+│ 3F2A 91C0 7B6D 1E44 A1B2 0C9E 55D3 F7A8      │
+│ B6C1 02E9 4D77 98AF 13C5 6E0B D2F4 8A19      │
+│                                              │
+│ Compare this with the publisher over a       │
+│ channel you trust before you continue.       │
+│                                              │
+│ <span class="t-hi"> Esc </span> Do not trust   <span class="t-hi"> Enter </span> Trust           │
+╰──────────────────────────────────────────────╯
+</pre>
+<figcaption>Rendered at 48 columns. Illustrative. Full fingerprint, two groups of 8 hex digits per line pair.</figcaption>
+</figure>
+
+<p>The fingerprint is the SHA-256 of the raw public key, shown as 64 hex digits in 16 groups of 4. The short form <code>3F2A91C0</code> is the first 8 hex digits and appears only next to the full form or in <code>trust list</code>.</p>
+<h2 id="updates">Updates</h2>
+<figure>
+<pre class="term"><span class="t-hi">╭─ Update example.pane-tools 2.1.0 ────────────╮</span>
+│ Same signing key as 2.0.0.                   │
+│                                              │
+│ <span class="t-dim">New</span>                                          │
+│ [ ] <span class="t-warn">HIGH</span> Read scrollback    terminal.history │
+│ <span class="t-dim">Widened</span>                                      │
+│ [ ] Send data to *.example.com …………………… http │
+│ <span class="t-dim">Removed</span>                                      │
+│ Show toasts ………………………………………………… notify.toast │
+│                                              │
+│ Unchanged grants keep their answers.         │
+│                                              │
+│ <span class="t-hi"> Esc </span> Cancel   <span class="t-hi"> Enter </span> Update                │
+╰──────────────────────────────────────────────╯
+</pre>
+<figcaption>Rendered at 48 columns. Illustrative. The update dialog lists only what changed.</figcaption>
+</figure>
+
+<p><strong>[SEC-108]</strong> An update dialog MUST show three groups. <strong>New</strong>: grants not held before; a new high-risk grant is unchecked and a new normal grant is checked. <strong>Wider</strong>: a grant whose argument now covers more than before; always unchecked. <strong>Removed</strong>: grants the new version no longer lists, shown for information. A widened grant replaces the old one, so the old grant string also appears under Removed. Unchanged grants keep their state and are not shown. Always-granted entries are never shown. Test: update from {<code>fs.read:data</code>, <code>http:a.example</code>} to {<code>fs.read:project</code>, <code>http:*.example</code>}; assert New=[<code>fs.read:project</code>], Wider=[<code>http:*.example</code>], Removed=[<code>http:a.example</code>].</p>
+<p>Widening is defined for these real argument forms only. Any other argument change is Removed plus New.</p>
+<table>
+<thead>
+<tr>
+<th>Family</th>
+<th>Widened when</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>commands.invoke:&lt;arg&gt;</code></td>
+<td>an exact id becomes <code>&lt;plugin-id&gt;/*</code>, or <code>&lt;plugin-id&gt;/*</code> becomes <code>*</code></td>
+</tr>
+<tr>
+<td><code>http:&lt;host&gt;</code></td>
+<td>an exact host becomes <code>*.&lt;domain&gt;</code> that covers it. Adding a port is a new grant. <code>http:setting:&lt;key&gt;</code> is never widened</td>
+</tr>
+<tr>
+<td><code>fs.*:path:&lt;template&gt;</code></td>
+<td>the template is replaced by an ancestor template (<code>path:{home}/a/b</code> to <code>path:{home}/a</code>)</td>
+</tr>
+<tr>
+<td><code>fs.*:&lt;scope&gt;</code></td>
+<td>the scope becomes a broader named scope (<code>project</code> to <code>path:{home}/**</code>), or read becomes write</td>
+</tr>
+<tr>
+<td><code>process.run:&lt;program&gt;</code></td>
+<td>a program name becomes an absolute path: a new grant, not widening</td>
+</tr>
+<tr>
+<td><code>extensions.*:&lt;point&gt;</code></td>
+<td>a different point: Removed plus New</td>
+</tr>
+<tr>
+<td>risk</td>
+<td>a normal grant becomes high: New</td>
+</tr>
+</tbody>
+</table>
+<p>An answer the user gave to an unchanged grant is kept. New and widened grants start in their default state (widened: unchecked). A removed grant is dropped.</p>
+<p><strong>[SEC-109]</strong> A change of the publisher key, or of the tier (T2 to T3 or T3 to T2), resets all grants and consents of the plugin and shows the full dialog as for a first install. A key change that is endorsed by a rotation statement ([SEC-143]) shows the update dialog and a line <code>Signing key rotated</code>.</p>
+<figure>
+<pre class="term"><span class="t-hi">╭─ Publisher key changed ──────────────────────╮</span>
+│ example.pane-tools 2.2.0 is signed by a      │
+│ different key than the installed 2.1.0.      │
+│                                              │
+│ Installed key  3F2A91C0 7B6D1E44             │
+│ New key        A1B20C9E 55D3F7A8             │
+│                                              │
+│ The update is refused. To use this package,  │
+│ uninstall the plugin first. Its grants and   │
+│ data settings will be asked for again.       │
+│                                              │
+│ <span class="t-hi"> Enter </span> Close                                │
+╰──────────────────────────────────────────────╯
+</pre>
+<figcaption>Rendered at 48 columns. Illustrative. The kernel refuses an update that changes the signing key without an endorsement.</figcaption>
+</figure>
+
+<h2 id="consent-prompts">Consent prompts</h2>
+<p><strong>[SEC-105]</strong> Consent prompts (origin for <code>open-external</code>, host from a setting, geocoding, bundled first start) are limited. At most one prompt is pending per plugin. At most 6 prompts are shown per plugin in a rolling hour. The call that triggers a prompt waits for the answer, up to 120 s; then it returns <code>timeout</code>, the prompt is closed and nothing is stored. A second consent-gated call from the same plugin while one prompt is pending returns <code>busy</code> with <code>retry-after-ms</code> = 1000 and shows no prompt. The 7th prompt in a rolling hour returns <code>rate-limited</code> with <code>retry-after-ms</code> = the time until the oldest prompt leaves the window. Test: trigger two consent calls at once and assert one prompt and one <code>busy</code>; trigger seven in an hour and assert <code>rate-limited</code> on the 7th. A prompt is a kernel dialog and cannot be answered by any event a plugin can cause.</p>
+<p><strong>[SEC-110]</strong> After a user declines the same target three times, the plugin gets <code>not-permitted</code> with reason <code>declined</code> for that target without a prompt, until the user resets it in Settings &gt; Plugins &gt; Consents or with <code>ilium plugin consents &lt;id&gt; --withdraw &lt;target&gt;</code>.</p>
+<figure>
+<pre class="term"><span class="t-hi">╭─ Allow once more? ───────────────────────────╮</span>
+│ Notes Panel wants to open this site again:   │
+│                                              │
+│ https://status.example.com                   │
+│                                              │
+│ You declined this site twice before.         │
+│                                              │
+│ <span class="t-hi"> Esc </span> Decline        <span class="t-hi"> Enter </span> Allow           │
+╰──────────────────────────────────────────────╯
+</pre>
+<figcaption>Rendered at 48 columns. Illustrative. After three declines the prompt stops until the user resets it.</figcaption>
+</figure>
+
+<p><strong>[SEC-111]</strong> Bundled first start. A T1 plugin with H grants is activated without them. The kernel asks at first activation. Every row of the prompt starts unchecked, and focus starts on <strong>Not now</strong>. Enter with no row checked equals <strong>Not now</strong> and counts as one of the three asks. If the user answers <strong>Not now</strong>, the question comes back at the next server start. After three <strong>Not now</strong> answers (counted per plugin) the prompt stops and the grants stay off until the user enables them in Settings &gt; Plugins &gt; Capabilities.</p>
+<figure>
+<pre class="term"><span class="t-hi">╭─ Bundled plugin, first start ────────────────╮</span>
+│ ilium.pane-tools asks for:                   │
+│                                              │
+│ [ ] Read scrollback ………………… terminal.history │
+│ [ ] Hold the keyboard    terminal.input-lock │
+│ [ ] Read agent transcripts  agent.transcript │
+│                                              │
+│ Asked 1 of 3 times.                          │
+│                                              │
+│ <span class="t-hi"> Enter </span> Allow selected   <span class="t-hi"> Esc </span> Not now       │
+╰──────────────────────────────────────────────╯
+</pre>
+<figcaption>Rendered at 48 columns. Illustrative. Bundled plugins start without their high-risk grants, and every row starts unchecked.</figcaption>
+</figure>
+
+<h2 id="where-decisions-are-stored">Where decisions are stored</h2>
+<p><strong>[SEC-112]</strong> The grant store, consent store, trust store and project trust store are separate files in the Ilium user state directory (Linux <code>$XDG_STATE_HOME/ilium/</code>, macOS <code>~/Library/Application Support/Ilium/state/</code>, Windows <code>%LOCALAPPDATA%\Ilium\state\</code>). Each file is created with mode 0600 in a directory with mode 0700 and is owned by the user. No store lives in a project folder, and none is reachable by any plugin scope ([SEC-060]).</p>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Content</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>grants.json</code></td>
+<td><code>{ "version": 1, "plugins": { "&lt;id&gt;": { "epoch": n, "tier": "t2", "key": "&lt;fingerprint&gt;", "grants": { "server": [...], "client": [...] }, "installed": "&lt;ISO 8601&gt;" } } }</code></td>
+</tr>
+<tr>
+<td><code>consents.json</code></td>
+<td><code>{ "version": 1, "plugins": { "&lt;id&gt;": { "open-external": { "&lt;origin&gt;": "allow" or "deny:&lt;count&gt;" }, "http-hosts": {...}, "geocode": "allow" } } }</code></td>
+</tr>
+<tr>
+<td><code>trust.json</code></td>
+<td><code>{ "version": 1, "keys": [ { "fingerprint", "publisher", "added", "public_key" } ] }</code></td>
+</tr>
+<tr>
+<td><code>project-trust.json</code></td>
+<td><code>{ "version": 1, "projects": { "&lt;canonical path&gt;": { "trusted": true, "added": "&lt;ISO 8601&gt;" } } }</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>[SEC-114]</strong> Stores are written atomically (temporary sibling, fsync, rename) and carry a <code>version</code>. A file with a newer version than the server knows is not modified and the server reports <code>store.version</code>. A file that cannot be parsed is renamed to <code>&lt;name&gt;.corrupt-&lt;YYYYMMDD-HHmmss&gt;</code>, the server logs <code>grants.unreadable</code> (<code>trust.unreadable</code> for the trust store), starts with no entries from it, and draws a notice. T2 and T3 plugins then start as not installed with no grants, and T1 plugins start with only their normal grants; grants and consents are asked again (fail closed).</p>
+<p><strong>[SEC-113]</strong> The server re-reads a store file only at start. External edits made while the server runs are ignored until the next start. At start, entries that appear in a store but were not written by the server (the file hash differs from the hash the server recorded in the audit log at its last write) are audited as <code>store-external-edit</code>. External edits MUST NOT add a high-risk grant: an H grant found in a store without an audit record of a user decision is dropped. An administrator uses the policy file <code>preapproved</code> list instead (<a href="/pages/reference-admin-policy/">Admin policy</a>).</p>
+<h2 id="who-may-approve">Who may approve</h2>
+<p><strong>[SEC-116]</strong> A decision that adds a grant, trusts a key, installs a package with <code>--allow-unsigned</code> or marks a project trusted MUST be confirmed in a dialog in an attached TUI client of the same session. When <code>ilium plugin install</code> runs in a shell pane (the <code>ILIUM_PANE_ID</code> variable is set), the CLI asks the server to open the dialog in the client, and the dialog names the requesting pane: <code>Requested from pane "shell 3"</code>. If no client is attached, the CLI waits up to 60 s, prints <code>waiting for a client to approve</code>, and then fails with <code>approval.no-client</code>.</p>
+<p><strong>[SEC-117]</strong> No command-line flag grants a high-risk capability, trusts a key or approves a project without that confirmation. The only exception is a grant that the admin policy lists in <code>preapproved</code> for that plugin id, which requires no dialog. A prompt-injected agent that runs <code>ilium plugin install pkg --yes</code> still reaches the dialog, and the dialog shows what is installed.</p>
+<h2 id="revocation-and-uninstall">Revocation and uninstall</h2>
+<p><strong>[SEC-118]</strong> The user can withdraw a decision at any time: one grant, one consent, one picked path, or all of a plugin's grants and consents (<strong>Revoke all</strong>). Effects are those in the <a href="/pages/security/">Security model</a>: in-flight calls return <code>revoked</code>, the epoch bumps, contributions are withdrawn.</p>
+<p><strong>[SEC-120]</strong> CLI. <code>ilium plugin consents &lt;id&gt;</code> prints consents as JSONL. <code>ilium plugin consents &lt;id&gt; --withdraw &lt;target&gt;</code> withdraws one. <code>ilium plugin grants &lt;id&gt; --revoke &lt;grant&gt;</code> revokes one grant. Granting never happens from the CLI ([SEC-116]).</p>
+<p><strong>[SEC-119]</strong> Uninstall forgets the plugin's grants, consents and picked paths. Its data and cache are removed unless <code>--keep-data</code> is passed. A reinstall starts with a fresh review dialog.</p>
+<h2 id="edge-cases">Edge cases</h2>
+<table>
+<thead>
+<tr>
+<th>Situation</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>The user holds Enter while the dialog opens</td>
+<td>Ignored for 500 ms and while repeating; the dialog stays open</td>
+</tr>
+<tr>
+<td>A plugin tries to open a second review dialog</td>
+<td>Queued; the first stays on top</td>
+</tr>
+<tr>
+<td>The terminal is smaller than the dialog minimum (40 by 12)</td>
+<td>The dialog shows <code>Terminal too small</code> and Cancel only</td>
+</tr>
+<tr>
+<td>Two clients attached</td>
+<td>The dialog opens in the client that most recently had input; the other shows <code>Waiting for approval</code></td>
+</tr>
+<tr>
+<td>Grants store missing</td>
+<td>All third-party plugins are treated as not installed and the user is told</td>
+</tr>
+<tr>
+<td>Package re-signed with the same key, same version</td>
+<td><code>install</code> refuses with <code>install.same-version</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="see-also">See also</h3>
+<ul>
+<li><a href="/pages/security/">Security model</a></li>
+<li><a href="/pages/packages/">Packages</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+</ul>
+<p>Contract: <code>ilium:plugin@0.1.0</code>.</p>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/reference-feature-traceability/"><small>Previous</small>Feature traceability</a><a class="next" href="/pages/reference-health-and-watchdog/"><small>Next</small>Reference, health and watchdog</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#you-will-need">You will need</a></li><li class="l2"><a href="#the-install-pipeline">The install pipeline</a></li><li class="l2"><a href="#the-review-dialog">The review dialog</a></li><li class="l3"><a href="#trust-dialog">Trust dialog</a></li><li class="l2"><a href="#updates">Updates</a></li><li class="l2"><a href="#consent-prompts">Consent prompts</a></li><li class="l2"><a href="#where-decisions-are-stored">Where decisions are stored</a></li><li class="l2"><a href="#who-may-approve">Who may approve</a></li><li class="l2"><a href="#revocation-and-uninstall">Revocation and uninstall</a></li><li class="l2"><a href="#edge-cases">Edge cases</a></li><li class="l3"><a href="#see-also">See also</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,1020 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Services | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details open><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/" aria-current="page">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Concepts</b></p>
+<h1>Services</h1>
+
+<p>A service is a named interface that one plugin provides and other plugins call. The caller sends a method name and a JSON payload. The provider answers with a JSON reply, at once or later. The plugins never link to each other. The kernel checks both grants and the payload, and it routes the call to the provider the user has enabled. A consumer can also declare that it needs a provider, so the kernel starts that provider first.</p>
+<p>Version 0.1 has two kinds of service. Kernel-known interfaces, such as <code>ilium:inference/provider</code>, have typed WIT signatures. Plugin-defined services use the generic <code>services.call</code> form, which is unstable in 0.1. The call-side reference is <a href="/pages/api-services/">services API</a>.</p>
+<h2 id="what-you-need">What you need</h2>
+<ul>
+<li><strong>Grants.</strong> A caller needs <code>services.use:&lt;name&gt;</code>. A provider needs <code>services.provide:&lt;name&gt;</code>. The inference provider needs <code>inference.provide</code> instead.</li>
+<li><strong>Manifest.</strong> The provider lists <code>service-provider</code> in <code>exports</code> and its services in <code>contributes.services.provides</code>. The caller lists the services it needs in <code>requires.services</code>. Both plugins set <code>"unstable": ["plugin-services"]</code>, which is accepted only in dev mode for T2 and T3 plugins (see <a href="/pages/reference-manifest/">Manifest reference</a>).</li>
+<li><strong>SDK.</strong> The <a href="/pages/rust-sdk/">Rust SDK</a> provides <code>ilium_plugin_sdk::host::services</code>. The <a href="/pages/typescript-sdk/">TypeScript SDK</a> provides <code>@ilium/plugin-sdk/host/services</code>.</li>
+</ul>
+<h2 id="names-versions-and-grants">Names, versions and grants</h2>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Form</th>
+<th>Example</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Kernel-known service</td>
+<td><code>ilium:&lt;package&gt;/&lt;interface&gt;</code></td>
+<td><code>ilium:inference/provider</code></td>
+</tr>
+<tr>
+<td>Plugin-defined service</td>
+<td><code>&lt;plugin-id&gt;/&lt;name&gt;</code>; <code>&lt;name&gt;</code> is 1 to 64 characters from <code>a-z</code>, <code>0-9</code>, <code>-</code></td>
+<td><code>com.example.titles/suggest</code></td>
+</tr>
+<tr>
+<td>Caller grant</td>
+<td><code>services.use:&lt;name&gt;</code></td>
+<td><code>services.use:com.example.titles/suggest</code></td>
+</tr>
+<tr>
+<td>Provider grant</td>
+<td><code>services.provide:&lt;name&gt;</code></td>
+<td><code>services.provide:com.example.titles/suggest</code></td>
+</tr>
+<tr>
+<td>Provider manifest entry</td>
+<td>object with <code>name</code>, <code>version</code>, <code>schema</code></td>
+<td>see below</td>
+</tr>
+<tr>
+<td>Caller manifest entry</td>
+<td>string with a version, in <code>requires.services</code></td>
+<td><code>com.example.titles/suggest@0.1.0</code></td>
+</tr>
+</tbody>
+</table>
+<p>A grant carries the bare name, with no version and no wildcard. The first colon in a grant separates the grant from its argument, so <code>services.use:ilium:inference/provider</code> names <code>ilium:inference/provider</code>. A version appears only in <code>requires</code> and <code>provides</code>, always written <code>@0.1.0</code>.</p>
+<h2 id="the-registry">The registry</h2>
+<p>The kernel keeps one service registry, keyed by name. A provider enters it when it is installed, enabled and granted <code>services.provide</code>. A name has one provider. If a second enabled plugin declares a registered name, the registry keeps the first and never calls the second.</p>
+<figure>
+<svg viewBox="0 0 420 170" role="img" aria-label="Service registry routing calls to a provider" width="630" height="255">
+  <title>Service registry routing</title>
+  <desc>Two consumers call a service through the registry. The registry checks both grants and routes each call to the provider the user enabled.</desc>
+  <defs>
+    <marker id="services-arrow" viewBox="0 0 6 6" refX="5" refY="3" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L6,3 L0,6 z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <rect x="8" y="22" width="110" height="40" rx="6" fill="none" stroke="currentColor" stroke-dasharray="6 4"/>
+  <text x="63" y="46" font-size="11" text-anchor="middle" fill="currentColor">Consumer A</text>
+  <rect x="8" y="108" width="110" height="40" rx="6" fill="none" stroke="currentColor" stroke-dasharray="6 4"/>
+  <text x="63" y="132" font-size="11" text-anchor="middle" fill="currentColor">Consumer B</text>
+  <line x1="118" y1="42" x2="168" y2="72" stroke="currentColor" marker-end="url(#services-arrow)"/>
+  <line x1="118" y1="128" x2="168" y2="100" stroke="currentColor" marker-end="url(#services-arrow)"/>
+  <rect x="168" y="50" width="130" height="72" rx="6" fill="none" stroke="currentColor" stroke-width="2"/>
+  <text x="233" y="78" font-size="11" text-anchor="middle" fill="currentColor">Service registry</text>
+  <text x="233" y="96" font-size="10" text-anchor="middle" fill="currentColor">checks both grants</text>
+  <text x="233" y="110" font-size="10" text-anchor="middle" fill="currentColor">routes each call</text>
+  <line x1="298" y1="86" x2="320" y2="86" stroke="currentColor" marker-end="url(#services-arrow)"/>
+  <rect x="320" y="50" width="92" height="72" rx="6" fill="none" stroke="currentColor" stroke-dasharray="6 4"/>
+  <text x="366" y="78" font-size="11" text-anchor="middle" fill="currentColor">Provider</text>
+  <text x="366" y="96" font-size="10" text-anchor="middle" fill="currentColor">chosen by user</text>
+</svg>
+<figcaption>Consumers never link to the provider. The registry checks both grants and routes each call.</figcaption>
+</figure>
+
+<h2 id="declaring-a-provider">Declaring a provider</h2>
+<p>The provider's schema file maps each method to a <code>params</code> schema and a <code>result</code> schema. The schemas use the keyword subset of JSON Schema draft 2020-12 that the <a href="/pages/settings-screens/">settings screens</a> also use.</p>
+<pre><code class="language-json">{
+  &quot;exports&quot;: [&quot;service-provider&quot;],
+  &quot;contributes&quot;: {
+    &quot;services&quot;: {
+      &quot;provides&quot;: [
+        {
+          &quot;name&quot;: &quot;com.example.titles/suggest&quot;,
+          &quot;version&quot;: &quot;0.1.0&quot;,
+          &quot;schema&quot;: &quot;schemas/suggest.json&quot;
+        }
+      ]
+    }
+  },
+  &quot;unstable&quot;: [&quot;plugin-services&quot;]
+}
+</code></pre>
+<pre><code class="language-json">{
+  &quot;suggest&quot;: {
+    &quot;params&quot;: {
+      &quot;type&quot;: &quot;object&quot;,
+      &quot;properties&quot;: { &quot;text&quot;: { &quot;type&quot;: &quot;string&quot; } },
+      &quot;required&quot;: [&quot;text&quot;]
+    },
+    &quot;result&quot;: {
+      &quot;type&quot;: &quot;object&quot;,
+      &quot;properties&quot;: { &quot;title&quot;: { &quot;type&quot;: &quot;string&quot; } },
+      &quot;required&quot;: [&quot;title&quot;]
+    }
+  }
+}
+</code></pre>
+<h2 id="declaring-a-consumer">Declaring a consumer</h2>
+<p>The consumer names the service with its version in <code>requires.services</code>. Its activation waits for a compatible provider. A provider is compatible when its major version equals the required major version and its minor version is at least the required minor version. For major version 0 the rule is stricter, because 0.x versions are unstable: the minor version must be equal, and the patch version is ignored. A consumer that requires <code>0.1.0</code> accepts a provider at <code>0.1.0</code> or <code>0.1.5</code>, and refuses <code>0.9.0</code> and any <code>0.2.x</code> release. A consumer that requires <code>1.2.0</code> accepts <code>1.2.0</code> and <code>1.4.0</code>, and refuses <code>1.1.0</code> and <code>2.0.0</code> [SVC-006]. A provider has at most 64 calls in flight at once; a 65th call returns <code>busy</code> at the call [SVC-014].</p>
+<pre><code class="language-json">{
+  &quot;requires&quot;: { &quot;services&quot;: [&quot;com.example.titles/suggest@0.1.0&quot;] },
+  &quot;unstable&quot;: [&quot;plugin-services&quot;]
+}
+</code></pre>
+<h2 id="the-call-surface">The call surface</h2>
+<table>
+<thead>
+<tr>
+<th>Name</th>
+<th>Side</th>
+<th>Rust</th>
+<th>TypeScript</th>
+<th>Grant</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>call</code></td>
+<td>caller</td>
+<td><code>services::call(service, method, payload_json).await</code></td>
+<td><code>await call(service, method, payloadJson)</code></td>
+<td><code>services.use</code></td>
+<td>Sends the call, waits and resolves with the reply JSON. Fails with the completion code.</td>
+</tr>
+<tr>
+<td><code>call-request</code></td>
+<td>caller</td>
+<td><code>services::call_request(...)</code></td>
+<td><code>callRequest(...)</code></td>
+<td><code>services.use</code></td>
+<td>Sends the call and returns a request id at once.</td>
+</tr>
+<tr>
+<td><code>take-reply</code></td>
+<td>caller</td>
+<td><code>services::take_reply(request)</code></td>
+<td><code>takeReply(request)</code></td>
+<td><code>services.use</code></td>
+<td>Returns the reply JSON once. <code>None</code> or <code>undefined</code> after a failure, a cancel or a second take.</td>
+</tr>
+<tr>
+<td><code>handle</code></td>
+<td>provider</td>
+<td><code>ServiceProvider::handle(&amp;mut self, call)</code></td>
+<td><code>handle(call)</code> in <code>definePlugin</code></td>
+<td><code>services.provide</code></td>
+<td>Receives each checked call and returns a <code>ServiceReply</code>.</td>
+</tr>
+<tr>
+<td><code>reply</code></td>
+<td>provider</td>
+<td><code>services::reply(call, outcome)</code></td>
+<td><code>reply(call, outcome)</code></td>
+<td><code>services.provide</code></td>
+<td>Answers a deferred call with <code>Ok(json)</code> or <code>Err(error)</code>.</td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr>
+<th>Type</th>
+<th>Field or case</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ServiceCall</code></td>
+<td><code>call</code> (<code>u64</code>; <code>bigint</code> in TypeScript)</td>
+<td>The number to pass back to <code>reply</code>.</td>
+</tr>
+<tr>
+<td><code>ServiceCall</code></td>
+<td><code>service</code>, <code>method</code>, <code>payload_json</code></td>
+<td>The name, the method, and the payload already checked against <code>params</code>.</td>
+</tr>
+<tr>
+<td><code>ServiceCall</code></td>
+<td><code>caller</code></td>
+<td>The id of the calling plugin.</td>
+</tr>
+<tr>
+<td><code>ServiceReply</code></td>
+<td><code>Done(String)</code> or <code>{ tag: 'done', val }</code></td>
+<td>Answers now with JSON that matches <code>result</code>.</td>
+</tr>
+<tr>
+<td><code>ServiceReply</code></td>
+<td><code>Deferred</code> or <code>{ tag: 'deferred' }</code></td>
+<td>Promises a later <code>reply</code> with the same call number.</td>
+</tr>
+</tbody>
+</table>
+<p>The <code>ServiceCall</code>, <code>ServiceReply</code> and <code>ServiceProvider</code> names live in <code>ilium_plugin_sdk::exports</code> in Rust. In TypeScript they come from <code>@ilium/plugin-sdk</code>.</p>
+<h2 id="how-a-call-travels">How a call travels</h2>
+<figure>
+<svg viewBox="0 0 420 284" role="img" aria-label="Steps of one service call from caller to provider and back" width="630" height="426">
+  <title>One service call</title>
+  <desc>The caller sends a call, the kernel checks grants and the payload, the provider answers now or later, and the caller takes the reply.</desc>
+  <defs>
+    <marker id="flow-arrow" viewBox="0 0 6 6" refX="5" refY="3" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L6,3 L0,6 z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <rect x="12" y="10" width="212" height="34" rx="6" fill="none" stroke="currentColor"/>
+  <text x="118" y="31" font-size="10" text-anchor="middle" fill="currentColor">1. Caller: services.call(...)</text>
+  <text x="244" y="31" font-size="10" fill="currentColor">Needs services.use grant</text>
+  <line x1="118" y1="44" x2="118" y2="68" stroke="currentColor" marker-end="url(#flow-arrow)"/>
+  <rect x="12" y="68" width="212" height="34" rx="6" fill="none" stroke="currentColor"/>
+  <text x="118" y="89" font-size="10" text-anchor="middle" fill="currentColor">2. Kernel: check grants, schema</text>
+  <text x="244" y="89" font-size="10" fill="currentColor">No provider: not-found</text>
+  <line x1="118" y1="102" x2="118" y2="126" stroke="currentColor" marker-end="url(#flow-arrow)"/>
+  <rect x="12" y="126" width="212" height="34" rx="6" fill="none" stroke="currentColor"/>
+  <text x="118" y="147" font-size="10" text-anchor="middle" fill="currentColor">3. Provider: handle(call)</text>
+  <text x="244" y="147" font-size="10" fill="currentColor">Inactive: started first</text>
+  <line x1="118" y1="160" x2="118" y2="184" stroke="currentColor" marker-end="url(#flow-arrow)"/>
+  <rect x="12" y="184" width="212" height="34" rx="6" fill="none" stroke="currentColor"/>
+  <text x="118" y="205" font-size="10" text-anchor="middle" fill="currentColor">4. Provider: done or deferred</text>
+  <text x="244" y="205" font-size="10" fill="currentColor">Deferred: reply() later</text>
+  <line x1="118" y1="218" x2="118" y2="242" stroke="currentColor" marker-end="url(#flow-arrow)"/>
+  <rect x="12" y="242" width="212" height="34" rx="6" fill="none" stroke="currentColor"/>
+  <text x="118" y="263" font-size="10" text-anchor="middle" fill="currentColor">5. Caller: take-reply(request)</text>
+  <text x="244" y="263" font-size="10" fill="currentColor">Returns the JSON once</text>
+</svg>
+<figcaption>One call. A refused call ends at step 2. Otherwise the reply reaches the caller at step 5.</figcaption>
+</figure>
+
+<p>The payload is checked against <code>params</code> before the provider runs, and a failing payload never reaches it. A <code>Done</code> answer or a <code>reply</code> value must match <code>result</code>. The caller has 30 seconds from the call to receive its reply.</p>
+<h2 id="activation-order">Activation order</h2>
+<p>At startup the kernel starts service providers before the consumers that require them. A provider that is installed but not running is started by the first call to its service, through the trigger <code>service:&lt;name&gt;</code>. The call waits up to the provider's activation deadline, then for the reply. At shutdown, services stop in their declared order. A cycle, where two plugins each require the other, is refused at install.</p>
+<pre class="term">
+<span class="t-prompt">$</span> ilium plugin logs com.example.notes-ui
+<span class="t-dim">info</span>  services.call com.example.titles/suggest
+      <span class="t-dim">provider inactive, activation started (2000 ms)</span>
+<span class="t-err">error</span> services.call com.example.titles/suggest
+      <span class="t-err">failed(timed-out)</span>: provider did not start
+</pre>
+
+<p>Illustrative, not generated. The provider was installed but not running, and it did not start before its activation deadline.</p>
+<h2 id="errors-and-limits">Errors and limits</h2>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Returned by</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>not-found</code></td>
+<td><code>call</code></td>
+<td>No installed and enabled provider. Returned at once.</td>
+</tr>
+<tr>
+<td><code>not-permitted</code></td>
+<td><code>call</code>, <code>reply</code></td>
+<td>The plugin lacks the grant.</td>
+</tr>
+<tr>
+<td><code>invalid-argument</code></td>
+<td><code>call</code></td>
+<td>The payload is over 1 MiB or fails <code>params</code>. The provider is not called.</td>
+</tr>
+<tr>
+<td><code>unsupported</code></td>
+<td><code>call</code></td>
+<td>The method is not in the schema.</td>
+</tr>
+<tr>
+<td><code>busy</code>, <code>quota-exceeded</code></td>
+<td><code>call</code></td>
+<td>Too many pending requests, or the CPU budget is spent.</td>
+</tr>
+<tr>
+<td><code>invalid-argument</code></td>
+<td><code>reply</code></td>
+<td>The reply is over 1 MiB or fails <code>result</code>.</td>
+</tr>
+<tr>
+<td><code>not-found</code></td>
+<td><code>reply</code>, <code>take-reply</code></td>
+<td>The call is unknown, answered or expired.</td>
+</tr>
+<tr>
+<td><code>timed-out</code></td>
+<td>caller</td>
+<td>No reply within 30 seconds, or the provider did not start in time.</td>
+</tr>
+<tr>
+<td><code>cancelled</code></td>
+<td>caller</td>
+<td>The provider stopped, restarted or was disabled before answering.</td>
+</tr>
+<tr>
+<td>provider's code</td>
+<td>caller</td>
+<td>A failed <code>reply</code> passes its <code>plugin-error</code> on to the caller.</td>
+</tr>
+</tbody>
+</table>
+<p>A <code>Done</code> answer that fails <code>result</code> completes the caller's request as <code>failed(invalid-argument)</code>, and the provider logs the failure at level error.</p>
+<table>
+<thead>
+<tr>
+<th>Limit</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Payload of one call, or one reply</td>
+<td>1 MiB</td>
+</tr>
+<tr>
+<td>Wait for the reply</td>
+<td>30 seconds from the call</td>
+</tr>
+<tr>
+<td>Provider activation</td>
+<td><code>activate_deadline_ms</code>: 2 seconds by default, 5 seconds at most</td>
+</tr>
+</tbody>
+</table>
+<div class="warn">
+<p>Plugin-defined services are unstable in 0.1 and may change within 0.x. Update both plugins when the API changes.</p>
+</div>
+
+<h2 id="worked-example-a-provider-and-a-caller">Worked example: a provider and a caller</h2>
+<p>The provider answers short notes at once and defers long ones to a task. The caller submits a note when a command runs. Each plugin is its own <code>src/lib.rs</code>.</p>
+<p><strong>Rust</strong></p>
+<p>Provider:</p>
+<pre><code class="language-rust">use ilium_plugin_sdk::exports::{
+    Handler, Lifecycle, ServiceCall, ServiceProvider, ServiceReply,
+};
+use ilium_plugin_sdk::host::log::{self, Level};
+use ilium_plugin_sdk::host::services;
+use ilium_plugin_sdk::prelude::*;
+use ilium_plugin_sdk::task;
+
+/// Notes shorter than this many bytes are answered at once.
+const SHORT_NOTE_BYTES: usize = 200;
+
+#[ilium_plugin(side = &quot;server&quot;, exports = [&quot;service-provider&quot;])]
+#[derive(Default)]
+struct TitleProvider;
+
+impl Lifecycle for TitleProvider {}
+
+impl Handler for TitleProvider {
+    fn on_events(&amp;mut self, _batch: Vec&lt;Event&gt;) -&gt; Vec&lt;Submission&gt; {
+        Vec::new()
+    }
+}
+
+impl ServiceProvider for TitleProvider {
+    fn handle(&amp;mut self, call: ServiceCall) -&gt; ServiceReply {
+        // The host has already checked the payload against the params schema.
+        if call.payload_json.len() &lt; SHORT_NOTE_BYTES {
+            return ServiceReply::Done(r#&quot;{&quot;title&quot;:&quot;Fix the parser&quot;}&quot;#.to_string());
+        }
+        let call_number = call.call;
+        task::spawn(async move {
+            // Stand-in for real work. A real provider computes the title first.
+            let outcome = Ok(r#&quot;{&quot;title&quot;:&quot;Long note&quot;}&quot;#.to_string());
+            if let Err(error) = services::reply(call_number, outcome) {
+                log::log(Level::Error, &amp;error.message);
+            }
+        });
+        ServiceReply::Deferred
+    }
+}
+</code></pre>
+<p>Caller:</p>
+<pre><code class="language-rust">use ilium_plugin_sdk::exports::{Handler, Lifecycle};
+use ilium_plugin_sdk::host::log::{self, Level};
+use ilium_plugin_sdk::host::services;
+use ilium_plugin_sdk::prelude::*;
+use ilium_plugin_sdk::task;
+
+const TITLE_SERVICE: &amp;str = &quot;com.example.titles/suggest&quot;;
+
+#[ilium_plugin(side = &quot;server&quot;)]
+#[derive(Default)]
+struct NoteCaller;
+
+impl Lifecycle for NoteCaller {}
+
+impl Handler for NoteCaller {
+    fn on_events(&amp;mut self, batch: Vec&lt;Event&gt;) -&gt; Vec&lt;Submission&gt; {
+        for event in batch {
+            let Event::CommandInvoked(invoked) = event else {
+                continue;
+            };
+            if invoked.command == &quot;com.example.notes/suggest-title&quot; {
+                task::spawn(ask_for_title(&quot;Fix the parser crash on empty input&quot;.to_string()));
+            }
+        }
+        Vec::new()
+    }
+}
+
+async fn ask_for_title(note: String) {
+    // A real plugin builds the payload with a JSON library, so quotes in the note are escaped.
+    let payload_json = format!(r#&quot;{{&quot;text&quot;:&quot;{note}&quot;}}&quot;#);
+    match services::call(TITLE_SERVICE, &quot;suggest&quot;, &amp;payload_json).await {
+        Ok(reply_json) =&gt; log::log(Level::Info, &amp;format!(&quot;title: {reply_json}&quot;)),
+        Err(error) =&gt; log::log(Level::Warn, &amp;format!(&quot;title failed: {}&quot;, error.message)),
+    }
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<p>The same pair in TypeScript. The provider returns the <code>ServiceReply</code> union in the jco form. The caller awaits <code>call</code>, which resolves with the reply text or throws the completion code.</p>
+<p>Provider, <code>src/index.ts</code>:</p>
+<pre><code class="language-ts">import { definePlugin, type Event, type ServiceCall, type ServiceReply } from '@ilium/plugin-sdk';
+import { reply } from '@ilium/plugin-sdk/host/services';
+import { log } from '@ilium/plugin-sdk/host/log';
+
+// Notes shorter than this many characters are answered at once.
+const SHORT_NOTE_CHARACTERS = 200;
+
+export const { lifecycle, handler, serviceProvider } = definePlugin({
+  side: 'server',
+  onEvents(_batch: Event[]) {
+    return [];
+  },
+  handle(call: ServiceCall): ServiceReply {
+    if (call.payloadJson.length &lt; SHORT_NOTE_CHARACTERS) {
+      return { tag: 'done', val: JSON.stringify({ title: 'Fix the parser' }) };
+    }
+    answerLater(call.call);
+    return { tag: 'deferred' };
+  },
+});
+
+function answerLater(callNumber: bigint): void {
+  // Stand-in for real work. A real provider computes the title first.
+  queueMicrotask(() =&gt; {
+    const outcome = reply(callNumber, { tag: 'ok', val: JSON.stringify({ title: 'Long note' }) });
+    if (outcome.tag === 'err') {
+      log('error', `reply failed: ${outcome.val.message}`);
+    }
+  });
+}
+</code></pre>
+<p>Caller, <code>src/index.ts</code> of the second plugin:</p>
+<pre><code class="language-ts">import { definePlugin, type Event, type Submission } from '@ilium/plugin-sdk';
+import { call } from '@ilium/plugin-sdk/host/services';
+import { log } from '@ilium/plugin-sdk/host/log';
+
+const TITLE_SERVICE = 'com.example.titles/suggest';
+
+export const { lifecycle, handler } = definePlugin({
+  side: 'server',
+  onEvents(batch: Event[]): Submission[] {
+    for (const event of batch) {
+      const isTitleCommand =
+        event.tag === 'command-invoked' &amp;&amp; event.val.command === 'com.example.notes/suggest-title';
+      if (isTitleCommand) {
+        void askForTitle('Fix the parser crash on empty input');
+      }
+    }
+    return [];
+  },
+});
+
+async function askForTitle(note: string): Promise&lt;void&gt; {
+  const payloadJson = JSON.stringify({ text: note });
+  try {
+    const replyJson = await call(TITLE_SERVICE, 'suggest', payloadJson);
+    log('info', `title: ${replyJson}`);
+  } catch (error: unknown) {
+    log('warn', `title failed: ${String(error)}`);
+  }
+}
+</code></pre>
+<h2 id="when-to-use-extension-points-instead">When to use extension points instead</h2>
+<p>A service has one provider and many callers, and the caller pulls an answer. If many plugins should add to one plugin's behaviour, the owner declares an extension point and the others fill it. Use a collect point for data the owner reads, and a hook when the others' code must run inside the owner's flow. See <a href="/pages/api-extension-points/">Extension points</a> and <a href="/pages/extending-core-plugins/">Extending core plugins</a>.</p>
+<h2 id="other-ways-two-parts-of-a-plugin-talk">Other ways two parts of a plugin talk</h2>
+<p>A plugin service is for two different plugins. Two other channels cover the cases that look similar.</p>
+<table>
+<thead>
+<tr>
+<th>Need</th>
+<th>Use</th>
+<th>Grant</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>The server side asks its own client side a question only a client can answer (terminal size, clipboard, theme)</td>
+<td><code>client-requests</code></td>
+<td>None for own sides</td>
+</tr>
+<tr>
+<td>One plugin runs a command in another running Ilium session</td>
+<td><code>sessions.list-live</code>, <code>sessions.send</code></td>
+<td><code>sessions.cross</code>, high risk</td>
+</tr>
+<tr>
+<td>Choose from a list that a plugin provides</td>
+<td>A plugin catalogue, see <a href="/pages/api-catalogs/">Catalogs</a></td>
+<td><code>catalogs.provide</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>client-requests</code> needs the request <code>kind</code> declared in <code>contributes.client_requests</code>, with an optional <code>timeout_ms</code> from 1 to 30,000 and 5,000 by default. The client side receives a <code>client-request</code> event and answers with <code>respond</code>. A client that is detached completes the request with <code>not-found</code>. No answer in time completes it with <code>timed-out</code>.</p>
+<figure>
+<pre class="term">╭ client-requests ───────────────────────────────────────────────╮
+│ server  <span class="t-hi">request</span>(client, "terminal-size", 2000 ms)              │
+│ client  <span class="t-hi">client-request</span> {call: 7, kind: terminal-size}          │
+│ client  <span class="t-hi">respond</span>(7, ok)                                         │
+│ server  <span class="t-ok"><span class="w2">✓</span> request-completed: ok</span>                                │
+│ <span class="t-dim">no client attached</span>  <span class="t-err"><span class="w2">✗</span> failed(not-found)</span>                        │
+│ <span class="t-dim">no answer in time</span>   <span class="t-err"><span class="w2">✗</span> failed(timed-out)</span>                        │
+╰────────────────────────────────────────────────────────────────╯</pre>
+<figcaption>Illustrative, not generated. The order of events of one client request and its two failure outcomes.</figcaption>
+</figure>
+
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::host::client_requests;
+use ilium_plugin_sdk::prelude::*;
+
+// Server side: ask the attached client for its terminal size.
+pub async fn ask_client_size(client: ClientId) -&gt; Result&lt;String, PluginError&gt; {
+    client_requests::request(client, &quot;terminal-size&quot;, &quot;{}&quot;, 2_000).await
+}
+
+// Client side: answer the request. `call` is the number in the client-request event.
+pub fn answer_size(call: u64, columns: u16, rows: u16) {
+    let payload = format!(&quot;{{\&quot;columns\&quot;:{columns},\&quot;rows\&quot;:{rows}}}&quot;);
+    client_requests::respond(call, Ok(payload));
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { request, respond } from '@ilium/plugin-sdk/host/client-requests';
+
+// Server side: ask the attached client for its terminal size.
+export async function askClientSize(client: bigint): Promise&lt;string&gt; {
+  return request(client, 'terminal-size', '{}', 2_000);
+}
+
+// Client side: answer the request. `call` is the number in the client-request event.
+export function answerSize(call: bigint, columns: number, rows: number): void {
+  respond(call, { tag: 'ok', val: JSON.stringify({ columns, rows }) });
+}
+</code></pre>
+<h2 id="kernel-known-services-the-inference-provider">Kernel-known services: the inference provider</h2>
+<p>The inference provider is the typed service that most consumers use. A plugin that exports <code>inference-provider</code> must hold <code>inference.provide</code>. Its WIT shape is:</p>
+<pre><code class="language-wit">// Provider exports
+record provider-call { call: u64, request: completion-request }
+complete: func(call: provider-call) -&gt; result&lt;_, plugin-error&gt;;
+models: func() -&gt; list&lt;string&gt;;
+
+// Provider import, needs inference.provide
+provider-reply: func(call: u64, outcome: result&lt;completion, plugin-error&gt;);
+</code></pre>
+<p><code>complete</code> accepts the call and returns at once. Network work runs in a task that answers through <code>provider-reply</code> with the same call number. A consumer that must wait for a provider declares <code>requires.services</code> with <code>ilium:inference/provider@0.1.0</code>. The full contract is in <a href="/pages/capability-inference-provide/">Inference provider</a>.</p>
+<h2 id="what-the-user-sees">What the user sees</h2>
+<ul>
+<li>The install review lists each grant, such as <code>services.use:com.example.titles/suggest</code>.</li>
+<li>If the user declines <code>services.provide</code>, the provider stays installed but is never registered. Every caller gets <code>not-found</code>.</li>
+<li>Failed calls appear in the caller's plugin log.</li>
+</ul>
+<figure>
+<pre class="term"><span class="t-prompt">$</span> ilium plugin logs com.example.notes-ui
+<span class="t-warn">warn</span>  services.call com.example.titles/suggest
+      <span class="t-err">not-found</span>: no installed and enabled provider
+</pre>
+<figcaption>Illustrative, not generated. The caller's log line for a service with no enabled provider.</figcaption>
+</figure>
+
+<h2 id="common-mistakes">Common mistakes</h2>
+<ul>
+<li>Expecting <code>call</code> to wait for a provider that is not installed or is disabled. It returns <code>not-found</code> at once.</li>
+<li>Putting a version in a grant. Grants carry the bare name.</li>
+<li>Replying to a deferred call after 30 seconds. The late <code>reply</code> returns <code>not-found</code>.</li>
+<li>Sending large payloads. Each call and each reply is capped at 1 MiB, so pass identifiers and short summaries.</li>
+<li>Assuming that the consumer can read the provider's data. The consumer sees only the reply it asked for.</li>
+</ul>
+<h3 id="provider-lifecycle">Provider lifecycle</h3>
+<p>A provider stops after its consumers, in reverse activation order. When a provider fails, its consumers move to <code>waiting</code> and requests in flight complete as <code>cancelled</code>. They are not counted as consumer failures. When the provider restarts, waiting consumers resume. See <a href="/pages/lifecycle/">Lifecycle</a> and <a href="/pages/reference-plugin-lifecycle-states/">Plugin lifecycle states</a>. [LIF-280]</p>
+<ul>
+<li>[LIF-280] A provider failure MUST NOT count as a failure of its consumers. Test: trap a provider and read the consumer window.</li>
+</ul>
+<p>Requirement ids for this page: [SVC-002], [SVC-003], [SVC-004], [SVC-006], [SVC-009], [SVC-012], [SVC-013], [SVC-014]. See the <a href="/pages/reference-requirements/">requirements index</a>.</p>
+<h2 id="see-also">See also</h2>
+<ul>
+<li><a href="/pages/api-services/">Services API</a></li>
+<li><a href="/pages/capability-services/">Capability: services</a></li>
+<li><a href="/pages/capability-inference-provide/">Inference provider</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a></li>
+</ul>
+<p>API version checked: <code>ilium:plugin@0.1.0</code>.</p>
+<p>Requirements for this page: <a href="/pages/reference-requirements-services-topics/">Services and topics requirements</a>.</p>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/retained-mode/"><small>Previous</small>Retained mode</a><a class="next" href="/pages/extending-core-plugins/"><small>Next</small>Extending core plugins</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#what-you-need">What you need</a></li><li class="l2"><a href="#names-versions-and-grants">Names, versions and grants</a></li><li class="l2"><a href="#the-registry">The registry</a></li><li class="l2"><a href="#declaring-a-provider">Declaring a provider</a></li><li class="l2"><a href="#declaring-a-consumer">Declaring a consumer</a></li><li class="l2"><a href="#the-call-surface">The call surface</a></li><li class="l2"><a href="#how-a-call-travels">How a call travels</a></li><li class="l2"><a href="#activation-order">Activation order</a></li><li class="l2"><a href="#errors-and-limits">Errors and limits</a></li><li class="l2"><a href="#worked-example-a-provider-and-a-caller">Worked example: a provider and a caller</a></li><li class="l2"><a href="#when-to-use-extension-points-instead">When to use extension points instead</a></li><li class="l2"><a href="#other-ways-two-parts-of-a-plugin-talk">Other ways two parts of a plugin talk</a></li><li class="l2"><a href="#kernel-known-services-the-inference-provider">Kernel-known services: the inference provider</a></li><li class="l2"><a href="#what-the-user-sees">What the user sees</a></li><li class="l2"><a href="#common-mistakes">Common mistakes</a></li><li class="l3"><a href="#provider-lifecycle">Provider lifecycle</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

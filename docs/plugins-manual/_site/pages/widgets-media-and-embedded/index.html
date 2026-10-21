@@ -1,0 +1,1272 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Media and embedded views | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details open><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/" aria-current="page">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Widgets</b></p>
+<h1>Media and embedded views</h1>
+
+<p>Five widgets show things that text and tables cannot. <code>image</code> shows a picture from the package, a file or encoded bytes. <code>surface</code> shows pixels that the plugin draws itself, with an optional glyph plane and owner ids. <code>code-view</code> shows a text buffer with the native editor, read-only or editable. <code>terminal-view</code> shows an existing pane, read-only or interactive. <code>video</code> plays a clip from the package, a file or a range of a file.</p>
+<table>
+<thead>
+<tr>
+<th>Widget</th>
+<th>Shows</th>
+<th>The plugin supplies</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>image</code></td>
+<td>A picture</td>
+<td>An asset path, an <code>fs-path</code>, decoded pixels or encoded bytes</td>
+</tr>
+<tr>
+<td><code>surface</code></td>
+<td>Pixels the plugin writes</td>
+<td>Rows of pixels with <code>ui.write-surface</code>, glyph cells, owner ids</td>
+</tr>
+<tr>
+<td><code>code-view</code></td>
+<td>A text buffer</td>
+<td>A buffer id</td>
+</tr>
+<tr>
+<td><code>terminal-view</code></td>
+<td>A live view of a pane</td>
+<td>A pane node id</td>
+</tr>
+<tr>
+<td><code>video</code></td>
+<td>A clip</td>
+<td>An asset, a file or a file range</td>
+</tr>
+</tbody>
+</table>
+<p><code>image</code> mirrors ratatui-image's <code>StatefulImage</code>, and <code>surface</code> mirrors the Ilium frame surface. The editing and terminal widgets mirror the native views, so a plugin sees keystrokes only through the events of the grants it holds.</p>
+<h2 id="you-need">You need</h2>
+<ul>
+<li>The <code>ui.panels</code> grant for a panel, settings page or onboarding step. A pane kind that shows these widgets needs <code>panes.provide-kind</code> instead. Both are client-side grants.</li>
+<li><code>fs.read</code> for the scope of an <code>fs-path</code> image or video source. Package assets need no grant, because <code>fs.read:package</code> is always granted.</li>
+<li>For <code>code-view</code>: <code>editor.edit</code> to show a buffer that the plugin created with <code>create-buffer</code>, and <code>editor.read</code> to show any other buffer or to receive <code>editor-changed</code> events.</li>
+<li>For <code>terminal-view</code>: <code>terminal.read-screen</code>, and <code>terminal.raw-input</code> for <code>interactive</code>.</li>
+<li>For <code>video</code>: <code>media.video</code>. Without <code>audio.playback</code> the video is always muted.</li>
+<li>The SDK for Rust (<code>ilium-plugin-sdk</code>) or TypeScript (<code>@ilium/plugin-sdk</code>). The worked examples use the builders from <code>ilium_plugin_sdk::ui::build</code> and <code>@ilium/plugin-sdk/ui/build</code>.</li>
+</ul>
+<p>Without a grant, the widget draws an empty frame with the text <code>not permitted</code>.</p>
+<h2 id="properties">Properties</h2>
+<p>Every widget takes an optional <code>key</code>. The host keeps widget state by key, and actions name the key. Set the <code>focusable</code> flag on a <code>surface</code> or <code>image</code> that sends clicks.</p>
+<table>
+<thead>
+<tr>
+<th>Widget</th>
+<th>Property</th>
+<th>Type</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>image</code></td>
+<td><code>source</code></td>
+<td><code>image-source</code></td>
+<td>required</td>
+<td><code>asset(string)</code>, <code>fs-path(fs-path)</code>, <code>rgba(decoded-image)</code> or <code>bytes(list&lt;u8&gt;, string)</code>.</td>
+</tr>
+<tr>
+<td><code>image</code></td>
+<td><code>fit</code></td>
+<td><code>contain</code>, <code>cover</code> or <code>fill</code></td>
+<td><code>contain</code></td>
+<td>How the picture meets the area.</td>
+</tr>
+<tr>
+<td><code>surface</code></td>
+<td><code>format</code></td>
+<td><code>pixel-format</code></td>
+<td>required</td>
+<td><code>mask8</code>, <code>mono1</code>, <code>gray8</code>, <code>rgb8</code> or <code>rgba8</code>.</td>
+</tr>
+<tr>
+<td><code>surface</code></td>
+<td><code>min-columns</code>, <code>min-rows</code></td>
+<td><code>u16</code></td>
+<td>1</td>
+<td>Size in cells.</td>
+</tr>
+<tr>
+<td><code>surface</code></td>
+<td><code>glyph-plane</code></td>
+<td><code>bool</code></td>
+<td><code>false</code></td>
+<td>Allow <code>write-glyphs</code>.</td>
+</tr>
+<tr>
+<td><code>surface</code></td>
+<td><code>owner-ids</code></td>
+<td><code>bool</code></td>
+<td><code>false</code></td>
+<td>Allow <code>set-owner-ids</code> and pointer hit tests.</td>
+</tr>
+<tr>
+<td><code>code-view</code></td>
+<td><code>buffer</code></td>
+<td><code>buffer-id</code></td>
+<td>required</td>
+<td>The buffer to show.</td>
+</tr>
+<tr>
+<td><code>code-view</code></td>
+<td><code>read-only</code></td>
+<td><code>bool</code></td>
+<td><code>true</code></td>
+<td>Whether the user can type.</td>
+</tr>
+<tr>
+<td><code>code-view</code></td>
+<td><code>line-numbers</code></td>
+<td><code>bool</code></td>
+<td><code>true</code></td>
+<td>Whether line numbers are shown.</td>
+</tr>
+<tr>
+<td><code>code-view</code></td>
+<td><code>wrap</code></td>
+<td><code>bool</code></td>
+<td><code>false</code></td>
+<td>Whether long lines wrap.</td>
+</tr>
+<tr>
+<td><code>code-view</code></td>
+<td><code>minimap</code></td>
+<td><code>bool</code></td>
+<td><code>false</code></td>
+<td>Whether a minimap is drawn at the right edge.</td>
+</tr>
+<tr>
+<td><code>terminal-view</code></td>
+<td><code>pane</code></td>
+<td><code>node-id</code></td>
+<td>required</td>
+<td>The existing pane to show.</td>
+</tr>
+<tr>
+<td><code>terminal-view</code></td>
+<td><code>rows</code></td>
+<td><code>option&lt;u16&gt;</code></td>
+<td>none</td>
+<td>Height in rows. Without it the view fills the area.</td>
+</tr>
+<tr>
+<td><code>terminal-view</code></td>
+<td><code>interactive</code></td>
+<td><code>bool</code></td>
+<td><code>false</code></td>
+<td>Forward keys and mouse to the program. Needs <code>terminal.raw-input</code>.</td>
+</tr>
+<tr>
+<td><code>terminal-view</code></td>
+<td><code>scrollback</code></td>
+<td><code>bool</code></td>
+<td><code>false</code></td>
+<td>Allow scrolling the history.</td>
+</tr>
+<tr>
+<td><code>terminal-view</code></td>
+<td><code>highlights</code></td>
+<td><code>option&lt;string&gt;</code></td>
+<td>none</td>
+<td>Name of an own highlight layer.</td>
+</tr>
+<tr>
+<td><code>video</code></td>
+<td><code>source</code></td>
+<td><code>video-source</code></td>
+<td>required</td>
+<td><code>asset(string)</code>, <code>fs(fs-path)</code> or <code>range(fs-path, u64, option&lt;u64&gt;)</code>.</td>
+</tr>
+<tr>
+<td><code>video</code></td>
+<td><code>autoplay</code>, <code>loop</code>, <code>muted</code>, <code>controls</code></td>
+<td><code>bool</code></td>
+<td><code>false</code></td>
+<td>Playback options. Rust spells <code>loop</code> as <code>looped</code>.</td>
+</tr>
+<tr>
+<td><code>video</code></td>
+<td><code>fit</code></td>
+<td><code>contain</code>, <code>cover</code> or <code>fill</code></td>
+<td><code>contain</code></td>
+<td>How the frame meets the area.</td>
+</tr>
+</tbody>
+</table>
+<p>The pixel size of a surface is <code>min-columns</code> and <code>min-rows</code> multiplied by the sub-cell factor of the user's active dither mode, so it depends on that setting. The plugin asks for the size with <code>ui::surface_size</code> and does not compute it.</p>
+<h2 id="actions-and-events">Actions and events</h2>
+<table>
+<thead>
+<tr>
+<th>Widget</th>
+<th>Sends</th>
+<th>Value</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>image</code></td>
+<td><code>activated</code> when focusable</td>
+<td><code>cell(cell-position)</code></td>
+<td>Pictures are otherwise not interactive.</td>
+</tr>
+<tr>
+<td><code>surface</code></td>
+<td><code>activated</code> on a click</td>
+<td><code>cell(cell-position)</code>, relative to the surface</td>
+<td>Needs <code>focusable</code>.</td>
+</tr>
+<tr>
+<td><code>surface</code></td>
+<td><code>pointer</code></td>
+<td><code>pointer(view-pointer)</code></td>
+<td>With the <code>pointer-events</code> flag. The receipt names the owner id under the pointer.</td>
+</tr>
+<tr>
+<td><code>surface</code></td>
+<td><code>scrolled</code> on the wheel</td>
+<td><code>number(f64)</code>, notches since the last action</td>
+<td>Negative up, positive down. Coalesced.</td>
+</tr>
+<tr>
+<td><code>code-view</code></td>
+<td>no <code>ui-action</code></td>
+<td>none</td>
+<td>Changes arrive as <code>editor-changed</code> events, debounced by 100 ms.</td>
+</tr>
+<tr>
+<td><code>terminal-view</code></td>
+<td><code>activated</code></td>
+<td><code>none</code></td>
+<td>A request to focus the view.</td>
+</tr>
+<tr>
+<td><code>video</code></td>
+<td><code>changed</code> on seek</td>
+<td><code>number(f64)</code>, the position in ms</td>
+<td></td>
+</tr>
+<tr>
+<td><code>video</code></td>
+<td><code>activated</code></td>
+<td><code>none</code></td>
+<td>Play or pause.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="keys-mouse-and-roles">Keys, mouse and roles</h2>
+<table>
+<thead>
+<tr>
+<th>Widget</th>
+<th>Keys</th>
+<th>Mouse</th>
+<th>Theme</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>image</code>, <code>surface</code></td>
+<td>none</td>
+<td>click</td>
+<td>The shared look and dithering apply.</td>
+</tr>
+<tr>
+<td><code>code-view</code></td>
+<td>The editor's keys.</td>
+<td>The editor's mouse rules.</td>
+<td>The <code>syntax-*</code> roles and the gutter in <code>muted</code>.</td>
+</tr>
+<tr>
+<td><code>terminal-view</code></td>
+<td>None, or all keys when <code>interactive</code>.</td>
+<td>Click focuses. With <code>interactive</code> the mouse goes to the program.</td>
+<td>The terminal colours of the pane.</td>
+</tr>
+<tr>
+<td><code>video</code></td>
+<td>Space play or pause, Left and Right seek 5 s.</td>
+<td>Click toggles play.</td>
+<td>The shared look. The progress line is <code>━</code> and <code>─</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>An interactive <code>terminal-view</code> forwards keys and mouse to the pane's program while it has focus. Press Escape twice to leave it.</p>
+<h2 id="image">image</h2>
+<p>An asset is a path relative to the package's <code>assets/</code> folder, for example <code>asset("icons/logo.png")</code>, and the file must be listed in the package <code>files</code> inventory. An <code>fs-path</code> names a file under a file scope and needs the <code>fs.read</code> grant. <code>rgba</code> carries decoded pixels, and <code>bytes</code> carries an encoded PNG, JPEG, GIF or WebP up to 16 MiB with its MIME type.</p>
+<p>The host decodes the first frame with the limits of <code>codec.decode-image</code>: input up to 16 MiB and up to 67,108,864 pixels. The decoded picture is kept until the source changes. Supported formats are PNG, JPEG, GIF, WebP and BMP.</p>
+<ul>
+<li><code>contain</code> keeps the aspect ratio. Unused cells keep the cell background.</li>
+<li><code>cover</code> keeps the aspect ratio and crops the overflow equally at both ends.</li>
+<li><code>fill</code> stretches the picture to the area.</li>
+</ul>
+<figure>
+<pre class="term">╭─ Logo ─────────────────────────────────╮
+│          <span class="t-hi">      ▄▄▄▄▄▄      </span>            │
+│          <span class="t-hi">   ▄██▀▀▀▀▀▀██▄   </span>            │
+│          <span class="t-hi">  ██▀  ▄▄▄▄  ▀██  </span>            │
+│          <span class="t-hi">  ██   ▀██▀   ██  </span>            │
+│          <span class="t-hi">  ▀██▄▄▄▄▄▄▄▄██▀  </span>            │
+│          <span class="t-hi">     ▀▀▀▀▀▀▀▀     </span>            │
+╰────────────────────────────────────────╯
+</pre>
+<figcaption>Rendered at 42 columns. An <code>image</code> fitted with <code>contain</code>. The host draws the picture with half blocks when the terminal has no graphics protocol, and the empty margin keeps the cell background.</figcaption>
+</figure>
+
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">// types::ui::{ImageSource, MediaFit}
+let logo = tree
+    .image(ImageSource::Asset(&quot;icons/logo.png&quot;.into()))
+    .fit(MediaFit::Contain)
+    .key(&quot;logo&quot;);
+let avatar = tree.image(ImageSource::Bytes(png_bytes, &quot;image/png&quot;.into())).key(&quot;avatar&quot;);
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">const logo = image({ tag: 'asset', val: 'icons/logo.png' }, { key: 'logo', fit: 'contain' });
+const avatar = image({ tag: 'bytes', val: [pngBytes, 'image/png'] }, { key: 'avatar' });
+</code></pre>
+<h2 id="surface">surface</h2>
+<p>A <code>surface</code> has a fixed pixel format. The plugin writes rows of pixels into it with <code>ui::write_surface(view, key, first_row, format, data)</code> in Rust, or <code>writeSurface(view, key, firstRow, format, data)</code> in TypeScript. The host converts those pixels to cells with the shared look and dithering.</p>
+<table>
+<thead>
+<tr>
+<th>Format</th>
+<th>Bytes per pixel</th>
+<th>Layout</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>mask8</code></td>
+<td>1</td>
+<td>Coverage from 0 to 255. 255 is fully on.</td>
+</tr>
+<tr>
+<td><code>mono1</code></td>
+<td>1 bit</td>
+<td>One bit per pixel, most significant bit first. Each row is padded to a whole byte, so a row is <code>ceil(width / 8)</code> bytes.</td>
+</tr>
+<tr>
+<td><code>gray8</code></td>
+<td>1</td>
+<td>One tone per pixel.</td>
+</tr>
+<tr>
+<td><code>rgb8</code></td>
+<td>3</td>
+<td>Red, green, blue.</td>
+</tr>
+<tr>
+<td><code>rgba8</code></td>
+<td>4</td>
+<td>Red, green, blue, alpha.</td>
+</tr>
+</tbody>
+</table>
+<p>A row holds <code>width</code> pixels, where <code>width</code> is the pixel width from <code>ui::surface_size(view, key)</code>. The <code>data</code> must hold whole rows, and <code>first-row</code> plus the number of rows written must stay inside <code>height</code>.</p>
+<figure>
+<svg viewBox="0 0 360 240" role="img" aria-label="Plugin pixels pass through the surface, the shared look and dithering, and become cells" width="540" height="360">
+  <title>From pixels to cells</title>
+  <desc>The plugin writes rows of pixels. The host keeps them in a surface buffer, applies the shared look and dithering, and draws cells.</desc>
+  <defs>
+    <marker id="media-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <rect x="20" y="10" width="320" height="44" rx="6" fill="none" stroke="currentColor" stroke-dasharray="6 4"/>
+  <text x="180" y="30" font-size="11" text-anchor="middle" fill="currentColor">Plugin: ui.write-surface</text>
+  <text x="180" y="46" font-size="11" text-anchor="middle" fill="currentColor">rows of pixels in one pixel format</text>
+  <line x1="180" y1="54" x2="180" y2="76" stroke="currentColor" marker-end="url(#media-arrow)"/>
+  <rect x="20" y="76" width="320" height="44" rx="6" fill="none" stroke="currentColor"/>
+  <text x="180" y="96" font-size="11" text-anchor="middle" fill="currentColor">Surface buffer</text>
+  <text x="180" y="112" font-size="11" text-anchor="middle" fill="currentColor">one value per pixel, in the declared format</text>
+  <line x1="180" y1="120" x2="180" y2="142" stroke="currentColor" marker-end="url(#media-arrow)"/>
+  <rect x="20" y="142" width="320" height="44" rx="6" fill="none" stroke="currentColor"/>
+  <text x="180" y="162" font-size="11" text-anchor="middle" fill="currentColor">Shared look and dithering</text>
+  <text x="180" y="178" font-size="11" text-anchor="middle" fill="currentColor">colour mode, palette, filters, dither</text>
+  <line x1="180" y1="186" x2="180" y2="208" stroke="currentColor" marker-end="url(#media-arrow)"/>
+  <rect x="20" y="208" width="320" height="26" rx="6" fill="none" stroke="currentColor"/>
+  <text x="180" y="225" font-size="11" text-anchor="middle" fill="currentColor">Cells of the surface widget</text>
+</svg>
+<figcaption>The host converts surface pixels to cells, so the shared colour settings apply to pictures that the plugin draws.</figcaption>
+</figure>
+
+<figure>
+<pre class="term">╭─ Surface 34 x 5 ───────────────────╮
+│ <span class="t-ok"> ░▒▓█ ░▒▓█ ░▒▓█ ░▒▓█ ░▒▓█ ░▒▓█ ░▒▓</span> │
+│ <span class="t-ok">░▒▓█ ░▒▓█ ░▒▓█ ░▒▓█ ░▒▓█ ░▒▓█ ░▒▓█</span> │
+│ <span class="t-ok">▒▓█ ░▒▓█ ░▒▓█ ░▒▓█ ░▒▓█ ░▒▓█ ░▒▓█ </span> │
+│ <span class="t-ok">▓█ ░▒▓█ ░▒▓█ ░▒▓█ ░▒▓█ ░▒▓█ ░▒▓█ ░</span> │
+│ <span class="t-ok">█ ░▒▓█ ░▒▓█ ░▒▓█ ░▒▓█ ░▒▓█ ░▒▓█ ░▒</span> │
+╰────────────────────────────────────╯
+</pre>
+<figcaption>Rendered at 38 columns. A <code>gray8</code> <code>surface</code> after dithering. The pixels come from the plugin, and the shared look and dither mode decide the cell glyphs.</figcaption>
+</figure>
+
+<p>A click on a focusable surface arrives as <code>activated</code> with <code>cell(cell-position)</code>, the column and row relative to the surface. A wheel movement arrives as <code>scrolled</code>.</p>
+<h3 id="glyph-plane-and-owner-ids">Glyph plane and owner ids</h3>
+<p>A surface created with <code>glyph-plane: true</code> accepts glyph cells. <code>write-glyphs</code> takes a list of <code>glyph-cell</code> records (<code>column</code>, <code>row</code>, <code>text</code>, <code>fg</code>, <code>bg</code>, <code>add</code>) with at most 131,072 cells per frame, and <code>clear-glyphs</code> removes them. The cells are drawn over the pixel layer after dithering and the shared look, with icon widths, and their colours go through the shared look too. Without <code>glyph-plane</code>, <code>write-glyphs</code> returns <code>unsupported</code>.</p>
+<figure>
+<pre class="term">╭─ Board ────────────────────────────╮
+│ <span class="t-dim">░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░</span> │
+│ <span class="t-hi">      <span class="w2">♜</span> <span class="w2">♞</span> <span class="w2">♝</span> <span class="w2">♛</span> <span class="w2">♚</span> <span class="w2">♝</span> <span class="w2">♞</span> <span class="w2">♜</span>             </span> │
+│ <span class="t-hi">      <span class="w2">♟</span> <span class="w2">♟</span> <span class="w2">♟</span> <span class="w2">♟</span> <span class="w2">♟</span> <span class="w2">♟</span> <span class="w2">♟</span> <span class="w2">♟</span>             </span> │
+│ <span class="t-dim">░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░</span> │
+│ <span class="t-dim">░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░</span> │
+╰────────────────────────────────────╯
+</pre>
+<figcaption>Rendered at 38 columns. A <code>surface</code> with <code>glyph-plane</code>. The pixel layer is the background, and the glyph cells are drawn over it after dithering. Glyph colours go through the shared look.</figcaption>
+</figure>
+
+<p>A surface created with <code>owner-ids: true</code> accepts <code>set-owner-ids(first-row, ids)</code>, one <code>u16</code> per pixel, where 0 means none. After a frame, <code>last-receipt</code> returns a <code>frame-receipt</code> with <code>frame</code>, <code>presented-at-millis</code>, <code>dropped-before</code> and <code>pointer-owner</code>. A plugin that sets the <code>pointer-events</code> flag can hit-test a click on a logical object without keeping a copy of the frame. The same calls exist on scene surfaces, described in <a href="/pages/primitives/">Primitives</a>.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">// host::ui, types::ui::{GlyphCell, PixelFormat}
+let board = tree
+    .surface(PixelFormat::Rgb8)
+    .min_columns(40)
+    .min_rows(12)
+    .glyph_plane(true)
+    .owner_ids(true)
+    .key(&quot;board&quot;)
+    .flags(NodeFlags::FOCUSABLE | NodeFlags::POINTER_EVENTS);
+
+// After render, in an event handler:
+ui::write_glyphs(panel_view(), &quot;board&quot;, &amp;[GlyphCell {
+    column: 3, row: 1, text: &quot;N&quot;.into(), fg: Some(0xffffff), bg: None, add: Modifiers::BOLD,
+}])?;
+ui::set_owner_ids(panel_view(), &quot;board&quot;, 0, &amp;owner_ids)?;
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">const board = surface({
+  key: 'board',
+  format: 'rgb8',
+  minColumns: 40,
+  minRows: 12,
+  glyphPlane: true,
+  ownerIds: true,
+  flags: { focusable: true, pointerEvents: true },
+});
+
+// After render, in an event handler:
+writeGlyphs(panelView(), 'board', [
+  { column: 3, row: 1, text: 'N', fg: 0xffffff, bg: undefined, add: { bold: true } },
+]);
+setOwnerIds(panelView(), 'board', 0, ownerIds);
+</code></pre>
+<h2 id="code-view">code-view</h2>
+<p>A <code>code-view</code> shows the buffer as the native editor does. The user types, moves the cursor, selects and undoes natively. Set <code>read-only: false</code> and hold <code>editor.edit</code> to make it a text editor. The plugin learns about changes through <code>editor-changed</code>, which carries <code>buffer</code>, <code>revision</code>, <code>first-line</code> and <code>last-line</code> but not the text. The plugin reads the lines it needs with the editor primitive (<a href="/pages/primitives-editor/">Editor primitive</a>). Syntax colours come from the <code>token-provider</code> exports of languages that plugins declare.</p>
+<figure>
+<pre class="term">╭─ notes.md ─────────────────────────────────╮
+│ <span class="t-dim">  1 </span># Plugin notes                         │
+│ <span class="t-dim">  2 </span>                                       │
+│ <span class="t-dim">  3 </span>The build uses the release profile.    │
+│ <span class="t-dim">  4 </span>The cursor sits on line four.▏         │
+│ <span class="t-dim">  5 </span>                                       │
+│ <span class="t-dim">  6 </span>- check the grant list                 │
+│ <span class="t-dim">  7 </span>- run the probe                        │
+╰────────────────────────────────────────────╯
+</pre>
+<figcaption>Rendered at 46 columns. A <code>code-view</code> with line numbers. The gutter uses <code>muted</code>. Syntax colours come from the <code>syntax-*</code> theme roles.</figcaption>
+</figure>
+
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">let buffer = editor::create_buffer(&quot;# Plugin notes\n&quot;, Some(&quot;markdown&quot;))?;
+let notes = tree
+    .code_view(buffer)
+    .read_only(false)
+    .line_numbers(true)
+    .wrap(true)
+    .minimap(true)
+    .key(&quot;notes&quot;);
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">const buffer = createBuffer('# Plugin notes\n', 'markdown');
+const notes = codeView(buffer, {
+  key: 'notes',
+  readOnly: false,
+  lineNumbers: true,
+  wrap: true,
+  minimap: true,
+});
+</code></pre>
+<h2 id="terminal-view">terminal-view</h2>
+<p>A <code>terminal-view</code> embeds a pane that already exists. It shows the bottom rows of the pane's visible area. With <code>rows</code> set, the view is that many rows tall at the top of its area. The view never resizes the pane. By default the view is read-only. With <code>interactive: true</code> the view forwards keys and mouse to the pane's program while it has focus, and the plugin needs <code>terminal.raw-input</code>. Press Escape twice to leave an interactive view.</p>
+<figure>
+<pre class="term">╭─ Pane: build ──────────────────────────────────────────╮
+│ <span class="t-prompt">$ </span>cargo test                                           │
+│    Compiling ilium-core v0.1.0                         │
+│     Running unittests src/lib.rs                       │
+│ <span class="t-ok">test result: ok. 14 passed; 0 failed</span>                   │
+│                                                        │
+│ <span class="t-dim">Keys go to the pane owner, not to the plugin.</span>          │
+╰────────────────────────────────────────────────────────╯
+</pre>
+<figcaption>Rendered at 58 columns. A read-only <code>terminal-view</code>. The cells use the terminal colours of the pane, not the theme.</figcaption>
+</figure>
+
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">let build = tree.terminal_view(self.build_pane).rows(8).key(&quot;build&quot;);
+let shell = tree
+    .terminal_view(self.shell_pane)
+    .interactive(true)   // needs terminal.raw-input
+    .scrollback(true)
+    .key(&quot;shell&quot;);
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">const build = terminalView(buildPane, { key: 'build', rows: 8 });
+const shell = terminalView(shellPane, {
+  key: 'shell',
+  interactive: true,   // needs terminal.raw-input
+  scrollback: true,
+});
+</code></pre>
+<h2 id="video">video</h2>
+<p>A <code>video</code> is decoded natively, and the shared look and dithering apply to its frames. The source is a package asset, a file under a granted scope, or a range of a file given as a start and an optional end in milliseconds. Video bytes up to 16 MiB can also be opened from memory with <code>media.open-video-bytes</code>. Playback is always muted unless the plugin holds <code>audio.playback</code>. With <code>controls</code> the widget draws a progress line of <code>━</code> and <code>─</code>.</p>
+<figure>
+<pre class="term">╭─ Shore ────────────────────────────────────╮
+│ <span class="t-dim">▒▒▒▒▓▓▓▓████▓▓▒▒░░░░▒▒▓▓████▓▓▒▒░░░░▒▒▒▒</span>   │
+│ <span class="t-dim">░░▒▒▓▓████▓▓▒▒░░░░▒▒▓▓████▓▓▒▒░░▒▒▓▓████▓▓</span> │
+│ <span class="t-dim">▒▒▒▒░░░░▒▒▓▓████▓▓▒▒░░░░▒▒▓▓████▓▓▒▒░░░░▒▒</span> │
+│                                            │
+│ <span class="t-hi">━━━━━━━━━━━━━━━━━━</span><span class="t-dim">────────────────────────</span> │
+│ <span class="t-dim">Space play/pause · Left/Right seek 5 s    </span> │
+╰────────────────────────────────────────────╯
+</pre>
+<figcaption>Rendered at 46 columns. A <code>video</code> with <code>controls</code>. The frame is dithered into cells, and the progress line uses <code>━</code> and <code>─</code>.</figcaption>
+</figure>
+
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">// types::ui::{VideoSource, MediaFit}
+let clip = tree
+    .video(VideoSource::Asset(&quot;loops/shore.webm&quot;.into()))
+    .autoplay(true)
+    .looped(true)
+    .controls(true)
+    .fit(MediaFit::Cover)
+    .key(&quot;clip&quot;);
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">const clip = video({ tag: 'asset', val: 'loops/shore.webm' }, {
+  key: 'clip',
+  autoplay: true,
+  loop: true,
+  controls: true,
+  fit: 'cover',
+});
+</code></pre>
+<h2 id="worked-example-in-rust">Worked example in Rust</h2>
+<p>The example is a panel with five widgets. It creates a notes buffer on activation and repaints the surface on scroll.</p>
+<pre><code class="language-rust">use ilium_plugin_sdk::host::{editor, ui};
+use ilium_plugin_sdk::prelude::*;
+use ilium_plugin_sdk::types::ids::BufferId;
+use ilium_plugin_sdk::types::layout::{Area, Constraint, Direction};
+use ilium_plugin_sdk::types::ui::{
+    ActionKind, ActionValue, MediaFit, ImageSource, PixelFormat, UiTree, VideoSource, ViewTarget,
+};
+use ilium_plugin_sdk::ui::build::{NodeFlags, Tree};
+
+const PANEL: &amp;str = &quot;media-demo&quot;;
+const SCOPE_KEY: &amp;str = &quot;scope&quot;;
+const SCOPE_COLUMNS: u16 = 40;
+const SCOPE_ROWS: u16 = 6;
+
+#[ilium_plugin(side = &quot;client&quot;, exports = [&quot;lifecycle&quot;, &quot;handler&quot;, &quot;views&quot;])]
+#[derive(Default)]
+struct MediaDemo {
+    notes: Option&lt;BufferId&gt;,
+    // Set by on_events when the build pane is known, for example from a PaneCreated event.
+    build_pane: Option&lt;NodeId&gt;,
+    scroll: u32,
+}
+
+impl Lifecycle for MediaDemo {
+    fn activate(&amp;mut self, _context: Activation) -&gt; Result&lt;(), PluginError&gt; {
+        self.notes = Some(editor::create_buffer(&quot;# Plugin notes\n&quot;, Some(&quot;markdown&quot;))?);
+        Ok(())
+    }
+}
+
+impl Handler for MediaDemo {
+    fn on_events(&amp;mut self, batch: Vec&lt;Event&gt;) -&gt; Vec&lt;Submission&gt; {
+        for event in batch {
+            let Event::UiAction(action) = event else { continue };
+            if action.key != SCOPE_KEY {
+                continue;
+            }
+            let (ActionKind::Scrolled, ActionValue::Number(notches)) = (action.kind, action.value)
+            else {
+                continue;
+            };
+            // Wheel notches are negative for up and positive for down.
+            self.scroll = self.scroll.wrapping_add(notches as i32 as u32);
+            self.paint_scope();
+        }
+        Vec::new()
+    }
+}
+
+impl MediaDemo {
+    fn paint_scope(&amp;self) {
+        // None until the panel has rendered once.
+        let Some((width, height)) = ui::surface_size(panel_view(), SCOPE_KEY) else {
+            return;
+        };
+        let mut tones = Vec::with_capacity((width * height) as usize);
+        for row in 0..height {
+            for column in 0..width {
+                tones.push((column + row + self.scroll) as u8);
+            }
+        }
+        // gray8 is one byte per pixel; the rows start at the top of the surface.
+        let _ = ui::write_surface(panel_view(), SCOPE_KEY, 0, PixelFormat::Gray8, &amp;tones);
+    }
+}
+
+fn panel_view() -&gt; ViewTarget {
+    ViewTarget::Panel(PANEL.to_string())
+}
+
+impl Views for MediaDemo {
+    fn render(&amp;mut self, _view: ViewTarget, _area: Area) -&gt; UiTree {
+        let mut tree = Tree::new();
+        let logo = tree
+            .image(ImageSource::Asset(&quot;icons/logo.png&quot;.to_string()))
+            .fit(MediaFit::Contain)
+            .key(&quot;logo&quot;);
+        let scope = tree
+            .surface(PixelFormat::Gray8)
+            .min_columns(SCOPE_COLUMNS)
+            .min_rows(SCOPE_ROWS)
+            .key(SCOPE_KEY)
+            .flags(NodeFlags::FOCUSABLE);
+        let clip = tree
+            .video(VideoSource::Asset(&quot;loops/shore.webm&quot;.to_string()))
+            .autoplay(true)
+            .looped(true)
+            .key(&quot;clip&quot;);
+        let notes = match self.notes {
+            Some(buffer) =&gt; tree.code_view(buffer).read_only(true).key(&quot;notes&quot;),
+            None =&gt; tree
+                .paragraph(vec![vec![Span::plain(&quot;Notes are not open yet.&quot;)]])
+                .key(&quot;notes&quot;),
+        };
+        let build = match self.build_pane {
+            Some(pane) =&gt; tree.terminal_view(pane).rows(8).key(&quot;build-view&quot;),
+            None =&gt; tree
+                .paragraph(vec![vec![Span::plain(&quot;No build pane.&quot;)]])
+                .key(&quot;build-view&quot;),
+        };
+        let top = tree
+            .layout(Direction::Horizontal, [Constraint::Length(20), Constraint::Fill(1), Constraint::Length(24)])
+            .child(logo)
+            .child(scope)
+            .child(clip);
+        let body = tree
+            .layout(Direction::Vertical, [Constraint::Length(12), Constraint::Fill(1), Constraint::Length(8)])
+            .child(top)
+            .child(notes)
+            .child(build);
+        tree.finish(body)
+    }
+}
+</code></pre>
+<h2 id="worked-example-in-typescript">Worked example in TypeScript</h2>
+<p>The TypeScript version builds the same panel with the camelCase builders.</p>
+<pre><code class="language-ts">import { definePlugin } from '@ilium/plugin-sdk';
+import { createBuffer } from '@ilium/plugin-sdk/host/editor';
+import { surfaceSize, writeSurface } from '@ilium/plugin-sdk/host/ui';
+import { codeView, image, layout, paragraph, surface, terminalView, tree, video }
+  from '@ilium/plugin-sdk/ui/build';
+import { span, type Event, type Submission, type ViewTarget } from '@ilium/plugin-sdk/types';
+
+const PANEL = 'media-demo';
+const SCOPE_KEY = 'scope';
+const SCOPE_COLUMNS = 40;
+const SCOPE_ROWS = 6;
+
+const state = {
+  notes: undefined as bigint | undefined,
+  buildPane: undefined as bigint | undefined,
+  scroll: 0,
+};
+
+function panelView(): ViewTarget {
+  return { tag: 'panel', val: PANEL };
+}
+
+function paintScope(): void {
+  // Undefined until the panel has rendered once.
+  const size = surfaceSize(panelView(), SCOPE_KEY);
+  if (size === undefined) return;
+  const [width, height] = size;
+  const tones = new Uint8Array(width * height);
+  for (let row = 0; row &lt; height; row += 1) {
+    for (let column = 0; column &lt; width; column += 1) {
+      tones[row * width + column] = (column + row + state.scroll) &amp; 0xff;
+    }
+  }
+  // gray8 is one byte per pixel; the rows start at the top of the surface.
+  writeSurface(panelView(), SCOPE_KEY, 0, 'gray8', tones);
+}
+
+export const { lifecycle, handler, views } = definePlugin({
+  side: 'client',
+  activate() {
+    state.notes = createBuffer('# Plugin notes\n', 'markdown');
+  },
+  deactivate() {
+    return undefined;
+  },
+  onEvents(batch: Event[]): Submission[] {
+    for (const event of batch) {
+      if (event.tag !== 'ui-action' || event.val.key !== SCOPE_KEY) continue;
+      const { kind, value } = event.val;
+      if (kind === 'scrolled' &amp;&amp; value.tag === 'number') {
+        // Wheel notches are negative for up and positive for down.
+        state.scroll = (state.scroll + Math.trunc(value.val)) &gt;&gt;&gt; 0;
+        paintScope();
+      }
+    }
+    return [];
+  },
+  render(_view: ViewTarget) {
+    const logo = image({ tag: 'asset', val: 'icons/logo.png' }, { key: 'logo', fit: 'contain' });
+    const scope = surface({
+      key: SCOPE_KEY,
+      format: 'gray8',
+      minColumns: SCOPE_COLUMNS,
+      minRows: SCOPE_ROWS,
+      flags: { focusable: true },
+    });
+    const clip = video({ tag: 'asset', val: 'loops/shore.webm' }, {
+      key: 'clip', autoplay: true, loop: true,
+    });
+    const notes = state.notes !== undefined
+      ? codeView(state.notes, { key: 'notes', readOnly: true })
+      : paragraph([[span('Notes are not open yet.')]], { key: 'notes' });
+    const build = state.buildPane !== undefined
+      ? terminalView(state.buildPane, { key: 'build-view', rows: 8 })
+      : paragraph([[span('No build pane.')]], { key: 'build-view' });
+    const top = layout(
+      {
+        direction: 'horizontal',
+        constraints: [
+          { tag: 'length', val: 20 }, { tag: 'fill', val: 1 }, { tag: 'length', val: 24 },
+        ],
+      },
+      [logo, scope, clip],
+    );
+    const body = layout(
+      {
+        direction: 'vertical',
+        constraints: [
+          { tag: 'length', val: 12 }, { tag: 'fill', val: 1 }, { tag: 'length', val: 8 },
+        ],
+      },
+      [top, notes, build],
+    );
+    return tree(body);
+  },
+});
+</code></pre>
+<h2 id="edge-cases-and-errors">Edge cases and errors</h2>
+<table>
+<thead>
+<tr>
+<th>Situation</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A grant is missing or declined</td>
+<td>The widget draws an empty frame with the text <code>not permitted</code>.</td>
+</tr>
+<tr>
+<td>An image asset or file is missing, or its data is corrupt, unsupported or over 16 MiB</td>
+<td>The widget draws an empty frame with the text <code>image not available</code>. The plugin log gets one warn line that names the source.</td>
+</tr>
+<tr>
+<td>An <code>rgba</code> picture has a length other than <code>width x height x 4</code></td>
+<td>The same as a corrupt image.</td>
+</tr>
+<tr>
+<td>A video source is missing, not decodable or over 16 MiB from bytes</td>
+<td>An empty frame, and <code>invalid-argument</code> or <code>quota-exceeded</code> from the open call.</td>
+</tr>
+<tr>
+<td>A <code>code-view</code> names a buffer that does not exist</td>
+<td>Empty frame with the text <code>not found</code>.</td>
+</tr>
+<tr>
+<td>A <code>terminal-view</code> names a pane that is closed or was never created</td>
+<td>Empty frame with the text <code>not found</code>.</td>
+</tr>
+<tr>
+<td><code>interactive</code> without <code>terminal.raw-input</code></td>
+<td>The view stays read-only.</td>
+</tr>
+<tr>
+<td><code>ui.write-surface</code> names a key with no surface</td>
+<td><code>not-found</code>.</td>
+</tr>
+<tr>
+<td>The format differs from the widget's <code>format</code></td>
+<td><code>invalid-argument</code>, nothing written.</td>
+</tr>
+<tr>
+<td>The data is not a whole number of rows, or is over 16 MiB</td>
+<td><code>invalid-argument</code>, nothing written.</td>
+</tr>
+<tr>
+<td><code>first-row</code> plus the rows written goes past <code>height</code></td>
+<td><code>invalid-argument</code>, nothing written. The host never truncates a write silently.</td>
+</tr>
+<tr>
+<td><code>write-glyphs</code> without <code>glyph-plane</code>, or outside the surface</td>
+<td><code>unsupported</code> or <code>invalid-argument</code>. More than 131,072 cells in a frame gives <code>quota-exceeded</code>.</td>
+</tr>
+<tr>
+<td>The area is smaller than the surface</td>
+<td>The surface is clipped at the right and bottom.</td>
+</tr>
+<tr>
+<td>The area is larger than the surface</td>
+<td>The surface is drawn from the top-left corner, and the extra cells keep the cell background.</td>
+</tr>
+<tr>
+<td>A surface has received no rows</td>
+<td>It draws the cell background.</td>
+</tr>
+</tbody>
+</table>
+<p>The <code>not-found</code>, <code>invalid-argument</code>, <code>unsupported</code> and <code>quota-exceeded</code> codes are described in <a href="/pages/errors-and-limits/">Errors and limits</a>. A missing grant or bad source never fails the render, so check the plugin log when a widget stays empty.</p>
+<h2 id="what-the-user-sees">What the user sees</h2>
+<ul>
+<li>An image keeps its proportions in <code>contain</code> and <code>cover</code> modes.</li>
+<li>A surface shows the plugin's picture, recoloured by the user's shared look. The user cannot edit its pixels.</li>
+<li>A code view behaves like the native editor, with typing, selection and undo, unless <code>read-only</code> is true.</li>
+<li>A terminal view looks like the pane itself. Its keys go to the pane owner unless the view is interactive.</li>
+<li>A video plays muted in a loop, dithered with the user's settings.</li>
+</ul>
+<p>API version: <code>ilium:plugin@0.1.0</code>.</p>
+<p>Requirement ids for this page: [WID-028]. See the <a href="/pages/reference-requirements/">requirements index</a>.</p>
+<h2 id="see-also">See also</h2>
+<ul>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/ui-model/">UI model</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/accessibility-and-theming/">Accessibility and theming</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+</ul>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/widgets-layout-and-containers/"><small>Previous</small>Layout and containers</a><a class="next" href="/pages/widgets-text/"><small>Next</small>Text</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#you-need">You need</a></li><li class="l2"><a href="#properties">Properties</a></li><li class="l2"><a href="#actions-and-events">Actions and events</a></li><li class="l2"><a href="#keys-mouse-and-roles">Keys, mouse and roles</a></li><li class="l2"><a href="#image">image</a></li><li class="l2"><a href="#surface">surface</a></li><li class="l3"><a href="#glyph-plane-and-owner-ids">Glyph plane and owner ids</a></li><li class="l2"><a href="#code-view">code-view</a></li><li class="l2"><a href="#terminal-view">terminal-view</a></li><li class="l2"><a href="#video">video</a></li><li class="l2"><a href="#worked-example-in-rust">Worked example in Rust</a></li><li class="l2"><a href="#worked-example-in-typescript">Worked example in TypeScript</a></li><li class="l2"><a href="#edge-cases-and-errors">Edge cases and errors</a></li><li class="l2"><a href="#what-the-user-sees">What the user sees</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,966 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Your first plugin in five minutes | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details open><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/" aria-current="page">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Start here</b></p>
+<h1>Your first plugin in five minutes</h1>
+
+<p>This page takes you from an empty folder to a badge on an agent row. You create a server-side plugin from the template, change one line of Rust, and run the plugin in dev mode. The page shows the tree before and after the change. The full build of a plugin with state, commands and tests is the subject of the <a href="/pages/tutorial-01-agent-badge/">tutorial series</a>.</p>
+<h3 id="how-the-plugin-works">How the plugin works</h3>
+<p>The host sends a plugin a batch of events. When an agent changes activity, the host sends an <code>agent-activity-changed</code> event for that agent's row in the tree. The plugin reads the event and returns a list of submissions. A submission carries an intent. The intent <code>set-decoration</code> puts styled text into a named slot on the row, and <code>clear-decoration</code> removes it. The host draws the slot as a badge.</p>
+<figure>
+<svg viewBox="0 0 400 250" role="img" aria-label="Event, handler, intent and badge in four steps" width="600" height="375">
+  <title>Event to badge</title>
+  <desc>The host sends an agent activity event to the plugin handler. The handler returns an intent, and the host draws a badge on the row.</desc>
+  <defs>
+    <marker id="arrow-first-plugin" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <rect x="110" y="8" width="180" height="40" rx="4" fill="none" stroke="currentColor"/>
+  <text x="200" y="32" font-size="11" text-anchor="middle" fill="currentColor">Agent activity changes</text>
+  <line x1="200" y1="48" x2="200" y2="70" stroke="currentColor" marker-end="url(#arrow-first-plugin)"/>
+  <rect x="110" y="70" width="180" height="40" rx="4" fill="none" stroke="currentColor"/>
+  <text x="200" y="94" font-size="11" text-anchor="middle" fill="currentColor">on_events(batch)</text>
+  <line x1="200" y1="110" x2="200" y2="132" stroke="currentColor" marker-end="url(#arrow-first-plugin)"/>
+  <rect x="40" y="132" width="320" height="40" rx="4" fill="none" stroke="currentColor"/>
+  <text x="200" y="156" font-size="11" text-anchor="middle" fill="currentColor">set-decoration or clear-decoration intent</text>
+  <line x1="200" y1="172" x2="200" y2="194" stroke="currentColor" marker-end="url(#arrow-first-plugin)"/>
+  <rect x="90" y="194" width="220" height="40" rx="4" fill="none" stroke="currentColor"/>
+  <text x="200" y="218" font-size="11" text-anchor="middle" fill="currentColor">Badge drawn on the tree row</text>
+</svg>
+<figcaption>The plugin never draws anything itself. It returns an intent, and the host draws the badge in the slot that the intent names.</figcaption>
+</figure>
+
+<h3 id="what-you-need">What you need</h3>
+<ul>
+<li>A Rust toolchain of version 1.90 or later with the <code>wasm32-wasip2</code> target. <a href="/pages/getting-started-toolchain/">Set up a toolchain</a> shows the install steps.</li>
+<li>An Ilium build with the <code>ilium plugin</code> commands. Installing Ilium installs them.</li>
+<li>Two grants, both on the server side. The manifest lists them, and the install dialog shows each one as a row that you check to allow it.</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Grant</th>
+<th>Dialog row text</th>
+<th>What the plugin may do with it</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>agent.read</code></td>
+<td>See agent status</td>
+<td>Receive <code>agent-activity-changed</code> events for agent panes</td>
+</tr>
+<tr>
+<td><code>tree.decorate</code></td>
+<td>Add badges, icons and rows to the tree</td>
+<td>Send <code>set-decoration</code> and <code>clear-decoration</code> intents</td>
+</tr>
+</tbody>
+</table>
+<p>A declined grant stays unchecked and dimmed in the dialog, and the plugin does not receive it in its activation context. Without <code>agent.read</code> the plugin gets no activity events, so it never draws a badge. Without <code>tree.decorate</code> the host refuses the whole batch that holds a decoration intent.</p>
+<h3 id="create-the-project">Create the project</h3>
+<p>Run the command in a directory that is not inside a project you care about. The <code>--id</code>, <code>--lang</code> and <code>--side</code> flags are required. <code>--name</code> is optional and sets the display name.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-bash">ilium plugin new agent-tools --id example.agent-tools --lang rust --side server --name &quot;Agent tools&quot;
+cd agent-tools
+ilium plugin build
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Flag or argument</th>
+<th>Value in this page</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>&lt;dir&gt;</code></td>
+<td><code>agent-tools</code></td>
+<td>Folder to create.</td>
+</tr>
+<tr>
+<td><code>--id</code></td>
+<td><code>example.agent-tools</code></td>
+<td>Plugin id. Global command ids start with it, for example <code>example.agent-tools/greet</code>.</td>
+</tr>
+<tr>
+<td><code>--lang</code></td>
+<td><code>rust</code></td>
+<td><code>rust</code> or <code>typescript</code>.</td>
+</tr>
+<tr>
+<td><code>--side</code></td>
+<td><code>server</code></td>
+<td><code>server</code>, <code>client</code>, <code>both</code> or <code>scene</code>.</td>
+</tr>
+<tr>
+<td><code>--name</code></td>
+<td><code>Agent tools</code></td>
+<td>Display name shown in the install dialog and in settings.</td>
+</tr>
+</tbody>
+</table>
+<p>The command prints JSON lines. Each line has a <code>type</code> field, so a script can read the result.</p>
+<figure>
+<pre class="term"><span class="t-prompt">$</span> ilium plugin new agent-tools --id example.agent-tools \
+    --lang rust --side server
+{"type":"progress","step":"template","message":"Writing the Rust template"}
+{"type":"result","ok":true}
+{"type":"summary","duration_ms":412,"warnings":0,"errors":0}
+</pre>
+<figcaption>Illustrative, not generated. The new command writes three files and prints one result line.</figcaption>
+</figure>
+
+<p>The template writes three files:</p>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Contents</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>manifest.json</code></td>
+<td>Plugin id, version, grants and contributions. The next section shows the file.</td>
+</tr>
+<tr>
+<td><code>Cargo.toml</code></td>
+<td>Crate settings. The crate builds as a component for <code>wasm32-wasip2</code>.</td>
+</tr>
+<tr>
+<td><code>src/lib.rs</code></td>
+<td>The server side. It holds the badge text function and the handler.</td>
+</tr>
+</tbody>
+</table>
+<p>The template handler already submits one intent for each activity event. While <code>badge_text</code> returns an empty string for every activity, each event clears the slot, so the template draws no badge. The first render in this page shows that state.</p>
+<h3 id="the-manifest">The manifest</h3>
+<p>The manifest below is the one the template writes. It declares both grants and the <code>badge</code> slot that the plugin writes to. The <code>files</code> inventory is written by <code>ilium plugin pack</code>, so a source manifest may omit it.</p>
+<pre><code class="language-json">{
+  &quot;api&quot;: &quot;ilium:plugin@0.1.0&quot;,
+  &quot;id&quot;: &quot;example.agent-tools&quot;,
+  &quot;name&quot;: &quot;Agent tools&quot;,
+  &quot;version&quot;: &quot;0.1.0&quot;,
+  &quot;publisher&quot;: &quot;Example Developer&quot;,
+  &quot;server&quot;: {
+    &quot;entry&quot;: &quot;server.wasm&quot;,
+    &quot;world&quot;: &quot;ilium:server/base@0.1.0&quot;,
+    &quot;exports&quot;: []
+  },
+  &quot;capabilities&quot;: {
+    &quot;server&quot;: [&quot;agent.read&quot;, &quot;tree.decorate&quot;]
+  },
+  &quot;contributes&quot;: {
+    &quot;decoration_slots&quot;: [
+      { &quot;id&quot;: &quot;badge&quot;, &quot;placement&quot;: &quot;badge&quot;, &quot;priority&quot;: 10 }
+    ]
+  }
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>api</code></td>
+<td>string</td>
+<td><code>ilium:plugin@0.1.0</code>.</td>
+</tr>
+<tr>
+<td><code>id</code></td>
+<td>string</td>
+<td>Plugin id. It must match the <code>--id</code> given to <code>new</code>.</td>
+</tr>
+<tr>
+<td><code>name</code></td>
+<td>string</td>
+<td>Display name in the install dialog and in settings.</td>
+</tr>
+<tr>
+<td><code>version</code></td>
+<td>string</td>
+<td>Plugin version. A higher version of an installed id is an update.</td>
+</tr>
+<tr>
+<td><code>publisher</code></td>
+<td>string</td>
+<td>Publisher name shown in the install dialog.</td>
+</tr>
+<tr>
+<td><code>server.entry</code></td>
+<td>string</td>
+<td>Component file. <code>server.wasm</code> for the server side.</td>
+</tr>
+<tr>
+<td><code>server.world</code></td>
+<td>string</td>
+<td>WIT world. <code>ilium:server/base@0.1.0</code> for the server side.</td>
+</tr>
+<tr>
+<td><code>server.exports</code></td>
+<td>list</td>
+<td>Optional exports: <code>views</code>, <code>detector</code>, <code>job-runner</code>, <code>service-provider</code>, <code>inference-provider</code> and <code>annotator</code>. The handler needs no entry.</td>
+</tr>
+<tr>
+<td><code>capabilities.server</code></td>
+<td>list</td>
+<td>Grants of the server side, as in the grants table above.</td>
+</tr>
+<tr>
+<td><code>contributes.decoration_slots</code></td>
+<td>list</td>
+<td>Each entry has <code>id</code>, <code>placement</code> and <code>priority</code>. <code>placement</code> is one of <code>badge</code>, <code>icon</code>, <code>subtitle</code> or <code>footer</code>. A lower <code>priority</code> is drawn first within the same placement.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="worked-example-the-complete-server-side-in-both-languages">Worked example: the complete server side in both languages</h3>
+<p>This is the complete server side after the change in the next section, in Rust (<code>src/lib.rs</code>) and in TypeScript (<code>src/server.ts</code>). Both plugins build as they stand.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::prelude::*;
+use ilium_plugin_sdk::types::intents::{DecorationKey, SetDecorationSpec};
+use ilium_plugin_sdk::types::tree::AgentActivity;
+
+const BADGE_SLOT: &amp;str = &quot;badge&quot;;
+
+#[ilium_plugin(side = &quot;server&quot;)]
+#[derive(Default)]
+struct AgentTools;
+
+/// Text for the badge slot. An empty string clears the slot.
+fn badge_text(activity: AgentActivity) -&gt; &amp;'static str {
+    match activity {
+        AgentActivity::Working =&gt; &quot;working&quot;,
+        _ =&gt; &quot;&quot;,
+    }
+}
+
+impl Handler for AgentTools {
+    fn on_events(&amp;mut self, batch: Vec&lt;Event&gt;) -&gt; Vec&lt;Submission&gt; {
+        let mut submissions = Vec::new();
+        for event in batch {
+            let Event::AgentActivityChanged(change) = event else { continue };
+            let text = badge_text(change.current);
+            let intent = if text.is_empty() {
+                Intent::ClearDecoration(DecorationKey {
+                    node: change.node,
+                    slot: BADGE_SLOT.into(),
+                })
+            } else {
+                Intent::SetDecoration(SetDecorationSpec {
+                    node: change.node,
+                    slot: BADGE_SLOT.into(),
+                    content: vec![Span::plain(text)],
+                    icon: None,
+                    sort_key: None,
+                    persist: false,
+                })
+            };
+            submissions.push(Submission::new(intent));
+        }
+        submissions
+    }
+}
+</code></pre>
+<p>The handler reads two fields from each event. <code>change.node</code> names the row, and <code>change.current</code> holds the new activity. It writes one intent for each event. <code>persist: false</code> means the badge is dropped when the plugin shuts down.</p>
+<h3 id="the-one-changed-line">The one changed line</h3>
+<p>In the template, the <code>AgentActivity::Working</code> arm returns an empty string, so the badge never has text. Change that arm to return the word <code>working</code>:</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">        AgentActivity::Working =&gt; &quot;working&quot;,   // was: &quot;&quot;
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">    case 'working':
+      return 'working';   // was: ''
+</code></pre>
+<p>Nothing else changes. Build the plugin again with <code>ilium plugin build</code>.</p>
+<h3 id="build-and-run-in-dev-mode">Build and run in dev mode</h3>
+<p>Run dev mode from the project folder. Dev mode installs the plugin as an unsigned development package, which the tree shows with a <code>dev</code> badge. The plugin reloads each time a file in the project changes.</p>
+<pre><code class="language-bash">ilium plugin build
+ilium plugin dev
+</code></pre>
+<p>The dev command prints one <code>reload</code> line each time it loads a new build.</p>
+<figure>
+<pre class="term"><span class="t-prompt">$</span> ilium plugin dev
+<span class="t-ok">watching</span> agent-tools/ for changes
+<span class="t-hi">reloaded</span> example.agent-tools 0.1.0
+</pre>
+<figcaption>Illustrative, not generated. The same reload appears as a JSON line with type <code>reload</code>, shown below.</figcaption>
+</figure>
+
+<pre><code class="language-json">{&quot;type&quot;:&quot;reload&quot;,&quot;plugin&quot;:&quot;example.agent-tools&quot;,&quot;version&quot;:&quot;0.1.0&quot;,&quot;restored_bytes&quot;:0}
+</code></pre>
+<h3 id="before-and-after">Before and after</h3>
+<p>The first render shows the tree before the change. The agent in <code>api/server</code> is working, but the template draws no badge. The second render shows the same tree after the change. The <code>working</code> badge appears on the row. The other rows do not change.</p>
+<figure>
+<pre class="term">╭  ≡ ● · Sessions ─────────────────────╮
+│ ▼ <span class="w2">📂</span> shop                            │
+│ › ▼ <span class="w2">📂</span> api                           │
+│ ››   <span class="w2">🦀</span> <span class="t-ok">⠋</span> Fix login redirect         │
+│ ››   <span class="w2">🐢</span> <span class="t-dim">●</span> Review schema              │
+│ ››   <span class="w2">🖥️</span>    Shell                     │
+│ › ▶ <span class="w2">📂</span> web                           │
+│                                      │
+╰──────────────────────────────────────╯
+ <span class="t-dim">↑/↓ move · Enter open · F1 help</span>
+</pre>
+<figcaption>Illustrative, not generated. The agent in the first pane is working, shown by the spinner in the Now column, and the template draws no badge.</figcaption>
+</figure>
+
+<figure>
+<pre class="term">╭  ≡ ● · Sessions ─────────────────────╮
+│ ▼ <span class="w2">📂</span> shop                            │
+│ › ▼ <span class="w2">📂</span> api                           │
+│ ››   <span class="w2">🦀</span> <span class="t-ok">⠋</span> Fix login redirect <span class="t-ok">working</span> │
+│ ››   <span class="w2">🐢</span> <span class="t-dim">●</span> Review schema              │
+│ ››   <span class="w2">🖥️</span>    Shell                     │
+│ › ▶ <span class="w2">📂</span> web                           │
+│                                      │
+╰──────────────────────────────────────╯
+ <span class="t-hi">After: the row carries the badge.</span>
+</pre>
+<figcaption>Illustrative, not generated. The <code>working</code> badge is drawn after the title of the row. The other rows do not change.</figcaption>
+</figure>
+
+<p>When the agent leaves the working state, the plugin receives a new <code>agent-activity-changed</code> event. The handler then returns <code>clear-decoration</code>, and the badge disappears.</p>
+<h3 id="create-the-typescript-project">Create the TypeScript project</h3>
+<p>The TypeScript form is created with <code>--lang typescript</code>. Its manifest is the same, except for the id.</p>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-bash">ilium plugin new agent-tools-ts --id example.agent-tools-ts \
+  --lang typescript --side server --name &quot;Agent tools&quot;
+cd agent-tools-ts
+bun install
+ilium plugin build
+ilium plugin dev
+</code></pre>
+<p>Bun 1.2 or later is the only tool you install globally. <code>bun install</code> fetches the pinned <code>@ilium/plugin-sdk</code>, which provides the types and the component build. The entry file is <code>src/server.ts</code>.</p>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { definePlugin, type Event, type Submission } from '@ilium/plugin-sdk';
+import { span } from '@ilium/plugin-sdk/types';
+import type { AgentActivity } from '@ilium/plugin-sdk/primitives/agent';
+
+const BADGE_SLOT = 'badge';
+
+/** Text for the badge slot. An empty string clears the slot. */
+function badgeText(activity: AgentActivity): string {
+  switch (activity) {
+    case 'working':
+      return 'working';
+    default:
+      return '';
+  }
+}
+
+export const { handler } = definePlugin({
+  side: 'server',
+  onEvents(batch: Event[]): Submission[] {
+    const submissions: Submission[] = [];
+    batch.forEach((event, index) =&gt; {
+      if (event.tag !== 'agent-activity-changed') return;
+      const { node, current } = event.val;
+      const text = badgeText(current);
+      const intent = text === ''
+        ? { tag: 'clear-decoration' as const, val: { node, slot: BADGE_SLOT } }
+        : {
+            tag: 'set-decoration' as const,
+            val: {
+              node,
+              slot: BADGE_SLOT,
+              content: [span(text)],
+              icon: undefined,
+              sortKey: undefined,
+              persist: false,
+            },
+          };
+      submissions.push({ intent, correlation: BigInt(index), dedupKey: undefined });
+    });
+    return submissions;
+  },
+});
+</code></pre>
+<p>The TypeScript template differs in one line: its <code>'working'</code> case returns an empty string until you change it, as in the Rust template.</p>
+<p>The contract lets the same intent carry more than text. The extended <code>set-decoration</code> adds styled spans, a tooltip, a frame animation and trailing segments, so the badge could be a spinner or a meter instead of the word. Tutorial step 1 uses these fields. Node ids are <code>bigint</code> values. The event index serves as the <code>correlation</code> number, which is unique within one batch.</p>
+<h3 id="surface-used-on-this-page">Surface used on this page</h3>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Rust</th>
+<th>TypeScript</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Server side</td>
+<td><code>#[ilium_plugin(side = "server")]</code></td>
+<td><code>definePlugin({ side: 'server' })</code></td>
+<td>Declares the side.</td>
+</tr>
+<tr>
+<td>Handler</td>
+<td><code>impl Handler</code>, <code>fn on_events</code></td>
+<td><code>onEvents(batch)</code></td>
+<td>Receives a batch and returns submissions.</td>
+</tr>
+<tr>
+<td>Activity event</td>
+<td><code>Event::AgentActivityChanged(change)</code></td>
+<td><code>event.tag === 'agent-activity-changed'</code>, <code>event.val</code></td>
+<td>Fields <code>node</code>, <code>previous</code>, <code>current</code> and <code>revision</code>.</td>
+</tr>
+<tr>
+<td>Activity values</td>
+<td><code>AgentActivity::Working</code></td>
+<td><code>'working'</code></td>
+<td><code>none</code>, <code>working</code>, <code>idle</code>, <code>awaiting-approval</code>, <code>done</code> and <code>menu</code>.</td>
+</tr>
+<tr>
+<td>Set badge</td>
+<td><code>Intent::SetDecoration(SetDecorationSpec)</code></td>
+<td>tag <code>'set-decoration'</code></td>
+<td>Writes styled text into a slot.</td>
+</tr>
+<tr>
+<td>Clear badge</td>
+<td><code>Intent::ClearDecoration(DecorationKey)</code></td>
+<td>tag <code>'clear-decoration'</code></td>
+<td>Empties a slot. Clearing an empty slot returns <code>ok</code>.</td>
+</tr>
+<tr>
+<td>Text</td>
+<td><code>Span::plain(text)</code></td>
+<td><code>span(text)</code></td>
+<td>One unstyled run of text.</td>
+</tr>
+<tr>
+<td>Submission</td>
+<td><code>Submission::new(intent)</code></td>
+<td>object with <code>intent</code>, <code>correlation</code> and <code>dedupKey</code></td>
+<td>One intent in the returned list.</td>
+</tr>
+</tbody>
+</table>
+<p><code>SetDecorationSpec</code> has these fields:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>node</code></td>
+<td>node id</td>
+<td>Tree row that receives the decoration.</td>
+</tr>
+<tr>
+<td><code>slot</code></td>
+<td>string</td>
+<td>Slot id. It must match an id in <code>contributes.decoration_slots</code>.</td>
+</tr>
+<tr>
+<td><code>content</code></td>
+<td>list of spans</td>
+<td>Text. A badge is at most 12 cells wide. Wider text is cut and ends with <code>…</code>.</td>
+</tr>
+<tr>
+<td><code>icon</code></td>
+<td>optional string</td>
+<td>Tabler icon name. <code>None</code> draws no icon.</td>
+</tr>
+<tr>
+<td><code>sort_key</code></td>
+<td>optional integer</td>
+<td>Orders decorations that share a row. Lower sorts first.</td>
+</tr>
+<tr>
+<td><code>persist</code></td>
+<td>boolean</td>
+<td><code>true</code> keeps the decoration across a server restart, shown as stale. <code>false</code> drops it at shutdown.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="edge-cases-and-errors">Edge cases and errors</h3>
+<table>
+<thead>
+<tr>
+<th>Situation</th>
+<th>Result</th>
+<th>What happens</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>The manifest asks for a grant that does not exist</td>
+<td>Build error <code>manifest.grant-unknown</code></td>
+<td>The text is <code>capability "&lt;grant&gt;" is not known to plugin API &lt;api&gt;</code>. Fix the spelling in <code>capabilities.server</code>.</td>
+</tr>
+<tr>
+<td>The slot id is not declared in the manifest</td>
+<td><code>refused(invalid-argument)</code></td>
+<td>Only that submission is refused. The other submissions of the batch run.</td>
+</tr>
+<tr>
+<td>The node was removed before the intent is applied</td>
+<td><code>refused(not-found)</code></td>
+<td>The row no longer exists. Nothing is drawn.</td>
+</tr>
+<tr>
+<td>The plugin already holds the maximum number of decorations</td>
+<td><code>refused(quota-exceeded)</code></td>
+<td>The default limit is 4,096 decorations for each plugin.</td>
+</tr>
+<tr>
+<td>A batch holds a decoration intent without <code>tree.decorate</code></td>
+<td><code>refused(not-permitted)</code> for the whole batch</td>
+<td>A missing grant refuses the batch.</td>
+</tr>
+<tr>
+<td>The user declines <code>agent.read</code></td>
+<td>No activity events</td>
+<td>No badge is drawn. The row in the install dialog stays unchecked.</td>
+</tr>
+<tr>
+<td>The user revokes <code>tree.decorate</code> later</td>
+<td>Decorations are withdrawn</td>
+<td>The plugin is re-activated with the reduced grant set. The restart does not count as a failure.</td>
+</tr>
+<tr>
+<td><code>on_events</code> panics or traps</td>
+<td>Plugin restart</td>
+<td>The plugin restarts after 1 s, then 5 s. A third failure within 10 minutes disables the plugin, and the tree footer shows a notice.</td>
+</tr>
+<tr>
+<td>The plugin restarts after a crash</td>
+<td>Decorations stay, marked stale</td>
+<td>Stale badges are drawn in the muted colour until the plugin sets or clears them again.</td>
+</tr>
+</tbody>
+</table>
+<div class="note">
+<p>An empty string from <code>badge_text</code> is a valid state. The handler uses it to clear the slot when an agent is idle, done or waiting for approval. Clearing an empty slot returns <code>ok</code>, so the plugin does not need to check whether a badge exists.</p>
+</div>
+
+<div class="warn">
+<p>The slot id in the code and in <code>contributes.decoration_slots</code> must match exactly. A mismatch does not stop the build. Each submission then fails with <code>refused(invalid-argument)</code>, and no badge appears.</p>
+</div>
+
+<h3 id="see-also">See also</h3>
+<ul>
+<li><a href="/pages/tutorial-01-agent-badge/">Tutorial step 1: agent badge</a> builds on this plugin and handles every activity state. <a href="/pages/tutorial-02-command-and-settings/">Tutorial step 2</a> adds a command and a setting.</li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a> explains the sides, the tiers and the events used here.</li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a> covers the Rust target and the <code>ilium plugin</code> commands.</li>
+<li><a href="/pages/rust-sdk/">Rust SDK</a> and <a href="/pages/typescript-sdk/">TypeScript SDK</a> list the module paths.</li>
+<li><a href="/pages/capability-tree-decorate/">Tree capability: decorate</a> documents the full decoration contract.</li>
+<li><a href="/pages/primitives-agent/">Agent primitive</a> lists the activity values.</li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a> lists every manifest key.</li>
+<li><a href="/pages/testing/">Testing</a> shows how to test <code>on_events</code> without a running Ilium.</li>
+</ul>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/landing/"><small>Previous</small>Plugin manual</a><a class="next" href="/pages/getting-started-overview/"><small>Next</small>What a plugin is</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#how-the-plugin-works">How the plugin works</a></li><li class="l2"><a href="#what-you-need">What you need</a></li><li class="l2"><a href="#create-the-project">Create the project</a></li><li class="l2"><a href="#the-manifest">The manifest</a></li><li class="l2"><a href="#worked-example-the-complete-server-side-in-both-languages">Worked example: the complete server side in both languages</a></li><li class="l2"><a href="#the-one-changed-line">The one changed line</a></li><li class="l2"><a href="#build-and-run-in-dev-mode">Build and run in dev mode</a></li><li class="l2"><a href="#before-and-after">Before and after</a></li><li class="l2"><a href="#create-the-typescript-project">Create the TypeScript project</a></li><li class="l2"><a href="#surface-used-on-this-page">Surface used on this page</a></li><li class="l2"><a href="#edge-cases-and-errors">Edge cases and errors</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

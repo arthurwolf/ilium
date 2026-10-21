@@ -192,8 +192,8 @@ pub struct Limits {
 impl Default for Limits {
     fn default() -> Self {
         Self {
-            max_tiles: 128,
-            max_construction_windows: 512,
+            max_tiles: MAX_CORE_TILES,
+            max_construction_windows: construction::MAX_WINDOWS,
             max_targets: 512,
             max_operations: 8_000_000,
             max_owned_bytes: 2 * 1024 * 1024,

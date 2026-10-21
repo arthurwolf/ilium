@@ -1,0 +1,2337 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Error codes and limits | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details open><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/" aria-current="page">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Reference</b></p>
+<h1>Error codes and limits</h1>
+
+<p>A plugin calls host functions, and some of those calls fail. A failed call returns a <code>plugin-error</code> record to the caller, and the plugin keeps running. A contract violation is different: it traps the plugin instance, which the host then ends and restarts. Resource limits bound how much CPU time, memory, storage, I/O and queue space a plugin can use. Each limit has a default. A manifest may ask for a lower value or a higher one, up to the ceiling for the plugin's tier.</p>
+<p>Tiers decide the ceilings. T1 is first-party bundled plugins. T2 is a third-party package signed by a publisher key the user trusts. T3 is an unsigned local package, installed with <code>--allow-unsigned</code> or <code>ilium plugin dev</code> and shown with a <code>dev</code> badge. T2 and T3 share the same ceilings.</p>
+<h3 id="what-you-need">What you need</h3>
+<ul>
+<li><strong>Grants:</strong> none for this page. Each call needs the grant of its own capability. A declined or revoked grant returns <code>not-permitted</code>. Storage is always granted.</li>
+<li><strong>Language:</strong> Rust with <code>ilium_plugin_sdk</code>, or TypeScript with <code>@ilium/plugin-sdk</code>. Both SDKs expose the same record and codes.</li>
+<li><strong>Prerequisites:</strong> the <a href="/pages/rust-sdk/">Rust SDK reference</a> or the <a href="/pages/typescript-sdk/">TypeScript SDK reference</a> for handler rules, and the <a href="/pages/performance/">Performance guide</a> for how deadlines are charged.</li>
+</ul>
+<h3 id="the-plugin-error-record">The plugin error record</h3>
+<p>Every fallible host function returns <code>result&lt;T, plugin-error&gt;</code>. The record has three fields.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Rust</th>
+<th>TypeScript</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>code</code></td>
+<td><code>error.code</code> (<code>ErrorCode</code>)</td>
+<td><code>error.code</code> (string)</td>
+<td>One of the codes in the table below</td>
+</tr>
+<tr>
+<td><code>message</code></td>
+<td><code>error.message</code> (<code>String</code>)</td>
+<td><code>error.message</code></td>
+<td>Text for logs. Do not match on it</td>
+</tr>
+<tr>
+<td><code>retry-after-ms</code></td>
+<td><code>error.retry_after_ms</code> (<code>Option&lt;u32&gt;</code>)</td>
+<td><code>error.retryAfterMs</code></td>
+<td>Set for <code>rate-limited</code>; the CPU budget case also sets it</td>
+</tr>
+</tbody>
+</table>
+<p>The SDKs map the result to <code>Result&lt;T, PluginError&gt;</code> in Rust and to a return value or a thrown <code>PluginError</code> in TypeScript. The WIT surface itself has only results and traps.</p>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Meaning</th>
+<th>Retry</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>not-permitted</code></td>
+<td>The capability is missing, declined or revoked, the argument is outside the grant, a path escapes its scope, or a policy forbids the action</td>
+<td>No</td>
+</tr>
+<tr>
+<td><code>not-found</code></td>
+<td>The node, pane, buffer, file, command, plugin, provider, call or device does not exist any more</td>
+<td>No</td>
+</tr>
+<tr>
+<td><code>invalid-argument</code></td>
+<td>The argument breaks a rule the plugin can check before the call: syntax, range, a per-call cap</td>
+<td>No, fix the call</td>
+</tr>
+<tr>
+<td><code>conflict</code></td>
+<td>State changed or is held: a stale revision, a manual title, a held lock, an existing file for <code>create-new</code></td>
+<td>Yes, after reading the state again</td>
+</tr>
+<tr>
+<td><code>quota-exceeded</code></td>
+<td>A stored or held quota is full, or the CPU budget of the execution quota group is spent</td>
+<td>After freeing resources, or after <code>retry-after-ms</code></td>
+</tr>
+<tr>
+<td><code>rate-limited</code></td>
+<td>A rate rule throttles the call</td>
+<td>Yes, after <code>retry-after-ms</code></td>
+</tr>
+<tr>
+<td><code>busy</code></td>
+<td>Transient capacity is full: pending requests, the job queue, an open picker, a device in use</td>
+<td>Yes, later</td>
+</tr>
+<tr>
+<td><code>timed-out</code></td>
+<td>A deadline passed: lock wait, HTTP, process, job time or a reply from a service or command</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td><code>cancelled</code></td>
+<td>Cancelled by the plugin, the user, a shutdown, or a refused batch</td>
+<td>Maybe</td>
+</tr>
+<tr>
+<td><code>unsupported</code></td>
+<td>The host or platform cannot do it, such as a codec, a channel count or an unknown action, or the call is made in the wrong instance kind</td>
+<td>No</td>
+</tr>
+<tr>
+<td><code>pane-not-ready</code></td>
+<td>A restored terminal pane has not started its process yet</td>
+<td>Yes, after <code>pane-created</code> or <code>tree-changed</code></td>
+</tr>
+<tr>
+<td><code>revoked</code></td>
+<td>The authorization epoch changed during the call. The plugin is re-activated</td>
+<td>No</td>
+</tr>
+<tr>
+<td><code>io</code></td>
+<td>An operating system I/O error other than a missing file</td>
+<td>Maybe</td>
+</tr>
+<tr>
+<td><code>network</code></td>
+<td>DNS, connect, TLS or transport failure</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td><code>internal</code></td>
+<td>A host bug, or a trap inside a job instance</td>
+<td>No</td>
+</tr>
+</tbody>
+</table>
+<p>Every function that returns a result can return <code>not-permitted</code>, <code>revoked</code> and <code>internal</code>. A function that returns a <code>request-id</code> can also return <code>busy</code>, and <code>quota-exceeded</code> when the CPU budget is spent. Other codes are listed per function. For example, <code>storage.put</code> returns <code>invalid-argument</code> for an empty key, a key over 256 bytes or a value over 1 MiB, and <code>quota-exceeded</code> when the bucket or the disk is full.</p>
+<p>Calls that return a <code>request-id</code> split their errors in two. Grant, scope, syntax and per-call cap checks fail at once, in the call. Disk, network, process and user failures arrive later in the completion as <code>failed(code)</code>. Check the completion, not only the call.</p>
+<h3 id="handling-errors-in-rust">Handling errors in Rust</h3>
+<p>The example stores a cursor in the session bucket. A full bucket skips the save. A busy host asks the caller to retry. Any other error is passed up, because it means a bug in the plugin or a missing grant.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::host::storage::{self, Bucket};
+use ilium_plugin_sdk::prelude::*;
+
+const CURSOR_KEY: &amp;str = &quot;cursor&quot;;
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum SaveOutcome {
+    Saved,
+    SkippedFull,
+    RetryLater,
+}
+
+pub fn save_cursor(cursor: &amp;[u8]) -&gt; Result&lt;SaveOutcome, PluginError&gt; {
+    match storage::put(Bucket::Session, CURSOR_KEY, cursor) {
+        Ok(()) =&gt; Ok(SaveOutcome::Saved),
+        Err(error) =&gt; match error.code {
+            ErrorCode::QuotaExceeded =&gt; Ok(SaveOutcome::SkippedFull),
+            ErrorCode::Busy =&gt; Ok(SaveOutcome::RetryLater),
+            _ =&gt; Err(error),
+        },
+    }
+}
+</code></pre>
+<h3 id="handling-errors-in-typescript">Handling errors in TypeScript</h3>
+<p>The TypeScript version applies the same rules. A thrown <code>PluginError</code> is checked with <code>instanceof</code>, and <code>error.code</code> is a string union of the kebab-case codes. Errors that the plugin cannot fix are rethrown, so the restart rule sees them.</p>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { PluginError } from '@ilium/plugin-sdk';
+import * as storage from '@ilium/plugin-sdk/host/storage';
+
+const CURSOR_KEY = 'cursor';
+
+export type SaveOutcome = 'saved' | 'skipped-full' | 'retry-later';
+
+export function saveCursor(cursor: Uint8Array): SaveOutcome {
+  try {
+    storage.put('session', CURSOR_KEY, cursor);
+    return 'saved';
+  } catch (error) {
+    if (!(error instanceof PluginError)) {
+      throw error;
+    }
+    switch (error.code) {
+      case 'quota-exceeded':
+        return 'skipped-full';
+      case 'busy':
+        return 'retry-later';
+      default:
+        // invalid-argument, not-permitted and the rest are plugin bugs or missing grants.
+        throw error;
+    }
+  }
+}
+</code></pre>
+<h3 id="traps">Traps</h3>
+<p>A trap ends the instance. The plugin is restarted under the restart rule below. The plugin cannot catch a trap. A trap is raised for these cases, because each one is a plugin bug:</p>
+<ul>
+<li>Calling a function of a capability the manifest never requested, in an interface that the plugin linked because it requested another capability of it. An interface that no requested capability unlocks is refused at install with <code>manifest.import-not-requested</code> and never links. A function of a requested capability that the user declined is not a trap: it returns <code>not-permitted</code>. See <a href="/pages/reference-host-runtime/">Host runtime</a>.</li>
+<li>An invalid <code>ui-tree</code>: an index out of range, a graph that is not a tree, a duplicate <code>key</code> in one tree, more nodes than the effective <code>ui_tree_nodes</code> limit (4,096 by default), or a <code>layout</code> whose child count differs from its constraint count.</li>
+<li>Returning more than 256 submissions from one <code>on-events</code> call.</li>
+<li>A hard deadline breach in <code>activate</code>, <code>on-events</code> or <code>views.render</code>. A breach in <code>deactivate</code> is not a trap: the instance is dropped and no restore bytes are kept. A soft deadline breach traps and counts as a failure when it reaches the streak limit of its call class (3 consecutive, or 30 consecutive for scene frames) or when the call runs 100 ms past its deadline (grace). A hook-handler breach never counts as a failure; it disables that extension handler. The call classes are in <a href="/pages/reference-host-scheduling/">Host scheduling</a>.</li>
+<li>Exceeding the linear memory or table limits.</li>
+<li>A Rust panic or an uncaught TypeScript exception in such an export.</li>
+</ul>
+<h3 id="trap-codes">Trap codes</h3>
+<p>A trap carries one code. The codes are diagnostics of the host, the harness and <code>ilium plugin logs</code>. They are never a value of <code>plugin-error.code</code>, which is always one of the 15 values of the error-code enum above.</p>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Raised when</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>trap.deadline</code></td>
+<td>A hard deadline breach in <code>activate</code>, <code>on-events</code> or <code>views.render</code>, or a soft breach on the streak limit</td>
+</tr>
+<tr>
+<td><code>trap.memory</code></td>
+<td>Linear memory grows past the effective <code>memory_mib</code> limit</td>
+</tr>
+<tr>
+<td><code>trap.table</code></td>
+<td>A table grows past the effective table limit</td>
+</tr>
+<tr>
+<td><code>trap.submission-batch</code></td>
+<td>One <code>on-events</code> call returns more than 256 submissions</td>
+</tr>
+<tr>
+<td><code>trap.invalid-ui-tree</code></td>
+<td>A <code>ui-tree</code> is invalid: an index out of range, a graph that is not a tree, a duplicate <code>key</code>, more nodes than <code>ui_tree_nodes</code>, or a <code>layout</code> whose child count differs from its constraint count</td>
+</tr>
+<tr>
+<td><code>trap.import-not-requested</code></td>
+<td>A function of a capability the manifest never requested is called</td>
+</tr>
+<tr>
+<td><code>trap.abi</code></td>
+<td>An ABI fault: the bytes cannot be a value of the type</td>
+</tr>
+<tr>
+<td><code>trap.panic</code></td>
+<td>A Rust panic or an uncaught TypeScript exception in an export</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>[API-081]</strong> A trap MUST carry exactly one of the eight codes <code>trap.deadline</code>, <code>trap.memory</code>, <code>trap.table</code>, <code>trap.submission-batch</code>, <code>trap.invalid-ui-tree</code>, <code>trap.import-not-requested</code>, <code>trap.abi</code> and <code>trap.panic</code>, and the log line of the trap MUST name it.</li>
+</ul>
+<p>Every <code>not-permitted</code> result and every trap is logged with the plugin id, the interface and the function, and shown in <code>ilium plugin logs</code>. Release builds show function names in trap backtraces only. Build with <code>ilium plugin build --debug</code> to see <code>file:line</code> for each frame.</p>
+<pre class="term">
+<span class="t-prompt">$</span> ilium plugin logs example.notes --tail 4
+16:02:10 <span class="t-err">err</span>  on-events 34 ms (limit 20 ms)
+16:02:12 <span class="t-err">err</span>  on-events 41 ms (limit 20 ms)
+16:02:20 <span class="t-err">err</span>  on-events 38 ms (limit 20 ms)
+16:02:20 <span class="t-hi">note</span> 3 failures in 10 minutes: disabled
+</pre>
+
+<p>Illustrative, not generated. A plugin that breaches its event deadline three times is restarted after the first two traps, then disabled.</p>
+<figure>
+<svg viewBox="0 0 400 286" role="img" aria-label="A failed call returns plugin-error, or traps and is restarted" width="600" height="429">
+  <defs>
+    <marker id="err-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <rect x="110" y="10" width="180" height="36" rx="6" fill="none" stroke="currentColor" stroke-width="2"/>
+  <text x="200" y="32" font-size="11" text-anchor="middle" fill="currentColor">Plugin calls a host import</text>
+  <path d="M200 46 L200 68" stroke="currentColor" stroke-width="1.5" fill="none" marker-end="url(#err-arrow)"/>
+  <rect x="110" y="70" width="180" height="36" rx="6" fill="none" stroke="currentColor" stroke-width="2"/>
+  <text x="200" y="92" font-size="11" text-anchor="middle" fill="currentColor">Host checks grant and limits</text>
+  <path d="M150 106 L95 128" stroke="currentColor" stroke-width="1.5" fill="none" marker-end="url(#err-arrow)"/>
+  <text x="40" y="120" font-size="10" fill="currentColor">returned</text>
+  <path d="M250 106 L305 128" stroke="currentColor" stroke-width="1.5" fill="none" marker-end="url(#err-arrow)"/>
+  <text x="330" y="120" font-size="10" fill="currentColor">trap</text>
+  <rect x="10" y="130" width="170" height="36" rx="6" fill="none" stroke="currentColor" stroke-dasharray="6 4"/>
+  <text x="95" y="152" font-size="11" text-anchor="middle" fill="currentColor">Return plugin-error</text>
+  <rect x="210" y="130" width="180" height="36" rx="6" fill="none" stroke="currentColor" stroke-width="2"/>
+  <text x="300" y="152" font-size="11" text-anchor="middle" fill="currentColor">Trap: instance ends</text>
+  <path d="M300 166 L300 186" stroke="currentColor" stroke-width="1.5" fill="none" marker-end="url(#err-arrow)"/>
+  <rect x="210" y="188" width="180" height="34" rx="6" fill="none" stroke="currentColor" stroke-width="2"/>
+  <text x="300" y="209" font-size="10" text-anchor="middle" fill="currentColor">Restart after 1 s, then 5 s</text>
+  <path d="M300 222 L300 242" stroke="currentColor" stroke-width="1.5" fill="none" marker-end="url(#err-arrow)"/>
+  <rect x="210" y="244" width="180" height="34" rx="6" fill="none" stroke="currentColor" stroke-width="2"/>
+  <text x="300" y="265" font-size="10" text-anchor="middle" fill="currentColor">Third failure: disabled</text>
+</svg>
+<figcaption>A failed check returns a plugin-error record to the caller. A trap ends the instance, which is restarted until the third failure disables it.</figcaption>
+</figure>
+
+<h3 id="abi-faults-and-semantic-faults">ABI faults and semantic faults</h3>
+<p>Two kinds of fault exist. The kind decides whether the call returns an error or the instance traps.</p>
+<table>
+<thead>
+<tr>
+<th>Kind</th>
+<th>Examples</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ABI fault: the bytes cannot be a value of the type</td>
+<td>A string that is not valid UTF-8 [ABI-017]; an enum discriminant or variant tag outside the case list; a list whose length or pointer leaves the plugin memory; more than 256 submissions [ABI-008]; memory growth past the instance limit [ABI-027]</td>
+<td>Trap. The call does not complete, and the restart rule applies</td>
+</tr>
+<tr>
+<td>Semantic fault: a valid value that breaks a documented rule</td>
+<td>A value above a stated maximum; a colour with a non-zero top byte; a path with <code>..</code>; an unknown id</td>
+<td>Error return. The code is <code>invalid-argument</code>, <code>not-found</code>, <code>quota-exceeded</code> or the code the function lists</td>
+</tr>
+<tr>
+<td>Grant fault</td>
+<td>A function of an interface that was linked, but whose capability was not requested</td>
+<td>Trap <code>host.capability-not-requested</code> [ABI-023]</td>
+</tr>
+<tr>
+<td>Grant fault in an intent or a call that returns <code>result</code></td>
+<td>The capability was requested but the user declined it</td>
+<td><code>not-permitted</code> (a whole batch is refused when one submission lacks its grant [ABI-009])</td>
+</tr>
+</tbody>
+</table>
+<p>The per-function codes are the codes in the doc comment of each function in the <a href="/pages/reference-wit/">WIT reference</a>. The no-grant behaviour of every function is the second test of each row in the <a href="/pages/reference-host-conformance/#1-how-to-use-the-matrices">host conformance matrix</a>. The security policy is in <a href="/pages/security/">Security</a>.</p>
+<h3 id="restart-and-disable-rule">Restart and disable rule</h3>
+<p>The rule applies to each plugin on each side. A client counts its own failures separately from the server. A failing view counts against the plugin, not against the view alone.</p>
+<table>
+<thead>
+<tr>
+<th>Failure</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>First failure in a 10-minute window</td>
+<td>Restart after 1 s</td>
+</tr>
+<tr>
+<td>Second failure in the window</td>
+<td>Restart after 5 s</td>
+</tr>
+<tr>
+<td>Third failure in the window</td>
+<td>Disable the plugin on that side and show a notice</td>
+</tr>
+<tr>
+<td>A failure when all earlier failures are older than 10 minutes</td>
+<td>Counts as a first failure: restart after 1 s. No 30 s step exists</td>
+</tr>
+</tbody>
+</table>
+<p>Test vectors. Times are measured from the first failure. Failures at 0, 2 and 4 minutes: restart after 1 s, restart after 5 s, disabled. Failures at 0 and 11 minutes: both restart after 1 s, because the first failure has expired. Failures at 0, 6 and 11 minutes: restart 1 s, restart 5 s, restart 5 s (the failure at 0 has expired, the one at 6 minutes counts), never disabled. A scene, view or inference-provider failure counts as a failure of the whole plugin on that side. The client and the server keep independent counts. A user turn-off persists across restarts of Ilium; re-enabling in Settings resets the count to zero.
+A failure expires 10 minutes after it happened. A successful run does not clear it sooner. Turn the plugin on again in Settings &gt; Plugins, which resets the count to zero.</p>
+<p>These count as failures: a trap, a hard deadline breach, an <code>activate</code> call that returns an error, a restart of a stuck event queue, the death of the sandbox helper during a call, and a soft deadline breach that reaches the streak limit of its call class (3 consecutive, or 30 consecutive for scene frames) or runs 100 ms past its deadline (grace). These never count: a <code>revoked</code> or <code>granted</code> re-activation, a disable, an upgrade, a shutdown, a breach or trap in <code>deactivate</code>, an activation refused for host capacity or helper count, and a failed job. A job failure never counts toward the restart rule. The full list with the rule for each case is in <a href="#host-rules-for-limits-and-restarts">Host rules for limits and restarts</a>.</p>
+<h3 id="resource-limits-in-the-manifest">Resource limits in the manifest</h3>
+<p>The manifest <code>limits</code> object is a JSON object. Each key is optional. If the plugin asks for a value above the ceiling for its tier, the host clamps the value and logs the clamp. A request never fails the install. The user can also set a value for every plugin with the same key under <code>[plugins.limits]</code> in <code>config.toml</code>, or for one plugin under <code>[plugins."&lt;id&gt;".limits]</code>. A user value overrides the manifest value and is clamped to the tier ceiling. Session keys are the exception: they have no manifest value and the user may only lower them.</p>
+<pre><code class="language-json">&quot;limits&quot;: {
+  &quot;memory_mib&quot;: 64,
+  &quot;job_deadline_ms&quot;: 5000,
+  &quot;job_wall_ms&quot;: 30000
+}
+</code></pre>
+<p>The table lists the per-plugin limits. The values belong to API version <code>ilium:plugin@0.1.0</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Default</th>
+<th>Ceiling T1</th>
+<th>Ceiling T2/T3</th>
+<th>Effect when reached</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>memory_mib</code></td>
+<td>32</td>
+<td>256</td>
+<td>128</td>
+<td>Trap</td>
+</tr>
+<tr>
+<td><code>table_elements</code></td>
+<td>10,000</td>
+<td>50,000</td>
+<td>20,000</td>
+<td>Trap</td>
+</tr>
+<tr>
+<td><code>event_deadline_ms</code></td>
+<td>20</td>
+<td>50</td>
+<td>20</td>
+<td>Trap</td>
+</tr>
+<tr>
+<td><code>command_deadline_ms</code></td>
+<td>50</td>
+<td>100</td>
+<td>50</td>
+<td>Trap</td>
+</tr>
+<tr>
+<td><code>render_deadline_ms</code></td>
+<td>10</td>
+<td>20</td>
+<td>10</td>
+<td>Trap</td>
+</tr>
+<tr>
+<td><code>annotate_deadline_ms</code></td>
+<td>10</td>
+<td>20</td>
+<td>10</td>
+<td>Late result dropped; third breach in a row traps</td>
+</tr>
+<tr>
+<td><code>frame_deadline_ms</code></td>
+<td>frame budget (1,000 ms divided by the effective frame rate, rounded down; 33 ms at 30 fps)</td>
+<td>50</td>
+<td>50</td>
+<td>Frame skipped; 30 breaches in a row traps</td>
+</tr>
+<tr>
+<td><code>activate_deadline_ms</code></td>
+<td>2,000</td>
+<td>5,000</td>
+<td>2,000</td>
+<td>Trap</td>
+</tr>
+<tr>
+<td><code>deactivate_deadline_ms</code></td>
+<td>500</td>
+<td>1,000</td>
+<td>500</td>
+<td>Instance dropped, no restore bytes kept</td>
+</tr>
+<tr>
+<td><code>job_deadline_ms</code> (CPU)</td>
+<td>2,000</td>
+<td>60,000</td>
+<td>10,000</td>
+<td><code>failed(timed-out)</code></td>
+</tr>
+<tr>
+<td><code>job_wall_ms</code></td>
+<td>20,000</td>
+<td>600,000</td>
+<td>100,000</td>
+<td><code>failed(timed-out)</code></td>
+</tr>
+<tr>
+<td><code>job_memory_mib</code></td>
+<td>64</td>
+<td>512</td>
+<td>256</td>
+<td><code>failed(quota-exceeded)</code></td>
+</tr>
+<tr>
+<td><code>job_io_mib</code> (input and output)</td>
+<td>16</td>
+<td>64</td>
+<td>16</td>
+<td><code>invalid-argument</code></td>
+</tr>
+<tr>
+<td><code>concurrent_jobs</code></td>
+<td>2</td>
+<td>8</td>
+<td>2</td>
+<td>Queued</td>
+</tr>
+<tr>
+<td><code>job_queue</code></td>
+<td>16</td>
+<td>64</td>
+<td>16</td>
+<td><code>busy</code></td>
+</tr>
+<tr>
+<td><code>event_queue</code></td>
+<td>1,024</td>
+<td>4,096</td>
+<td>1,024</td>
+<td>Stuck plugin is restarted</td>
+</tr>
+<tr>
+<td><code>pending_requests</code> (ABI-013)</td>
+<td>64</td>
+<td>256</td>
+<td>64</td>
+<td><code>busy</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>pending_requests</code> counts the requests that have a request id and no delivered completion: accepted submissions, calls that return a <code>request-id</code> (including deferred service calls) and jobs. A request enters the count when its id is returned and leaves it when its <code>request-completed</code> is enqueued for the plugin. Refused submissions, synchronous calls and the host-internal work of a request do not count. A call that would make the count exceed the limit returns <code>busy</code>, and in a batch it is refused as <code>refused(busy)</code> for that submission only. [API-073]
+| <code>timers</code> | 64 | 256 | 64 | <code>quota-exceeded</code> |
+| <code>output_filters</code> | 32 | 128 | 32 | <code>quota-exceeded</code> |
+| <code>watches</code> | 64 | 256 | 64 | <code>quota-exceeded</code> |
+| <code>key_grabs</code> | 8 | 32 | 8 | <code>quota-exceeded</code> |
+| <code>ui_tree_nodes</code> | 4,096 | 16,384 | 4,096 | Trap |
+| <code>ui_tree_kib</code> | 1,024 | 4,096 | 1,024 | Trap |
+| <code>decorations</code> | 4,096 | 16,384 | 4,096 | <code>refused(quota-exceeded)</code> |
+| <code>node_metadata_kib</code> | 64 | 256 | 64 | <code>quota-exceeded</code> |
+| <code>storage_bucket_mib</code> | 16 | 256 | 16 | <code>quota-exceeded</code> |
+| <code>disk_mib</code> (<code>data</code> plus <code>cache</code>) | 256 | 4,096 | 256 | <code>failed(quota-exceeded)</code> |
+| <code>fs_write_mib</code> (one call) | 16 | 64 | 16 | <code>invalid-argument</code> |
+| <code>fs_read_all_mib</code> | 64 | 512 | 64 | <code>failed(quota-exceeded)</code> |
+| <code>http_response_mib</code> | 8 | 64 | 8 | <code>failed(quota-exceeded)</code> |
+| <code>process_output_mib</code> | 4 | 32 | 4 | <code>failed(quota-exceeded)</code> |
+| <code>log_lines_per_second</code> | 200 | 1,000 | 200 | Dropped and counted |
+| <code>open_videos</code> | 2 | 8 | 2 | <code>quota-exceeded</code> |
+| <code>audio_captures</code> | 2 | 4 | 2 | <code>quota-exceeded</code> |</p>
+<p>The CPU time of a plugin is also charged to the <code>ilium-execution</code> quota group [API-072]. There is one group for each plugin side in each process. The group is a token bucket that holds 2,000 ms of CPU time and refills at 500 ms of CPU time per second. These values are fixed for ilium:plugin@0.1.0 and are not manifest keys. The group charges the thread time of <code>on-events</code>, <code>views.render</code>, <code>command</code>, scene frames, annotators and jobs, and it charges 1 ms for every 64 KiB of payload in a submission or a call that returns a <code>request-id</code>. When the bucket is empty, every call that returns a <code>request-id</code> and every submission returns <code>quota-exceeded</code> with The bucket balance can go below zero, because a call is charged after it ends. The bucket is empty when the balance is 0 or less. <code>retry-after-ms</code> = max(100, ceil_10(-balance_ms * 2)), where <code>ceil_10</code> rounds up to the next 10 ms: the wall time until the balance refills to 0 at 500 ms per second, never below 100. A balance of -100 ms gives 200. A trap inside a call still charges the time used. Test: run jobs that spin 2,500 ms of CPU in total and assert that the next submission returns <code>quota-exceeded</code> with <code>retry-after-ms</code> between 100 and 400. Second test: drive the balance to -100 ms, submit, and expect <code>retry-after-ms</code> 200. A per-kind job limit in <code>contributes.jobs</code> (<code>deadline_ms</code>, <code>memory_mib</code>) overrides the job values for that kind, within the same ceilings.</p>
+<p>Some caps are fixed and no manifest or user setting changes them: 256 submissions per <code>on-events</code> return (a trap when exceeded), 1 MiB for a synchronous <code>fs.read</code>, 4,096 entries for <code>fs.list-dir</code>, 8 MiB, 64 headers and 8 KiB of URL per HTTP request, a timer interval of at least 50 ms, and 64 picked paths per plugin (the oldest is forgotten). A call over a fixed cap that the plugin can check in advance returns <code>invalid-argument</code>, and nothing is written or sent. The host never truncates a value silently, with the exceptions in the next table. This table is the complete list of cuts and clamps [API-060]. Every other over-limit input is refused with a code.</p>
+<table>
+<thead>
+<tr>
+<th>Exception</th>
+<th>What the host does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>log.log</code></td>
+<td>Cuts the line and marks it</td>
+</tr>
+<tr>
+<td><code>terminal.read-screen</code></td>
+<td>Clamps <code>max-rows</code></td>
+</tr>
+<tr>
+<td>Menu entries over 64</td>
+<td>Shows 64 and a final <code>… N more</code> entry</td>
+</tr>
+<tr>
+<td>Tooltip over 200 characters</td>
+<td>Cuts it and ends it with <code>…</code></td>
+</tr>
+<tr>
+<td><code>history-text</code> over 4 MiB</td>
+<td>Keeps the newest 4 MiB</td>
+</tr>
+<tr>
+<td>Transcript over 512 turns or 4 MiB</td>
+<td>Drops the oldest turns</td>
+</tr>
+<tr>
+<td>Catalogue page over 256 items, geocode results over 8</td>
+<td>Clamps the count</td>
+</tr>
+<tr>
+<td>Debounce outside 0 to 2,000 ms (rows 300 to 2,000)</td>
+<td>Clamps the value</td>
+</tr>
+<tr>
+<td>Layout percentage above 100</td>
+<td>Clamps it to 100</td>
+</tr>
+<tr>
+<td><code>limits</code> request above the tier ceiling</td>
+<td>Clamps it and logs it; the install never fails</td>
+</tr>
+<tr>
+<td>Event queues, journal, shared cache</td>
+<td>Drop or evict the oldest entry and count it</td>
+</tr>
+</tbody>
+</table>
+<p>Per-call caps that a plugin can check before the call return <code>invalid-argument</code>. The caps that return <code>quota-exceeded</code> instead (<code>read-cells</code> rows, CLI stdin, <code>write-glyphs</code> cells, the popup stack) do so because they depend on held or cumulative state that the plugin cannot see in advance: other panes' frozen snapshots, bytes already written to the invocation, cells already queued in the frame, and popups already open [API-061].</p>
+<h3 id="host-rules-for-limits-and-restarts">Host rules for limits and restarts</h3>
+<p>This section is the host-side statement of the tables above. It adds the keys that earlier tables did not list and fixes the exact counting. The deadlines of every call class are in <a href="/pages/reference-host-scheduling/">Host scheduling</a>.</p>
+<p>Additional per-plugin key:</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Default</th>
+<th>Ceiling T1</th>
+<th>Ceiling T2/T3</th>
+<th>Effect when reached</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>detector_deadline_ms</code></td>
+<td>20</td>
+<td>50</td>
+<td>20</td>
+<td>Previous classification kept; third breach in a row traps</td>
+</tr>
+</tbody>
+</table>
+<p>Limits that apply to a whole session (all plugins of one hosting process together). They are not manifest keys, the ceiling is the same for every tier, and a user can only lower them under <code>[plugins.limits]</code>. There are five session keys.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Default</th>
+<th>Ceiling</th>
+<th>Effect when reached</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>session_memory_mib</code></td>
+<td>1,024</td>
+<td>4,096</td>
+<td>Activation refused with <code>session.memory-exceeded</code>; the side stays <code>inactive</code> with the reason <code>host-capacity</code>; no failure</td>
+</tr>
+<tr>
+<td><code>session_helpers</code></td>
+<td>16</td>
+<td>32</td>
+<td>Activation refused with <code>helper.too-many</code>; no failure</td>
+</tr>
+<tr>
+<td><code>session_processes</code></td>
+<td>16</td>
+<td>64</td>
+<td><code>process.run</code> returns <code>busy</code> and <code>process.spawn</code> returns <code>quota-exceeded</code>; one count covers both kinds of child</td>
+</tr>
+<tr>
+<td><code>session_http_streams</code></td>
+<td>64</td>
+<td>256</td>
+<td><code>http.open-stream</code> returns <code>quota-exceeded</code></td>
+</tr>
+<tr>
+<td><code>session_decorations</code></td>
+<td>65,536</td>
+<td>262,144</td>
+<td><code>refused(quota-exceeded)</code></td>
+</tr>
+</tbody>
+</table>
+<p>Counting a failure, in one list. A <strong>failure</strong> is one of: a trap; a hard deadline breach; an <code>activate</code> that returns an error or breaches; the restart of a stuck event queue; the death of the helper during a call, a hung helper, or a helper protocol error; and a soft deadline breach that reaches the streak limit of its call class (3 consecutive, or 30 consecutive for scene frames) or runs 100 ms past its deadline (grace). A hook-handler breach never counts as a failure; it disables that extension handler. Anything else is not a failure. In particular these never count: re-activation after <code>granted</code> or <code>revoked</code>, disable, upgrade, shutdown, a breach or trap in <code>deactivate</code>, a refusal for session memory, helper count or host capacity, a failed or timed-out job, and a late hook handler.</p>
+<p>Restart delay, per side, within a window of 10 minutes: the first failure restarts after 1 s, the second after 5 s, and the third disables the side. There is no 30 s step. A failure expires 10 minutes after it happened.</p>
+<ul>
+<li><strong>[HST-400]</strong> The host MUST apply the restart rule per plugin per side: 1 s after the first failure, 5 s after the second, disabled at the third failure inside 10 minutes, and MUST NOT insert any other step.</li>
+<li><strong>[HST-401]</strong> The host MUST count as failures exactly the list above and MUST NOT count the listed non-failures.</li>
+<li><strong>[HST-402]</strong> A failure MUST expire 10 minutes after it happened, and a successful run MUST NOT clear it sooner.</li>
+<li><strong>[HST-403]</strong> A breach or trap in <code>deactivate</code> MUST drop the instance, discard its restore bytes, and MUST NOT count as a failure.</li>
+<li><strong>[HST-404]</strong> The host MUST clamp each manifest limit to the ceiling of the plugin's tier, log the clamp once, and never fail the install because of a limit request.</li>
+<li><strong>[HST-405]</strong> The defaults MUST be the same for all tiers. The T1 values in brackets on other pages MUST be read as T1 ceilings.</li>
+<li><strong>[HST-496]</strong> <code>retry-after-ms</code> on a <code>quota-exceeded</code> from the <code>ilium-execution</code> group MUST equal max(100, ceil((100 - bucket_ms) / 0.5 / 10) * 10).</li>
+<li><strong>[HST-497]</strong> <code>session_processes</code> MUST allow 16 children per session, counting <code>process.run</code> and <code>process.spawn</code> children together; when it is full <code>process.run</code> MUST return <code>busy</code> and <code>process.spawn</code> MUST return <code>quota-exceeded</code>.</li>
+<li><strong>[HST-498]</strong> A soft deadline breach MUST trap and count as a failure when it reaches the streak limit of its call class (3, or 30 for scene frames) or runs 100 ms past its deadline; a hook-handler breach MUST NOT count as a failure and MUST disable that extension handler.</li>
+<li><strong>[HST-499]</strong> The reply deadlines MUST be: command 30,000 ms, service 30,000 ms, inference completion 120,000 ms, HTTP API respond 30,000 ms, client request default 5,000 ms (settable 1 to 30,000) and job cancel grace 1,000 ms; each returns <code>timed-out</code> to the caller.</li>
+<li><strong>[HST-406]</strong> The host MUST enforce the five session keys <code>session_memory_mib</code>, <code>session_helpers</code>, <code>session_processes</code>, <code>session_http_streams</code> and <code>session_decorations</code>, and MUST apply a user value under <code>[plugins.limits]</code> for them only when it is lower than the default.</li>
+<li><strong>[HST-407]</strong> A refusal because of <code>session_memory_mib</code> or <code>session_helpers</code> MUST leave the side <code>inactive</code> with the reason <code>host-capacity</code> and MUST retry the activation when capacity returns.</li>
+<li><strong>[HST-408]</strong> <code>event_queue</code> MUST default to 1,024 with a ceiling of 4,096 for T1 and 1,024 for T2 and T3.</li>
+<li><strong>[HST-409]</strong> <code>detector_deadline_ms</code> MUST default to 20 ms with ceilings of 50 ms for T1 and 20 ms for T2 and T3.</li>
+<li><strong>[HST-410]</strong> A function of a never-requested capability in a linked interface MUST trap with <code>host.capability-not-requested</code>, an interface that no requested capability unlocks MUST be refused at install with <code>manifest.import-not-requested</code>, and a declined grant MUST return <code>not-permitted</code>.</li>
+<li><strong>[HST-411]</strong> The client and the server MUST keep independent failure counts for the same plugin.</li>
+<li><strong>[HST-412]</strong> The user turning a plugin on again MUST reset the failure count of that side to zero.</li>
+</ul>
+<h3 id="settings-codes-limits-and-warnings">Settings codes, limits and warnings</h3>
+<p>Install errors for <code>contributes.settings</code>. Each names the item, its JSON path and the rule.</p>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Text</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>manifest.settings-kind</code></td>
+<td><code>settings entry at &lt;json path&gt; has kind "&lt;kind&gt;"; expected "tab" or "section"</code></td>
+</tr>
+<tr>
+<td><code>manifest.settings-id</code></td>
+<td><code>settings id "&lt;id&gt;" at &lt;json path&gt; must match [a-z][a-z0-9-]{0,31}</code></td>
+</tr>
+<tr>
+<td><code>manifest.settings-key</code></td>
+<td><code>settings key "&lt;key&gt;" at &lt;json path&gt; must match [a-z][a-z0-9_]{0,63}</code></td>
+</tr>
+<tr>
+<td><code>manifest.settings-key-clash</code></td>
+<td><code>settings key "&lt;key&gt;" is declared twice (&lt;json path&gt; and &lt;json path&gt;)</code></td>
+</tr>
+<tr>
+<td><code>manifest.settings-id-clash</code></td>
+<td><code>settings id "&lt;id&gt;" is declared twice in this plugin</code></td>
+</tr>
+<tr>
+<td><code>manifest.settings-title-clash</code></td>
+<td><code>settings tab title "&lt;title&gt;" is the name of a built-in tab</code></td>
+</tr>
+<tr>
+<td><code>manifest.settings-target-unknown</code></td>
+<td><code>settings section "&lt;id&gt;" targets unknown tab "&lt;tab&gt;"</code></td>
+</tr>
+<tr>
+<td><code>manifest.settings-target-closed</code></td>
+<td><code>settings tab "&lt;tab&gt;" does not accept plugin sections</code></td>
+</tr>
+<tr>
+<td><code>manifest.settings-target-grant</code></td>
+<td><code>settings section "&lt;id&gt;" in tab "&lt;tab&gt;" needs capability "settings.contribute:&lt;tab&gt;"</code></td>
+</tr>
+<tr>
+<td><code>manifest.settings-anchor</code></td>
+<td><code>settings placement "&lt;placement&gt;" names no section of tab "&lt;tab&gt;"</code></td>
+</tr>
+<tr>
+<td><code>manifest.settings-tab-anchor</code></td>
+<td><code>settings tab "&lt;id&gt;" cannot be placed after "&lt;tab&gt;"</code></td>
+</tr>
+<tr>
+<td><code>manifest.settings-row-type</code></td>
+<td><code>settings row type "&lt;type&gt;" at &lt;json path&gt; is not known</code></td>
+</tr>
+<tr>
+<td><code>manifest.settings-row-field</code></td>
+<td><code>settings row field "&lt;field&gt;" at &lt;json path&gt; is not supported for type "&lt;type&gt;"</code></td>
+</tr>
+<tr>
+<td><code>manifest.settings-default</code></td>
+<td><code>settings default for "&lt;key&gt;" does not match its row: &lt;reason&gt;</code></td>
+</tr>
+<tr>
+<td><code>manifest.settings-depends</code></td>
+<td><code>depends_on at &lt;json path&gt; names unknown key "&lt;key&gt;" or forms a cycle</code></td>
+</tr>
+<tr>
+<td><code>manifest.settings-help</code></td>
+<td><code>help topic "&lt;id&gt;" at &lt;json path&gt; is not in contributes.help</code></td>
+</tr>
+<tr>
+<td><code>manifest.settings-command</code></td>
+<td><code>settings row at &lt;json path&gt; names command "&lt;id&gt;" that the plugin does not contribute</code></td>
+</tr>
+<tr>
+<td><code>manifest.settings-glyph</code></td>
+<td><code>settings tab glyph "&lt;glyph&gt;" must be one character 1 or 2 cells wide</code></td>
+</tr>
+<tr>
+<td><code>manifest.settings-limit</code></td>
+<td><code>settings &lt;item&gt; at &lt;json path&gt; exceeds the limit of &lt;n&gt;</code></td>
+</tr>
+</tbody>
+</table>
+<p>Load warnings are not install errors. They appear in <code>ilium plugin list</code> and on the recovery page:</p>
+<table>
+<thead>
+<tr>
+<th>Warning</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>settings.section-dropped</code></td>
+<td>A built-in tab already shows six plugin sections; the section is not drawn</td>
+</tr>
+<tr>
+<td><code>settings.tab-dropped</code></td>
+<td>16 plugin tabs are already shown; the tab is not drawn</td>
+</tr>
+<tr>
+<td><code>settings.anchor-missing</code></td>
+<td>An own-section anchor no longer exists; the section is placed at the end</td>
+</tr>
+<tr>
+<td><code>settings.value-ignored</code></td>
+<td>A stored value no longer matches its row; the default applies and the stored text is kept</td>
+</tr>
+</tbody>
+</table>
+<p>Limits are in <a href="/pages/errors-and-limits/#settings-limits">Errors and limits</a>. The validation answer has a deadline of 100 ms, and a timeout refuses the save with <code>Could not check this value: &lt;plugin name&gt; did not answer.</code></p>
+<h3 id="error-codes-of-the-extended-functions">Error codes of the extended functions</h3>
+<p>No new <code>error-code</code> case exists. The extended functions reuse the 15 codes. Codes marked sync are returned by the call. Codes marked completion arrive as <code>failed</code> in <code>request-completed</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Function or intent</th>
+<th>Sync codes</th>
+<th>Completion codes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>catalogs.query</code>, <code>query-async</code></td>
+<td><code>not-found</code> (catalogue), <code>invalid-argument</code> (limit)</td>
+<td><code>timed-out</code>, <code>internal</code></td>
+</tr>
+<tr>
+<td><code>geocode.search</code>, <code>reverse</code></td>
+<td><code>not-permitted</code> (no consent), <code>rate-limited</code>, <code>invalid-argument</code></td>
+<td><code>network</code>, <code>timed-out</code>, <code>not-found</code></td>
+</tr>
+<tr>
+<td><code>cli.write-text</code>, <code>read-stdin</code></td>
+<td><code>invalid-argument</code>, <code>unsupported</code> (stdin <code>none</code>), <code>quota-exceeded</code> (4 MiB)</td>
+<td><code>cancelled</code></td>
+</tr>
+<tr>
+<td><code>sessions.send</code></td>
+<td><code>not-found</code>, <code>not-permitted</code></td>
+<td><code>timed-out</code>, <code>network</code></td>
+</tr>
+<tr>
+<td><code>surface.write-glyphs</code>, <code>set-owner-ids</code></td>
+<td><code>invalid-argument</code>, <code>quota-exceeded</code>, <code>unsupported</code></td>
+<td>none</td>
+</tr>
+<tr>
+<td><code>media.open-video-bytes</code>, <code>open-video-range</code></td>
+<td><code>invalid-argument</code>, <code>quota-exceeded</code> (16 MiB)</td>
+<td><code>io</code></td>
+</tr>
+<tr>
+<td><code>fs.write-atomic</code></td>
+<td><code>not-permitted</code></td>
+<td><code>conflict</code>, <code>io</code></td>
+</tr>
+<tr>
+<td><code>fs.tail</code></td>
+<td><code>not-found</code>, <code>io</code></td>
+<td>none</td>
+</tr>
+<tr>
+<td><code>http.open-stream</code></td>
+<td><code>not-permitted</code>, <code>quota-exceeded</code></td>
+<td><code>network</code>, <code>timed-out</code>, <code>rate-limited</code> (in <code>http-stream-closed</code>)</td>
+</tr>
+<tr>
+<td><code>vector.embed</code></td>
+<td><code>unsupported</code>, <code>invalid-argument</code></td>
+<td><code>network</code>, <code>rate-limited</code>, <code>timed-out</code></td>
+</tr>
+<tr>
+<td><code>vector.upsert</code>, <code>create-index</code></td>
+<td><code>quota-exceeded</code>, <code>invalid-argument</code></td>
+<td>none</td>
+</tr>
+<tr>
+<td><code>process.spawn</code></td>
+<td><code>not-permitted</code>, <code>quota-exceeded</code> (<code>children</code>), <code>not-found</code></td>
+<td>exit status in <code>child-exited</code></td>
+</tr>
+<tr>
+<td><code>timers.at</code></td>
+<td><code>invalid-argument</code> (past by more than 1 s), <code>quota-exceeded</code></td>
+<td>none</td>
+</tr>
+<tr>
+<td><code>journal.log-event</code></td>
+<td><code>quota-exceeded</code>, <code>rate-limited</code></td>
+<td>none</td>
+</tr>
+<tr>
+<td><code>settings.set-row-state</code>, <code>set-item-states</code>, <code>set-choice-items</code>, <code>set-meter</code></td>
+<td><code>not-found</code>, <code>invalid-argument</code>, <code>rate-limited</code></td>
+<td>none</td>
+</tr>
+<tr>
+<td><code>kernel-settings.read</code></td>
+<td><code>not-permitted</code>, <code>not-found</code></td>
+<td>none</td>
+</tr>
+<tr>
+<td><code>terminal.read-cells</code>, <code>freeze-snapshot</code></td>
+<td><code>pane-not-ready</code>, <code>not-found</code>, <code>quota-exceeded</code></td>
+<td>none</td>
+</tr>
+<tr>
+<td><code>terminal.history-text</code>, <code>search-history</code></td>
+<td><code>invalid-argument</code>, <code>quota-exceeded</code></td>
+<td><code>timed-out</code></td>
+</tr>
+<tr>
+<td><code>terminal.lock-input</code></td>
+<td><code>conflict</code>, <code>invalid-argument</code> (over 2 s)</td>
+<td>none</td>
+</tr>
+<tr>
+<td><code>agent.transcript</code></td>
+<td><code>unsupported</code>, <code>not-found</code></td>
+<td><code>io</code>, <code>quota-exceeded</code></td>
+</tr>
+<tr>
+<td><code>client-requests.request</code></td>
+<td><code>not-found</code></td>
+<td><code>timed-out</code>, <code>not-found</code> (client detached)</td>
+</tr>
+<tr>
+<td><code>gpu.run</code></td>
+<td><code>unsupported</code>, <code>invalid-argument</code></td>
+<td>none</td>
+</tr>
+</tbody>
+</table>
+<p>The outcomes of the extended intents are in the <a href="/pages/reference-events-and-intents/">events and intents reference</a>.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">match host::geocode::search(&amp;query) {
+    Ok(request) =&gt; self.pending_geocode = Some(request),
+    Err(e) if e.code == ErrorCode::NotPermitted =&gt; self.ask_consent(),
+    Err(e) if e.code == ErrorCode::RateLimited =&gt; self.retry_in(Duration::from_secs(1)),
+    Err(e) =&gt; return Err(e),
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">try {
+  pendingGeocode = geocode.search(query);
+} catch (e) {
+  if (!isPluginError(e)) throw e;
+  if (e.code === 'not-permitted') askConsent();
+  else if (e.code === 'rate-limited') retryIn(1000);
+  else throw e;
+}
+</code></pre>
+<h3 id="extension-point-codes">Extension point codes</h3>
+<p>Install codes: <code>manifest.extension-point-duplicate</code>, <code>manifest.extension-point-invalid</code>, <code>manifest.extension-entry-invalid</code>, <code>manifest.extension-side</code>, <code>manifest.extension-limit</code>, <code>manifest.grant-missing-extension</code>, <code>manifest.replaces-unknown</code>, <code>manifest.replaces-not-replaceable</code>, <code>manifest.replaces-surface-incomplete</code> and <code>manifest.replaces-cycle</code>. See <a href="/pages/reference-manifest/#extension-points-and-replacement">Manifest reference</a>.</p>
+<p>Run codes, returned by the <code>extensions</code> host functions or written to the plugin log. They do not add an error-code case: each one travels as a base code plus a message prefix, mapped in <a href="/pages/api-extension-points/#edge-cases-and-error-codes">Extension points</a>:</p>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Cause</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>extension.unknown-point</code></td>
+<td>The point does not exist or its owner is not enabled</td>
+</tr>
+<tr>
+<td><code>extension.not-granted</code></td>
+<td>The matching <code>extensions.provide</code> or <code>extensions.contribute</code> grant is missing</td>
+</tr>
+<tr>
+<td><code>extension.schema-mismatch</code></td>
+<td>A payload, entry or reply failed its schema. A bad reply counts as a pass</td>
+</tr>
+<tr>
+<td><code>extension.cap-exceeded</code></td>
+<td>A point is full</td>
+</tr>
+<tr>
+<td><code>extension.reentrant</code></td>
+<td>A handler called <code>run-hook</code> on the point that is running it</td>
+</tr>
+<tr>
+<td><code>extension.not-dynamic</code></td>
+<td><code>register</code> or <code>unregister</code> on a point without <code>dynamic: true</code></td>
+</tr>
+<tr>
+<td><code>extension.handler-timeout</code></td>
+<td>A handler missed its deadline. It counts as a pass</td>
+</tr>
+<tr>
+<td><code>extension.reply-not-allowed</code></td>
+<td>The reply does not fit the mode. It counts as a pass</td>
+</tr>
+<tr>
+<td><code>extension.vetoed</code></td>
+<td>A <code>veto</code> handler refused. The run completes as <code>refused(conflict)</code></td>
+</tr>
+<tr>
+<td><code>extension.disabled</code></td>
+<td>The extension stopped after three breaches in a row, until the plugin restarts or the user presses Reset</td>
+</tr>
+<tr>
+<td><code>extension.chain-cap</code></td>
+<td>Handlers after the 100 ms chain cap were skipped. Log-only</td>
+</tr>
+</tbody>
+</table>
+<h3 id="requestable-limits">Requestable limits</h3>
+<p>Requestable limits. The manifest <code>limits</code> object may ask for less, or for more up to the ceiling of the tier.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Default</th>
+<th>Ceiling T1</th>
+<th>Ceiling T2 and T3</th>
+<th>Effect of a breach</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>http_streams</code></td>
+<td>4</td>
+<td>16</td>
+<td>4</td>
+<td><code>quota-exceeded</code></td>
+</tr>
+<tr>
+<td><code>children</code></td>
+<td>2</td>
+<td>8</td>
+<td>2</td>
+<td><code>quota-exceeded</code></td>
+</tr>
+<tr>
+<td><code>durable_timers</code></td>
+<td>64</td>
+<td>256</td>
+<td>64</td>
+<td><code>quota-exceeded</code></td>
+</tr>
+<tr>
+<td><code>vector_indexes</code></td>
+<td>4</td>
+<td>16</td>
+<td>4</td>
+<td><code>quota-exceeded</code></td>
+</tr>
+<tr>
+<td><code>vector_entries</code></td>
+<td>10,000</td>
+<td>200,000</td>
+<td>50,000</td>
+<td><code>quota-exceeded</code></td>
+</tr>
+<tr>
+<td><code>shared_cache_mib</code></td>
+<td>64</td>
+<td>256</td>
+<td>128</td>
+<td>oldest entries evicted</td>
+</tr>
+<tr>
+<td><code>journal_entries</code></td>
+<td>5,000</td>
+<td>20,000</td>
+<td>5,000</td>
+<td>oldest trimmed</td>
+</tr>
+<tr>
+<td><code>toasts_pending</code></td>
+<td>3</td>
+<td>3</td>
+<td>3</td>
+<td>oldest replaced</td>
+</tr>
+<tr>
+<td><code>package_assets_mib</code></td>
+<td>64</td>
+<td>256</td>
+<td>64</td>
+<td><code>manifest.asset-size</code></td>
+</tr>
+<tr>
+<td><code>video_buffer_mib</code></td>
+<td>64</td>
+<td>256</td>
+<td>64</td>
+<td>decode-ahead shortens; nothing fails</td>
+</tr>
+<tr>
+<td><code>migrate_deadline_ms</code></td>
+<td>30,000</td>
+<td>60,000</td>
+<td>30,000</td>
+<td>hard deadline: the migration fails, the backup is restored, not counted as a failure [LIF-105]</td>
+</tr>
+</tbody>
+</table>
+<p>Fixed caps. They are the same for every tier unless <code>limits_tier</code> is <code>first-party</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Cap</th>
+<th>Value</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Catalogue page</td>
+<td>256 items</td>
+<td>clamped</td>
+</tr>
+<tr>
+<td>Catalogues, client request kinds, languages</td>
+<td>8, 16, 8</td>
+<td><code>manifest.contribution-limit</code></td>
+</tr>
+<tr>
+<td>Points per plugin, extensions per plugin</td>
+<td>16, 64</td>
+<td><code>manifest.extension-limit</code></td>
+</tr>
+<tr>
+<td>Entries per collect point, handlers per hook point</td>
+<td><code>max_entries</code> (at most 256), <code>max_handlers</code> (at most 8)</td>
+<td><code>extension.cap-exceeded</code></td>
+</tr>
+<tr>
+<td>Extension entry, hook payload, hook reply</td>
+<td>16 KiB, 64 KiB, 64 KiB</td>
+<td><code>manifest.extension-entry-invalid</code>, <code>extension.cap-exceeded</code></td>
+</tr>
+<tr>
+<td>Hook handler, whole hook chain</td>
+<td><code>deadline_ms</code> (5 to 50, default 20), 100 ms</td>
+<td>counts as a pass, <code>extension.handler-timeout</code></td>
+</tr>
+<tr>
+<td>Menu entries, submenu depth</td>
+<td>64, 2</td>
+<td>truncated with <code>… N more</code>, <code>manifest.menu-depth</code></td>
+</tr>
+<tr>
+<td>Tooltip</td>
+<td>200 characters</td>
+<td>truncated with <code>…</code></td>
+</tr>
+<tr>
+<td><code>send-input</code> stages, total stage delay</td>
+<td>16, 10 s</td>
+<td><code>invalid-argument</code></td>
+</tr>
+<tr>
+<td><code>send-input</code> text or raw bytes per intent</td>
+<td>64 KiB</td>
+<td><code>refused(invalid-argument)</code></td>
+</tr>
+<tr>
+<td>Codec input</td>
+<td>16 MiB</td>
+<td><code>invalid-argument</code></td>
+</tr>
+<tr>
+<td>Events per <code>on-events</code> batch</td>
+<td>256</td>
+<td>the excess is split into later batches</td>
+</tr>
+<tr>
+<td><code>fs.scan</code> entries</td>
+<td>65,536</td>
+<td>results truncated, <code>truncated: true</code></td>
+</tr>
+<tr>
+<td>Journal payload</td>
+<td>4 KiB</td>
+<td><code>invalid-argument</code></td>
+</tr>
+<tr>
+<td>Message payload</td>
+<td>1 MiB</td>
+<td><code>refused(invalid-argument)</code></td>
+</tr>
+<tr>
+<td>Topic payload</td>
+<td>64 KiB</td>
+<td><code>invalid-argument</code></td>
+</tr>
+<tr>
+<td>Command <code>arguments-json</code></td>
+<td>64 KiB</td>
+<td><code>invalid-argument</code></td>
+</tr>
+<tr>
+<td>Backup copy before a migration (<code>migration_backup_mib</code>)</td>
+<td>2,048 MiB</td>
+<td>the migration is refused with <code>migration.backup-too-large</code></td>
+</tr>
+<tr>
+<td>Input lock</td>
+<td>2 s</td>
+<td><code>invalid-argument</code></td>
+</tr>
+<tr>
+<td><code>history-text</code></td>
+<td>4 MiB, newest kept</td>
+<td>truncated</td>
+</tr>
+<tr>
+<td><code>read-cells</code> rows per call</td>
+<td>1,000</td>
+<td><code>quota-exceeded</code></td>
+</tr>
+<tr>
+<td>Transcript per call</td>
+<td>512 turns or 4 MiB</td>
+<td>oldest dropped</td>
+</tr>
+<tr>
+<td>HTTP stream chunk</td>
+<td>1 MiB</td>
+<td>split</td>
+</tr>
+<tr>
+<td>CLI stdin per invocation</td>
+<td>4 MiB</td>
+<td><code>quota-exceeded</code></td>
+</tr>
+<tr>
+<td><code>write-glyphs</code> cells per frame</td>
+<td>131,072</td>
+<td><code>quota-exceeded</code></td>
+</tr>
+<tr>
+<td>Decoration frames, frame time</td>
+<td>16, at least 90 ms</td>
+<td><code>invalid-argument</code></td>
+</tr>
+<tr>
+<td><code>map</code> entries, <code>multi-choice</code> options</td>
+<td>64, 64</td>
+<td><code>manifest.settings-limit</code></td>
+</tr>
+<tr>
+<td><code>steps</code> ladder, <code>special_values</code></td>
+<td>64, 8</td>
+<td><code>manifest.row-format</code></td>
+</tr>
+<tr>
+<td><code>check-list</code> items</td>
+<td>256</td>
+<td>trap, <code>invalid-argument</code> logged</td>
+</tr>
+<tr>
+<td><code>list-editor</code> items</td>
+<td>64 (1,024 with <code>first-party</code>)</td>
+<td>trap, <code>invalid-argument</code> logged</td>
+</tr>
+<tr>
+<td><code>vector.embed</code></td>
+<td>256 texts of at most 8 KiB</td>
+<td><code>invalid-argument</code></td>
+</tr>
+<tr>
+<td>Journal bytes per pane, all plugins</td>
+<td>4 MiB</td>
+<td>oldest trimmed</td>
+</tr>
+<tr>
+<td>Pre-rendered scene loop</td>
+<td>30 fps, 3,600 frames, 128 MiB</td>
+<td><code>manifest.scene-prerender</code></td>
+</tr>
+<tr>
+<td>Video from bytes, font asset</td>
+<td>16 MiB, 4 MiB</td>
+<td><code>quota-exceeded</code>, <code>manifest.asset-size</code></td>
+</tr>
+<tr>
+<td><code>status_segments</code>, <code>pane_frame_slots</code>, <code>tree_toolbar</code>, <code>row_actions</code>, <code>tree_orderings</code>, <code>display_modes</code></td>
+<td>2, 4, 4, 4, 4, 2</td>
+<td><code>manifest.contribution-limit</code></td>
+</tr>
+<tr>
+<td>Geocode results</td>
+<td>8</td>
+<td>clamped</td>
+</tr>
+<tr>
+<td>Popup stack per view</td>
+<td>4</td>
+<td><code>quota-exceeded</code></td>
+</tr>
+<tr>
+<td>Debounce</td>
+<td>0 to 2,000 ms (rows 300 to 2,000)</td>
+<td>clamped</td>
+</tr>
+<tr>
+<td><code>restructure</code> operations</td>
+<td>256</td>
+<td><code>invalid-argument</code></td>
+</tr>
+<tr>
+<td>Minimap marks per layer, meter segments</td>
+<td>4,096, 8</td>
+<td>trap, <code>invalid-argument</code> logged</td>
+</tr>
+<tr>
+<td>Toast actions, notice actions</td>
+<td>2, 3</td>
+<td><code>invalid-argument</code></td>
+</tr>
+<tr>
+<td>Spinner custom frames</td>
+<td>16</td>
+<td>trap, <code>invalid-argument</code> logged</td>
+</tr>
+<tr>
+<td>Rich text of an info row</td>
+<td>120 characters</td>
+<td><code>invalid-argument</code></td>
+</tr>
+</tbody>
+</table>
+<p>Deadlines: <code>query-catalog</code>, <code>menu-items</code> and <code>list-virtual-children</code> take 20 ms, and <code>tokens</code> takes 10 ms per call. The timeout of <code>client-requests.request</code> is 1 to 30,000 ms. A breach counts like any deadline breach. <code>menu-items</code> and <code>tokens</code> fall back to static content and do not fail the user action.</p>
+<p>Fixed session caps. They count across every plugin of the session [API-070]. They are not keys and a user cannot change them. The five session keys (<code>session_memory_mib</code>, <code>session_helpers</code>, <code>session_processes</code>, <code>session_http_streams</code>, <code>session_decorations</code>) are in the table under "Host rules for limits and restarts".</p>
+<table>
+<thead>
+<tr>
+<th>Cap</th>
+<th>Value</th>
+<th>Over the limit</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Pending requests</td>
+<td>4,096</td>
+<td><code>busy</code> at the call</td>
+</tr>
+<tr>
+<td>Key grabs</td>
+<td>32</td>
+<td><code>quota-exceeded</code></td>
+</tr>
+<tr>
+<td>Input locks</td>
+<td>one per pane</td>
+<td><code>conflict</code></td>
+</tr>
+<tr>
+<td>Client session memory</td>
+<td>512 MiB (fixed)</td>
+<td>the new instance is refused, logged, and not counted as a failure (state <code>inactive</code>, reason <code>host-capacity</code>)</td>
+</tr>
+</tbody>
+</table>
+<p><code>session_processes</code> is the single budget of 16 per session for <code>process.run</code> children (<code>busy</code> when full) and <code>process.spawn</code> children (<code>quota-exceeded</code> when full) together. It is not a manifest key.</p>
+<p>Rates:</p>
+<table>
+<thead>
+<tr>
+<th>Operation</th>
+<th>Rate</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>toast</code></td>
+<td>3 per 10 s per plugin</td>
+</tr>
+<tr>
+<td><code>geocode</code></td>
+<td>1 per second per plugin</td>
+</tr>
+<tr>
+<td><code>set-status-segment</code>, <code>set-frame-slot</code></td>
+<td>10 per second per slot</td>
+</tr>
+<tr>
+<td><code>set-row-state</code>, <code>set-item-states</code>, <code>set-choice-items</code>, <code>set-info-rich</code>, <code>set-meter</code></td>
+<td>10 per second per plugin, together</td>
+</tr>
+<tr>
+<td><code>journal.log-event</code></td>
+<td>20 per second per plugin</td>
+</tr>
+<tr>
+<td><code>send-input</code>, <code>agent-action</code></td>
+<td>20 per second per pane per plugin</td>
+</tr>
+<tr>
+<td><code>topics.publish</code></td>
+<td>100 per second per plugin</td>
+</tr>
+<tr>
+<td><code>notify</code></td>
+<td>6 per minute per plugin</td>
+</tr>
+<tr>
+<td><code>play-sound</code></td>
+<td>4 per second per plugin</td>
+</tr>
+<tr>
+<td><code>screen-changed</code> delivery</td>
+<td>10 per second per pane</td>
+</tr>
+</tbody>
+</table>
+<p>Every rate in this table is a <strong>sliding window</strong> over the host monotonic clock: an operation is allowed when fewer than N operations of the same key were allowed in the previous window length (1 s, 10 s or 60 s). Refused operations do not enter the window. The key is the plugin, plus the slot or the pane where the table says so. The window is not reset by a restart of the plugin side, and not shared between the server and the client half. A refusal is <code>rate-limited</code> with <code>retry-after-ms</code> set to the time until the oldest counted operation leaves the window, rounded up to 10 ms. [API-071]</p>
+<p>The first-party tier (<code>limits_tier: "first-party"</code>, bundled T1 <code>ilium.</code> plugins only) raises the settings caps: 8 tabs per plugin, 2,048 value keys, 64 rows per section, 1,024 list items and 512 choice options.</p>
+<p>A breach shows as a refusal to the plugin and, for user-visible limits, as a warning. The render shows what the user sees when a plugin hits the toast rate.</p>
+<pre class="term">╭  ≡ ● · Plugin log───────────────────────────────────╮
+│ ! ilium.guard: toast rate-limited (3 per 10 s)      │
+│ <span class="w2">✕</span> ilium.guard: http_streams 4 of 4 in use           │
+│ <span class="w2">✓</span> ilium.guard: retry accepted, stream 3 closed      │
+╰──────────────────────────────────────────────────── ╯
+</pre>
+
+<p>The three lines are refusals logged at level warn. Illustrative, not generated.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">match host::http::open_stream(&amp;request) {
+    Err(e) if e.code == ErrorCode::QuotaExceeded =&gt; {
+        // 4 of 4 streams are open: close an idle one, then retry on the next event.
+        self.close_oldest_stream();
+        self.retry_open = true;
+    }
+    other =&gt; self.track(other)?,
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">try {
+  track(http.openStream(request));
+} catch (e) {
+  if (isPluginError(e) &amp;&amp; e.code === 'quota-exceeded') {
+    closeOldestStream(); // 4 of 4 streams are open
+    retryOpen = true;
+  } else throw e;
+}
+</code></pre>
+<h3 id="reply-deadlines">Reply deadlines</h3>
+<p>A caller that waits for an answer gets <code>timed-out</code> when the answer does not arrive in time. These deadlines are fixed; none of them is a <code>limits</code> key. The call classes of the plugin's own handlers are in <a href="/pages/reference-host-scheduling/">Host scheduling</a>.</p>
+<table>
+<thead>
+<tr>
+<th>Reply</th>
+<th>Deadline</th>
+<th>Result at the caller</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Command reply</td>
+<td>30,000 ms</td>
+<td><code>timed-out</code></td>
+</tr>
+<tr>
+<td>Service reply</td>
+<td>30,000 ms</td>
+<td><code>timed-out</code></td>
+</tr>
+<tr>
+<td>Inference completion</td>
+<td>120,000 ms</td>
+<td><code>timed-out</code></td>
+</tr>
+<tr>
+<td>HTTP API respond</td>
+<td>30,000 ms</td>
+<td><code>timed-out</code></td>
+</tr>
+<tr>
+<td>Client request, default</td>
+<td>5,000 ms (settable from 1 to 30,000 ms)</td>
+<td><code>timed-out</code></td>
+</tr>
+<tr>
+<td>Job cancel grace</td>
+<td>1,000 ms</td>
+<td>the job instance is trapped at the next tick</td>
+</tr>
+</tbody>
+</table>
+<h3 id="install-codes-manifest-and-package">Install codes: manifest and package</h3>
+<p>The complete list of install, signature, trust, registry and dependency codes, with the stage, exit code and message template of each, is in <a href="/pages/reference-manifest-schema/#error-catalogue">Manifest schema and error catalogue</a>. This page keeps a short list for orientation. If the two differ, the catalogue is right.</p>
+<p>An install, an update and <code>ilium plugin verify</code> report a code with the path of the fault. Codes that start with <code>manifest.</code> are about what the manifest says. Codes that start with <code>package.</code> are about the archive. The settings and extension point tables on this page give those codes with their messages. This index lists the other codes in one place, with the page that defines each. Codes of the <code>ilium plugin</code> command itself (<code>toolchain.</code>, <code>new.</code>, <code>dev.</code>, <code>inspect.</code>, <code>trace.</code> and <code>usage.</code>) are in <a href="/pages/reference-plugin-cli/">Plugin command-line reference</a>, the <code>component.</code> and <code>lint.</code> rules are in <a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a>, and the <code>harness.</code> and <code>fixture.</code> codes are in <a href="/pages/reference-test-harness/">Test harness reference</a>. When two pages differ, the defining page decides, and a page that cites an install code MUST use the cause that the defining page gives. [AUT-110]</p>
+<p>Older drafts used other spellings for these codes. The current names are <code>manifest.unknown-key</code>, <code>manifest.api-version</code> and the four <code>manifest.file-*</code> codes; the <a href="/pages/reference-manifest-schema/#error-catalogue">install error catalogue</a> is the only list.</p>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Cause</th>
+<th>Defined in</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>manifest.api-version</code></td>
+<td>The <code>ilium:api-version</code> section of a component differs from the manifest <code>api</code></td>
+<td><a href="/pages/reference-package-format/">Package format</a></td>
+</tr>
+<tr>
+<td><code>manifest.asset-size</code></td>
+<td>A declared asset is over its size limit</td>
+<td><a href="/pages/reference-manifest/">Manifest</a></td>
+</tr>
+<tr>
+<td><code>manifest.catalog-unknown</code></td>
+<td>A <code>choice</code> row <code>source</code> names a catalogue that no plugin provides</td>
+<td><a href="/pages/api-settings/">Settings API</a></td>
+</tr>
+<tr>
+<td><code>manifest.client-request-unknown</code></td>
+<td>A client request kind or export disagrees between the two sides</td>
+<td><a href="/pages/api-client-requests/">Client requests</a></td>
+</tr>
+<tr>
+<td><code>manifest.cli-field</code></td>
+<td>A CLI <code>output</code>, <code>stdin</code> or <code>argument_groups</code> value is invalid</td>
+<td><a href="/pages/api-cli/">CLI</a></td>
+</tr>
+<tr>
+<td><code>manifest.cli-name-reserved</code></td>
+<td>A CLI name is a kernel subcommand (plugin, session, recap, progress, chat, kill-session, help, version)</td>
+<td><a href="/pages/api-cli/">CLI</a></td>
+</tr>
+<tr>
+<td><code>manifest.cli-name-taken</code></td>
+<td>A CLI name is owned by another installed plugin</td>
+<td><a href="/pages/api-cli/">CLI</a></td>
+</tr>
+<tr>
+<td><code>manifest.point-risk</code></td>
+<td>An extension point declares a risk level lower than the grant its handlers receive, or an unknown risk</td>
+<td><a href="/pages/reference-extension-security/">Extension security</a></td>
+</tr>
+<tr>
+<td><code>manifest.contribution-limit</code></td>
+<td>A contribution list is longer than its limit</td>
+<td><a href="/pages/reference-manifest/">Manifest</a></td>
+</tr>
+<tr>
+<td><code>manifest.contribution-target</code></td>
+<td><code>row_actions.applies_to</code> names an unknown target</td>
+<td><a href="/pages/api-commands/">Commands</a></td>
+</tr>
+<tr>
+<td><code>manifest.export-grant</code></td>
+<td>An export is listed without the grant that unlocks it</td>
+<td><a href="/pages/api-exports/">Exports</a></td>
+</tr>
+<tr>
+<td><code>manifest.exports-mismatch</code></td>
+<td><code>exports</code> and the component do not agree</td>
+<td><a href="/pages/reference-manifest/">Manifest</a></td>
+</tr>
+<tr>
+<td><code>manifest.file-unlisted</code></td>
+<td>A file is in the package but not in <code>files</code></td>
+<td><a href="/pages/security/">Security</a></td>
+</tr>
+<tr>
+<td><code>manifest.file-missing</code></td>
+<td>A <code>files</code> entry has no file in the package</td>
+<td><a href="/pages/security/">Security</a></td>
+</tr>
+<tr>
+<td><code>manifest.file-length</code></td>
+<td>A file length differs from its <code>files</code> entry</td>
+<td><a href="/pages/security/">Security</a></td>
+</tr>
+<tr>
+<td><code>manifest.file-hash</code></td>
+<td>A file SHA-256 differs from its <code>files</code> entry</td>
+<td><a href="/pages/security/">Security</a></td>
+</tr>
+<tr>
+<td><code>manifest.file-self</code></td>
+<td><code>files</code> lists <code>manifest.json</code> or <code>signature</code></td>
+<td><a href="/pages/reference-package-format/">Package format</a></td>
+</tr>
+<tr>
+<td><code>manifest.files-order</code></td>
+<td><code>files</code> is not in the order of the archive</td>
+<td><a href="/pages/reference-package-format/">Package format</a></td>
+</tr>
+<tr>
+<td><code>manifest.key-missing</code></td>
+<td>A packed manifest has no <code>files</code> key</td>
+<td><a href="/pages/reference-package-format/">Package format</a></td>
+</tr>
+<tr>
+<td><code>manifest.unknown-key</code></td>
+<td>A manifest key is outside the schema, or a key under <code>limits</code> is unknown</td>
+<td><a href="/pages/reference-manifest/">Manifest</a></td>
+</tr>
+<tr>
+<td><code>manifest.grant-argument</code></td>
+<td>A grant argument is malformed, or <code>http:setting:&lt;key&gt;</code> names a setting the plugin lacks</td>
+<td><a href="/pages/capabilities/">Capabilities</a></td>
+</tr>
+<tr>
+<td><code>manifest.grant-argument-missing</code></td>
+<td>A grant that needs an argument has none</td>
+<td><a href="/pages/capabilities/">Capabilities</a></td>
+</tr>
+<tr>
+<td><code>manifest.grant-dependency</code></td>
+<td>A grant needs another grant that is not requested, for example <code>fs.pick</code> without <code>fs.read:picked</code></td>
+<td><a href="/pages/api-fs/">fs</a></td>
+</tr>
+<tr>
+<td><code>manifest.grant-program</code></td>
+<td>A <code>process.run</code> grant has a space in the program name</td>
+<td><a href="/pages/capability-process-run/">process.run</a></td>
+</tr>
+<tr>
+<td><code>manifest.grant-scope</code></td>
+<td>The file scope is unknown or does not accept that access</td>
+<td><a href="/pages/capabilities/">Capabilities</a></td>
+</tr>
+<tr>
+<td><code>manifest.grant-side</code></td>
+<td>The capability is not available on the side that requests it</td>
+<td><a href="/pages/capabilities/">Capabilities</a></td>
+</tr>
+<tr>
+<td><code>manifest.grant-tier</code></td>
+<td>The tier of the package may not hold the grant</td>
+<td><a href="/pages/capabilities/">Capabilities</a></td>
+</tr>
+<tr>
+<td><code>manifest.grant-unknown</code></td>
+<td>The name is not a capability of this API version</td>
+<td><a href="/pages/capabilities/">Capabilities</a></td>
+</tr>
+<tr>
+<td><code>manifest.grant-wildcard</code></td>
+<td>A grant argument is <code>*</code> where no wildcard is allowed</td>
+<td><a href="/pages/capabilities/">Capabilities</a></td>
+</tr>
+<tr>
+<td><code>manifest.grant-missing-extension</code></td>
+<td>A grant needed by an extension entry is missing</td>
+<td><a href="/pages/api-extension-points/">Extension points</a></td>
+</tr>
+<tr>
+<td><code>manifest.id-invalid</code></td>
+<td>The plugin id does not match the id pattern</td>
+<td><a href="/pages/packages/">Packages</a></td>
+</tr>
+<tr>
+<td><code>manifest.id-publisher</code></td>
+<td>A signed package id does not start with the publisher id</td>
+<td><a href="/pages/reference-signing-and-trust/">Signing and trust</a></td>
+</tr>
+<tr>
+<td><code>manifest.id-reserved</code></td>
+<td>A third-party package uses an <code>ilium.</code> id</td>
+<td><a href="/pages/packages/">Packages</a></td>
+</tr>
+<tr>
+<td><code>manifest.import-not-requested</code></td>
+<td>The component imports an interface that no requested capability unlocks</td>
+<td><a href="/pages/reference-host-runtime/">Host runtime</a></td>
+</tr>
+<tr>
+<td><code>manifest.limits-tier</code></td>
+<td>A <code>limits</code> key is not allowed for the tier</td>
+<td><a href="/pages/reference-manifest/">Manifest</a></td>
+</tr>
+<tr>
+<td><code>manifest.menu-depth</code></td>
+<td>A menu is nested deeper than the limit</td>
+<td><a href="/pages/reference-manifest/">Manifest</a></td>
+</tr>
+<tr>
+<td><code>manifest.publisher-mismatch</code></td>
+<td>The signature publisher does not match the trusted key</td>
+<td><a href="/pages/reference-signing-and-trust/">Signing and trust</a></td>
+</tr>
+<tr>
+<td><code>manifest.requires-cycle</code></td>
+<td><code>requires</code> forms a cycle</td>
+<td><a href="/pages/reference-dependency-resolution/">Dependency resolution</a></td>
+</tr>
+<tr>
+<td><code>manifest.requires-invalid</code></td>
+<td>A <code>requires</code> version range is malformed</td>
+<td><a href="/pages/reference-dependency-resolution/">Dependency resolution</a></td>
+</tr>
+<tr>
+<td><code>manifest.requires-self</code></td>
+<td>A plugin requires itself</td>
+<td><a href="/pages/reference-dependency-resolution/">Dependency resolution</a></td>
+</tr>
+<tr>
+<td><code>manifest.service-cycle</code></td>
+<td><code>requires.services</code> forms a cycle against the installed set</td>
+<td><a href="/pages/reference-install-update-uninstall/">Install, update, uninstall</a></td>
+</tr>
+<tr>
+<td><code>manifest.row-format</code></td>
+<td>A row format string is invalid</td>
+<td><a href="/pages/reference-manifest/">Manifest</a></td>
+</tr>
+<tr>
+<td><code>manifest.scene-prerender</code></td>
+<td>A scene declares prerender settings that are not allowed</td>
+<td><a href="/pages/reference-manifest/">Manifest</a></td>
+</tr>
+<tr>
+<td><code>manifest.schema-keyword</code></td>
+<td>A service schema uses a keyword outside the allowed subset</td>
+<td><a href="/pages/capability-services/">Services</a></td>
+</tr>
+<tr>
+<td><code>manifest.settings-source</code></td>
+<td>A <code>choice</code> row has both or neither of <code>options</code> and <code>source</code></td>
+<td><a href="/pages/packages/">Packages</a></td>
+</tr>
+<tr>
+<td><code>manifest.signature-invalid</code></td>
+<td>The signature does not verify</td>
+<td><a href="/pages/reference-signing-and-trust/">Signing and trust</a></td>
+</tr>
+<tr>
+<td><code>manifest.sound-id-taken</code></td>
+<td>A sound id repeats or is <code>chirping</code></td>
+<td><a href="/pages/capability-sound-play/">Sound</a></td>
+</tr>
+<tr>
+<td><code>manifest.unstable-missing</code></td>
+<td>The component uses an unstable item the manifest does not list</td>
+<td><a href="/pages/versioning/">Versioning</a></td>
+</tr>
+<tr>
+<td><code>manifest.unstable-tier</code></td>
+<td>A T2 or T3 package lists an unstable feature outside development mode</td>
+<td><a href="/pages/versioning/">Versioning</a></td>
+</tr>
+<tr>
+<td><code>manifest.unstable-unknown</code></td>
+<td>A name in <code>unstable</code> is not an unstable feature</td>
+<td><a href="/pages/versioning/">Versioning</a></td>
+</tr>
+<tr>
+<td><code>manifest.version-invalid</code></td>
+<td>The <code>version</code> is not a plain semantic version, for example <code>v1.2.3</code></td>
+<td><a href="/pages/reference-dependency-resolution/">Dependency resolution</a></td>
+</tr>
+<tr>
+<td><code>manifest.visible-when</code></td>
+<td>A <code>visible_when</code> expression is invalid</td>
+<td><a href="/pages/reference-manifest/">Manifest</a></td>
+</tr>
+<tr>
+<td><code>manifest.when-key</code></td>
+<td>A <code>when</code> expression uses an unknown key</td>
+<td><a href="/pages/api-commands/">Commands</a></td>
+</tr>
+<tr>
+<td><code>manifest.when-syntax</code></td>
+<td>A <code>when</code> expression has bad syntax</td>
+<td><a href="/pages/api-commands/">Commands</a></td>
+</tr>
+<tr>
+<td><code>package.api-unsupported</code></td>
+<td>The <code>api</code> is outside the window the host loads</td>
+<td><a href="/pages/versioning/">Versioning</a></td>
+</tr>
+<tr>
+<td><code>package.corrupt</code></td>
+<td>A store entry fails its hash check at load</td>
+<td><a href="/pages/reference-install-update-uninstall/">Install, update, uninstall</a></td>
+</tr>
+<tr>
+<td><code>package.downgrade</code></td>
+<td>The version is lower than the installed one and <code>--allow-downgrade</code> is absent</td>
+<td><a href="/pages/reference-install-update-uninstall/">Install, update, uninstall</a></td>
+</tr>
+<tr>
+<td><code>package.version-reused</code></td>
+<td>The version is already installed with different content</td>
+<td><a href="/pages/reference-package-format/">Package format</a></td>
+</tr>
+<tr>
+<td><code>package.publisher-key-changed</code></td>
+<td>A known publisher id arrives with a different key</td>
+<td><a href="/pages/reference-signing-and-trust/">Signing and trust</a></td>
+</tr>
+<tr>
+<td><code>package.precompiled-forbidden</code></td>
+<td>The package contains a <code>.cwasm</code> file</td>
+<td><a href="/pages/reference-host-runtime/">Host runtime</a></td>
+</tr>
+<tr>
+<td><code>package.old-format</code></td>
+<td>The file is an <code>.iliumanim</code> package</td>
+<td><a href="/pages/porting-iliumanim/">Porting from .iliumanim</a></td>
+</tr>
+<tr>
+<td><code>package.*</code></td>
+<td>All other archive, path, signature and component faults of a <code>.iliumpkg</code></td>
+<td><a href="/pages/reference-package-format/">Package format</a> lists each one</td>
+</tr>
+</tbody>
+</table>
+<p>An install code never reaches a running plugin. The installer shows the code and the path in the install error, and nothing from the package runs. <a href="/pages/guide-troubleshooting/">Troubleshooting</a> gives a route from the symptom to these codes.</p>
+<h3 id="refusal-reasons">Refusal reasons</h3>
+<p>A refusal carries one reason word from this closed list. For the codes <code>not-permitted</code>, <code>quota-exceeded</code> and <code>network</code>, the error <code>message</code> starts with <code>&lt;reason&gt;:</code>, so a plugin can branch on the prefix. The same word ends the refusal line in the plugin log. A plugin MUST NOT depend on any other reason word. A call that the manifest never requested is not a refusal: it traps with <code>host.capability-not-requested</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Reason</th>
+<th>Code</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>declined</code></td>
+<td><code>not-permitted</code></td>
+<td>The user left the requested grant unchecked</td>
+</tr>
+<tr>
+<td><code>revoked</code></td>
+<td><code>not-permitted</code></td>
+<td>The grant was removed after the plugin started</td>
+</tr>
+<tr>
+<td><code>not-granted</code></td>
+<td><code>not-permitted</code></td>
+<td>The argument is outside the grant: another host, program or command</td>
+</tr>
+<tr>
+<td><code>scope</code></td>
+<td><code>not-permitted</code></td>
+<td>A path lies outside the granted scope</td>
+</tr>
+<tr>
+<td><code>policy</code></td>
+<td><code>not-permitted</code></td>
+<td>The admin policy forbids the call</td>
+</tr>
+<tr>
+<td><code>offline</code></td>
+<td><code>not-permitted</code></td>
+<td>The offline switch is on</td>
+</tr>
+<tr>
+<td><code>private-address</code></td>
+<td><code>not-permitted</code></td>
+<td>The host name resolves to a refused address class</td>
+</tr>
+<tr>
+<td><code>reserved</code></td>
+<td><code>not-permitted</code></td>
+<td>The destination is an Ilium port or socket</td>
+</tr>
+<tr>
+<td><code>downgrade</code></td>
+<td><code>not-permitted</code></td>
+<td>A redirect goes from https to http</td>
+</tr>
+<tr>
+<td><code>not-user-initiated</code></td>
+<td><code>not-permitted</code></td>
+<td>The action needs a user gesture</td>
+</tr>
+<tr>
+<td><code>file-type</code></td>
+<td><code>not-permitted</code></td>
+<td>The file type is refused</td>
+</tr>
+<tr>
+<td><code>unavailable</code></td>
+<td><code>not-permitted</code></td>
+<td>The target is absent, or the caller lacks the grant to learn about it</td>
+</tr>
+<tr>
+<td><code>response-size</code></td>
+<td><code>quota-exceeded</code></td>
+<td>A buffered response is over its cap</td>
+</tr>
+<tr>
+<td><code>stream-size</code></td>
+<td><code>quota-exceeded</code></td>
+<td>A stream is over its lifetime cap</td>
+</tr>
+<tr>
+<td><code>tls</code></td>
+<td><code>network</code></td>
+<td>Certificate or TLS failure</td>
+</tr>
+</tbody>
+</table>
+<h3 id="edge-cases">Edge cases</h3>
+<table>
+<thead>
+<tr>
+<th>Situation</th>
+<th>What happens</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A job exceeds its CPU deadline</td>
+<td>The job fails with <code>timed-out</code>; the plugin is not restarted</td>
+</tr>
+<tr>
+<td>A job traps</td>
+<td>The job fails with <code>internal</code> and the trap text</td>
+</tr>
+<tr>
+<td>A process writes more output than its limit</td>
+<td>The process is killed and the call fails with <code>quota-exceeded</code></td>
+</tr>
+<tr>
+<td>The plugin stops while an HTTP API call is open</td>
+<td>The listener answers <code>503</code>; a later <code>respond</code> returns <code>not-found</code></td>
+</tr>
+<tr>
+<td>An HTTP API body is over 1 MiB, or a route gives no reply within 30 s</td>
+<td><code>413</code>, or <code>504</code> after 30 s</td>
+</tr>
+<tr>
+<td>A known HTTP API path is called with another method</td>
+<td><code>405</code>, with an <code>Allow</code> header</td>
+</tr>
+<tr>
+<td>A CLI invocation is open when the plugin restarts</td>
+<td>Exit code 1, and <code>plugin stopped</code> on standard error</td>
+</tr>
+<tr>
+<td>A drop-oldest event (output matches, topic messages, audio frames) arrives while the plugin queue is full</td>
+<td>The oldest queued event of that kind is dropped and counted; the next batch starts with an <code>events-dropped</code> event. These events have no per-source cap of their own, except that an output filter delivers at most its own <code>rate</code> matches per second (1 to 100)</td>
+</tr>
+<tr>
+<td>Server memory across all instances reaches 1,024 MiB</td>
+<td>The new instance is refused and logged. It does not count as a failure; the side stays <code>inactive</code> with the reason <code>host-capacity</code> and activation is retried (see <a href="/pages/lifecycle/#failure-counting-and-restart">Failure counting</a>)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="what-the-user-sees">What the user sees</h3>
+<ul>
+<li>A failed plugin shows a notice in the tree footer: <code>Plugin &lt;name&gt; stopped after 3 failures in 10 minutes: &lt;export&gt; &lt;code or trap&gt; (&lt;view&gt;)</code>. The view part appears only when a <code>views.render</code> call failed.</li>
+<li>Settings &gt; Plugins lists the disabled plugin. Turn it on there to clear the failure count.</li>
+<li><code>ilium plugin logs &lt;plugin-id&gt;</code> shows refusals and traps, with the interface and function.</li>
+</ul>
+<pre class="term">
+<span class="t-prompt">$</span> ilium plugin logs example.files --tail 2
+16:10:04 <span class="t-warn">warn</span> fs.write: not-permitted (scope)
+16:10:09 <span class="t-warn">warn</span> http.fetch: not-permitted (host)
+</pre>
+
+<p>Illustrative, not generated. Two refused calls are logged with the plugin id, the interface and the function. Only refusals and traps reach the log, so a <code>quota-exceeded</code> result appears only in the caller's own handling.</p>
+<p>Requirement ids for this page: [API-001], [API-002], [API-003], [API-004], [API-005], [API-010], [API-011], [API-012], [API-013], [API-014], [API-015], [API-016], [API-040], [API-041], [API-042], [API-043], [API-044], [API-046], [API-060], [API-061], [API-062], [API-070], [API-071], [API-072], [CAP-018], [EVT-003], [EXT-001], [EXT-023], [PRI-002], [PRI-005], [PRI-008], [PRI-014], [RND-015], [RND-016], [RND-017], [RND-018], [WID-020], [WID-021], [API-081]. See the <a href="/pages/reference-requirements/">requirements index</a>.</p>
+<h3 id="see-also">See also</h3>
+<ul>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/settings-extension/">Plugin settings extension</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul>
+<p>Checked against the API version <code>ilium:plugin@0.1.0</code>.</p>
+<h3 id="security">Security</h3>
+<p>Security codes: <code>policy.tier-denied</code>, <code>policy.id-denied</code>, <code>policy.publisher-denied</code>, <code>policy.third-party-denied</code> (detail codes of the one install code <code>policy.blocked</code>, written as the message prefix), <code>policy.grant-forbidden</code> (shown next to a locked row, never an install failure), <code>policy.source-denied</code>, <code>policy.replacement</code>, <code>policy.invalid</code>, <code>sandbox.unavailable</code>, <code>package.publisher-key-changed</code>, <code>package.blocked</code>, <code>package.path-invalid</code>, <code>package.path-duplicate</code>, <code>package.entry-symlink</code> or <code>package.entry-directory</code>, <code>package.zip-invalid</code>, <code>manifest.replaces-tier</code>, <code>manifest.secret-scope</code>, <code>trust.declined</code>, <code>manifest.display-name</code>, <code>manifest.point-risk</code>, <code>extension.depth-exceeded</code>, <code>extension.entry-rejected</code>, <code>approval.no-client</code>, <code>store.version</code>, <code>trust.collision</code>, <code>install.same-version</code>, <code>settings.locked</code>, <code>regex.too-large</code>, <code>regex.unsupported</code>. New <code>not-permitted</code> reasons: <code>policy</code>, <code>offline</code>, <code>private-address</code>, <code>downgrade</code>, <code>reserved</code>, <code>not-user-initiated</code>, <code>file-type</code>. Limits: [SEC-082] and [SEC-083] (egress), [SEC-285] and [SEC-290] (hooks), [SEC-029] (helper). See <a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a>.</p>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/reference-capabilities/"><small>Previous</small>Capability table</a><a class="next" href="/pages/reference-events-and-intents/"><small>Next</small>Event and intent tables</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#what-you-need">What you need</a></li><li class="l2"><a href="#the-plugin-error-record">The plugin error record</a></li><li class="l2"><a href="#handling-errors-in-rust">Handling errors in Rust</a></li><li class="l2"><a href="#handling-errors-in-typescript">Handling errors in TypeScript</a></li><li class="l2"><a href="#traps">Traps</a></li><li class="l2"><a href="#trap-codes">Trap codes</a></li><li class="l2"><a href="#abi-faults-and-semantic-faults">ABI faults and semantic faults</a></li><li class="l2"><a href="#restart-and-disable-rule">Restart and disable rule</a></li><li class="l2"><a href="#resource-limits-in-the-manifest">Resource limits in the manifest</a></li><li class="l2"><a href="#host-rules-for-limits-and-restarts">Host rules for limits and restarts</a></li><li class="l2"><a href="#settings-codes-limits-and-warnings">Settings codes, limits and warnings</a></li><li class="l2"><a href="#error-codes-of-the-extended-functions">Error codes of the extended functions</a></li><li class="l2"><a href="#extension-point-codes">Extension point codes</a></li><li class="l2"><a href="#requestable-limits">Requestable limits</a></li><li class="l2"><a href="#reply-deadlines">Reply deadlines</a></li><li class="l2"><a href="#install-codes-manifest-and-package">Install codes: manifest and package</a></li><li class="l2"><a href="#refusal-reasons">Refusal reasons</a></li><li class="l2"><a href="#edge-cases">Edge cases</a></li><li class="l2"><a href="#what-the-user-sees">What the user sees</a></li><li class="l2"><a href="#see-also">See also</a></li><li class="l2"><a href="#security">Security</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

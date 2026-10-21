@@ -3261,9 +3261,14 @@ mod tests {
     fn semantic_scope_row_persists_through_real_project_configuration() {
         use crate::background_animation::SemanticScope;
         let (mut app, _probe, project) = settings_app(80, 24);
+        // Edits are refused while the project settings are still loading, so
+        // let that load finish before the first change.
+        app.settle_filesystem_for_test();
         let was_enabled = app.animation_settings.enabled;
         let semantic_row = row_index(&app, &AnimationRow::Scene(AnimationKind::Semantic));
         app.settings_adjust_animation_row(semantic_row, 1);
+        app.settle_filesystem_for_test();
+        assert_eq!(app.animation_settings.kind, AnimationKind::Semantic);
         assert_eq!(
             app.animation_settings.semantic_scope,
             SemanticScope::Project

@@ -14,7 +14,9 @@ use std::path::{Path, PathBuf};
 use ilium_core::AgentClass;
 use serde_json::Value;
 
+mod codex_thread_name;
 mod request_evidence;
+pub use codex_thread_name::official_thread_name;
 pub use request_evidence::{
     genuine_request_text, is_codex_injected_message, GenuineRequestEvidence,
 };
@@ -862,19 +864,11 @@ impl TranscriptLocator {
         let Some(transcript) = self.transcript_for_session(class, session_id) else {
             return Ok(GenuineRequestEvidence::Unavailable);
         };
-        match self.read_budget.as_deref() {
-            Some(budget) => request_evidence::request_evidence_from_path_with_budget(
-                class,
-                &transcript.path,
-                &transcript.session_id,
-                budget,
-            ),
-            None => request_evidence::request_evidence_from_path(
-                class,
-                &transcript.path,
-                &transcript.session_id,
-            ),
-        }
+        request_evidence::request_evidence_from_path(
+            class,
+            &transcript.path,
+            &transcript.session_id,
+        )
     }
 
     /// Enumerates format-shaped paths without making any ownership claim.
@@ -1640,7 +1634,7 @@ mod tests {
     }
 
     #[test]
-    fn bounded_request_evidence_stops_at_the_shared_transcript_byte_limit() {
+    fn request_evidence_ignores_the_discovery_byte_budget() {
         let home = tempfile::tempdir().expect("home");
         let project = tempfile::tempdir().expect("project");
         let session_id = "123e4567-e89b-12d3-a456-426614174000";
@@ -1677,22 +1671,18 @@ mod tests {
             },
         );
 
-        assert_eq!(
+        // Discovery budgets do not cap the evidence scan: a long Codex
+        // session must stay nameable however large its transcript grows.
+        assert!(matches!(
             locator
                 .genuine_request_evidence(&AgentClass::Codex, session_id)
-                .expect("bounded evidence is a structured result"),
-            GenuineRequestEvidence::Unavailable,
-            "a request beyond the transcript budget must not authorize a title"
-        );
-        assert!(locator.read_limit_reached());
-        assert_eq!(
-            locator.read_limit_failure().map(|failure| failure.resource),
-            Some("transcript bytes")
-        );
+                .expect("evidence is a structured result"),
+            GenuineRequestEvidence::Present { .. }
+        ));
     }
 
     #[test]
-    fn bounded_request_evidence_refuses_an_oversized_jsonl_record() {
+    fn request_evidence_treats_a_malformed_record_as_unavailable() {
         let home = tempfile::tempdir().expect("home");
         let project = tempfile::tempdir().expect("project");
         let session_id = "123e4567-e89b-12d3-a456-426614174000";
@@ -1718,13 +1708,8 @@ mod tests {
         assert_eq!(
             locator
                 .genuine_request_evidence(&AgentClass::Codex, session_id)
-                .expect("line-limit refusal is structured evidence"),
+                .expect("a malformed record is structured evidence"),
             GenuineRequestEvidence::Unavailable
-        );
-        assert!(locator.read_limit_reached());
-        assert_eq!(
-            locator.read_limit_failure().map(|failure| failure.resource),
-            Some("transcript line bytes")
         );
     }
 

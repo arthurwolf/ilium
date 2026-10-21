@@ -1,0 +1,967 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Messages and topics | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details open><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/" aria-current="page">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Host API</b></p>
+<h1>Messages and topics</h1>
+
+<p>Messages and topics let plugins talk without calling each other. A message goes to one receiver: the other side of the same plugin, or a named peer plugin. A topic is a named channel that a plugin publishes on. Every plugin that holds a matching subscribe grant receives each publish on that topic.</p>
+<p>Use a message when one receiver must act on the data. Use a topic when any number of plugins may react and the publisher does not need to know who they are. Neither path returns a reply to the sender. A message intent completes only with whether the message was queued for its receiver.</p>
+<h3 id="what-you-need">What you need</h3>
+<ul>
+<li><strong>Grants.</strong> Messages between the two sides of your own plugin need no grant. A message to another plugin needs <code>messages.peer:&lt;plugin-id&gt;</code> with the exact id of that plugin. Receiving a topic needs <code>topics.subscribe:&lt;pattern&gt;</code>. Publishing a topic needs no grant.</li>
+<li><strong>Manifest.</strong> Each topic you publish must be declared under <code>contributes.topics.publishes</code>. Each topic you react to is listed under <code>contributes.topics.subscribes</code>. A subscription without a matching grant delivers nothing and raises no error.</li>
+<li><strong>Language.</strong> Rust uses the crate <code>ilium-plugin-sdk</code>. TypeScript uses <code>@ilium/plugin-sdk</code>. Both need the toolchain from <a href="/pages/getting-started-toolchain/">getting started</a>.</li>
+</ul>
+<h3 id="surface">Surface</h3>
+<table>
+<thead>
+<tr>
+<th>Name</th>
+<th>Kind</th>
+<th>Types</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>publish(topic, payload-json)</code></td>
+<td>function, <code>ilium:host/topics</code></td>
+<td>two <code>string</code> arguments, returns <code>result&lt;_, plugin-error&gt;</code></td>
+<td>Publishes a JSON payload on a declared topic under the plugin's own id. Sync.</td>
+</tr>
+<tr>
+<td><code>message</code></td>
+<td>intent, case <code>message(message-spec)</code></td>
+<td><code>message-spec</code></td>
+<td>Queues a message for a receiver. Completes <code>ok</code> when queued, or <code>refused(busy)</code> when the receiver queue has no free slot and no drop-oldest event to evict.</td>
+</tr>
+<tr>
+<td><code>message</code></td>
+<td>event</td>
+<td><code>message-event</code></td>
+<td>Delivers a message to the receiver. Never dropped.</td>
+</tr>
+<tr>
+<td><code>topic-published</code></td>
+<td>event</td>
+<td><code>topic-published-event</code></td>
+<td>Delivers a topic publish to a subscriber. Dropped and counted when the queue is full.</td>
+</tr>
+<tr>
+<td><code>events-dropped</code></td>
+<td>event</td>
+<td><code>list&lt;dropped-count&gt;</code></td>
+<td>Reports how many events of one source a subscriber lost.</td>
+</tr>
+<tr>
+<td><code>message-spec</code></td>
+<td>record</td>
+<td><code>to: message-target</code>, <code>channel: string</code>, <code>payload: list&lt;u8&gt;</code></td>
+<td>The intent payload.</td>
+</tr>
+<tr>
+<td><code>message-target</code></td>
+<td>record</td>
+<td><code>plugin: plugin-id</code>, <code>side: plugin-side</code>, <code>client: option&lt;client-id&gt;</code></td>
+<td>The receiver. <code>client: none</code> from the server reaches every attached client.</td>
+</tr>
+<tr>
+<td><code>plugin-side</code></td>
+<td>enum</td>
+<td><code>server</code>, <code>client</code></td>
+<td>The side of the receiver that gets the message.</td>
+</tr>
+<tr>
+<td><code>message-event</code></td>
+<td>record</td>
+<td><code>from</code>, <code>from-side</code>, <code>from-client</code>, <code>channel</code>, <code>payload</code></td>
+<td>The sender id, side, client (if any), channel and payload.</td>
+</tr>
+<tr>
+<td><code>topic-published-event</code></td>
+<td>record</td>
+<td><code>topic: string</code>, <code>from: plugin-id</code>, <code>payload-json: string</code></td>
+<td>The topic, the publishing plugin and its JSON payload.</td>
+</tr>
+</tbody>
+</table>
+<p>The WIT definitions behind the table:</p>
+<pre><code class="language-wit">// ilium:host/topics
+publish: func(topic: string, payload-json: string) -&gt; result&lt;_, plugin-error&gt;;
+
+// ilium:types/intents, a case of the intent variant
+message(message-spec)
+
+record message-target { plugin: plugin-id, side: plugin-side, client: option&lt;client-id&gt; }
+enum plugin-side { server, client }
+record message-spec { to: message-target, channel: string, payload: list&lt;u8&gt; }
+
+// ilium:types/events
+record message-event {
+    from: plugin-id, from-side: plugin-side, from-client: option&lt;client-id&gt;,
+    channel: string, payload: list&lt;u8&gt;,
+}
+record topic-published-event { topic: string, from: plugin-id, payload-json: string }
+</code></pre>
+<p>Limits that apply to this surface:</p>
+<table>
+<thead>
+<tr>
+<th>Limit</th>
+<th>Value</th>
+<th>Error when exceeded</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Topic name</td>
+<td>128 characters</td>
+<td><code>invalid-argument</code></td>
+</tr>
+<tr>
+<td>Topic payload</td>
+<td>64 KiB, valid JSON</td>
+<td><code>invalid-argument</code></td>
+</tr>
+<tr>
+<td>Message payload</td>
+<td>1 MiB</td>
+<td><code>refused(invalid-argument)</code></td>
+</tr>
+<tr>
+<td>Channel</td>
+<td>1 to 64 characters from <code>[a-z0-9.-]</code></td>
+<td><code>refused(invalid-argument)</code></td>
+</tr>
+<tr>
+<td><code>topics.publish</code> rate</td>
+<td>100 calls per second per plugin</td>
+<td><code>rate-limited</code>, with <code>retry-after-ms</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="topic-names-and-patterns">Topic names and patterns</h3>
+<p>A topic id is the publisher's plugin id, a <code>/</code>, and a name, for example <code>example.notes/saved</code>. A plugin may publish only topics that start with its own plugin id followed by <code>/</code>. The kernel publishes its own topics under the kernel plugin ids, for example <code>ilium.progress/finished</code>.</p>
+<p>A subscription pattern takes one of three forms:</p>
+<ul>
+<li>An exact topic, such as <code>ilium.progress/finished</code>.</li>
+<li>A prefix followed by <code>/*</code>, such as <code>ilium.progress/*</code>. It matches every topic under that prefix at any depth.</li>
+<li>A bare <code>*</code>. It matches every topic and is a high-trust grant.</li>
+</ul>
+<p>A <code>*</code> in any other position is not valid.</p>
+<h3 id="kernel-topic-for-extension-points">Kernel topic for extension points</h3>
+<p>The kernel publishes <code>ilium.extensions/changed</code> with the payload <code>{ "point": "&lt;id&gt;" }</code> when the contributions to a point change, for example when a plugin is installed, enabled, disabled or calls <code>register</code>. The kernel delivers it only to the owner of that point. It needs no <code>topics.subscribe</code> grant beyond <code>extensions.provide</code> for the point. After the topic arrives, the owner calls <code>list</code> again. See <a href="/pages/api-extension-points/">extension points</a>.</p>
+<h3 id="routing">Routing</h3>
+<figure>
+<svg viewBox="0 0 420 200" role="img" aria-label="Message and topic routing between sides and plugins" width="630" height="300">
+<title>Message and topic routing</title>
+<desc>A message goes from the server side to the client side. A peer plugin receives a message with a grant. A topic reaches every subscriber whose pattern matches.</desc>
+<defs>
+<marker id="arrow-messages" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+<path d="M0 0 L10 5 L0 10 z" fill="currentColor"/>
+</marker>
+</defs>
+<rect x="10" y="10" width="110" height="36" rx="6" fill="none" stroke="currentColor"/>
+<text x="65" y="32" font-size="12" text-anchor="middle" fill="currentColor">Server side</text>
+<rect x="300" y="10" width="110" height="36" rx="6" fill="none" stroke="currentColor"/>
+<text x="355" y="32" font-size="12" text-anchor="middle" fill="currentColor">Client side</text>
+<line x1="120" y1="28" x2="300" y2="28" stroke="currentColor" marker-end="url(#arrow-messages)"/>
+<text x="210" y="22" font-size="10" text-anchor="middle" fill="currentColor">message, one receiver</text>
+<rect x="10" y="100" width="110" height="36" rx="6" fill="none" stroke="currentColor" stroke-dasharray="4 3"/>
+<text x="65" y="122" font-size="12" text-anchor="middle" fill="currentColor">Peer plugin</text>
+<line x1="65" y1="46" x2="65" y2="100" stroke="currentColor" stroke-dasharray="4 3" marker-end="url(#arrow-messages)"/>
+<text x="72" y="76" font-size="10" fill="currentColor">messages.peer grant</text>
+<rect x="146" y="100" width="128" height="36" rx="6" fill="none" stroke="currentColor"/>
+<text x="210" y="122" font-size="10" text-anchor="middle" fill="currentColor">example.notes/saved</text>
+<rect x="300" y="100" width="110" height="36" rx="6" fill="none" stroke="currentColor"/>
+<text x="355" y="122" font-size="12" text-anchor="middle" fill="currentColor">Subscriber</text>
+<line x1="274" y1="118" x2="300" y2="118" stroke="currentColor" marker-end="url(#arrow-messages)"/>
+<text x="10" y="165" font-size="10" fill="currentColor">A topic reaches every subscriber whose pattern matches</text>
+<text x="10" y="181" font-size="10" fill="currentColor">and who holds the topics.subscribe grant.</text>
+</svg>
+<figcaption>Messages go to one receiver. Topics go to every matching subscriber.</figcaption>
+</figure>
+
+<h3 id="manifest-declarations">Manifest declarations</h3>
+<p>The example plugin <code>example.notes</code> publishes one topic and subscribes to the progress topic. The
+examples below also react to the command <code>example.notes/save</code>, which is declared as described on
+the <a href="/pages/api-commands/">commands</a> page:</p>
+<pre><code class="language-json">{
+  &quot;id&quot;: &quot;example.notes&quot;,
+  &quot;contributes&quot;: {
+    &quot;topics&quot;: {
+      &quot;publishes&quot;: [&quot;example.notes/saved&quot;],
+      &quot;subscribes&quot;: [&quot;ilium.progress/finished&quot;]
+    }
+  },
+  &quot;capabilities&quot;: {
+    &quot;server&quot;: [],
+    &quot;client&quot;: [&quot;topics.subscribe:ilium.progress/finished&quot;]
+  }
+}
+</code></pre>
+<p>The client side needs no grant to receive its own server side's messages. A message to another
+plugin would add <code>messages.peer:&lt;that-plugin-id&gt;</code> to the sending side's list.</p>
+<h3 id="example-the-server-side-publishes-and-messages-the-client-side-rust">Example: the server side publishes and messages the client side (Rust)</h3>
+<p>The server side runs when the user invokes <code>example.notes/save</code>. It publishes the topic for other
+plugins, then sends the same data to its own client side.</p>
+<pre><code class="language-rust">use ilium_plugin_sdk::prelude::*;
+use ilium_plugin_sdk::host::log::{self, Level};
+use ilium_plugin_sdk::host::topics;
+use ilium_plugin_sdk::types::events::CommandInvokedEvent;
+use ilium_plugin_sdk::types::intents::{MessageSpec, MessageTarget, PluginSide};
+
+#[ilium_plugin(side = &quot;server&quot;)]
+#[derive(Default)]
+struct NotesServer;
+
+impl Lifecycle for NotesServer {
+    fn activate(&amp;mut self, _context: Activation) -&gt; Result&lt;(), PluginError&gt; {
+        Ok(())
+    }
+
+    fn deactivate(&amp;mut self, _reason: DeactivationReason) -&gt; Option&lt;Vec&lt;u8&gt;&gt; {
+        None
+    }
+}
+
+impl Handler for NotesServer {
+    fn on_events(&amp;mut self, batch: Vec&lt;Event&gt;) -&gt; Vec&lt;Submission&gt; {
+        let mut submissions = Vec::new();
+        for event in batch {
+            let Event::CommandInvoked(CommandInvokedEvent { command, .. }) = event else {
+                continue;
+            };
+            if command == &quot;example.notes/save&quot; {
+                submissions.extend(announce_saved(&quot;notes/plan.md&quot;));
+            }
+        }
+        submissions
+    }
+}
+
+fn announce_saved(path: &amp;str) -&gt; Vec&lt;Submission&gt; {
+    let payload = format!(r#&quot;{{&quot;path&quot;:&quot;{path}&quot;}}&quot;#);
+    if let Err(error) = topics::publish(&quot;example.notes/saved&quot;, &amp;payload) {
+        log::log(Level::Warn, &amp;format!(&quot;publish refused: {:?}&quot;, error.code));
+    }
+    vec![Submission::new(Intent::Message(MessageSpec {
+        to: MessageTarget {
+            plugin: &quot;example.notes&quot;.to_string(),
+            side: PluginSide::Client,
+            client: None,
+        },
+        channel: &quot;saved&quot;.to_string(),
+        payload: payload.into_bytes(),
+    }))]
+}
+</code></pre>
+<h3 id="example-the-client-side-receives-the-topic-and-the-message-rust">Example: the client side receives the topic and the message (Rust)</h3>
+<p>The client side receives the progress topic through its grant and the saved message from its own
+server side.</p>
+<pre><code class="language-rust">use ilium_plugin_sdk::prelude::*;
+use ilium_plugin_sdk::host::log::{self, Level};
+use ilium_plugin_sdk::types::events::{MessageEvent, TopicPublishedEvent};
+
+#[ilium_plugin(side = &quot;client&quot;)]
+#[derive(Default)]
+struct NotesClient;
+
+impl Lifecycle for NotesClient {
+    fn activate(&amp;mut self, _context: Activation) -&gt; Result&lt;(), PluginError&gt; {
+        Ok(())
+    }
+
+    fn deactivate(&amp;mut self, _reason: DeactivationReason) -&gt; Option&lt;Vec&lt;u8&gt;&gt; {
+        None
+    }
+}
+
+impl Handler for NotesClient {
+    fn on_events(&amp;mut self, batch: Vec&lt;Event&gt;) -&gt; Vec&lt;Submission&gt; {
+        for event in batch {
+            match event {
+                Event::TopicPublished(TopicPublishedEvent { topic, from, payload_json }) =&gt; {
+                    log::log(Level::Info, &amp;format!(&quot;{topic}: {payload_json}&quot;));
+                }
+                Event::Message(MessageEvent { from, channel, payload, .. })
+                    if channel == &quot;saved&quot; =&gt;
+                {
+                    log::log(Level::Info, &amp;format!(&quot;saved by {from}: {} bytes&quot;, payload.len()));
+                }
+                _ =&gt; {}
+            }
+        }
+        Vec::new()
+    }
+}
+</code></pre>
+<h3 id="example-the-server-side-publishes-and-messages-the-client-side-typescript">Example: the server side publishes and messages the client side (TypeScript)</h3>
+<pre><code class="language-ts">import { definePlugin, PluginError, type Event } from '@ilium/plugin-sdk';
+import type { Intent, Submission } from '@ilium/plugin-sdk/types';
+import { publish } from '@ilium/plugin-sdk/host/topics';
+import { log } from '@ilium/plugin-sdk/host/log';
+
+function announceSaved(path: string): Submission[] {
+  const payload = JSON.stringify({ path });
+  try {
+    publish('example.notes/saved', payload);
+  } catch (error) {
+    log('warn', `publish refused: ${(error as PluginError).code}`);
+  }
+  const intent: Intent = {
+    tag: 'message',
+    val: {
+      to: { plugin: 'example.notes', side: 'client', client: undefined },
+      channel: 'saved',
+      payload: new TextEncoder().encode(payload),
+    },
+  };
+  return [{ intent, correlation: 1n, dedupKey: undefined }];
+}
+
+export const { lifecycle, handler } = definePlugin({
+  side: 'server',
+  activate() {},
+  onEvents(batch: Event[]): Submission[] {
+    const out: Submission[] = [];
+    for (const event of batch) {
+      if (event.tag === 'command-invoked' &amp;&amp; event.val.command === 'example.notes/save') {
+        out.push(...announceSaved('notes/plan.md'));
+      }
+    }
+    return out;
+  },
+});
+</code></pre>
+<h3 id="example-the-client-side-receives-the-topic-and-the-message-typescript">Example: the client side receives the topic and the message (TypeScript)</h3>
+<pre><code class="language-ts">import { definePlugin, type Event } from '@ilium/plugin-sdk';
+import type { Submission } from '@ilium/plugin-sdk/types';
+import { log } from '@ilium/plugin-sdk/host/log';
+
+export const { lifecycle, handler } = definePlugin({
+  side: 'client',
+  activate() {},
+  onEvents(batch: Event[]): Submission[] {
+    for (const event of batch) {
+      if (event.tag === 'topic-published') {
+        const { topic, from, payloadJson } = event.val;
+        log('info', `${topic}: ${payloadJson}`);
+      } else if (event.tag === 'message' &amp;&amp; event.val.channel === 'saved') {
+        log('info', `saved by ${event.val.from}: ${event.val.payload.length} bytes`);
+      }
+    }
+    return [];
+  },
+});
+</code></pre>
+<p>The intent completes <code>ok</code> once the message is queued for the client side. A subscriber to
+<code>example.notes/*</code> receives one <code>topic-published</code> event with <code>from</code> set to <code>example.notes</code>.</p>
+<h3 id="what-the-user-sees">What the user sees</h3>
+<p>The user sees messages and topics only through what plugins do with them and through their logs.
+The log of the subscriber after one save looks like this:</p>
+<pre class="term">$ ilium plugin logs example.notes-watch --tail 2
+2026-10-11 10:20:31 info  example.notes/saved: {"path":"notes/plan.md"}
+2026-10-11 10:20:31 info  saved by example.notes: 24 bytes
+$ 2 lines shown, 0 dropped
+</pre>
+
+<p>Illustrative, not generated. The log of a subscriber that reacts to the saved topic and the message.</p>
+<p>When a publish is refused, the publisher's own code decides what the user sees. The example above
+logs this warning:</p>
+<pre class="term">$ ilium plugin logs example.notes --tail 1
+2026-10-11 10:21:04 warn  publish refused: InvalidArgument
+$ 1 line shown, 0 dropped
+</pre>
+
+<p>Illustrative, not generated. The warning the publisher logs when it publishes an undeclared topic.</p>
+<h3 id="payload-of-the-progress-topic">Payload of the progress topic</h3>
+<p>The progress monitor publishes <code>ilium.progress/finished</code> when a monitored job ends. Subscribe with
+<code>topics.subscribe:ilium.progress/finished</code> or <code>topics.subscribe:ilium.progress/*</code>. The payload is
+a JSON object:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>pane</code></td>
+<td>number</td>
+<td>Node id of the pane that ran the job.</td>
+</tr>
+<tr>
+<td><code>job_id</code></td>
+<td>string</td>
+<td>Id of the monitored job.</td>
+</tr>
+<tr>
+<td><code>status</code></td>
+<td><code>"done"</code> or <code>"error"</code></td>
+<td>Final state of the job.</td>
+</tr>
+<tr>
+<td><code>percent</code></td>
+<td>number, 0 to 100</td>
+<td>Progress when the job ended.</td>
+</tr>
+<tr>
+<td><code>message</code></td>
+<td>string</td>
+<td>One line that describes the outcome.</td>
+</tr>
+<tr>
+<td><code>details</code></td>
+<td>string or <code>null</code></td>
+<td>Longer text, or <code>null</code> when there is none.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="edge-cases-and-errors">Edge cases and errors</h3>
+<p>Synchronous codes are returned by <code>publish</code> at the call. Completion codes arrive as the outcome
+of the message intent.</p>
+<table>
+<thead>
+<tr>
+<th>Situation</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Topic id does not start with the plugin id and <code>/</code></td>
+<td><code>not-permitted</code> (sync)</td>
+</tr>
+<tr>
+<td>Topic not declared in <code>contributes.topics.publishes</code></td>
+<td><code>invalid-argument</code> (sync)</td>
+</tr>
+<tr>
+<td>Topic name over 128 characters, or payload not JSON or over 64 KiB</td>
+<td><code>invalid-argument</code> (sync)</td>
+</tr>
+<tr>
+<td>More than 100 publishes per second</td>
+<td><code>rate-limited</code>, with <code>retry-after-ms</code> (sync)</td>
+</tr>
+<tr>
+<td>Message to the plugin's own other side</td>
+<td><code>ok</code> when queued</td>
+</tr>
+<tr>
+<td>Message to a peer without <code>messages.peer:&lt;plugin-id&gt;</code></td>
+<td><code>refused(not-permitted)</code> on that submission</td>
+</tr>
+<tr>
+<td>Message to a plugin that is not installed or is disabled</td>
+<td><code>refused(not-found)</code></td>
+</tr>
+<tr>
+<td>Channel outside <code>[a-z0-9.-]</code> or longer than 64 characters</td>
+<td><code>refused(invalid-argument)</code></td>
+</tr>
+<tr>
+<td>Message payload over 1 MiB</td>
+<td><code>refused(invalid-argument)</code></td>
+</tr>
+<tr>
+<td>Message to an installed plugin that is not active</td>
+<td>The plugin is activated, and the message is delivered after <code>activate</code></td>
+</tr>
+<tr>
+<td>Subscriber without the subscribe grant</td>
+<td>No events and no error</td>
+</tr>
+<tr>
+<td>Subscriber queue full for <code>topic-published</code></td>
+<td>Oldest events are dropped and counted. The next batch starts with <code>events-dropped</code>.</td>
+</tr>
+<tr>
+<td>Receiver queue full for <code>message</code></td>
+<td>Back-pressure at the sender: the <code>message</code> intent completes <code>refused(busy)</code> and nothing is queued. The receiver is not restarted. A <code>message</code> that was accepted is never dropped [SVC-030].</td>
+</tr>
+</tbody>
+</table>
+<p>A refused submission makes the other submissions of its batch complete as <code>refused(cancelled)</code>,
+with the message <code>batch refused: submission &lt;index&gt;</code>. A publish that is refused for a topic does not
+reach any subscriber.</p>
+<h3 id="used-by">Used by</h3>
+<ul>
+<li>The progress monitor (feature 59) publishes <code>ilium.progress/finished</code> for other plugins to react to.</li>
+<li>Semantic animation (feature 103) subscribes to <code>ilium.organise/*</code> from the tree organisation plugin.</li>
+<li>AI triggers (feature 44) subscribe to topics as their events.</li>
+<li>Extension point owners receive <code>ilium.extensions/changed</code> for their own points.</li>
+<li><code>ilium voice say</code> (feature 52) sends a message from the server side to the plugin's own client side.</li>
+</ul>
+<h3 id="questions-between-the-two-sides">Questions between the two sides</h3>
+<p>A message is one-way news. When the server side needs an answer that only a client can give, such as its terminal size or theme, use <code>client-requests</code> instead: a typed request, a typed answer, a timeout and a failure when the client is gone. See <a href="/pages/api-client-requests/">client requests</a>.</p>
+<table>
+<thead>
+<tr>
+<th>Need</th>
+<th>Use</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Tell the other side something</td>
+<td><code>message</code> intent</td>
+</tr>
+<tr>
+<td>Tell any plugin that subscribed</td>
+<td><code>publish</code> on a topic</td>
+</tr>
+<tr>
+<td>Ask one client a question and wait</td>
+<td><code>client-requests.request</code></td>
+</tr>
+<tr>
+<td>Run a command of the same plugin in another session</td>
+<td><code>sessions.send</code> (below)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="across-sessions">Across sessions</h3>
+<p>The <code>sessions</code> interface (server side, grant <code>sessions.cross</code>, high risk) lists the user's other running Ilium sessions and runs one declared command of the same plugin in one of them.</p>
+<pre><code class="language-wit">// Excerpt of ilium:host/sessions in reference-wit
+record live-session { name: string, project: string, socket-id: string, panes: u32, attached-clients: u32, is-self: bool }
+list-live: func() -&gt; list&lt;live-session&gt;;
+record cross-request { session: string, command: string, arguments-json: string }
+send: func(request: cross-request) -&gt; result&lt;request-id, plugin-error&gt;;
+take-reply: func(request: request-id) -&gt; option&lt;string&gt;;
+</code></pre>
+<p>The target session must have the same plugin installed and enabled with <code>sessions.cross</code> granted, and <code>command</code> must be declared by that plugin. Kernel commands of another session are never reachable. Other users' sockets are never listed. Errors: <code>not-found</code> (session), <code>not-permitted</code> (target lacks the plugin or the grant); completion <code>timed-out</code> or <code>network</code>.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::host::sessions::{self, CrossRequest};
+
+fn ping_other_sessions() {
+    for live in sessions::list_live().into_iter().filter(|s| !s.is_self) {
+        let _ = sessions::send(&amp;CrossRequest {
+            session: live.name, command: &quot;refresh-index&quot;.into(), arguments_json: &quot;{}&quot;.into(),
+        });
+    }
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { listLive, send } from '@ilium/plugin-sdk/host/sessions';
+
+export function pingOtherSessions(): void {
+  for (const live of listLive().filter((s) =&gt; !s.isSelf)) {
+    send({ session: live.name, command: 'refresh-index', argumentsJson: '{}' });
+  }
+}
+</code></pre>
+<p>Kernel changes also reach plugins as events: <code>kernel-settings-changed { tab, keys }</code>, <code>keymap-changed</code> and <code>display-mode-changed { mode }</code> (see <a href="/pages/api-events/">events</a>). They are delivered coalesced, never as topics.</p>
+<p>Requirement ids for this page: [SVC-020], [SVC-021], [SVC-022], [SVC-023], [SVC-024], [SVC-025], [SVC-026], [SVC-027], [SVC-028], [SVC-029], [SVC-030]. See the <a href="/pages/reference-requirements/">requirements index</a>.</p>
+<h3 id="see-also">See also</h3>
+<ul>
+<li><a href="/pages/api-intents/">Intents</a> for the <code>message</code> intent and its outcomes.</li>
+<li><a href="/pages/api-events/">Events</a> for the <code>message</code> and <code>topic-published</code> delivery policies.</li>
+<li><a href="/pages/events-and-intents/">Events and intents</a> for the submission and batch model.</li>
+<li><a href="/pages/api-exports/">Exports</a> for the <code>Lifecycle</code> and <code>Handler</code> exports used in the examples.</li>
+<li><a href="/pages/capabilities/">Capabilities</a> for the grant strings.</li>
+<li><a href="/pages/api-log/">Log</a> for the <code>log</code> import used in the examples.</li>
+</ul>
+<p>Checked against <code>ilium:plugin@0.1.0</code>.</p>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/api-media/"><small>Previous</small>media</a><a class="next" href="/pages/api-notifications/"><small>Next</small>Notifications and sounds</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#what-you-need">What you need</a></li><li class="l2"><a href="#surface">Surface</a></li><li class="l2"><a href="#topic-names-and-patterns">Topic names and patterns</a></li><li class="l2"><a href="#kernel-topic-for-extension-points">Kernel topic for extension points</a></li><li class="l2"><a href="#routing">Routing</a></li><li class="l2"><a href="#manifest-declarations">Manifest declarations</a></li><li class="l2"><a href="#example-the-server-side-publishes-and-messages-the-client-side-rust">Example: the server side publishes and messages the client side (Rust)</a></li><li class="l2"><a href="#example-the-client-side-receives-the-topic-and-the-message-rust">Example: the client side receives the topic and the message (Rust)</a></li><li class="l2"><a href="#example-the-server-side-publishes-and-messages-the-client-side-typescript">Example: the server side publishes and messages the client side (TypeScript)</a></li><li class="l2"><a href="#example-the-client-side-receives-the-topic-and-the-message-typescript">Example: the client side receives the topic and the message (TypeScript)</a></li><li class="l2"><a href="#what-the-user-sees">What the user sees</a></li><li class="l2"><a href="#payload-of-the-progress-topic">Payload of the progress topic</a></li><li class="l2"><a href="#edge-cases-and-errors">Edge cases and errors</a></li><li class="l2"><a href="#used-by">Used by</a></li><li class="l2"><a href="#questions-between-the-two-sides">Questions between the two sides</a></li><li class="l2"><a href="#across-sessions">Across sessions</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

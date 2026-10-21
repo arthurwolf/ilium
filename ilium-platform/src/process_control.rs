@@ -375,20 +375,12 @@ pub fn processes_using_directory_bounded(
         }
         let cwd_matches = match read_process_cwd(&entry.path(), deadline) {
             Ok(cwd) => cwd.starts_with(&root),
-            Err(error)
-                if error.kind() == io::ErrorKind::PermissionDenied
-                    && is_unreadable_init_child(process_id) =>
-            {
-                // Init-managed user services (for example `systemd --user`) hide their
-                // cwd and fds from every other process. The fd scan below still runs.
-                false
-            }
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            Err(error) if process_vanished(&error) => {
                 // A vanished proc entry is normal; an existing live process
                 // with an unreadable cwd is not proof that the path is free.
                 match read_linux_process(process_id) {
                     Ok(process) if matches!(process.state, 'Z' | 'X') => {}
-                    Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                    Err(error) if process_vanished(&error) => {}
                     Ok(_) => {
                         return Err(io::Error::other(format!(
                             "cwd of live process {process_id} is unavailable"
@@ -489,6 +481,14 @@ pub fn processes_using_directory_bounded(
     ))
 }
 
+/// A process can exit between `/proc` listing and its per-process reads. procfs then
+/// answers `ENOENT` for some files and `ESRCH` ("No such process") for others, and both
+/// mean the same thing: the process is gone and cannot hold the path.
+#[cfg(target_os = "linux")]
+fn process_vanished(error: &io::Error) -> bool {
+    error.kind() == io::ErrorKind::NotFound || error.raw_os_error() == Some(libc::ESRCH)
+}
+
 /// Open descriptors matter even when a process changed its cwd out of the worktree.
 /// This remains an observation, not an exclusion of future external opens or mmap-only use.
 #[cfg(target_os = "linux")]
@@ -499,10 +499,10 @@ fn linux_process_has_worktree_fd(
 ) -> io::Result<bool> {
     let entries = match std::fs::read_dir(format!("/proc/{process_id}/fd")) {
         Ok(entries) => entries,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+        Err(error) if process_vanished(&error) => {
             return match read_linux_process(process_id) {
                 Ok(process) if matches!(process.state, 'Z' | 'X') => Ok(false),
-                Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+                Err(error) if process_vanished(&error) => Ok(false),
                 Ok(_) => Err(io::Error::other(format!(
                     "fds of live process {process_id} are unavailable"
                 ))),
@@ -533,20 +533,6 @@ fn linux_process_has_worktree_fd(
         }
     }
     Ok(false)
-}
-
-/// True for a live process whose parent is init (pid 1) and whose procfs links
-/// are unreadable to us. Only the user-service manager matches this shape in
-/// practice (`systemd --user` runs as a child of init with a non-dumpable
-/// profile). Pane processes are children of `ilium-server`, so they keep failing
-/// closed. A process orphaned into init would also match; that residual gap is
-/// accepted deliberately, and the fd scan still applies to it.
-#[cfg(target_os = "linux")]
-fn is_unreadable_init_child(process_id: u32) -> bool {
-    matches!(
-        read_linux_process(process_id),
-        Ok(process) if process.parent_id == 1 && !matches!(process.state, 'Z' | 'X')
-    )
 }
 
 #[cfg(target_os = "linux")]
@@ -1572,5 +1558,19 @@ mod tests {
         child.wait().unwrap();
         wait_for_group_exit(process_id, Duration::from_secs(3)).unwrap();
         assert!(!process_group_exists(process_id).unwrap());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn exited_process_errors_count_as_vanished_including_esrch() {
+        assert!(super::process_vanished(&io::Error::from_raw_os_error(
+            libc::ESRCH
+        )));
+        assert!(super::process_vanished(&io::Error::from(
+            io::ErrorKind::NotFound
+        )));
+        assert!(!super::process_vanished(&io::Error::from(
+            io::ErrorKind::PermissionDenied
+        )));
     }
 }
