@@ -416,6 +416,10 @@ Builds the plugin, installs it as a development copy, and rebuilds and reloads i
 
 - **[DEV-195]** `log-level` with no argument MUST print the current threshold. With a level it MUST set the threshold for that plugin and all its sides until the session stops. `--reset` MUST return to the session default.
 
+## status
+
+`ilium plugin status [<id>] --json` prints one line per plugin with its health, the reason for it and the numbers behind it. Without `<id>` it lists every plugin; with `<id>` it prints that plugin only. Without `--json` it prints a table with the columns ID, HEALTH, P99 and NEAR. The record fields, health states and the meaning of each reason are defined in [Health and watchdog](/pages/reference-health-and-watchdog/).
+
 ## trace, profile, inspect and doctor
 
 These commands print text by default and JSONL with `--json`. Their output content is defined in [Debugging tools](/pages/reference-debugging-tools/).

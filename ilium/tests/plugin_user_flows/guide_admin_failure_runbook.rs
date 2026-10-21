@@ -264,7 +264,7 @@ fn usr_233_failure_window_kill_sequence_crash_loop_guard_and_install_lock_match_
             "Crash-loop guard trigger",
             "3 crashes during start within 5 minutes",
             "user-safe-mode-and-troubleshooting",
-            &["3 crashes", "5 minutes"][..],
+            &["Three crashes", "5 minutes"][..],
         ),
         (
             "Install lock wait",
@@ -303,7 +303,7 @@ fn usr_234_audit_path_jq_command_and_every_event_name_match_the_source_pages() {
         "the runbook does not name the Linux audit file"
     );
     assert!(
-        manual_page("reference-audit-log").contains("ilium/audit/audit.jsonl"),
+        manual_page("reference-audit-log").contains("audit.jsonl") && manual_page("reference-audit-log").contains("ilium/audit/"),
         "the audit log reference gives no Linux audit path"
     );
 

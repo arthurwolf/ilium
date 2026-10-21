@@ -4,7 +4,7 @@
 
 use crate::support::*;
 
-const MATRIX_PAGE: &str = "reference-core-replacement-matrix.md";
+const MATRIX_PAGE: &str = "reference-core-replacement-matrix";
 const MATRIX_HEADING: &str = "### The matrix";
 
 /// The core plugin id and the CLI names of each matrix row that names any CLI command.
