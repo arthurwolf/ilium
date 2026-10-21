@@ -68,7 +68,7 @@ Render triggers, in order of when they are coalesced:
 | Theme or font change | The host repaints the last tree of every open view at once with the new role colours, delivers `theme-changed`, and triggers exactly one render per open view, coalesced with any other trigger in the same 16 ms window. The plugin need not call `ui.invalidate` |
 | User action in the view | The `ui-action` event is delivered first; the render follows after `on-events` returns |
 
-The client draws the last tree until the new tree arrives. The new tree replaces it between frames, never partway through a frame. The render deadline is `render_deadline_ms`: 10 ms by default, 20 ms at most. A render that exceeds it is interrupted by epoch interruption and traps with `ui.render-timeout`, which counts as one failure under the restart rule. The view keeps its previous tree, drawn with the stale marker, until a later render succeeds.
+The client draws the last tree until the new tree arrives. The new tree replaces it between frames, never partway through a frame. The render deadline is `render_deadline_ms`: 10 ms by default, 20 ms at most. A render that exceeds it is interrupted by epoch interruption and traps with `trap.deadline`, and the logged reason is `ui.render-timeout`, which counts as one failure under the restart rule. The view keeps its previous tree, drawn with the stale marker, until a later render succeeds.
 
 The tree is diffed by the client against the previous tree, keyed by node `key`. Only changed subtrees are re-laid out.
 

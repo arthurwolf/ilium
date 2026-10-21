@@ -162,7 +162,7 @@ The host answers each submission with a `request-completed` event. The SDK passe
 | Outcome | When it happens | What the plugin does |
 |---|---|---|
 | `ok` | The id is in the catalogue and the sound is sent to the audio output. | Nothing. |
-| `refused(not-permitted)` | The grant is missing, declined or revoked during the call. Every other submission in the same batch completes as `refused(cancelled)`. | Do not retry. Tell the user the grant is needed. |
+| `refused(not-permitted)` | The grant is missing or declined, or was revoked before the call started. Every other submission in the same batch completes as `refused(cancelled)`. | Do not retry. Tell the user the grant is needed. |
 | `refused(not-found)` | The id is not in `catalog()`. Only this submission is refused. | Check `catalog()` first. Do not retry the same id. |
 | `refused(rate-limited)` | More than 4 `play-sound` submissions per second from this plugin. The result carries `retry-after-ms`. | Wait for `retry-after-ms`, or drop the sound. The key is not reserved, so a retry with the same key is valid. |
 | `duplicate(original)` | The same key was reserved within the last 10 minutes. The `original` field names the earlier submission. | Nothing. The earlier sound was already accepted. |
@@ -176,7 +176,7 @@ Edge cases:
 - A plugin that submits 5 `play-sound` intents inside one second gets `ok` for 4 and `refused(rate-limited)` for the fifth.
 - A sound file that is missing or not WAV or OGG Vorbis fails the install. It never fails at play time.
 - A `play-sound` on a client without an audio device completes as `failed(io)`. The plugin keeps running and no failure is counted.
-- A grant revoked while a batch is in flight refuses the current submission with `not-permitted` and the later ones with `refused(cancelled)`. The plugin is re-activated with the reduced grants.
+- A grant revoked while a batch is in flight refuses the current submission with `revoked` and the later ones with `refused(cancelled)`. The plugin is re-activated with the reduced grants.
 
 ### Rate and dedup rules
 

@@ -231,7 +231,8 @@ An answer the user gave to an unchanged grant is kept. New and widened grants st
 | The terminal is smaller than the dialog minimum (40 by 12) | The dialog shows `Terminal too small` and Cancel only |
 | Two clients attached | The dialog opens in the client that most recently had input; the other shows `Waiting for approval` |
 | Grants store missing | All third-party plugins are treated as not installed and the user is told |
-| Package re-signed with the same key, same version | `install` refuses with `package.version-reused` ([PKG-274]) |
+| Package re-signed with the same key, same version and same manifest | No change: `install.already-installed` warning, exit 0 ([LIF-072]) |
+| Same version, different manifest SHA-256 | `install` refuses with `package.version-reused` ([PKG-274]) |
 
 ### See also
 

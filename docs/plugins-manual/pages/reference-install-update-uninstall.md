@@ -166,7 +166,7 @@ The JSON Schema of the file:
 
 ### The install pipeline
 
-`ilium plugin install <file.iliumpkg>` runs these steps in order. This table groups the 11 numbered steps of SEC-100 into 7 rows; other pages cite SEC-100 step numbers (policy is SEC-100 step 6, commit is step 11), so refer to steps by name. A failure at any step stops the pipeline, removes what the pipeline created and leaves the registry unchanged. Step 2 is the validation order of [Package format](/pages/reference-package-format/#the-validation-order) (PKG-149); this page does not define a second order.
+`ilium plugin install <file.iliumpkg>` runs these steps in order. This table groups the 11 numbered steps of SEC-100 into 7 rows; other pages cite SEC-100 step numbers (policy is SEC-100 step 7, commit is step 11), so refer to steps by name. A failure at any step stops the pipeline, removes what the pipeline created and leaves the registry unchanged. Step 2 is the validation order of [Package format](/pages/reference-package-format/#the-validation-order) (PKG-149); this page does not define a second order.
 
 | Step | Action | On failure | Code |
 |---|---|---|---|
