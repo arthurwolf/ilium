@@ -89,7 +89,17 @@ generic over any async byte stream and must not learn about sockets or pipes.
 - Run `cargo clippy --workspace --all-targets` and `cargo fmt --check` before considering any change done. Treat new clippy warnings as things to fix, not suppress with `#[allow]`, unless there's a specific documented reason.
 - **Remote build output is cleaned immediately.** The ni-build service retrieves hash-verified artifacts and receipts, then removes only its exact `/data/ni-build-service/jobs/<uuid>/` directory. Preserve failed recovery evidence and other owners' jobs. Local returned artifacts are verified build outputs, not locally compiled outputs.
 
+## ni-build is yours to maintain
+
+The ni-build service (dispatcher in `/home/arthur/dev/misc/julia/ni-build` and the remote service on ni-vm) may be modified by agents when a build or test needs it (new toolchain, new operation, fixing the route). Edit, rebuild, reinstall, verify with a real job, report. Never fall back to local compilation; fix the route instead.
+
+## Red gates are work
+
+A failing test, Clippy, fmt or build is never a reason to ask: diagnose, fix, rerun until green, or show the failure is unrelated and pre-existing (verify against a `git archive` snapshot of HEAD) and report it.
+
 ## Capacity gates
+
+A failing capacity gate is work too: investigate the regression, fix the budget or the consumer, rerun; do not stop and ask.
 
 - Never lower a capacity gate (pane counts in scale tests such as `terminal_pool_runtime.rs`, quota limits, worker caps) to make a test or restore pass. A failing capacity gate is a real regression: fix the budget or the consumer.
 
@@ -112,7 +122,7 @@ A feature session is exactly these five steps, and then it stops:
 2. **Implementation**: make the change, with tests, docs and a `CHANGELOG.md` entry.
 3. **Compilation**: compile through ni-build in a separate build folder (see "Where compile and test runs happen").
 4. **Testing**: run the relevant tests, Clippy and `cargo fmt --check`, and exercise the feature in an isolated environment (separate build folder, isolated tmux session, random port) as far as needed to trust it.
-5. **Report**: say what was built, what was verified, and what was not. If the work was done in a worktree, leave the branch committed and ready to merge into `master` (merge-back itself still follows the Git rules in the global file). Then stop.
+5. **Report**: say what was built, what was verified, and what was not. If the work was done in a worktree, commit on the branch, merge master into it, push the branch, and report "Ready to merge into master" (merge-back itself still follows the Git rules in the global file). Then stop.
 
 Not part of a feature session, unless the user asks for it in that request:
 
