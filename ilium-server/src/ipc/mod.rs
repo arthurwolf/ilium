@@ -380,7 +380,12 @@ mod tests {
             .await
             .expect("shutdown did not cancel saturated accept")
             .expect("accept task panicked");
-        listener.state.abort_all_connection_tasks();
+        // Abort the handles directly: `abort_all_connection_tasks` also closes
+        // the ordered event journal, which this test reuses for the fresh
+        // connection that must be admitted after the aborted handle is reaped.
+        for task in listener.state.connection_tasks.lock().unwrap().iter() {
+            task.abort();
+        }
         let admitted_end =
             tokio::time::timeout(TEST_DEADLINE, read_frame::<ServerEvent, _>(&mut admitted))
                 .await

@@ -200,11 +200,12 @@ mod durability_tests {
         }
     }
 
+    /// Each state owns a private execution bank: the shared test bank's admission gate is
+    /// `try_lock`, so concurrent tests reserving journal storage would see transient `Busy`.
     fn state_at(directory: &Path) -> (Arc<ServerState>, Task<()>) {
-        let (sound_requests, sound_task) = crate::sounds::spawn(
-            Arc::new(crate::NoopSoundPlayer),
-            crate::execution::test_general_client(),
-        );
+        let execution = crate::execution::ServerExecution::start().unwrap();
+        let (sound_requests, sound_task) =
+            crate::sounds::spawn(Arc::new(crate::NoopSoundPlayer), execution.client.clone());
         let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
             session_name: "durability-test".to_owned(),
             session_cwd: directory.to_path_buf(),
@@ -253,10 +254,6 @@ mod durability_tests {
     async fn regex_validation_uses_a_real_cpu_worker_and_acceptance_keeps_its_storage() {
         let directory = tempfile::tempdir().unwrap();
         let (state, _sound) = state_at(directory.path());
-        assert!(state
-            .execution
-            .set(crate::execution::ServerExecution::start().unwrap())
-            .is_ok());
         let original = rules("literal accepted message");
         let candidate = crate::text_triggers::validate_in_worker(&state, original.clone(), None)
             .await

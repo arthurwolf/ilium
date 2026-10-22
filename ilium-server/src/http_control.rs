@@ -443,6 +443,20 @@ async fn voice_text(
     }
 }
 
+/// The server's refusal reasons for a worktree removal. The removal is refused
+/// or unconfirmed, so the caller must inspect the worktree rather than assume
+/// it is gone or intact.
+fn workspace_refusal_failure(reasons: &[String]) -> (StatusCode, Json<Value>) {
+    failure(
+        StatusCode::CONFLICT,
+        "worktree-removal-refused",
+        format!(
+            "the worktree removal was refused or is unconfirmed; inspect the worktree before retrying: {}",
+            reasons.join("; ")
+        ),
+    )
+}
+
 async fn run_operation(state: &Arc<ServerState>, operation: Operation) -> ApiResult {
     let before = state.tree.read().await.clone();
     let requests = operation
@@ -460,6 +474,7 @@ async fn run_operation(state: &Arc<ServerState>, operation: Operation) -> ApiRes
     }
     drop(sender);
     let mut rejection = None;
+    let mut workspace_refusal = None;
     while let Some(queued) = receiver.recv_queued().await {
         match queued.event {
             ServerEvent::Error { message } => rejection = Some(message),
@@ -467,11 +482,17 @@ async fn run_operation(state: &Arc<ServerState>, operation: Operation) -> ApiRes
                 result: Err(message),
                 ..
             } => rejection = Some(message),
+            ServerEvent::WorkspaceRemovalBlocked { reasons, .. } => {
+                workspace_refusal = Some(reasons)
+            }
             _ => {}
         }
     }
     if let Some(message) = rejection {
         return Err(failure(StatusCode::CONFLICT, "rejected", message));
+    }
+    if let Some(reasons) = workspace_refusal {
+        return Err(workspace_refusal_failure(&reasons));
     }
     let details = if operation.is_input_only() {
         json!({})
@@ -548,6 +569,21 @@ mod tests {
     #[test]
     fn request_ids_increase() {
         assert!(next_request_id() < next_request_id());
+    }
+
+    #[test]
+    fn refused_worktree_removal_is_a_conflict_with_its_reasons() {
+        let (status, body) = workspace_refusal_failure(&[
+            "worktree has uncommitted changes".to_string(),
+            "process 42 uses the worktree".to_string(),
+        ]);
+        assert_eq!(status, StatusCode::CONFLICT);
+        let text = body.0.to_string();
+        assert!(text.contains("worktree-removal-refused"), "{text}");
+        assert!(
+            text.contains("worktree has uncommitted changes; process 42 uses the worktree"),
+            "{text}"
+        );
     }
 
     #[test]
