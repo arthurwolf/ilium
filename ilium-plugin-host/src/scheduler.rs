@@ -1,17 +1,17 @@
 //! Per-plugin queues, fairness and epoch interruption (reference-runtime-model.md,
 //! reference-host-architecture.md HST-180..216).
 //!
-//! Skeleton: every function with behaviour is `unimplemented!` until the implementation phase.
-//! The reference tests of the `sched` lane drive the scheduler through the testing hooks below
-//! (`executed`, `abandoned`, `set_store_busy`, ...), which exist for those tests only.
+//! Work is owned by named worker banks; instance queues serialize calls and rotate fairly.
 
-use std::marker::PhantomData;
+use ilium_platform::owned_worker::{reserve_owned_worker, OwnedWorker, StopToken, WorkerKind};
+use std::collections::{BTreeMap, VecDeque};
+use std::sync::{mpsc, Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use ilium_plugin_api::generated::types::events::Event;
 use ilium_plugin_api::generated::types::requests::{Outcome, RequestRef};
 use ilium_plugin_api::ids::{PluginId, RequestId};
-use ilium_plugin_api::{PluginError, ProcessKind};
+use ilium_plugin_api::{ErrorCode, PluginError, ProcessKind};
 
 use crate::calls::CallClass;
 use crate::telemetry::LogLine;
@@ -33,37 +33,49 @@ pub const EXECUTOR_THREAD_PREFIX: &str = "ilium-exec-";
 pub const JOB_THREAD_PREFIX: &str = "ilium-job-";
 
 /// Executor threads of a process for a core count (reference-host-architecture.md HST-183).
-pub fn executor_threads(_process: ProcessKind, _cores: usize) -> usize {
-    unimplemented!("host::scheduler::executor_threads")
+pub fn executor_threads(process: ProcessKind, cores: usize) -> usize {
+    match process {
+        ProcessKind::Server => (cores / 2).clamp(2, 4),
+        ProcessKind::Client => (cores / 4).clamp(1, 2),
+        ProcessKind::Cli | ProcessKind::Helper => 1,
+    }
 }
 
 /// Job bank threads for a core count (reference-host-architecture.md HST-184).
-pub fn job_bank_threads(_cores: usize) -> usize {
-    unimplemented!("host::scheduler::job_bank_threads")
+pub fn job_bank_threads(cores: usize) -> usize {
+    (cores / 2).clamp(1, 4)
 }
 
 /// Bounded channel from worker threads to the UI thread (reference-host-architecture.md HST-182).
 #[derive(Debug)]
 pub struct UiWorkChannel<T> {
-    _items: PhantomData<T>,
+    items: Mutex<VecDeque<T>>,
+    capacity: usize,
 }
 
 impl<T> UiWorkChannel<T> {
     /// A channel that holds at most `capacity` items.
-    pub fn new(_capacity: usize) -> UiWorkChannel<T> {
+    pub fn new(capacity: usize) -> UiWorkChannel<T> {
         UiWorkChannel {
-            _items: PhantomData,
+            items: Mutex::new(VecDeque::new()),
+            capacity,
         }
     }
 
     /// Queues an item; a full channel hands it back (reference-host-architecture.md HST-182).
-    pub fn try_send(&self, _item: T) -> Result<(), T> {
-        unimplemented!("host::scheduler::UiWorkChannel::try_send")
+    pub fn try_send(&self, item: T) -> Result<(), T> {
+        let mut items = lock(&self.items);
+        if items.len() >= self.capacity {
+            Err(item)
+        } else {
+            items.push_back(item);
+            Ok(())
+        }
     }
 
     /// Takes the oldest queued item, if any.
     pub fn try_recv(&self) -> Option<T> {
-        unimplemented!("host::scheduler::UiWorkChannel::try_recv")
+        lock(&self.items).pop_front()
     }
 }
 
@@ -138,12 +150,22 @@ impl CallKind {
 
     /// The queue priority, `None` for kinds that bypass the queue (reference-host-architecture.md HST-185).
     pub fn priority(self) -> Option<u8> {
-        unimplemented!("host::scheduler::CallKind::priority")
+        match self {
+            Self::Activate | Self::Deactivate => Some(1),
+            Self::OnEvents => Some(3),
+            Self::Render => Some(4),
+            Self::Annotate => Some(5),
+            Self::SceneFrame | Self::JobRun => None,
+            _ => Some(2),
+        }
     }
 
     /// Whether a call of this kind may yield to the next side mid-way (reference-host-architecture.md HST-187).
     pub fn may_yield(self) -> bool {
-        unimplemented!("host::scheduler::CallKind::may_yield")
+        matches!(
+            self,
+            Self::Activate | Self::JobRun | Self::ServiceCallWaitingForActivation
+        )
     }
 }
 
@@ -199,111 +221,509 @@ pub struct QueueStats {
     pub running: bool,
 }
 
-/// The scheduler of all plugin queues (reference-host-architecture.md).
-#[derive(Debug)]
-pub struct Scheduler;
+type Work = Box<dyn FnOnce() + Send>;
+
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+struct PendingCall {
+    kind: CallKind,
+    ticket: u64,
+    queued_at: Instant,
+    work: Work,
+}
+
+struct SideQueue {
+    calls: Vec<PendingCall>,
+    events: VecDeque<Event>,
+    capacity: usize,
+    dropped: u64,
+    busy: bool,
+    activating: bool,
+    activation_failed: bool,
+    peak: usize,
+    call_window_start: Option<Instant>,
+    calls_in_window: usize,
+    breaches: Vec<(CallClass, u64)>,
+    source_rate: Option<u32>,
+    source_times: VecDeque<Instant>,
+    bucket: ExecutionBucket,
+}
+
+impl Default for SideQueue {
+    fn default() -> Self {
+        Self {
+            calls: Vec::new(),
+            events: VecDeque::new(),
+            capacity: 1024,
+            dropped: 0,
+            busy: false,
+            activating: false,
+            activation_failed: false,
+            peak: 0,
+            call_window_start: None,
+            calls_in_window: 0,
+            breaches: Vec::new(),
+            source_rate: None,
+            source_times: VecDeque::new(),
+            bucket: ExecutionBucket::new(),
+        }
+    }
+}
+
+#[derive(Default)]
+struct SchedulerState {
+    sides: BTreeMap<PluginId, SideQueue>,
+    ready_order: Vec<PluginId>,
+    ticket: u64,
+    last_tick: Option<Instant>,
+    executed: Vec<ExecutedCall>,
+    abandoned: Vec<AbandonedCall>,
+    logs: Vec<LogLine>,
+}
+
+impl SchedulerState {
+    fn side(&mut self, plugin: &PluginId) -> &mut SideQueue {
+        if !self.sides.contains_key(plugin) {
+            self.ready_order.push(plugin.clone());
+        }
+        self.sides.entry(plugin.clone()).or_default()
+    }
+}
+
+/// An owned worker bank. Dropping closes admission; the platform supervisor retains
+/// physical custody through join, including workers still returning from guest code.
+struct WorkerBank {
+    sender: Option<mpsc::SyncSender<Work>>,
+    workers: Vec<OwnedWorker>,
+}
+
+impl WorkerBank {
+    fn new(prefix: &str, count: usize) -> Self {
+        let (sender, receiver) = mpsc::sync_channel::<Work>(1024);
+        let receiver = Arc::new(Mutex::new(receiver));
+        let mut workers = Vec::new();
+        for index in 0..count {
+            let receiver = receiver.clone();
+            let name = if count == 1 && prefix == SCENE_THREAD_NAME {
+                prefix.to_owned()
+            } else {
+                format!("{prefix}{index}")
+            };
+            let started = reserve_owned_worker(Some(2 * 1024 * 1024), ()).and_then(|reservation| {
+                reservation.spawn(
+                    &name,
+                    WorkerKind::Cooperative,
+                    StopToken::default(),
+                    || {},
+                    move |stop| {
+                        ilium_platform::thread_priority::lower_current_thread(
+                            ilium_platform::thread_priority::WorkerPriority::BelowNormal,
+                        );
+                        while !stop.is_stopped() {
+                            let work = lock(&receiver).recv();
+                            let Ok(work) = work else {
+                                break;
+                            };
+                            // A guest adapter's panic cannot kill the bank or strand other stores.
+                            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(work));
+                        }
+                    },
+                )
+            });
+            match started {
+                Ok(worker) => workers.push(worker),
+                Err(error) => {
+                    eprintln!("Plugin scheduler worker creation failed: {error}");
+                    break;
+                }
+            }
+        }
+        Self {
+            sender: (!workers.is_empty()).then_some(sender),
+            workers,
+        }
+    }
+
+    fn send(&self, work: Work) -> Result<(), Work> {
+        match &self.sender {
+            Some(sender) => sender.try_send(work).map_err(|error| match error {
+                mpsc::TrySendError::Full(work) | mpsc::TrySendError::Disconnected(work) => work,
+            }),
+            None => Err(work),
+        }
+    }
+}
+
+impl Drop for WorkerBank {
+    fn drop(&mut self) {
+        self.sender.take();
+        self.workers.clear();
+    }
+}
+
+/// Per-instance queues and owned execution banks. `tick` is a dispatcher operation:
+/// the client UI submits through `UiWorkChannel` and never calls it to run guests.
+pub struct Scheduler {
+    state: Mutex<SchedulerState>,
+    dispatch: Mutex<()>,
+    executor: WorkerBank,
+    scenes: WorkerBank,
+    jobs: WorkerBank,
+    epoch_tick_ms: u64,
+}
+
+impl std::fmt::Debug for Scheduler {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("Scheduler")
+            .field("epoch_tick_ms", &self.epoch_tick_ms)
+            .finish_non_exhaustive()
+    }
+}
 
 impl Scheduler {
-    /// A scheduler with the given epoch tick (reference-host-runtime.md).
-    pub fn new(_epoch_tick_ms: u64) -> Scheduler {
-        Scheduler
+    /// Creates owned worker banks; epoch interruption is supplied by the guest runtime.
+    pub fn new(epoch_tick_ms: u64) -> Scheduler {
+        let cores = std::thread::available_parallelism().map_or(1, usize::from);
+        Self {
+            state: Mutex::new(SchedulerState::default()),
+            dispatch: Mutex::new(()),
+            executor: WorkerBank::new(
+                EXECUTOR_THREAD_PREFIX,
+                executor_threads(ProcessKind::Server, cores),
+            ),
+            scenes: WorkerBank::new(SCENE_THREAD_NAME, 1),
+            jobs: WorkerBank::new(JOB_THREAD_PREFIX, job_bank_threads(cores)),
+            epoch_tick_ms,
+        }
     }
 
-    /// Statistics of a plugin's queue, if it has one.
-    pub fn stats(&self, _plugin: &PluginId) -> Option<QueueStats> {
-        unimplemented!("host::scheduler::Scheduler::stats")
+    /// Current event queue and store admission statistics.
+    pub fn stats(&self, plugin: &PluginId) -> Option<QueueStats> {
+        lock(&self.state).sides.get(plugin).map(|side| QueueStats {
+            queued_events: side.events.len(),
+            dropped_events: side.dropped,
+            running: side.busy,
+        })
     }
 
-    /// Advances time: runs due calls, applies deadlines, rotates fairly between plugins.
-    pub fn tick(&self, _now: Instant) {
-        unimplemented!("host::scheduler::Scheduler::tick")
+    /// Dispatches one fair pass, with one in-flight call per instance Store.
+    /// Separate scene/job Stores bypass ordinary instance admission.
+    pub fn tick(&self, now: Instant) {
+        let _dispatch = lock(&self.dispatch);
+        let order = {
+            let mut state = lock(&self.state);
+            if let Some(previous) = state.last_tick {
+                if now < previous {
+                    return;
+                }
+                let gap = now.duration_since(previous);
+                if gap > Duration::from_secs(1) {
+                    for side in state.sides.values_mut() {
+                        for call in &mut side.calls {
+                            call.queued_at += gap;
+                        }
+                    }
+                    state.last_tick = Some(now);
+                    return;
+                }
+                for side in state.sides.values_mut() {
+                    side.bucket.refill(gap);
+                }
+            }
+            state.last_tick = Some(now);
+            let order = state.ready_order.clone();
+            for plugin in &order {
+                let mut expired = Vec::new();
+                {
+                    let side = state.side(plugin);
+                    side.calls.retain(|call| {
+                        let overdue = caller_deadline(call.kind).is_some_and(|(_, deadline)| {
+                            now.saturating_duration_since(call.queued_at) > deadline
+                        });
+                        if overdue {
+                            expired.push((call.kind, call.ticket));
+                        }
+                        !overdue
+                    });
+                    for (kind, _) in &expired {
+                        if let Some((class, _)) = caller_deadline(*kind) {
+                            if let Some((_, count)) =
+                                side.breaches.iter_mut().find(|(key, _)| *key == class)
+                            {
+                                *count += 1;
+                            } else {
+                                side.breaches.push((class, 1));
+                            }
+                        }
+                    }
+                }
+                for (kind, ticket) in expired {
+                    state.abandoned.push(AbandonedCall {
+                        plugin: plugin.clone(),
+                        kind,
+                        ticket,
+                    });
+                    state.logs.push(LogLine {
+                        plugin: plugin.0.clone(),
+                        level: "warn".into(),
+                        message: format!("host.queue-timeout: {kind:?}"),
+                    });
+                }
+            }
+            order
+        };
+        // Process ordinary calls in round-robin rounds, dispatching every side before
+        // joining this round. A slow side therefore cannot delay another side's start.
+        for _round in 0..SIDE_CALLS_PER_TICK {
+            let mut pending = Vec::new();
+            for plugin in &order {
+                let call = {
+                    let mut state = lock(&self.state);
+                    let side = state.side(plugin);
+                    if side.call_window_start.is_none_or(|start| {
+                        now.saturating_duration_since(start) >= Duration::from_millis(TICK_MS)
+                    }) {
+                        side.call_window_start = Some(now);
+                        side.calls_in_window = 0;
+                    }
+                    let index = side
+                        .calls
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, call)| {
+                            call.kind.priority().is_none()
+                                || (side.calls_in_window < SIDE_CALLS_PER_TICK
+                                    && !side.busy
+                                    && !side.activation_failed
+                                    && (!side.activating || call.kind == CallKind::Activate))
+                        })
+                        .min_by_key(|(_, call)| (call.kind.priority().unwrap_or(0), call.ticket))
+                        .map(|(index, _)| index);
+                    index.map(|index| {
+                        let call = side.calls.remove(index);
+                        if call.kind.priority().is_some() {
+                            side.busy = true;
+                            side.peak = side.peak.max(1);
+                            side.calls_in_window += 1;
+                        }
+                        call
+                    })
+                };
+                let Some(call) = call else {
+                    continue;
+                };
+                let kind = call.kind;
+                let ticket = call.ticket;
+                let (done, result) = mpsc::channel();
+                let worker: Work = Box::new(move || {
+                    let name = std::thread::current()
+                        .name()
+                        .unwrap_or("unnamed-plugin-worker")
+                        .to_owned();
+                    let succeeded =
+                        std::panic::catch_unwind(std::panic::AssertUnwindSafe(call.work)).is_ok();
+                    let _ = done.send((name, succeeded));
+                });
+                let bank = match kind {
+                    CallKind::SceneFrame => &self.scenes,
+                    CallKind::JobRun => &self.jobs,
+                    _ => &self.executor,
+                };
+                if bank.send(worker).is_ok() {
+                    pending.push((plugin.clone(), kind, ticket, result));
+                } else {
+                    let mut state = lock(&self.state);
+                    if kind.priority().is_some() {
+                        state.side(plugin).busy = false;
+                    }
+                    state.abandoned.push(AbandonedCall {
+                        plugin: plugin.clone(),
+                        kind,
+                        ticket,
+                    });
+                    state.logs.push(LogLine {
+                        plugin: plugin.0.clone(),
+                        level: "error".into(),
+                        message: "host.worker-unavailable: call could not be dispatched".into(),
+                    });
+                }
+            }
+            if pending.is_empty() {
+                break;
+            }
+            for (plugin, kind, ticket, result) in pending {
+                let outcome = result.recv();
+                let mut state = lock(&self.state);
+                if kind.priority().is_some() {
+                    state.side(&plugin).busy = false;
+                }
+                match outcome {
+                    Ok((thread_name, succeeded)) => {
+                        if !succeeded {
+                            state.logs.push(LogLine {
+                                plugin: plugin.0.clone(),
+                                level: "error".into(),
+                                message: "trap.panic: scheduled guest adapter panicked".into(),
+                            });
+                        }
+                        state.executed.push(ExecutedCall {
+                            plugin,
+                            kind,
+                            ticket,
+                            thread_name,
+                            yields: 0,
+                        });
+                    }
+                    Err(_) => state.abandoned.push(AbandonedCall {
+                        plugin,
+                        kind,
+                        ticket,
+                    }),
+                }
+            }
+        }
     }
 
-    /// Registers a plugin side with its event queue capacity (reference-host-architecture.md HST-201).
-    pub fn register_side(&self, _plugin: &PluginId, _event_queue: usize) {
-        unimplemented!("host::scheduler::Scheduler::register_side")
+    /// Registers or updates event queue capacity without discarding queued work.
+    pub fn register_side(&self, plugin: &PluginId, event_queue: usize) {
+        lock(&self.state).side(plugin).capacity = event_queue;
     }
-
-    /// Queues a call and returns its ticket (reference-host-architecture.md HST-185).
-    pub fn enqueue(
-        &self,
-        _plugin: &PluginId,
-        _kind: CallKind,
-        _now: Instant,
-        _work: Box<dyn FnOnce() + Send>,
-    ) -> u64 {
-        unimplemented!("host::scheduler::Scheduler::enqueue")
+    /// Queues real work; ticket order is stable within a priority.
+    pub fn enqueue(&self, plugin: &PluginId, kind: CallKind, now: Instant, work: Work) -> u64 {
+        let mut state = lock(&self.state);
+        state.ticket = state.ticket.saturating_add(1);
+        let ticket = state.ticket;
+        state.side(plugin).calls.push(PendingCall {
+            kind,
+            ticket,
+            queued_at: now,
+            work,
+        });
+        ticket
     }
-
-    /// Every call run so far, in order (testing hook of the `sched` lane, HST-186).
+    /// Completed call observations in dispatch order.
     pub fn executed(&self) -> Vec<ExecutedCall> {
-        unimplemented!("host::scheduler::Scheduler::executed")
+        lock(&self.state).executed.clone()
     }
-
-    /// Every call dropped unrun so far (testing hook of the `sched` lane, HST-191).
+    /// Calls removed before execution.
     pub fn abandoned(&self) -> Vec<AbandonedCall> {
-        unimplemented!("host::scheduler::Scheduler::abandoned")
+        lock(&self.state).abandoned.clone()
     }
-
-    /// Deadline breaches of a plugin per call class (reference-host-architecture.md HST-188).
-    pub fn breach_count(&self, _plugin: &PluginId, _class: CallClass) -> u64 {
-        unimplemented!("host::scheduler::Scheduler::breach_count")
+    /// Number of queued-call deadline breaches of this class.
+    pub fn breach_count(&self, plugin: &PluginId, class: CallClass) -> u64 {
+        lock(&self.state)
+            .sides
+            .get(plugin)
+            .and_then(|side| side.breaches.iter().find(|(key, _)| *key == class))
+            .map_or(0, |(_, count)| *count)
     }
-
-    /// Peak number of calls running in one plugin's store at once (reference-host-architecture.md HST-189).
-    pub fn max_concurrent_calls_in_store(&self, _plugin: &PluginId) -> usize {
-        unimplemented!("host::scheduler::Scheduler::max_concurrent_calls_in_store")
+    /// Maximum simultaneous ordinary Store calls.
+    pub fn max_concurrent_calls_in_store(&self, plugin: &PluginId) -> usize {
+        lock(&self.state)
+            .sides
+            .get(plugin)
+            .map_or(0, |side| side.peak)
     }
-
-    /// Marks a plugin's store busy or free (testing hook of the `sched` lane, HST-189).
-    pub fn set_store_busy(&self, _plugin: &PluginId, _busy: bool) {
-        unimplemented!("host::scheduler::Scheduler::set_store_busy")
+    /// External guest-runtime Store admission, also used by deterministic tests.
+    pub fn set_store_busy(&self, plugin: &PluginId, busy: bool) {
+        lock(&self.state).side(plugin).busy = busy;
     }
-
-    /// Records the start of a plugin's activation (reference-host-architecture.md HST-190).
-    pub fn begin_activation(&self, _plugin: &PluginId) {
-        unimplemented!("host::scheduler::Scheduler::begin_activation")
+    /// Holds other ordinary calls until activation succeeds.
+    pub fn begin_activation(&self, plugin: &PluginId) {
+        let mut state = lock(&self.state);
+        let side = state.side(plugin);
+        side.activating = true;
+        side.activation_failed = false;
     }
-
-    /// Records the end of a plugin's activation (reference-host-architecture.md HST-190).
-    pub fn finish_activation(&self, _plugin: &PluginId, _succeeded: bool) {
-        unimplemented!("host::scheduler::Scheduler::finish_activation")
+    /// Releases admission only after successful activation.
+    pub fn finish_activation(&self, plugin: &PluginId, succeeded: bool) {
+        let mut state = lock(&self.state);
+        let side = state.side(plugin);
+        side.activating = false;
+        side.activation_failed = !succeeded;
     }
-
-    /// The log lines the scheduler wrote, oldest first (reference-host-architecture.md HST-191).
+    /// Captured operational diagnostics.
     pub fn log_lines(&self) -> Vec<LogLine> {
-        unimplemented!("host::scheduler::Scheduler::log_lines")
+        lock(&self.state).logs.clone()
     }
-
-    /// Pushes an event to a side's queue (reference-host-architecture.md HST-202).
-    pub fn push_event(&self, _plugin: &PluginId, _event: Event) -> EventPush {
-        unimplemented!("host::scheduler::Scheduler::push_event")
+    /// Applies the event-kind policy before inserting into the bounded queue.
+    pub fn push_event(&self, plugin: &PluginId, event: Event) -> EventPush {
+        push_to_side(lock(&self.state).side(plugin), event)
     }
-
-    /// Sets the per-second rate a source may push at (reference-host-architecture.md HST-203).
-    pub fn set_source_rate(&self, _plugin: &PluginId, _per_second: u32) {
-        unimplemented!("host::scheduler::Scheduler::set_source_rate")
+    /// Configures a monotonic one-second sliding window.
+    pub fn set_source_rate(&self, plugin: &PluginId, per_second: u32) {
+        lock(&self.state).side(plugin).source_rate = Some(per_second);
     }
-
-    /// Pushes an event from a rate-limited source; over the rate it is refused `rate-limited`
-    /// (reference-host-architecture.md HST-203).
+    /// Rate checks happen before insertion and refused arrivals never enter the window.
     pub fn push_event_from_source(
         &self,
-        _plugin: &PluginId,
-        _event: Event,
+        plugin: &PluginId,
+        event: Event,
     ) -> Result<EventPush, PluginError> {
-        unimplemented!("host::scheduler::Scheduler::push_event_from_source")
+        let mut state = lock(&self.state);
+        let side = state.side(plugin);
+        let now = Instant::now();
+        side.source_times
+            .retain(|at| now.saturating_duration_since(*at) < Duration::from_secs(1));
+        if side
+            .source_rate
+            .is_some_and(|rate| side.source_times.len() >= rate as usize)
+        {
+            let mut error =
+                PluginError::new(ErrorCode::RateLimited, "Plugin event source rate exceeded");
+            let remaining = side.source_times.front().map_or(1000, |at| {
+                1000u64.saturating_sub(now.saturating_duration_since(*at).as_millis() as u64)
+            });
+            error.retry_after_ms = Some(
+                remaining
+                    .div_ceil(10)
+                    .max(1)
+                    .saturating_mul(10)
+                    .min(u64::from(u32::MAX)) as u32,
+            );
+            return Err(error);
+        }
+        if side.source_rate.is_some() {
+            side.source_times.push_back(now);
+        }
+        Ok(push_to_side(side, event))
     }
+    /// Number of undelivered events.
+    pub fn queue_len(&self, plugin: &PluginId) -> usize {
+        lock(&self.state)
+            .sides
+            .get(plugin)
+            .map_or(0, |side| side.events.len())
+    }
+    /// Overrides the side's quota balance for deterministic runtime tests.
+    pub fn set_bucket_balance_ms(&self, plugin: &PluginId, balance_ms: i64) {
+        lock(&self.state).side(plugin).bucket.balance = balance_ms;
+    }
+}
 
-    /// Events waiting in a side's queue (reference-host-architecture.md HST-202).
-    pub fn queue_len(&self, _plugin: &PluginId) -> usize {
-        unimplemented!("host::scheduler::Scheduler::queue_len")
-    }
-
-    /// Sets a plugin's execution bucket balance (testing hook of the `sched` lane, HST-206).
-    pub fn set_bucket_balance_ms(&self, _plugin: &PluginId, _balance_ms: i64) {
-        unimplemented!("host::scheduler::Scheduler::set_bucket_balance_ms")
-    }
+fn caller_deadline(kind: CallKind) -> Option<(CallClass, Duration)> {
+    let (class, ms) = match kind {
+        CallKind::OnEvents | CallKind::Render | CallKind::SceneFrame | CallKind::JobRun => {
+            return None
+        }
+        CallKind::Activate => (CallClass::Activate, 2000),
+        CallKind::Deactivate => (CallClass::Deactivate, 500),
+        CallKind::MenuItems => (CallClass::MenuItems, 20),
+        CallKind::QueryCatalog => (CallClass::QueryCatalog, 20),
+        CallKind::ListVirtualChildren => (CallClass::ListVirtualChildren, 20),
+        CallKind::Tokens => (CallClass::Tokens, 10),
+        CallKind::SettingsValidate => (CallClass::SettingsValidate, 100),
+        CallKind::Detector => (CallClass::Detector, 20),
+        CallKind::Annotate => (CallClass::Annotate, 10),
+        CallKind::HookHandler => (CallClass::Event, 20),
+        _ => (CallClass::Command, 50),
+    };
+    Some((class, Duration::from_millis(ms)))
 }
 
 // ---- Event queues, batches and stream credit (reference-host-architecture.md HST-200..205) -----
@@ -329,108 +749,361 @@ pub enum QueuePolicy {
 }
 
 /// The queue policy of an event kind (reference-host-architecture.md HST-202).
-pub fn event_queue_policy(_event: &Event) -> QueuePolicy {
-    unimplemented!("host::scheduler::event_queue_policy")
+pub fn event_queue_policy(event: &Event) -> QueuePolicy {
+    match event {
+        Event::TreeChanged(_)
+        | Event::PaneFocused(_)
+        | Event::PaneResized(_)
+        | Event::PaneTitleChanged(_)
+        | Event::AgentGoalChanged(_)
+        | Event::EditorChanged(_)
+        | Event::SettingsChanged(_)
+        | Event::TimerFired(_)
+        | Event::JobProgress(_)
+        | Event::ViewVisibility(_)
+        | Event::FsChanged(_)
+        | Event::ThemeChanged
+        | Event::EventsDropped(_)
+        | Event::ScreenChanged(_)
+        | Event::SignalChanged(_)
+        | Event::AgentModelChanged(_)
+        | Event::EditorViewportChanged(_)
+        | Event::AttentionChanged(_)
+        | Event::KernelSettingsChanged(_)
+        | Event::KeymapChanged
+        | Event::DisplayModeChanged(_) => QueuePolicy::Coalesce,
+        Event::Pointer(pointer)
+            if matches!(
+                pointer.kind,
+                ilium_plugin_api::generated::types::ui::PointerKind::Move
+                    | ilium_plugin_api::generated::types::ui::PointerKind::Drag
+            ) =>
+        {
+            QueuePolicy::Coalesce
+        }
+        Event::EditorPointer(_) => QueuePolicy::Coalesce,
+        Event::UiAction(action)
+            if matches!(
+                action.kind,
+                ilium_plugin_api::generated::types::ui::ActionKind::Scrolled
+                    | ilium_plugin_api::generated::types::ui::ActionKind::Pointer
+                    | ilium_plugin_api::generated::types::ui::ActionKind::DragOver
+            ) =>
+        {
+            QueuePolicy::Coalesce
+        }
+        Event::OutputMatched(_) | Event::TopicPublished(_) | Event::AudioFrames(_) => {
+            QueuePolicy::DropOldest
+        }
+        _ => QueuePolicy::NeverDrop,
+    }
+}
+
+// Serde is the canonical event wire representation. Selecting only identity fields
+// avoids coupling queue identity to changing payloads such as revisions or values.
+fn coalesce_key(event: &Event) -> (String, Vec<serde_json::Value>) {
+    let serialized = serde_json::to_value(event).unwrap_or(serde_json::Value::Null);
+    let payload = serialized
+        .as_object()
+        .and_then(|object| object.values().next());
+    let fields: &[&str] = match event {
+        Event::PaneResized(_)
+        | Event::PaneTitleChanged(_)
+        | Event::AgentGoalChanged(_)
+        | Event::Pointer(_)
+        | Event::AttentionChanged(_) => &["node"],
+        Event::EditorChanged(_) => &["buffer"],
+        Event::JobProgress(_) => &["job"],
+        Event::ViewVisibility(_) => &["view"],
+        Event::FsChanged(_) => &["watch"],
+        Event::ScreenChanged(_) | Event::AgentModelChanged(_) | Event::EditorViewportChanged(_) => {
+            &["pane"]
+        }
+        Event::SignalChanged(_) => &["pane", "signal"],
+        Event::EditorPointer(_) => &["buffer", "pane"],
+        Event::KernelSettingsChanged(_) => &["tab"],
+        Event::UiAction(_) => &["view", "key", "kind"],
+        _ => &[],
+    };
+    let identity = if matches!(event, Event::TimerFired(_)) {
+        vec![payload.cloned().unwrap_or_default()]
+    } else {
+        fields
+            .iter()
+            .map(|field| {
+                payload
+                    .and_then(|value| value.get(*field))
+                    .cloned()
+                    .unwrap_or_default()
+            })
+            .collect()
+    };
+    (event.case_name().to_owned(), identity)
+}
+
+fn merge_event(previous: Event, mut incoming: Event) -> Event {
+    match (&previous, &mut incoming) {
+        (Event::TreeChanged(old), Event::TreeChanged(new)) => {
+            let mut union = old.clone();
+            for node in new.iter() {
+                if !union.contains(node) {
+                    union.push(*node);
+                }
+            }
+            *new = union;
+        }
+        (Event::FsChanged(old), Event::FsChanged(new)) => {
+            let mut union = old.paths.clone();
+            for path in &new.paths {
+                if !union.contains(path) {
+                    union.push(path.clone());
+                }
+            }
+            new.paths = union;
+        }
+        (Event::KernelSettingsChanged(old), Event::KernelSettingsChanged(new)) => {
+            let mut union = old.keys.clone();
+            for key in &new.keys {
+                if !union.contains(key) {
+                    union.push(key.clone());
+                }
+            }
+            new.keys = union;
+        }
+        (Event::SettingsChanged(old), Event::SettingsChanged(new)) => {
+            let mut union = old.keys.clone();
+            for key in &new.keys {
+                if !union.contains(key) {
+                    union.push(key.clone());
+                }
+            }
+            new.keys = union;
+        }
+        _ => {}
+    }
+    incoming
+}
+
+fn push_to_side(side: &mut SideQueue, mut event: Event) -> EventPush {
+    if let Event::NodeRemoved(node) = &event {
+        side.events.retain_mut(|pending| {
+            if let Event::TreeChanged(nodes) = pending {
+                nodes.retain(|id| id != node);
+                return !nodes.is_empty();
+            }
+            if event_queue_policy(pending) != QueuePolicy::Coalesce {
+                return true;
+            }
+            let serialized = serde_json::to_value(&*pending).unwrap_or_default();
+            let payload = serialized
+                .as_object()
+                .and_then(|object| object.values().next());
+            !payload.is_some_and(|value| {
+                value.get("node").or_else(|| value.get("pane")) == Some(&serde_json::json!(node))
+            })
+        });
+    }
+    let policy = event_queue_policy(&event);
+    if policy == QueuePolicy::Coalesce {
+        let key = coalesce_key(&event);
+        if let Some(index) = side
+            .events
+            .iter()
+            .position(|pending| coalesce_key(pending) == key)
+        {
+            if let Some(previous) = side.events.remove(index) {
+                event = merge_event(previous, event);
+            }
+            side.events.push_back(event);
+            return EventPush::Coalesced;
+        }
+    }
+    if side.events.len() < side.capacity {
+        side.events.push_back(event);
+        return EventPush::Queued;
+    }
+    if let Some(index) = side
+        .events
+        .iter()
+        .position(|pending| event_queue_policy(pending) == QueuePolicy::DropOldest)
+    {
+        side.events.remove(index);
+        side.dropped = side.dropped.saturating_add(1);
+        side.events.push_back(event);
+        return EventPush::DroppedOldest;
+    }
+    if policy == QueuePolicy::DropOldest {
+        side.dropped = side.dropped.saturating_add(1);
+        return EventPush::DiscardedIncoming;
+    }
+    EventPush::Stuck
+}
+
+fn latency_critical(event: &Event) -> bool {
+    matches!(
+        event,
+        Event::KeyPressed(_)
+            | Event::KeyReleased(_)
+            | Event::CommandInvoked(_)
+            | Event::UiAction(_)
+            | Event::Pointer(_)
+    )
 }
 
 /// Collects events into `on-events` batches (reference-host-architecture.md HST-204).
 #[derive(Debug, Default)]
-pub struct BatchBuilder;
+pub struct BatchBuilder {
+    events: VecDeque<(Event, u64, bool)>,
+}
 
 impl BatchBuilder {
     /// An empty builder.
     pub fn new() -> BatchBuilder {
-        BatchBuilder
+        Self::default()
     }
 
     /// Adds an event that arrived at `at_ms`; user actions flush at once (HST-204).
-    pub fn push(&mut self, _event: Event, _at_ms: u64, _from_user_action: bool) {
-        unimplemented!("host::scheduler::BatchBuilder::push")
+    pub fn push(&mut self, event: Event, at_ms: u64, from_user_action: bool) {
+        self.events.push_back((event, at_ms, from_user_action));
     }
 
     /// The batch to deliver now, if one is due (HST-204).
-    pub fn take_ready(&mut self, _now_ms: u64) -> Option<Vec<Event>> {
-        unimplemented!("host::scheduler::BatchBuilder::take_ready")
+    pub fn take_ready(&mut self, now_ms: u64) -> Option<Vec<Event>> {
+        let (_, first, _) = self.events.front()?;
+        let immediate = self
+            .events
+            .iter()
+            .any(|(event, _, user)| *user || latency_critical(event));
+        if self.events.len() < BATCH_MAX_EVENTS
+            && !immediate
+            && now_ms.saturating_sub(*first) < BATCH_FLUSH_MS
+        {
+            return None;
+        }
+        let count = self.events.len().min(BATCH_MAX_EVENTS);
+        Some(
+            self.events
+                .drain(..count)
+                .map(|(event, _, _)| event)
+                .collect(),
+        )
     }
 }
 
 /// Flow control of one stream to a plugin (reference-host-architecture.md HST-205).
 #[derive(Debug, Default)]
-pub struct StreamCredit;
+pub struct StreamCredit {
+    bytes: usize,
+    paused: bool,
+}
 
 impl StreamCredit {
     /// Credit with nothing in flight.
     pub fn new() -> StreamCredit {
-        StreamCredit
+        Self::default()
     }
 
     /// Bytes queued for the plugin.
-    pub fn enqueued(&mut self, _bytes: usize) {
-        unimplemented!("host::scheduler::StreamCredit::enqueued")
+    pub fn enqueued(&mut self, bytes: usize) {
+        self.bytes = self.bytes.saturating_add(bytes);
+        self.paused |= self.bytes >= CREDIT_WINDOW_BYTES;
     }
 
     /// Bytes the plugin consumed.
-    pub fn consumed(&mut self, _bytes: usize) {
-        unimplemented!("host::scheduler::StreamCredit::consumed")
+    pub fn consumed(&mut self, bytes: usize) {
+        self.bytes = self.bytes.saturating_sub(bytes);
+        if self.bytes <= CREDIT_WINDOW_BYTES / 2 {
+            self.paused = false;
+        }
     }
 
     /// Bytes queued and not yet consumed.
     pub fn in_flight(&self) -> usize {
-        unimplemented!("host::scheduler::StreamCredit::in_flight")
+        self.bytes
     }
 
     /// Whether the reader may read more (HST-205).
     pub fn should_read(&self) -> bool {
-        unimplemented!("host::scheduler::StreamCredit::should_read")
+        !self.paused
     }
 
     /// Chunk sizes for `len` bytes, each at most `MAX_CHUNK_BYTES` (HST-205).
-    pub fn split_chunks(_len: usize) -> Vec<usize> {
-        unimplemented!("host::scheduler::StreamCredit::split_chunks")
+    pub fn split_chunks(len: usize) -> Vec<usize> {
+        let mut chunks = vec![MAX_CHUNK_BYTES; len / MAX_CHUNK_BYTES];
+        if len % MAX_CHUNK_BYTES != 0 {
+            chunks.push(len % MAX_CHUNK_BYTES);
+        }
+        chunks
     }
 }
 
 // ---- Execution budget (reference-host-architecture.md HST-206, HST-207) -----------------------
 
 /// A plugin's execution-time bucket (reference-host-architecture.md HST-206).
-#[derive(Debug, Default)]
-pub struct ExecutionBucket;
+#[derive(Debug)]
+pub struct ExecutionBucket {
+    balance: i64,
+    refill_remainder_ns: u128,
+}
+
+impl Default for ExecutionBucket {
+    fn default() -> Self {
+        Self {
+            balance: 2_000,
+            refill_remainder_ns: 0,
+        }
+    }
+}
 
 impl ExecutionBucket {
     /// A bucket at its starting balance.
     pub fn new() -> ExecutionBucket {
-        ExecutionBucket
+        Self::default()
     }
 
     /// Charges CPU time.
-    pub fn charge_cpu_ms(&mut self, _cpu_ms: u64) {
-        unimplemented!("host::scheduler::ExecutionBucket::charge_cpu_ms")
+    pub fn charge_cpu_ms(&mut self, cpu_ms: u64) {
+        self.balance =
+            (i128::from(self.balance) - i128::from(cpu_ms)).max(i128::from(i64::MIN)) as i64;
     }
 
     /// Charges payload bytes at the documented rate (HST-206).
-    pub fn charge_payload_bytes(&mut self, _bytes: u64) {
-        unimplemented!("host::scheduler::ExecutionBucket::charge_payload_bytes")
+    pub fn charge_payload_bytes(&mut self, bytes: u64) {
+        self.charge_cpu_ms(bytes.div_ceil(MAX_CHUNK_BYTES as u64));
     }
 
     /// Refills for elapsed wall time, capped at the bucket size (HST-206).
-    pub fn refill(&mut self, _elapsed: Duration) {
-        unimplemented!("host::scheduler::ExecutionBucket::refill")
+    pub fn refill(&mut self, elapsed: Duration) {
+        let units = elapsed.as_nanos().saturating_add(self.refill_remainder_ns);
+        let refill = units / 2_000_000;
+        self.refill_remainder_ns = units % 2_000_000;
+        self.balance =
+            (i128::from(self.balance) + refill.min(i64::MAX as u128) as i128).min(2_000) as i64;
+        if self.balance == 2_000 {
+            self.refill_remainder_ns = 0;
+        }
     }
 
     /// The current balance; negative is debt.
     pub fn balance_ms(&self) -> i64 {
-        unimplemented!("host::scheduler::ExecutionBucket::balance_ms")
+        self.balance
     }
 
     /// Refuses a submission with `quota-exceeded` while in debt (HST-206, HST-207).
     pub fn try_submit(&self) -> Result<(), PluginError> {
-        unimplemented!("host::scheduler::ExecutionBucket::try_submit")
+        if self.balance > 0 {
+            return Ok(());
+        }
+        let mut error =
+            PluginError::new(ErrorCode::QuotaExceeded, "Plugin execution quota is empty");
+        error.retry_after_ms = Some(retry_after_ms(self.balance));
+        Err(error)
     }
 }
 
 /// Milliseconds to wait until a debt is repaid at the refill rate (HST-207).
-pub fn retry_after_ms(_balance_ms: i64) -> u32 {
-    unimplemented!("host::scheduler::retry_after_ms")
+pub fn retry_after_ms(balance_ms: i64) -> u32 {
+    crate::limits_rules::retry_after_ms(balance_ms).min(i64::from(u32::MAX / 10 * 10)) as u32
 }
 
 // ---- Cancellation (reference-host-architecture.md HST-208..216) -------------------------------
@@ -462,43 +1135,63 @@ pub enum CancelCause {
 }
 
 /// The outcome a cancelled request reports (HST-208).
-pub fn cancellation_outcome(_cause: CancelCause) -> Outcome {
-    unimplemented!("host::scheduler::cancellation_outcome")
+pub fn cancellation_outcome(cause: CancelCause) -> Outcome {
+    let code = match cause {
+        CancelCause::SideStopped | CancelCause::PluginAsked | CancelCause::Shutdown => {
+            return Outcome::Cancelled
+        }
+        CancelCause::GrantRevoked => ErrorCode::Revoked,
+        CancelCause::DeadlinePassed => ErrorCode::TimedOut,
+        CancelCause::ProviderTrapped => ErrorCode::Cancelled,
+        CancelCause::ProviderBreach => ErrorCode::Internal,
+    };
+    Outcome::Failed(PluginError::new(code, "Plugin request cancelled"))
 }
 
 /// Open requests and their final outcomes (reference-host-architecture.md HST-209).
 #[derive(Debug, Default)]
-pub struct RequestLedger;
+pub struct RequestLedger {
+    requests: Vec<(RequestRef, Option<Outcome>)>,
+}
 
 impl RequestLedger {
     /// An empty ledger.
     pub fn new() -> RequestLedger {
-        RequestLedger
+        Self::default()
     }
 
     /// Records an open request.
-    pub fn open(&mut self, _request: RequestRef) {
-        unimplemented!("host::scheduler::RequestLedger::open")
+    pub fn open(&mut self, request: RequestRef) {
+        if !self.requests.iter().any(|(id, _)| *id == request) {
+            self.requests.push((request, None));
+        }
     }
 
     /// Completes a request; a second completion is ignored (HST-209).
-    pub fn complete(&mut self, _request: RequestRef, _outcome: Outcome) {
-        unimplemented!("host::scheduler::RequestLedger::complete")
+    pub fn complete(&mut self, request: RequestRef, outcome: Outcome) {
+        if let Some((_, result)) = self.requests.iter_mut().find(|(id, _)| *id == request) {
+            if result.is_none() {
+                *result = Some(outcome);
+            }
+        }
     }
 
     /// Cancels a request (HST-209).
-    pub fn cancel(&mut self, _request: RequestRef) {
-        unimplemented!("host::scheduler::RequestLedger::cancel")
+    pub fn cancel(&mut self, request: RequestRef) {
+        self.complete(request, Outcome::Cancelled);
     }
 
     /// The final outcome of a request, if it ended.
-    pub fn outcome_of(&self, _request: RequestRef) -> Option<Outcome> {
-        unimplemented!("host::scheduler::RequestLedger::outcome_of")
+    pub fn outcome_of(&self, request: RequestRef) -> Option<Outcome> {
+        self.requests
+            .iter()
+            .find(|(id, _)| *id == request)
+            .and_then(|(_, result)| result.clone())
     }
 
     /// How many times a request was completed (at most one, HST-209).
-    pub fn completion_count(&self, _request: RequestRef) -> usize {
-        unimplemented!("host::scheduler::RequestLedger::completion_count")
+    pub fn completion_count(&self, request: RequestRef) -> usize {
+        usize::from(self.outcome_of(request).is_some())
     }
 }
 
@@ -516,8 +1209,12 @@ pub enum CancelledWork {
 }
 
 /// Longest teardown of cancelled work (HST-212..214).
-pub fn teardown_bound(_work: CancelledWork) -> Duration {
-    unimplemented!("host::scheduler::teardown_bound")
+pub fn teardown_bound(work: CancelledWork) -> Duration {
+    Duration::from_millis(match work {
+        CancelledWork::Http | CancelledWork::FileRead => HTTP_FILE_TEARDOWN_MS,
+        CancelledWork::Child => CHILD_KILL_GRACE_MS,
+        CancelledWork::Job => JOB_CANCEL_GRACE_MS,
+    })
 }
 
 /// Signals sent to a cancelled child (HST-213).
@@ -531,7 +1228,13 @@ pub enum ChildSignal {
 
 /// The signals and the delay before each one (HST-213).
 pub fn child_signal_schedule() -> Vec<(ChildSignal, Duration)> {
-    unimplemented!("host::scheduler::child_signal_schedule")
+    vec![
+        (ChildSignal::Term, Duration::ZERO),
+        (
+            ChildSignal::Kill,
+            Duration::from_millis(CHILD_KILL_GRACE_MS),
+        ),
+    ]
 }
 
 /// Whether a cancelled job is still allowed to run or counts as a trap (HST-214).
@@ -544,8 +1247,12 @@ pub enum JobCancelVerdict {
 }
 
 /// The verdict for a job whose cancel flag was set at `flag_set_at_ms` (HST-214).
-pub fn job_cancel_verdict(_flag_set_at_ms: u64, _now_ms: u64, _returned: bool) -> JobCancelVerdict {
-    unimplemented!("host::scheduler::job_cancel_verdict")
+pub fn job_cancel_verdict(flag_set_at_ms: u64, now_ms: u64, returned: bool) -> JobCancelVerdict {
+    if !returned && now_ms.saturating_sub(flag_set_at_ms) >= JOB_CANCEL_GRACE_MS {
+        JobCancelVerdict::Trap
+    } else {
+        JobCancelVerdict::Running
+    }
 }
 
 // ---- Hook chains (reference-host-architecture.md HST-215, HST-216) ---------------------------
@@ -596,10 +1303,45 @@ pub struct HookRun {
 }
 
 /// Runs a hook chain started at `start_ms` by a side of `owner_process` (HST-215, HST-216).
-pub fn run_hook(
-    _owner_process: ProcessKind,
-    _handlers: Vec<HandlerSpec>,
-    _start_ms: u64,
-) -> HookRun {
-    unimplemented!("host::scheduler::run_hook")
+pub fn run_hook(owner_process: ProcessKind, handlers: Vec<HandlerSpec>, start_ms: u64) -> HookRun {
+    static NEXT_REQUEST: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    let request = RequestId(NEXT_REQUEST.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
+    let mut result = HookRun {
+        request,
+        owner_blocked_ms: 0,
+        runs: Vec::new(),
+        log_ids: Vec::new(),
+    };
+    let mut now = start_ms;
+    let mut first_start = None;
+    for handler in handlers
+        .into_iter()
+        .filter(|handler| handler.process == owner_process)
+    {
+        let due = now;
+        let started = now.max(handler.busy_until_ms);
+        let capped = first_start.is_some_and(|first| started.saturating_sub(first) >= 100);
+        let cannot_start = started.saturating_sub(due) > handler.deadline_ms;
+        let mut run = HandlerRun {
+            plugin: handler.plugin,
+            started_ms: None,
+            ended_ms: None,
+            skipped_as_pass: capped || cannot_start,
+            breach: cannot_start,
+            skipped_by_chain_cap: capped,
+        };
+        if capped {
+            if !result.log_ids.iter().any(|id| id == "extension.chain-cap") {
+                result.log_ids.push("extension.chain-cap".into());
+            }
+        } else if !cannot_start {
+            first_start.get_or_insert(started);
+            now = started.saturating_add(handler.run_ms);
+            run.started_ms = Some(started.saturating_sub(start_ms));
+            run.ended_ms = Some(now.saturating_sub(start_ms));
+            run.breach = handler.run_ms > handler.deadline_ms;
+        }
+        result.runs.push(run);
+    }
+    result
 }

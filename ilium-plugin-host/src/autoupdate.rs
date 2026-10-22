@@ -31,13 +31,44 @@ pub struct AutoUpdateConfig {
 
 impl AutoUpdateConfig {
     /// Parses the config TOML; the interval must lie in 1..=168 (PKG-300, 301).
-    pub fn from_toml(_text: &str) -> Result<AutoUpdateConfig, Diagnostic> {
-        unimplemented!("host::autoupdate::AutoUpdateConfig::from_toml")
+    pub fn from_toml(text: &str) -> Result<AutoUpdateConfig, Diagnostic> {
+        #[derive(serde::Deserialize, Default)]
+        struct Root {
+            #[serde(default)]
+            plugins: Config,
+        }
+        #[derive(serde::Deserialize)]
+        #[serde(default)]
+        struct Config {
+            auto_update: String,
+            auto_update_interval_hours: u32,
+            metered: bool,
+        }
+        impl Default for Config {
+            fn default() -> Self {
+                Self { auto_update: "off".to_owned(), auto_update_interval_hours: 24, metered: false }
+            }
+        }
+        let config = toml::from_str::<Root>(text)
+            .map_err(|error| config_error("", error.to_string()))?.plugins;
+        let mode = match config.auto_update.as_str() {
+            "off" => AutoUpdateMode::Off,
+            "notify" => AutoUpdateMode::Notify,
+            "install" => AutoUpdateMode::Install,
+            _ => return Err(config_error("/plugins/auto_update", "Expected off, notify or install")),
+        };
+        if !(1..=168).contains(&config.auto_update_interval_hours) {
+            return Err(config_error("/plugins/auto_update_interval_hours", "Expected an interval from 1 to 168 hours"));
+        }
+        Ok(Self { mode, os_metered: false, interval_hours: config.auto_update_interval_hours, skip_metered: config.metered })
     }
 
     /// Applies the system policy mode when set (PKG-305).
-    pub fn with_policy(self, _policy_mode: Option<AutoUpdateMode>) -> AutoUpdateConfig {
-        unimplemented!("host::autoupdate::AutoUpdateConfig::with_policy")
+    pub fn with_policy(mut self, policy_mode: Option<AutoUpdateMode>) -> AutoUpdateConfig {
+        if let Some(mode) = policy_mode {
+            self.mode = mode;
+        }
+        self
     }
 }
 
@@ -53,13 +84,17 @@ pub struct Schedule {
 }
 
 /// The check schedule of a config (PKG-301).
-pub fn schedule(_config: &AutoUpdateConfig) -> Schedule {
-    unimplemented!("host::autoupdate::schedule")
+pub fn schedule(config: &AutoUpdateConfig) -> Schedule {
+    Schedule {
+        at_start: config.mode != AutoUpdateMode::Off,
+        interval: Duration::from_secs(u64::from(config.interval_hours) * 3600),
+        max_jitter: Duration::from_secs(3600),
+    }
 }
 
 /// Whether a check may use the network (PKG-300, 302).
-pub fn should_check_network(_config: &AutoUpdateConfig) -> bool {
-    unimplemented!("host::autoupdate::should_check_network")
+pub fn should_check_network(config: &AutoUpdateConfig) -> bool {
+    config.mode != AutoUpdateMode::Off && !config.os_metered && !config.skip_metered
 }
 
 /// An update found by a check (PKG-303, 304).
@@ -114,6 +149,8 @@ pub struct Notice {
 /// What a check does with a candidate (PKG-303, 304).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AutoAction {
+    /// Automatic update processing is disabled or suppressed on a metered connection.
+    None,
     /// Installs silently.
     Install,
     /// Shows a notice.
@@ -121,11 +158,37 @@ pub enum AutoAction {
 }
 
 /// Decides between a silent install and a notice (PKG-303, 304).
-pub fn decide(_config: &AutoUpdateConfig, _candidate: &UpdateCandidate) -> AutoAction {
-    unimplemented!("host::autoupdate::decide")
+pub fn decide(config: &AutoUpdateConfig, candidate: &UpdateCandidate) -> AutoAction {
+    if !should_check_network(config) {
+        return AutoAction::None;
+    }
+    if config.mode == AutoUpdateMode::Install
+        && candidate.new_grants.is_empty()
+        && !candidate.adds_replaces
+        && !candidate.key_changed
+        && candidate.channel_selected
+    {
+        return AutoAction::Install;
+    }
+    AutoAction::Notice(Notice {
+        plugin: candidate.plugin.clone(),
+        old_version: candidate.old_version.clone(),
+        new_version: candidate.new_version.clone(),
+        new_grants: candidate.new_grants.clone(),
+        changelog_url: candidate.changelog_url.clone(),
+        actions: vec![NoticeAction::Update, NoticeAction::Later, NoticeAction::SkipThisVersion],
+    })
 }
 
 /// How long `Later` hides a notice (PKG-304).
 pub fn later_hides_for() -> Duration {
-    unimplemented!("host::autoupdate::later_hides_for")
+    Duration::from_secs(7 * 24 * 3600)
+}
+
+fn config_error(pointer: &str, message: impl Into<String>) -> Diagnostic {
+    Diagnostic::error(
+        ilium_plugin_api::Code::from_static(ilium_plugin_api::codes::config::PARSE_ERROR),
+        pointer,
+        message,
+    )
 }
