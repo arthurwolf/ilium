@@ -4,6 +4,7 @@ Recorded demonstrations of Ilium, one per feature. Each demo is an animated GIF 
 
 ## Contents
 
+- [Find the next agent that needs you](#find-the-next-agent-that-needs-you)
 - [AI names agents and organizes the project tree](#ai-names-agents-and-organizes-the-project-tree)
 - [Control Ilium and prompt agents with voice](#control-ilium-and-prompt-agents-with-voice)
 - [Give agent panes automatic titles](#give-agent-panes-automatic-titles)
@@ -35,6 +36,12 @@ Recorded demonstrations of Ilium, one per feature. Each demo is an animated GIF 
 - [Convert a session between Claude and Codex](#convert-a-session-between-claude-and-codex)
 - [Additional file](#additional-file)
 - [Duplicate file names](#duplicate-file-names)
+
+## Find the next agent that needs you
+
+![Real Claude and Codex sessions demonstrate the attention queue, with setup cuts and reading holds](../../assets/demos/27-attention-queue.gif)
+
+The attention queue collects questions, blocked goals, background-agent waits and unread completed turns. **Next: needs you** jumps to an agent; **[+]** opens the overview. The recording uses instant detection and real agent sessions in a fictional museum project. Setup and idle gaps are cut, with frames held for reading. Explained in [Attention queue](attention-queue.md).
 
 ## AI names agents and organizes the project tree
 
