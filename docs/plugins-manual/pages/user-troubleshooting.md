@@ -210,6 +210,12 @@ If you think Ilium itself is at fault, for example a plugin could do something i
 | Two problems at once | Fix one, restart, then check again. Bisect finds one plugin at a time |
 | The registry cannot be written | The action fails with `io`, and the state stays as it was |
 
+## Host upgrade user experience requirements
+
+- [USR-254] When an Ilium upgrade makes an installed plugin API-incompatible, the host MUST keep the plugin installed, set its state to `Incompatible`, and not load it. Test: Upgrade to a host with a newer incompatible API and assert the state word and that the plugin is not running.
+- [USR-255] The host MUST show a notice naming the plugin, its API version and the host's supported range, with actions **Check for update**, **Keep disabled** and **Uninstall**, and MUST show the same state word in the list, the CLI and the recovery page. Test: Assert the notice text and three actions, and the same word in Settings, `ilium plugin list` and recovery page.
+- [USR-256] When a compatible update appears, a plugin in `Incompatible` state MUST be offered it first, and settings and grants MUST be kept through the update. Test: Publish a compatible version, accept it and assert settings and grants are unchanged.
+
 ### See also
 
 - [Plugins for users](/pages/user-plugins-overview/)

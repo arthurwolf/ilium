@@ -81,6 +81,21 @@ stop:  deactivate(shutdown) -> drain_session_work
 | Two servers share a global bucket | See the lock rule in [Data migration](/pages/guide-data-migration/). |
 | A plugin writes during `deactivate` | The write is kept if it finishes within the deactivate deadline. |
 
+### Clock changes, suspend and resume
+
+Wall-clock jumps and suspend must not make a timer fire early, lose a deadline or prune a backup that is still young.
+
+- [LIF-317] Durable timers, update deadlines and the failure window MUST run on the monotonic clock. A wall-clock jump or a suspend and resume MUST NOT fire a timer early, and a timer that came due during a suspend MUST fire once after resume, not once per missed period.
+- [LIF-318] Backup age pruning MUST use the age recorded as monotonic uptime plus the boot id, and MUST fall back to wall time only when the boot id changed. A backward wall-clock jump MUST NOT make the host prune a backup younger than its retention.
+
+### Two servers on one project
+
+Two servers, or two sessions, can point at the same project directory. They must not corrupt the snapshot, the config files or the plugin data directories.
+
+- [COR-100] The server MUST take an exclusive lock on the snapshot, and each config file and plugin data directory it writes, before writing, and a second server that cannot get the session lock MUST refuse to start a second writer for the same session and report the owner.
+- [COR-101] When two servers use different sessions of the same project, writes to shared config files and plugin data directories MUST be serialized by the lock and MUST use last-writer-wins per file with an atomic replace, never a partial write.
+- [COR-102] A server that loses the lock, or finds a lock held by a dead process, MUST stop writing, MUST take over a stale lock only after verifying that the owner process no longer exists, and MUST log the decision.
+
 ### See also
 
 - [Plugin lifecycle states](/pages/reference-plugin-lifecycle-states/)

@@ -108,6 +108,13 @@ disk         12 MiB   256 MiB  default
 | The pool shrinks at a config reload | Running instances keep their reservation. New activations see the new pool. |
 | Disk quota reached | Writes return `quota-exceeded`. See [Offline and low disk](/pages/reference-offline-and-low-disk/). |
 
+### Lifecycle targets and sizing
+
+These are the production targets an operator can size a machine against.
+
+- [LIF-315] On the reference machine, the host MUST activate a plugin within 200 ms at the 95th percentile and 1 s at the 99th percentile, and MUST support at least 64 active plugins per session without breaking those targets.
+- [LIF-316] When many plugins fail together, the host MUST start no more than 4 restarts at a time and MUST space the rest by the existing backoff, so that a restart storm MUST NOT hold more than one core for longer than 10 s. The host MUST publish the measured numbers in `ilium plugin top`.
+
 ### See also
 
 - [Errors and limits](/pages/reference-errors-and-limits/)

@@ -10,7 +10,7 @@ This page states which parts of the plugin command line are a contract, how a ch
 
 Text output is outside this contract. A script that reads text output gets no protection from this page, and it MUST use `--json` instead.
 
-Requirement ids of this page are in the range `DEV-858` to `DEV-864`. The complete list is in [Requirements of the developer tooling lane](/pages/reference-requirements-dev-tooling/).
+Requirement ids of this page are in the range `DEV-858` to `DEV-864` and `DEV-891`. The complete list is in [Requirements of the developer tooling lane](/pages/reference-requirements-dev-tooling/).
 
 ### Terms
 
@@ -50,6 +50,13 @@ Adding a field, a record type or a flag is not a breaking change. A consumer MUS
 - **[DEV-863]** Each deprecation and each breaking change MUST appear in the release notes of its release as one entry that names the command, the item, the kind of change (`deprecated` or `breaking`) and the stop release.
 
 - **[DEV-864]** The `deprecated` warning of [DEV-859] MUST use only the fields that the `warning` record defines (`code`, `message`, optional `file`, `line`, `column`), and the `code` MUST be exactly `deprecated`. It MUST NOT change the exit code, and it counts in the `warnings` field of `summary`.
+
+
+### Compatibility check in the command line's own CI
+
+The rule below is for the maintainers of the command line, so that the promises above hold in every release. It describes target behaviour.
+
+- **[DEV-891]** The command line project MUST keep a recorded snapshot of every `--json` record shape, `type` value and exit code of its previous release, and its own CI MUST fail when a build changes any of them without a matching deprecation or breaking entry under [DEV-863].
 
 ### Inputs and outputs
 

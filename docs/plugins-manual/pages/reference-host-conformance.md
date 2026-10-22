@@ -318,6 +318,15 @@ test('clipboard write needs its grant', () => {
 });
 ```
 
+
+## ABI conformance suite for third-party hosts
+
+Target behaviour of the production plugin system.
+
+- [ABI-073] The project MUST publish a versioned ABI conformance corpus, with a stable identifier per case, that an alternative host or embedder can run without Ilium source.
+- [ABI-074] Each corpus case MUST state its input, the expected result or refusal code, and the matrix row of ABI-030 it covers.
+- [ABI-075] A host MAY claim ABI conformance for a version only when every case of that version's corpus passes, and the corpus version MUST equal the API version it checks.
+
 ## See also
 
 - [WIT reference](/pages/reference-wit/)

@@ -80,6 +80,21 @@ Safe mode starts Ilium with all third-party code off, for the case where a plugi
 
 **[SEC-331]** An advisory in Wasmtime or a codec that applies to the pinned version is handled as in [SEC-171]: a patched release within 14 days of the upstream fix (48 hours when exploited in the wild), a release-blocklist entry for the vulnerable runtime, and a warning in Ilium until the user updates.
 
+## Publish rate limits and abuse reports
+
+This section is target behaviour for the public plugin system. The registry protects itself and its users from floods of publications and downloads and from malicious packages. This section sets the limits and the abuse intake.
+
+- [PKG-704] The registry MUST apply a per-publisher quota to publish requests and a per-client rate limit to metadata and download requests. A request over a limit MUST be refused with `registry.rate-limited` and a `retry-after` value, and a limit MUST NOT stop installs from an already cached package or from a file.
+- [PKG-705] The registry MUST accept abuse reports for any published package through a documented intake. It MUST acknowledge a report within 1 business day, MUST decide on a report of active malware or a stolen key within 24 hours (yank or takedown, or a stated reason for none), and MUST record each decision in the transparency log.
+
+## Coordinated disclosure policy
+
+Target behaviour (specified here before the code is written).
+
+- [SEC-439] The project MUST publish a `security.txt` (RFC 9116) at the documentation site's `/.well-known/security.txt` with the contact, the preferred language, the policy link and an expiry date no more than 12 months ahead. It MUST name the same contact as `SECURITY.md` ([SEC-320]).
+- [SEC-440] The disclosure policy MUST state a safe harbor: the project MUST NOT start or support legal action against a reporter who acts in good faith, tests only their own installation, stops at proof of the issue and keeps the report private until the embargo of [SEC-321] ends.
+- [SEC-441] A reporter who asks for it MUST be credited by name or handle in the advisory of [SEC-322]; a reporter who asks for anonymity MUST NOT be named. The project MAY shorten the embargo by agreement with the reporter, and MUST NOT lengthen it past the 90 days of [SEC-321] without the reporter's written consent.
+
 ## Edge cases
 
 | Situation | Result |
@@ -88,6 +103,23 @@ Safe mode starts Ilium with all third-party code off, for the case where a plugi
 | Safe mode and a bundled T1 plugin | Runs normally |
 | Report arrives for a plugin and the host together | Two advisories, one for each party |
 | User runs `ilium --safe-mode` against a running server | The command starts a new session in safe mode and does not disturb the running one |
+
+## Reporting a vulnerability in the host or sandbox
+
+The general intake above covers all of Ilium. A flaw in the plugin host or in the sandbox is more serious, because it breaks the guarantee that every plugin relies on, so it has its own handling.
+
+- **[HST-520]** A report about the plugin host, the Wasmtime configuration or the sandbox helper MUST be rated at least High, and a sandbox escape MUST be rated Critical. The intake MUST be the security contact in `SECURITY.md`, and the project MUST acknowledge such a report within 2 working days.
+- **[HST-521]** For a confirmed host or sandbox flaw the embargo MUST be 90 days from the report or until a fix is released, whichever is first. A fix MUST be released within 30 days for a Critical flaw and within 60 days for a High flaw, and the advisory MUST name the affected tiers and say whether the flaw can be reached without a grant. The project MAY shorten the embargo when the flaw is exploited in the wild.
+
+## Emergency disable of an installed plugin version
+
+The blocklist ([SEC-146]) stops a plugin at the next load. These requirements add the target behaviour for a registry-pushed emergency disable that reaches hosts which already run the plugin.
+
+- [EXT-057] The host MUST poll the signed emergency-disable feed of each configured registry at least every 6 hours and MUST verify it with the registry key before use. An entry that fails verification MUST be ignored and logged as `quarantine.feed-invalid`.
+- [EXT-058] An entry that matches an installed plugin version MUST put that version in quarantine within 60 s of the next poll: running instances MUST be stopped, the package MUST NOT be instantiated again, its data MUST be kept, and the user MUST see `Quarantined: <reason>`.
+- [EXT-059] A quarantine MUST be lifted only by a newer signed feed entry that withdraws it or by an upgrade to a version the feed does not list. A user or an administrator MUST NOT be able to lift it by editing local files. When the feed is unreachable, existing quarantines MUST stay in force and the audit log MUST record `quarantine.feed-unreachable`.
+- [EXT-069] The security contact in `SECURITY.md` MUST accept reports about the host and about plugin sandbox escapes through at least one encrypted channel, and a report MUST receive a tracking identifier with the acknowledgement defined in [SEC-321].
+- [EXT-070] During an embargo the project MUST NOT publish the details of an unfixed issue. When a fix ships, the advisory MUST state which plugin tiers are affected and the date the reporter was told, and a reporter who asks for it MUST be credited.
 
 ### See also
 

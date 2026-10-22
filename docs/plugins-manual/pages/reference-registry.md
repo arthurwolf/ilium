@@ -342,6 +342,13 @@ ilium plugin install com.example.notes
 
 The client checks the metadata with the pinned root key, so a compromised mirror cannot serve a changed package. At worst it can serve old metadata, and the freshness and rollback rules limit that.
 
+## Namespace ownership and name squatting
+
+This section is target behaviour for the public plugin system. A namespace is the part of a plugin id before the first dot. This section sets the rules that stop a publisher from taking a name that belongs to another party or that looks like it.
+
+- [PKG-702] The registry MUST bind each namespace to one verified publisher at its first publication. It MUST refuse a publication by any other publisher with `registry.namespace-unowned`, MUST reserve the prefixes `ilium.` and `core.` for the project, and MUST refuse a new id that is confusable with an existing id after Unicode normalisation, case folding and removal of separators, with `registry.name-confusable`.
+- [PKG-703] A namespace with no published release for 24 months and no answer from its owner to two notices sent 30 days apart MUST be marked abandoned in the signed metadata. Only an abandoned namespace MAY be reclaimed, and a reclaimed id MUST NOT reuse the version numbers or the keys of the earlier owner, and MUST be announced in the transparency log.
+
 ## Edge cases
 
 | Situation | Result |

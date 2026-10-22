@@ -387,6 +387,13 @@ Illustrative, not generated. The notice shows the export that failed. It names a
 
 Requirement ids for this page: [EVT-021], [EVT-022], [RQO-001], [RQO-002], [RQO-003], [RQO-004], [RQO-005], [RQO-006], [RQO-007], [RQO-008], [RQO-009], [RQO-010], [RQO-011], [RQO-020], [RQO-021], [RQO-022], [RQO-030], [RQO-031], [RQO-040]. See the [requirements index](/pages/reference-requirements/).
 
+## Stale completions and pending request lifetime
+
+Target behaviour. A request id belongs to one plugin instance. A request that never completes must not hold a pending slot forever.
+
+- [API-090] When a plugin instance traps, restarts or is replaced by an upgrade, the host MUST cancel every pending request of the old instance, MUST reclaim its pending slots and held results, and MUST drop a late completion of such a request instead of delivering it to the new instance. The new instance MUST NOT see a `request-completed` event for an id it did not issue, and `take-*` of an old id MUST return `none`.
+- [API-091] A pending request MUST have a host-side lifetime limit of 120 seconds by default from the return of its id. On expiry the host MUST complete it with the outcome `cancelled`, free the pending slot and remove any held result. The same limit MUST apply if the completing worker is lost.
+
 ## See also
 
 - [Events and intents](/pages/events-and-intents/) for the event batch and the submission record.

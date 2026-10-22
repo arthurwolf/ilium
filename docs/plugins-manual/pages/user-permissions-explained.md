@@ -265,6 +265,11 @@ Even with permissions, Ilium limits what a plugin can do to your screen and sess
 | Your administrator forbids a permission | The grant row in the review dialog and in the Capabilities tab shows "Blocked by your administrator", off and locked. A whole plugin that the policy blocks shows "Blocked by policy" in the plugin list. See [Plugin policy](/pages/reference-plugin-policy/) |
 | You uninstall, then reinstall | Permissions are asked again |
 
+## Localised user-facing text requirements
+
+- [USR-259] Permission wording, notices and error text shown to users MUST come from message catalogues keyed by message id, so a translation can replace them without changing the id. Test: Load a test catalogue and assert the review dialog and an error use its text.
+- [USR-260] When a message has no text in the user's language, the host MUST fall back to English for that message, and the recovery page MUST always be shown in English if its catalogue fails to load. Test: Remove one message from a catalogue and assert English for it; break the catalogue and assert English recovery page.
+
 ### See also
 
 - [Plugins for users](/pages/user-plugins-overview/)

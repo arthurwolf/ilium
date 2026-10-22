@@ -120,6 +120,22 @@ Wrong host rollback: running `ilium plugin rollback my.plugin` after a bad host 
 - What each running instance sees at a stop, and which state survives: [Host upgrade and restart while plugins run](/pages/host-upgrade-while-plugins-run/) and [Persistence and restart](/pages/reference-persistence-and-restart/).
 - Crash-loop guard and safe mode after repeated crashes: [Safe mode and recovery](/pages/user-safe-mode-and-troubleshooting/).
 
+### Staged update rollout
+
+An operator who manages many machines or sessions applies a plugin update to a small group first. This section is the target behaviour of that staged rollout.
+
+- [LIF-306] A policy MUST be able to assign an update to a rollout stage of a named share of sessions or machines, and a host outside the current stage MUST NOT apply that update, and MUST report it as `held` in `ilium plugin list --json`.
+- [LIF-307] A rollout MUST halt on its own when the plugin fails inside the failure window on a host of the current stage. A halted rollout MUST stop widening, MUST log `rollout.halt` with the plugin id and version, and MUST NOT roll back hosts that already updated.
+- [LIF-308] An operator MUST be able to resume a halted rollout or cancel it with `ilium plugin rollout resume <id>` and `ilium plugin rollout cancel <id>`, and each command MUST write an audit event.
+
+## Operator runbook for failure modes
+
+Each entry gives detection, mitigation and recovery. The runbook is part of the contract: the commands and codes it names MUST exist.
+
+- [EXT-074] The runbook MUST cover a crash loop: detection by the plugin state `stopped-by-failure` with a restart count shown by `ilium plugin list --json`; mitigation by `ilium plugin disable <id>`; recovery by reading `ilium plugin logs <id>` and re-enabling. The host MUST stop restarting a plugin after 5 failures in 10 minutes.
+- [EXT-075] The runbook MUST cover a quarantined or blocked plugin that users still depend on: detection by `Quarantined` or `Blocked` in the list; mitigation by naming the replacement or the fixed version; recovery by upgrade, with the data kept as stated in [SEC-327].
+- [EXT-076] The runbook MUST cover an upgrade that fails part way: detection by the error code and the audit line; mitigation by the guarantee that the previous version stays installed ([EXT-062]); recovery by `ilium plugin rollback <id>` and a retry after the cause is fixed.
+
 ### See also
 
 - [Host upgrade and restart while plugins run](/pages/host-upgrade-while-plugins-run/) for what happens to running instances at a stop

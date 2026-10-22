@@ -154,3 +154,10 @@ com.example.cursor    <span class="t-err">failed</span>     -      -
 - [Requirements, lifecycle and operations](/pages/reference-requirements-lifecycle-ops/)
 
 API version checked: `ilium:plugin@0.1.0`.
+
+## Trap and refusal observability
+
+Target behaviour of the production plugin system.
+
+- [ABI-079] Every ABI trap and every ABI refusal code MUST produce a log record with the stable fields `plugin`, `code` and `phase`.
+- [ABI-080] The host MUST expose a counter per ABI code, labelled by plugin id, so an operator can alert on ABI-class failures without parsing messages.

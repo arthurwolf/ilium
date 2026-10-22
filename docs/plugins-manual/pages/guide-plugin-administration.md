@@ -91,6 +91,11 @@ Automatic updates are off. A user can set `[plugins] auto_update` to `notify` or
 | User adds a registry not in `packages.allowed_sources` | `policy.source-denied`, exit 7. |
 | Mirror is missing a dependency | `dependency.unsatisfied` names the id. Add the id to the mirror's `--allow` list and run `ilium plugin mirror sync` again; a partial mirror includes its dependencies ([PKG-409]). For an air-gapped bundle, export with `ilium plugin export-bundle <dir> <id> --with-deps` ([PKG-412]). |
 
+## Shared machine grant scope requirements
+
+- [USR-252] On a machine with several OS users, the host MUST keep grants, trusted keys and plugin data per OS user, so that a grant or trust decision by one user never applies to another. Test: Grant a permission as user A and assert user B sees it as not granted.
+- [USR-253] Machine policy MUST apply to every OS user, and a per-user trust or grant MUST NOT widen it; when a user's trust conflicts with policy, the policy wins and the user sees `Blocked by your administrator`. Test: Trust a key as a user, deny it in machine policy and assert the plugin is blocked for that user.
+
 ## See also
 
 - [Plugin policy](/pages/reference-plugin-policy/)

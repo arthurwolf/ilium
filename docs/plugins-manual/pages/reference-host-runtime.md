@@ -303,6 +303,22 @@ pub fn runtime_config() -> wasmtime::Config {
 - **[HST-088]** When the config fingerprint of an embedded `.cwasm` differs from the host's, the host MUST NOT call `Component::deserialize` on it, MUST fall back to `Component::new` on the embedded `.wasm`, and MUST log `host.cwasm-incompatible`. A release-build test MUST fail if any bundled plugin takes this path.
 - **[HST-089]** A stack overflow in guest code MUST trap the instance with `host.stack-overflow` and MUST NOT crash the process.
 
+
+## Wasmtime and Component Model pinning
+
+Target behaviour of the production plugin system.
+
+- [ABI-070] The host MUST pin the exact Wasmtime version and the Component Model canonical ABI revision it ships with, and MUST report both in `ilium plugin doctor` output.
+- [ABI-071] A runtime upgrade that changes canonical-ABI behaviour, trap behaviour or fuel accounting MUST NOT ship until the full ABI conformance corpus of ABI-073 passes on the new runtime.
+- [ABI-072] A runtime upgrade MUST list in the release notes every observable change in traps or refusal codes, and a change that alters a code MUST follow the removal rules of ABI-052.
+
+## Staged rollout of host updates
+
+A point release that bumps Wasmtime changes the code that runs every plugin. The 14-day deadline for security fixes says how fast to ship, and this section says how to ship safely.
+
+- **[HST-512]** A point release that changes the pinned Wasmtime version MUST pass through three stages before general release: the conformance suite and the soak test on the reference machine, a pre-release channel for at least 3 days, and a general release. A release that fixes a vulnerability exploited in the wild MAY shorten the pre-release stage to 24 hours but MUST NOT skip the conformance suite.
+- **[HST-513]** The host MUST keep the previous release available as a documented rollback target for 90 days. When a bumped host regresses plugins, the release MUST be withdrawn from the update channel within 24 hours of confirmation, and the project MUST publish the affected plugin ids and the rollback steps in the release notes. Compiled `.cwasm` caches from a different Wasmtime version MUST be rejected and rebuilt, so a rollback never loads a cache the older host cannot read.
+
 ## See also
 
 - [Host architecture](/pages/reference-host-architecture/), [Sandbox helper](/pages/reference-host-helper/) and [Platform support](/pages/reference-platform-support/).

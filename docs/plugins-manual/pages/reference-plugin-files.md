@@ -149,6 +149,14 @@ Copy these items, in this order, with Ilium stopped:
 
 Skip the cache, the logs, the staging folder and the backups. A machine that runs a different operating system cannot run T2 and T3 plugins unless it is Linux (see [Plugins overview](/pages/user-plugins-overview/)). Core and bundled plugins need no copy, because they ship with Ilium.
 
+### Secret rotation
+
+Target behaviour (specified here before the code is written).
+
+- [SEC-451] `ilium plugin secret rotate <id> <name>` MUST replace a stored secret value without reinstalling or disabling the plugin. The old value MUST be overwritten in the secret store, the plugin MUST receive a `secret-changed` event for that name, and the audit log MUST record the rotation without the value.
+- [SEC-452] The HTTP API token and the lock tokens MUST be rotatable with `ilium plugin token rotate [--http|--lock <id>]`. The old token MUST stop working at the moment the command returns, and a plugin that held a lock token MUST receive a fresh one through its next request without a restart.
+- [SEC-453] A secret MAY carry an `expires` time set by the user or the policy. The Plugins screen MUST warn 14 days before it passes, and after it passes the secret MUST NOT be delivered: the plugin gets `secret.expired` (not an empty value) until the secret is rotated.
+
 ### Errors and edge cases
 
 | Situation | What happens |

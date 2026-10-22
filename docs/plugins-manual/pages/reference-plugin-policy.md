@@ -123,6 +123,11 @@ The audit log is always on. It is defined only in the [Audit log reference](/pag
 - [USR-212] The host MUST treat a policy with an unknown key or a wrong type as malformed and MUST name the line of the first error in the notice. Test: write a policy with the key `allow_thirdparty`; assert that T2 and T3 plugins refuse to load, T1 plugins run, and the notice names line and key.
 - [USR-213] The host MUST read the policy at server start only. Test: set `packages.allow_third_party = false` while a T2 plugin runs and assert that nothing changes; restart and assert the plugin is shown as `Blocked by policy` with the message `policy.third-party-denied`.
 
+## Audit log tamper evidence requirements
+
+- [USR-257] The host MUST chain each audit record to the previous one with a hash, and `ilium plugin audit verify` MUST report the first record where the chain is broken, or confirm the file is intact. Test: Edit one record and assert verify names it; truncate the file and assert verify reports the break.
+- [USR-258] The host MUST cap the total storage of audit and crash records at a configurable ceiling (default 256 MiB), delete the oldest rotated files first when it is reached, and write a record that says how many were deleted. Test: Fill storage above the ceiling and assert oldest files go first and a deletion record exists.
+
 ### See also
 
 - [Admin policy reference](/pages/reference-admin-policy/)

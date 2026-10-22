@@ -123,4 +123,18 @@ Health is computed from these counters and from lifecycle state, with the thresh
 | The clock jumps | Buckets use the monotonic clock; a jump does not move data between buckets |
 | A plugin makes 100,000 calls a minute | Histograms stay fixed in size; only counts grow |
 
+## Diagnosis beyond 24 hours
+
+Hourly buckets answer questions about the last day. A plugin that degrades over several days needs a longer, coarser record.
+
+- **[HST-524]** The host MUST fold each hourly bucket that leaves the 24-hour window into a daily summary per plugin side holding call count, failure count, near misses and the 50th, 95th and 99th percentile of call time, and MUST keep 30 daily summaries and discard older ones. A daily summary MUST add at most 4 KiB per plugin side, MUST stay on the local disk with the session data, and MUST obey the same content rules as the hourly buckets.
+- **[HST-525]** `ilium plugin status <plugin-id> --days <n>` MUST print the daily summaries for up to 30 days, MUST mark a day with a restart or an upgrade, and MUST end its output with the trend of the 95th percentile call time as rising, flat or falling over the period. The summaries MUST be removed when the plugin is uninstalled.
+
 API version checked: `ilium:plugin@0.1.0`.
+
+## Operator observability of traps
+
+Target behaviour. An operator must be able to see how often a plugin traps without reading every log line.
+
+- [API-092] The host MUST keep a per-plugin, per-side counter for each trap code of [API-081] and for each restart, MUST collapse identical consecutive log lines of one trap code within 10 seconds into one line with a repeat count, and MUST retain a crash record (trap code, time, side and the last 20 log lines) for each plugin disabled by the restart rule until the plugin is enabled again or removed. `ilium plugin logs` MUST show the crash record.
+

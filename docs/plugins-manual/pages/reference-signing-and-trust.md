@@ -297,6 +297,13 @@ Each row changes the vector and expects a refusal.
 | [PKG-257] | The key is revoked as `compromised` | `trust.key-revoked` |
 | [PKG-258] | An installed `example.minimal` signed by key A, an update signed by key B, no rotation | `package.publisher-key-changed` |
 
+## Signature validity windows and clock skew
+
+This section is target behaviour for the public plugin system. A validity window is the time between a signature's `not-before` and `not-after`. The host reads its own clock to check it, and that clock can be wrong.
+
+- [PKG-712] The host MUST allow a clock skew of 10 minutes at both ends of a validity window. Outside it, the host MUST refuse the signature with `trust.signature-expired` or `trust.signature-not-yet-valid`, and MUST NOT take the time from the package or from an unsigned source.
+- [PKG-713] When the host clock differs by more than 24 hours from the signed time of the registry metadata, the host MUST report `trust.clock-skew` with the measured difference and MUST refuse new installs and updates, but MUST keep already installed plugins running. The host MUST NOT disable a plugin only because its validity window ended after install.
+
 ## Edge cases
 
 | Situation | Result |

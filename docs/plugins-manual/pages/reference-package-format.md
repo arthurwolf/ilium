@@ -366,6 +366,13 @@ Rules that apply to every row:
 
 These rows are the minimum matrix. A host MAY add more rows and MUST NOT remove any.
 
+## Reproducible build verification
+
+This section is target behaviour for the public plugin system. A reproducible build gives the same package bytes from the same source and build recipe. This section lets a registry or an auditor check that a package matches its source.
+
+- [PKG-714] A package MAY include a `build-attestation` entry naming the source repository, the commit digest, the toolchain versions and the build command. A package that includes it MUST be buildable from that input to a package whose content digest, with the signature entry left out, is identical.
+- [PKG-715] The `ilium plugin verify-build` command MUST rebuild a package from its attestation in a clean environment and compare the digest. It MUST report `package.build-mismatch` with the differing entries on a difference. The registry MUST show the verified state of each release and MUST NOT make a package non-installable only because it has no attestation.
+
 ## Edge cases
 
 | Situation | Result |

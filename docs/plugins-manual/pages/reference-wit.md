@@ -2614,3 +2614,10 @@ Every type is defined once, with two deliberate exceptions: `minimap-mark` is de
 | Everything a plugin implements | `ilium:exports/*` | 8.1 to 8.16 |
 | Worlds | `ilium:server`, `ilium:client`, `ilium:anim` | 9 |
 
+## Per-field size limits
+
+Target behaviour of the production plugin system.
+
+- [ABI-067] This page MUST hold one table that gives, for every WIT field of type string, list or blob, the maximum size and the refusal code used when it is exceeded.
+- [ABI-068] The host MUST enforce each limit of that table before the value reaches host logic, and MUST refuse an oversize value with that row's code without truncating it.
+- [ABI-069] A limit in the table MUST NOT be raised or lowered within the same ABI major without a minor release that lists the change in its notes.

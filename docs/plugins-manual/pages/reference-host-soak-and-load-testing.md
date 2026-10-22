@@ -93,6 +93,13 @@ For a plugin in a running server, `ilium plugin status` shows the health and the
 - The counters that the host keeps: see [Telemetry and plugin health](/pages/reference-host-telemetry/).
 - Helper restart behaviour: see [Sandbox helper](/pages/reference-host-helper/).
 
+## Long uptime and Engine growth
+
+A server session can run for weeks. Growth that a short soak run hides, such as a slowly rising compile cache or a drifting Engine, needs its own bound.
+
+- **[HST-514]** Over an endurance run of at least 72 hours, resident memory of the session server after a forced idle period MUST NOT exceed its steady-state value by more than 10 %, and the size of the compile cache and of the Engine code memory MUST be recorded at the end of each cycle in the run record.
+- **[HST-515]** The host MUST recycle its Wasmtime Engine, and MUST restart a helper, when the Engine code memory exceeds 512 MiB or after 7 days of uptime, whichever comes first, and MUST do so at a moment when no call is in flight. A recycle MUST keep every plugin active, MUST count no failure for any plugin, and MUST be logged as `host.engine-recycled`.
+
 ## See also
 
 - [Performance budgets and benchmarks](/pages/reference-host-budgets/) for the timing budgets and the release gate.

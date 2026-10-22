@@ -250,6 +250,14 @@ An escape hatch is a feature whose effect leaves the sandbox by design. Each one
 
 **[SEC-046]** Regular expressions supplied by plugins (output filters, settings `pattern`, schema `pattern`, `when` expressions) MUST be compiled with a linear-time engine that has Rust `regex` semantics: no backreferences and no lookaround. A pattern is at most 1,024 bytes, and its compiled automaton is at most 256 KiB. A pattern that fails any limit is refused with `invalid-argument` at registration. Matching against a 1 MiB input finishes in time proportional to the input.
 
+## Kernel prerequisites and diagnostics
+
+Target behaviour (specified here before the code is written).
+
+- [SEC-442] Ilium MUST document a minimum Linux kernel for T2 and T3 plugins and MUST check at server start, once per start, each prerequisite of [SEC-055] separately: unprivileged user namespaces, cgroup v2 delegation, seccomp filter support and `openat2` availability. The result of each check MUST be stored for the diagnostics below.
+- [SEC-443] `ilium plugin doctor --sandbox` MUST print one JSONL `check` line per prerequisite with `name`, `ok`, the kernel value found and, when `ok` is false, the exact remediation (the sysctl, the kernel option or the cgroup delegation step). It MUST exit 0 when all pass and 1 otherwise, and it MUST NOT change any system setting.
+- [SEC-444] A kernel without `openat2` MUST NOT make `sandbox.unavailable` by itself: the `openat` walk of [SEC-058] applies and `doctor` reports `openat2` as `ok: false, degraded: true`. A missing user namespace, cgroup v2 or seccomp prerequisite MUST give `sandbox.unavailable` with the message naming that one prerequisite.
+
 ## Edge cases
 
 | Situation | Result |

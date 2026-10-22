@@ -114,6 +114,14 @@ The `notifications` core plugin sends sound, desktop notice and in-app text as s
 |---|---|---|---|
 | CAP-885 | Core notifications fan-out | For one event the in-app text is always delivered; a `refused` or `failed` result on the sound or desktop channel is logged and does not remove the other channels | `src/docs/notifications.md` |
 
+### Replacing a core plugin keeps the user contract
+
+A third-party plugin can take over a feature that a core plugin owns. The replacement must keep what the user and other tools already depend on: the CLI commands, the Settings keys and the stored data of the replaced plugin. If it cannot, it is rejected at install or enable time and the core plugin stays active.
+
+- [COR-097] A plugin that replaces a core plugin's owned feature MUST declare every CLI command, Settings key and data section of the replaced plugin, and the host MUST reject the replacement at enable time, with the missing items listed, when any is absent.
+- [COR-098] A replacement MUST read the existing stored data of the replaced plugin without loss, and the host MUST run the parity test of the replaced plugin against the replacement before it becomes the owner.
+- [COR-099] Disabling or removing a replacement MUST return ownership to the core plugin with the data written during the replacement still readable by it, or the host MUST refuse the replacement at enable time because it cannot guarantee that.
+
 ### Security
 
 Replacement of core plugins follows [SEC-300] to [SEC-306] in [Extension security](/pages/reference-extension-security/).

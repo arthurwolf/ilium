@@ -687,6 +687,14 @@ A package adds this entry in its manifest. It needs no code.
 - [Events](/pages/api-events/) and [requests and outcomes](/pages/requests-and-outcomes/)
 - [Messages and topics](/pages/api-messages-and-topics/)
 
+### Support bundle
+
+The support bundle is the file a user attaches to a report after a failure. This section fixes what goes in, what is left out, its size and its life.
+
+- [LIF-312] `ilium plugin bundle` MUST write one archive that holds the report, the last 1000 log records of each plugin, the manifest and the state names of each installed plugin, and the host version. It MUST NOT include plugin storage buckets, secrets, grant tokens or file contents.
+- [LIF-313] Log text and paths in a bundle MUST pass through the same redaction as log sinks, and the home directory MUST be replaced by `~`. The bundle MUST be capped at 5 MiB, and when the cap is reached the oldest log records MUST be dropped first and the bundle MUST name the cut in its index.
+- [LIF-314] The host MUST offer a bundle after a plugin enters `failed`, MUST write it only after the user agrees, and MUST delete bundles older than 14 days at the next start. It MUST NOT send a bundle anywhere.
+
 ### See also
 
 - [Core replacement matrix](/pages/reference-core-replacement-matrix/) for the surface, stored data, CLI names and install codes that a replacement of this plugin must keep.

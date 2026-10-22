@@ -195,6 +195,14 @@ Accepted risks, stated plainly: a plugin with read grants can still observe the 
 
 Every mitigation in the table has at least one test. [Security testing](/pages/reference-security-testing/) maps ids to fixtures. A test author derives cases by taking each requirement id, creating the attacker's starting position from the "Starting position" column and asserting the defined result.
 
+## Multi-user shared machines
+
+Target behaviour (specified here before the code is written).
+
+- [SEC-454] Each OS user MUST have a separate runtime directory, socket, module cache, trust store and state folder, all with mode 0700 owned by that user. A server MUST refuse to start and name the path when one of them is owned by another user or is group- or world-accessible.
+- [SEC-455] The host MUST NOT share any compiled module, package cache or secret between OS users, even when the plugin and its hash are identical. A policy file in a system-wide location MUST be readable by all users and writable only by root, and the host MUST refuse a policy file that another non-root user can write.
+- [SEC-456] A plugin helper MUST NOT be able to see another OS user's processes, sockets or files through the sandbox ([SEC-055]); the `peer` scope of messaging MUST stay inside one OS user's server and never cross to another user's server.
+
 ## Edge cases
 
 | Situation | Result |

@@ -192,6 +192,12 @@ If the power fails after progress step 6, `installed.json` says 1.3.0 and `store
 
 The user sees a progress line per step, the review dialog and the result. After an update the plugin shows **restart pending** in Settings > Plugins if the old version is still running. See [Finding and installing plugins](/pages/user-plugin-store/).
 
+## Package size limit requirements
+
+- [USR-249] The host MUST refuse an install or update whose package exceeds 64 MiB compressed or 256 MiB unpacked, before unpacking beyond the limit, with the error `package.too-large`; a policy MAY lower both limits but MUST NOT raise them. Test: Install a package one byte over each limit and assert `package.too-large` and no files left; set a lower policy limit and assert it applies.
+- [USR-250] The size check MUST use the sizes declared in the package header and MUST also count actual bytes while unpacking, so a package that lies about its size is refused with the same error. Test: Install a package whose header understates its size and assert `package.too-large`.
+- [USR-251] The `package.too-large` text MUST name the plugin, the measured size, the limit that was exceeded and whether the limit comes from the host or from policy, and the review dialog MUST show the same text. Test: Trigger the error from CLI and dialog and assert both name plugin, size, limit and source.
+
 ## See also
 
 - [Package format reference](/pages/reference-package-format/)

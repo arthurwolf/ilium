@@ -799,6 +799,21 @@ Illustrative, not generated. Two refused calls are logged with the plugin id, th
 
 Requirement ids for this page: [API-001], [API-002], [API-003], [API-004], [API-005], [API-010], [API-011], [API-012], [API-013], [API-014], [API-015], [API-016], [API-040], [API-041], [API-042], [API-043], [API-044], [API-046], [API-060], [API-061], [API-062], [API-070], [API-071], [API-072], [CAP-018], [EVT-003], [EXT-001], [EXT-023], [PRI-002], [PRI-005], [PRI-008], [PRI-014], [RND-015], [RND-016], [RND-017], [RND-018], [WID-020], [WID-021], [API-081]. See the [requirements index](/pages/reference-requirements/).
 
+### Error code extensibility and retry hints
+
+Target behaviour. The set of error codes can grow, and a plugin must survive that. A client that gets `rate-limited` or `quota-exceeded` must also wait before it retries.
+
+- [API-088] A plugin MUST treat an error code it does not know as a failed call of unspecified cause and MUST NOT trap or match on `message`. The SDKs MUST expose such a code as an `Unknown` variant that carries the code string, and a code added in a later contract version MUST be a minor change of the contract that does not break a plugin built for an earlier minor.
+- [API-089] A plugin that gets `retry-after-ms` MUST NOT repeat the same call before that many milliseconds have passed and SHOULD add random jitter of up to 20 percent. The host MUST NOT trap or penalise an early retry, MUST answer it with the same error and MUST NOT shorten or extend the original hint because of it. Refused attempts MUST NOT enter the rate window or charge CPU time to the quota group beyond the cost of the call itself.
+
+## Disk full
+
+This section separates the storage of a plugin from the storage the host needs for itself.
+
+- [EXT-063] A plugin write that fails because the plugin quota or the disk is full MUST return `storage.full` to that plugin only. Other plugins and the host MUST keep working, and the plugin MUST stay enabled.
+- [EXT-064] The host MUST keep a reserve of 16 MiB for its own journal, audit log and snapshots. When free space falls under the reserve, plugin writes MUST fail with `storage.full` while host writes continue, and the host MUST show one warning `Disk space low` per hour.
+- [EXT-065] An install or upgrade that cannot finish for lack of disk space MUST fail with `install.no-space`, MUST remove its partial files, and MUST leave the previous version installed and enabled.
+
 ### See also
 
 - [Rust SDK reference](/pages/rust-sdk/)
@@ -815,3 +830,11 @@ Checked against the API version `ilium:plugin@0.1.0`.
 ### Security
 
 Security codes: `policy.tier-denied`, `policy.id-denied`, `policy.publisher-denied`, `policy.third-party-denied` (detail codes of the one install code `policy.blocked`, written as the message prefix), `policy.grant-forbidden` (shown next to a locked row, never an install failure), `policy.source-denied`, `policy.replacement`, `policy.invalid`, `sandbox.unavailable`, `package.publisher-key-changed`, `package.blocked`, `package.path-invalid`, `package.path-duplicate`, `package.entry-symlink` or `package.entry-directory`, `package.zip-invalid`, `manifest.replaces-tier`, `manifest.secret-scope`, `trust.declined`, `manifest.display-name`, `manifest.point-risk`, `extension.depth-exceeded`, `extension.entry-rejected`, `install.review-required`, `store.version`, `trust.collision`, `settings.locked`. New `not-permitted` reasons: `policy`, `offline`, `private-address`, `downgrade`, `reserved`, `not-user-initiated`, `file-type`. Limits: [SEC-082] and [SEC-083] (egress), [SEC-290] (hooks), [SEC-029] (helper). See [Security and policy requirements](/pages/reference-requirements-security-policy/).
+
+## Value nesting depth limits
+
+Target behaviour of the production plugin system.
+
+- [ABI-061] The host MUST bound the nesting depth of every decoded WIT value, including nested JSON strings and recursive widget trees, at 32 levels, and MUST NOT let decoding recurse on the native stack beyond that bound.
+- [ABI-062] A value nested deeper than the bound MUST be refused with the stable code `abi.depth-exceeded` and MUST NOT trap the plugin or the host.
+- [ABI-063] The host MUST bound decoding work per call by the same limits whether the value comes from a plugin return or from a host-built event, and MUST count a refusal in the ABI refusal metric of ABI-079.

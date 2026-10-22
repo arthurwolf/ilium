@@ -150,6 +150,13 @@ Core plugins are made by the Ilium project and follow the same permission rules 
 | You share a project folder | Plugin settings and project storage in `.ilium` go with it. Permissions do not |
 | A plugin writes a secret to its log | Ilium cannot detect it. The log rotates at 4 MiB, keeps four rotated files, deletes rotated files older than 14 days at server start, and the logs of an uninstalled plugin are deleted 7 days after uninstall; `--purge` deletes them at once |
 
+## Personal data export and erasure requirements
+
+- [USR-245] The host MUST let a user export all plugin data held about them with `ilium plugin export-data`, covering plugin settings, project storage references, grants, plugin logs, audit records and crash records, as readable files in one folder. Test: Run the export for a profile with each data kind and assert one folder with a file per kind.
+- [USR-246] The host MUST let a user erase the data of one plugin or of all plugins with `ilium plugin erase-data`, after showing counts per data kind and asking for confirmation, and MUST report what was deleted and what was kept. Test: Run erase for one plugin and assert its settings, grants, logs and crash records are gone, others are untouched and the report lists both.
+- [USR-247] The export and erase commands MUST work without network access and MUST NOT send any data to a plugin or a registry. Test: Run both with networking blocked and assert success and no outbound request.
+- [USR-248] Erasure MUST NOT silently drop audit records that policy requires to keep; the host MUST name them as kept, with the retention period that keeps them, and MUST delete them when that period ends. Test: Set a retention policy, erase, and assert the audit records remain and are named; advance the clock and assert they are deleted.
+
 ### See also
 
 - [Plugins for users](/pages/user-plugins-overview/)

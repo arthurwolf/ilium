@@ -610,6 +610,13 @@ Voice handles two kinds of data: the audio you speak and the transcript made fro
 
 See [Plugin privacy](/pages/user-privacy/#core-plugins-and-ai-providers).
 
+### Core dumps, swap and provider retention
+
+The rules in the data and privacy section cover disk and log files. They also apply to memory that leaves the process: core dumps, swap and what a remote provider keeps.
+
+- [COR-105] While a capture or a transcript is held, the plugin MUST keep the audio and transcript buffers out of core dumps and swap (locked, non-dumpable memory where the platform allows), and where it cannot, MUST say so in the diagnostics page.
+- [COR-106] Before the first capture with a remote provider, Settings MUST show the provider's data retention statement as configured in the provider entry, or the text "retention unknown", and the user MUST confirm it once per provider.
+
 ### Security
 
 Risk marks of this plugin's extension points follow the corrected table in [Extension security](/pages/reference-extension-security/) ([SEC-293]).

@@ -92,6 +92,13 @@ The three items about the Ilium binary, the restart command and host rollback no
 - **Ilium rollback.** `ilium plugin rollback` covers plugin versions only. The sources do not describe rolling back Ilium itself. Choice: state that the plugin rollback does not change the host, or describe a host rollback once it exists. Consequence: operators could assume that rolling back a plugin also undoes a host change. See [Upgrading Ilium and rolling back the host](/pages/guide-operator-upgrades/) for the procedure and the decision it needs.
 - **Pending requests on a crash.** The persistence table says pending requests are lost, and the errors table says `cancelled` on shutdown. The sources do not say what a caller sees after a crash, where no `cancelled` is produced. Choice: document the caller's view after a crash as a lost call with an unknown outcome. Consequence: plugins that submit writes must check their result after activation.
 
+### Downgrading the host after newer data was written
+
+Rolling back the Ilium binary can leave on-disk files that a newer host wrote. This section fixes which files an older host reads and what it does with the rest.
+
+- [LIF-304] Every on-disk format of the plugin system MUST carry a format number. A host MUST read a file whose format number is at most its own and MUST NOT rewrite a file with a lower number than the one it found.
+- [LIF-305] A host that finds `installed.json`, a bucket or a stamp with a newer format number than it knows MUST start with the affected plugins disabled, MUST log `host.format-newer` naming the file, and MUST NOT delete or truncate it, so the operator can run the newer host again without data loss.
+
 ### See also
 
 - [Upgrading Ilium and rolling back the host](/pages/guide-operator-upgrades/) for the operator steps for a binary replacement, a clean restart and a host rollback

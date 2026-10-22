@@ -352,6 +352,15 @@ The request names are the only contract here. The SDK helper names follow [Reque
 - [COR-090] A `config.toml` or `.ilium/config.yaml` that cannot be parsed MUST be left unchanged on disk and MUST NOT be rewritten while it stays unparseable. The host MUST use the built-in defaults for that file for the run, MUST print one `warning` with the code `config.parse-error` that names the file, and MUST still boot. Test: start a server with `config.toml` holding `[ui` and assert the bytes are unchanged, the warning, and a running server.
 - [COR-033] No key in `config.toml` or `.ilium/config.yaml` MAY be renamed or moved by the plugin build, and the plugin build MUST preserve unknown keys and tables. Test: run the plugin build on a fixture config with an unknown key, change one setting, compare the files with a diff that must show only that change.
 
+### Data written by a newer build, and unknown section versions
+
+A build can read a snapshot or a config file written by a newer build of Ilium, for example after the user starts an older binary. The older build never rewrites such a file in a way that loses data. A plugin snapshot section follows the same idea with its own `schema_version`: a section whose version is newer than the installed plugin knows, or not a known version at all, is kept untouched and is not passed to the plugin as current state.
+
+- [COR-093] A build that reads a snapshot or a `config_version` newer than it supports MUST NOT overwrite or truncate that file, MUST start in read-only persistence mode (no snapshot or config writes), MUST show a notice that names both versions, and MUST preserve unknown sections byte for byte if the user chooses to continue and save.
+- [COR-094] A snapshot or config file with an unreadable version field MUST be treated as corrupt under the existing corrupt-file rule and MUST NOT be interpreted as the newest or the oldest version.
+- [COR-095] A stored plugin section whose `schema_version` is newer than, or unknown to, the installed plugin MUST be kept unmodified in the snapshot, MUST NOT be passed to `restore` of that plugin, and MUST be reported once at boot with the plugin id, the stored version and the supported versions.
+- [COR-096] When a stored section's `schema_version` is older than the plugin's current one, the host MUST call the plugin migration with the stored bytes and MUST keep the old bytes until the migration returns successfully.
+
 ### See also
 
 - [Settings screens](/pages/settings-screens/) and [Settings schema](/pages/reference-settings-schema/)

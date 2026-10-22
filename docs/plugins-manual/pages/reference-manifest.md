@@ -735,6 +735,13 @@ This manifest needs a minimum Ilium release and one other plugin. The range `^1.
 
 If `com.example.notes` is not installed or is at `2.0.0`, the install fails at stage 10 with `dependency.unresolved` and a message that names the range.
 
+## Localized listing fields
+
+This section is target behaviour for the public plugin system. Listing fields are the text and images a user sees in the store before install. This section sets how a manifest provides them in several languages and what the host accepts.
+
+- [PKG-706] A manifest MAY provide `name`, `description` and `screenshots` text in a `[locale.<tag>]` table keyed by a BCP 47 language tag. The host MUST choose the entry for the user's language, fall back to the base language and then to the unlocalized value, and MUST require an alt text for every screenshot in every locale.
+- [PKG-707] The host MUST validate localized fields with the limits of the unlocalized ones (name at most 64 characters, description at most 500, alt text at most 200, counted in Unicode scalar values), MUST refuse control characters and bidirectional override characters, and MUST reject a violation with `manifest.listing-invalid` naming the locale and the field.
+
 ## Edge cases
 
 | Situation | Result |

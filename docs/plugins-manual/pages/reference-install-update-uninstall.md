@@ -360,6 +360,14 @@ The catalogue in [Manifest schema and error catalogue](/pages/reference-manifest
 
 A successful install adds the plugin to Settings > Plugins. A failed install prints its errors and runs no plugin code. A rolled-back update shows the toast `Update failed, rolled back` and keeps the old version. The screens are described in [Managing plugins](/pages/user-managing-plugins/).
 
+## Concurrent install, upgrade and uninstall
+
+Two `ilium` processes can change the same plugin at once, for example two CLI calls or a CLI call and a running server.
+
+- [EXT-060] Every install, upgrade, rollback and uninstall of a plugin id MUST take an exclusive lock on that id in the plugin store before it reads the current state. A second operation on the same id MUST wait up to 30 s and then fail with `install.busy`; operations on different ids MUST NOT block each other.
+- [EXT-061] A process that holds the lock MUST release it when it exits. A lock whose holder is gone MUST be taken over by the next caller, and the takeover MUST be logged as `install.stale-lock`.
+- [EXT-062] The store MUST show either the old or the new version of a plugin to a reader, never a mixture. An uninstall that races an upgrade MUST end with the plugin either fully removed or fully at the new version, and the audit log MUST record the order in which the operations ran.
+
 ### See also
 
 - [Plugin lifecycle states](/pages/reference-plugin-lifecycle-states/)

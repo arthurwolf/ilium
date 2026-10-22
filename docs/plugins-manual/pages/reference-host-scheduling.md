@@ -318,6 +318,12 @@ The benchmarks B16 and B17 of [Performance budgets and benchmarks](/pages/refere
 
 - **[HST-216]** A call that is abandoned in the queue MUST log `host.queue-timeout` and count a breach of its class.
 
+## Re-admission after a memory-budget refusal
+
+Target behaviour. [API-046] refuses a new instance when the host is at capacity. This section fixes the order in which refused sides try again.
+
+- [API-095] A side refused for memory MUST be queued in the order of refusal and admitted first-in first-out when capacity frees, one admission per plugin at a time. The host MUST retry admission whenever an instance ends and at least every 30 seconds, MUST NOT let one plugin take two slots while another waits, and MUST show a notice to the user that names the plugin and says the side is inactive for lack of memory, until it is admitted or removed.
+
 ## See also
 
 - [Host runtime](/pages/reference-host-runtime/) for how deadlines are enforced.

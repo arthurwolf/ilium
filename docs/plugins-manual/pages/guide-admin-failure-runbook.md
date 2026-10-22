@@ -158,6 +158,13 @@ The names are those used by the pages that define them. The audit log lists the 
 
 Who inside your organisation is told, and in what order, is not defined in the manual. See [Open decisions](#open-decisions).
 
+## Registry backup and disaster recovery
+
+This section is target behaviour for the public plugin system. This section is for the operator of a registry. It sets the backup and restore procedure for the registry index and how to rebuild it.
+
+- [PKG-708] A registry operator MUST back up the signed index and the signed metadata at least daily, MUST keep the registry signing key in a separate backup under its own access control, and MUST test a restore at least once a quarter. A restore MUST bring back the last signed head or a later one, never an older version of `plugins/<id>.json`.
+- [PKG-709] A registry MUST be able to rebuild its index from the signed releases alone. After a restore or a rebuild the operator MUST verify every signature and package digest, compare the result with the transparency log head, and publish the verification result. The registry MUST NOT serve a rebuilt index to clients until that check passes.
+
 ### Open decisions
 
 | Subject | Choice in this manual | Consequence |
@@ -177,6 +184,27 @@ Who inside your organisation is told, and in what order, is not defined in the m
 - [USR-233] The runbook MUST state the time limits of the failure window, the helper kill sequence, the crash-loop guard and the install lock as the source pages define them. Test: compare each value in the time-limits table with its source page.
 - [USR-234] The runbook MUST name the audit file path for Linux and each event it tells the administrator to search for, and every event name MUST appear in the source page that defines it. Test: run the `jq` command of the Bad plugin section on a fixture audit log and search each event name in the source pages.
 - [USR-235] The runbook MUST name the escalation path in this order: the plugin's security contact, then the Ilium project's security contact, then the release blocklist, and MUST list the security contact address as an open decision while it is a placeholder. Test: check the page for the three steps and the open decision row.
+
+### Emergency kill switch
+
+An operator who learns that one plugin version is harmful needs to stop it on every machine at once, without waiting for each user to disable it. This section is the target behaviour. It is different from disabling one plugin on one machine and from a registry yank, which only blocks new installs.
+
+- [LIF-301] A policy file MUST be able to list a plugin id and a version range under a `kill` key. A host that loads such a policy MUST refuse to activate any installed version inside a listed range, MUST stop a running instance of it with reason `policy`, and MUST log `policy.kill` once per plugin id.
+- [LIF-302] A killed version MUST stay installed and its data MUST stay untouched, so lifting the `kill` entry and reloading policy MUST let the plugin start again without a reinstall.
+- [LIF-303] A kill MUST take effect on a running host within 60 s of the policy file changing, MUST NOT need a server restart, and MUST apply before the crash-loop guard counts the stop as a failure.
+
+## Emergency kill switch for one plugin
+
+The registry blocklist acts on a release schedule and on publisher decisions. When a plugin is causing harm now, an administrator needs a switch that acts at once on every attached client and on the server.
+
+- **[HST-516]** The host MUST provide `ilium plugin kill <plugin-id> --reason <text>`, which MUST stop the server side and every attached client side of the plugin, set it to `disabled-by-admin`, and prevent reactivation until `ilium plugin unkill <plugin-id>`. It MUST work in safe mode and without a network.
+- **[HST-517]** The kill switch MUST take effect on the server within 1 s and on every attached client within 5 s of the command, MUST cancel the pending requests of the plugin as `cancelled`, and MUST write an audit event `plugin.killed` with the administrator, the reason and the time. A client that reconnects later MUST learn the killed state before it activates the plugin.
+
+### Recover a disabled side
+
+Target behaviour. After the third failure inside 10 minutes the host disables a side and waits for a manual enable ([API-041]). This section is the recovery procedure.
+
+- [API-093] The host MUST offer `ilium plugin enable <id>` and an administrator bulk form for every disabled plugin, MUST show the crash record of [API-092] before it enables, and MUST clear the restart window on an enable so that the 10-minute count starts again at zero. An enable MUST NOT clear the crash record before the plugin has run for 10 minutes without a trap.
 
 ### See also
 

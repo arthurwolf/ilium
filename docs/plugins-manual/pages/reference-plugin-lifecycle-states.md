@@ -278,6 +278,13 @@ How a request behaves while another transition of the same plugin is in flight:
 
 The last recorded desired state wins. A queued request never waits longer than the sum of the deadlines of the transition in flight. The call returns when the change is recorded, never when the transition ends.
 
+## Package end of life and abandonment
+
+This section is target behaviour for the public plugin system. A package that nobody maintains still runs on user machines. This section sets how a package is declared at its end of life and what the host does about it.
+
+- [PKG-710] A publisher MAY declare end of life for a plugin with a signed metadata entry that names the date and an optional successor id. From the declaration, the host MUST show the plugin as `end-of-life` in its state and in the store, and MUST warn the user at install, then at most once every 30 days while it stays installed.
+- [PKG-711] The registry MAY declare a plugin abandoned when its namespace is abandoned or the publisher has not answered a security report for 90 days. The host MUST then disable that plugin after a 30 day warning period, unless an administrator pins it, and MUST keep its data. Re-enabling it MUST need an explicit user action.
+
 ### Edge cases
 
 | Situation | What happens |

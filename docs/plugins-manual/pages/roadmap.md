@@ -256,6 +256,13 @@ These answers replace the questions that the plan left open.
 | Key-release events | Delivered only when the terminal supports the kitty keyboard protocol |
 | `device.gpu` | Not part of the contract (`gpu.kernels` is `@unstable`). A manifest that names it is refused with `manifest.grant-unknown` |
 
+### Rollback when a wave gate regresses
+
+A wave gate can pass at release and regress later. The project keeps a documented way to go back to the last wave that passed.
+
+- [COR-103] Each wave MUST ship with a kill switch that switches the features of that wave back to their native kernel path without a data migration, and the switch MUST be documented in the release notes of the wave.
+- [COR-104] When the gate test of a released wave fails, the release MUST be blocked or rolled back to the last passing wave, and the regression MUST be recorded with the failing gate, the wave and the commit.
+
 ### See also
 
 - [Design decisions](/pages/design-decisions/)

@@ -107,6 +107,19 @@ These values are a choice for the project owner. The repository does not set the
 - Decision needed: whether a refusal by the aggregate ceiling gets its own error code instead of the `host-capacity` reason. Default: no new code, so that refusals look the same to plugin authors as session refusals.
 - Decision needed: whether the memory of a job is counted apart from its plugin side's instance reservation. Default: it is counted within that reservation, so no separate job accounting is added.
 
+## Number of installed and active plugins
+
+Memory and thread ceilings bound what plugins use, but the count of plugins is a limit of its own: startup time, the tree mirror and the settings list all grow with it. The startup budget is set for the 40 bundled plugins only, so a larger set needs an explicit rule.
+
+- **[HST-510]** The host MUST enforce a ceiling of 256 installed plugins and 128 simultaneously active plugin sides per session server. Both values MUST be policy keys that an administrator can lower but not raise above these ceilings.
+- **[HST-511]** When the active ceiling is reached, the host MUST refuse the next activation with the reason `host-capacity`, MUST keep every active plugin running, and MUST NOT evict an active plugin to make room. Startup activation MUST follow the admission order of the aggregate ceiling, and plugins left inactive MUST be listed by `ilium plugin status`.
+
+### Limit changes between host releases
+
+Target behaviour. Ceilings and rates can change when the host is upgraded, and a plugin has to be able to read the values it gets.
+
+- [API-094] A host release MUST NOT lower a tier ceiling, a rate rule or a session-wide limit of [API-043], [API-070] or [API-071] below the value a plugin was admitted with within the same contract minor. A change MUST be listed in the release notes, and a plugin MUST be able to read its effective limits at runtime from the `limits` record of the host info, which names each limit, its value and its source (default, manifest or user).
+
 ### See also
 
 - [Resource accounting](/pages/reference-resource-accounting/)

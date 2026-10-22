@@ -191,6 +191,15 @@ The event catalogue shows 35 rows for the base events, because three rows each d
 - **A removed feature.** An unstable feature may be removed. A package that lists it fails with `manifest.unstable-unknown` after the upgrade.
 - **Names kept by users.** Pane kind ids, command ids, settings keys, decoration slots and topic names are stored in user snapshots and keep their spelling for ever.
 
+
+## Cross-version interop matrix
+
+Target behaviour of the production plugin system.
+
+- [ABI-064] The project MUST publish and run a matrix of host minor against SDK minor, covering at least the old plugin on the new host and the new SDK on the old host, for every minor inside the window.
+- [ABI-065] Each matrix cell MUST state its expected result: loads, loads with a `deprecated` record, or refused with the code of section 4.
+- [ABI-066] A release MUST NOT ship while any matrix cell inside the window differs from its stated result.
+
 ## See also
 
 - [WIT reference](/pages/reference-wit/)

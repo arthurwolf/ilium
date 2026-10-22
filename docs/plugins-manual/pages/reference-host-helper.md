@@ -196,6 +196,13 @@ On termination the host sends SIGTERM and then SIGKILL after 2 s. On shutdown of
 | `session.memory-exceeded` | Charge would pass `session_memory_mib` | no |
 | `sandbox.unavailable` | Prerequisites missing, root user, or non-Linux platform | no |
 
+## Helper crash forensics
+
+The death table says what the host does when a helper dies. This section says what evidence is kept so that a crash report can be analysed afterwards.
+
+- **[HST-518]** When a helper dies, the host MUST record the exit code or the terminating signal, the name of the call in flight if any, the elapsed time of that call, the helper uptime, the peak memory charge and the last 20 log lines of the helper, in the plugin log under the stable condition id. The record MUST NOT contain payloads, paths or terminal text.
+- **[HST-519]** The host MUST disable core dumps for helpers by default, because a dump can hold plugin data. A core dump MAY be enabled only by an administrator policy key, MUST then be written to an owner-only directory, MUST be deleted after 7 days, and MUST NOT be attached to a crash report without the user choosing to do so.
+
 ## See also
 
 - [Host scheduling](/pages/reference-host-scheduling/) for deadlines and cancellation.

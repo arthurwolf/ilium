@@ -106,6 +106,15 @@ A host at `1.0.0` whose final 0.x minor is `0.3.0` (illustrative numbers):
 - Upgrade steps for plugin authors and operators: [Compatibility and upgrades](/pages/guide-compatibility-and-upgrades/).
 - The full list of rules and tests: [Requirements for WIT and ABI](/pages/reference-requirements-wit-abi/).
 
+
+## Operator procedure for ABI incompatibility
+
+Target behaviour of the production plugin system.
+
+- [ABI-076] The page MUST give a runbook for an operator whose host upgrade makes installed plugins refuse with `package.api-unsupported` or a section mismatch, covering triage, pin, roll back and bulk report in that order.
+- [ABI-077] The host MUST provide a command that lists every installed plugin refused for an ABI reason, with the refusal code and the plugin's declared `api`, in one output.
+- [ABI-078] Rolling the host back MUST NOT change installed plugin files, grants or stored settings, and a plugin refused after the upgrade MUST load again unchanged after the rollback.
+
 ## See also
 
 - [ABI evolution](/pages/reference-abi-evolution/)

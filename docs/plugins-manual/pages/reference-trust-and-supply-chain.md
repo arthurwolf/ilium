@@ -152,6 +152,13 @@ ilium plugin install ./dist/example.notes-1.2.0.iliumpkg
 
 `inspect` prints the signer fingerprint in full. The user compares it with a value published by the author before running `trust add`. A later `example.notes-1.3.0` signed by another key fails with `package.publisher-key-changed` unless it carries a rotation statement signed by the first key.
 
+## Transparency log
+
+This section is target behaviour for the public plugin system. The registry keeps an append-only log of every published release and every signing event, so that a client or an auditor can detect a registry that shows different histories to different users (a split view) or that silently signs a release again.
+
+- [PKG-700] The registry MUST publish an append-only transparency log of every release publication, yank, takedown and key rotation. Each entry MUST carry the plugin id, the version, the package digest, the signing key fingerprint and a timestamp, and the log head MUST be signed with the registry signing key. Removing or rewriting an entry MUST be impossible without changing the signed head.
+- [PKG-701] A client MUST check an inclusion proof for a package against the log head before it installs or updates it, and MUST keep the last log head it has seen. A head that is not an extension of the stored head, or a package with no valid proof, MUST be refused with `trust.log-inconsistent`, and the client MUST keep the evidence for the audit log.
+
 ## Edge cases
 
 | Situation | Result |
@@ -162,6 +169,22 @@ ilium plugin install ./dist/example.notes-1.2.0.iliumpkg
 | Package matches a blocklist entry and a policy allow entry | Blocked: deny wins |
 | Install directory edited by hand | Next load fails with `manifest.file-hash` |
 | Blocklist file malformed | The release blocklist is ignored with an audit line; the last good copy is used if one exists |
+
+## Publisher ownership transfer
+
+A plugin id belongs to one publisher key. This section says how an id moves to another publisher and how an abandoned id is recovered.
+
+- [LIF-309] A plugin id MUST move to another publisher only through a transfer statement signed by the current publisher key and countersigned by the receiving key. A host MUST accept the new key for that id only when both signatures verify, and MUST otherwise keep the pinned key.
+- [LIF-310] After a transfer the existing grants and the plugin data MUST stay unchanged, but the host MUST show the user the new publisher key fingerprint once and MUST ask for consent again before the next update from the new key is applied.
+- [LIF-311] An abandoned id MAY be recovered only through the registry with a recovery request that a human reviews. A recovered id MUST NOT inherit the old pin, so every host MUST treat the first package under the new key as a new install.
+
+## Clock skew and time-based trust
+
+Signatures, certificates and revocation lists carry times. The system clock can jump or be wrong.
+
+- [EXT-071] The host MUST verify a package signature against the signing time recorded in the signature and not against the current clock. A clock set before that time or far in the future MUST NOT make a valid signature fail or an expired key valid.
+- [EXT-072] A revocation list or blocklist MUST be treated as stale after 7 days without a successful refresh. A stale list MUST NOT be dropped; the host MUST keep enforcing it and MUST show `Revocation data is stale`. A list whose own issue time is later than the clock plus 24 h MUST be rejected as `trust.clock-skew`.
+- [EXT-073] Durable timers of plugins MUST be driven by the monotonic clock for their duration and MUST NOT fire in a burst after a wall-clock jump. A timer set for a wall-clock time MUST fire once, when that time is reached, and MUST be logged as `timer.clock-jump` when the clock moved while it waited.
 
 ### See also
 

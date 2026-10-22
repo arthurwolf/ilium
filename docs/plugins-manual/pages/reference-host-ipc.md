@@ -241,6 +241,13 @@ An oversized item is refused at the sender. The sender's call returns `ipc.paylo
 | `plugin.version-skew` | Client and server plugin differ | Client half disabled |
 | `plugin.server-missing` | Plugin not installed on the server | Client half disabled |
 
+## Visibility of coalesced and dropped plugin traffic
+
+The queue rules bound plugin traffic by merging or dropping. Without a signal, an operator sees a plugin that appears to lag and cannot tell why.
+
+- **[HST-522]** The host MUST count, per plugin and per client, the records that were coalesced, the resyncs that were flagged and the disconnects caused by an overloaded queue, and `ilium plugin status` MUST show these counts with the time of the latest occurrence.
+- **[HST-523]** The host MUST write a log line `ipc.plugin-coalesced` naming the plugin and the kind of traffic at most once per minute per plugin and client, and when it disconnects a client for `ipc.client-too-slow` it MUST name the plugin with the largest queued share. The user interface MUST show a non-modal notice naming the plugin when its traffic has been coalesced for more than 10 s without a break.
+
 ## See also
 
 - [Host scheduling](/pages/reference-host-scheduling/) for what happens on the client between messages.

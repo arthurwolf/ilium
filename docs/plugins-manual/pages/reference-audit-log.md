@@ -85,6 +85,14 @@ A **hash chain** links each record to the one before it by including the previou
 {"ts":"2026-10-12T08:14:02.240Z","seq":413,"prev_hash":"4ab7…","session":"default","actor":{"kind":"cli","pane":"shell-3"},"event":"install","plugin_id":"example.notes","version":"1.2.0","tier":"t2","package_sha256":"d5e0…","result":"ok"}
 ```
 
+## Crash and core dump handling
+
+Target behaviour (specified here before the code is written).
+
+- [SEC-445] The server and every plugin helper MUST disable core dumps for themselves (`RLIMIT_CORE` 0 and the non-dumpable flag on Linux, the equivalent on macOS and Windows) so that a crash cannot write plugin secrets, granted file contents or tokens into a core file.
+- [SEC-446] The crash report the server writes for itself or a helper MUST contain only the plugin id, the error code, the host version and a stack of host frames. It MUST NOT contain memory, argument values, secret values, granted data or file contents, and a redaction test MUST run over every report before it is stored.
+- [SEC-447] Crash reports MUST be stored with mode 0600 in a 0700 folder beside the audit directory, MUST be deleted after 14 days or when the plugin is uninstalled, and MUST NOT be sent anywhere unless the user runs the explicit export command. Each report written MUST add one `crash-report` audit record ([SEC-222]) naming the file.
+
 ## Edge cases
 
 | Situation | Result |
