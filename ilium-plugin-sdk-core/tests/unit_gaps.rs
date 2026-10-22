@@ -85,6 +85,92 @@ fn sample_signal() -> SignalPaneSpec {
     }
 }
 
+// The generated spec and event types carry no Default: several fields name ids or enums with no
+// empty value. These builders hold the same empty-or-first-variant values the old defaults meant.
+fn sample_send_input() -> SendInputSpec {
+    SendInputSpec {
+        pane: NodeId(1),
+        text: String::new(),
+        delivery: Delivery::Typed,
+        prompt_epoch: None,
+        stages: Vec::new(),
+        raw: None,
+        mouse: None,
+        if_current: None,
+        lock_user_input: false,
+        journal: false,
+    }
+}
+
+fn sample_create_group() -> CreateGroupSpec {
+    CreateGroupSpec {
+        parent: None,
+        title: String::new(),
+        placement: Placement::After,
+        children: Vec::new(),
+    }
+}
+
+fn sample_create_split() -> CreateSplitSpec {
+    CreateSplitSpec {
+        panes: Vec::new(),
+        direction: SplitDirection::Horizontal,
+    }
+}
+
+fn sample_title_changed() -> PaneTitleChangedEvent {
+    PaneTitleChangedEvent {
+        node: NodeId(1),
+        title: String::new(),
+        source: TitleOrigin::Manual,
+    }
+}
+
+fn sample_agent_activity() -> AgentActivityEvent {
+    AgentActivityEvent {
+        node: NodeId(1),
+        previous: AgentActivity::None,
+        current: AgentActivity::Working,
+        revision: 0,
+    }
+}
+
+fn sample_editor_pointer() -> EditorPointerEvent {
+    EditorPointerEvent {
+        buffer: BufferId(1),
+        pane: NodeId(1),
+        position: TextPosition { line: 0, column: 0 },
+        pointer: ViewPointer {
+            kind: PointerKind::Down,
+            button: PointerButton::Left,
+            modifiers: PointerModifiers(0),
+            column: 0,
+            row: 0,
+            sub_x: 0,
+            sub_y: 0,
+            clicks: 1,
+        },
+    }
+}
+
+fn sample_message_event() -> MessageEvent {
+    MessageEvent {
+        from: PluginId("ilium.core.tree".to_string()),
+        from_side: PluginSide::Server,
+        from_client: None,
+        channel: String::new(),
+        payload: Vec::new(),
+    }
+}
+
+fn sample_pane_lifecycle() -> PaneLifecycleEvent {
+    PaneLifecycleEvent {
+        pane: NodeId(1),
+        state: PaneLifecycleState::Running,
+        by: None,
+    }
+}
+
 fn sample_decoration() -> SetDecorationSpec {
     SetDecorationSpec {
         node: NodeId(1),
@@ -264,7 +350,7 @@ fn intent_pane_and_node_constructors_wrap_payloads() {
     check_intent(
         intents::send_input,
         Intent::SendInput,
-        SendInputSpec::default(),
+        sample_send_input(),
     );
     check_intent(
         intents::agent_action,
@@ -350,7 +436,7 @@ fn intent_group_split_and_attention_constructors_wrap_payloads() {
     check_intent(
         intents::create_group,
         Intent::CreateGroup,
-        CreateGroupSpec::default(),
+        sample_create_group(),
     );
     check_intent(
         intents::create_folder,
@@ -365,7 +451,7 @@ fn intent_group_split_and_attention_constructors_wrap_payloads() {
     check_intent(
         intents::create_split,
         Intent::CreateSplit,
-        CreateSplitSpec::default(),
+        sample_create_split(),
     );
     check_intent(
         intents::set_bookmarked,
@@ -496,7 +582,7 @@ fn event_tree_pane_and_agent_constructors_wrap_payloads() {
     check_event(
         events::pane_title_changed,
         Event::PaneTitleChanged,
-        PaneTitleChangedEvent::default(),
+        sample_title_changed(),
     );
     check_event(
         events::agent_identified,
@@ -506,7 +592,7 @@ fn event_tree_pane_and_agent_constructors_wrap_payloads() {
     check_event(
         events::agent_activity_changed,
         Event::AgentActivityChanged,
-        AgentActivityEvent::default(),
+        sample_agent_activity(),
     );
     check_event(
         events::agent_goal_changed,
@@ -574,7 +660,7 @@ fn event_input_output_pointer_and_editor_constructors_wrap_payloads() {
     check_event(
         events::editor_pointer,
         Event::EditorPointer,
-        EditorPointerEvent::default(),
+        sample_editor_pointer(),
     );
     check_event(
         events::editor_viewport_changed,
@@ -608,7 +694,7 @@ fn event_settings_request_timer_job_and_topic_constructors_wrap_payloads() {
         Event::JobProgress,
         JobProgressEvent::default(),
     );
-    check_event(events::message, Event::Message, MessageEvent::default());
+    check_event(events::message, Event::Message, sample_message_event());
     check_event(
         events::topic_published,
         Event::TopicPublished,
@@ -775,7 +861,7 @@ fn event_child_output_exit_and_lifecycle_constructors_wrap_payloads() {
     check_event(
         events::pane_lifecycle_changed,
         Event::PaneLifecycleChanged,
-        PaneLifecycleEvent::default(),
+        sample_pane_lifecycle(),
     );
 }
 
