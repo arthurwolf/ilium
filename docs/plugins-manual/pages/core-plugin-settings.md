@@ -622,3 +622,7 @@ The table gives the values that [EXT-052] requires for each point this plugin ow
 ### Security
 
 Project-scope values are ignored until the project is trusted ([SEC-311]). See [Extension security](/pages/reference-extension-security/).
+
+## Production additions: T6-core-plugins
+
+- [COR-215] While ilium.core.settings is down, the kernel MUST serve the last committed settings values read-only to all plugins, reject writes with settings.unavailable, and open the recovery page on the key bound to recovery.

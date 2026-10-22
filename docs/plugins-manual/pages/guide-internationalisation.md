@@ -240,3 +240,14 @@ Decision needed: who translates the built-in core plugin text when a catalogue e
 - [Quality checklist](/pages/guide-quality-checklist/)
 
 API version checked: `ilium:plugin@0.1.0`.
+
+## Production additions: T7-users-privacy-a11y
+
+- **[USR-310]** A plugin that ships translations MUST put them in `i18n/<tag>.json` as a flat object of message id to string, tag a BCP 47 language tag such as `de` or `pt-BR`; the loader MUST reject a file larger than 256 KiB, a non-string value, a duplicate id or invalid UTF-8 with `i18n.catalogue-invalid` naming file and id.
+- **[USR-311]** The host MUST choose the UI language in this order: `[ui] language` setting, `ILIUM_LANG`, `LC_ALL`, `LC_MESSAGES`, `LANG`, then `en`; the choice MUST be stable for the whole session, and `ilium plugin doctor` MUST print the chosen tag and its source.
+- **[USR-312]** Lookup for a message MUST try the exact tag, then the language without region (`pt-BR` then `pt`), then `en`; a placeholder-count mismatch between the translation and the English source MUST cause that one message to fall back to English and log `i18n.placeholder-mismatch` once per message.
+- **[USR-313]** A message with a count MUST be a plural message with the CLDR categories zero, one, two, few, many, other, `other` MUST be required, and the host MUST pick the category with the CLDR plural rule of the active language; a missing category MUST use `other`.
+- **[USR-314]** The host MUST format numbers, sizes and dates in its own notices by the active language's separators and date order, MUST keep the log and audit timestamps in `YYYY-MM-DD HH:mm:ss` regardless of language, and MUST NOT change any machine-readable output (`--json`, lockfile, bundle names).
+- **[USR-315]** Text from a catalogue MUST be measured in terminal cells using Unicode East Asian Width and combining marks, a wide glyph MUST never be split across a line wrap, and a string that exceeds its box MUST be truncated with `…` rather than overflow.
+- **[USR-316]** The host MUST accept the language tag `en-XA` which expands every catalogue string by 40 percent (proposed, owner to confirm) with accents and brackets, and `ilium plugin lint` MUST fail a plugin whose view clips or overflows at `en-XA` with `i18n.layout-overflow`.
+- **[USR-317]** A plugin catalogue MUST only be consulted for the plugin's own message ids; a plugin MUST NOT override host permission wording, risk labels or consent prompts, and every user-visible text in a host dialog MUST come from the host catalogue.

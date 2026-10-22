@@ -113,3 +113,7 @@ A plugin that declares `name: "notes"` with `aliases: ["nt"]` and `summary: "Sea
 - [CLI compatibility](/pages/reference-cli-compatibility/)
 - [Capability cli.contribute](/pages/capability-cli-contribute/)
 - [Plugin command-line reference](/pages/reference-plugin-cli/)
+
+## Production additions: T5-devtools
+
+- **[DEV-907]** `ilium plugin completions <shell>` for `bash`, `zsh`, `fish` and `powershell` MUST print the script to standard output, exit 0 offline, and an unknown shell MUST exit 2 `usage.invalid-value`. Completion of `<id>` arguments MUST call `ilium plugin list --json` and MUST time out after 500 ms (proposed, owner to confirm) with no candidates and no error output.

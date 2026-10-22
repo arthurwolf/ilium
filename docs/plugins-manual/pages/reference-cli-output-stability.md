@@ -113,6 +113,11 @@ Decision needed: where the release notes live and in what form (file in the repo
 - Ignore fields and enumerated values that you do not know.
 - Check exit codes by number, and never by the text of a message.
 
+## Production additions: T9-compat-deprecation
+
+- **[DEV-998]** A CLI flag, field or record type marked deprecated under DEV-858 MUST keep working for at least two minor releases (proposed, owner to confirm) of the contract version, matching API-083 and ABI-052.
+
+
 ## See also
 
 - [Plugin command-line reference](/pages/reference-plugin-cli/)

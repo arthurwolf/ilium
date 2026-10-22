@@ -399,7 +399,8 @@ fn hst_206_submission_is_accepted_with_a_positive_balance() {
     assert!(bucket.try_submit().is_ok());
 }
 
-/// REQ: HST-207; zero is empty (reference-errors-and-limits.md).
+/// REQ: HST-207
+/// Zero is empty (reference-errors-and-limits.md).
 #[test]
 fn hst_207_submission_at_exactly_zero_is_refused_with_minimum_retry() {
     let mut bucket = ExecutionBucket::new();

@@ -82,3 +82,8 @@ The store shows cached results with their age ("Updated 3 days ago"). Install of
 - [Install and manage plugins](/pages/user-install-and-manage/)
 - [Registry reference](/pages/reference-registry/)
 - [Plugin administration](/pages/guide-plugin-administration/)
+
+## Production additions: T7-users-privacy-a11y
+
+- [USR-347] Every error code the user can see in a notice or CLI message MUST have a catalogue entry with a one-sentence cause and a one-sentence next step, and `ilium plugin explain <code>` MUST print them and exit 0, or exit 2 for an unknown code. Test: iterate the error code table and assert that every user-visible code has both sentences; run `ilium plugin explain` on one known code and one unknown code and assert exit 0 and exit 2.
+- [USR-349] A plugin's Details page MUST show its `contact` and `security_contact` from the manifest as text only (never opened without the link-consent prompt of USR-083), and `ilium plugin report <id>` MUST print them with the version and key fingerprint and send nothing. Test: open the Details page of a plugin that has both contacts and assert that the text appears with no link opened; run `ilium plugin report <id>` with the network blocked and assert that it prints the contacts, version and fingerprint and makes no request.

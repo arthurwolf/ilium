@@ -234,6 +234,24 @@ An answer the user gave to an unchanged grant is kept. New and widened grants st
 | Package re-signed with the same key, same version and same manifest | No change: `install.already-installed` warning, exit 0 ([LIF-072]) |
 | Same version, different manifest SHA-256 | `install` refuses with `package.version-reused` ([PKG-274]) |
 
+## Production additions: T2-security
+
+- **[SEC-717]** A grant MAY carry an expiry. `ilium plugin grant --until <timestamp>` MUST store it, the host MUST treat an expired grant as absent at the next call, write the audit line `grant-expired`, and show the grant as `expired` in the Plugins screen for 30 days (proposed, owner to confirm).
+
+- **[SEC-719]** The consent prompt MUST NOT be drawable, answerable or dismissible by any plugin, MUST rate-limit to at most one prompt per plugin per 30 s (proposed, owner to confirm), and MUST auto-deny after 120 s (proposed, owner to confirm) without an answer, recording `consent-timeout`.
+
+- **[SEC-720]** When an update adds a capability or widens a scope, the host MUST keep the old version running with the old grants until the user answers, and a non-interactive session MUST deny the widening and keep the old version.
+
+
+## Production additions: T7-users-privacy-a11y
+
+- **[USR-318]** Each consent decision (grant, decline, revoke, key trust, link open, host confirm, replaces confirm) MUST be stored with plugin id, version, grant string, decision, UTC time `YYYY-MM-DD HH:mm:ss` and the surface (`dialog`, `cli`, `policy`), and `ilium plugin consents <id>` MUST list them oldest first.
+
+- **[USR-319]** Every consent given through a dialog MUST be revocable from the Capabilities tab in at most 2 key presses from the plugin's Details page, and revoking MUST NOT require a reason, a confirmation for a normal grant, or a restart of Ilium.
+
+- **[USR-321]** A review dialog MUST show the plain wording of a permission untruncated (wrapping or scrolling), MUST show how many rows are below the fold, and Confirm MUST stay disabled until the list has been scrolled to its end when more than one screen of rows exists.
+
+
 ### See also
 
 - [Security model](/pages/security/)

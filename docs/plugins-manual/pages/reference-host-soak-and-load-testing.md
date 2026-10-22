@@ -100,6 +100,13 @@ A server session can run for weeks. Growth that a short soak run hides, such as 
 - **[HST-514]** Over an endurance run of at least 72 hours, resident memory of the session server after a forced idle period MUST NOT exceed its steady-state value by more than 10 %, and the size of the compile cache and of the Engine code memory MUST be recorded at the end of each cycle in the run record.
 - **[HST-515]** The host MUST recycle its Wasmtime Engine, and MUST restart a helper, when the Engine code memory exceeds 512 MiB or after 7 days of uptime, whichever comes first, and MUST do so at a moment when no call is in flight. A recycle MUST keep every plugin active, MUST count no failure for any plugin, and MUST be logged as `host.engine-recycled`.
 
+## Production additions: T10-operations
+
+- **[HST-681]** The host MUST budget no more than 8 (proposed, owner to confirm) open file descriptors per active plugin side and 512 (proposed, owner to confirm) per session server, MUST raise the soft limit to the hard limit at start, and when the budget is hit MUST refuse the new open with `io` message `too-many-files` and the activation with `host-capacity`. A plugin MUST NOT be able to exhaust descriptors needed for IPC.
+
+- **[HST-699]** The host conformance suite MUST include fault-injection tests that, for a set of 10,000 (proposed, owner to confirm) acknowledged storage writes under random kill points, disk-full, read-only flips and corrupt-byte injection, prove that every acknowledged write is readable after recovery or is in a quarantine file, and zero acknowledged writes are silently lost. A release MUST fail when this suite fails.
+
+
 ## See also
 
 - [Performance budgets and benchmarks](/pages/reference-host-budgets/) for the timing budgets and the release gate.

@@ -536,7 +536,8 @@ fn cap_008_write_to_read_only_scopes_is_grant_scope() {
     }
 }
 
-/// REQ: CAP-008; reference-capabilities file scopes explicitly permit H read/write.
+/// REQ: CAP-008
+/// The reference-capabilities file explicitly permits high-risk read/write of agent configuration.
 #[test]
 fn cap_008_agent_configuration_write_is_a_high_risk_valid_scope() {
     let parsed = grant("fs.write:agent-config:claude");

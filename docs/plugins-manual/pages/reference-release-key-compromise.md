@@ -110,3 +110,7 @@ This page names no new error codes. A refused blocklist is reported only through
 - [Security and policy requirements](/pages/reference-requirements-security-policy/)
 
 Contract: `ilium:plugin@0.1.0`.
+
+## Production additions: T2-security
+
+- [SEC-728] The release signing key MUST be generated and held in hardware (HSM or hardware token) with at least 2 of 3 custodians required to sign (proposed threshold, owner to confirm), and the key ceremony MUST be recorded and the transcript published with its hash. Test: check the ceremony record for a key generated in hardware, the 2-of-3 signing rule, and a published transcript whose hash matches the transcript file.

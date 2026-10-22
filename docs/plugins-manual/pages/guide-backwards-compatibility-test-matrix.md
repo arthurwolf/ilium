@@ -99,3 +99,7 @@ Each cell runs in a CI job that follows the five-step pipeline of [CI recipes](/
 - [Conformance suite](/pages/reference-conformance-suite/) for the contract checks that run alongside the matrix
 
 API version checked: `ilium:plugin@0.1.0`.
+
+## Production additions: T9-compat-deprecation
+
+- **[DEV-987]** `ilium plugin check --against <host-version>` (proposed, owner to confirm) MUST load the built package into a headless host of that version and report load result, refusal code and `deprecated` records as JSONL, for every minor inside the window with `--against window`.

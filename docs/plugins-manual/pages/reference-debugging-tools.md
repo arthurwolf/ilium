@@ -72,6 +72,8 @@ Logs live at `<state>/plugins/logs/<session-slug>/<plugin-id>.log`, with rotated
 - **[DEV-662]** `ilium plugin logs` MUST read the files oldest first across rotation, so the output is in time order.
 - **[DEV-663]** The log folder MUST be created with owner-only access.
 - **[DEV-664]** Logs MUST NOT contain granted data such as file contents or storage values unless the plugin wrote them on purpose. The host lines never include payloads.
+- **[HST-670]** The host MUST cap the total size of all plugin logs per user at 256 MiB (`plugins.log_total_mib`, proposed value, owner to confirm) and when exceeded MUST delete the oldest rotated file of the largest log first, never the active file, and MUST record `log.cap-evict` once per minute at most. Test: fill the logs past the cap and assert the oldest rotated file of the largest log is deleted and the active file kept; trigger eviction twice within a minute and count `log.cap-evict` records.
+- **[HST-671]** The host MUST delete a `<state>/plugins/logs/<session-slug>/` folder whose newest file is older than 14 days at server start, and MUST NOT delete the folder of a running session. A purge uninstall MUST delete that plugin's log files in every session folder. Test: create a session folder whose newest file is 15 days old, start the server, and assert it is deleted; run a purge and assert the plugin's log files are gone from every session folder.
 
 ### Reading the log
 

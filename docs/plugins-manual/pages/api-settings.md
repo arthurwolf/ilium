@@ -395,3 +395,7 @@ A settings screen uses `list-settings` to find the tabs and sections. A section 
 ### Security
 
 Secret settings are stored outside plain settings files and redacted from logs; see [Secrets](/pages/reference-secrets/).
+
+## Production additions: T3-abi-api
+
+**[API-213]** A settings write MUST validate against the declared schema before storing, MUST return `invalid-argument` with the JSON pointer of the first failing field, and MUST emit one `settings-changed` event only after the value is persisted.

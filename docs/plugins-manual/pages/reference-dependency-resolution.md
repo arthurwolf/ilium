@@ -212,6 +212,15 @@ Plugin `com.example.reviews` needs the plugin `com.example.git` at `^1.2` and an
 
 The review dialog lists plugins that will be installed or updated because of a dependency, under **Also installs**. A plugin that waits shows `waiting for <name>` in Settings > Plugins. See [Finding and installing plugins](/pages/user-plugin-store/).
 
+## Production additions: T4-package-registry
+
+- **[PKG-803]** A lock file entry that names a yanked version MUST still install by exact sha256, and the client MUST print a `warning` record with code `registry.yanked-locked`. A yanked version MUST NOT be chosen when `ilium plugin lock` regenerates the file.
+
+- **[PKG-804]** The resolver MUST refuse a graph with more than 256 (proposed, owner to confirm) distinct plugins or a dependency chain deeper than 32 (proposed, owner to confirm) with `resolve.graph-too-large` before it downloads any package.
+
+- **[PKG-828]** A lock file with an unknown `format`, a duplicate id, unsorted entries or a `sha256` that is not 64 lower-case hex characters MUST be refused with `lock.invalid` and no package MUST be downloaded.
+
+
 ## See also
 
 - [Manifest reference](/pages/reference-manifest/)

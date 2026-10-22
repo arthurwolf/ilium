@@ -477,3 +477,7 @@ Manifest errors (the install is refused with the key path):
 - [rust-sdk](/pages/rust-sdk/) and [typescript-sdk](/pages/typescript-sdk/) for the SDK layout.
 
 Checked against `ilium:plugin@0.1.0`.
+
+## Production additions: T3-abi-api
+
+- [API-214] Registering a command id that another plugin already owns MUST return `conflict` and leave both registrations unchanged, and unregistering a command during its own invocation MUST let that invocation finish. Test: register the same id from two plugins and assert `conflict` with both registrations unchanged; unregister a command inside its own handler and assert that the handler completes and its result is delivered.

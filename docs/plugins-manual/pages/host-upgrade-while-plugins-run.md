@@ -110,3 +110,7 @@ Rolling back the Ilium binary can leave on-disk files that a newer host wrote. T
 - [Errors and limits](/pages/reference-errors-and-limits/) for `cancelled`, `host.shutdown-timeout` and the restart rule
 
 API version checked: `ilium:plugin@0.1.0`.
+
+## Production additions: T9-compat-deprecation
+
+- **[DEV-993]** The host MUST support upgrading directly from any supported minor to the next major and from the last minor of a major to any later minor of the next major, and MUST refuse starting on state written by a host more than one major older with `state.too-old` (proposed, owner to confirm), naming the intermediate version to install.

@@ -131,3 +131,11 @@ Every row below is a test the project MUST have. Kinds: unit, integration, e2e (
 - [Security and policy requirements](/pages/reference-requirements-security-policy/)
 
 Contract: `ilium:plugin@0.1.0`.
+
+## Production additions: T2-security
+
+**[SEC-704]** Every fixed High or Critical vulnerability MUST add a regression fixture to the hostile-plugin suite in the same release, and the release checklist MUST fail when the advisory id has no fixture whose name contains it.
+
+**[SEC-705]** The project MUST fuzz the manifest parser, the package archive reader, the signature/metadata parsers and the dispatcher channel decoder in continuous fuzzing with a corpus kept in the repository, and a crash found MUST block the next release until fixed or triaged as not exploitable in writing.
+
+**[SEC-733]** The hostile-plugin suite MUST contain at least one fixture for each of: fork bomb, memory bomb, fd exhaustion, infinite loop, symlink swap during open (TOCTOU), path traversal, environment leak, network probe, ptrace of sibling and abuse of a revoked grant, and each fixture MUST be run on every release candidate with a pass/fail line in JSONL.

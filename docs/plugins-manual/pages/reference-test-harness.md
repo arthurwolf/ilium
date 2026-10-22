@@ -613,3 +613,7 @@ Every dotted code named on this page and on the conformance page is in this tabl
 - [Errors and limits](/pages/reference-errors-and-limits/)
 
 API checked against `ilium:plugin@0.1.0`.
+
+## Production additions: T5-devtools
+
+- [DEV-919] Each test case MUST run in a fresh instance with empty storage, an empty settings store, a fake clock and the default seed. `test` MUST run cases in sorted fixture name order by default, `--shuffle <seed>` MUST run a seeded permutation and print the seed, and a case MUST NOT observe state from any other case (verified by running with `--shuffle` and getting identical statuses).

@@ -242,3 +242,11 @@ API checked against `ilium:plugin@0.1.0`.
 ### Dependency vulnerability audit
 
 - [DEV-896] `ilium plugin check` and `ilium plugin publish` MUST scan the locked dependency set against an advisory database, MUST report each match as a `lint.dependency-vulnerable` diagnostic with the advisory id and fixed version, MUST fail `publish` at or above a configurable severity unless `--allow-advisory <id>` is given, and MUST run against a cached database without network access when `--offline` is set.
+
+## Production additions: T5-devtools
+
+**[DEV-932]** The CI recipes MUST name the exact cache paths and cache key inputs per language: Rust `~/.cargo/registry` (proposed, owner to confirm), `~/.cargo/git`, `target/` keyed on `Cargo.lock` hash and toolchain version; TypeScript `~/.bun/install/cache` keyed on `bun.lock` hash. A recipe MUST NOT cache `dist/`, and a pack from a cold cache MUST be byte-identical to one from a warm cache.
+
+**[DEV-933]** A CI recipe MUST show running `test` and `conformance` against the oldest and the newest host contract version the manifest `requires` range admits, using `ilium plugin test --host-contract <version>` (proposed, owner to confirm). An unsupported version MUST fail with `usage.host-contract-unavailable` and exit 2.
+
+**[DEV-934]** The CI recipe MUST upload on every run, success or failure, these files: the JSONL log of each step, `dist/build.json`, `dist/coverage.json` when produced, the conformance report, and on release the package, its SHA-256 file and `publisher.pub`. It MUST NOT upload `publisher.key`, `dist/*.tmp` or the signing environment.

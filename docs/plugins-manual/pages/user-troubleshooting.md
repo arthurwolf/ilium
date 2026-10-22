@@ -227,3 +227,7 @@ If you think Ilium itself is at fault, for example a plugin could do something i
 - [CLI reference](/pages/reference-plugin-cli/)
 
 API version checked: `ilium:plugin@0.1.0`.
+
+## Production additions: T7-users-privacy-a11y
+
+**[USR-346]** `ilium plugin bisect` MUST disable half of the enabled T2 and T3 plugins for the next start, ask 'Is the problem gone?', and narrow in at most ceil(log2 N)+1 rounds (proposed, owner to confirm) to one plugin, and MUST restore the original enabled set when finished or cancelled.

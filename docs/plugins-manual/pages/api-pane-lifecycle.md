@@ -412,3 +412,7 @@ Requirement ids for this page: [EVT-005], [PAN-001], [PAN-002], [PAN-003], [PAN-
 - [panes](/pages/api-panes/) for pane facts and the basic pane intents.
 - [Intents](/pages/api-intents/) and [requests and outcomes](/pages/requests-and-outcomes/) for submissions, keys and outcomes.
 - [Clock and timers](/pages/api-clock-and-timers/) for durable timers.
+
+## Production additions: T3-abi-api
+
+- [API-216] An import that targets a pane closed before the host applied it MUST complete as `refused(not-found)` and MUST NOT affect the pane that reuses the screen position.

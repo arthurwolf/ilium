@@ -223,3 +223,9 @@ None. The first release of the suite is ids as listed.
 - [Debugging tools](/pages/reference-debugging-tools/)
 
 API checked against `ilium:plugin@0.1.0`.
+
+## Production additions: T5-devtools
+
+- **[DEV-923]** `conformance` run with `--report <file>` MUST write a JSON document `ilium-conformance/1` containing the suite version, the CLI version, the plugin id and version, the manifest SHA-256, and every case record. The file MUST be byte-identical across two runs on the same inputs, and a registry MAY require it at publish.
+- **[DEV-924]** The suite MUST carry a version `MAJOR.MINOR`. `--suite-version <v>` MUST run exactly the catalogue of that version if the CLI still embeds it, else fail with `usage.suite-unavailable`. A MAJOR increase MAY remove or change a case and a MINOR increase MUST only add cases (DEV-610).
+- **[DEV-925]** The suite MUST ignore the user's home directory, the process environment other than the CLI variables, and the system time zone and locale: all cases MUST run with TZ `UTC`, locale `C` and an empty environment for the plugin, so a case result MUST be the same on any machine.

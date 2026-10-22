@@ -386,3 +386,7 @@ Requirement ids for this page: [SVC-001], [SVC-005], [SVC-007], [SVC-008], [SVC-
 - [packages](/pages/packages/) and [reference: manifest](/pages/reference-manifest/) for the manifest keys used above.
 
 Checked against `ilium:plugin@0.1.0`.
+
+## Production additions: T3-abi-api
+
+- **[API-209]** A service call chain deeper than 4 hops, or a cycle where a plugin is already on the chain, MUST be refused with `reentrant` before any callee runs.

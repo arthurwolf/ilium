@@ -705,3 +705,15 @@ The support bundle is the file a user attaches to a report after a failure. This
 ### Security
 
 Log sinks receive redacted records ([SEC-249]); see [Secrets](/pages/reference-secrets/).
+
+## Production additions: T7-users-privacy-a11y
+
+**[USR-332]** After building a support bundle the host MUST show the redacted `summary.txt` and `log.txt` in a viewer, MUST NOT upload a bundle itself, and `ilium plugin support-bundle --dry-run` MUST print the file names, sizes and the count of redactions per rule without writing the zip.
+
+**[USR-334]** A bundle for plugin A MUST NOT contain log lines, stats or crash records of any other plugin, except host lines about A, and `--include-host` MUST add the host log tail (last 500 lines, redacted) and MUST be named in `summary.txt`.
+
+**[USR-335]** The default bundle name MUST be `ilium-support-<id>-<YYYYMMDD-HHmmss>.zip`, and `summary.txt` MUST list on separate `key: value` lines Ilium version, plugin id, version, tier, state, platform, host API range, failure count, redaction counts, dropped log lines, and a SHA-256 of the other three files.
+
+**[USR-336]** `support-bundle` MUST work for a plugin in state `failed`, `blocked`, `incompatible` or missing helper, MUST build in at most 5 s (proposed, owner to confirm) for a 4 MiB log, and MUST exit with the error `bundle.plugin-unknown` if the id is not installed.
+
+**[USR-337]** `ilium plugin doctor` MUST check, and print one line each with `ok`, `warn` or `fail`, the state folders and their permissions, the policy file, the trust store, `installed.json` readability, free disk space (warn below 100 MiB (proposed, owner to confirm)), host API range, and the chosen language, and MUST exit 0 only when no line is `fail`.

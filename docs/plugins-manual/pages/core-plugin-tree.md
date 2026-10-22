@@ -690,3 +690,7 @@ Side basis: the page routes every move and close through server-side intents, an
 ### Security
 
 Risk marks of this plugin's extension points follow the corrected table in [Extension security](/pages/reference-extension-security/) ([SEC-293]).
+
+## Production additions: T6-core-plugins
+
+- **[COR-216]** Replacing ilium.core.tree MUST be performed with no pane closed and no PTY restarted, and the tree contents MUST be identical before and after the switch as compared by node id, kind, parent and order.

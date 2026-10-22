@@ -446,3 +446,7 @@ The full interface, with every record and function, is in the [WIT reference](/p
 ### Security
 
 Scopes and the deny set are defined in [Sandbox reference](/pages/reference-sandbox/) ([SEC-058] to [SEC-062]).
+
+## Production additions: T3-abi-api
+
+- [API-203] A write import MUST either apply completely or not at all for payloads up to 4 MiB, and an interrupted write MUST leave the previous content intact, and the result MUST carry the new content hash.

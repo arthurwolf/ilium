@@ -179,3 +179,33 @@ Target behaviour (specified here before the code is written).
 - [Lifecycle](/pages/lifecycle/)
 
 API version checked: `ilium:plugin@0.1.0`.
+
+## Production additions: T10-operations
+
+**[HST-651]** The host MUST provide `ilium plugin du [<plugin-id>] [--json]` that reports, per plugin, the bytes used by store, data, storage buckets, cache, logs and backups, each as an integer, within 5 s for 100 plugins, and the sum MUST equal the on-disk size of those folders within 1 MiB. Test: write known bytes and compare.
+
+**[HST-652]** The host MUST provide `ilium plugin backup <file.tar.zst> [--include-grants] [--include-secrets]` (proposed, owner to confirm) that writes a consistent archive of the items listed in the backup procedure while Ilium is running, by taking each bucket lock briefly (at most 2 s per bucket), MUST exclude cache, logs, staging and compile cache, MUST write to `<file>.partial` and rename on success, and MUST exit 0 only after the archive is verified readable. Secrets MUST NOT be included unless `--include-secrets` is given.
+
+**[HST-653]** The host MUST provide `ilium plugin restore <file> [--dry-run] [--merge|--replace]` that validates the archive manifest and every entry hash before changing anything, MUST refuse a running session server with `restore.server-running`, MUST apply the restore atomically per plugin (all of a plugin's data or none), and MUST on any failure leave the pre-restore state intact. `--dry-run` MUST change no file and list what would change.
+
+**[HST-654]** The backup archive MUST contain a `backup.json` with `format: "ilium-backup/1"` (proposed, owner to confirm), the host version, creation time (UTC, ISO 8601), the OS, and a SHA-256 for each entry. A restore of an archive with an unknown major format MUST fail with `restore.format-unsupported`, and a restore of a newer host version's archive MUST fail with `restore.host-newer` unless `--force` is given.
+
+**[HST-655]** A restore on a different operating system MUST rewrite no plugin data bytes, MUST normalise path separators in `installed.json` and settings, MUST mark every T2/T3 plugin whose package targets an unavailable platform `refused-at-load` with `package.platform-unsupported` while keeping its data, and MUST list those plugins in the restore result.
+
+**[HST-665]** At start the host MUST detect when `<data>` or `<state>` is on a network filesystem (NFS, SMB, FUSE-remote), MUST log `data.network-fs` once, and MUST fall back to a lock scheme that does not rely on advisory locks alone (lock file with owner id and boot id, renewed every 10 s (proposed, owner to confirm), stale after 60 s). If neither scheme can be guaranteed it MUST start in read-only mode.
+
+**[HST-666]** The host MUST treat plugin ids as lowercase ASCII on disk so two ids that differ only by case cannot collide, MUST reject at install any package whose file paths collide after case folding or Unicode NFC/NFD normalisation with `package.path-collision`, and MUST create store paths with no characters outside `[a-z0-9._-]`.
+
+**[HST-667]** On Windows the host MUST use extended-length paths (`\\?\` prefix) for every file under the plugin roots and MUST accept a package whose longest relative path is at most 240 bytes (proposed, owner to confirm); a longer path MUST be rejected at install with `package.path-too-long` naming the file.
+
+**[HST-668]** The host MUST refuse to follow a symbolic link or reparse point inside any plugin root when reading or writing plugin files, MUST log `fs.symlink-refused` with the path, and MUST fail the operation with `io` and the message `symlink`. A symlink at the root folder itself (e.g. `<data>/plugins` pointing to another disk) MUST be allowed only when owned by the current user.
+
+**[HST-669]** The host MUST support the environment variable `ILIUM_PLUGIN_DATA_DIR` (proposed, owner to confirm) and the key `plugins.data_dir` to place `<data>/plugins/` elsewhere, MUST validate that the target exists, is owned by the current user and has mode 0700 before use, and MUST refuse to start plugins from it with `data.root-invalid` otherwise. Changing it MUST NOT move existing data automatically.
+
+**[HST-672]** The compile cache MUST be capped at 1024 MiB (`plugins.compile_cache_mib`), MUST evict least-recently-used entries when over the cap, MUST NOT evict an entry in use, and MUST be written atomically (temp file plus rename) so a crash never leaves a loadable truncated entry; a truncated entry MUST fail its recorded SHA-256 and be rebuilt.
+
+**[HST-673]** The plugin cache at `<cache>/plugins/<id>/` MUST be limited by the key `cache_mib` (default 64, ceiling 512) (proposed, owner to confirm). On exceeding it the host MUST fail the write with `quota-exceeded` message `cache-full` and MUST evict only whole files oldest-modified-first when the cache volume has less than 512 MiB free, logging `cache.evict` with the count.
+
+**[HST-675]** Entries in `purged.json` MUST be kept for 365 days, MUST be applied when the matching project is next opened (deleting that plugin's bucket and settings there, logged `purge.applied`), and a project folder with plugin data whose plugin is not installed MUST be listed by `ilium plugin doctor` as orphaned with size and MUST NOT be deleted automatically.
+
+**[HST-690]** The host MUST NOT use wall-clock time for lock staleness, retention or quota refill; it MUST use a monotonic clock for durations within a run and persisted UTC timestamps only for display and retention across runs. A wall clock moved backwards MUST NOT cause a retained backup, log or quarantine file to be deleted earlier than its stated age.

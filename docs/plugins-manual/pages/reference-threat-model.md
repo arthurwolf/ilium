@@ -212,6 +212,18 @@ Target behaviour (specified here before the code is written).
 | The policy forbids the combination | The install succeeds, the combination row reads `Blocked by your administrator` with its grants locked off, and calls return `not-permitted` with the reason `policy` |
 | A plugin that never declared `accepts_messages_from` is sent a peer message | The message is dropped and counted; the sender gets `not-permitted` with reason `unavailable` |
 
+## Production additions: T2-security
+
+- **[SEC-706]** The host MUST validate every component with Wasmtime's validator using the fixed feature set of the ABI (no threads, no relaxed-simd, no unlisted proposals) before compilation; a module using a disabled proposal MUST be refused with `manifest.component-invalid` and detail naming the proposal, and no compilation MUST start.
+
+- **[SEC-714]** The threat model MUST list for each asset (user files, terminal content, secrets, tokens, trust store, grants, audit log) the actors that can reach it, the control that blocks them and the SEC id of that control, and a CI check MUST fail when a listed SEC id does not exist.
+
+
+## Not defended
+
+- **[SEC-715]** The threat model MUST state the out-of-scope attackers explicitly: a user with root on the machine, a malicious kernel, hardware side channels beyond SEC-711, and a compromised terminal emulator; the docs site MUST list them under the heading `Not defended`.
+
+
 ### See also
 
 - [Security model](/pages/security/)

@@ -795,3 +795,7 @@ Requirement ids for this page: [API-080]. See the [requirements index](/pages/re
 ### Security
 
 Security keys: `data_use` ([SEC-267]), `security_contact` ([SEC-268]) and the display name rule ([SEC-381], error `manifest.display-name`). See [User security and privacy](/pages/user-plugin-security-and-privacy/).
+
+## Production additions: T4-package-registry
+
+- [PKG-805] `requires.plugins` and `requires.services` MUST each hold at most 64 entries (proposed limit, owner to confirm). A longer list MUST be refused with `manifest.limit` naming the key. Test: a manifest with 65 entries under each key is refused with `manifest.limit` naming that key, and a manifest with 64 entries installs.

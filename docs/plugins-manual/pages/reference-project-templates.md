@@ -532,3 +532,8 @@ The test builds a `HookCall` with a payload that holds a secret, runs the handle
 - [Set up a toolchain](/pages/getting-started-toolchain/)
 
 API checked against `ilium:plugin@0.1.0`.
+
+## Production additions: T5-devtools
+
+- [DEV-935] `new` MUST write a `.gitignore` that lists `dist/`, `target/`, `node_modules/`, `publisher.key` and `*.tmp` (and `.ilium/`, as DEV-268 requires), and a `README.md` naming the build, test, dev and pack commands. `new --license <spdx-id>` MUST write a `LICENSE` and set the manifest `license` field; an id not in the SPDX list MUST fail with `new.license-unknown` before writing files. Test: run `new` with no licence flag and read the `.gitignore` and `README.md`; run `new --license MIT` and assert the `LICENSE` file and the manifest field; run it with an unknown id and assert `new.license-unknown` with no files written.
+- [DEV-937] `check --template-drift` MUST compare the project's files that come from a template (listed in `.ilium-template.json` (proposed file name, owner to confirm) in the project root, written by `new`) with the template of the installed CLI and print one `warn` record `template.drift` per file whose template content changed, without modifying anything. Test: create a project, change one template file in a test CLI build, run `check --template-drift` and assert one `template.drift` warning per changed file, and compare checksums of the project before and after to assert that nothing changed.

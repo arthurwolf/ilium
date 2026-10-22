@@ -707,6 +707,8 @@ export function onEvents(events: Event[]): Submission[] {
 
 The poll loop is native and runs in the server. This plugin's detector runs on the plugin executor, one call per pane, in parallel with other plugins' detectors. One poll cycle spends at most 50 ms on detector calls. A slow call keeps the previous activity and counts as a breach. A third breach in a row traps the call; the side stops only after a third counted failure within the failure window (LIF-030), with no restart. The full rules are in the [detection loop](/pages/capability-agent-signatures/#detection-loop) section of the signatures page and in [Host scheduling](/pages/reference-host-scheduling/).
 
+- [COR-219] When `ilium.core.agent-detect` is off, every pane MUST report agent class `none` and activity `unknown` within one detection interval, and on re-enable all panes MUST be reclassified within 2 seconds (proposed, owner to confirm). Test: switch the plugin off with two panes open and read their classes, switch it on, and time the reclassification.
+
 ### Extension points
 
 Other plugins change what `ilium.core.agent-detect` does through the points below. The plugin owns each point (grant `extensions.provide:ilium.core.agent-detect/<point>`). Contributors need `extensions.contribute:ilium.core.agent-detect/<point>`. See [Extension points](/pages/api-extension-points/) for the mechanism and [Extending core plugins](/pages/extending-core-plugins/) for the five ways to work with a core feature.

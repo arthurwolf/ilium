@@ -125,3 +125,13 @@ These are the production targets an operator can size a machine against.
 - [Requirements, lifecycle and operations](/pages/reference-requirements-lifecycle-ops/)
 
 API version checked: `ilium:plugin@0.1.0`.
+
+## Production additions: T8-observability-perf
+
+- [HST-628] The host MUST sample each plugin side's resident memory (linear memory plus table plus host-side buffers) at least once per second and expose `memory_bytes_current` and `memory_bytes_peak`, where peak MUST be reset only on instance restart.
+- [HST-629] A plugin side whose memory use reaches 90 percent (proposed, owner to confirm) of its effective limit MUST cause the log line `host.memory.high` once per 60 seconds, and an allocation failure at 100 percent MUST trap the instance with the trap code `out-of-memory` and MUST NOT affect other plugins.
+- [HST-630] CPU accounting MUST report `cpu_ms_total` and `cpu_ms_last_minute` per plugin side measured as thread CPU time, with a resolution of 1 ms, and MUST include time spent in synchronous host calls made on the plugin's behalf only when the call is charged to the plugin by LIF-139.
+- [HST-631] The host MUST count open handles per plugin side (files, sockets, subscriptions, timers, child processes) in `handles_open` with a label per kind, MUST refuse an open over the limit with `quota-exceeded` and the offending kind, and MUST release all handles of a stopped instance within 1 second.
+- [HST-633] The host MUST charge a plugin side for event queue memory at 1 byte per queued payload byte plus 64 bytes per queued event, and MUST apply the drop-oldest policy when the charge reaches the queue limit.
+- [HST-634] The host MUST aggregate resource use across all plugins and `ilium plugin top` MUST show the 10 largest plugin sides by CPU, memory and storage, refreshed at most once per second, with columns plugin, side, cpu_pct, memory_bytes, handles, calls_per_second.
+- [HST-644] The host MUST bound the server-wide memory used by all plugin telemetry, logs buffers and traces to 16 MiB plus 64 KiB per plugin side, and `ilium plugin stats --host` MUST print the current value.

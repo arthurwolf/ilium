@@ -572,3 +572,7 @@ Requirement ids for this page: [EVT-030]. See the [requirements index](/pages/re
 - [Lifecycle](/pages/lifecycle/) for activation, deactivation and restarts.
 
 Checked against `ilium:plugin@0.1.0`.
+
+## Production additions: T3-abi-api
+
+- **[API-201]** A subscribe import MUST be idempotent per (plugin, topic, filter): a second identical subscribe MUST return the same subscription id and MUST NOT duplicate delivery, and unsubscribe of a stale id MUST return ok.

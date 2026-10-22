@@ -1129,3 +1129,9 @@ The SDK version has its own number, separate from the contract `ilium:plugin@0.1
 
 Checked against the API version `ilium:plugin@0.1.0`.
 
+
+## Production additions: T5-devtools
+
+**[DEV-927]** For every export and host import, the Rust and TypeScript SDK MUST produce the same observable outcome and error code for the same input; the conformance suite MUST include a parity case per SDK function listed in the API index, and the two SDK reference pages MUST list the same function names (verified by the manual check script).
+
+**[DEV-928]** The TypeScript build MUST tree-shake the SDK so a minimal plugin bundle (init export only) is at most 1 MiB (proposed, owner to confirm) including the JavaScript engine, and cold instantiation of that bundle in the test host MUST finish within 150 ms on the reference machine of the performance page. `build` MUST warn `build.bundle-large` when the bundle exceeds 5 MiB.

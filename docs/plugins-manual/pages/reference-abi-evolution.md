@@ -27,6 +27,8 @@ The version appears in three places, and the host requires that they agree:
 
 The bytes of the custom section for `0.1.0` are `00 00 00 01 00 00`: major 0, minor 1, patch 0 [ABI-004]. A component with no section, with a section of another length, or with values that differ from the manifest is refused with `manifest.api-version`.
 
+- [DEV-968] Each host release MUST publish the SHA-256 of every WIT package it ships in the release notes and in `ilium version --json` under `wit_hashes`, and `ilium plugin inspect` MUST report the same hashes for the component's embedded world.
+
 ## 2. What may change
 
 After the first freeze of 0.1.0, a later version may only **add**. The canonical ABI makes the following parts of the contract binary-significant, so a change to one of them is a break:
@@ -44,6 +46,8 @@ After the first freeze of 0.1.0, a later version may only **add**. The canonical
 Why records are fixed: a record is flattened into a sequence of fields. A host that reads a field that an older plugin did not write would read the wrong bytes. Appending to a `variant` is safe, because an older plugin never produces the new case. Delivering a new case to an older plugin is not safe, so the host filters (section 5).
 
 **What counts as "shape" in 0.1.0.** Several records carry optional fields in 0.1.0 itself, for example `ui-node`, `popup-anchor`, `send-input-spec`, `set-decoration-spec`, `rename-node-spec`, `notify-spec`, `set-virtual-rows-spec`, `choice-option` and `menu-entry`. They are part of the first freeze. They are listed as "shape" items in [Versioning](/pages/versioning/) and they are not open to later change.
+
+- [DEV-967] Two host patch releases of the same minor MUST export byte-identical WIT packages; the release pipeline MUST fail when the WIT text hash of a patch release differs from that of its minor's first release.
 
 ## 3. Markers and unstable features
 
@@ -70,6 +74,10 @@ The manifest checks run before any code loads:
 | `manifest.unstable-unknown` | A name in `unstable` is not a feature of this host. |
 | `manifest.unstable-tier` | A T2 or T3 package lists a feature outside development mode. |
 | `manifest.unstable-missing` | The component imports an unstable item and the manifest does not list the feature. |
+
+- [DEV-975] An unstable feature MUST either graduate or be removed within 6 minor releases (proposed, owner to confirm) of its introduction; the release notes of the sixth minor MUST name the decision, and a feature past the bound MUST be flagged by the release checklist as blocking.
+- [DEV-977] `ilium plugin list --json` MUST include for each plugin the array `unstable_used` of feature names it lists, so an operator can find every plugin affected by a planned graduation or removal.
+- [DEV-978] The host MUST refuse, with `manifest.unstable-tier`, a plugin that lists an unstable feature when installed from a registry flagged `production`, regardless of tier.
 
 ## 4. The window and the refusal codes
 
@@ -147,6 +155,8 @@ export function describe(outcome: Outcome): string {
   }
 }
 ```
+
+- [ABI-119] The host MUST provide the import `host-info` returning the exact `api-version`, host build id, enabled unstable features and every limit in effect, and its result MUST NOT change during one activation.
 
 ## 6. A change in practice
 

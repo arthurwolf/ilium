@@ -181,3 +181,7 @@ other grants.
 - [CI recipes](/pages/guide-ci-recipes/)
 
 API checked against `ilium:plugin@0.1.0`.
+
+## Production additions: T5-devtools
+
+- **[DEV-938]** `ilium plugin docs [--out <dir>]` (proposed, owner to confirm) MUST generate a Markdown page listing the plugin id, version, grants with risk, contributions, settings with defaults and limits, commands and keybindings, all taken from the manifest only, and MUST be byte-identical across runs. A manifest field with no `description` MUST appear with the text `(undocumented)` and produce the check warning `docs.missing-description`.

@@ -110,3 +110,7 @@ Target behaviour (specified here before the code is written).
 - [Secrets](/pages/reference-secrets/)
 
 Contract: `ilium:plugin@0.1.0`.
+
+## Production additions: T2-security
+
+- **[SEC-730]** The audit log MUST be tamper-evident: each record MUST carry the SHA-256 of the previous record, `ilium plugin audit --verify` MUST report the first broken index with exit code 3, and rotation MUST write the last hash as the first record of the next file.

@@ -430,3 +430,7 @@ Side basis: `ilium.core.sessions/before-restore` is server, granted in the serve
 
 - [Core plugins](/pages/core-plugins/)
 - [Worktrees](/pages/core-plugin-worktrees/)
+
+## Production additions: T6-core-plugins
+
+- **[COR-214]** While ilium.core.sessions is down, the kernel snapshot writer MUST continue to write the snapshot at least every 30 seconds (proposed, owner to confirm), and the restarted plugin MUST NOT overwrite a newer kernel snapshot with older state.

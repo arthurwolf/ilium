@@ -217,7 +217,7 @@ When a safe switch is on, the footer shows `Safe mode: third-party plugins are o
 
 ### What the user keeps when a plugin is off
 
-A core plugin can be off for four reasons: the user turned it off, the restart rule turned it off after three failures within 10 minutes (see [Health and watchdog](/pages/reference-health-and-watchdog/); never for an essential plugin), a policy turned it off, or a safe switch is on. The effect is the same in all four. The kernel fallback column is what the user still has. Stored values, files and snapshot sections of an off plugin are never deleted.
+A core plugin can be off for four reasons: the user turned it off, the restart rule turned it off after 3 failures within 60 seconds (proposed value, owner to confirm; COR-107; see [Health and watchdog](/pages/reference-health-and-watchdog/); never for an essential plugin), a policy turned it off, or a safe switch is on. The effect is the same in all four. The kernel fallback column is what the user still has. Stored values, files and snapshot sections of an off plugin are never deleted.
 
 | Core plugin | When it is off | Kernel fallback or what stays |
 |---|---|---|
@@ -346,6 +346,7 @@ Code that reads a restart-only value gets the value that was current at the star
 - [COR-022] Disabling a core plugin MUST have the effect in the table "What the user keeps when a plugin is off", MUST NOT delete its stored data, and MUST leave the kernel fallback and the recovery page working. Test: for each of the 26 plugins that can be disabled (all except the four essential ones), disable it, run the check listed in its row, enable it and compare stored data byte for byte.
 - [COR-023] The scene world MUST NOT import `extensions`, and `capabilities.scene` MUST NOT contain `extensions.provide` or `extensions.contribute`. Test: a manifest with `extensions.contribute:…` under `capabilities.scene` fails with `manifest.grant-side`.
 - [COR-024] Each change in the table "Live reload and restart" MUST apply as stated. Test: change one value of each kind with a client attached, and check whether the running side sees it without a restart.
+- [COR-207] The core plugin dependency graph MUST be acyclic; the kernel MUST refuse to boot a build whose bundled core manifests form a cycle, naming the cycle path in the error `core.dependency-cycle`. Test: bundle two core manifests that require each other and assert boot refuses with `core.dependency-cycle` and the cycle path.
 
 ### Startup plugin deadline
 
@@ -362,6 +363,7 @@ A core plugin can crash on every start. Without a limit the kernel would restart
 - [COR-108] While a core plugin is `degraded`, the kernel MUST keep the other core plugins running, MUST show the degraded state on the status surface and in diagnostics, and MUST refuse its commands with `core.degraded` instead of serving stale state.
 - [COR-109] The user MUST be able to restart a degraded core plugin from the status surface or with `ilium plugin restart <id>`, and a successful restart MUST reset its failure window.
 - [COR-110] Each failure of a core plugin MUST be written to the audit log with its time, exit reason and restart count, so repeated crashes can be diagnosed without a core dump.
+- [COR-200] The core-plugin failure window MUST be one value across the manual: 3 failures within 60 seconds (proposed, owner to confirm) mark the plugin degraded (COR-107), and the text of 'What the user keeps when a plugin is off' MUST cite that rule instead of 'three failures within 10 minutes'. Test: search that section for `10 minutes` and assert no match, and assert it cites COR-107.
 
 ### See also
 

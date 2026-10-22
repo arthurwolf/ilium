@@ -562,3 +562,15 @@ API version checked: `ilium:plugin@0.1.0`.
 ### Security
 
 `ilium --safe-mode` (the same as `--safe-mode=third-party`) starts with all third-party plugins off ([SEC-328]). See [Security response](/pages/reference-security-response/).
+
+## Production additions: T1-lifecycle
+
+- [LIF-702] The end-of-life and abandonment dates MUST be evaluated on the wall clock, at server start and then every 1 h (proposed, owner to confirm), and a backward wall-clock jump MUST NOT re-enable a retired plugin. The 30 day warning period of PKG-711 MUST be counted from the first time the host saw the abandonment notice, stored in `installed.json` as `abandon_notice_at`. Test: set the clock back 40 days after retirement and assert the state stays `retired`.
+
+- [LIF-704] When an administrator pins a plugin (PKG-711) the host MUST skip the abandonment disable, MUST keep showing the `abandoned` badge, and MUST log `plugin.abandon-pinned` once per start. Removing the pin MUST start a fresh 30 day warning period. Test: pin, pass 31 days, assert enabled; unpin and assert the 30 day countdown restarts.
+
+- [LIF-721] Failure windows MUST be held in memory only; a clean or unclean server start MUST begin with empty windows, except that `failure_stopped` sides MUST stay stopped (LIF-037). A host-crash start MUST NOT count the crash against the plugin that was active. Test: two failures, restart server, one failure, assert a 1 s restart delay, not 5 s.
+
+- [LIF-723] In `third-party` safe mode, `ilium plugin enable <id>` MUST be accepted into the registry but MUST NOT activate until safe mode is left, and the list MUST show `safe-mode` as the disabled reason. The host MUST log the plugin that was starting at each crash mark as `crash.suspect <id>`. Test: stage a plugin whose start aborts the process, restart three times, assert the suspect log.
+
+- [LIF-729] An essential core plugin's third and later failures MUST restart after 5 s on every failure, MUST log `failure.core-restart` with a running count, and the host MUST show a persistent notice after 10 failures (proposed, owner to confirm) in one window. Test: 12 failures and count restarts and notices.

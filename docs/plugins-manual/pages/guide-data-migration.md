@@ -232,3 +232,8 @@ An update shows a progress line `Updating data of Notes (2 of 5 steps)` in the C
 - [Requirements, lifecycle and operations](/pages/reference-requirements-lifecycle-ops/)
 
 API version checked: `ilium:plugin@0.1.0`.
+
+## Production additions: T9-compat-deprecation
+
+- **[DEV-982]** A migration of several steps MUST be applied as one transaction over the plugin's storage: if step k fails, the host MUST restore the storage as it was before step 1 and report `migrate.failed` with the step index k.
+- **[DEV-985]** `ilium plugin update <id> --dry-run-migrate` (proposed, owner to confirm) MUST run the migrator on a copy of the storage, print the step count and the resulting size, change nothing, and exit 0 on success or 1 with the `migrate.*` code on failure.

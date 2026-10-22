@@ -143,3 +143,16 @@ These requirements cover a machine where several users run Ilium.
 - [Plugin CLI](/pages/reference-plugin-cli/)
 
 Contract: `ilium:plugin@0.1.0`.
+
+## Production additions: T7-users-privacy-a11y
+
+- [USR-341] `ilium plugin list --json --inventory` MUST output id, version, tier, content hash, key id, state and granted permissions for every plugin, one object per line, sorted by id, without paths under the user's home, so that a fleet tool can compare machines.
+- [USR-343] A policy MAY set `notice.contact` (at most 200 characters, proposed, owner to confirm; no control characters) and the host MUST append it to every message that says `Blocked by your administrator`.
+- [USR-344] Applying a policy MUST NOT give an administrator access to a user's plugin data, settings values or consent records; `ilium plugin audit` MUST show plugin ids, events and reasons only, and the manual MUST list this limit in the administration guide.
+
+## Production additions: T10-operations
+
+- [HST-686] The policy MUST support `max_user_plugin_disk_mib` and `max_user_active_plugins` (proposed, owner to confirm) as caps per user, enforced by each user's own session server, and the host MUST refuse an install that would exceed the disk cap with `policy.user-quota` showing used and allowed MiB. The system-wide aggregate ceilings (HST-500..511) apply per machine across users.
+- [HST-687] A system-wide install MUST be stored read-only for users (owner root/administrator, no write for others), MUST be verified by `manifest.sha256` on each server start for each user, and MUST be loaded by many users concurrently without a per-user copy; compiled-component cache for it MUST be per user.
+- [HST-688] When two users open the same project folder, each user's session MUST keep its own grants, and project buckets MUST be stored per user (keyed by user id) or the host MUST refuse the second user with `project.owned-by-other-user`; a plugin MUST NOT be able to read the other user's project bucket. The `.ilium` folder permissions of 0700 MUST NOT be widened by the host.
+- [HST-689] The host MUST provide `ilium plugin admin purge-user <user>` (proposed, owner to confirm) for an administrator that deletes the plugin data, storage, grants, logs and cache of that user under the user's roots, requires `--yes`, writes a system audit entry and refuses a user with a running session server (`purge.user-active`).

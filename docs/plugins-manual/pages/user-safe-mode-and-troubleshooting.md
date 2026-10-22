@@ -87,6 +87,11 @@ Plugins
 <figcaption>Rendered at 48 columns. Illustrative. The Plugins list in safe mode with third-party plugins held off.</figcaption>
 </figure>
 
+## Production additions: T7-users-privacy-a11y
+
+- **[USR-345]** Safe mode MUST be enterable by `ilium --safe-mode`, by `ILIUM_SAFE_MODE=1`, and automatically after 3 (proposed, owner to confirm) server starts in 5 minutes that ended in a host crash while loading plugins, and the banner MUST say which of the three caused it.
+
+
 ### See also
 
 - [Managing plugins](/pages/user-managing-plugins/)

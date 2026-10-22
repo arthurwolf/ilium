@@ -283,3 +283,11 @@ export function recordSend(pane: bigint, key: string): void {
 ### Security
 
 Log lines are redacted of secrets ([SEC-243]). See [Secrets](/pages/reference-secrets/).
+
+## Production additions: T8-observability-perf
+
+- **[HST-600]** The host MUST store each plugin's log as one file per plugin id and MUST rotate it when it reaches 4 MiB (4,194,304 bytes) (proposed, owner to confirm), keeping at most 3 rotated files (proposed, owner to confirm) per plugin, so total log disk use per plugin is at most 16 MiB (proposed, owner to confirm).
+- **[HST-601]** The host MUST delete rotated plugin log files older than 14 days (proposed, owner to confirm) at server start and once every 24 hours (proposed, owner to confirm), and MUST delete a plugin's log files within 1 minute (proposed, owner to confirm) of uninstall with purge.
+- **[HST-602]** Each plugin log line MUST be written as one JSON object per line when the file is read by `ilium plugin logs <id> --json`, with the fields `ts` (RFC 3339 UTC, millisecond precision), `level`, `plugin`, `side`, `instance`, `code` (may be null), `message`, and a line MUST never contain a raw newline inside `message` (newlines are escaped as \n).
+- **[HST-604]** A log call with a message that is not valid UTF-8 or contains NUL MUST be accepted, the invalid bytes MUST be replaced by U+FFFD and NUL by U+2400, and the host MUST count the event in `log_sanitized` for the plugin side.
+- **[HST-605]** The host MUST apply the log level filter before the rate limit, so a line below the configured minimum level (default `info`; `debug` and `trace` are off) MUST NOT consume the 200-lines-per-second budget and MUST NOT be stored.

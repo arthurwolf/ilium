@@ -121,3 +121,9 @@ Target behaviour of the production plugin system.
 - [Versioning](/pages/versioning/)
 - [Compatibility and upgrades](/pages/guide-compatibility-and-upgrades/)
 - [Requirements for WIT and ABI](/pages/reference-requirements-wit-abi/)
+
+## Production additions: T9-compat-deprecation
+
+- **[DEV-964]** The project MUST support each host minor release with security fixes for at least 12 months (proposed, owner to confirm) after its release date and MUST publish that end date in the support matrix at release time; the window of ABI minors (current and previous) is a loading rule and MUST NOT be read as the support period.
+- **[DEV-966]** A fix for a vulnerability in the plugin host, sandbox or SDK MUST be released as a patch to every host minor still inside its support period (DEV-964), and a patch release MUST NOT change any WIT interface, limit, error code or manifest key.
+- **[DEV-995]** A major host release MUST be announced in the release notes of a minor at least 6 months (proposed, owner to confirm) before its release date, with the list of every removal and limit change it contains; the announced list MUST NOT grow after the announcement.

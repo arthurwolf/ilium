@@ -751,3 +751,7 @@ Side basis: `before-send-input` is server because input reaches a pane through t
 ### Security
 
 Risk marks of this plugin's extension points follow the corrected table in [Extension security](/pages/reference-extension-security/) ([SEC-293]).
+
+## Production additions: T6-core-plugins
+
+- [COR-218] The PTY and vt100 state MUST be owned by the kernel; disabling or crashing `ilium.core.terminal` MUST NOT kill, resize or detach any PTY, and input typed by the user MUST still reach the focused pane. Test: disable the terminal plugin, and separately crash it in a test, then assert that each PTY keeps running at its size, and type into the focused pane and assert that the input arrives.

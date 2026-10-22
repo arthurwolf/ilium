@@ -111,3 +111,12 @@ The host keeps the counters that these budgets need: call durations per class, q
 - [Soak and endurance testing](/pages/reference-host-soak-and-load-testing/) for the long-run tests of memory, handles and helper processes.
 
 API version checked: `ilium:plugin@0.1.0`.
+
+## Production additions: T8-observability-perf
+
+- **[HST-622]** Input-to-echo latency added by plugin key and mouse hooks MUST be at most 2 ms (proposed, owner to confirm) at the 99th percentile with 40 bundled plugins registered, measured by a benchmark B25, and the hooks MUST run under a 5 ms (proposed, owner to confirm) hard deadline.
+- **[HST-623]** The per-plugin activation phases (load, compile or cache lookup, instantiate, `init` export, first event) MUST each be timed, written to the telemetry as `startup_phase_us` with the phase name, and shown by `ilium plugin status --startup`.
+- **[HST-625]** The host MUST cache compiled components keyed by the component hash and Wasmtime version, and a warm start from the cache MUST be at least 5 times faster than a cold compile for the same component, measured by benchmark B26; a corrupt cache entry MUST be discarded and recompiled with the log code `host.cache.corrupt`.
+- **[HST-626]** The compiled-component cache MUST be bounded to 512 MiB (proposed, owner to confirm) by default (configurable), MUST evict least-recently-used entries when over the bound, and MUST report size and hit rate in `ilium plugin stats --cache`.
+- **[HST-627]** The release gate MUST compare each benchmark median with the stored baseline of the previous release and MUST fail the run when any median regresses by more than 10 percent (proposed, owner to confirm), even when the absolute budget is met.
+- **[HST-646]** The benchmark harness MUST emit results as JSON lines with the fields `id`, `median_ns`, `p99_ns`, `budget_ns`, `pass` and `commit`, and `ilium-plugin-bench --compare <file>` MUST exit with code 1 when any `pass` is false.

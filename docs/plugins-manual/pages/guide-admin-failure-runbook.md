@@ -217,3 +217,8 @@ Target behaviour. After the third failure inside 10 minutes the host disables a 
 - [Security response](/pages/reference-security-response/)
 
 API version checked: `ilium:plugin@0.1.0`.
+
+## Production additions: T10-operations
+
+- [HST-696] `ilium plugin doctor [--json] [--fix]` MUST check the registry, lock files, staging folders, store hashes, bucket integrity, quarantine files, permissions (USR-206/207), disk space and orphaned data, MUST print one line per finding with a stable code, MUST change nothing without `--fix`, and with `--fix` MUST only perform the reversible actions (move aside, rebuild index, remove stale lock) and list each. Exit code 0 means no findings, 1 findings, 2 fixed.
+- [HST-697] A lock holder is stale only when its recorded process is gone, or its boot id differs from the current one, or its heartbeat is older than 60 s; the host MUST NOT break a lock whose holder passes these checks, MUST log `lock.takeover` with the old holder's pid and boot id on takeover, and a command that waits for a held lock MUST fail with `registry.locked` after 30 s naming the holder.

@@ -372,3 +372,26 @@ The user sees the registry only through search results, plugin detail pages and 
 - [Administrator guide](/pages/guide-plugin-administration/)
 - [Publishing guide](/pages/guide-publishing/)
 - [Release rollout](/pages/reference-release-rollout/)
+
+## Production additions: T2-security
+
+- **[SEC-723]** Publishing to a registry account MUST require a second factor (TOTP or WebAuthn), MUST support at least two maintainers per publisher id, and MUST send a notice to every maintainer on publish, key change, transfer and yank.
+
+## Production additions: T4-package-registry
+
+- **[PKG-800]** A yank or unyank request MUST be signed by a trusted key of the plugin's current publisher; any other signer MUST be refused with `registry.not-owner` and the metadata MUST stay unchanged.
+- **[PKG-801]** A yank MUST record `yanked_at` (UTC, second precision), `yanked_by` (key fingerprint) and `reason` (1 to 500 (proposed, owner to confirm) Unicode scalar values) in plugins/<id>.json. `ilium plugin yank` without `--reason` MUST fail with `usage.missing-argument`. The reason MUST be shown by `info` and by the install refusal of PKG-420.
+- **[PKG-802]** unyank MUST clear the yanked fields of that version, MUST append an entry to the transparency log, and MUST fail with `registry.not-yanked` when the version is not yanked. A version removed by takedown MUST NOT be unyankable (`registry.taken-down`).
+- **[PKG-810]** The registry MUST refuse a publish body over 300 MiB with 413 `registry.size` before reading it fully, and MUST abort an upload that makes no progress for 60 s with `registry.upload-timeout`.
+- **[PKG-811]** The registry MUST run publish checks in this order and report the first failure: size, package format stages, manifest schema, signature, namespace ownership, confusable check, version-exists, dependency existence. A failed publish MUST leave no blob and no metadata change.
+- **[PKG-812]** A publish whose `requires.plugins` names an id that does not exist in the same registry or in a configured upstream MUST be refused with `registry.dependency-unknown`, unless the entry is optional.
+- **[PKG-813]** When one id is served by two configured registries, the client MUST install from the registry that first served an installed or locked copy of that id and MUST refuse a different source with `registry.source-changed` unless `--allow-source-change` is passed.
+- **[PKG-814]** `[plugins.registry]` MUST support a per-namespace route (prefix to registry url); an id matching a route MUST be requested only from that registry and a miss MUST be `plugin.not-found`, never a fall-through.
+- **[PKG-816]** A mirror that serves a `snapshot.json` or `timestamp.json` whose version number is lower than the highest the client has stored MUST be refused with `registry.rollback` and the stored version MUST NOT change.
+- **[PKG-817]** `mirror` with `--allow` MUST fail with `mirror.closure-incomplete` and write nothing when the closure of the allowed ids (non-optional requires, all versions in range) contains an id the source does not serve.
+- **[PKG-818]** The registry MUST serve metadata with `Content-Type: application/json` and blobs with `application/octet-stream`; a client MUST ignore the content type (as PKG-261 does for packages) and MUST accept `Content-Encoding: gzip` for metadata only, applying the size limits to the decoded bytes.
+- **[PKG-819]** `ilium plugin owner add|remove <id> <publisher-id>` MUST require a signature by a key of an existing owner, MUST refuse removing the last owner with `registry.last-owner`, and MUST be recorded in the transparency log.
+- **[PKG-821]** After a takedown of `id@version`, the registry MUST refuse any new publish of that same `id@version` with `registry.version-exists`, and the tombstone (id, version, sha256, reason code, time) MUST remain in plugins/<id>.json.
+- **[PKG-822]** A publish on channel `stable` of a version lower than the highest stable version already published MUST be accepted only for a different MAJOR line (proposed, owner to confirm), otherwise refused with `registry.version-order`.
+- **[PKG-823]** `yank` MUST print the number of plugins in the registry whose latest release requires a range that only the yanked version satisfies, and MUST require `--confirm-dependents` when that number is above 0.
+- **[PKG-824]** A search request with `--limit` outside 1..100 or `--offset` above 10,000 (proposed, owner to confirm) MUST fail with `usage.invalid-value` before any network request, and a result page MUST contain at most the requested limit.

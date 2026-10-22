@@ -106,6 +106,7 @@ The entry is named `signature` and holds a UTF-8 JSON document.
 |---|---|
 | [PKG-214] | `public_key` is the 32 raw bytes in base64url without padding. `key_id` MUST equal the lowercase hexadecimal SHA-256 of those 32 bytes. A file with another `key_id` is refused with `trust.key-malformed`. |
 | [PKG-215] | `publisher_id` follows the grammar below. `publisher` is a display name of 1 to 64 characters with no control and no bidirectional-override characters. |
+| [SEC-722] | Signing keys MUST be Ed25519 with a validity of at most 2 years (proposed, owner to confirm); the registry MUST refuse a publish signed with an expired key, and the CLI MUST warn from 60 days (proposed, owner to confirm) before expiry with a command to rotate. |
 
 **Fingerprint display.** The stored form is the 64-character hex string. The display form groups it in 16 groups of 4 characters separated by single spaces, and the dialog splits it into two lines of 8 groups. [PKG-216] A dialog or prompt that asks the user to trust a key MUST show all 64 characters. It MUST NOT show a truncated fingerprint as the only identification. A short form (the first 8 characters) MAY appear next to the full form in lists.
 
@@ -169,6 +170,7 @@ Store format:
 | [PKG-225] | `ilium plugin install --trust <key_id>` trusts that exact key for this install and for later ones. It is the non-interactive way to trust a key while installing; outside an install, `trust add --fingerprint <key_id> <package>` and `trust add <publisher.pub> --yes` are the non-interactive ways. A package signed by another key is refused with `trust.key-unknown`. |
 | [PKG-226] | `trust remove` of a key that signed installed plugins MUST be refused with `trust.in-use` and list the plugins, unless `--force` is given. With `--force` the plugins change to the package state `disabled-untrusted` ([plugin lifecycle states](/pages/reference-plugin-lifecycle-states/#package-states)): they stay installed, are stopped, keep their grants and settings, and show a badge. They leave that state when the key is trusted again, or with `ilium plugin enable <id> --accept-risk`. |
 | [PKG-227] | `trust remove` MUST NOT delete any plugin data. `trust remove` of a system entry is refused with `trust.system-entry`. |
+| [SEC-721] | The host MUST detect modification of the trust store and the grant file between reads by comparing a keyed MAC (key kept in the user's OS secret store, falling back to a 0600 file) and, on mismatch, MUST refuse T2 and T3 plugins with `trust.store-tampered`, preserve the file as `.tampered-<timestamp>` and tell the user. |
 
 ## Tier assignment
 

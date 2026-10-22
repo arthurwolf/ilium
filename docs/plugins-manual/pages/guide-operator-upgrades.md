@@ -145,3 +145,7 @@ Each entry gives detection, mitigation and recovery. The runbook is part of the 
 - [Troubleshooting plugins](/pages/user-troubleshooting/) for the restart rules and the recovery page
 
 API version checked: `ilium:plugin@0.1.0`.
+
+## Production additions: T9-compat-deprecation
+
+- **[DEV-992]** `ilium plugin preflight --target <host-version>` (command name proposed, owner to confirm) MUST list, for every installed plugin, whether it would load, load with a `deprecated` record or be refused with a code, using the matrix data shipped in the target binary or a manifest file, without starting any plugin.

@@ -327,6 +327,8 @@ Target behaviour of the production plugin system.
 - [ABI-074] Each corpus case MUST state its input, the expected result or refusal code, and the matrix row of ABI-030 it covers.
 - [ABI-075] A host MAY claim ABI conformance for a version only when every case of that version's corpus passes, and the corpus version MUST equal the API version it checks.
 
+- [ABI-120] The conformance corpus MUST include, for every import, one case for each documented error code, one case for each limit at limit and at limit plus one, and one case for a revoked grant, and a coverage report MUST list uncovered import-code pairs and fail the release when it is non-empty.
+
 ## See also
 
 - [WIT reference](/pages/reference-wit/)

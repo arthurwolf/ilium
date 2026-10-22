@@ -138,3 +138,48 @@ Target behaviour. An operator must be able to see how often a plugin traps witho
 
 - [API-092] The host MUST keep a per-plugin, per-side counter for each trap code of [API-081] and for each restart, MUST collapse identical consecutive log lines of one trap code within 10 seconds into one line with a repeat count, and MUST retain a crash record (trap code, time, side and the last 20 log lines) for each plugin disabled by the restart rule until the plugin is enabled again or removed. `ilium plugin logs` MUST show the crash record.
 
+## Production additions: T8-observability-perf
+
+The registry below lists every code the host writes to a log line, with its level, its meaning and the requirement that produces it. Only codes that start with `host.` match the pattern of HST-607. The other codes are listed as they stand today; their rename needs an owner decision before the first ABI release.
+
+| Code | Level | Meaning | Produced by |
+|---|---|---|---|
+| `host.trap` | error | A trap, with the trap code | HST-358 |
+| `host.slow-calls` | info | Slow call report, top 3 calls of the last minute | HST-359 |
+| `host.observability.dropped` | warn | Records dropped by the writer queue, one line per minute | HST-643 |
+| `instance.started` | info | Instance start (not `host.` form yet) | HST-358 |
+| `instance.ended` | info | Instance end with summary (not `host.` form yet) | HST-357, HST-358 |
+| `trap.deadline` | warn | Soft or hard deadline breach (not `host.` form yet) | HST-358 |
+| `host.late` | warn | Late call (matches the pattern) | HST-358 |
+| `host.queue-timeout` | warn | Call abandoned in the queue (matches the pattern) | HST-358 |
+| `events.dropped` | warn | Events dropped, with counts (not `host.` form yet) | HST-358, HST-643 |
+| `limits.clamped` | warn | Limit clamped to the tier ceiling (not `host.` form yet) | HST-358 |
+| `deactivate.deadline` | warn | Deactivate breach (not `host.` form yet) | HST-358 |
+| `helper.died` | error | Helper death (not `host.` form yet) | HST-358 |
+
+- **[HST-607]** Every host-written log line that reports a condition MUST carry a stable code of the form `host.<area>.<name>` matching `^host\.[a-z0-9-]+(\.[a-z0-9-]+)*$`, and the manual MUST list every code in one registry table with level, meaning and the requirement that produces it; a code MUST NOT be renamed or reused for another meaning within a major ABI version.
+
+- **[HST-608]** The host MUST redact every log line and span attribute through the secret redactor before write, and MUST replace a matched value with `[redacted]`, including lines written by the host on behalf of a plugin.
+
+- **[HST-609]** The trace log of `ILIUM_PLUGIN_TRACE=1` MUST be written to `<state>/plugin-trace.jsonl` with one span per line containing `trace_id`, `span_id`, `parent_id`, `plugin`, `side`, `class`, `export`, `queue_us`, `run_us`, `imports` and `outcome`, and MUST be capped at 32 MiB with the oldest half discarded on overflow.
+
+- **[HST-610]** When tracing is on, a span MUST use the correlation id of HST-526 as `trace_id`, a span for a cross-plugin call MUST have the caller span as `parent_id`, and a span MUST be emitted exactly once per call, including calls that trap or time out.
+
+- **[HST-612]** The host MUST expose the counters of HST-354 in Prometheus text format at `ilium plugin metrics` (stdout) with metric names prefixed `ilium_plugin_`, labels `plugin`, `side` and `class` only, and MUST NOT serve them over any network socket.
+
+- **[HST-613]** Metric label cardinality MUST be bounded: the labels MUST NOT include export names, event kinds beyond the 32 defined kinds, error messages or user data, and the host MUST cap the metric series at 64 per plugin side.
+
+- **[HST-614]** The histogram buckets MUST use a monotonic clock, MUST count a call in exactly one bucket, and the sum of bucket counts MUST equal the `calls` counter for the same window; a clock step backwards MUST NOT produce a negative duration (clamp to 0).
+
+- **[HST-636]** The diagnostics bundle `ilium plugin diagnostics --out <file>` MUST contain per plugin health, metrics, last 500 log lines, effective limits, manifest and grants, MUST apply redaction (HST-608), MUST NOT contain plugin data directories, and MUST complete within 10 seconds for 64 plugins.
+
+- **[HST-638]** A plugin MUST be able to emit a custom counter with `host::telemetry::count(name, delta)` limited to 16 distinct names (proposed, owner to confirm) per plugin side, names matching `^[a-z][a-z0-9_]{0,31}$`, and a 17th name MUST fail with `quota-exceeded`; custom counters MUST appear under the `plugin.` prefix in stats.
+
+- **[HST-639]** Reading the counters through `ilium plugin stats` or `plugin-info` MUST take at most 5 ms for 64 plugins and MUST NOT call into any plugin or block the recording path (HST-351).
+
+- **[HST-642]** Time used for telemetry, deadlines and spans MUST come from a monotonic clock, and the test clock `advance_clock` MUST drive histogram buckets, hourly buckets and the 24-hour window identically, so a test can age data without sleeping.
+
+- **[HST-643]** Log, trace and telemetry writes MUST be non-blocking for the plugin call path: when the writer queue holds 8,192 records (proposed, owner to confirm) the host MUST drop the oldest records, count them in `observability_dropped` and write one `host.observability.dropped` line per minute.
+
+- **[HST-647]** Timestamps in logs, traces and status output MUST use UTC in storage and the user's local time in terminal display, and the format `YYYY-MM-DD HH:mm:ss` MUST be used for terminal display.
+

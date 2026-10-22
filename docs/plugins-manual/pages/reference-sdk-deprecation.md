@@ -89,6 +89,13 @@ The entry of 0.6.0 repeats the item under `### Removed`. The names here are illu
 - Plugin authors act on the build warning or the editor mark. They move to the successor before the removal minor, because the item stops compiling after it.
 - Operators take no action. An SDK deprecation changes only what plugin builds report, so there is nothing to configure on a host.
 
+## Production additions: T9-compat-deprecation
+
+- **[DEV-996]** An SDK release MUST declare in its metadata the lowest and highest host API minors its output loads on, and `ilium plugin build` MUST fail with `build.sdk-host-mismatch` when the manifest `api` falls outside that range.
+
+- **[DEV-997]** `ilium plugin check` MUST report each use of a deprecated SDK item in the plugin source as `lint.sdk-deprecated` (warning) naming the item and successor, and as an error when the SDK minor in use is the removal minor.
+
+
 ### See also
 
 - [ABI evolution](/pages/reference-abi-evolution/)

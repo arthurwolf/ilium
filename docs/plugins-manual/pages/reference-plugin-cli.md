@@ -602,3 +602,43 @@ A person who runs `ilium plugin doctor` on a machine without the Rust target see
 - [Package and share](/pages/tutorial-09-package-and-share/)
 
 API checked against `ilium:plugin@0.1.0`.
+
+## Production additions: T5-devtools
+
+- **[DEV-900]** `ilium plugin clean [<dir>] [--all]` MUST delete `dist/` and the plugin build cache of the project and print one `artifact` record per removed path; with `--all` it MUST also delete `target/` or `node_modules/.cache`. It MUST NOT delete `src/`, `manifest.json`, lock files, `publisher.key` or golden files, MUST be idempotent (exit 0 when nothing exists) and MUST work offline.
+
+- **[DEV-901]** Two commands that write `dist/` in the same project (`build`, `pack`, `sign`, `test --update`, `dev`) MUST serialize through an advisory lock file `dist/.lock`; a second command MUST wait up to 30,000 ms (proposed, owner to confirm) then fail with `build.locked` (exit 1) naming the holder PID. A lock whose PID is dead MUST be broken automatically.
+
+- **[DEV-902]** Every project command MUST accept `--manifest-path <file>` naming a `manifest.json`; the project directory is then that file's parent and `<dir>` MUST NOT also be given (else exit 2 `usage.conflicting-flags`). Relative paths in output records MUST be relative to the project directory, never the caller's working directory.
+
+- **[DEV-903]** A project MAY contain `ilium-plugin.toml` in its root. The CLI MUST read only the keys `[build] profile`, `[build] extra-args`, `[test] timeout_ms`, `[lint] deny`, `[dev] ignore` and MUST fail with `config.unknown-key` (exit 2) on any other key. A command-line flag MUST override the file, and the file MUST override defaults but never the manifest.
+
+- **[DEV-904]** The CLI reference MUST list every environment variable the CLI reads (at least `ILIUM_SESSION`, `ILIUM_PLUGIN_SIGNING_KEY`, `NO_COLOR`, `ILIUM_PLUGIN_OFFLINE`) with type, default and the flag that overrides it. The CLI MUST ignore any `ILIUM_PLUGIN_*` variable not in that list and `doctor` MUST emit a `warn` doctor-check named `env.unknown` for each such variable set.
+
+- **[DEV-906]** `ilium plugin --version` MUST print one `version` record (JSONL) or one text line with the CLI version, the plugin contract version, the supported WIT package versions and the embedded test host version, and exit 0 without a session or toolchain.
+
+- **[DEV-908]** `lint --fix` MUST apply only rules whose record carries a non-empty `fix` field, MUST rewrite files atomically (write temp file then rename), MUST print one `artifact` record per modified file, and MUST refuse with `lint.dirty-tree` (exit 1) when the project is in a Git repository with uncommitted changes in a file it would modify, unless `--allow-dirty` is given. A second run MUST change zero files.
+
+- **[DEV-911]** `check` MUST emit lint/check rule `size.component-over-budget` with severity `warn` when a built component exceeds 2 MiB (proposed, owner to confirm) and `error` when it exceeds the package component limit of the package format; the budget MAY be lowered by `[build] max_component_bytes` in the project config and MUST NOT be raised above the format limit.
+
+- **[DEV-912]** `ilium plugin upgrade-sdk [<dir>] [--to <version>] [--dry-run]` MUST update the SDK dependency and the pinned WIT version in the project, MUST print each edit as a `diff` record, MUST be a no-op with exit 0 when already current, and MUST fail with `upgrade.no-path` (exit 1) when the target version is older than the current one or crosses a major SDK version without a published migration note.
+
+- **[DEV-913]** `ilium plugin check --deps` MUST report, offline from the lock file, the SDK version in use, the newest SDK version known to the installed CLI, and a `warn` record `deps.sdk-outdated` when the project's SDK minor is more than 2 minors (proposed, owner to confirm) behind the CLI.
+
+- **[DEV-914]** Every offline command MUST behave identically on Linux, macOS and Windows: paths in records MUST use forward slashes, line endings of generated files MUST be LF, key files MUST be created with owner-only permissions (mode 0600, or an ACL granting only the current user on Windows), and the file watcher MUST fall back to polling every 500 ms (proposed, owner to confirm) when native events are unavailable.
+
+- **[DEV-915]** The CLI MUST write standard output and files as UTF-8 regardless of locale, MUST NOT localise `code` or `rule` fields or JSONL keys, and MUST print text-mode messages in English only. Invalid UTF-8 in a source manifest MUST fail with `manifest.encoding` and the byte offset.
+
+- **[DEV-916]** An interrupt (SIGINT, SIGTERM or Windows Ctrl+C) during `pack` or `sign` MUST leave no partial output: the target file MUST either be unchanged or fully written, no temp file named `*.tmp` may remain, and the command MUST exit 130 after printing `summary` and `result`.
+
+- **[DEV-920]** `test` MUST accept `--timeout-ms <n>` (default 10,000 per case, max 600,000 (proposed, owner to confirm); larger MUST exit 2 `usage.out-of-range`) and `--filter <glob>` matching fixture names. A case over its timeout MUST get status `fail` with reason `timeout`, and a filter matching zero fixtures MUST exit 2 `test.no-match`.
+
+- **[DEV-922]** `ilium plugin bench [--fixture <name>] [--iterations <n>]` MUST call the built component in the embedded test host with a real clock, default 100 iterations (proposed, owner to confirm) after 10 warm-up iterations, and print one `timing` record per export with `p50_ms`, `p99_ms` and `max_ms`; it MUST exit 3 when any export p99 exceeds its manifest `deadline_ms` and MUST label the record `synthetic: true`.
+
+- **[DEV-931]** `dev --reset-data` MUST delete the development copy's data folder, cache folder and storage buckets before the first install and print one `warning` record naming them. Without it, data from the previous `dev` run MUST be kept across runs and across rebuilds.
+
+- **[DEV-939]** `ilium plugin diff <old.iliumpkg> <new.iliumpkg>` MUST work offline and print `diff` records for: added, removed and changed grants, contributions, file list, version, and declared limits; it MUST exit 0 when identical and 3 when they differ, and it MUST NOT extract files to disk.
+
+- **[DEV-940]** `pack --sbom` MUST write `dist/<id>-<version>.sbom.json` in CycloneDX 1.5 JSON listing every locked dependency with name, version and SHA-256 or registry checksum from the lock file, MUST be reproducible (DEV-099), and MUST print an `artifact` record of kind `sbom`.
+
+- **[DEV-941]** `ilium plugin doctor --bundle <file>` MUST write a zip of the doctor records, CLI and host versions, the manifest, the lock file hash and the last 200 log lines (proposed, owner to confirm) of the plugin, MUST redact values of environment variables whose names contain `KEY`, `TOKEN` or `SECRET`, and MUST NOT include source files, key files or the data folder.

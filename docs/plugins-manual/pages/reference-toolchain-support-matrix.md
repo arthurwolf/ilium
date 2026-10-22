@@ -28,3 +28,10 @@ Each rule names its failure code. A failure prints a `diagnostic` record in JSON
 - [Requirements of the developer tooling lane](/pages/reference-requirements-dev-tooling/)
 
 API checked against `ilium:plugin@0.1.0`.
+
+## Production additions: T9-compat-deprecation
+
+- [DEV-965] A host release past its end-of-support date MUST make `ilium version --json` report `support: "end-of-life"` and MUST write one `warn` line `host.end-of-life` per server start; it MUST keep loading plugins unchanged. Test: build a test host with a past end-of-support date, run `ilium version --json` and start the server, and assert the `support` field, one `warn` line, and that installed plugins still load.
+- [DEV-988] Raising the minimum Rust, Bun or wasm-tools version MUST be announced in the release notes of a minor release at least one minor before it takes effect, and a patch release MUST NOT raise any minimum. Test: read the release notes of the minor release before a raise and assert the announcement; compare the minimum versions of two consecutive patch releases and assert that they are equal.
+- [DEV-989] `ilium plugin doctor` MUST report a toolchain newer than the newest tested one as `untested` (warning, exit 0) and MUST NOT fail the build on it; the newest tested version of each tool MUST be listed in this support matrix. Test: install a toolchain one minor version newer than the newest tested one, run `ilium plugin doctor` and assert an `untested` warning with exit 0, then assert that the build succeeds.
+- [DEV-990] A project MAY carry `ilium-toolchain.json` (proposed file name, owner to confirm) naming exact versions of Rust, Bun and wasm-tools; when present, `ilium plugin build` MUST fail with `toolchain.pin-mismatch` if an installed version differs, and the component MUST be reproducible under DEV-882 with that pin. Test: write a pin, install a different Rust version, run `ilium plugin build` and assert the `toolchain.pin-mismatch` failure; with matching versions, build on two hosts and compare the component bytes.

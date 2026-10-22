@@ -370,3 +370,7 @@ A build can read a snapshot or a config file written by a newer build of Ilium, 
 - [Kernel and boot reference](/pages/reference-kernel-and-boot/)
 - [Feature traceability](/pages/reference-feature-traceability/)
 - [Core plugins](/pages/core-plugins/)
+
+## Production additions: T9-compat-deprecation
+
+- [DEV-986] A manifest MAY declare `renamed_from` on a setting; the host MUST read a stored value under the old key when no value exists under the new key, write only the new key, and drop the alias after the plugin version in `remove_in`.

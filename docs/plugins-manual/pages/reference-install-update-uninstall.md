@@ -379,3 +379,18 @@ Two `ilium` processes can change the same plugin at once, for example two CLI ca
 - [Requirements, lifecycle and operations](/pages/reference-requirements-lifecycle-ops/)
 
 API version checked: `ilium:plugin@0.1.0`.
+
+## Production additions: T10-operations
+
+- **[HST-677]** When the data to back up exceeds `migration_backup_mib` the update MUST stop before migration with `migration.backup-too-large`, naming the size and the key, unless the user passes `--no-backup`, which MUST be recorded in the audit log. The backup MUST be verified by a byte count and file count comparison before `migrate` runs.
+
+## Production additions: T1-lifecycle
+
+- **[LIF-707]** `ilium plugin update-cancel <id>` (and the Decline action of the review dialog) MUST delete `store/<id>/<candidate>/`, set `update` to `null`, mark the candidate `skip`, log `update.cancelled`, and exit 0 with `changed: false` when no update is staged. It MUST refuse with `update.in-progress` (exit 1) once `update.state` is `migrating` or `trial`. Test: each state.
+- **[LIF-708]** An update to version C while B is `staged` or `update-staged` MUST replace B: delete `store/<id>/B/`, write C, log `update.superseded` naming both versions. While `update.state` is `migrating` or `trial` it MUST be refused with `install.update-busy` (exit 4). Test: both cases.
+- **[LIF-711]** A package in `update-staged` MUST remain staged for at most 30 days (proposed, owner to confirm); after that the host MUST delete the candidate, log `update.review-expired`, and the next update check MAY stage it again. The list MUST show `update-staged` with the pending grants for the whole period. Test: advance the clock 31 days.
+- **[LIF-713]** The error codes `install.no-previous`, `rollback.no-backup`, `migration.data-newer` and `migration.interrupted` MUST each appear in the error catalogue with stage, exit code and one fix sentence, and no other code MUST be returned for these situations. Test: a table-driven test, one case per code, asserting the exit code.
+- **[LIF-716]** `ilium plugin uninstall <id>` while an `ilium plugin dev` lease (LIF-229) shadows the id MUST be refused with `install.dev-attached` (exit 4) naming the session; uninstall MUST proceed when the lease has expired. Test: attach dev, uninstall, then kill dev and wait 3 lease periods.
+- **[LIF-717]** During uninstall the host MUST wait at most the deactivate deadline per instance, MUST cancel in-flight calls with `cancelled`, MUST drop an instance that misses the deadline with `deactivate.deadline`, and MUST NOT delete files until every instance of the id is gone. Total time from `uninstall-pending` to removal MUST be under 10 s (proposed, owner to confirm) with 4 instances. Test: instance that never returns from deactivate.
+- **[LIF-725]** An install, update or uninstall on a read-only plugin root MUST fail at step 1 with `install.read-only` (exit 1), write nothing and leave `installed.lock` free. A host that finds the registry read-only at start MUST run the plugins in it and refuse every lifecycle write. Test: chmod the root 0500 and run each command.
+- **[LIF-726]** The host MUST refuse an install that would make the number of installed plugins exceed 256 (proposed, owner to confirm) with `install.too-many`, and a store that would exceed 2 GiB (proposed, owner to confirm) for one plugin (all versions plus backup) with `install.store-too-large`. Test: install 257 trivial plugins; install a 1.5 GiB package twice.

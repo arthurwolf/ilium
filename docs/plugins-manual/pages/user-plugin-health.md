@@ -89,3 +89,12 @@ Start Ilium with `--safe-mode` (the alias `--safe-plugins` does the same) to run
 - [Health and watchdog](/pages/reference-health-and-watchdog/) for the exact rules.
 
 API version checked: `ilium:plugin@0.1.0`.
+
+## Production additions: T8-observability-perf
+
+- **[HST-640]** The Plugins screen MUST show for each plugin the health, the last error code with its time, calls per minute, p95 call time, and memory, updating at most once per second, and MUST render this in at most 16 ms (proposed, owner to confirm) for 64 plugins.
+
+
+## Production additions: T7-users-privacy-a11y
+
+- **[USR-338]** When a plugin screen's view call fails or exceeds its 100 ms (proposed, owner to confirm) budget the host MUST keep the last good frame dimmed for at most 2 s and then show a placeholder naming the plugin and the code, with the keys Retry and Details, and MUST NOT blank any other window.

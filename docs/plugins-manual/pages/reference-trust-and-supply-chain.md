@@ -198,3 +198,9 @@ Signatures, certificates and revocation lists carry times. The system clock can 
 - [Errors and limits](/pages/reference-errors-and-limits/)
 
 Contract: `ilium:plugin@0.1.0`.
+
+## Production additions: T2-security
+
+- [SEC-725] A project-level or private registry entry MUST NOT shadow a public id silently: when two configured registries serve the same plugin id, the host MUST use the registry the plugin was installed from and MUST refuse an update from the other with `registry.source-changed` unless the user passes `--switch-registry`.
+- [SEC-726] The registry MUST run automated static analysis on every upload (denied imports, oversize components, known malicious digests) and MUST hold a version that matches a rule in state `pending-review` for at most 72 h (proposed, owner to confirm), during which clients MUST NOT receive it in metadata.
+- [SEC-727] Release builds of the host and of every first-party plugin MUST be reproducible: two builds from the same tag on different machines MUST produce byte-identical artifacts, and the release job MUST publish the SBOM (CycloneDX) and the SLSA provenance attestation beside the artifact.

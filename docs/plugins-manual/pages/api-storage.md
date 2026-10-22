@@ -343,3 +343,7 @@ Errors: the 1 MiB value cap applies to `shared` like every bucket, so a larger v
 - [settings](/pages/api-settings/) for values that the user edits.
 - [Always-granted capabilities](/pages/capability-always-granted/) for the other imports that need no grant.
 - [Errors and limits](/pages/reference-errors-and-limits/) for the error codes and the full limit table.
+
+## Production additions: T10-operations
+
+- [HST-656] The host MUST provide `ilium plugin data export <id> <dir>` and `ilium plugin data import <id> <dir>` that write and read every bucket as JSON lines of base64 key and value plus the data version, so a user can move one plugin's data without moving the plugin. Import MUST refuse a data version higher than the installed plugin's with `migration.data-newer`, and MUST be all-or-nothing per bucket.

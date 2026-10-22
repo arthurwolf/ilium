@@ -129,3 +129,10 @@ The blocklist ([SEC-146]) stops a plugin at the next load. These requirements ad
 - [Audit log](/pages/reference-audit-log/)
 
 Contract: `ilium:plugin@0.1.0`.
+
+## Production additions: T2-security
+
+- **[SEC-700]** A security advisory MUST be published as a machine-readable JSON document (OSV schema 1.6 (proposed, owner to confirm)) beside the human page, and MUST contain `id`, `aliases` (CVE if assigned), `affected` ranges by plugin id or `ilium-host` version, `severity` (CVSS v4 vector and score), `fixed` version, `published` and `credits`.
+- **[SEC-702]** The project MUST request a CVE id through a CNA for every confirmed High or Critical host, sandbox or registry flaw before the advisory is published, and the advisory MUST list that id in `aliases` (SEC-700).
+- **[SEC-703]** An advisory for a third-party plugin MUST be sent to the publisher privately first; if the publisher does not acknowledge within 14 days the registry MAY quarantine the version through the emergency feed (EXT-057) and MUST publish the advisory 90 days after the first contact, whether or not a fix exists.
+- **[SEC-729]** For an active exploit the project MUST be able to ship an emergency-disable entry (EXT-057) within 4 hours (proposed, owner to confirm) of confirmation, MUST publish an incident status page, and MUST write a public post-mortem within 30 days (proposed, owner to confirm) that lists timeline, root cause and the SEC ids changed.

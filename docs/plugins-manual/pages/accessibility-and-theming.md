@@ -358,3 +358,14 @@ A T1 plugin may raise the render deadline through `render_deadline_ms`, up to 20
 - [Performance](/pages/performance/)
 
 Checked against the API version `ilium:plugin@0.1.0`.
+
+## Production additions: T7-users-privacy-a11y
+
+- **[USR-300]** Every state that a host-drawn plugin widget conveys by colour (error, warning, success, selected, disabled, focus) MUST also be conveyed by a text label, glyph or attribute (bold, underline, reverse) that survives `NO_COLOR` and a 16-colour theme.
+- **[USR-301]** Every built-in theme MUST give each colour role (`danger`, `warning`, `success`, `muted`, `accent`, `info`) a contrast ratio of at least 4.5:1 (proposed, owner to confirm) against the theme background, computed on the resolved RGB, and a theme that fails MUST be refused by the theme loader with `theme.low-contrast` naming the role.
+- **[USR-302]** The host MUST provide a high-contrast setting (`[ui] contrast = "high"`, default `"normal"`) that raises every role to at least 7:1, replaces `muted` text by the foreground colour, and MUST be delivered to plugins through the theme extras so that a plugin's `rgb` colour can be remapped; a plugin that ignores it MUST still render without error.
+- **[USR-303]** Every action on a plugin screen drawn by a host widget MUST be reachable and operable with the keyboard alone, focus order MUST follow reading order (top to bottom, left to right), Tab MUST never trap focus, and Esc MUST always leave a modal plugin dialog.
+- **[USR-304]** The focused widget MUST be drawn with an indicator that differs from the unfocused state in at least one attribute besides colour (reverse, bold or a `>` marker) and exactly one widget per window MUST carry it.
+- **[USR-305]** When `[ui] screen_reader = true` (default false) the host MUST render widgets in a linear mode: one logical element per line in focus order, with role words (button, checked, unchecked, selected, N of M), no box-drawing or spinner frames, and MUST emit focus changes so that the cursor sits on the focused element's first cell.
+- **[USR-306]** A widget kind that can be focused (button, toggle, input, list row) MUST carry a non-empty text label; the view validator MUST reject a focusable widget with an empty label with `ui.label-missing` naming the widget id, and an icon-only button MUST supply a `label` used in screen-reader mode.
+- **[USR-307]** When reduced motion is on, the host MUST deliver at most 1 full-view redraw per second for a plugin that animates, MUST stop host-run decorative animations, and MUST count a plugin timer below 1000 ms that triggers only redraws as a `ui.motion-ignored` warning in the plugin log once per session.

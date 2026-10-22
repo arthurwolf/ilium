@@ -482,3 +482,7 @@ The main manifest grants `extensions.provide:ilium.core.layout/layout-presets` a
 - [Core plugins](/pages/core-plugins/)
 - [Tree plugin](/pages/core-plugin-tree/)
 - [Terminal plugin](/pages/core-plugin-terminal/)
+
+## Production additions: T6-core-plugins
+
+**[COR-217]** The kernel MUST validate every layout the layout plugin proposes, rejecting it with layout.invalid if any pane has width under 4 cells (proposed, owner to confirm) or height under 2 rows, or any node is missing or duplicated, and MUST keep the previous layout.

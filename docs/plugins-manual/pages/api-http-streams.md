@@ -336,3 +336,7 @@ Illustrative, not generated. A plugin log of a stream that the server closed wit
 ### Security
 
 Stream size and egress budget limits are in [Network egress](/pages/reference-network-egress/) ([SEC-082], [SEC-083]).
+
+## Production additions: T3-abi-api
+
+- **[API-204]** Every stream import MUST define a maximum chunk of 64 KiB (proposed, owner to confirm), a maximum of 8 unread chunks, and on overflow the host MUST pause the producer and MUST NOT drop data; a stream closed by either side MUST deliver exactly one `stream-closed` event with a reason code.

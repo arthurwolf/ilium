@@ -396,3 +396,7 @@ The user sees a package only through the install dialog and the CLI. A refused p
 - [Install, update and uninstall](/pages/reference-install-and-update/)
 - [Plugin command line](/pages/reference-plugin-cli/)
 - [Packages and manifests](/pages/packages/)
+
+## Production additions: T4-package-registry
+
+- **[PKG-825]** `ilium plugin pack` run twice on the same source tree with the same `--signed-at` MUST produce byte-identical archives, using fixed ZIP timestamps (1980-01-01 00:00:00), mode 0644 and no extra fields.

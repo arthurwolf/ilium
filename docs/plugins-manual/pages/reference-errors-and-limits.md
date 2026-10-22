@@ -848,3 +848,12 @@ Target behaviour of the production plugin system.
 - [ABI-061] The host MUST bound the nesting depth of every decoded WIT value, including nested JSON strings and recursive widget trees, at 32 levels, and MUST NOT let decoding recurse on the native stack beyond that bound.
 - [ABI-062] A value nested deeper than the bound MUST be refused with the stable code `abi.depth-exceeded` and MUST NOT trap the plugin or the host.
 - [ABI-063] The host MUST bound decoding work per call by the same limits whether the value comes from a plugin return or from a host-built event, and MUST count a refusal in the ABI refusal metric of ABI-079.
+
+## Production additions: T3-abi-api
+
+- **[API-200]** Every effectful import MUST be rate limited per plugin by a named token bucket, and the call that finds the bucket empty MUST return `err(busy)` with reason `rate-limited` and a `retry-after-ms` value of at least 1.
+
+## Production additions: T10-operations
+
+- **[HST-682]** The manual MUST contain one table listing every host limit with its name, unit, default, minimum, ceiling, config key, error code on breach and owning requirement id, and a conformance test MUST fail when any limit named in a requirement is absent from the table or when a default differs from the host's compiled value.
+- **[HST-683]** `ilium plugin limits [<id>] [--json]` MUST print each effective limit, its source (default, manifest, user config, admin policy) and its current usage, and MUST show a clamped limit with both the requested and applied values.

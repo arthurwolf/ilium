@@ -208,3 +208,7 @@ The user sees a progress line per step, the review dialog and the result. After 
 - [Distribution commands](/pages/reference-plugin-distribution-cli/)
 - [Reference, install, update and uninstall](/pages/reference-install-update-uninstall/)
 - [Lifecycle](/pages/lifecycle/)
+
+## Production additions: T1-lifecycle
+
+- [LIF-727] Auto-update MUST apply only at a safe point, MUST NOT apply an update that adds grants, changes the publisher key, or crosses a major version without the user's confirmation, MUST skip plugins in `skip`, `pinned` or `retired`, and MUST write one `update.auto` log line per applied update. Test: one case per exclusion.

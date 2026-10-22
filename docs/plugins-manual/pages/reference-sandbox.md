@@ -278,3 +278,19 @@ Target behaviour (specified here before the code is written).
 - [Design decisions](/pages/design-decisions/)
 
 Contract: `ilium:plugin@0.1.0`.
+
+## Production additions: T2-security
+
+**[SEC-707]** Before compilation the host MUST bound the component: at most 64 MiB (proposed, owner to confirm) of uncompressed bytes, 100000 functions, 1 MiB of any single function body and 16 nested component instances; exceeding any bound MUST refuse the load with `manifest.component-too-large`, and compilation memory MUST be charged to the helper cgroup, not the server.
+
+**[SEC-708]** Compilation of a T2 or T3 component MUST run inside the plugin's sandbox helper, never in the server process, and the server MUST accept only the serialised artifact after checking its digest and the engine version stamp.
+
+**[SEC-709]** The helper MUST set `RLIMIT_NOFILE` to 64 (proposed, owner to confirm), `RLIMIT_FSIZE` to the granted storage quota and `RLIMIT_MEMLOCK` to 0, and a call that exceeds a limit MUST return `quota-exceeded` with the limit name in the detail.
+
+**[SEC-710]** A guest that exhausts its fuel or epoch budget N consecutive times (default 3 within 60 s) (proposed, owner to confirm) MUST be disabled with notice `Plugin stopped: repeated limit hits`, an audit line `limit-disable`, and MUST NOT be restarted automatically until the user re-enables it.
+
+**[SEC-711]** Timers and clocks exposed to guests MUST be coarsened to 100 microseconds (proposed, owner to confirm) for T3 plugins without the `high-resolution-time` grant, and the host MUST NOT expose a shared-memory counter or SharedArrayBuffer-like primitive to any guest.
+
+**[SEC-712]** On kernels that support it (Linux 5.13 or later (proposed, owner to confirm)) the helper MUST additionally apply a Landlock ruleset equal to its mount view, and a Landlock failure MUST be audited as `sandbox-degraded` but MUST NOT by itself prevent loading when namespaces and seccomp succeeded.
+
+**[SEC-732]** A guest-supplied string shown in the UI or written to the log MUST have control characters, escape sequences and bidirectional override characters (U+202A to U+202E, U+2066 to U+2069) removed or escaped before display.
