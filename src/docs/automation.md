@@ -549,6 +549,8 @@ The request waits until the agent's prompt is ready, then submits the prompt, so
 
 Beyond `/create_agent`, the API serves `/v1/*`: read the tree, a project or a pane, and apply any operation `ilium ctl` offers. See [`ilium ctl`](cli-reference.md#ilium-ctl) for the commands; the routes mirror them one to one (`GET /v1/tree`, `GET /v1/panes/{id}`, `POST /v1/ops`, `POST /v1/panes/{id}/input`, `POST /v1/voice`, ...). `GET /v1/guide` returns the essentials.
 
+To close a worktree agent's pane from outside it, the same route as `ilium close-pane` is `POST /v1/ops` with `{"op":"close","pane":12,"worktree":"remove"}` (`keep`, `remove` or `remove-and-branch`). A refused removal returns HTTP 409 with `"code":"worktree-removal-refused"` and the server's reasons in `"error"`; the worktree is then left for you to inspect. A removal the server does not confirm in time returns HTTP 409 with the code `unconfirmed`; check the worktree before retrying. See [Wrap up a worktree agent](worktrees.md#wrap-up-a-worktree-agent).
+
 ## Reset forecasts
 
 The status bar can show when the providers' public, discretionary usage resets are announced. These come from public announcement feeds, not from your account.

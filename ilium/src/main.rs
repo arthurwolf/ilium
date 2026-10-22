@@ -23,6 +23,7 @@
 use ilium::session;
 
 mod broadcast;
+mod close_pane;
 mod ctl;
 mod pane_filter;
 mod pane_scan;
@@ -190,6 +191,10 @@ enum Command {
     /// "Send message to all" does. The pane running this command is skipped
     /// unless --include-self is given. Output is JSONL.
     Broadcast(broadcast::BroadcastArgs),
+    /// Close a pane of this session, by default the pane this command runs
+    /// in. `--worktree remove` also removes the pane's Ilium-created Git
+    /// worktree when it is clean, merged and unused. Output is JSONL.
+    ClosePane(close_pane::ClosePaneArgs),
     /// Full remote control of a running session for agents and scripts: read
     /// the tree, project or pane as JSON/YAML/Markdown; create, rename, move,
     /// close and drive panes; manage worktrees. Start with `ilium ctl guide`.
@@ -568,6 +573,7 @@ async fn dispatch(cli: Cli) -> Result<(), CliError> {
         Some(Command::Panes(args)) => panes::panes(args, &cli.cwd).await,
         Some(Command::Recap(args)) => recap::recap(args, &cli.cwd).await,
         Some(Command::Broadcast(args)) => broadcast::broadcast(args, &cli.cwd).await,
+        Some(Command::ClosePane(args)) => close_pane::close_pane(args).await,
         Some(Command::Ctl(args)) => ctl::ctl(args, &cli.cwd).await,
     }
 }
