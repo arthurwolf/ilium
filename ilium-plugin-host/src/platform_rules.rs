@@ -148,7 +148,8 @@ pub fn select_precompiled(
 mod tests {
     use super::{
         check_sandbox, normalize_plugin_path, select_precompiled, shipped_triples,
-        termination_plan, tick_gap_ignored, TerminationKind, TerminationPlan, WasmArtifact,
+        termination_plan, tick_gap_ignored, ArtifactSelectionError, TerminationKind,
+        TerminationPlan, WasmArtifact,
     };
     use ilium_plugin_api::{Diagnostic, Platform, Severity, Tier};
     use std::time::Duration;
@@ -398,7 +399,8 @@ mod tests {
             WasmArtifact::cwasm(LINUX_X86_64_TRIPLE),
             WasmArtifact::cwasm(MACOS_AARCH64_TRIPLE),
         ];
-        let selected = select_precompiled(LINUX_X86_64_TRIPLE, &artifacts);
+        let selected = select_precompiled(LINUX_X86_64_TRIPLE, &artifacts)
+            .expect("the artifact list holds a portable component, so selection succeeds");
         assert_eq!(selected.artifact, WasmArtifact::cwasm(LINUX_X86_64_TRIPLE));
         assert!(!selected.logged_fallback);
         assert_eq!(selected.log_code, "");
@@ -411,7 +413,8 @@ mod tests {
             WasmArtifact::Wasm,
             WasmArtifact::cwasm(LINUX_AARCH64_TRIPLE),
         ];
-        let selected = select_precompiled(WINDOWS_X86_64_TRIPLE, &artifacts);
+        let selected = select_precompiled(WINDOWS_X86_64_TRIPLE, &artifacts)
+            .expect("the artifact list holds a portable component, so selection succeeds");
         assert_eq!(selected.artifact, WasmArtifact::Wasm);
         assert!(selected.logged_fallback);
         assert_eq!(selected.log_code, CWASM_INCOMPATIBLE_CODE);
@@ -421,7 +424,8 @@ mod tests {
     #[test]
     fn select_precompiled_falls_back_when_only_wasm_is_present() {
         let artifacts = vec![WasmArtifact::Wasm];
-        let selected = select_precompiled(LINUX_X86_64_TRIPLE, &artifacts);
+        let selected = select_precompiled(LINUX_X86_64_TRIPLE, &artifacts)
+            .expect("the artifact list holds a portable component, so selection succeeds");
         assert_eq!(selected.artifact, WasmArtifact::Wasm);
         assert!(selected.logged_fallback);
         assert_eq!(selected.log_code, CWASM_INCOMPATIBLE_CODE);
@@ -434,7 +438,8 @@ mod tests {
             WasmArtifact::Wasm,
             WasmArtifact::cwasm(LINUX_X86_64_TRIPLE),
         ];
-        let selected = select_precompiled("", &artifacts);
+        let selected = select_precompiled("", &artifacts)
+            .expect("the artifact list holds a portable component, so selection succeeds");
         assert_eq!(selected.artifact, WasmArtifact::Wasm);
         assert!(selected.logged_fallback);
         assert_eq!(selected.log_code, CWASM_INCOMPATIBLE_CODE);
@@ -442,13 +447,10 @@ mod tests {
 
     /// REQ: HST-383
     #[test]
-    fn select_precompiled_with_no_artifacts_falls_back_to_wasm_and_logs() {
-        // Assumption: the manual does not define an empty package; the portable module is the
-        // only artifact the host can fall back to (HST-383), so the empty case is reported as
-        // a fallback with the incompatibility code.
+    fn select_precompiled_with_no_artifacts_reports_missing_portable_component() {
+        // A package that contains no portable component cannot fall back to one (see the
+        // doc comment on ArtifactSelectionError), so selection fails with that error.
         let selected = select_precompiled(LINUX_X86_64_TRIPLE, &[]);
-        assert_eq!(selected.artifact, WasmArtifact::Wasm);
-        assert!(selected.logged_fallback);
-        assert_eq!(selected.log_code, CWASM_INCOMPATIBLE_CODE);
+        assert_eq!(selected.err(), Some(ArtifactSelectionError::MissingPortableComponent));
     }
 }
