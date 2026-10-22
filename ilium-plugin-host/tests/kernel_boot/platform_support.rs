@@ -83,7 +83,8 @@ fn hst_383_a_matching_cwasm_is_selected() {
         WasmArtifact::cwasm("x86_64-unknown-linux-gnu"),
         WasmArtifact::wasm(),
     ];
-    let chosen = select_precompiled("x86_64-unknown-linux-gnu", &available).expect("artifact available");
+    let chosen =
+        select_precompiled("x86_64-unknown-linux-gnu", &available).expect("artifact available");
     assert_eq!(
         chosen.artifact,
         WasmArtifact::cwasm("x86_64-unknown-linux-gnu")
@@ -98,7 +99,8 @@ fn hst_383_without_a_matching_cwasm_the_host_compiles_the_wasm_and_logs_the_fall
         WasmArtifact::cwasm("aarch64-apple-darwin"),
         WasmArtifact::wasm(),
     ];
-    let chosen = select_precompiled("x86_64-unknown-linux-gnu", &available).expect("artifact available");
+    let chosen =
+        select_precompiled("x86_64-unknown-linux-gnu", &available).expect("artifact available");
     assert_eq!(chosen.artifact, WasmArtifact::wasm());
     assert!(chosen.logged_fallback);
     assert_eq!(chosen.log_code, "host.cwasm-incompatible");

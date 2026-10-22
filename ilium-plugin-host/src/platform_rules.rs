@@ -125,9 +125,10 @@ pub fn select_precompiled(
     host_triple: &str,
     artifacts: &[WasmArtifact],
 ) -> Result<Selected, ArtifactSelectionError> {
-    if let Some(artifact) = artifacts.iter().find(|artifact| {
-        matches!(artifact, WasmArtifact::Cwasm(triple) if triple == host_triple)
-    }) {
+    if let Some(artifact) = artifacts
+        .iter()
+        .find(|artifact| matches!(artifact, WasmArtifact::Cwasm(triple) if triple == host_triple))
+    {
         return Ok(Selected {
             artifact: artifact.clone(),
             logged_fallback: false,

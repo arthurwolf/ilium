@@ -112,7 +112,7 @@ fn hst_301_result_records_the_runtime_config_output() {
     let result = run_with("B1", &quick_spec(100, 1000)).expect("run accepted");
     assert_eq!(
         result.wasmtime_config,
-        ilium_plugin_host::engine::runtime_config()
+        ilium_plugin_host::engine::runtime_settings()
     );
 }
 

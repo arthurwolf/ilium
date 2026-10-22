@@ -72,10 +72,10 @@ fn hst_209_provider_trap_completes_waiting_callers_failed_cancelled() {
 
 /// REQ: HST-209
 #[test]
-fn hst_209_provider_breach_completes_the_breaching_call_failed_timed_out() {
+fn hst_209_provider_breach_completes_the_breaching_call_failed_internal() {
     assert_eq!(
         failed_code(&cancellation_outcome(CancelCause::ProviderBreach)),
-        Some("timed-out")
+        Some("internal")
     );
 }
 

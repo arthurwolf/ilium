@@ -35,6 +35,7 @@ members = [
     # and so does "plugins/fixtures/*" (Cargo rejects a member glob that matches no crate).
     "ilium-plugin-api",
     "ilium-plugin-host",
+    "ilium-plugin-precompile",
     "ilium-plugin-helper",
     "ilium-plugin-sdk-core",
     "ilium-plugin-sdk-macros",
@@ -56,7 +57,7 @@ exclude = [
 [workspace.package]
 version = "0.1.1"
 edition = "2021"
-rust-version = "1.89"
+rust-version = "1.96.0"
 license = "MIT"
 repository = "https://github.com/arthurwolf/ilium"
 
@@ -64,6 +65,9 @@ repository = "https://github.com/arthurwolf/ilium"
 # then panic when a later erase sequence clears that row. Upstream issue #28
 # and PR #30 contain the unreleased fix; keep the shared client/server repair
 # local and reproducible until a fixed crate release exists.
+[workspace.dependencies]
+wasmtime = { version = "=49.0.2", default-features = false }
+
 [patch.crates-io]
 vt100 = { path = "vendor/vt100" }
 crossterm = { path = "vendor/crossterm-0.29.0" }

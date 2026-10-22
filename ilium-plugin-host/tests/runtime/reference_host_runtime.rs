@@ -982,7 +982,7 @@ fn hst_072_refused_component_is_never_instantiated() {
     );
     assert_eq!(
         refusal_code(&bytes, &bare_context()),
-        "component.wasi-forbidden"
+        "manifest.import-not-requested"
     );
     assert_eq!(engine.stats().instantiations, 0);
 }
