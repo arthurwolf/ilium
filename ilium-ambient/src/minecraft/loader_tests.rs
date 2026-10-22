@@ -429,7 +429,9 @@ fn projected_ceiling_admits_a_larger_request_but_never_invents_missing_chunks() 
 
 #[test]
 fn projected_ceiling_rejects_overflow_before_any_read() {
-    let requested = (0..=MAX_PROJECTED_CHUNKS as i32).map(|x| [x, 0]).collect::<BTreeSet<_>>();
+    let requested = (0..=MAX_PROJECTED_CHUNKS as i32)
+        .map(|x| [x, 0])
+        .collect::<BTreeSet<_>>();
     let calls = Cell::new(0);
     let result = load_with_ceiling(
         &requested,

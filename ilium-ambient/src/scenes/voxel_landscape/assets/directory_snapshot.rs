@@ -2,7 +2,7 @@
 //! the same immutable `ZipSource` path as a selected archive. Per-tile reads never
 //! touch the live folder, so a pack edited mid-route cannot change the definitions
 //! a route already uses. The snapshot digest is the identity of what was read.
-use super::archive::{ZipSource, crc32};
+use super::archive::{crc32, ZipSource};
 use super::budget::{ByteBudget, Cancel};
 use super::error::{AssetError, Result};
 use super::source::{AssetSource, LocalTree, SourceBytes, SourceLimits};

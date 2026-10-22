@@ -7,7 +7,9 @@ use ilium_plugin_sdk::testing::FakeHost;
 use ilium_plugin_sdk::types::{PluginError, Submission};
 
 /// Agent config files seen by the plugin, through the host.
-pub struct AgentFiles<'a>(pub &'a mut FakeHost);
+pub struct AgentFiles<'a> {
+    pub _host: &'a mut FakeHost,
+}
 
 impl AgentFiles<'_> {
     /// Writes a file.

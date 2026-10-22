@@ -1904,12 +1904,12 @@ pub(crate) async fn admitted_terminal_recovery_prefix(
                     // A replay rebuilds the whole journal on the client; the
                     // current screen snapshot shows the same state at once.
                     // The journal replay remains only when no snapshot exists.
-                    Some(PtyOutputRecovery::Replay(replay)) => Some(
-                        match runtime.session.attach_snapshot() {
+                    Some(PtyOutputRecovery::Replay(replay)) => {
+                        Some(match runtime.session.attach_snapshot() {
                             Some(snapshot) => terminal_snapshot_event(pane_id, snapshot),
                             None => terminal_replay_event(pane_id, replay),
-                        },
-                    ),
+                        })
+                    }
                     None => None,
                 }
             }
@@ -3324,9 +3324,6 @@ async fn idempotent_install_progress_monitor(
     request_id: u64,
     identity: ProgressSetRequestIdentity,
 ) -> Result<ilium_ipc::ProgressMonitorAccepted, ilium_ipc::ProgressMonitorRejection> {
-    // Cold path, one value per progress registration: boxing would only add
-    // indirection at every match site.
-    #[allow(clippy::large_enum_variant)]
     // Cold path, one value per progress registration: boxing would only add
     // indirection at every match site.
     #[allow(clippy::large_enum_variant)]

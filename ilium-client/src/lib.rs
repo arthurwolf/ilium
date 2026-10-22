@@ -1000,8 +1000,8 @@ async fn run_inner(
     let provider_client = provider_client.with_completion_wake(move || provider_wake.notify_one());
     app.model_catalog_preparation
         .configure(provider_client.clone());
-    let mut naming_workers =
-        NamingWorkers::new(naming_events_tx.clone(), &config.inference).map_err(|reason| {
+    let mut naming_workers = NamingWorkers::new(naming_events_tx.clone(), &config.inference)
+        .map_err(|reason| {
             ClientError::TerminalSetup(std::io::Error::other(format!(
                 "naming settings startup: {reason:?}"
             )))
@@ -2704,7 +2704,7 @@ async fn finish_input_retirement(
             report.complete_exit_click_release(exit_click_release);
             return report
                 .into_result()
-                .map_err(|failure| crate::error::InputRetirementError::Failed(failure));
+                .map_err(crate::error::InputRetirementError::Failed);
         }
         if tokio::time::Instant::now() >= deadline {
             return Err(crate::error::InputRetirementError::Deadline(

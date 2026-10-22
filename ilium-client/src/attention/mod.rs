@@ -2,6 +2,8 @@
 //!
 //! Pure domain logic with no I/O and no async, so every rule is unit-testable:
 //! - [`item`]: the item, its kind and the stable evidence fingerprint.
+//! - [`briefing`]: the box at the top of an agent pane that says why the user
+//!   was brought there.
 //! - [`queue`]: the in-memory queue (ordering, merge, staleness, persistence).
 //! - [`instant`]: the deterministic layer that needs no LLM.
 //! - [`refresh`]: coalescing of press-triggered refreshes.
@@ -13,6 +15,8 @@
 //! state still supports, and a reply is merged only while the evidence
 //! fingerprint it was computed from still matches the pane.
 
+pub mod briefing;
+pub mod dialog;
 pub mod instant;
 pub mod item;
 pub mod panel;
@@ -28,10 +32,12 @@ pub mod turbo;
 pub mod worker;
 
 pub use instant::{derive_instant_item, LivePane};
-pub use item::{fingerprint_parts, AttentionItem, AttentionKind, AttentionSource};
-pub use queue::{AttentionQueue, LlmReply, PersistedQueue};
+pub use item::{fingerprint_parts, AttentionItem, AttentionKind, AttentionSource, Briefing};
 pub use parse::{parse_attention, take_attention_value, KnownPane, ParsedAttention};
-pub use turbo::{CallOutcome, TurboJob, TurboLimiter, TurboScheduler};
+pub use queue::{AttentionQueue, LlmReply, PersistedQueue};
 pub use refresh::{RefreshDecision, RefreshGate};
 pub use settings::{AttentionMode, AttentionSettings};
-pub use worker::{run_turbo_batch, AttentionCallError, AttentionCompletionClient, TurboEnvironment, TurboRequest};
+pub use turbo::{CallOutcome, TurboJob, TurboLimiter, TurboScheduler};
+pub use worker::{
+    run_turbo_batch, AttentionCallError, AttentionCompletionClient, TurboEnvironment, TurboRequest,
+};

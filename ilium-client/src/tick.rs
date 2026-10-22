@@ -40,7 +40,7 @@ pub fn on_tick(
         | app.tick_remote_compaction_save(now);
     let workspace_search_started = app.tick_workspace_search(now, search_workers);
     let chatroom_changed = app.tick_chatroom_projects(now);
-    let attention_changed = app.tick_attention();
+    let attention_changed = app.tick_attention() | app.tick_attention_dialog();
     let session_stats_changed = app.tick_session_stats(now);
     let session_models_changed = app.tick_session_models(now);
     let remote_compaction_started = app.tick_remote_compaction_monitor(now);

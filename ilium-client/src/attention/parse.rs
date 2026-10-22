@@ -10,7 +10,9 @@ use std::collections::{HashMap, HashSet};
 use ilium_core::NodeId;
 use serde_json::Value;
 
-use super::item::{AttentionItem, AttentionKind, AttentionSource};
+use super::item::{
+    AttentionItem, AttentionKind, AttentionSource, Briefing, MAXIMUM_BRIEFING_CHARACTERS,
+};
 
 /// Longest reason and question kept from a reply, in characters.
 pub const MAXIMUM_REASON_CHARACTERS: usize = 200;
@@ -83,6 +85,7 @@ fn parse_entry(
         .get("waiting_on")
         .and_then(node_id)
         .filter(|target| *target != pane_id && known.contains_key(target));
+    let briefing = parse_briefing(object);
     let priority = object
         .get("priority")
         .and_then(Value::as_u64)
@@ -95,12 +98,32 @@ fn parse_entry(
         reason,
         question,
         waiting_on,
+        briefing,
         priority,
         source: AttentionSource::Llm,
         fingerprint: pane.fingerprint,
         generation,
         created_ms: now_ms,
     })
+}
+
+/// Reads the three briefing fields. A missing, non-string, blank or overlong
+/// field is dropped or truncated; it never fails the entry.
+fn parse_briefing(object: &serde_json::Map<String, Value>) -> Briefing {
+    let field = |key: &str| {
+        object
+            .get(key)
+            .and_then(Value::as_str)
+            .and_then(|text| clipped(text, MAXIMUM_BRIEFING_CHARACTERS))
+    };
+    let mut briefing = Briefing {
+        status_summary: field("status_summary"),
+        why_here: field("why_here"),
+        suggested_action: field("suggested_action"),
+        from_llm: false,
+    };
+    briefing.from_llm = !briefing.is_empty();
+    briefing
 }
 
 /// Models write ids as numbers or numeric strings; accept both.
@@ -223,5 +246,66 @@ mod tests {
             .collect();
         let parsed = parse_attention(Some(&Value::Array(flood)), &known(), 1, 0);
         assert_eq!(parsed.items.len() + parsed.skipped, 6);
+    }
+
+    #[test]
+    fn briefing_fields_are_read_trimmed_and_flagged_as_llm_wording() {
+        let value = json!([{"id": 1, "kind": "stuck", "reason": "loops",
+            "status_summary": " Re-running the same failing test. ",
+            "why_here": "It has failed four times.", "suggested_action": "Check the test"}]);
+        let item = &parse_attention(Some(&value), &known(), 1, 0).items[0];
+        assert_eq!(
+            item.briefing.status_summary.as_deref(),
+            Some("Re-running the same failing test.")
+        );
+        assert_eq!(
+            item.briefing.why_here.as_deref(),
+            Some("It has failed four times.")
+        );
+        assert_eq!(
+            item.briefing.suggested_action.as_deref(),
+            Some("Check the test")
+        );
+        assert!(item.briefing.from_llm);
+    }
+
+    #[test]
+    fn missing_or_malformed_briefing_fields_never_fail_the_entry() {
+        let value = json!([
+            {"id": 1, "kind": "stuck", "reason": "r"},
+            {"id": 2, "kind": "stuck", "reason": "r", "status_summary": 7,
+                "why_here": ["x"], "suggested_action": "   "},
+            {"id": 3, "kind": "stuck", "reason": "r", "why_here": "only this"}
+        ]);
+        let parsed = parse_attention(Some(&value), &known(), 1, 0);
+        assert_eq!(parsed.skipped, 0);
+        assert!(parsed.items[0].briefing.is_empty());
+        assert!(!parsed.items[0].briefing.from_llm);
+        assert!(parsed.items[1].briefing.is_empty());
+        assert!(!parsed.items[1].briefing.from_llm);
+        assert_eq!(
+            parsed.items[2].briefing.why_here.as_deref(),
+            Some("only this")
+        );
+        assert!(parsed.items[2].briefing.from_llm);
+        assert_eq!(parsed.items[2].briefing.status_summary, None);
+    }
+
+    #[test]
+    fn overlong_briefing_fields_are_truncated() {
+        let long = "y".repeat(5_000);
+        let value = json!([{"id": 1, "kind": "stuck", "reason": "r",
+            "status_summary": long, "why_here": long, "suggested_action": long}]);
+        let item = &parse_attention(Some(&value), &known(), 1, 0).items[0];
+        for text in [
+            &item.briefing.status_summary,
+            &item.briefing.why_here,
+            &item.briefing.suggested_action,
+        ] {
+            assert_eq!(
+                text.as_ref().unwrap().chars().count(),
+                MAXIMUM_BRIEFING_CHARACTERS
+            );
+        }
     }
 }

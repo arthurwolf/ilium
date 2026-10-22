@@ -264,6 +264,8 @@ pub enum Action {
     AttentionNext,
     /// Shows or hides the attention queue in the right panel.
     AttentionPanel,
+    /// Opens the "Needs you" overview dialog listing every queued agent.
+    AttentionOverview,
 }
 
 impl Action {
@@ -557,6 +559,11 @@ pub const LEADER_BINDINGS: &[KeyBinding] = &[
         description: "Show or hide the attention queue panel",
     },
     KeyBinding {
+        key: BindingKey::Character('O'),
+        action: Action::AttentionOverview,
+        description: "Open the Needs you overview (every agent that needs attention)",
+    },
+    KeyBinding {
         key: BindingKey::Character('?'),
         action: Action::Help,
         description: "Show or hide this help screen",
@@ -617,6 +624,7 @@ pub fn action_name(action: Action) -> &'static str {
         Action::Settings => "settings",
         Action::AttentionNext => "attention_next",
         Action::AttentionPanel => "attention_panel",
+        Action::AttentionOverview => "attention_overview",
     }
 }
 
@@ -662,6 +670,7 @@ pub const fn action_label(action: Action) -> &'static str {
         Action::Settings => "Open settings",
         Action::AttentionNext => "Next needing you",
         Action::AttentionPanel => "Attention panel",
+        Action::AttentionOverview => "Needs you overview",
     }
 }
 
@@ -1166,6 +1175,20 @@ pub const fn action_mnemonics(action: Action) -> &'static [ActionMnemonic] {
                 word: "panel",
             },
         ],
+        Action::AttentionOverview => &[
+            Mnemonic {
+                key: 'a',
+                word: "attention",
+            },
+            Mnemonic {
+                key: 'o',
+                word: "overview",
+            },
+            Mnemonic {
+                key: 'l',
+                word: "list",
+            },
+        ],
         Action::Settings => &[
             Mnemonic {
                 key: 'c',
@@ -1604,7 +1627,7 @@ mod tests {
     }
 
     #[test]
-    fn attention_actions_are_bound_to_i_and_capital_i_in_every_preset() {
+    fn attention_actions_are_bound_to_i_capital_i_and_capital_o_in_every_preset() {
         assert_eq!(
             action_for_table(LEADER_BINDINGS, BindingKey::Character('i')),
             Some(Action::AttentionNext)
@@ -1612,6 +1635,10 @@ mod tests {
         assert_eq!(
             action_for_table(LEADER_BINDINGS, BindingKey::Character('I')),
             Some(Action::AttentionPanel)
+        );
+        assert_eq!(
+            action_for_table(LEADER_BINDINGS, BindingKey::Character('O')),
+            Some(Action::AttentionOverview)
         );
         for preset in KeymapPreset::ALL {
             let bindings = preset_bindings(preset);
@@ -1622,6 +1649,11 @@ mod tests {
             assert_eq!(
                 action_for_table(&bindings, BindingKey::Character('I')),
                 Some(Action::AttentionPanel)
+            );
+            assert_eq!(
+                action_for_table(&bindings, BindingKey::Character('O')),
+                Some(Action::AttentionOverview),
+                "{preset:?}"
             );
         }
     }
@@ -1635,6 +1667,10 @@ mod tests {
         assert_eq!(
             action_from_name("attention_panel"),
             Some(Action::AttentionPanel)
+        );
+        assert_eq!(
+            action_from_name("attention_overview"),
+            Some(Action::AttentionOverview)
         );
         let mut bindings = LEADER_BINDINGS.to_vec();
         let free_key = *available_keys(&bindings)
@@ -1654,5 +1690,9 @@ mod tests {
         );
         assert_eq!(mnemonic_for(Action::AttentionNext, 'i'), Some("important"));
         assert_eq!(mnemonic_for(Action::AttentionPanel, 'I'), Some("inbox"));
+        assert_eq!(
+            mnemonic_for(Action::AttentionOverview, 'O'),
+            Some("overview")
+        );
     }
 }

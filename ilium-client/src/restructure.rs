@@ -1094,6 +1094,7 @@ pub fn infer_restructure_plan_with_attention<G: RestructureCompletionClient>(
 /// fence, or stray prose before/after the object -- rather than failing on
 /// the first byte that isn't `{`. The shared structured-output parser keeps
 /// title and restructure inference on the same contract.
+#[cfg(test)]
 fn parse_restructure_response(
     response: &str,
     contexts: &[LeafContext],
@@ -2912,7 +2913,11 @@ mod tests {
     fn infer_with_attention(
         reply: String,
         include_attention: bool,
-    ) -> (anyhow::Result<(RecommendedRestructurePlan, Option<serde_json::Value>)>, u8, String) {
+    ) -> (
+        anyhow::Result<(RecommendedRestructurePlan, Option<serde_json::Value>)>,
+        u8,
+        String,
+    ) {
         let generator = FakeGenerator::new(reply);
         let contexts = vec![leaf(1, "shell-a"), leaf(2, "shell-b")];
         let outcome = infer_restructure_plan_with_attention(
@@ -2947,15 +2952,28 @@ mod tests {
         let (_, _, with) = infer_with_attention(attention_sort_reply(None), true);
         assert!(!without.contains("<attention-queue>"), "{without}");
         assert!(with.contains("<attention-queue>"));
+        for field in ["status_summary", "why_here", "suggested_action"] {
+            assert!(with.contains(field), "{field}");
+            assert!(!without.contains(field), "{field}");
+        }
     }
 
     #[test]
     fn a_malformed_attention_list_never_fails_or_retries_the_sort() {
         let plain = infer_with_attention(attention_sort_reply(None), false);
-        for bad in [r#""not a list""#, r#"[1,"x",{"id":"nope"}]"#, "null", r#"{"id":1}"#] {
+        for bad in [
+            r#""not a list""#,
+            r#"[1,"x",{"id":"nope"}]"#,
+            "null",
+            r#"{"id":1}"#,
+        ] {
             let shared = infer_with_attention(attention_sort_reply(Some(bad)), true);
             let (plan, _) = shared.0.unwrap_or_else(|error| panic!("{bad}: {error}"));
-            assert_eq!(plan.structure, plain.0.as_ref().unwrap().0.structure, "{bad}");
+            assert_eq!(
+                plan.structure,
+                plain.0.as_ref().unwrap().0.structure,
+                "{bad}"
+            );
             assert_eq!(shared.1, 1, "{bad}: no corrective retry");
         }
     }

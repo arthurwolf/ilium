@@ -46,9 +46,9 @@ fn with_model(settings: &InferenceSettings, model: &str) -> InferenceSettings {
 
 fn classify(error: &InferenceError) -> AttentionCallError {
     match error {
-        InferenceError::Http { status, .. } if matches!(status, 429 | 503) => {
-            AttentionCallError::Throttled(error.to_string())
-        }
+        InferenceError::Http {
+            status: 429 | 503, ..
+        } => AttentionCallError::Throttled(error.to_string()),
         other => AttentionCallError::classify(&other.to_string()),
     }
 }

@@ -14,6 +14,13 @@ const COST: JobCost = JobCost {
     input_bytes: 16 * 1024 * 1024,
     result_bytes: 2 * 1024 * 1024,
 };
+// Board snapshots retain the full conservative capture/rollback reservation.
+// The generic 64 MiB writer budget admits only three of these snapshots,
+// rejecting ordinary typing bursts while a publication is still pending.
+// Match the filesystem client's 16-job allowance; shared execution admission
+// still enforces its input/result budgets across all filesystem consumers.
+const MAX_BOARD_WRITES: usize = 16;
+const MAX_BOARD_WRITE_BYTES: usize = MAX_BOARD_WRITES * (COST.input_bytes + COST.result_bytes);
 struct DiskState {
     revision: Option<String>,
     failed: bool,
@@ -77,7 +84,13 @@ impl BoardWriter {
     fn new(client: Client, ready: Arc<tokio::sync::Notify>, source: &BoardSource) -> Self {
         Self(Rc::new(RefCell::new(BoardWriterInner {
             _source_hold: source.retention.clone(),
-            writer: OrderedWriter::new(client, ready),
+            writer: OrderedWriter::new_with_readiness_and_limits(
+                client,
+                ready,
+                |_| true,
+                MAX_BOARD_WRITES,
+                MAX_BOARD_WRITE_BYTES,
+            ),
             state: Arc::new(Mutex::new(DiskState {
                 revision: source.markdown_revision.clone(),
                 failed: false,

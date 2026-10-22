@@ -272,6 +272,12 @@ pub(crate) fn handle_event_after_intercept(app: &mut App, event: Event) {
                 }
             }
         }
+        Mode::AttentionOverview => {
+            app.mode = Mode::AttentionOverview;
+            if let Event::Key(key) = &event {
+                app.handle_attention_overview_key(*key);
+            }
+        }
         Mode::ConvertSession => {
             app.mode = Mode::ConvertSession;
             if let Event::Key(key) = &event {
@@ -1052,6 +1058,7 @@ fn execute_action(app: &mut App, action: Action) {
         Action::Settings => app.action_open_settings(),
         Action::AttentionNext => app.action_attention_press(),
         Action::AttentionPanel => app.action_toggle_attention_panel(),
+        Action::AttentionOverview => app.action_open_attention_overview(),
     }
 }
 

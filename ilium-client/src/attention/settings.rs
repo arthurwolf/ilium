@@ -74,6 +74,10 @@ pub struct AttentionSettings {
     pub mode: AttentionMode,
     /// Pressing Sort also refreshes the attention queue.
     pub press_sorts: bool,
+    /// Show the briefing box (why you were brought here) at the top of an
+    /// agent reached through the attention queue. Only effective while the
+    /// mode is not Off.
+    pub show_briefing: bool,
     /// Parallel LLM calls in flight in Turbo mode.
     pub turbo_concurrency: u8,
     /// An item no longer supported by the live state is dropped after this long.
@@ -88,6 +92,7 @@ impl Default for AttentionSettings {
         Self {
             mode: AttentionMode::Shared,
             press_sorts: true,
+            show_briefing: true,
             turbo_concurrency: 16,
             expiry_seconds: 1_800,
             model_override: None,
@@ -112,6 +117,11 @@ impl AttentionSettings {
         self
     }
 
+    /// Whether the briefing box may appear: the user wants it and the queue is on.
+    pub const fn briefing_enabled(&self) -> bool {
+        self.show_briefing && !matches!(self.mode, AttentionMode::Off)
+    }
+
     /// Sets the model override, normalising an empty string to `None`.
     pub fn set_model_override(&mut self, model: Option<String>) {
         self.model_override = model
@@ -129,6 +139,7 @@ mod tests {
         let settings = AttentionSettings::default();
         assert_eq!(settings.mode, AttentionMode::Shared);
         assert!(settings.press_sorts);
+        assert!(settings.show_briefing, "the briefing is on by default");
         assert_eq!(settings.turbo_concurrency, 16);
         assert_eq!(settings.expiry_seconds, 1_800);
         assert_eq!(settings.model_override, None);
@@ -190,6 +201,7 @@ mod tests {
         let settings = AttentionSettings {
             mode: AttentionMode::InstantOnly,
             press_sorts: false,
+            show_briefing: false,
             turbo_concurrency: 3,
             expiry_seconds: 600,
             model_override: Some("claude-haiku".to_owned()),
@@ -203,5 +215,30 @@ mod tests {
         let partial: AttentionSettings = toml::from_str("mode = \"turbo\"\n").unwrap();
         assert_eq!(partial.mode, AttentionMode::Turbo);
         assert_eq!(partial.turbo_concurrency, 16);
+    }
+
+    #[test]
+    fn the_briefing_is_effective_only_while_the_queue_is_on() {
+        let mut settings = AttentionSettings::default();
+        assert!(settings.briefing_enabled());
+        settings.mode = AttentionMode::InstantOnly;
+        assert!(
+            settings.briefing_enabled(),
+            "instant-only shows the automatic briefing"
+        );
+        settings.mode = AttentionMode::Off;
+        assert!(!settings.briefing_enabled());
+        settings.mode = AttentionMode::Turbo;
+        settings.show_briefing = false;
+        assert!(!settings.briefing_enabled());
+    }
+
+    #[test]
+    fn an_old_config_without_the_key_defaults_to_showing_the_briefing() {
+        let parsed: AttentionSettings =
+            toml::from_str("mode = \"turbo\"\npress_sorts = false\n").unwrap();
+        assert!(parsed.show_briefing);
+        let off: AttentionSettings = toml::from_str("show_briefing = false\n").unwrap();
+        assert!(!off.show_briefing);
     }
 }
