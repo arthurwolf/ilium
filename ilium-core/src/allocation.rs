@@ -301,9 +301,11 @@ impl AllocationSize for ProgressTaskReport {
             details,
             error,
             eta_seconds,
+            indeterminate,
         } = self;
         0usize
             .saturating_add(eta_seconds.heap_bytes())
+            .saturating_add(indeterminate.heap_bytes())
             .saturating_add(job_id.heap_bytes())
             .saturating_add(status.heap_bytes())
             .saturating_add(percent.heap_bytes())

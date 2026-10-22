@@ -1021,7 +1021,7 @@ mod tests {
         let row: String = (0..100)
             .map(|x| terminal.backend().buffer()[(x, 0)].symbol())
             .collect();
-        assert!(row.contains("no progress reported"), "{row}");
+        assert!(row.contains("no probe report"), "{row}");
         assert!(!row.contains("ETA"), "{row}");
     }
 

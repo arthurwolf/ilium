@@ -411,6 +411,7 @@ mod tests {
                 details: String::new(),
                 error: (status == ProgressTaskStatus::Error).then(|| "failed".to_string()),
                 eta_seconds: None,
+                indeterminate: false,
             },
             monitor_health: ProgressMonitorHealth::Healthy,
             last_observed_unix_millis: 1,

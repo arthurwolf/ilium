@@ -129,6 +129,11 @@ pub struct ProgressTaskReport {
     /// of the footer's ETA; the pace still provides the confidence range.
     #[serde(default)]
     pub eta_seconds: Option<u64>,
+    /// The probe states that the task's progress cannot be measured (a
+    /// compile or test run with no counter). The footer then shows no ETA
+    /// and the percent is only a placeholder.
+    #[serde(default)]
+    pub indeterminate: bool,
 }
 
 /// Longest ETA a probe may report: ten years, far beyond any real task but
@@ -168,6 +173,7 @@ impl ProgressTaskReport {
             details,
             error,
             eta_seconds: None,
+            indeterminate: false,
         };
         if report.error.as_deref() == Some("") {
             report.error = None;

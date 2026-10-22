@@ -409,6 +409,9 @@ struct RawProgressReport {
     /// Optional probe-side estimate of the seconds still needed.
     #[serde(default)]
     eta_seconds: Option<u64>,
+    /// The probe declares the task's progress unmeasurable.
+    #[serde(default)]
+    indeterminate: bool,
 }
 
 async fn run_probe(
@@ -569,6 +572,10 @@ async fn run_probe(
         raw.error,
     )
     .and_then(|report| report.with_eta_seconds(raw.eta_seconds))
+    .map(|mut report| {
+        report.indeterminate = raw.indeterminate;
+        report
+    })
     .map_err(|error| {
         probe_error(
             ProgressProbeFailureKind::InvalidReport,
@@ -900,6 +907,18 @@ mod tests {
                 .eta_seconds,
             None
         );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn probe_may_declare_progress_indeterminate() {
+        let flagged =
+            r#"{"job_id":"job","status":"running","percent":0,"message":"m","indeterminate":true}"#;
+        let parsed = preflight(&test_probes::emit_text(flagged)).await.unwrap();
+        assert!(parsed.report.indeterminate);
+        let plain = r#"{"job_id":"job","status":"running","percent":0,"message":"m"}"#;
+        let parsed = preflight(&test_probes::emit_text(plain)).await.unwrap();
+        assert!(!parsed.report.indeterminate);
     }
 
     #[tokio::test]

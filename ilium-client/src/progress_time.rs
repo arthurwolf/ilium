@@ -115,20 +115,23 @@ pub fn time_box_variants(progress: &PaneProgress, now_unix_millis: u64) -> Vec<V
         });
     let stalled = is_stalled(progress, now_unix_millis).then(|| TimeSegment {
         text: format!(
-            "\u{26a0} no progress reported {}",
-            human_duration(timing.quiet_millis(now_unix_millis).unwrap_or(0))
+            "\u{26a0} no probe report {}",
+            human_duration(timing.silent_millis(now_unix_millis).unwrap_or(0))
         ),
         warn: true,
     });
-    let eta = (is_running(progress) && stalled.is_none()).then(|| TimeSegment {
-        text: timing
-            .estimate(now_unix_millis, progress.report.percent)
-            .map_or_else(
-                || "ETA \u{2014}".to_string(),
-                |estimate| format!("ETA {}", human_in(estimate.expected_millis)),
-            ),
-        warn: false,
-    });
+    let eta =
+        (is_running(progress) && stalled.is_none() && !progress.report.indeterminate).then(|| {
+            TimeSegment {
+                text: timing
+                    .estimate(now_unix_millis, progress.report.percent)
+                    .map_or_else(
+                        || "ETA \u{2014}".to_string(),
+                        |estimate| format!("ETA {}", human_in(estimate.expected_millis)),
+                    ),
+                warn: false,
+            }
+        });
     let tail = stalled.clone().or(eta);
 
     let mut variants = Vec::new();
@@ -140,7 +143,7 @@ pub fn time_box_variants(progress: &PaneProgress, now_unix_millis: u64) -> Vec<V
     if let Some(stalled) = stalled {
         variants.push(vec![stalled]);
         variants.push(vec![TimeSegment {
-            text: "⚠ no progress reported".into(),
+            text: "⚠ no probe report".into(),
             warn: true,
         }]);
     } else if let Some(started) = started {
@@ -194,19 +197,10 @@ pub fn popover_lines(
         None => lines.push("Started: unknown (monitor restored from an older snapshot)".into()),
     }
     if let Some(last) = timing.last_progress_unix_millis {
-        let quiet = now_unix_millis.saturating_sub(last);
-        let stalled = if is_stalled(progress, now_unix_millis) {
-            format!(
-                " \u{26a0} no reported progress: threshold {}",
-                human_duration(timing.stall_threshold_millis())
-            )
-        } else {
-            String::new()
-        };
         lines.push(format!(
-            "Last progress: {} ({}){stalled}",
+            "Last progress: {} ({})",
             timestamp_text(last),
-            human_ago(quiet)
+            human_ago(now_unix_millis.saturating_sub(last))
         ));
     }
     if progress.is_terminal() {
@@ -216,7 +210,9 @@ pub fn popover_lines(
     } else if let Some(elapsed) = timing.elapsed_millis(now_unix_millis) {
         lines.push(format!("Elapsed: {}", human_duration(elapsed)));
     }
-    if is_running(progress) && !is_stalled(progress, now_unix_millis) {
+    if is_running(progress) && progress.report.indeterminate {
+        lines.push("Progress: not measurable (the probe reports an indeterminate task)".into());
+    } else if is_running(progress) && !is_stalled(progress, now_unix_millis) {
         match timing.rate(progress.report.percent) {
             Some(rate) => {
                 let mut text = format!("Rate: {:.1} %/min", rate.percent_per_minute);
@@ -245,8 +241,16 @@ pub fn popover_lines(
             None => lines.push("ETA: unknown".into()),
         }
     }
+    let silent = if is_stalled(progress, now_unix_millis) {
+        format!(
+            " \u{26a0} no probe report: threshold {}",
+            human_duration(timing.stall_threshold_millis())
+        )
+    } else {
+        String::new()
+    };
     lines.push(format!(
-        "Last successful check: {} ({})",
+        "Last successful check: {} ({}){silent}",
         timestamp_text(progress.last_observed_unix_millis),
         human_ago(now_unix_millis.saturating_sub(progress.last_observed_unix_millis))
     ));
@@ -291,6 +295,7 @@ mod tests {
                 details: String::new(),
                 error: None,
                 eta_seconds: None,
+                indeterminate: false,
             },
             observed,
         )
@@ -350,20 +355,25 @@ mod tests {
     }
 
     #[test]
+    fn indeterminate_task_shows_no_eta() {
+        let mut progress = running(0.0, steady_timing(), MINUTE);
+        progress.report.indeterminate = true;
+        let variants = time_box_variants(&progress, MINUTE);
+        assert_eq!(texts(&variants[0]), ["started 1 minute ago"]);
+        let text = popover_lines(&progress, MINUTE, None).join("\n");
+        assert!(text.contains("not measurable"), "{text}");
+        assert!(!text.contains("ETA"), "{text}");
+    }
+
+    #[test]
     fn stalled_task_replaces_the_eta_with_a_warning_that_outranks_the_start() {
         let progress = running(50.0, steady_timing(), 10 * MINUTE);
         let now = 10 * MINUTE + 11 * MINUTE;
         assert!(is_stalled(&progress, now));
         let variants = time_box_variants(&progress, now);
-        assert_eq!(
-            variants[0][1].text,
-            "\u{26a0} no progress reported 11 minutes"
-        );
+        assert_eq!(variants[0][1].text, "\u{26a0} no probe report 11 minutes");
         assert!(variants[0][1].warn);
-        assert_eq!(
-            texts(&variants[1]),
-            ["\u{26a0} no progress reported 11 minutes"]
-        );
+        assert_eq!(texts(&variants[1]), ["\u{26a0} no probe report 11 minutes"]);
     }
 
     #[test]
@@ -428,7 +438,7 @@ mod tests {
         let stuck = running(50.0, steady_timing(), 10 * MINUTE);
         let text = popover_lines(&stuck, 25 * MINUTE, None).join("\n");
         assert!(
-            text.contains("no reported progress: threshold 10 minutes"),
+            text.contains("no probe report: threshold 10 minutes"),
             "{text}"
         );
     }
