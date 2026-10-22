@@ -52,33 +52,40 @@ More: [Getting started](src/docs/getting-started.md) · [Building from source](s
 <tbody>
 <tr>
 <td width="50%" valign="top">
+<p><strong>Find the next agent that needs you</strong></p>
+<p><a href="assets/demos/27-attention-queue.gif?raw=true" target="_blank" rel="noopener noreferrer"><img src="assets/demos/27-attention-queue.gif" alt="Real Claude and Codex sessions show questions, blocked goals, background-agent waits and unread completed turns in one attention queue; setup and idle gaps are cut, with reading holds" width="100%"></a></p>
+</td>
+<td width="50%" valign="top">
 <p><strong>AI names agents and organizes the project tree</strong></p>
 <p><a href="assets/demos/01-ai-tree.gif?raw=true" target="_blank" rel="noopener noreferrer"><img src="assets/demos/01-ai-tree.gif" alt="Ilium names agent panes and organizes the project tree around their work" width="100%"></a></p>
 </td>
+</tr>
+<tr>
 <td width="50%" valign="top">
 <p><strong>Track agent status and current goals</strong></p>
 <p><a href="assets/demos/08-agent-activity.gif?raw=true" target="_blank" rel="noopener noreferrer"><img src="assets/demos/08-agent-activity.gif" alt="Agent status changes as work progresses, with its goal shown in the tree" width="100%"></a></p>
 </td>
-</tr>
-<tr>
 <td width="50%" valign="top">
 <p><strong>Control Ilium and prompt agents with voice</strong></p>
 <p><a href="assets/demos/02-voice-control.gif?raw=true" target="_blank" rel="noopener noreferrer"><img src="assets/demos/02-voice-control.gif" alt="Voice commands trigger Ilium actions and send a prompt to Claude" width="100%"></a></p>
 </td>
+</tr>
+<tr>
 <td width="50%" valign="top">
 <p><strong>Use agents, editors, and terminals side by side</strong></p>
 <p><a href="assets/demos/10-mixed-splits.gif?raw=true" target="_blank" rel="noopener noreferrer"><img src="assets/demos/10-mixed-splits.gif" alt="View terminal, editor, and board panes together in a split view" width="100%"></a></p>
 </td>
-</tr>
-<tr>
 <td width="50%" valign="top">
 <p><strong>Resume agent sessions after a reboot</strong></p>
 <p><a href="assets/demos/24-agents-survive-reboots.gif?raw=true" target="_blank" rel="noopener noreferrer"><img src="assets/demos/24-agents-survive-reboots.gif" alt="After a reboot sequence, Ilium restores the pane layout and resumes Claude and Codex" width="100%"></a></p>
 </td>
+</tr>
+<tr>
 <td width="50%" valign="top">
 <p><strong>Choose an animation, then watch it play</strong></p>
 <p><a href="assets/demos/26-animations.gif?raw=true" target="_blank" rel="noopener noreferrer"><img src="assets/demos/26-animations.gif" alt="A gallery of recorded animation demos" width="100%"></a></p>
 </td>
+<td width="50%"></td>
 </tr>
 </tbody>
 </table>
