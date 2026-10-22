@@ -26,6 +26,7 @@ pub mod lifecycle;
 pub mod limits;
 pub mod manifest;
 pub mod naming;
+pub mod nesting;
 pub mod platform;
 pub mod side;
 pub mod tier;

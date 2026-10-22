@@ -31,3 +31,8 @@ mod user_plugins_overview;
 mod user_privacy;
 mod user_troubleshooting;
 mod reference_core_replacement_matrix;
+mod admin_lockfile_replay;
+mod audit_chain;
+mod package_size_limits;
+mod user_data_portability;
+mod user_trust_policy;

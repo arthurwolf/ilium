@@ -23,3 +23,12 @@ mod reference_extension_security;
 mod reference_security_response_p2;
 mod reference_security_testing;
 mod reference_threat_model_p2;
+
+// Part 3: release-security requirements SEC-439 .. SEC-459 (one module per requirement area).
+mod crash_reports_and_audit_export;
+mod emergency_disable;
+mod per_user_isolation;
+mod sandbox_prerequisites;
+mod secret_and_token_rotation;
+mod security_response_disclosure;
+mod signature_algorithm_allow_list;

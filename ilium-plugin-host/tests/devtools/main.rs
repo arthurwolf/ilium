@@ -2,6 +2,12 @@
 //! debugging, trace and doctor files added by the second writer of this lane.
 
 mod common;
+mod dev_pipeline_debug_build;
+mod dev_pipeline_deprecation;
+mod dev_pipeline_dev_loop;
+mod dev_pipeline_network;
+mod dev_pipeline_test_harness;
+mod dev_pipeline_toolchain;
 mod guide_backwards_compatibility_test_matrix;
 mod guide_ci_recipes;
 mod guide_plugin_documentation;

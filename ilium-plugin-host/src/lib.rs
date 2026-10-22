@@ -16,6 +16,7 @@
 // `unimplemented!` bodies, and private fields wait for the code that reads them; until then both
 // are unused by design (test plan 1.3).
 
+pub mod admission_queue;
 pub mod approval;
 pub mod audit;
 pub mod autoupdate;
@@ -28,13 +29,16 @@ pub mod devtools;
 pub mod dispatch;
 pub mod engine;
 pub mod error;
+pub mod error_code_decode;
 pub mod extensions;
 pub mod helper_client;
+pub mod host_info;
 pub mod imports;
 pub mod install;
 pub mod instance;
 pub mod ipc;
 pub mod lifecycle;
+pub mod lifecycle_ops_support;
 pub mod limits_rules;
 pub mod linker;
 pub mod package;
@@ -50,11 +54,19 @@ pub mod secrets;
 pub mod services;
 pub mod session;
 pub mod settings;
+pub mod signature_algorithms;
 pub mod signing;
 pub mod storage;
 pub mod stores;
 pub mod sync;
 pub mod telemetry;
+pub mod telemetry_history;
+pub mod host_capacity;
+pub mod engine_recycle;
+pub mod kill_switch;
+pub mod helper_forensics;
+pub mod ipc_traffic;
+pub mod correlation_chain;
 #[cfg(feature = "testing")]
 pub mod testing;
 

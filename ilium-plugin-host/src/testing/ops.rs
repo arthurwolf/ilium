@@ -1257,6 +1257,31 @@ impl OpsRig {
     pub fn dev_start(&self, _spec: &PackageSpec, _args: &[&str]) -> DevSession {
         unimplemented!("host::testing::ops::OpsRig::dev_start")
     }
+
+    /// The plugins screen as the user sees it, with one row per installed plugin.
+    pub fn render_plugins_screen(&self) -> PluginsScreen {
+        unimplemented!("host::testing::ops::OpsRig::render_plugins_screen")
+    }
+
+    /// Writes a value into a plugin's storage bucket.
+    pub fn write_storage(&self, _id: &str, _bucket: &str, _key: &str, _value: &[u8]) {
+        unimplemented!("host::testing::ops::OpsRig::write_storage")
+    }
+
+    /// Reads a value from a plugin's storage bucket.
+    pub fn read_storage(&self, _id: &str, _bucket: &str, _key: &str) -> Option<Vec<u8>> {
+        unimplemented!("host::testing::ops::OpsRig::read_storage")
+    }
+
+    /// Writes a plugin setting as the user would.
+    pub fn write_setting(&self, _id: &str, _key: &str, _value: &str) {
+        unimplemented!("host::testing::ops::OpsRig::write_setting")
+    }
+
+    /// Reloads the machine policy file into the running host.
+    pub fn reload_policy(&self) {
+        unimplemented!("host::testing::ops::OpsRig::reload_policy")
+    }
 }
 
 impl Default for OpsRig {

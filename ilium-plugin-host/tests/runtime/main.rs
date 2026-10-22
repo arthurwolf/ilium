@@ -4,6 +4,9 @@
 //! One module per manual page; `support` holds the shared helpers. Later parts of the lane add
 //! modules here.
 
+mod api_pending_requests;
+mod api_restart_and_limits;
+mod api_retry_and_codes;
 mod reference_errors_and_limits;
 mod reference_host_runtime;
 mod reference_requirements_api_host;

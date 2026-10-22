@@ -6,4 +6,5 @@
 mod animations;
 mod cli_reference;
 mod common;
+mod core_data_and_recovery;
 mod reference_cli_compatibility;
