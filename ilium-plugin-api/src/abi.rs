@@ -42,8 +42,8 @@ pub const PURE_EXPORTS: [&str; 3] = ["views.render", "annotate", "settings-valid
 pub const BATCH_REFUSED_PREFIX: &str = "batch refused: submission ";
 
 /// ABI-008: `Ok` for at most 256 submissions, else the trap code `trap.submission-batch`.
-pub fn check_submission_count(_count: usize) -> Result<(), Code> {
-    unimplemented!("api::abi::check_submission_count")
+pub fn check_submission_count(count: usize) -> Result<(), Code> {
+    if count <= SUBMISSION_BATCH_LIMIT { Ok(()) } else { Err(Code::from_static("trap.submission-batch")) }
 }
 
 /// Result of the two batch-level checks for one submission (ABI-031).
@@ -67,39 +67,41 @@ pub enum BatchVerdict {
 }
 
 /// ABI-031: shape over the whole list first, then grant; one verdict per submission, in order.
-pub fn batch_verdicts(_checks: &[BatchCheck]) -> Vec<BatchVerdict> {
-    unimplemented!("api::abi::batch_verdicts")
+pub fn batch_verdicts(checks: &[BatchCheck]) -> Vec<BatchVerdict> {
+    // Validate every shape before examining grants: an earlier missing grant
+    // cannot conceal a later malformed submission.
+    let offender = checks.iter().position(|check| !check.shape_ok).map(|index| (index, ErrorCode::InvalidArgument))
+        .or_else(|| checks.iter().position(|check| !check.grant_ok).map(|index| (index, ErrorCode::NotPermitted)));
+    checks.iter().enumerate().map(|(index, _)| match offender {
+        None => BatchVerdict::Proceed,
+        Some((bad, code)) if index == bad => BatchVerdict::Refused(code),
+        Some((bad, _)) => BatchVerdict::Cancelled(format!("{BATCH_REFUSED_PREFIX}{bad}")),
+    }).collect()
 }
 
 /// ABI-011: whether a correlation number belongs to the SDK.
-pub fn is_sdk_correlation(_correlation: u64) -> bool {
-    unimplemented!("api::abi::is_sdk_correlation")
-}
+pub fn is_sdk_correlation(correlation: u64) -> bool { correlation >= SDK_CORRELATION_FLOOR }
 
 /// ABI-042: the instance deadline in ticks for a call deadline of `deadline_ms`:
 /// `ceil(deadline_ms / 10) + 1`.
-pub fn deadline_ticks(_deadline_ms: u64) -> u64 {
-    unimplemented!("api::abi::deadline_ticks")
-}
+pub fn deadline_ticks(deadline_ms: u64) -> u64 { deadline_ms.div_ceil(EPOCH_TICK_MS) + 1 }
 
 /// ABI-045: the batch sizes that deliver `queued` events, at most 256 each, in order.
-pub fn batch_sizes(_queued: usize) -> Vec<usize> {
-    unimplemented!("api::abi::batch_sizes")
+pub fn batch_sizes(queued: usize) -> Vec<usize> {
+    let mut batches = vec![MAX_EVENTS_PER_BATCH; queued / MAX_EVENTS_PER_BATCH];
+    if !queued.is_multiple_of(MAX_EVENTS_PER_BATCH) { batches.push(queued % MAX_EVENTS_PER_BATCH); }
+    batches
 }
 
 /// ABI-044: whether `deactivate` bytes of this length are kept for the next activation.
-pub fn restore_bytes_accepted(_length: usize) -> bool {
-    unimplemented!("api::abi::restore_bytes_accepted")
-}
+pub fn restore_bytes_accepted(length: usize) -> bool { length <= RESTORE_BYTES_MAX }
 
 /// ABI-048: whether an export (as named in [`PURE_EXPORTS`]) is a pure call.
-pub fn is_pure_export(_export: &str) -> bool {
-    unimplemented!("api::abi::is_pure_export")
-}
+pub fn is_pure_export(export: &str) -> bool { PURE_EXPORTS.contains(&export) }
 
 /// ABI-048: the error an effectful import returns inside a pure call.
 pub fn effectful_import_error() -> PluginError {
-    unimplemented!("api::abi::effectful_import_error")
+    PluginError { code: ErrorCode::NotPermitted, message: EFFECTFUL_IMPORT_MESSAGE.into(), retry_after_ms: None }
 }
 
 /// The delivery policy of an event case (reference-events-and-intents.md "Delivery policies").

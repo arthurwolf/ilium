@@ -322,6 +322,10 @@ pub struct ServerState {
     /// Serializes enqueue/clear mutations with completion-driven delivery so
     /// a successful PTY write advances exactly the FIFO head it observed.
     pub prompt_queue_transaction: Mutex<()>,
+    /// Finite menu-query admission, including discovery before a repository is known.
+    pub(crate) repo_facts_admission: tokio::sync::Semaphore,
+    pub(crate) repo_discovery_cache: crate::repo_facts_cache::FactsCache<ilium_git::Repository>,
+    pub(crate) repo_facts_cache: crate::repo_facts_cache::FactsCache<ilium_ipc::RepoFacts>,
     /// Serializes workspace creation and removal within this server for a
     /// canonical Git common directory. Cooperating servers also take the
     /// platform repository lease before the spawn lock; external Git does not.
@@ -570,6 +574,9 @@ impl ServerState {
             debug_logging_transaction: Mutex::new(()),
             scheduled_input_transaction: Mutex::new(()),
             prompt_queue_transaction: Mutex::new(()),
+            repo_facts_admission: tokio::sync::Semaphore::new(32),
+            repo_discovery_cache: Default::default(),
+            repo_facts_cache: Default::default(),
             workspace_repository_locks: Mutex::new(HashMap::new()),
             workspace_spawn_lock: Mutex::new(()),
             replacing_panes: std::sync::Mutex::new(HashSet::new()),

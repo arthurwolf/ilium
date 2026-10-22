@@ -34,6 +34,7 @@ pub(crate) fn report_lines(progress: &PaneProgress) -> Vec<String> {
             .eta_seconds
             .map_or_else(|| "not supplied".into(), |value| value.to_string())
     ));
+    lines.push(format!("├─ indeterminate: {}", report.indeterminate));
     lines.push(format!(
         "└─ error: {}",
         report.error.as_deref().unwrap_or("none")
@@ -279,6 +280,7 @@ mod tests {
                 message: "Compiling project".into(),
                 details: "What: compiling\nNow: phase two".into(),
                 eta_seconds: Some(120),
+                indeterminate: false,
                 error: None,
             },
             1000,

@@ -46,21 +46,39 @@ impl AutoUpdateConfig {
         }
         impl Default for Config {
             fn default() -> Self {
-                Self { auto_update: "off".to_owned(), auto_update_interval_hours: 24, metered: false }
+                Self {
+                    auto_update: "off".to_owned(),
+                    auto_update_interval_hours: 24,
+                    metered: false,
+                }
             }
         }
         let config = toml::from_str::<Root>(text)
-            .map_err(|error| config_error("", error.to_string()))?.plugins;
+            .map_err(|error| config_error("", error.to_string()))?
+            .plugins;
         let mode = match config.auto_update.as_str() {
             "off" => AutoUpdateMode::Off,
             "notify" => AutoUpdateMode::Notify,
             "install" => AutoUpdateMode::Install,
-            _ => return Err(config_error("/plugins/auto_update", "Expected off, notify or install")),
+            _ => {
+                return Err(config_error(
+                    "/plugins/auto_update",
+                    "Expected off, notify or install",
+                ))
+            }
         };
         if !(1..=168).contains(&config.auto_update_interval_hours) {
-            return Err(config_error("/plugins/auto_update_interval_hours", "Expected an interval from 1 to 168 hours"));
+            return Err(config_error(
+                "/plugins/auto_update_interval_hours",
+                "Expected an interval from 1 to 168 hours",
+            ));
         }
-        Ok(Self { mode, os_metered: false, interval_hours: config.auto_update_interval_hours, skip_metered: config.metered })
+        Ok(Self {
+            mode,
+            os_metered: false,
+            interval_hours: config.auto_update_interval_hours,
+            skip_metered: config.metered,
+        })
     }
 
     /// Applies the system policy mode when set (PKG-305).
@@ -176,7 +194,11 @@ pub fn decide(config: &AutoUpdateConfig, candidate: &UpdateCandidate) -> AutoAct
         new_version: candidate.new_version.clone(),
         new_grants: candidate.new_grants.clone(),
         changelog_url: candidate.changelog_url.clone(),
-        actions: vec![NoticeAction::Update, NoticeAction::Later, NoticeAction::SkipThisVersion],
+        actions: vec![
+            NoticeAction::Update,
+            NoticeAction::Later,
+            NoticeAction::SkipThisVersion,
+        ],
     })
 }
 

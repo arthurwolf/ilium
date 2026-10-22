@@ -1,0 +1,15 @@
+[package]
+name = "ilium-plugin-precompile"
+description = "Release-time precompiler for trusted bundled Ilium components"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+anyhow = "1"
+ilium-plugin-host = { path = "../ilium-plugin-host" }
+serde_json = "1.0.151"
+wasmtime = { workspace = true, default-features = false, features = ["component-model", "cranelift", "runtime", "std"] }

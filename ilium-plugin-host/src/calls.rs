@@ -120,7 +120,12 @@ fn breach_at(class: CallClass, elapsed: Duration, deadline: Duration) -> BreachV
 
 /// The call class of an event batch: `Command` when a command invocation is present (HST-192).
 pub fn batch_call_class(batch: &[ilium_plugin_api::generated::types::events::Event]) -> CallClass {
-    if batch.iter().any(|event| matches!(event, ilium_plugin_api::generated::types::events::Event::CommandInvoked(_))) {
+    if batch.iter().any(|event| {
+        matches!(
+            event,
+            ilium_plugin_api::generated::types::events::Event::CommandInvoked(_)
+        )
+    }) {
         CallClass::Command
     } else {
         CallClass::Event
@@ -131,8 +136,12 @@ pub fn batch_call_class(batch: &[ilium_plugin_api::generated::types::events::Eve
 pub fn streak_limit(class: CallClass) -> Option<u32> {
     match class {
         CallClass::Frame => Some(30),
-        CallClass::Annotate | CallClass::Detector | CallClass::MenuItems
-        | CallClass::QueryCatalog | CallClass::ListVirtualChildren | CallClass::Tokens
+        CallClass::Annotate
+        | CallClass::Detector
+        | CallClass::MenuItems
+        | CallClass::QueryCatalog
+        | CallClass::ListVirtualChildren
+        | CallClass::Tokens
         | CallClass::SettingsValidate => Some(3),
         _ => None,
     }
@@ -148,12 +157,19 @@ pub struct StreakCounter {
 impl StreakCounter {
     /// A counter for one class.
     pub fn new(class: CallClass) -> StreakCounter {
-        Self { class, late_in_a_row: 0 }
+        Self {
+            class,
+            late_in_a_row: 0,
+        }
     }
 
     /// Records one call; returns true when the streak limit is reached (trap the instance).
     pub fn record(&mut self, timely: bool) -> bool {
-        self.late_in_a_row = if timely { 0 } else { self.late_in_a_row.saturating_add(1) };
+        self.late_in_a_row = if timely {
+            0
+        } else {
+            self.late_in_a_row.saturating_add(1)
+        };
         streak_limit(self.class).is_some_and(|limit| self.late_in_a_row >= limit)
     }
 }
@@ -171,7 +187,12 @@ pub struct CallBudget {
 impl CallBudget {
     /// A budget for one call of `class` under `limits`.
     pub fn new(class: CallClass, limits: &ResolvedLimits) -> CallBudget {
-        Self { class, deadline: deadline_for(class, limits), used: Duration::ZERO, returned: false }
+        Self {
+            class,
+            deadline: deadline_for(class, limits),
+            used: Duration::ZERO,
+            returned: false,
+        }
     }
 
     /// Guest code ran for `ms`.

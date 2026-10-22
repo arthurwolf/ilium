@@ -172,6 +172,7 @@ impl Harness {
         }));
         let (changed, _) = watch::channel(());
         let terminal = TerminalState {
+            child_process_id: 0,
             screen_reader: crate::screen_reader::ScreenReader::new(
                 Arc::clone(&parser),
                 Arc::clone(&generation),

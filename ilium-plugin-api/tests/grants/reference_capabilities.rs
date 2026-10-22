@@ -527,7 +527,6 @@ fn cap_008_write_to_read_only_scopes_is_grant_scope() {
     for text in [
         "fs.write:package",
         "fs.write:agent-sessions:claude",
-        "fs.write:agent-config:claude",
         "fs.watch:agent-config:claude",
     ] {
         assert!(
@@ -535,6 +534,14 @@ fn cap_008_write_to_read_only_scopes_is_grant_scope() {
             "{text}"
         );
     }
+}
+
+/// REQ: CAP-008; reference-capabilities file scopes explicitly permit H read/write.
+#[test]
+fn cap_008_agent_configuration_write_is_a_high_risk_valid_scope() {
+    let parsed = grant("fs.write:agent-config:claude");
+    assert_eq!(risk_of(std::slice::from_ref(&parsed)), Risk::High);
+    assert!(check_grant(&parsed, Tier::T2, Side::Server).is_ok());
 }
 
 /// REQ: CAP-008

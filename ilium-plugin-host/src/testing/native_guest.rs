@@ -44,3 +44,38 @@ fn missing_export(function: &str) -> Trap {
         function: function.to_owned(),
     }
 }
+
+/// Bridges native fixtures to the production lifecycle owner. It contains no
+/// state machine, batching, restart or ABI-validation policy of its own.
+pub struct NativeGuestAdapter {
+    guest: Box<dyn NativeGuest>,
+}
+
+impl NativeGuestAdapter {
+    /// Wraps one native guest; does not instantiate a WebAssembly component.
+    pub fn new(guest: Box<dyn NativeGuest>) -> Self {
+        Self { guest }
+    }
+}
+
+impl crate::instance::GuestExports for NativeGuestAdapter {
+    fn activate(&mut self, activation: Activation) -> Result<Result<(), PluginError>, Trap> {
+        Ok(self.guest.activate(activation))
+    }
+
+    fn deactivate(&mut self, reason: DeactivationReason) -> Result<Option<Vec<u8>>, Trap> {
+        Ok(self.guest.deactivate(reason))
+    }
+
+    fn on_events(&mut self, batch: Vec<Event>) -> Result<Vec<Submission>, Trap> {
+        self.guest.on_events(batch)
+    }
+
+    fn render(&mut self, view: ViewTarget, area: Area) -> Result<UiTree, Trap> {
+        self.guest.render(view, area)
+    }
+
+    fn call_export(&mut self, call: ExportCall) -> Result<ExportReply, Trap> {
+        self.guest.call_export(call)
+    }
+}

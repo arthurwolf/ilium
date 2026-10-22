@@ -3,7 +3,8 @@
 //!
 //! Work is owned by named worker banks; instance queues serialize calls and rotate fairly.
 
-use ilium_platform::owned_worker::{reserve_owned_worker, OwnedWorker, StopToken, WorkerKind};
+use ilium_execution::{reserve_admitted_worker, QuotaGroup, QuotaLimits, WorkerStartError};
+use ilium_platform::owned_worker::{OwnedWorker, StopToken, WorkerKind};
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::{mpsc, Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
@@ -13,7 +14,7 @@ use ilium_plugin_api::generated::types::requests::{Outcome, RequestRef};
 use ilium_plugin_api::ids::{PluginId, RequestId};
 use ilium_plugin_api::{ErrorCode, PluginError, ProcessKind};
 
-use crate::calls::CallClass;
+use crate::calls::{deadline_for, CallClass, ResolvedLimits};
 use crate::telemetry::LogLine;
 
 // ---- Threads and ticks (reference-host-architecture.md HST-180..184) ---------------------------
@@ -251,6 +252,7 @@ struct SideQueue {
     source_rate: Option<u32>,
     source_times: VecDeque<Instant>,
     bucket: ExecutionBucket,
+    limits: Option<ResolvedLimits>,
 }
 
 impl Default for SideQueue {
@@ -270,6 +272,7 @@ impl Default for SideQueue {
             source_rate: None,
             source_times: VecDeque::new(),
             bucket: ExecutionBucket::new(),
+            limits: None,
         }
     }
 }
@@ -302,19 +305,41 @@ struct WorkerBank {
 }
 
 impl WorkerBank {
-    fn new(prefix: &str, count: usize) -> Self {
+    fn empty() -> Self {
+        Self {
+            sender: None,
+            workers: Vec::new(),
+        }
+    }
+
+    fn try_new(prefix: &str, count: usize, quota: &QuotaGroup) -> Result<Self, WorkerStartError> {
+        if count == 0 {
+            return Ok(Self::empty());
+        }
+        // Reserve the whole bank before allocating its channel or worker captures.
+        // Each declaration includes an equal share of the bounded mailbox metadata.
+        let resident_per_worker = (1024 * std::mem::size_of::<Work>()
+            + std::mem::size_of::<mpsc::Receiver<Work>>()
+            + std::mem::size_of::<Mutex<mpsc::Receiver<Work>>>())
+        .div_ceil(count);
+        let reservations = (0..count)
+            .map(|_| reserve_admitted_worker(quota, 2 * 1024 * 1024, resident_per_worker))
+            .collect::<Result<Vec<_>, _>>()?;
         let (sender, receiver) = mpsc::sync_channel::<Work>(1024);
         let receiver = Arc::new(Mutex::new(receiver));
-        let mut workers = Vec::new();
-        for index in 0..count {
+        let mut bank = Self {
+            sender: Some(sender),
+            workers: Vec::new(),
+        };
+        for (index, reservation) in reservations.into_iter().enumerate() {
             let receiver = receiver.clone();
             let name = if count == 1 && prefix == SCENE_THREAD_NAME {
                 prefix.to_owned()
             } else {
                 format!("{prefix}{index}")
             };
-            let started = reserve_owned_worker(Some(2 * 1024 * 1024), ()).and_then(|reservation| {
-                reservation.spawn(
+            let worker = reservation
+                .spawn(
                     &name,
                     WorkerKind::Cooperative,
                     StopToken::default(),
@@ -328,24 +353,14 @@ impl WorkerBank {
                             let Ok(work) = work else {
                                 break;
                             };
-                            // A guest adapter's panic cannot kill the bank or strand other stores.
                             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(work));
                         }
                     },
                 )
-            });
-            match started {
-                Ok(worker) => workers.push(worker),
-                Err(error) => {
-                    eprintln!("Plugin scheduler worker creation failed: {error}");
-                    break;
-                }
-            }
+                .map_err(WorkerStartError::Platform)?;
+            bank.workers.push(worker);
         }
-        Self {
-            sender: (!workers.is_empty()).then_some(sender),
-            workers,
-        }
+        Ok(bank)
     }
 
     fn send(&self, work: Work) -> Result<(), Work> {
@@ -374,6 +389,7 @@ pub struct Scheduler {
     scenes: WorkerBank,
     jobs: WorkerBank,
     epoch_tick_ms: u64,
+    default_limits: ResolvedLimits,
 }
 
 impl std::fmt::Debug for Scheduler {
@@ -386,20 +402,108 @@ impl std::fmt::Debug for Scheduler {
 }
 
 impl Scheduler {
-    /// Creates owned worker banks; epoch interruption is supplied by the guest runtime.
+    /// Convenience for isolated callers: server executor sizing plus a scene bank,
+    /// with an independent quota. Production hosts must use `try_with_config` to
+    /// share their process quota and select the appropriate process worker topology.
     pub fn new(epoch_tick_ms: u64) -> Scheduler {
+        let quota = QuotaGroup::new(QuotaLimits {
+            clients: 0,
+            jobs: 0,
+            service_jobs: 0,
+            input_bytes: 0,
+            result_bytes: 0,
+            worker_threads: 9,
+            worker_bytes: 32 * 1024 * 1024,
+        });
+        match Self::try_build(
+            ProcessKind::Server,
+            epoch_tick_ms,
+            ResolvedLimits(BTreeMap::new()),
+            &quota,
+            1,
+        ) {
+            Ok(scheduler) => scheduler,
+            Err(error) => {
+                let mut state = SchedulerState::default();
+                state.logs.push(LogLine {
+                    plugin: String::new(),
+                    level: "error".into(),
+                    message: format!("host.worker-unavailable: {error}"),
+                });
+                Self {
+                    state: Mutex::new(state),
+                    dispatch: Mutex::new(()),
+                    executor: WorkerBank::empty(),
+                    scenes: WorkerBank::empty(),
+                    jobs: WorkerBank::empty(),
+                    epoch_tick_ms,
+                    default_limits: ResolvedLimits(BTreeMap::new()),
+                }
+            }
+        }
+    }
+
+    /// Production startup: all native workers retain the supplied shared quota
+    /// admission through physical join. Only clients own the scene worker.
+    /// `limits` supplies default resolved deadlines; register per-side limits when
+    /// plugin tiers or manifest requests differ within the hosting process.
+    pub fn try_with_config(
+        process: ProcessKind,
+        epoch_tick_ms: u64,
+        limits: ResolvedLimits,
+        quota: &QuotaGroup,
+    ) -> Result<Self, WorkerStartError> {
+        Self::try_build(
+            process,
+            epoch_tick_ms,
+            limits,
+            quota,
+            usize::from(process == ProcessKind::Client),
+        )
+    }
+
+    fn try_build(
+        process: ProcessKind,
+        epoch_tick_ms: u64,
+        limits: ResolvedLimits,
+        quota: &QuotaGroup,
+        scene_workers: usize,
+    ) -> Result<Self, WorkerStartError> {
         let cores = std::thread::available_parallelism().map_or(1, usize::from);
-        Self {
+        Ok(Self {
             state: Mutex::new(SchedulerState::default()),
             dispatch: Mutex::new(()),
-            executor: WorkerBank::new(
+            executor: WorkerBank::try_new(
                 EXECUTOR_THREAD_PREFIX,
-                executor_threads(ProcessKind::Server, cores),
-            ),
-            scenes: WorkerBank::new(SCENE_THREAD_NAME, 1),
-            jobs: WorkerBank::new(JOB_THREAD_PREFIX, job_bank_threads(cores)),
+                executor_threads(process, cores),
+                quota,
+            )?,
+            scenes: WorkerBank::try_new(SCENE_THREAD_NAME, scene_workers, quota)?,
+            jobs: WorkerBank::try_new(
+                JOB_THREAD_PREFIX,
+                if process == ProcessKind::Helper {
+                    0
+                } else {
+                    job_bank_threads(cores)
+                },
+                quota,
+            )?,
             epoch_tick_ms,
+            default_limits: limits,
+        })
+    }
+
+    /// Registers the effective per-side limits after trust-tier clamping.
+    pub fn register_side_with_limits(&self, plugin: &PluginId, limits: ResolvedLimits) {
+        let mut state = lock(&self.state);
+        let side = state.side(plugin);
+        if let Some(capacity) = limits
+            .0
+            .get(&ilium_plugin_api::limits::LimitKey::EventQueue)
+        {
+            side.capacity = usize::try_from(*capacity).unwrap_or(usize::MAX);
         }
+        side.limits = Some(limits);
     }
 
     /// Current event queue and store admission statistics.
@@ -441,17 +545,22 @@ impl Scheduler {
                 let mut expired = Vec::new();
                 {
                     let side = state.side(plugin);
+                    let limits = side.limits.as_ref().unwrap_or(&self.default_limits);
                     side.calls.retain(|call| {
-                        let overdue = caller_deadline(call.kind).is_some_and(|(_, deadline)| {
-                            now.saturating_duration_since(call.queued_at) > deadline
-                        });
+                        let overdue =
+                            caller_deadline(call.kind, limits).is_some_and(|(_, deadline)| {
+                                now.saturating_duration_since(call.queued_at) > deadline
+                            });
                         if overdue {
                             expired.push((call.kind, call.ticket));
                         }
                         !overdue
                     });
                     for (kind, _) in &expired {
-                        if let Some((class, _)) = caller_deadline(*kind) {
+                        if let Some((class, _)) = caller_deadline(
+                            *kind,
+                            side.limits.as_ref().unwrap_or(&self.default_limits),
+                        ) {
                             if let Some((_, count)) =
                                 side.breaches.iter_mut().find(|(key, _)| *key == class)
                             {
@@ -693,6 +802,21 @@ impl Scheduler {
         }
         Ok(push_to_side(side, event))
     }
+    /// Transfers up to `maximum` queued events in delivery order to the caller.
+    /// The caller owns the drained events; queue policies have already been applied.
+    pub fn take_events(&self, plugin: &PluginId, maximum: usize) -> Vec<Event> {
+        let mut state = lock(&self.state);
+        let Some(side) = state.sides.get_mut(plugin) else { return Vec::new(); };
+        let count = maximum.min(side.events.len());
+        side.events.drain(..count).collect()
+    }
+
+    /// Observes pending delivery order without consuming events or changing policy state.
+    pub fn snapshot_events(&self, plugin: &PluginId) -> Vec<Event> {
+        lock(&self.state).sides.get(plugin)
+            .map_or_else(Vec::new, |side| side.events.iter().cloned().collect())
+    }
+
     /// Number of undelivered events.
     pub fn queue_len(&self, plugin: &PluginId) -> usize {
         lock(&self.state)
@@ -706,7 +830,7 @@ impl Scheduler {
     }
 }
 
-fn caller_deadline(kind: CallKind) -> Option<(CallClass, Duration)> {
+fn caller_deadline(kind: CallKind, limits: &ResolvedLimits) -> Option<(CallClass, Duration)> {
     let (class, ms) = match kind {
         CallKind::OnEvents | CallKind::Render | CallKind::SceneFrame | CallKind::JobRun => {
             return None
@@ -723,7 +847,12 @@ fn caller_deadline(kind: CallKind) -> Option<(CallClass, Duration)> {
         CallKind::HookHandler => (CallClass::Event, 20),
         _ => (CallClass::Command, 50),
     };
-    Some((class, Duration::from_millis(ms)))
+    let deadline = if kind == CallKind::HookHandler {
+        Duration::from_millis(ms)
+    } else {
+        deadline_for(class, limits)
+    };
+    Some((class, deadline))
 }
 
 // ---- Event queues, batches and stream credit (reference-host-architecture.md HST-200..205) -----
@@ -786,8 +915,6 @@ pub fn event_queue_policy(event: &Event) -> QueuePolicy {
             if matches!(
                 action.kind,
                 ilium_plugin_api::generated::types::ui::ActionKind::Scrolled
-                    | ilium_plugin_api::generated::types::ui::ActionKind::Pointer
-                    | ilium_plugin_api::generated::types::ui::ActionKind::DragOver
             ) =>
         {
             QueuePolicy::Coalesce
@@ -1030,7 +1157,7 @@ impl StreamCredit {
     /// Chunk sizes for `len` bytes, each at most `MAX_CHUNK_BYTES` (HST-205).
     pub fn split_chunks(len: usize) -> Vec<usize> {
         let mut chunks = vec![MAX_CHUNK_BYTES; len / MAX_CHUNK_BYTES];
-        if len % MAX_CHUNK_BYTES != 0 {
+        if !len.is_multiple_of(MAX_CHUNK_BYTES) {
             chunks.push(len % MAX_CHUNK_BYTES);
         }
         chunks

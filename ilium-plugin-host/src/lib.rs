@@ -67,6 +67,7 @@ pub mod kill_switch;
 pub mod helper_forensics;
 pub mod ipc_traffic;
 pub mod correlation_chain;
+pub mod wasm_guest;
 #[cfg(feature = "testing")]
 pub mod testing;
 

@@ -2706,6 +2706,7 @@ mod tests {
                 details: String::new(),
                 error: None,
                 eta_seconds: None,
+                indeterminate: false,
             },
             monitor_health,
             last_observed_unix_millis: 0,

@@ -1174,6 +1174,8 @@ pub(crate) struct TerminalSnapshot {
     pub scrollback_position: usize,
     pub scrolled_back: bool,
     pub sequence: u64,
+    /// A complete server snapshot is displayable even before the first output.
+    pub initial_display_ready: bool,
     pub revision: u64,
     pub mouse: bool,
     pub paste: bool,
@@ -1223,6 +1225,7 @@ impl PaintedTerminal {
             scrollback_position: 0,
             scrolled_back: false,
             sequence: 0,
+            initial_display_ready: true,
             revision: 0,
             mouse: !matches!(
                 parser.screen().mouse_protocol_mode(),
@@ -1252,6 +1255,11 @@ impl PaintedTerminal {
     pub(crate) fn with_screen<R>(&self, read: impl FnOnce(&vt100::Screen) -> R) -> R {
         read(&self.snapshot.visible)
     }
+    /// Sequence of the immutable source actually painted, including progress previews.
+    pub(crate) fn output_sequence(&self) -> u64 {
+        self.snapshot.sequence
+    }
+
     /// Long-lived interactions obtain a bounded pin; the original allocation
     /// remains charged until its final screen, history, frame, or pin owner drops.
     pub(crate) fn pinned(&self) -> Result<Self, String> {
@@ -1385,6 +1393,7 @@ impl TerminalState {
             scrollback_position: self.scrollback_position(),
             scrolled_back: self.is_scrolled_back(),
             sequence: self.last_output_sequence,
+            initial_display_ready: self.history_base_sequence.is_some(),
             revision: self.render_revision,
             mouse: self.wants_mouse_protocol(),
             paste: self.wants_bracketed_paste(),
@@ -2547,11 +2556,14 @@ impl TerminalView {
             .unwrap_or_else(|| self.snapshot.clone())
     }
     pub(crate) fn has_initial_display(&self) -> bool {
-        self.snapshot.sequence > 0
+        self.snapshot.initial_display_ready
+            || self.snapshot.sequence > 0
             || !self.snapshot.visible.contents().trim().is_empty()
             || self.frontend.as_ref().is_some_and(|frontend| {
                 frontend.progress_preview().is_some_and(|snapshot| {
-                    snapshot.sequence > 0 || !snapshot.visible.contents().trim().is_empty()
+                    snapshot.initial_display_ready
+                        || snapshot.sequence > 0
+                        || !snapshot.visible.contents().trim().is_empty()
                 })
             })
     }
@@ -2999,6 +3011,30 @@ fn context_cost(snapshot: &TerminalSnapshot) -> Result<ilium_execution::JobCost,
 #[cfg(test)]
 mod search_origin_tests {
     use super::*;
+
+    #[test]
+    fn painted_sequence_stays_frozen_when_the_live_view_advances() {
+        let mut view = TerminalView::new(3, 20);
+        view.apply_replay(b"first", 1, true);
+        let painted = view.painted_source();
+        view.apply_replay(b"second", 2, true);
+        assert_eq!(painted.output_sequence(), 1);
+        assert_eq!(view.painted_source().output_sequence(), 2);
+    }
+
+    #[test]
+    fn blank_server_snapshot_at_sequence_zero_is_ready_without_output() {
+        let mut view = TerminalView::new(3, 20);
+        assert!(!view.has_initial_display(), "bootstrap is still waiting");
+        let mut state = TerminalState::with_scrollback_budget_mib(3, 20, 0);
+        // The parser owner marks a complete Snapshot, including sequence zero,
+        // with the base used for subsequently requested historical pages.
+        state.set_history_base(Some(1));
+        view.install(Arc::new(state.publish()), 1);
+        assert!(view.has_initial_display());
+        assert_eq!(view.last_output_sequence(), 0);
+        assert!(view.snapshot.visible.contents().trim().is_empty());
+    }
 
     #[test]
     fn frozen_screen_rejects_zero_geometry_before_parser_construction() {

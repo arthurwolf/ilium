@@ -923,6 +923,13 @@ impl PtySession {
         // leaks as a zombie: dropping portable-pty's child does not prove its
         // process has exited or been reaped.
         let process_id = child.process_id();
+        ilium_platform::startup_timing::record(
+            "process_launched",
+            0,
+            0,
+            process_id.unwrap_or(0),
+            0,
+        );
         let pty_process_identity = process_id.and_then(|process_id| {
             ilium_platform::process_control::capture_pty_process(process_id)
                 .ok()
@@ -1008,7 +1015,9 @@ impl PtySession {
         }));
         let journal_for_owner = Arc::clone(&output_journal);
         let broadcast_for_owner = output_bytes_tx.clone();
+        let mut first_publication = true;
         let terminal = TerminalState {
+            child_process_id: process_id.unwrap_or(0),
             screen_reader: screen_reader.clone(),
             parser: Arc::clone(&parser),
             generation: Arc::clone(&screen_generation),
@@ -1018,6 +1027,16 @@ impl PtySession {
                     .lock()
                     .unwrap_or_else(|error| error.into_inner())
                     .append_shared(bytes);
+                if first_publication {
+                    first_publication = false;
+                    ilium_platform::startup_timing::record(
+                        "first_parsed_output",
+                        0,
+                        0,
+                        process_id.unwrap_or(0),
+                        chunk.sequence,
+                    );
+                }
                 let _ = broadcast_for_owner.send(chunk);
             }),
         };

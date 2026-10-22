@@ -8,6 +8,14 @@ every accepted optimization, its isolated result, and the final installed
 runtime result. Values are interval averages or multi-sample medians; an
 instantaneous process sample is never used as evidence.
 
+## Fresh terminal startup qualification
+
+Fresh creation is measured separately from selecting an existing pane. Build matching release `ilium` and `ilium-server` binaries, then run `cargo test --release -p ilium --test pty_tui_smoke terminal_pool_runtime::fresh_terminal_startup_with_128_idle_and_busy_panes -- --ignored --nocapture` through ni-build in an isolated build folder. The existing 128-pane selection-recovery test and its five-second gate remain independent.
+
+The fresh-start harness uses 127 existing synthetic PTYs plus one newly created terminal, 32 trials each with idle and continuously busy background terminals. A real keyboard creation action starts the clock; a unique marker must appear inside the content viewport. Reports include successful p50/p95/p99/max and separately counted failures and censored trials. The two-second per-trial limit is an acceptance target, not a measured result.
+
+With isolated file logging enabled and `RUST_LOG=ilium_startup=debug`, numeric startup records cover creation intent/admission, server request receipt, process launch, first raw PTY read, first parsed publication and successful frame emission. A frame retains the terminal identities and output sequences captured during composition; rejected or uncertain output is excluded. These records contain no command or terminal text. Same-process intervals use monotonic clocks; cross-process intervals use wall clocks and require a stable host clock. Synthetic fixture performance does not establish the duration or cause of a user's real agent startup incident. Add parser workers only after these measurements identify parsing as the bottleneck.
+
 ## Environment and protocol
 
 - Host: `aquarelle`, Linux 7.0.0-29-generic, Intel Core i5-11600K, 6 cores / 12
@@ -547,3 +555,22 @@ re-measured in this run.
 - The earlier 200-pane baseline problem (`new-pane` timing out at 5 s) was not
   re-tested on these builds.
 
+
+The 2026-10-22 remote qualification used synthetic shell terminals on ni-vm,
+127 existing panes plus each fresh pane, and 32 trials per workload:
+
+| Workload | Median | 95th percentile | Maximum | Failed / censored |
+| --- | ---: | ---: | ---: | ---: |
+| Idle | 152.720 ms | 198.775 ms | 274.881 ms | 0 / 0 |
+| Continuously busy | 200.661 ms | 281.910 ms | 309.655 ms | 0 / 0 |
+
+Every trial had a complete correlated stage chain, preserved input echo, and
+retained its final marker. The existing 128-pane selection gate also passed.
+Remote runtime receipt: `14dd40ad34874a62baf5fe79af8932da` (exit 0, stable
+source, verified cleanup). Server raw-read-to-publication parsing was at most
+6.254 ms; client parsing is included in the later delivery-to-frame interval
+and was not separately timed. These measurements do not identify parser
+service as the bottleneck, so parser worker count remains unchanged. The
+keyboard shortcut exercises the same New Terminal action as its toolbar
+button; this is not a mouse-menu timing or a real-agent CLI startup measurement,
+and it does not establish the cause or resolution of the user's live incident.
