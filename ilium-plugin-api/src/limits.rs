@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::error::UnknownName;
+use crate::error::{Code, UnknownName};
 use crate::manifest::Diagnostic;
 use crate::tier::Tier;
 
@@ -238,19 +238,108 @@ impl std::str::FromStr for LimitKey {
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct Limits(pub BTreeMap<String, u64>);
 
+/// Defaults and tier ceilings from reference-manifest.md "Limits object".
+fn table_values(key: LimitKey) -> (u64, u64, u64) {
+    match key {
+        LimitKey::MemoryMib => (32, 256, 128),
+        LimitKey::TableElements => (10000, 50000, 20000),
+        LimitKey::EventDeadlineMs => (20, 50, 20),
+        LimitKey::CommandDeadlineMs => (50, 100, 50),
+        LimitKey::RenderDeadlineMs => (10, 20, 10),
+        LimitKey::AnnotateDeadlineMs => (10, 20, 10),
+        LimitKey::FrameDeadlineMs => (33, 50, 50),
+        LimitKey::DetectorDeadlineMs => (20, 50, 20),
+        LimitKey::ActivateDeadlineMs => (2000, 5000, 2000),
+        LimitKey::DeactivateDeadlineMs => (500, 1000, 500),
+        LimitKey::MigrateDeadlineMs => (30000, 60000, 30000),
+        LimitKey::JobDeadlineMs => (2000, 60000, 10000),
+        LimitKey::JobWallMs => (20000, 600000, 100000),
+        LimitKey::JobMemoryMib => (64, 512, 256),
+        LimitKey::JobIoMib => (16, 64, 16),
+        LimitKey::ConcurrentJobs => (2, 8, 2),
+        LimitKey::JobQueue => (16, 64, 16),
+        LimitKey::EventQueue => (1024, 4096, 1024),
+        LimitKey::PendingRequests => (64, 256, 64),
+        LimitKey::Timers => (64, 256, 64),
+        LimitKey::OutputFilters => (32, 128, 32),
+        LimitKey::Watches => (64, 256, 64),
+        LimitKey::KeyGrabs => (8, 32, 8),
+        LimitKey::UiTreeNodes => (4096, 16384, 4096),
+        LimitKey::UiTreeKib => (1024, 4096, 1024),
+        LimitKey::Decorations => (4096, 16384, 4096),
+        LimitKey::NodeMetadataKib => (64, 256, 64),
+        LimitKey::StorageBucketMib => (16, 256, 16),
+        LimitKey::DiskMib => (256, 4096, 256),
+        LimitKey::FsReadAllMib => (64, 512, 64),
+        LimitKey::FsWriteMib => (16, 64, 16),
+        LimitKey::HttpResponseMib => (8, 64, 8),
+        LimitKey::ProcessOutputMib => (4, 32, 4),
+        LimitKey::LogLinesPerSecond => (200, 1000, 200),
+        LimitKey::OpenVideos => (2, 8, 2),
+        LimitKey::VideoBufferMib => (64, 256, 64),
+        LimitKey::AudioCaptures => (2, 4, 2),
+        LimitKey::HttpStreams => (4, 16, 4),
+        LimitKey::Children => (2, 8, 2),
+        LimitKey::DurableTimers => (64, 256, 64),
+        LimitKey::VectorIndexes => (4, 16, 4),
+        LimitKey::VectorEntries => (10000, 200000, 50000),
+        LimitKey::SharedCacheMib => (64, 256, 128),
+        LimitKey::JournalEntries => (5000, 20000, 5000),
+        LimitKey::ToastsPending => (3, 3, 3),
+        LimitKey::PackageAssetsMib => (64, 256, 64),
+    }
+}
+
 /// The host default of a limit (reference-errors-and-limits.md "Requestable limits").
-pub fn default_of(_key: LimitKey) -> u64 {
-    unimplemented!("api::limits::default_of")
+///
+/// The frame default is the documented 30 fps baseline (33 ms). The runtime must
+/// resolve an unset frame deadline to `1000 / effective_frame_rate`, rounded down,
+/// and cap that budget at the tier ceiling before scheduling a scene frame.
+pub fn default_of(key: LimitKey) -> u64 {
+    table_values(key).0
 }
 
 /// The ceiling of a limit for a tier (reference-errors-and-limits.md "Requestable limits").
-pub fn ceiling(_key: LimitKey, _tier: Tier) -> u64 {
-    unimplemented!("api::limits::ceiling")
+pub fn ceiling(key: LimitKey, tier: Tier) -> u64 {
+    let (_, first_party, third_party) = table_values(key);
+    match tier {
+        Tier::T1 => first_party,
+        Tier::T2 | Tier::T3 => third_party,
+    }
 }
 
 /// PKG-031: a request above the ceiling is clamped, never refused.
-pub fn clamp(_requested: &Limits, _tier: Tier) -> Result<BTreeMap<LimitKey, u64>, Diagnostic> {
-    unimplemented!("api::limits::clamp")
+///
+/// Returns every requestable key, including defaults for absent or zero requests.
+/// Unknown keys and values outside the manifest's unsigned 32-bit range remain
+/// schema errors (PKG-070, PKG-072). The caller owns logging raised requests once;
+/// this pure contract module has no logging side effects.
+pub fn clamp(requested: &Limits, tier: Tier) -> Result<BTreeMap<LimitKey, u64>, Diagnostic> {
+    let mut effective: BTreeMap<_, _> = LimitKey::ALL
+        .into_iter()
+        .map(|key| (key, default_of(key).min(ceiling(key, tier))))
+        .collect();
+    for (name, &value) in &requested.0 {
+        let pointer = format!("/limits/{}", name.replace('~', "~0").replace('/', "~1"));
+        let key = name.parse::<LimitKey>().map_err(|_| {
+            Diagnostic::error(
+                Code::from_static("manifest.unknown-key"),
+                &pointer,
+                format!("Unknown limit key: {name}"),
+            )
+        })?;
+        if value > u64::from(u32::MAX) {
+            return Err(Diagnostic::error(
+                Code::from_static("manifest.schema"),
+                pointer,
+                "Limit values must be integers from 0 to 4,294,967,295",
+            ));
+        }
+        if value != 0 {
+            effective.insert(key, value.min(ceiling(key, tier)));
+        }
+    }
+    Ok(effective)
 }
 
 #[cfg(test)]

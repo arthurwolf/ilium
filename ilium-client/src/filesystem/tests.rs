@@ -83,7 +83,7 @@ fn text_trigger_modal_waits_for_real_durable_writer_and_server_request() {
 }
 
 #[test]
-fn board_async_detail_typing_retains_a_burst_while_publication_is_waiting() {
+fn board_async_detail_typing_admits_a_bounded_burst_before_collecting_writes() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("board.md");
     std::fs::write(&path, "# Board\n\n## Todo\n- Task\n").unwrap();
@@ -98,6 +98,9 @@ fn board_async_detail_typing_retains_a_burst_while_publication_is_waiting() {
     board.cycle_detail_editor_focus(false);
     let lock =
         ExclusiveFileLock::acquire(&directory.path().join(".board.md.ilium-write.lock")).unwrap();
+    // A terminal input batch can arrive before the UI collects write receipts.
+    // Test that bounded admission preserves that burst, then publish and read
+    // back every accepted character; this is not a lock-contention timing test.
     for character in "Live note 123456".chars() {
         let event = crossterm::event::KeyEvent::new(
             crossterm::event::KeyCode::Char(character),
