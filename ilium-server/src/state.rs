@@ -345,6 +345,9 @@ pub struct ServerState {
     pub(crate) workspace_git_status_cache: RwLock<HashMap<NodeId, WorkspaceGitStatus>>,
     pub(crate) workspace_close_preferences:
         std::sync::Arc<RwLock<HashMap<NodeId, WorkspaceClosePreference>>>,
+    /// Recaps clients produced, fenced by session and generation. Persisted
+    /// in the session snapshot; the server never generates them.
+    pub(crate) recaps: std::sync::Arc<RwLock<HashMap<NodeId, crate::persistence::PersistedRecap>>>,
     workspace_git_full_requests: mpsc::Sender<NodeId>,
     workspace_git_full_receiver: Mutex<Option<mpsc::Receiver<NodeId>>>,
     workspace_creation_tasks: std::sync::Mutex<WorkspaceCreationTasks>,
@@ -582,6 +585,7 @@ impl ServerState {
             replacing_panes: std::sync::Mutex::new(HashSet::new()),
             workspace_git_status_cache: RwLock::new(HashMap::new()),
             workspace_close_preferences: std::sync::Arc::new(RwLock::new(HashMap::new())),
+            recaps: std::sync::Arc::new(RwLock::new(HashMap::new())),
             workspace_git_full_requests,
             workspace_git_full_receiver: Mutex::new(Some(workspace_git_full_receiver)),
             workspace_creation_tasks: std::sync::Mutex::new(WorkspaceCreationTasks::default()),

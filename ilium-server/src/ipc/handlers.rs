@@ -227,6 +227,26 @@ async fn handle_scoped_request(
     direct_tx: &DirectEventSender,
 ) -> bool {
     match request {
+        ClientRequest::ApplyRecap {
+            pane_id,
+            session_id,
+            recap_generation,
+            trigger,
+            short,
+            long,
+        } => {
+            super::recaps::handle_apply_recap(
+                state,
+                pane_id,
+                session_id,
+                recap_generation,
+                trigger,
+                short,
+                long,
+            )
+            .await;
+            false
+        }
         // Plugin envelopes are routed by the plugin kernel once it exists (skeleton: ignored).
         ClientRequest::Plugin(_) => {
             tracing::debug!("plugin envelope ignored: plugin kernel not implemented");
@@ -2270,6 +2290,7 @@ async fn admitted_state_synchronization_events(
                         detection_evidence,
                     }];
                     events.extend(replay_events);
+                    events.extend(super::recaps::replay_events(state).await);
                     drop(panes);
                     drop(tree);
                     let statuses = state.workspace_git_status_cache.read().await;
@@ -2415,6 +2436,7 @@ async fn state_synchronization_events(
         detection_evidence,
     }];
     events.extend(replay_events);
+    events.extend(super::recaps::replay_events(state).await);
     let statuses = state.workspace_git_status_cache.read().await;
     let status_replays: Vec<_> = match &events[0] {
         ServerEvent::PaneStateSnapshot { tree, .. } => statuses

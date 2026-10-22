@@ -680,6 +680,26 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
         }
         // One-shot recap consumers own this direct reply; it is not UI state.
         ServerEvent::PaneRecapScreen { .. } => None,
+        ServerEvent::RecapUpdated {
+            pane_id,
+            session_id,
+            recap_generation,
+            trigger,
+            short,
+            long,
+        } => {
+            app.recap.observe_update(
+                pane_id,
+                crate::recap_state::StoredRecap {
+                    session_id,
+                    recap_generation,
+                    trigger,
+                    short,
+                    long,
+                },
+            );
+            None
+        }
         // Plugin traffic is consumed by the client plugin host, not by the render cache.
         ServerEvent::Plugin(_) | ServerEvent::Contributions(_) | ServerEvent::Rejected(_) => None,
         ServerEvent::AntigravityStatuslineCompleted { .. } => None,

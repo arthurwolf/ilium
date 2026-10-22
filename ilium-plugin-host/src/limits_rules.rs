@@ -133,9 +133,8 @@ impl ReplyWaiter {
 
     /// The error to report once the deadline passed, else `None`.
     pub fn result(&self) -> Option<PluginError> {
-        (self.elapsed_ms >= reply_deadline_ms(self.kind)).then(|| {
-            PluginError::new(ErrorCode::TimedOut, "Plugin reply deadline reached")
-        })
+        (self.elapsed_ms >= reply_deadline_ms(self.kind))
+            .then(|| PluginError::new(ErrorCode::TimedOut, "Plugin reply deadline reached"))
     }
 }
 

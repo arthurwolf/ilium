@@ -255,6 +255,13 @@ pub fn chrome_stats_cell(outer_area: ratatui::layout::Rect) -> ratatui::layout::
     ratatui::layout::Position::new(hamburger.x + 2, hamburger.y)
 }
 
+/// The cell of `CHROME_ICONS`' third glyph (the small dot), two cells right of
+/// the big dot: an agent pane makes it the hover/click target of its recap.
+pub fn chrome_recap_cell(outer_area: ratatui::layout::Rect) -> ratatui::layout::Position {
+    let stats = chrome_stats_cell(outer_area);
+    ratatui::layout::Position::new(stats.x + 2, stats.y)
+}
+
 /// Nerd Font powerline round-cap glyphs used to give the status bar rounded
 /// ends: each is rendered with `fg` = the bar's own accent color and no
 /// explicit `bg` (so it blends into whatever sits outside the bar), the

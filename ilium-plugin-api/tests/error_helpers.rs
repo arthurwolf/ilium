@@ -80,5 +80,8 @@ fn registry_covers_each_constant_once_and_preserves_extension_mappings() {
         assert!(!entry.retryable);
         assert_eq!(entry.page, "api-extension-points.md");
     }
-    assert_eq!(Code::from_static("unknown.code").base(), ErrorCode::Internal);
+    assert_eq!(
+        Code::from_static("unknown.code").base(),
+        ErrorCode::Internal
+    );
 }

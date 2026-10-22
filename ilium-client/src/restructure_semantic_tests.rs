@@ -15,6 +15,7 @@ fn context() -> LeafContext {
         filename: None,
         content_extract: "Working on Paris public transport maps".into(),
         automatic_content_fingerprint: 0,
+        recap_evidence: String::new(),
         agent_lookup: None,
     }
 }
@@ -128,6 +129,7 @@ fn parse_value(value: &serde_json::Value) -> anyhow::Result<RecommendedRestructu
         TitleStyle::Summarization,
         &RecommendationContext::default(),
     )
+    .map(|inference| inference.plan)
 }
 #[test]
 fn semantic_contract_resolves_project_group_and_leaf() {
@@ -228,7 +230,8 @@ fn semantic_contract_preserves_fixed_groups_and_split_paths() {
         TitleStyle::Summarization,
         &context,
     )
-    .unwrap();
+    .unwrap()
+    .plan;
     assert_eq!(plan.expected_animation_generation, 7);
     assert_eq!(
         plan.entries
@@ -363,13 +366,14 @@ fn attention_list_never_fails_or_alters_the_sort_parse() {
     ] {
         let mut value = valid_response();
         value["attention"] = attention;
-        let (plan, raw) = parse_restructure_response_with_attention(
+        let (plan, raw) = parse_restructure_response(
             &value.to_string(),
             &[context()],
             &[],
             TitleStyle::Summarization,
             &RecommendationContext::default(),
         )
+        .map(|inference| (inference.plan, inference.attention))
         .expect("the attention key must not affect the strict sort parse");
         assert!(raw.is_some());
         let plain = parse_value(&valid_response()).unwrap();
@@ -378,13 +382,14 @@ fn attention_list_never_fails_or_alters_the_sort_parse() {
             plain.structure.children.len()
         );
     }
-    let (_, raw) = parse_restructure_response_with_attention(
+    let (_, raw) = parse_restructure_response(
         &valid_response().to_string(),
         &[context()],
         &[],
         TitleStyle::Summarization,
         &RecommendationContext::default(),
     )
+    .map(|inference| (inference.plan, inference.attention))
     .unwrap();
     assert!(raw.is_none(), "a reply without the key is normal");
 }
