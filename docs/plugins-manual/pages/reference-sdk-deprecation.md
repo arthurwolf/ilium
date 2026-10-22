@@ -34,6 +34,55 @@ Decision needed: whether the two-minor minimum should match the rule for WIT fea
 
 - [API-084] Each SDK release MUST list every item it marks under a `Deprecated` heading of its changelog entry, and every item it removes under a `Removed` heading. Each entry MUST name the item, its successor and its removal minor. The headings use the Keep a Changelog section names.
 
+### Definitions
+
+- **SDK item:** a public function, type, builder, wrapper or export of `ilium-plugin-sdk` or `@ilium/plugin-sdk`. A WIT feature of the contract is not an SDK item.
+- **Marking release:** the SDK release that adds the mark to an item.
+- **Removal minor:** the SDK minor release named in the mark, in which the item no longer exists.
+- **Successor:** the SDK item an author uses instead.
+
+### Rules for the successor and the host
+
+- [API-085] A release that marks an item MUST already ship its successor, so that an author can move in the same release. An item with no successor MUST say so in its note instead.
+- [API-086] The release that removes an item MUST be the minor named in its mark, MUST NOT be a patch release, and MUST NOT change the signature or behaviour of any other item.
+- [API-087] The host MUST NOT write a `deprecated` record, a log line or a refusal for an SDK deprecation. Only the `deprecated` record of [ABI-053](/pages/reference-abi-evolution/#notice-and-removal) for WIT features exists at load time.
+
+### Inputs, outputs and failures
+
+- Input: the SDK source of a release, with its marks and its changelog entry.
+- Output: build warnings (Rust), editor marks (TypeScript) and the changelog headings `Deprecated` and `Removed`.
+- Failure: a plugin that names a removed item fails to compile (Rust) or to import (TypeScript). The host error codes of the manual do not apply, because the failure happens before a package exists. A package built against an SDK that needs another contract version is refused with `manifest.api-version` (see [SDK versioning policy](/pages/rust-sdk/#sdk-versioning-policy)).
+
+### Limits
+
+- Minimum notice: two SDK minors between the marking release and the removal minor ([API-083]).
+- Patch releases remove nothing ([API-083]).
+- The manual states no other numeric limit for SDK deprecation.
+
+### Example
+
+A Rust item marked in SDK 0.4.0 for removal in 0.6.0:
+
+```rust
+#[deprecated(since = "0.4.0", note = "use `pane_open`; removed in 0.6.0")]
+pub fn open_pane_legacy() { /* unchanged behaviour */ }
+```
+
+The matching changelog entry of 0.4.0:
+
+```
+### Deprecated
+- `open_pane_legacy`: use `pane_open`; removed in 0.6.0.
+```
+
+The entry of 0.6.0 repeats the item under `### Removed`. The names here are illustrative, not items of the real SDK.
+
+### What this page does not cover
+
+- Retiring a WIT feature of the contract: see [ABI evolution](/pages/reference-abi-evolution/).
+- SDK version numbers and the contract version: see [Versioning](/pages/versioning/).
+- Host error codes: see [Error codes and limits](/pages/reference-errors-and-limits/).
+
 ### Who acts
 
 - SDK maintainers add the mark, name the successor and write the changelog entry in the release that marks the item.
@@ -47,4 +96,4 @@ Decision needed: whether the two-minor minimum should match the rule for WIT fea
 - [TypeScript SDK](/pages/typescript-sdk/)
 - [Versioning](/pages/versioning/)
 
-Requirement ids for this page: [API-082], [API-083], [API-084]. See the [requirements index](/pages/reference-requirements/).
+Requirement ids for this page: [API-082], [API-083], [API-084], [API-085], [API-086], [API-087]. See the [requirements index](/pages/reference-requirements/).

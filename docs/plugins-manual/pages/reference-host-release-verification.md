@@ -24,6 +24,27 @@ Every release publishes one `SHA256SUMS` file beside the archives. The file list
 - [SEC-428] A release MUST publish a `SHA256SUMS` file that lists every release archive with its SHA-256 hash, one line per archive.
 - [SEC-429] A user who checks a download by hand MUST compare the archive's SHA-256 hash with the line in `SHA256SUMS` that carries the same archive name, and MUST run the attestation check before running the archive.
 
+## Terms and formats
+
+- **Archive inventory**: the five archives the installer expects in `SHA256SUMS`: `ilium-linux-x86_64.tar.gz`, `ilium-linux-aarch64.tar.gz`, `ilium-windows-x86_64.zip`, `ilium-macos-aarch64.tar.gz` and `ilium-macos-x86_64.tar.gz` (`release/install.sh`, `checksum_archives`).
+- **Record**: one line of `SHA256SUMS`. A valid record is exactly 66 characters plus the length of the file name: 64 lowercase hexadecimal characters, two spaces, then the name. The name starts with a letter or digit and holds only letters, digits, `.`, `_` and `-`.
+- **Hash tool**: `sha256sum`, `shasum -a 256` or `openssl dgst -sha256`. The installer uses the first one it finds and stops with `A SHA-256 tool is required: sha256sum, shasum, or openssl` when none exists.
+
+- [SEC-433] The installer MUST accept `SHA256SUMS` only when it holds exactly one valid record for each of the five archives of the archive inventory, with no other record, no duplicate name and no blank or extra line. Any other file MUST stop the install with `Malformed, duplicate or missing checksum record`.
+
+## Inputs, outputs and limits
+
+| Item | Value | Source |
+|---|---|---|
+| Inputs | The archive and `SHA256SUMS` of one release tag, fetched over HTTPS only | `release/install.sh` |
+| Download limits | 15 seconds to connect, 300 seconds per download | `release/install.sh` |
+| Latest fallback | None. A missing asset ends the install with `HTTPS download failed (network, rate limit, or missing release asset); no latest fallback` | `release/install.sh` |
+| Free staging space | At least 64 MiB, or `At least 64 MiB of free staging space is required` | `release/install.sh` |
+| Unpacked tar size | 1024 bytes to 2000000000 bytes, a multiple of 512, or `Unbounded or truncated tar archive` | `release/install.sh` |
+| Output on success | The installed files. On failure the installer exits 1 and unpacks nothing | `release/install.sh` |
+
+- [SEC-434] The installer MUST download the archive and `SHA256SUMS` over HTTPS from the same release tag, MUST NOT fall back to another release when a download fails, and MUST work in a private staging directory so that a failed check leaves no installed file.
+
 ## What the installer checks
 
 The installer script downloads the archive and `SHA256SUMS` from the same release, then stops before it unpacks anything when the check fails. Each failure has a fixed message.
@@ -47,11 +68,25 @@ Run these steps in the directory that holds the archive and the `SHA256SUMS` fil
 
 A matching hash shows that the archive is the file listed in `SHA256SUMS`. It does not, by itself, show who built the file. The attestation check adds that proof.
 
+Example of a good manual check (the hash shown is a placeholder):
+
+```
+$ sha256sum ilium-linux-x86_64.tar.gz
+<64 hex characters>  ilium-linux-x86_64.tar.gz
+$ grep ' ilium-linux-x86_64.tar.gz$' SHA256SUMS
+<the same 64 hex characters>  ilium-linux-x86_64.tar.gz
+$ gh attestation verify ilium-linux-x86_64.tar.gz --repo arthurwolf/ilium
+```
+
+- [SEC-435] A hash comparison MUST use the whole 64-character value and the exact archive name. A user who finds no line for the archive, or more than one, MUST treat the download as failed.
+
 ## What the host reports about itself
 
 The host does not re-check the release archive at start. The checks above run once, in the installer, before the files are installed. To see which build is running, use:
 
 - `ilium --version --verbose`, which prints the version and the path of the third-party notices file, or `notices: missing` when that file is absent ([SEC-423](/pages/reference-trust-and-supply-chain/)).
+
+- [SEC-436] The host MUST NOT claim, in `ilium --version --verbose` or in any other output, that its own archive passed verification. Verification belongs to the installer and to the user, before the first run.
 
 Decision needed: whether each release should also publish a detached signature over `SHA256SUMS`, made with a release key that users trust in advance.
 
@@ -65,6 +100,16 @@ Decision needed: whether each release should also publish a detached signature o
 | `Archive SHA-256 mismatch` | The archive changed after publication, or the download was cut short | Download the archive again from the same release page. Do not run it. |
 | `Malformed, duplicate or missing checksum record` | `SHA256SUMS` is incomplete or was edited | Download `SHA256SUMS` again. If the error repeats, report the release tag. |
 | `gh attestation verify` reports no attestation | The file is not the one the release workflow built | Do not run the file. Report the release tag and the file name. |
+
+- [SEC-437] After any failed check the installer MUST exit with status 1, MUST print the fixed message of the failed check, and MUST NOT leave an unpacked or half-installed host.
+- [SEC-438] An invalid gzip stream MUST stop the install with `Malformed gzip archive or exhausted staging space`. This check runs only after the hash check has passed.
+
+## What this page does not cover
+
+- Plugin package checksums and signatures: [Signing and trust](/pages/reference-signing-and-trust/).
+- Release notices, licences and the notices path: [Trust and supply chain](/pages/reference-trust-and-supply-chain/).
+- Loss of the release key and the blocklist key rules: [Release key compromise](/pages/reference-release-key-compromise/).
+- Installer steps, versions and updates: [Install and update](/pages/reference-install-and-update/).
 
 ### See also
 

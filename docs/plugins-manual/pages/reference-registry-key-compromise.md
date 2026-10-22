@@ -16,6 +16,29 @@ A compromised key is one that an attacker may have used or may be able to use. A
 - The publisher key revocation flow, which is separate: [Signing and trust](/pages/reference-signing-and-trust/).
 - The registry commands: [Plugin distribution command line](/pages/reference-plugin-distribution-cli/).
 
+## Definitions
+
+| Term | Meaning |
+|---|---|
+| Root key | A key listed in the `roles.root` entry of `root.json`. A threshold of them signs `root.json` ([PKG-364](/pages/reference-registry/)). |
+| Online role key | A key of the `timestamp`, `snapshot` or `targets` role. The registry operator uses these often, so they are more exposed than root keys. |
+| Threshold | The number of distinct keys of a role that must sign a document. `root.json` sets it per role. |
+| Rotation chain | The sequence of `root.json` versions in which each version is signed by the threshold of the previous root keys. |
+| Re-pin | `registry remove` followed by `registry add --root-key`, which replaces the root key stored in the client configuration. |
+| Last good metadata | The newest metadata that a client verified completely. A client keeps it when a newer document is refused. |
+
+## Inputs and outputs
+
+- Input from the operator: the new key ids, the new `root.json` and the re-signed documents. Output to clients: documents that verify against the current `root.json`.
+- Input from the user: the registry URL and the new root `key_id` from the announcement of [PKG-692]. Output: a registry entry that pins that key.
+- Output of a client on failure: one of the codes in the Errors table. It never partly applies a refused document.
+
+## Limits
+
+- `timestamp.json` expires within 1 day of its issue, `snapshot.json` within 7 days and `root.json` within 1 year ([PKG-367](/pages/reference-registry/)).
+- Maximum sizes of the documents involved: `root.json` 64 KiB, `timestamp.json` 16 KiB, `snapshot.json` 4 MiB ([PKG-369](/pages/reference-registry/)). A larger response is aborted with `registry.size`.
+- A new `root.json` has a `version` equal to the previous version plus 1 ([PKG-364](/pages/reference-registry/)).
+
 ## Who acts
 
 | Actor | Action in a compromise |
@@ -60,6 +83,20 @@ A registry operator finds that the `timestamp` key was copied from a build serve
 ilium plugin registry remove https://plugins.example.org/ilium/v1/
 ilium plugin registry add https://plugins.example.org/ilium/v1/ --root-key <new_key_id>
 ```
+
+## Additional rules
+
+- [PKG-696] A client MUST keep its last good metadata when it refuses a document under this page, and MUST NOT install, update or resolve a package from a document it refused.
+- [PKG-697] After a root rotation, a client MUST verify the new `root.json` with the threshold of the previous root keys and with the threshold of its own `roles.root` keys, as [PKG-364](/pages/reference-registry/) requires, before it uses any key id from it.
+- [PKG-698] The registry operator MUST NOT reuse a retired key id for a new key.
+- [PKG-699] A client that stops with `registry.changed` MUST name the registry URL and MUST tell the user to re-pin under [PKG-693]. It MUST NOT re-pin by itself.
+
+## What this page does not cover
+
+- The document formats, the freshness window and rollback protection: [Registry reference](/pages/reference-registry/).
+- Revoking a publisher key: [Signing and trust](/pages/reference-signing-and-trust/).
+- The exact command options: [Plugin distribution command line](/pages/reference-plugin-distribution-cli/).
+- Administrator policy for many clients: [Administrator guide](/pages/guide-plugin-administration/).
 
 ## See also
 

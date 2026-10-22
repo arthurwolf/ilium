@@ -10,6 +10,15 @@ A **soak test** runs the plugin host for a long time under a steady mix of work,
 
 A short benchmark cannot show a slow leak. This page defines the endurance test that the release gate runs, the resources it watches, and the pass criteria. Requirement ids are `[HST-505]` to `[HST-508]`.
 
+### Terms
+
+- **Cycle** means one pass through the four steps in "What the run does", plus the trapping call. The cycle number starts at 1.
+- **Steady state** means the counts recorded at the end of the first full cycle (see [HST-506]).
+- **Test set** means the plugins that the run installs. The test set is chosen by the release and is not fixed by this page.
+- **Tolerance** means the largest growth of resident memory that a passing run may show. Its value is the first open decision below.
+- **Reference machine** means the machine named in the results file of the benchmarks, as defined in [Performance budgets and benchmarks](/pages/reference-host-budgets/).
+- **Run record** means the file with one row per cycle, described in "Reading the results".
+
 ### You will need
 
 - [Performance budgets and benchmarks](/pages/reference-host-budgets/) for the timing budgets and the idle wake-up measurement B24.
@@ -33,6 +42,16 @@ The run also sends a trapping call at a fixed point in each cycle, so that the t
 
 Decision needed: the duration of a soak run and the length of the tolerance window. The default I would use is a 24-hour run for the nightly lane and a 72-hour run before each release, because a slow leak in a plugin that is activated once per hour needs several hours to show. The resident memory tolerance is a growth of at most 5 MiB over the last 24 hours of a run, because the steady-state variation of the allocator is of that order. Both values are a choice for the project owner and are not established by the current budgets.
 
+### Inputs and outputs
+
+- Inputs: the test set, the planned number of cycles, the tolerance, the release build of the server, and the reference machine.
+- Outputs: the run record, and one verdict: pass, fail, or incomplete.
+- A fail names the resource and the cycle in which it first appeared ([HST-507]). An incomplete run has no pass or fail verdict on its resources, and it MUST NOT count as a pass ([HST-508]).
+
+### Failure behaviour during a run
+
+A call in a cycle may fail without failing the run. A plugin that is refused by the aggregate ceiling is left `inactive` with the reason `host-capacity`, which is not a failure of the plugin (see [Host aggregate limits](/pages/reference-host-aggregate-limits/), [HST-503]). The run records the refusal in the cycle, repeats the step in the next cycle, and does not stop. A trapping call is expected to trap. The run checks that the trap releases the instance and leaves the counts of [HST-505] unchanged, as described in [Host runtime](/pages/reference-host-runtime/).
+
 ## Pass criteria
 
 A run passes only when every check of [HST-506] holds and no check of [HST-507] fails.
@@ -47,11 +66,32 @@ The idle wake-up budget B24 measures 40 loaded plugins with no events for 10 min
 
 - **[HST-508]** A soak run MUST run on the reference machine with a release build, and the run record MUST name the commit, the Wasmtime version and the number of cycles completed. A run that stops before its planned number of cycles MUST be reported as incomplete and MUST NOT count as a pass.
 
+### Limits
+
+| Item | Value | Source |
+| --- | --- | --- |
+| Idle wake-ups between cycles | At most 100 per second, under 0.5 % of one core, for 40 loaded plugins | B24 in [Performance budgets and benchmarks](/pages/reference-host-budgets/) |
+| Session memory for 40 bundled plugins and 8 T2 helpers | Added RSS under 120 MiB | B22 in the same page |
+| Helper memory | Under the sum of its hosted instances' `memory_mib` plus 32 MiB | B22 in the same page |
+| Run length, tolerance, cycle length | Open | See the decisions above |
+
+### Example
+
+A nightly run of 1,440 cycles of one minute each ends with a record of 1,440 rows. Cycle 1 shows 41 live instances and 8 helpers. Every later row shows 41 and 8. In cycle 311 the count of open handles goes from 212 to 213 and stays there. The run fails with the resource "open handles" and the cycle 311, even if the other counts hold. (The numbers in this example are illustrative, not measured.)
+
 ## Reading the results
 
 The run record holds one row per cycle with the counts listed in [HST-505]. The record is kept with the release evidence. A failing run keeps its record so that the first cycle where a count rose can be found.
 
 For a plugin in a running server, `ilium plugin status` shows the health and the metrics of each installed plugin, as described in [Health and watchdog](/pages/reference-health-and-watchdog/). It does not replace the run record, because it shows a snapshot and not the trend.
+
+## What this page does not cover
+
+- The timing budgets and the release gate: see [Performance budgets and benchmarks](/pages/reference-host-budgets/).
+- How instances and memory are released: see [Host runtime](/pages/reference-host-runtime/).
+- The aggregate memory and thread ceilings and `host-capacity`: see [Host aggregate limits](/pages/reference-host-aggregate-limits/).
+- The counters that the host keeps: see [Telemetry and plugin health](/pages/reference-host-telemetry/).
+- Helper restart behaviour: see [Sandbox helper](/pages/reference-host-helper/).
 
 ## See also
 
