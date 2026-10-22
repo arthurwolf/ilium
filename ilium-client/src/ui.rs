@@ -855,7 +855,15 @@ fn draw_base_layer(frame: &mut Frame, area: Rect, app: &mut App) -> Option<Posit
         },
     );
     if let Some(button_area) = app.attention_button_rect() {
-        crate::attention::panel::render_button(frame, button_area, app.attention_count());
+        let (main_area, plus_area) = crate::attention::dialog::split_button(button_area);
+        crate::attention::panel::render_button(frame, main_area, app.attention_count());
+        if let Some(plus_area) = plus_area {
+            crate::attention::dialog::render_plus(
+                frame,
+                plus_area,
+                app.is_attention_plus_hovered(),
+            );
+        }
     }
     let values = painted_rows
         .node_ids()
@@ -1190,6 +1198,17 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) -> O
                     frame,
                     crate::session_conversion::dialog_area(pane_area, area),
                     state,
+                );
+            }
+        }
+        Mode::AttentionOverview => {
+            if let Some(state) = &app.attention.dialog {
+                crate::attention::dialog::render(
+                    frame,
+                    area,
+                    state,
+                    &app.attention_overview_cards(),
+                    app.ui_settings.color_scheme,
                 );
             }
         }
@@ -2911,6 +2930,20 @@ fn draw_pane_runtime(
         }
     }
 
+    if let Some(briefing_area) = viewport.briefing_area {
+        if matches!(runtime, PaneRuntime::Terminal(_)) {
+            if let Some(view) = app.briefing_view(viewport.pane_id) {
+                crate::attention::briefing::render(
+                    frame,
+                    briefing_area,
+                    &view,
+                    app.ui_settings.color_scheme,
+                    app.hovered_briefing_button(viewport.pane_id),
+                );
+            }
+        }
+    }
+
     // A newly arrived attention item announces itself on the focused pane's
     // rule beside the last-prompt banner; never over terminal content.
     if pane_focused && matches!(runtime, PaneRuntime::Terminal(_)) {
@@ -2964,6 +2997,11 @@ fn draw_section_rules(
     }
     if let Some(rule) = viewport.last_prompt_bottom_rule {
         if prompt_shown {
+            crate::section_frame::render_rule(frame, rule, None, focused);
+        }
+    }
+    if let Some(rule) = viewport.briefing_bottom_rule {
+        if app.briefing_view(pane_id).is_some() {
             crate::section_frame::render_rule(frame, rule, None, focused);
         }
     }
@@ -3473,6 +3511,7 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         Mode::ConfirmClose(_) => "CONFIRM CLOSE",
         Mode::ConvertSession => "CONVERTING SESSION",
         Mode::RemoteCompaction => "REMOTE COMPACTION",
+        Mode::AttentionOverview => "NEEDS YOU",
         Mode::ConfirmRemoveWorkspace(_) => "REMOVE WORKTREE",
         Mode::ConfirmSessionRecovery { .. } => "SESSION RECOVERY",
         Mode::Search(_) => "SEARCH",

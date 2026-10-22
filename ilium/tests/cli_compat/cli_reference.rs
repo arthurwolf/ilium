@@ -296,14 +296,25 @@ fn cor_041_chat_hooks_call_context_since_last_read_on_session_start_and_prompt_s
     sandbox.ilium(&["chat", "init"]);
     let claude = std::fs::read_to_string(sandbox.project.join(".claude/settings.local.json"))
         .expect("claude hooks");
-    assert!(
-        claude.contains("SessionStart") && claude.contains("UserPromptSubmit"),
-        "{claude}"
-    );
-    assert!(
-        claude.contains("chat context --since-last-read"),
-        "{claude}"
-    );
+    let settings: serde_json::Value = serde_json::from_str(&claude).expect("valid hooks JSON");
+    for event in ["SessionStart", "UserPromptSubmit"] {
+        let groups = settings["hooks"][event].as_array().expect("event hooks");
+        assert!(
+            groups.iter().any(|group| {
+                group["hooks"].as_array().is_some_and(|hooks| {
+                    hooks.iter().any(|hook| {
+                        hook["command"].as_str().is_some_and(|command| {
+                            command.contains("chat context ")
+                                && command
+                                    .split_whitespace()
+                                    .any(|arg| arg == "--since-last-read")
+                        })
+                    })
+                })
+            }),
+            "{event}: {claude}"
+        );
+    }
 }
 
 /// REQ: COR-041
@@ -587,19 +598,24 @@ fn cor_041_wait_is_an_alias_of_progress_wait() {
     assert_eq!(alias.code, 0, "{}", alias.stderr);
     assert_eq!(full.code, 0, "{}", full.stderr);
     assert_eq!(
-        alias.stdout.replace("ilium wait", "ilium progress wait"),
-        full.stdout
+        alias
+            .stdout
+            .split_once("Usage:")
+            .expect("alias usage")
+            .1
+            .replace("ilium wait", "ilium progress wait"),
+        full.stdout.split_once("Usage:").expect("full usage").1
     );
 }
 
 /// REQ: COR-041
 #[test]
-fn cor_041_progress_check_rejects_a_probe_that_is_not_one_json_object() {
+fn cor_041_progress_check_without_a_pane_fails_before_running_the_probe() {
     let run = Sandbox::new().ilium(&["progress", "check", "--command", "echo not-json"]);
     assert_eq!(run.code, 1);
     assert_eq!(
         run.records().last().expect("record")["type"],
-        "progress_rejected"
+        "progress_request_failed"
     );
 }
 

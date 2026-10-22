@@ -83,6 +83,58 @@ fn text_trigger_modal_waits_for_real_durable_writer_and_server_request() {
 }
 
 #[test]
+fn board_async_detail_typing_admits_a_bounded_burst_before_collecting_writes() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("board.md");
+    std::fs::write(&path, "# Board\n\n## Todo\n- Task\n").unwrap();
+    let storage = ilium_core::BoardStorage::MarkdownFile { path: path.clone() };
+    let source = crate::board::read_source(storage, false).unwrap();
+    let mut files = BoardFiles::new(
+        crate::execution::test_client(),
+        Arc::new(tokio::sync::Notify::new()),
+    );
+    let mut board = files.attach(source).unwrap();
+    board.open_card_details(0, 0);
+    board.cycle_detail_editor_focus(false);
+    let lock =
+        ExclusiveFileLock::acquire(&directory.path().join(".board.md.ilium-write.lock")).unwrap();
+    // A terminal input batch can arrive before the UI collects write receipts.
+    // Test that bounded admission preserves that burst, then publish and read
+    // back every accepted character; this is not a lock-contention timing test.
+    for character in "Live note 123456".chars() {
+        let event = crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char(character),
+            crossterm::event::KeyModifiers::NONE,
+        );
+        board
+            .input_detail_editor(ratatui_textarea::Input::from(crossterm::event::Event::Key(
+                event,
+            )))
+            .unwrap();
+    }
+    let overflow = crossterm::event::KeyEvent::new(
+        crossterm::event::KeyCode::Char('!'),
+        crossterm::event::KeyModifiers::NONE,
+    );
+    assert!(board
+        .input_detail_editor(ratatui_textarea::Input::from(crossterm::event::Event::Key(
+            overflow,
+        )))
+        .is_err());
+    drop(lock);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while files.pending() != 0 {
+        if let Some(ack) = files.poll_write() {
+            board.acknowledge_revision(ack.result.unwrap());
+        }
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    let saved = std::fs::read_to_string(path).unwrap();
+    assert!(saved.contains("  Live note 123456\n"), "{saved:?}");
+}
+
+#[test]
 fn board_ordered_snapshots_advance_only_after_real_publication() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("board.md");

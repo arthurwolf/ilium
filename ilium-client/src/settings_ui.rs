@@ -828,7 +828,7 @@ pub fn settings_help_anchors(
             }
         }
         SettingsTab::Attention => {
-            for (i, id) in simple_rows("ATT-", 5) {
+            for (i, id) in simple_rows("ATT-", 6) {
                 push_help_anchor(
                     &mut anchors,
                     layout,
@@ -5576,6 +5576,11 @@ fn attention_lines(
                     .clone()
                     .unwrap_or_else(|| "Same as titles".to_string()),
                 "Model used for attention calls; Same as titles follows the title naming model.",
+            ),
+            (
+                "Show briefing on arrival",
+                on_off(settings.show_briefing),
+                "Reaching an agent from the attention queue shows a box at its top saying why you were brought there.",
             ),
         ],
         selected,

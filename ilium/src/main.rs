@@ -163,7 +163,11 @@ enum Command {
     /// Same as `ilium progress wait`: blocks until MONITOR_ID (or this pane's
     /// only running monitor) settles, then prints one JSONL line.
     Wait {
+        /// Monitor to wait for; defaults to the pane's only running monitor
+        /// (or its only monitor).
         monitor_id: Option<u64>,
+        /// Give up after this many seconds (exit 6). Omit to wait as long as
+        /// the task takes.
         #[arg(long)]
         timeout_seconds: Option<u64>,
     },
@@ -705,8 +709,14 @@ fn chatroom_project_root(cwd: &Path) -> PathBuf {
 
 fn default_chatroom_author() -> String {
     std::env::var("ILIUM_CHATROOM_AUTHOR")
-        .or_else(|_| std::env::var("AGENT_NAME"))
-        .unwrap_or_else(|_| "agent".to_string())
+        .ok()
+        .filter(|author| !author.trim().is_empty())
+        .or_else(|| {
+            std::env::var("AGENT_NAME")
+                .ok()
+                .filter(|author| !author.trim().is_empty())
+        })
+        .unwrap_or_else(|| "agent".to_string())
 }
 
 /// This pane's identity, as injected by `ilium-server` at spawn time (see

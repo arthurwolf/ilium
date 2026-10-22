@@ -226,6 +226,7 @@ where
 
         state.offset = start;
         state.ensure_selected_in_view_on_next_render = false;
+        state.center_selected_on_next_render = false;
 
         if let Some(scrollbar) = self.scrollbar {
             let total_lines: usize = state.last_item_heights.iter().sum();
@@ -607,6 +608,25 @@ mod render_tests {
         for relative_row in [3, 6] {
             assert!(!state.click_at(Position::new(area.x, area.y + relative_row)));
         }
+    }
+
+    #[test]
+    fn center_request_places_selection_mid_viewport_and_clamps_at_the_ends() {
+        let items: Vec<TreeItem<'static, usize>> = (0..30)
+            .map(|index| TreeItem::new_leaf(index, format!("row {index}")))
+            .collect();
+        let area = Rect::new(0, 0, 20, 9);
+        let render = |selected: usize| {
+            let mut state = TreeState::default();
+            state.select(vec![selected]);
+            state.center_selected_on_next_render();
+            let mut buffer = Buffer::empty(area);
+            StatefulWidget::render(Tree::new(&items).unwrap(), area, &mut buffer, &mut state);
+            state.first_visible_line()
+        };
+        assert_eq!(render(15), 11);
+        assert_eq!(render(1), 0);
+        assert_eq!(render(29), 21);
     }
 
     #[test]

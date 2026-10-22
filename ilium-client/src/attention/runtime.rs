@@ -17,9 +17,7 @@ use ilium_core::NodeId;
 
 use super::parse::KnownPane;
 use super::queue::LlmReply;
-use super::worker::{
-    run_turbo_batch, AttentionCompletionClient, TurboEnvironment, TurboRequest,
-};
+use super::worker::{run_turbo_batch, AttentionCompletionClient, TurboEnvironment, TurboRequest};
 
 /// How long a Turbo worker idles while every pending agent is backing off.
 const BACKOFF_PAUSE: Duration = Duration::from_millis(250);

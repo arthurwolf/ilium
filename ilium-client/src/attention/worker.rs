@@ -108,6 +108,9 @@ pub fn parse_agent_reply(
         "reason": reply.get("reason").cloned().unwrap_or(Value::Null),
         "question": reply.get("question").cloned().unwrap_or(Value::Null),
         "priority": reply.get("priority").cloned().unwrap_or(Value::Null),
+        "status_summary": reply.get("status_summary").cloned().unwrap_or(Value::Null),
+        "why_here": reply.get("why_here").cloned().unwrap_or(Value::Null),
+        "suggested_action": reply.get("suggested_action").cloned().unwrap_or(Value::Null),
     });
     let known = HashMap::from([(
         request.pane_id,
@@ -429,5 +432,44 @@ mod tests {
         );
         assert_eq!(provider.calls.load(Ordering::SeqCst), 0);
         assert!(cancelled.analysed.is_empty());
+    }
+
+    #[test]
+    fn reply_parsing_carries_the_briefing_fields() {
+        let request = request(5, 77);
+        let item = parse_agent_reply(
+            r#"{"kind":"stuck","reason":"loops","status_summary":"Retrying the build.",
+            "why_here":"Four identical failures.","suggested_action":"Read the error"}"#,
+            &request,
+            3,
+            10,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            item.briefing.status_summary.as_deref(),
+            Some("Retrying the build.")
+        );
+        assert_eq!(
+            item.briefing.why_here.as_deref(),
+            Some("Four identical failures.")
+        );
+        assert_eq!(
+            item.briefing.suggested_action.as_deref(),
+            Some("Read the error")
+        );
+        assert!(item.briefing.from_llm);
+        let bare = parse_agent_reply(r#"{"kind":"stuck","reason":"loops"}"#, &request, 3, 10)
+            .unwrap()
+            .unwrap();
+        assert!(bare.briefing.is_empty());
+    }
+
+    #[test]
+    fn the_agent_prompt_asks_for_the_briefing_fields() {
+        let prompt = render_agent_prompt("t", "screen");
+        for field in ["status_summary", "why_here", "suggested_action"] {
+            assert!(prompt.contains(field), "{field}");
+        }
     }
 }

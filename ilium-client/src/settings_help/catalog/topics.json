@@ -4630,5 +4630,17 @@
     "frames": [
       "Attention model ........ ‹ Same as titles ›\n\nSame as titles   use the title naming model\nOther entries    models of the selected provider"
     ]
+  },
+  {
+    "id": "ATT-06",
+    "title": "Show briefing on arrival",
+    "explanation": "“When On, reaching an agent from the attention queue shows a box at the top of that agent saying why you were brought there, what the agent is doing, and what it needs from you.”",
+    "specimen": "Show briefing on arrival ........ ‹ ☑ On ›\n\nOn   a box above the terminal explains why you are here\nOff  you land on the agent with no extra box",
+    "states": "On and Off; the default is On. The box only ever appears while Attention mode is not Off. In Instant only mode it shows wording derived from agent detection, marked automatic; in Shared and Turbo mode it shows the model's wording, marked AI.",
+    "motion": "None.",
+    "caveat": "Each box can be dismissed with its x or folded to one line, and it comes back only for a new attention item on that agent. Turning the setting Off removes every open box at once.",
+    "frames": [
+      "Show briefing on arrival ........ ‹ ☑ On ›\n\nOn   a box above the terminal explains why you are here\nOff  you land on the agent with no extra box"
+    ]
   }
 ]

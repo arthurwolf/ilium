@@ -59,9 +59,11 @@ mod tests {
             slot_index: 0,
             toolbar_area: None,
             last_prompt_area: None,
+            briefing_area: None,
             progress_area: None,
             toolbar_rule: None,
             last_prompt_bottom_rule: None,
+            briefing_bottom_rule: None,
             progress_rule: None,
         };
 
@@ -80,9 +82,11 @@ mod tests {
             slot_index: 0,
             toolbar_area: None,
             last_prompt_area: None,
+            briefing_area: None,
             progress_area: None,
             toolbar_rule: None,
             last_prompt_bottom_rule: None,
+            briefing_bottom_rule: None,
             progress_rule: None,
         };
 

@@ -702,3 +702,10 @@ fn hst_196_non_yielding_calls_stay_on_one_thread_until_they_return() {
     assert_eq!(ids.len(), 4);
     assert!(ids.iter().all(|id| *id == ids[0]));
 }
+
+#[test]
+fn soft_deadline_traps_at_the_full_hundred_millisecond_grace_boundary() {
+    let limits = default_limits();
+    assert_eq!(evaluate_breach(CallClass::Annotate, ms(109), &limits), BreachVerdict::SoftLate);
+    assert_eq!(evaluate_breach(CallClass::Annotate, ms(110), &limits), BreachVerdict::SoftTrap);
+}

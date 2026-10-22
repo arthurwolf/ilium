@@ -19,6 +19,7 @@ ilium-platform = { version = "0.1.1", path = "../ilium-platform" }
 ilium-logging = { version = "0.1.1", path = "../ilium-logging" }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.151"
+toml = "0.8.23"
 semver = "1.0.28"
 thiserror = "2.0.18"
 tokio = { version = "1", features = ["rt", "sync", "time"] }
@@ -30,7 +31,6 @@ proptest = "1"
 # Signatures with other keys, prefixes and malformed scalars in the package lane (PKG-203, PKG-250..252).
 ed25519-dalek = "2"
 tempfile = "3.27.0"
-toml = "0.8.23"
 # Hash checks of the cli, grants, registry and security lanes (DEV-097, DEV-111, DEV-136).
 sha2 = "0.10.9"
 # Public-key encoding checks of the registry lane (`base64::engine::general_purpose::URL_SAFE_NO_PAD`).

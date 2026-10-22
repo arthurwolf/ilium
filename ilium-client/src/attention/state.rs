@@ -53,6 +53,11 @@ pub struct AttentionState {
     pub known_kinds: HashMap<NodeId, AttentionKind>,
     /// Highlighted row of the right-hand panel.
     pub panel_selected: usize,
+    /// Briefing boxes shown at the top of agent panes, with their fold and
+    /// dismiss state. Per client run; not persisted.
+    pub briefings: super::briefing::BriefingState,
+    /// The "Needs you" overview dialog while it is open.
+    pub dialog: Option<super::dialog::DialogState>,
     /// Shared-mode calls in flight, by project: restructure calls that also
     /// ask for the attention list. Removed when their reply (or error) lands.
     pub shared_calls: HashMap<NodeId, SharedAttentionCall>,
@@ -83,6 +88,8 @@ impl Default for AttentionState {
             arrival: None,
             known_kinds: HashMap::new(),
             panel_selected: 0,
+            briefings: super::briefing::BriefingState::default(),
+            dialog: None,
             shared_calls: HashMap::new(),
             refresh_open: false,
             refresh_started_ms: 0,

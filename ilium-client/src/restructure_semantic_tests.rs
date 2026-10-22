@@ -373,7 +373,10 @@ fn attention_list_never_fails_or_alters_the_sort_parse() {
         .expect("the attention key must not affect the strict sort parse");
         assert!(raw.is_some());
         let plain = parse_value(&valid_response()).unwrap();
-        assert_eq!(plan.structure.children.len(), plain.structure.children.len());
+        assert_eq!(
+            plan.structure.children.len(),
+            plain.structure.children.len()
+        );
     }
     let (_, raw) = parse_restructure_response_with_attention(
         &valid_response().to_string(),

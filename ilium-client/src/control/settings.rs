@@ -919,6 +919,9 @@ fn adjust_setting(app: &mut App, path: &str, direction: i32) -> Result<(), Strin
         "attention.press_sorts" => {
             app.step_settings_choice(SettingsChoice::AttentionPressSorts, direction)
         }
+        "attention.show_briefing" => {
+            app.step_settings_choice(SettingsChoice::AttentionShowBriefing, direction)
+        }
         "attention.model_override" => {
             app.step_settings_choice(SettingsChoice::AttentionModel, direction)
         }
@@ -988,6 +991,7 @@ fn set_attention_setting(app: &mut App, path: &str, value: &Value) -> Result<(),
             })?;
         }
         "attention.press_sorts" => settings.press_sorts = boolean(value)?,
+        "attention.show_briefing" => settings.show_briefing = boolean(value)?,
         "attention.turbo_concurrency" => {
             settings.turbo_concurrency = u8::try_from(unsigned(value)?)
                 .ok()
@@ -1463,6 +1467,10 @@ mod tests {
         let mut app = App::new("default".to_owned(), PathBuf::from("/tmp/project"));
         set_setting(&mut app, "attention.mode", json!("Instant-Only")).unwrap();
         set_setting(&mut app, "attention.press_sorts", json!(false)).unwrap();
+        set_setting(&mut app, "attention.show_briefing", json!(false)).unwrap();
+        assert!(!app.attention_settings.show_briefing);
+        assert!(set_setting(&mut app, "attention.show_briefing", json!("no")).is_err());
+        set_setting(&mut app, "attention.show_briefing", json!(true)).unwrap();
         set_setting(&mut app, "attention.turbo_concurrency", json!(8)).unwrap();
         set_setting(&mut app, "attention.expiry_seconds", json!(600)).unwrap();
         set_setting(
