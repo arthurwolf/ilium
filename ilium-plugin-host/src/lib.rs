@@ -6,8 +6,8 @@
 //! object-safe `ilium_plugin_api::kernel::KernelFacade`; it has no edge to `ilium-core`,
 //! `ilium-transport` or `ilium-ipc` (test plan section 1.2, reference-host-architecture.md).
 //!
-//! Skeleton state: data types, constants and closed enums are complete. Every function with
-//! behaviour is `unimplemented!("host::<path>")` until the implementation phase.
+//! Implementation is in progress against the manual and acceptance suites. Remaining
+//! `unimplemented!("host::<path>")` bodies identify contracts not implemented yet.
 //!
 //! Manual: reference-host-architecture.md, reference-host-runtime.md, reference-runtime-model.md,
 //! reference-packaging.md, reference-cli.md.

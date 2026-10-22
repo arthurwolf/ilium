@@ -180,7 +180,7 @@ Use the `directories` crate, never hardcode `~`:
 
 - This is a new project with no users yet — no backwards-compatibility shims, no feature flags, no "v2" anything. Change things directly.
 - Conflicts in `CHANGELOG.md` during a merge are not a blocker: keep both sides' entries, finish the merge and commit, and tidy the changelog headings later; a changelog conflict must never prevent a merge.
-- Don't build the WASM plugin system, remote/SSH sharing, or agent-driving/SDK surface — see ARCHITECTURE.md "Non-goals." If a task seems to need one of those, stop and flag it rather than building toward it.
+- Don't build remote/SSH sharing or the agent-driving/SDK surface — see ARCHITECTURE.md "Non-goals." The extension system, including WebAssembly plugins, is authorized project scope.
 - Milestones in ARCHITECTURE.md (M0–M5) are meant to be built in order. M0–M4 are done; M5 (config surface, snapshot-restore-on-boot, notifications) is partially done — read ARCHITECTURE.md "Implementation plan" for exactly what M5 covers (custom detection signatures, keybinding remap, a four-color theme override, snapshot respawn-on-boot, desktop notifications) and what it still deliberately leaves out (resuming an agent CLI's own session on restore; theming beyond the four colors listed) before assuming a piece of it already exists.
 
 ## Background animations: the shared look is mandatory
@@ -226,3 +226,8 @@ A pane can run up to 8 monitors at once, one per task: `set` adds a monitor with
 <!-- ilium-agent-feature: chatroom -->
 If `CHATROOM.md` exists in the project root, read recent coordination with `ilium chat context --limit 40` when beginning work and before changing shared areas. Use `ilium chat send --message "..."` only for a task claim or release, blocker, dependency, material discovery or decision, or a handoff; do not post routine progress narration. Never rewrite `CHATROOM.md` directly.
 <!-- /ilium-agent-feature: chatroom -->
+
+## Changelog fragments
+
+- Never edit `CHANGELOG.md` for a change: add `changelog.d/<branch-or-topic>.md` (format in `changelog.d/README.md`). Every branch editing the same top lines of `CHANGELOG.md` caused conflicts and dirty-checkout merge refusals. `python3 tools/compile_changelog.py` folds fragments in at release. `.gitattributes` also sets `merge=union` on `CHANGELOG.md` as a safety net.
+- A leftover `CHANGELOG.md` conflict is still not a blocker: keep both sides.

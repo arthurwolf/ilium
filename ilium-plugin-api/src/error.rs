@@ -65,12 +65,17 @@ impl Code {
 
     /// The part before the first `.`, for example `manifest` (reference-errors-and-limits.md).
     pub fn namespace(&self) -> &str {
-        unimplemented!("api::error::Code::namespace")
+        self.as_str()
+            .split_once('.')
+            .map_or(self.as_str(), |(namespace, _)| namespace)
     }
 
     /// The `error-code` a plugin sees for this code (reference-errors-and-limits.md).
     pub fn base(&self) -> ErrorCode {
-        unimplemented!("api::error::Code::base")
+        registry()
+            .iter()
+            .find(|entry| entry.code == self.as_str())
+            .map_or(ErrorCode::Internal, |entry| entry.base)
     }
 }
 
@@ -86,25 +91,74 @@ pub const MESSAGE_MAX_CHARS: usize = 256;
 
 impl PluginError {
     /// API: message capped at 256 characters (reference-errors-and-limits.md "The plugin error record").
-    pub fn new(_code: ErrorCode, _message: impl Into<String>) -> PluginError {
-        unimplemented!("api::error::PluginError::new")
+    pub fn new(code: ErrorCode, message: impl Into<String>) -> PluginError {
+        PluginError {
+            code,
+            message: message.into().chars().take(MESSAGE_MAX_CHARS).collect(),
+            retry_after_ms: None,
+        }
     }
 
     /// An error whose message starts with `<extension code>: ` (reference-errors-and-limits.md
     /// "Extension point codes").
-    pub fn with_prefix(_code: ErrorCode, _extension_code: &Code, _message: &str) -> PluginError {
-        unimplemented!("api::error::PluginError::with_prefix")
+    pub fn with_prefix(code: ErrorCode, extension_code: &Code, message: &str) -> PluginError {
+        Self::new(code, format!("{extension_code}: {message}"))
     }
 
     /// The namespaced code at the start of the message, if any (reference-errors-and-limits.md).
     pub fn extension_code(&self) -> Option<Code> {
-        unimplemented!("api::error::PluginError::extension_code")
+        let (prefix, _) = self.message.split_once(": ")?;
+        registry()
+            .iter()
+            .find(|entry| entry.code == prefix)
+            .map(|entry| Code::from_static(entry.code))
     }
 }
 
 /// Every registered namespaced code with its base code (reference-errors-and-limits.md).
 pub fn registry() -> &'static [CodeInfo] {
-    unimplemented!("api::error::registry")
+    static REGISTRY: std::sync::OnceLock<Vec<CodeInfo>> = std::sync::OnceLock::new();
+    REGISTRY.get_or_init(|| {
+        crate::codes::ALL
+            .iter()
+            .map(|&code| CodeInfo {
+                code,
+                base: runtime_base(code),
+                retryable: matches!(code, "extension.disabled" | "snapshot.write-failed"),
+                page: match code.split_once('.').map(|(namespace, _)| namespace) {
+                    Some("extension") => "api-extension-points.md",
+                    Some("trap" | "settings" | "host" | "config" | "snapshot") => {
+                        "reference-errors-and-limits.md"
+                    }
+                    Some("component") => "reference-host-runtime.md",
+                    _ => "reference-manifest-schema.md",
+                },
+            })
+            .collect()
+    })
+}
+
+// Install, trap and log-only diagnostics have no plugin-error representation. The
+// existing non-optional API uses Internal for those diagnostics and unknown codes;
+// this does not turn a diagnostic into a caller-visible failure or a success.
+fn runtime_base(code: &str) -> ErrorCode {
+    match code {
+        "extension.unknown-point" | "settings.unknown-key" => ErrorCode::NotFound,
+        "extension.not-granted" | "settings.key-not-owned" | "settings.locked" => {
+            ErrorCode::NotPermitted
+        }
+        // A full point instead uses QuotaExceeded. with_prefix keeps the explicit
+        // caller-selected base because a code alone cannot distinguish these cases.
+        "extension.schema-mismatch"
+        | "extension.cap-exceeded"
+        | "extension.entry-rejected"
+        | "settings.invalid-value" => ErrorCode::InvalidArgument,
+        "extension.reentrant" | "extension.vetoed" | "extension.depth-exceeded" => {
+            ErrorCode::Conflict
+        }
+        "extension.not-dynamic" => ErrorCode::Unsupported,
+        _ => ErrorCode::Internal,
+    }
 }
 
 /// One entry of the code registry (reference-errors-and-limits.md).
@@ -142,8 +196,13 @@ pub const REFUSAL_REASONS: [&str; 15] = [
 ];
 
 /// The `error-code` of a refusal reason word (reference-errors-and-limits.md "Refusal reasons").
-pub fn refusal_reason_code(_reason: &str) -> Option<ErrorCode> {
-    unimplemented!("api::error::refusal_reason_code")
+pub fn refusal_reason_code(reason: &str) -> Option<ErrorCode> {
+    match reason {
+        "response-size" | "stream-size" => Some(ErrorCode::QuotaExceeded),
+        "tls" => Some(ErrorCode::Network),
+        reason if REFUSAL_REASONS.contains(&reason) => Some(ErrorCode::NotPermitted),
+        _ => None,
+    }
 }
 
 /// A name that is not one of the closed set of a `FromStr` enum of this crate.
