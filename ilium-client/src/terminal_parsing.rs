@@ -2734,6 +2734,81 @@ mod tests {
         assert!(snapshot.screen.contents().contains("hello red"));
     }
     #[test]
+    fn snapshot_cutover_keeps_live_output_and_rejects_duplicate_history_page() {
+        let (_bank, parsing) = Bank::start();
+        let pane_id = NodeId(209);
+        let mut view = TerminalView::new(4, 30);
+        attach(&parsing, pane_id, &mut view);
+        offer(
+            &mut view,
+            PaneCommand::Snapshot {
+                sequence: 10,
+                bytes: b"\x1b[2J\x1b[Hcurrent".to_vec(),
+                complete: true,
+            },
+        );
+        offer(
+            &mut view,
+            PaneCommand::Output {
+                first: 10,
+                sequence: 10,
+                bytes: b"DUPLICATE".to_vec(),
+                track: false,
+            },
+        );
+        offer(
+            &mut view,
+            PaneCommand::Output {
+                first: 11,
+                sequence: 11,
+                bytes: b"\r\nlive".to_vec(),
+                track: false,
+            },
+        );
+        offer(
+            &mut view,
+            PaneCommand::PrependHistory {
+                before_sequence: 11,
+                first_sequence: 1,
+                bytes: b"old\r\n".to_vec(),
+                reaches_journal_start: true,
+            },
+        );
+        offer(
+            &mut view,
+            PaneCommand::PrependHistory {
+                before_sequence: 11,
+                first_sequence: 1,
+                bytes: b"STALE".to_vec(),
+                reaches_journal_start: true,
+            },
+        );
+        offer(
+            &mut view,
+            PaneCommand::Output {
+                first: 12,
+                sequence: 12,
+                bytes: b"\r\ntail".to_vec(),
+                track: false,
+            },
+        );
+        let publication = result(&parsing, |result| {
+            matches!(result, ParseResult::Published { target, snapshot, .. }
+                if target.pane_id == pane_id && snapshot.sequence == 12)
+        });
+        let ParseResult::Published { snapshot, .. } = publication else {
+            unreachable!()
+        };
+        assert_eq!(
+            snapshot.history.to_vec(),
+            b"old\r\n\x1b[2J\x1b[Hcurrent\r\nlive\r\ntail"
+        );
+        assert!(snapshot.visible.contents().contains("current"));
+        assert!(snapshot.visible.contents().contains("live"));
+        assert!(snapshot.visible.contents().contains("tail"));
+    }
+
+    #[test]
     fn replay_resize_and_historical_capture_keep_exact_order() {
         let (_bank, parsing) = Bank::start();
         let mut view = TerminalView::new(3, 20);

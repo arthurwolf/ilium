@@ -72,6 +72,8 @@ pub struct Inputs<'a> {
     pub viewport: [usize; 2],
     pub scale: f64,
     pub account: &'a ByteBudget,
+    /// Persistent cache for the viewport model-requirement scan; `None` disables it.
+    pub cache: Option<&'a crate::prepared_cache::PreparedCache>,
     pub cancel: Cancel<'a>,
     // Sync: rendered tiles are built on scoped worker threads that share these.
     pub cancelled: &'a (dyn Fn() -> bool + Sync),
@@ -162,6 +164,32 @@ pub fn prepare_pinned(
     prepare_source(input, Some((source, native_jar)))
 }
 
+const REQUIREMENT_CACHE_KIND: &str = "route-requirements";
+
+/// Everything that decides which model/texture IDs the viewport scan finds:
+/// the world's region files, the viewport chunks, the seed, the native jar and
+/// the selected pack.
+fn requirement_key(input: &Inputs<'_>, render_chunks: &[[i32; 2]]) -> crate::prepared_cache::Key {
+    let mut builder = crate::prepared_cache::KeyBuilder::new(REQUIREMENT_CACHE_KIND);
+    builder
+        .path_fingerprint(&input.bound.directory.join("region"))
+        .path_fingerprint(&input.bound.directory.join("level.dat"))
+        .path_fingerprint(input.jar)
+        .number(input.world_seed as u64)
+        .number(u64::from(input.fancy_leaves))
+        .number(render_chunks.len() as u64);
+    for chunk in render_chunks {
+        builder.part(&chunk[0].to_le_bytes()).part(&chunk[1].to_le_bytes());
+    }
+    if let Some(selected) = input.selected {
+        builder
+            .text(&format!("{selected:?}"))
+            .path_fingerprint(Path::new(&selected.pack_path))
+            .path_fingerprint(Path::new(&selected.pack_addon_path));
+    }
+    builder.finish()
+}
+
 fn prepare_source(
     input: Inputs<'_>,
     source: Option<(
@@ -243,7 +271,19 @@ fn prepare_source(
     let immutable_definitions = session.immutable_definitions();
     // Ordered Vec so tile batches can slice it; the BTreeSet order is the chunk order.
     let render_chunks: Vec<[i32; 2]> = request.render_chunks().iter().copied().collect();
-    let requirement_worker_count = tile_worker_count(render_chunks.len());
+    let requirement_cache_key = input.cache.map(|_| requirement_key(&input, &render_chunks));
+    let cached_ids: Option<BTreeSet<ResourceId>> = input
+        .cache
+        .zip(requirement_cache_key)
+        .and_then(|(cache, key)| cache.load(REQUIREMENT_CACHE_KIND, &key));
+    if cached_ids.is_some() {
+        (input.progress)("Loaded viewport model requirements from the prepared-data cache");
+    }
+    let requirement_worker_count = if cached_ids.is_some() {
+        0
+    } else {
+        tile_worker_count(render_chunks.len())
+    };
     let mut requirement_compilers = Vec::with_capacity(requirement_worker_count);
     for _ in 0..requirement_worker_count {
         let mut compiler =
@@ -253,7 +293,8 @@ fn prepare_source(
         }
         requirement_compilers.push(compiler);
     }
-    let mut ids = BTreeSet::<ResourceId>::new();
+    let scan_needed = cached_ids.is_none();
+    let mut ids = cached_ids.unwrap_or_default();
     (input.work_progress)(
         "Collecting viewport model requirements",
         0,
@@ -264,7 +305,7 @@ fn prepare_source(
     // requirement set; the sets are merged back in chunk order, so the union matches
     // a sequential scan (the requirement result does not depend on which cache served it).
     let mut next_index = 0;
-    while next_index < render_chunks.len() {
+    while scan_needed && next_index < render_chunks.len() {
         input.cancel.check()?;
         let batch_end = (next_index + requirement_compilers.len()).min(render_chunks.len());
         let batch = &render_chunks[next_index..batch_end];
@@ -330,6 +371,11 @@ fn prepare_source(
         next_index = batch_end;
     }
     drop(requirement_compilers);
+    if let (true, Some(cache), Some(key)) = (scan_needed, input.cache, requirement_cache_key) {
+        if let Err(error) = cache.store(REQUIREMENT_CACHE_KIND, &key, &ids) {
+            tracing::warn!(%error, "could not save viewport model requirements to the cache");
+        }
+    }
     (input.progress)(&format!(
         "Loading selected texture-pack assets for {} required models",
         ids.len()

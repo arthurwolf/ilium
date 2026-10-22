@@ -413,3 +413,447 @@ async fn no_pool_release_renders_128_panes_and_measures_click_latency() {
         "pane selection exceeds the 5-second qualification limit: {receipt}"
     );
 }
+
+/// Fresh creation is distinct from selecting an existing, fully initialized
+/// pane. The keyboard action is shared with the New Terminal toolbar button.
+/// Fixtures are ordinary absolute-path scripts, never real agent installers.
+#[cfg(unix)]
+#[tokio::test]
+#[ignore = "explicit 128-pane fresh-start release runtime qualification"]
+async fn fresh_terminal_startup_with_128_idle_and_busy_panes() {
+    if cfg!(debug_assertions) {
+        panic!("startup qualification requires release binaries");
+    }
+    let mut accepted = true;
+    for busy in [false, true] {
+        accepted &= qualify_fresh_terminal_startup(busy).await;
+    }
+    assert!(
+        accepted,
+        "fresh terminal startup qualification failed; see numeric receipts"
+    );
+}
+
+#[cfg(unix)]
+async fn qualify_fresh_terminal_startup(busy: bool) -> bool {
+    const TRIALS: usize = 32;
+    const STARTUP_LIMIT: Duration = Duration::from_secs(2);
+    let workload = if busy { "continuously-busy" } else { "idle" };
+    let client_binary = std::path::PathBuf::from(ilium_binary());
+    let server_binary = client_binary.with_file_name("ilium-server");
+    assert!(
+        server_binary.is_file(),
+        "prebuild the matching release server"
+    );
+    let temp_root = tempfile::tempdir().unwrap();
+    let xdg = IsolatedXdgDirs::under(temp_root.path()).unwrap();
+    seed_keyboard_config(&xdg);
+    let project_dir = temp_root.path().join("startup-runtime");
+    std::fs::create_dir_all(&project_dir).unwrap();
+    seed_project_config(&xdg, &project_dir);
+    let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    assert_ne!(port, 8872);
+    drop(listener);
+    let config_path = xdg.ilium_config_dir.join("config.toml");
+    let config = std::fs::read_to_string(&config_path).unwrap();
+    std::fs::write(
+        config_path,
+        format!("{config}\n[api]\nport = {port}\n[debug]\nfile_logging_enabled = true\n"),
+    )
+    .unwrap();
+    let marker_path = temp_root.path().join("next-startup-marker");
+    let fake_shell = temp_root.path().join("startup-fixture-shell");
+    let script = format!(
+        "#!/bin/sh\nif [ \"$1\" = '-c' ]; then exec /bin/sh \"$@\"; fi\nmarker=$(/bin/cat {}); printf '\\n\\n\\n%s\\n' \"$marker\"; exec /bin/cat\n",
+        shell_quote(&marker_path.to_string_lossy()),
+    );
+    std::fs::write(&fake_shell, script).unwrap();
+    assert!(std::process::Command::new("chmod")
+        .arg("700")
+        .arg(&fake_shell)
+        .status()
+        .unwrap()
+        .success());
+    let mut cleanup = KillSessionOnDrop {
+        xdg: &xdg,
+        cwd: project_dir.clone(),
+        session_name: SESSION_NAME,
+        already_cleaned_up: false,
+    };
+    let command = PtyCommand::new(
+        client_binary.to_string_lossy().into_owned(),
+        &project_dir,
+        44,
+        140,
+    )
+    .arg("--cwd")
+    .arg(project_dir.to_string_lossy().to_string())
+    .env("SHELL", fake_shell.to_string_lossy().into_owned())
+    .env("RUST_LOG", "ilium_startup=debug");
+    let command = xdg
+        .as_pairs()
+        .into_iter()
+        .fold(command, |command, (key, value)| {
+            command.env(key, value.to_string_lossy().to_string())
+        });
+    let mut paths = vec![server_binary.parent().unwrap().to_path_buf()];
+    if let Some(path) = std::env::var_os("PATH") {
+        paths.extend(std::env::split_paths(&path));
+    }
+    let command = command.env(
+        "PATH",
+        std::env::join_paths(paths)
+            .unwrap()
+            .to_string_lossy()
+            .into_owned(),
+    );
+    let mut tui = PtySession::spawn(command).unwrap();
+    assert!(wait_until(|| tui.screen_text().contains(PROJECT_NAME), WAIT_TIMEOUT).await);
+    let (socket, _server_pid) = isolated_server_identity(&xdg, &project_dir).await;
+    let mut connection = Connection::connect(&socket, SESSION_NAME.to_owned())
+        .await
+        .unwrap();
+    let initial = receive_initial_tree(&mut connection, "fresh startup initial tree").await;
+    assert_eq!(
+        initial.panes().count(),
+        0,
+        "fixture starts without preexisting panes"
+    );
+    // Exactly 127 existing PTYs plus the newly created PTY = 128 at every
+    // measured launch. Busy sources remain active throughout all trials.
+    let mut background_ids = Vec::with_capacity(PANE_COUNT - 1);
+    for number in 0..PANE_COUNT - 1 {
+        let source = if busy {
+            "while :; do printf '%256s\\n' background; /bin/sleep 0.02; done"
+        } else {
+            "exec /bin/cat"
+        };
+        let command = format!("/bin/sh -c {}", shell_quote(source));
+        connection
+            .requests
+            .send(ClientRequest::NewPane {
+                request_id: number as u64 + 1,
+                parent_group: ilium_core::ROOT_ID,
+                kind: ilium_ipc::NewPaneKind::Command(command),
+                working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
+            })
+            .await
+            .unwrap();
+        let Some(tree) = startup_tree_with_count(&mut connection, number + 1).await else {
+            println!(
+                "{}",
+                serde_json::json!({
+                    "type":"error", "workload":workload, "phase":"background_fixture_creation",
+                    "completed_background_panes":number, "required_background_panes":PANE_COUNT - 1,
+                    "unattempted_trials":TRIALS, "error":"fixture creation deadline exceeded",
+                })
+            );
+            let output = run_one_shot(&xdg, &project_dir, &["kill-session", SESSION_NAME]).await;
+            cleanup.already_cleaned_up = output.status.success();
+            if !wait_until(|| tui.has_exited(), WAIT_TIMEOUT).await {
+                tui.kill().unwrap();
+            }
+            return false;
+        };
+        background_ids = tree.pane_ids_in_tree_order();
+    }
+    let mut samples = Vec::with_capacity(TRIALS);
+    for trial in 0..TRIALS {
+        let marker = format!("FRESH-{workload}-{trial:03}");
+        std::fs::write(&marker_path, &marker).unwrap();
+        assert!(!inner_marker_visible(&tui, &marker));
+        let key_unix_us = startup_wall_us();
+        let started = std::time::Instant::now();
+        tui.write(b"\x02c").unwrap();
+        let displayed = wait_until(|| inner_marker_visible(&tui, &marker), STARTUP_LIMIT).await;
+        let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
+        samples.push(serde_json::json!({
+            "trial": trial, "displayed": displayed, "elapsed_ms": elapsed_ms,
+            "key_unix_us": key_unix_us, "observed_unix_us": startup_wall_us(),
+            "censored": !displayed,
+        }));
+        if displayed {
+            let echo = format!("ECHO-{workload}-{trial:03}");
+            let echo_started = std::time::Instant::now();
+            tui.write(format!("{echo}\n").as_bytes()).unwrap();
+            let echo_displayed =
+                wait_until(|| inner_marker_visible(&tui, &echo), STARTUP_LIMIT).await;
+            samples.last_mut().unwrap()["echo_ms"] =
+                serde_json::json!(echo_started.elapsed().as_secs_f64() * 1000.0);
+            samples.last_mut().unwrap()["echo_failed"] = serde_json::json!(!echo_displayed);
+            samples.last_mut().unwrap()["final_marker_visible"] =
+                serde_json::json!(inner_marker_visible(&tui, &marker));
+        }
+        // Use authoritative state only after timing presentation. A control
+        // connection must not replace the real keyboard creation under test.
+        let Some(tree) = startup_tree_with_count(&mut connection, PANE_COUNT).await else {
+            let sample = samples.last_mut().unwrap();
+            sample["displayed"] = serde_json::json!(false);
+            sample["censored"] = serde_json::json!(true);
+            sample["error"] = serde_json::json!("creation tree absent before bounded deadline");
+            break;
+        };
+        let pane_id = tree
+            .pane_ids_in_tree_order()
+            .into_iter()
+            .find(|id| !background_ids.contains(id))
+            .expect("one newly created pane");
+        samples.last_mut().unwrap()["pane_id"] = serde_json::json!(pane_id.0);
+        connection
+            .requests
+            .send(ClientRequest::ClosePane { pane_id })
+            .await
+            .unwrap();
+        if startup_tree_with_count(&mut connection, PANE_COUNT - 1)
+            .await
+            .is_none()
+        {
+            samples.last_mut().unwrap()["error"] =
+                serde_json::json!("owned pane close absent before bounded deadline");
+            break;
+        }
+        println!(
+            "{}",
+            serde_json::json!({"type":"measurement", "workload":workload, "pane_count":PANE_COUNT, "sample":samples.last().unwrap()})
+        );
+    }
+    let mut latencies: Vec<_> = samples
+        .iter()
+        .filter(|s| s["displayed"] == true)
+        .map(|s| s["elapsed_ms"].as_f64().unwrap())
+        .collect();
+    latencies.sort_by(f64::total_cmp);
+    let percentile = |percent: usize| {
+        latencies
+            .get((latencies.len() * percent).div_ceil(100).saturating_sub(1))
+            .copied()
+    };
+    let failures = samples
+        .iter()
+        .filter(|s| {
+            s["displayed"] != true
+                || s["echo_failed"] == true
+                || s["final_marker_visible"] == false
+                || s.get("error").is_some()
+        })
+        .count();
+    let censored = samples.iter().filter(|s| s["censored"] == true).count();
+    let output = run_one_shot(&xdg, &project_dir, &["kill-session", SESSION_NAME]).await;
+    assert!(
+        output.status.success(),
+        "isolated startup session cleanup failed"
+    );
+    cleanup.already_cleaned_up = true;
+    let exited = wait_until(|| tui.has_exited(), WAIT_TIMEOUT).await;
+    if !exited {
+        tui.kill().unwrap();
+    }
+    assert!(exited);
+    // Both isolated writers have exited before reading final numeric logs.
+    let logs = walk_log_files(&xdg.debug_log_dir);
+    let stage_measurements = correlate_startup_stages(&logs, &samples);
+    let incomplete_stage_trials = stage_measurements
+        .iter()
+        .filter(|trial| trial["complete"] != true)
+        .count();
+    let receipt = serde_json::json!({
+        "type":"result", "synthetic_terminal_fixtures":true,
+        "measurement":"keyboard_new_terminal_to_inner_marker_presented", "workload":workload,
+        "pane_count":PANE_COUNT, "trials":samples.len(), "requested_trials":TRIALS, "failures":failures, "censored_trials":censored,
+        "p50_ms":percentile(50), "p95_ms":percentile(95), "p99_ms":percentile(99),
+        "max_ms":latencies.last(), "limit_ms":STARTUP_LIMIT.as_millis(),
+        "samples":samples, "stage_measurements":stage_measurements,
+        "incomplete_stage_trials":incomplete_stage_trials, "unattempted_trials":TRIALS - samples.len(),
+        "cross_process_clock":"unix_us; same-process durations use monotonic_us",
+        "user_incident_attribution_proven":false,
+    });
+    println!("{receipt}");
+    if let Some(path) = std::env::var_os("ILIUM_STARTUP_LATENCY_RECEIPT") {
+        let path = std::path::PathBuf::from(path).with_extension(format!("{workload}.json"));
+        std::fs::write(path, serde_json::to_vec_pretty(&receipt).unwrap()).unwrap();
+    }
+    failures == 0 && samples.len() == TRIALS && incomplete_stage_trials == 0
+}
+
+fn startup_wall_us() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_micros()
+        .min(u128::from(u64::MAX)) as u64
+}
+
+async fn startup_tree_with_count(connection: &mut Connection, count: usize) -> Option<Tree> {
+    tokio::time::timeout(WAIT_TIMEOUT, async {
+        while let Some(event) = connection.events.recv().await {
+            let (event, _retention) = event.into_parts();
+            if let ServerEvent::TreeSnapshot(tree) = event {
+                if tree.panes().count() == count {
+                    return Some(tree);
+                }
+            }
+        }
+        None
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
+#[derive(Clone, Debug)]
+struct StartupStage {
+    stage: String,
+    request_id: u64,
+    pane_id: u64,
+    child_process_id: u64,
+    process_id: u64,
+    sequence: u64,
+    unix_us: u64,
+    monotonic_us: u64,
+}
+
+fn parse_startup_stage(line: &str) -> Option<StartupStage> {
+    if !line.contains("startup timing") {
+        return None;
+    }
+    let fields: std::collections::HashMap<_, _> = line
+        .split_whitespace()
+        .filter_map(|word| word.split_once('='))
+        .map(|(key, value)| (key, value.trim_matches('"')))
+        .collect();
+    let number = |key| fields.get(key)?.parse::<u64>().ok();
+    Some(StartupStage {
+        stage: fields.get("stage")?.to_string(),
+        request_id: number("request_id")?,
+        pane_id: number("pane_id")?,
+        child_process_id: number("child_process_id")?,
+        process_id: number("process_id")?,
+        sequence: number("sequence")?,
+        unix_us: number("unix_us")?,
+        monotonic_us: number("monotonic_us")?,
+    })
+}
+
+fn correlate_startup_stages(
+    logs: &[(PathBuf, String)],
+    samples: &[serde_json::Value],
+) -> Vec<serde_json::Value> {
+    // Scan without retaining background frame traffic. At most ten numeric
+    // records per measured trial survive, regardless of workload frame rate.
+    samples.iter().map(|sample| {
+        let pane = sample["pane_id"].as_u64().unwrap_or(0);
+        let key_us = sample["key_unix_us"].as_u64().unwrap();
+        let records = || logs.iter().flat_map(|(_, text)| text.lines()).filter_map(parse_startup_stage);
+        let first = |stage: &str, predicate: &dyn Fn(&StartupStage) -> bool| {
+            records().filter(|record| record.stage == stage && predicate(record))
+                .min_by_key(|record| record.unix_us)
+        };
+        let finish = first("creation_finished", &|r| pane != 0 && r.pane_id == pane && r.unix_us >= key_us);
+        let receipt = first("creation_receipt", &|r| pane != 0 && r.pane_id == pane && r.unix_us >= key_us);
+        let ready = first("pty_ready", &|r| pane != 0 && r.pane_id == pane && r.unix_us >= key_us);
+        let launch = ready.as_ref().and_then(|ready| first("process_launched", &|r| {
+            r.process_id == ready.process_id && r.child_process_id == ready.child_process_id
+                && r.unix_us >= key_us
+        }));
+        let spawn = first("spawn_begin", &|r| pane != 0 && r.pane_id == pane && r.unix_us >= key_us);
+        let intent = receipt.as_ref().and_then(|receipt| first("creation_intent", &|r| {
+            r.process_id == receipt.process_id && r.request_id == receipt.request_id
+                && r.unix_us >= key_us && r.unix_us <= receipt.unix_us
+        }));
+        let received = finish.as_ref().zip(spawn.as_ref()).and_then(|(finish, spawn)| {
+            first("request_received", &|r| r.process_id == finish.process_id
+                && r.request_id == finish.request_id && r.unix_us >= key_us
+                && r.unix_us <= spawn.unix_us)
+        });
+        let raw = launch.as_ref().and_then(|launch| first("first_pty_read", &|r| {
+            r.process_id == launch.process_id && r.child_process_id == launch.child_process_id
+                && r.unix_us >= key_us
+        }));
+        let parsed = launch.as_ref().and_then(|launch| first("first_parsed_output", &|r| {
+            r.process_id == launch.process_id && r.child_process_id == launch.child_process_id
+                && r.unix_us >= key_us
+        }));
+        let emitted = receipt.as_ref().zip(parsed.as_ref()).and_then(|(receipt, parsed)| {
+            first("frame_emitted", &|r| r.process_id == receipt.process_id && r.pane_id == pane
+                && r.sequence >= parsed.sequence && r.unix_us >= parsed.unix_us)
+        });
+        let chain = [&intent, &received, &spawn, &launch, &ready, &raw, &parsed, &finish, &receipt, &emitted];
+        let missing: Vec<_> = ["creation_intent", "request_received", "spawn_begin", "process_launched",
+            "pty_ready", "first_pty_read", "first_parsed_output", "creation_finished", "creation_receipt", "frame_emitted"]
+            .into_iter().zip(chain).filter_map(|(name, record)| record.is_none().then_some(name)).collect();
+        let mono_ms = |from: &Option<StartupStage>, to: &Option<StartupStage>| {
+            from.as_ref().zip(to.as_ref()).and_then(|(a,b)| (a.process_id == b.process_id)
+                .then_some((i128::from(b.monotonic_us) - i128::from(a.monotonic_us)) as f64 / 1000.0))
+        };
+        let wall_ms = |from: &Option<StartupStage>, to: &Option<StartupStage>| {
+            from.as_ref().zip(to.as_ref()).map(|(a,b)| (i128::from(b.unix_us) - i128::from(a.unix_us)) as f64 / 1000.0)
+        };
+        let numeric_records: Vec<_> = chain.into_iter().filter_map(|r| r.as_ref()).map(|r| serde_json::json!({
+            "stage":r.stage, "request_id":r.request_id, "pane_id":r.pane_id,
+            "child_process_id":r.child_process_id,"process_id":r.process_id,
+            "sequence":r.sequence,"unix_us":r.unix_us,"monotonic_us":r.monotonic_us,
+        })).collect();
+        serde_json::json!({
+            "trial":sample["trial"], "pane_id":pane, "complete":missing.is_empty(), "missing_stages":missing,
+            "key_to_intent_wall_ms":intent.as_ref().map(|r| (i128::from(r.unix_us)-i128::from(key_us)) as f64 / 1000.0),
+            "intent_to_request_wall_ms":wall_ms(&intent,&received),
+            "request_to_spawn_begin_ms":mono_ms(&received,&spawn),
+            "spawn_begin_to_process_launch_ms":mono_ms(&spawn,&launch),
+            "process_launch_to_first_read_ms":mono_ms(&launch,&raw),
+            "process_launch_to_pty_ready_ms":mono_ms(&launch,&ready),
+            "spawn_begin_to_first_read_ms":mono_ms(&spawn,&raw),
+            "first_read_to_first_parse_ms":mono_ms(&raw,&parsed),
+            "first_parse_to_frame_wall_ms":wall_ms(&parsed,&emitted),
+            "intent_to_frame_ms":mono_ms(&intent,&emitted),
+            "key_to_marker_ms":sample["elapsed_ms"], "records":numeric_records,
+        })
+    }).collect()
+}
+
+#[test]
+fn startup_numeric_stage_parser_rejects_unrelated_or_incomplete_logs() {
+    assert!(parse_startup_stage("terminal content request_id=1").is_none());
+    assert!(parse_startup_stage("startup timing stage=frame_emitted").is_none());
+    let record = parse_startup_stage("DEBUG ilium_startup: startup timing stage=\"first_pty_read\" request_id=0 pane_id=0 child_process_id=22 sequence=0 process_id=33 monotonic_us=44 unix_us=55").unwrap();
+    assert_eq!(record.stage, "first_pty_read");
+    assert_eq!(record.child_process_id, 22);
+    assert_eq!(record.monotonic_us, 44);
+}
+
+#[test]
+fn startup_stage_correlation_fences_requests_and_ignores_blank_and_background_frames() {
+    let line = |stage: &str,
+                request: u64,
+                pane: u64,
+                child: u64,
+                process: u64,
+                sequence: u64,
+                time: u64| {
+        format!("startup timing stage={stage} request_id={request} pane_id={pane} child_process_id={child} process_id={process} sequence={sequence} monotonic_us={time} unix_us={time}\n")
+    };
+    let mut log = String::new();
+    for (stage, request, pane, child, process, sequence, time) in [
+        ("request_received", 22, 0, 0, 7, 0, 900), // same request ID, older control request
+        ("creation_intent", 22, 0, 0, 8, 0, 1010),
+        ("request_received", 22, 0, 0, 7, 0, 1020),
+        ("spawn_begin", 0, 9, 0, 7, 0, 1030),
+        ("process_launched", 0, 0, 44, 7, 0, 1040),
+        ("pty_ready", 0, 9, 44, 7, 0, 1065),
+        ("first_pty_read", 0, 0, 44, 7, 0, 1050),
+        ("first_parsed_output", 0, 0, 44, 7, 1, 1060),
+        ("creation_finished", 22, 9, 0, 7, 0, 1070),
+        ("creation_receipt", 22, 9, 0, 8, 0, 1080),
+        ("frame_emitted", 0, 9, 0, 8, 0, 1085), // blank initial state is not first output
+        ("frame_emitted", 0, 99, 0, 8, 1, 1086), // unrelated focused pane
+        ("frame_emitted", 0, 9, 0, 8, 1, 1090),
+    ] {
+        log.push_str(&line(stage, request, pane, child, process, sequence, time));
+    }
+    let sample = serde_json::json!({"trial":0,"pane_id":9,"key_unix_us":1000,"elapsed_ms":0.1});
+    let result = correlate_startup_stages(&[(PathBuf::from("fixture"), log)], &[sample]);
+    assert_eq!(result[0]["complete"], true);
+    assert_eq!(result[0]["request_to_spawn_begin_ms"], 0.01);
+    assert_eq!(result[0]["first_parse_to_frame_wall_ms"], 0.03);
+    assert_eq!(result[0]["records"].as_array().unwrap().len(), 10);
+}

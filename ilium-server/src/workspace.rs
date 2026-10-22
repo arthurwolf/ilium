@@ -201,26 +201,44 @@ pub(crate) async fn default_new_worktree_spec(
 
 /// Collects one bounded dialog snapshot. Every mutation is revalidated later.
 pub(crate) async fn repo_facts(state: &ServerState, project: NodeId) -> Result<RepoFacts, String> {
-    let execution = state
-        .execution
-        .get()
-        .ok_or_else(|| "workspace execution service is unavailable".to_string())?;
+    let _admission = state
+        .repo_facts_admission
+        .try_acquire()
+        .map_err(|_| "too many repository queries; retry shortly".to_string())?;
     if !secure_fs::supports_nofollow_directories() {
         return Err("agent worktrees are unavailable: this platform cannot secure workspace ownership paths".into());
     }
     let project_cwd = project_directory(state, project).await?;
-    let repository = ilium_git::discover(&project_cwd)
-        .await
-        .map_err(|error| error.to_string())?;
+    let repository = state
+        .repo_discovery_cache
+        .get((project_cwd.clone(), PathBuf::new()), async {
+            ilium_git::discover(&project_cwd)
+                .await
+                .map_err(|error| error.to_string())
+        })
+        .await?;
     if repository.is_bare {
         return Err("bare repositories cannot host agent panes".into());
     }
-    // Keep the Git registration and ownership-marker snapshot together while
-    // another request may be creating or removing a worktree.
-    let repository_lock = state
-        .workspace_repository_lock(&repository.common_dir)
-        .await;
-    let _guard = repository_lock.lock().await;
+    let key = (
+        repository.worktree_root.join(&repository.project_subpath),
+        repository.common_dir.clone(),
+    );
+    state
+        .repo_facts_cache
+        .get(key, collect_repo_facts(state, project_cwd, repository))
+        .await
+}
+
+async fn collect_repo_facts(
+    state: &ServerState,
+    project_cwd: PathBuf,
+    repository: ilium_git::Repository,
+) -> Result<RepoFacts, String> {
+    let execution = state
+        .execution
+        .get()
+        .ok_or("workspace execution service is unavailable")?;
     let default_base_ref = ilium_git::default_base_ref(&project_cwd)
         .await
         .map_err(|error| error.to_string())?;
@@ -230,64 +248,26 @@ pub(crate) async fn repo_facts(state: &ServerState, project: NodeId) -> Result<R
     let local_branches = ilium_git::list_branches(&project_cwd)
         .await
         .map_err(|error| error.to_string())?;
+    // Keep the Git registration and ownership-marker snapshot together while
+    // another request may be creating or removing a worktree.
+    let repository_lock = state
+        .workspace_repository_lock(&repository.common_dir)
+        .await;
+    let _guard = repository_lock.lock().await;
     let listed = ilium_git::list_worktrees(&project_cwd)
         .await
         .map_err(|error| error.to_string())?;
     crate::workspace_owner::validate_registered_worktree_count(listed.len())
         .map_err(|error| error.to_string())?;
-    let current_branch = ilium_git::head_probe(&project_cwd)
-        .await
-        .map_err(|error| error.to_string())?
-        .branch;
-    let source_status = ilium_git::status(&project_cwd)
-        .await
-        .map_err(|error| error.to_string())?;
-    let source_dirty_count = source_status
-        .staged
-        .saturating_add(source_status.modified)
-        .saturating_add(source_status.untracked)
-        .saturating_add(source_status.conflicted);
     let main_directory = listed
         .first()
         .map(|entry| entry.path.clone())
         .ok_or("Git reported no worktrees")?;
-    let main_status = if main_directory == repository.worktree_root {
-        source_status
-    } else {
-        ilium_git::status(&main_directory)
-            .await
-            .map_err(|error| format!("cannot read main checkout status: {error}"))?
-    };
-    let main_dirty_count = main_status
-        .staged
-        .saturating_add(main_status.modified)
-        .saturating_add(main_status.untracked)
-        .saturating_add(main_status.conflicted);
     let gitmodules_path = repository.worktree_root.join(".gitmodules");
     let (worktree_directories, has_gitmodules) =
         repo_facts_path_metadata(&execution.client, &listed, &gitmodules_path).await?;
-    let occupied = {
-        let tree = state.tree.read().await;
-        tree.panes()
-            .filter_map(|pane| {
-                tree.pane_cwd(pane.id)
-                    .map(|directory| (pane.id, directory.to_path_buf()))
-            })
-            .collect::<Vec<_>>()
-    };
-    let mut worktrees = Vec::with_capacity(listed.len());
-    for (entry, is_directory) in listed.into_iter().zip(worktree_directories) {
-        let existing = occupied
-            .iter()
-            .find(|(_, directory)| directory.starts_with(&entry.path));
-        let is_dirty = if entry.is_prunable || !is_directory {
-            true
-        } else {
-            ilium_git::status(&entry.path)
-                .await
-                .map(|status| !status.is_clean())
-                .unwrap_or(true)
-        };
+    let mut ownership = Vec::with_capacity(listed.len());
+    for (entry, is_directory) in listed.iter().zip(&worktree_directories) {
         let created_by_ilium = if entry.path == main_directory || entry.is_prunable || !is_directory
         {
             false
@@ -306,6 +286,76 @@ pub(crate) async fn repo_facts(state: &ServerState, project: NodeId) -> Result<R
             })?
             .is_some()
         };
+        ownership.push(created_by_ilium);
+    }
+    // Status scans are read-only hints. Never hold mutation admission behind
+    // arbitrarily slow index/status reads for every registered worktree.
+    drop(_guard);
+    let current_branch = ilium_git::head_probe(&project_cwd)
+        .await
+        .map_err(|error| error.to_string())?
+        .branch;
+    let source_status = ilium_git::status(&project_cwd)
+        .await
+        .map_err(|error| error.to_string())?;
+    let source_dirty_count = source_status
+        .staged
+        .saturating_add(source_status.modified)
+        .saturating_add(source_status.untracked)
+        .saturating_add(source_status.conflicted);
+    let main_status = if main_directory == repository.worktree_root {
+        source_status
+    } else {
+        ilium_git::status(&main_directory)
+            .await
+            .map_err(|error| format!("cannot read main checkout status: {error}"))?
+    };
+    let main_dirty_count = main_status
+        .staged
+        .saturating_add(main_status.modified)
+        .saturating_add(main_status.untracked)
+        .saturating_add(main_status.conflicted);
+    let occupied = {
+        let tree = state.tree.read().await;
+        tree.panes()
+            .filter_map(|pane| {
+                tree.pane_cwd(pane.id)
+                    .map(|directory| (pane.id, directory.to_path_buf()))
+            })
+            .collect::<Vec<_>>()
+    };
+    // Four statuses at a time, with JoinSet ownership cancelling every child
+    // when the query is dropped. Preserve Git's original worktree ordering.
+    let mut dirty = vec![true; listed.len()];
+    for (chunk_index, chunk) in listed.chunks(4).enumerate() {
+        let mut statuses = tokio::task::JoinSet::new();
+        for (offset, entry) in chunk.iter().enumerate() {
+            let index = chunk_index * 4 + offset;
+            if entry.is_prunable || !worktree_directories[index] {
+                continue;
+            }
+            let path = entry.path.clone();
+            statuses.spawn(async move {
+                (
+                    index,
+                    ilium_git::status(&path)
+                        .await
+                        .map(|status| !status.is_clean())
+                        .unwrap_or(true),
+                )
+            });
+        }
+        while let Some(result) = statuses.join_next().await {
+            let (index, is_dirty) =
+                result.map_err(|error| format!("worktree status worker failed: {error}"))?;
+            dirty[index] = is_dirty;
+        }
+    }
+    let mut worktrees = Vec::with_capacity(listed.len());
+    for ((entry, is_dirty), created_by_ilium) in listed.into_iter().zip(dirty).zip(ownership) {
+        let existing = occupied
+            .iter()
+            .find(|(_, directory)| directory.starts_with(&entry.path));
         worktrees.push(WorkspaceWorktreeFact {
             path: entry.path,
             branch: entry.branch,

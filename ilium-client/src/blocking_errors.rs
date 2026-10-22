@@ -31,6 +31,7 @@ impl App {
             return None;
         };
         *request_id = self.next_workspace_request_id();
+        ilium_platform::startup_timing::record("creation_intent", *request_id, 0, 0, 0);
         let action = match kind {
             NewPaneKind::PlainShell => TreeToolbarAction::Shell,
             NewPaneKind::Command(command)
@@ -60,6 +61,17 @@ impl App {
         let Some(pending) = self.pending_pane_creations.remove(&request_id) else {
             return;
         };
+        ilium_platform::startup_timing::record(
+            if result.is_ok() {
+                "creation_receipt"
+            } else {
+                "creation_failed"
+            },
+            request_id,
+            result.as_ref().map_or(0, |pane| pane.0),
+            0,
+            0,
+        );
         match result {
             Ok(_) => {
                 if let Some(errors) = self.local_blocking_errors.get_mut(&pending.parent_group) {

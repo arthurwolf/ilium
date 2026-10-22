@@ -44,6 +44,7 @@ mod progress_watchdog;
 mod prompt_queue;
 mod ready_log;
 mod recovery;
+mod repo_facts_cache;
 mod scheduled_input;
 mod session_backups;
 mod session_id;
