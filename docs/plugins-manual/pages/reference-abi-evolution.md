@@ -209,3 +209,8 @@ Target behaviour of the production plugin system.
 - [Runtime model](/pages/reference-runtime-model/)
 - [Errors and limits](/pages/reference-errors-and-limits/)
 - [SDK deprecation](/pages/reference-sdk-deprecation/): the rules for SDK names that are not WIT features
+
+
+### Graduating unstable features
+
+- [ABI-083] A release that removes or graduates an unstable feature MUST name it in its release notes one minor version in advance; the host MUST write one `deprecated` record per plugin that still lists the feature, and after graduation a manifest that still lists it under `unstable` MUST load with that `deprecated` record instead of being refused with `manifest.unstable-unknown`.

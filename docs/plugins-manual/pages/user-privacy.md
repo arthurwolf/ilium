@@ -157,6 +157,11 @@ Core plugins are made by the Ilium project and follow the same permission rules 
 - [USR-247] The export and erase commands MUST work without network access and MUST NOT send any data to a plugin or a registry. Test: Run both with networking blocked and assert success and no outbound request.
 - [USR-248] Erasure MUST NOT silently drop audit records that policy requires to keep; the host MUST name them as kept, with the retention period that keeps them, and MUST delete them when that period ends. Test: Set a retention policy, erase, and assert the audit records remain and are named; advance the clock and assert they are deleted.
 
+
+### Restoring plugin data
+
+- [USR-262] The host MUST provide `ilium plugin import-data <folder>` that restores plugin settings, storage and grants from a folder written by `ilium plugin export-data`, for plugins already installed at the same or a newer data version; it MUST show counts per data kind and ask for confirmation before writing, MUST re-check every restored grant against machine policy, MUST NOT use the network, and MUST NOT overwrite existing data unless `--replace` is given.
+
 ### See also
 
 - [Plugins for users](/pages/user-plugins-overview/)

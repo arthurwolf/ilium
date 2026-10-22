@@ -261,6 +261,11 @@ Each plugin can have its own settings pages inside Settings. Their values are sa
 - **A plugin id that starts with `ilium.`** is reserved. A third-party package with such an id is refused.
 - **A plugin that wants a replaced core plugin** needs your confirmation. Declining installs the plugin without the replacement.
 
+
+### Accessible host-owned dialogs
+
+- [USR-261] The key trust prompt, the replaces confirmation and the erase-data confirmation MUST be operable with the keyboard alone, MUST show risk and checked state as text as well as colour, MUST wrap the full fingerprint and grant strings so they stay readable at 80 columns, and MUST place keyboard focus on the Cancel action by default.
+
 ### See also
 
 - [Plugins for users](/pages/user-plugins-overview/)

@@ -814,6 +814,16 @@ This section separates the storage of a plugin from the storage the host needs f
 - [EXT-064] The host MUST keep a reserve of 16 MiB for its own journal, audit log and snapshots. When free space falls under the reserve, plugin writes MUST fail with `storage.full` while host writes continue, and the host MUST show one warning `Disk space low` per hour.
 - [EXT-065] An install or upgrade that cannot finish for lack of disk space MUST fail with `install.no-space`, MUST remove its partial files, and MUST leave the previous version installed and enabled.
 
+
+### Error message text stability
+
+- [ABI-082] Within one ABI major, only the error code and the documented reason-word prefix of a message MUST stay stable; a host MAY reword the rest of a message in a minor release, the conformance corpus MUST NOT assert on that rest, and the SDKs MUST NOT branch on message text.
+
+
+### Retry semantics of host calls
+
+- [API-097] For every host function that returns a request id, the reference MUST state whether a retry after a timeout or failure is idempotent and whether its effect is `none` or `unknown`; the host MUST NOT apply a retried call twice when it carries the same dedup key within its 128-character key scope.
+
 ### See also
 
 - [Rust SDK reference](/pages/rust-sdk/)

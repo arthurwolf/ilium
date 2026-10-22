@@ -237,3 +237,8 @@ A plugin that supports two languages or two sides builds each in its own job so 
 - [Plugin documentation guide](/pages/guide-plugin-documentation/)
 
 API checked against `ilium:plugin@0.1.0`.
+
+
+### Dependency vulnerability audit
+
+- [DEV-896] `ilium plugin check` and `ilium plugin publish` MUST scan the locked dependency set against an advisory database, MUST report each match as a `lint.dependency-vulnerable` diagnostic with the advisory id and fixed version, MUST fail `publish` at or above a configurable severity unless `--allow-advisory <id>` is given, and MUST run against a cached database without network access when `--offline` is set.

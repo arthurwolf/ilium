@@ -585,3 +585,8 @@ Requirement ids for this page: [SET-001], [SET-002], [SET-003], [SET-004], [SET-
 ### Security
 
 Regex `pattern` values are limited per [SEC-046]; `secret` rows follow [SEC-242]. See [Secrets](/pages/reference-secrets/).
+
+
+### Settings values after a schema change
+
+- [LIF-321] When an updated plugin version activates, the host MUST validate each saved setting value against the new schema before the first activation; it MUST keep valid values, replace an invalid or out-of-range value with the new default and write a `settings.value-reset` record with the key and the old value, MUST keep values for keys the new schema no longer declares until `uninstall --purge`, and MUST NOT count a reset as a failure or block the update.

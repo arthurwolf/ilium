@@ -322,3 +322,8 @@ This section is target behaviour for the public plugin system. A validity window
 - [Administrator guide](/pages/guide-plugin-administration/)
 - [Publishing guide](/pages/guide-publishing/)
 - [Security model](/pages/security/)
+
+
+### Cryptographic agility
+
+- [SEC-459] The host MUST accept signature and digest algorithms only from a closed, versioned allow-list compiled into the binary, MUST treat an unknown algorithm in a key, signature or digest entry as a verification failure rather than a skip, MUST refuse a retired algorithm for any metadata or package issued after the registry marks it retired, and MUST announce a new algorithm in signed registry metadata at least one release before it is required, accepting dual signatures during the overlap and writing an audit event whenever a deprecated algorithm is still used.

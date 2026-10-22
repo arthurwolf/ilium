@@ -144,6 +144,11 @@ com.example.cursor    <span class="t-err">failed</span>     -      -
 | A T1 plugin loops while the UI waits for its render | The render deadline traps it within 30 ms on the client. The view shows its last good frame, marked stale. |
 | The machine sleeps during a call | The monotonic clock may not advance; the host treats a gap of more than 1 s as a clock skip and does not count the call as a breach. |
 
+
+### Correlation ids across a call chain
+
+- [HST-526] The host MUST assign a correlation id to each originating input, event or hook chain, MUST pass it unchanged through every dispatcher call, handler step and cross-plugin message on both server and client sides, and MUST include it in every host and plugin log entry written during that chain and in the diagnostics bundle.
+
 ### See also
 
 - [Plugin lifecycle states](/pages/reference-plugin-lifecycle-states/)

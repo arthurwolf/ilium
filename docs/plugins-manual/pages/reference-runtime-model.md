@@ -251,3 +251,8 @@ The fake host in the test harness follows this page. It fakes the clock, the fil
 - [Performance](/pages/performance/)
 - [Errors and limits](/pages/reference-errors-and-limits/)
 - [Requirements: WIT and ABI](/pages/reference-requirements-wit-abi/)
+
+
+### Unknown members in host JSON payloads
+
+- [ABI-081] A host and an SDK MUST ignore unknown object members when they read a host-defined JSON payload, and the host MUST evolve such a payload within one ABI major only by adding optional members, never by removing, renaming or changing the type of a member.

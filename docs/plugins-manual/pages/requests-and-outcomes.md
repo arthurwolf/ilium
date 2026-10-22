@@ -406,3 +406,8 @@ Target behaviour. A request id belongs to one plugin instance. A request that ne
 API version checked: `ilium:plugin@0.1.0`.
 
 Requirements for this page: [Requests and outcomes requirements](/pages/reference-requirements-requests-outcomes/).
+
+
+### Cancelling a pending request
+
+- [API-096] The host MUST offer a generic `cancel(request-id)` import that, for a pending request of the calling plugin, stops the underlying work, frees the pending slot at once and completes the request with outcome `cancelled`; for an unknown, foreign or already completed id it MUST return `not-found` without effect, and repeated calls MUST be idempotent.

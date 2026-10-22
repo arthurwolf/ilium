@@ -268,3 +268,8 @@ An update shows the new grants in a review dialog and keeps the old version acti
 - [Backwards-compatibility test matrix](/pages/guide-backwards-compatibility-test-matrix/) for the test cells that check these rules
 
 API version checked: `ilium:plugin@0.1.0`.
+
+
+### Minimum toolchain support window
+
+- [DEV-897] Each SDK release MUST declare its minimum supported Rust and Bun versions in its package metadata and in the support matrix, MUST keep the previous minimum building for at least two minor releases after a raise, and MUST announce each raise in the release notes one minor version in advance.
