@@ -954,6 +954,7 @@ struct Bundle {
     selected: Option<Arc<session_catalog::PinnedCatalog>>,
     native_jar: Option<Arc<ilium_platform::animation_files::PinnedFile>>,
     warnings: Vec<String>,
+    prepared_cache: Option<crate::prepared_cache::PreparedCache>,
     budget: ByteBudget,
     _catalog_reservation: Arc<Reservation>,
 }
@@ -2060,6 +2061,10 @@ fn prepare_bundle(
         root,
         jar,
         warnings,
+        // History storage sits directly under the scene cache directory.
+        prepared_cache: storage
+            .parent()
+            .map(crate::prepared_cache::PreparedCache::for_scene_cache_dir),
         budget,
         _catalog_reservation: Arc::new(catalog_reservation),
     };
@@ -2598,6 +2603,7 @@ fn prepare_selection(
                     viewport: request.size,
                     scale: request.scale,
                     account: &bundle.budget,
+                    cache: bundle.prepared_cache.as_ref(),
                     cancel,
                     cancelled: &cancelled,
                     progress: &|event| progress.record(event),

@@ -279,6 +279,8 @@ async fn read_requests<R>(
     };
     let mut terminal_subscription_guard = TerminalSubscriptionGuard::new(Arc::clone(&state));
     let mut has_terminal_stream_selection = false;
+    // Connection ownership bounds work and aborts queries on disconnect.
+    let mut repository_queries = tokio::task::JoinSet::new();
     loop {
         let decoded = tokio::select! {
             biased;
@@ -311,6 +313,9 @@ async fn read_requests<R>(
         };
 
         let request = decoded.view();
+        if let ClientRequest::NewPane { request_id, .. } = request {
+            ilium_platform::startup_timing::record("request_received", *request_id, 0, 0, 0);
+        }
         let request_name = request.diagnostic_name();
         if request.is_high_frequency_diagnostic() {
             tracing::debug!(request_name, "client request received");
@@ -416,6 +421,34 @@ async fn read_requests<R>(
             if applied_rx.await.is_err() {
                 break;
             }
+        }
+
+        if let ClientRequest::QueryRepoFacts {
+            request_id,
+            project,
+        } = request
+        {
+            while repository_queries.try_join_next().is_some() {}
+            if repository_queries.len() >= 8 {
+                let _ = direct_tx
+                    .send(ServerEvent::RepoFactsReported {
+                        request_id: *request_id,
+                        project: *project,
+                        result: Err("too many pending repository queries; retry shortly".into()),
+                    })
+                    .await;
+            } else {
+                let query_state = Arc::clone(&state);
+                let replies = direct_tx.clone();
+                let query = ClientRequest::QueryRepoFacts {
+                    request_id: *request_id,
+                    project: *project,
+                };
+                repository_queries.spawn(async move {
+                    handlers::handle_request(&query_state, query, &replies).await;
+                });
+            }
+            continue;
         }
 
         let completes_attach = matches!(
@@ -1077,7 +1110,9 @@ where
                 let Some(target_sequence) = target_sequences.get(&pane_id).copied() else {
                     continue;
                 };
-                if after_sequence >= target_sequence {
+                if delivered_terminal_sequences.contains_key(&pane_id)
+                    && after_sequence >= target_sequence
+                {
                     continue;
                 }
                 let admitted = wait_for_visible_recovery_prefix(
@@ -2416,6 +2451,89 @@ mod text_trigger_writer_tests {
         initialize_fixture_execution(&state);
         (state, Task(sound_task))
     }
+    #[tokio::test]
+    async fn slow_repository_query_does_not_block_following_tree_mutation() {
+        let directory = tempfile::tempdir().unwrap();
+        assert!(std::process::Command::new("git")
+            .arg("init")
+            .arg(directory.path())
+            .status()
+            .unwrap()
+            .success());
+        assert!(std::process::Command::new("git")
+            .arg("-C")
+            .arg(directory.path())
+            .args([
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "commit",
+                "--allow-empty",
+                "-m",
+                "initial"
+            ])
+            .status()
+            .unwrap()
+            .success());
+        let (state, _sounds) = state_at(directory.path());
+        let repository = ilium_git::discover(directory.path()).await.unwrap();
+        let lock = state
+            .workspace_repository_lock(&repository.common_dir)
+            .await;
+        let blocked_repository = lock.lock().await;
+        let mut events = state.events.subscribe_owned();
+        let (client, server) = duplex(16384);
+        let (replies, mut reply_events) = DirectEventSender::channel(16);
+        let (phase, _phase_receiver) = watch::channel(AttachPhase::Ready);
+        let (controls, mut control_events) = mpsc::channel::<StreamControlCommand>(8);
+        let mut control_task = Task(tokio::spawn(async move {
+            while let Some(control) = control_events.recv().await {
+                let _ = control.applied.send(());
+            }
+        }));
+        let mut reader = Task(tokio::spawn(read_requests(
+            state.clone(),
+            server,
+            replies,
+            phase,
+            controls,
+        )));
+        let mut requests = FrameWriter::new(client);
+        requests
+            .write(&ClientRequest::QueryRepoFacts {
+                request_id: 71,
+                project: ilium_core::ROOT_ID,
+            })
+            .await
+            .unwrap();
+        requests
+            .write(&ClientRequest::NewGroup {
+                parent_group: ilium_core::ROOT_ID,
+                name: "responsive".into(),
+            })
+            .await
+            .unwrap();
+        let event = timeout(WAIT, events.recv())
+            .await
+            .expect("tree mutation stalled behind repository query")
+            .unwrap();
+        assert!(matches!(event, ServerEvent::TreeSnapshot(_)));
+        let tree = state.tree.read().await;
+        assert!(tree
+            .all_ids()
+            .any(|id| tree.get(id).is_some_and(|node| node.name == "responsive")));
+        drop(tree);
+        assert!(
+            reply_events.try_recv().is_err(),
+            "blocked query must not have completed"
+        );
+        drop(requests);
+        reader.joined().await;
+        control_task.joined().await;
+        drop(blocked_repository);
+    }
+
     async fn accept(state: &ServerState, message: &str, revision: u64) {
         let mut current = state.text_trigger_settings.write().await;
         current.settings = rules(message);

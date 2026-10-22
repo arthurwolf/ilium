@@ -60,6 +60,12 @@ pub struct ProgressTiming {
     /// Last time the percent rose or the one-line message changed.
     #[serde(default)]
     pub last_progress_unix_millis: Option<u64>,
+    /// Last time a probe ran and produced an accepted report. Unlike
+    /// `last_progress_unix_millis`, an unchanged report still counts: it
+    /// proves the monitor is alive and the task still answers. Stall
+    /// detection reads this field.
+    #[serde(default)]
+    pub last_report_unix_millis: Option<u64>,
     #[serde(default)]
     pub probe_interval_millis: Option<u64>,
     #[serde(default)]
@@ -105,6 +111,7 @@ impl ProgressTiming {
             started_at_unix_millis: Some(now),
             started_percent: percent,
             last_progress_unix_millis: Some(now),
+            last_report_unix_millis: Some(now),
             probe_interval_millis: None,
             samples: vec![ProgressSample {
                 unix_millis: now,
@@ -201,9 +208,21 @@ impl ProgressTiming {
             },
             percent: Some(percent),
         });
-        if made_progress && self.started_at_unix_millis.is_some() {
-            self.last_progress_unix_millis = Some(now);
+        if self.started_at_unix_millis.is_some() {
+            self.last_report_unix_millis = Some(now);
+            if made_progress {
+                self.last_progress_unix_millis = Some(now);
+            }
         }
+    }
+
+    /// Milliseconds since the last accepted probe report, or `None` when
+    /// never recorded. Snapshots from before this field existed fall back to
+    /// the last progress time.
+    pub fn silent_millis(&self, now: u64) -> Option<u64> {
+        self.last_report_unix_millis
+            .or(self.last_progress_unix_millis)
+            .map(|last| now.saturating_sub(last))
     }
 
     /// Milliseconds without progress, or `None` when never recorded.
@@ -212,8 +231,8 @@ impl ProgressTiming {
             .map(|last| now.saturating_sub(last))
     }
 
-    /// Quiet time after which a running task counts as stalled: ten probe
-    /// intervals, never under ten minutes.
+    /// Silence after which a running task counts as stalled: ten probe
+    /// intervals without an accepted report, never under ten minutes.
     pub fn stall_threshold_millis(&self) -> u64 {
         self.probe_interval_millis
             .unwrap_or(0)
@@ -221,10 +240,11 @@ impl ProgressTiming {
             .max(STALL_MINIMUM_MILLIS)
     }
 
-    /// Whether the task has been quiet past the stall threshold. Callers
-    /// apply this only to tasks that are still running.
+    /// Whether the probe has gone silent past the stall threshold. An
+    /// unchanged but successful report is not silence. Callers apply this
+    /// only to tasks that are still running.
     pub fn is_stalled(&self, now: u64) -> bool {
-        self.quiet_millis(now)
+        self.silent_millis(now)
             .is_some_and(|quiet| quiet >= self.stall_threshold_millis())
     }
 
@@ -422,6 +442,19 @@ mod tests {
         assert_eq!(timing.samples.len(), 1);
         assert_eq!(timing.last_progress_unix_millis, Some(6 * MINUTE));
         assert_eq!(timing.started_at_unix_millis, Some(0));
+    }
+
+    #[test]
+    fn unchanged_successful_reports_keep_the_task_from_stalling() {
+        let mut timing = ProgressTiming::started(0, 0.0);
+        timing.probe_interval_millis = Some(30_000);
+        for minute in 1..=60 {
+            timing.observe(minute * MINUTE, 0.0, false);
+        }
+        assert_eq!(timing.last_progress_unix_millis, Some(0));
+        assert_eq!(timing.silent_millis(61 * MINUTE), Some(MINUTE));
+        assert!(!timing.is_stalled(61 * MINUTE));
+        assert!(timing.is_stalled(70 * MINUTE));
     }
 
     #[test]

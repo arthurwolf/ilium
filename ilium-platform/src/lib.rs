@@ -68,4 +68,5 @@ pub mod provider_admission; // Native-account finite-provider slot ownership.
 pub mod pty_io;
 pub mod runtime_dir;
 pub mod secure_fs;
+pub mod startup_timing;
 pub mod thread_priority;

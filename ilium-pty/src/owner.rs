@@ -95,6 +95,7 @@ impl PtyInput {
 /// chunk to the existing journal and broadcasts it; it must not block on I/O.
 /// No read pump receives this state or any of its parser/journal Arcs.
 pub(crate) struct TerminalState {
+    pub(crate) child_process_id: u32,
     pub(crate) screen_reader: crate::screen_reader::ScreenReader,
     pub(crate) parser: Arc<RwLock<Parser>>,
     pub(crate) generation: Arc<AtomicU64>,
@@ -170,9 +171,17 @@ impl PtyOwner {
         )?;
         let writer_tickets = writer.tickets();
         let output_queue = Arc::clone(&queue);
+        let child_process_id = terminal.child_process_id;
+        let mut first_output = true;
         let reader_worker = match reader.spawn_reserved(
             queue.stop.child(),
-            move |message, stop| output_queue.output(message, stop),
+            move |message, stop| {
+                if first_output && matches!(&message, ilium_platform::pty_io::ReadMessage::Data(bytes) if !bytes.is_empty()) {
+                    first_output = false;
+                    ilium_platform::startup_timing::record("first_pty_read", 0, 0, child_process_id, 0);
+                }
+                output_queue.output(message, stop)
+            },
             reservations.reader,
         ) {
             Ok(worker) => worker,

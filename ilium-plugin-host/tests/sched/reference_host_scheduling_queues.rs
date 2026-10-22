@@ -21,24 +21,24 @@ fn hst_202_theme_and_keymap_coalesce_to_the_latest() {
 
 /// REQ: HST-202
 #[test]
-fn hst_202_tree_changed_and_pointer_coalesce() {
+fn hst_202_tree_changed_coalesces_and_pointer_down_is_never_dropped() {
     assert_eq!(
         event_queue_policy(&tree_changed(&[1])),
         QueuePolicy::Coalesce
     );
-    assert_eq!(event_queue_policy(&pointer()), QueuePolicy::Coalesce);
+    assert_eq!(event_queue_policy(&pointer()), QueuePolicy::NeverDrop);
 }
 
 /// REQ: HST-202
 #[test]
-fn hst_202_user_input_kinds_drop_the_oldest() {
+fn hst_202_user_input_kinds_are_never_dropped() {
     for event in [
         key_pressed(),
         key_released(),
         command_invoked(),
         ui_action(),
     ] {
-        assert_eq!(event_queue_policy(&event), QueuePolicy::DropOldest);
+        assert_eq!(event_queue_policy(&event), QueuePolicy::NeverDrop);
     }
 }
 
@@ -68,7 +68,7 @@ fn hst_202_coalescing_replaces_the_queued_event_when_full() {
 
 /// REQ: HST-202
 #[test]
-fn hst_202_full_queue_drops_the_oldest_user_input() {
+fn hst_202_full_queue_of_never_dropped_input_reports_stuck() {
     let scheduler = Scheduler::new(10);
     let who = plugin("demo.queue");
     scheduler.register_side(&who, 2);
@@ -76,20 +76,20 @@ fn hst_202_full_queue_drops_the_oldest_user_input() {
     scheduler.push_event(&who, key_released());
     assert_eq!(
         scheduler.push_event(&who, command_invoked()),
-        EventPush::DroppedOldest
+        EventPush::Stuck
     );
 }
 
 /// REQ: HST-202
 #[test]
-fn hst_202_full_queue_of_pointer_discards_the_incoming_after_coalescing_fails() {
+fn hst_202_full_queue_refuses_to_drop_pointer_down() {
     let scheduler = Scheduler::new(10);
     let who = plugin("demo.queue");
     scheduler.register_side(&who, 1);
     scheduler.push_event(&who, message());
     assert_eq!(
         scheduler.push_event(&who, pointer()),
-        EventPush::DiscardedIncoming
+        EventPush::Stuck
     );
 }
 
@@ -393,10 +393,20 @@ fn hst_206_payload_costs_1_ms_per_64_kib() {
 
 /// REQ: HST-206
 #[test]
-fn hst_206_submission_is_accepted_with_a_non_negative_balance() {
+fn hst_206_submission_is_accepted_with_a_positive_balance() {
+    let mut bucket = ExecutionBucket::new();
+    bucket.charge_cpu_ms(1_999);
+    assert!(bucket.try_submit().is_ok());
+}
+
+/// REQ: HST-207; zero is empty (reference-errors-and-limits.md).
+#[test]
+fn hst_207_submission_at_exactly_zero_is_refused_with_minimum_retry() {
     let mut bucket = ExecutionBucket::new();
     bucket.charge_cpu_ms(2_000);
-    assert!(bucket.try_submit().is_ok());
+    let refused = bucket.try_submit().expect_err("zero is empty");
+    assert_eq!(refused.code.as_str(), "quota-exceeded");
+    assert_eq!(refused.retry_after_ms, Some(100));
 }
 
 /// REQ: HST-206
@@ -434,7 +444,7 @@ fn hst_207_retry_after_for_a_debt_of_100_ms_is_200() {
 fn hst_207_retry_after_boundaries_round_up_by_the_refill_rate() {
     assert_eq!(retry_after_ms(-50), 100);
     assert_eq!(retry_after_ms(-51), 110);
-    assert_eq!(retry_after_ms(-1), 10);
+    assert_eq!(retry_after_ms(-1), 100);
 }
 
 /// REQ: HST-207

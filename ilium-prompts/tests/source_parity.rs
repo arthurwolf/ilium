@@ -90,11 +90,13 @@ fn baseline_source(name: &str, source: &str) -> String {
     // unit-test example in version 11. Normalize only that example sentence so
     // the immutable extraction hash still guards every other byte.
     if name == "agent/progress-instructions" {
-        let source = source.replace(r#"A successful check is only a heartbeat: it proves the probe ran and its report was accepted, not that the job advanced or remains alive. Keep the one-line message stable within a phase; do not add a changing clock or heartbeat counter to reset the no-reported-progress warning. State queued, compiling, linking or waiting explicitly in the message/details. When work has no measurable total, say that its progress is indeterminate in details and keep the last defensible percentage; never invent incremental percentages or an ETA. Use real completed/total counters when available. A drop in percent may mark a new phase. Details and ETA changes alone are not substantive progress.
+        let source = source.replace(r#"A successful check proves the probe ran and its report was accepted; Ilium shows a task as stalled only when the probe stops reporting (about ten probe intervals, at least ten minutes), so an unchanged report is fine. It does not prove the job advanced or remains alive: make the probe verify that (final result first, then process identity). State queued, compiling, linking or waiting explicitly in the message/details. Prefer a real measurable signal over a fixed placeholder: read a structured counter the task writes (completed/total items, crates compiled, tests run, bytes transferred, the current phase name with its index) and report it as `percent` and in the message, so the bar and ETA reflect real movement; a drop in percent may mark a new phase. When work truly has no measurable total, set `"indeterminate": true`, keep the last defensible percentage, say in details that progress is indeterminate, and never invent incremental percentages or an ETA.
 
 Track the actual job identity and its final exit/result record, not merely a local launcher or SSH wrapper. Local process checks must include boot identity and process start/command identity to avoid PID reuse. For remote jobs, use a remote job/result source that verifies the remote worker; a live local wrapper is not remote liveness. Check for a final result before process liveness and recheck the result before reporting a vanished job. If the task cannot be observed, report an observation failure rather than inventing a successful running heartbeat or a task outcome. Never inspect or stop another owner's job.
 
 "#, "");
+        // The probe field list gained the optional `indeterminate` flag.
+        let source = source.replace("optional boolean `indeterminate` (see below), ", "");
         return source.replace(
             "Running the focused unit tests of the ilium-client crate - test 14 of 22",
             "Building the release binaries of the ilium terminal app - compiling crate 14 of 22",
@@ -127,9 +129,9 @@ Track the actual job identity and its final exit/result record, not merely a loc
 fn progress_instructions_separate_heartbeat_from_work_and_require_real_job_identity() {
     let source = ilium_prompts::agent::PROGRESS_INSTRUCTIONS;
     for required in [
-        "only a heartbeat",
-        "progress is indeterminate",
-        "real completed/total counters",
+        "proves the probe ran",
+        "\"indeterminate\": true",
+        "structured counter",
         "PID reuse",
         "remote worker",
         "recheck the result",

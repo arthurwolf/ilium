@@ -1,6 +1,6 @@
-//! Component-model text to component bytes, so host tests need no wasm target (test plan 0.5).
+//! Parse component-model text into actual WebAssembly component bytes for tests.
 
-/// Compiles component-model text (`(component ...)`) to a binary component.
-pub fn wat_component(_text: &str) -> Vec<u8> {
-    unimplemented!("host::testing::wat_component")
+/// Test fixture parsing. Invalid WAT is a fixture error, not a host runtime result.
+pub fn wat_component(text: &str) -> Vec<u8> {
+    wat::parse_str(text).unwrap_or_else(|error| panic!("invalid component fixture: {error}"))
 }

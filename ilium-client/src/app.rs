@@ -4122,6 +4122,7 @@ impl App {
         let creation = self.prepare_pane_creation(&mut request);
         if let Some((request_id, pending)) = &creation {
             if self.pending_pane_creations.len() >= 16 {
+                ilium_platform::startup_timing::record("creation_rejected", *request_id, 0, 0, 0);
                 self.record_local_blocking_error(pending.parent_group, &format!("Create pane request {request_id}"), "Too many creations await confirmation; wait for their outcomes before retrying");
                 self.show_request_admission_error();
                 return false;
@@ -4131,6 +4132,7 @@ impl App {
         if self.try_queue_terminal_request(request).is_err() {
             self.show_request_admission_error();
             if let Some((request_id, pending)) = creation {
+                ilium_platform::startup_timing::record("creation_rejected", request_id, 0, 0, 0);
                 self.record_local_blocking_error(
                     pending.parent_group,
                     &format!("Create pane request {request_id}"),
@@ -4140,6 +4142,7 @@ impl App {
             return false;
         }
         if let Some((request_id, pending)) = creation {
+            ilium_platform::startup_timing::record("creation_admitted", request_id, 0, 0, 0);
             self.pending_pane_creations.insert(request_id, pending);
         }
         if let Some((label, cap)) = menu_label {
@@ -21924,6 +21927,7 @@ mod tests {
                 details: String::new(),
                 error: None,
                 eta_seconds: None,
+                indeterminate: false,
             },
             1000,
         )
@@ -22014,6 +22018,7 @@ mod tests {
                         details: String::new(),
                         error: None,
                         eta_seconds: None,
+                        indeterminate: false,
                     },
                     1000,
                 )

@@ -216,7 +216,7 @@ How it works in one paragraph: the job (or an agent on its behalf) registers a *
 
 ### Timing box and popover
 
-To the right of each gauge, after a dim `│` divider, a box shows how long ago the task **started** and an **ETA** (`started 13 minutes ago · ETA in 8 minutes`). Times use at most two units. The ETA blends whole-run pace with the last ten minutes; it reads `ETA —` until progress has been measured. After ten configured probe intervals and at least ten minutes without a meaningful percentage change, status transition or message change, the marker reads **no progress reported**. This describes the probe's report, not a dead or frozen job. A healthy probe can keep reporting the same compilation phase. On narrow panes the box drops lower-priority information to preserve the warning when it fits.
+To the right of each gauge, after a dim `│` divider, a box shows how long ago the task **started** and an **ETA** (`started 13 minutes ago · ETA in 8 minutes`). Times use at most two units. The ETA blends whole-run pace with the last ten minutes; it reads `ETA —` until progress has been measured. After ten configured probe intervals and at least ten minutes without any accepted probe report, the marker reads **no probe report**. An unchanged but successful report is not silence: a healthy probe can keep reporting the same compilation phase for hours without a warning. A probe may set `"indeterminate": true` when the task has no measurable progress; the box then shows no ETA and the hover popover says progress is not measurable. On narrow panes the box drops lower-priority information to preserve the warning when it fits.
 
 Hovering the footer opens a split popover. The left side retains timing, rate, health and owner diagnostics. The right side shows the **latest successful check data** as a structured UTF-8 tree, including the check timestamp and every accepted report field. An observation failure retains that successful report and timestamp; its failure appears separately in health and check history. Compact terminals stack the sections.
 
@@ -548,6 +548,8 @@ The request waits until the agent's prompt is ready, then submits the prompt, so
 ### Remote control routes
 
 Beyond `/create_agent`, the API serves `/v1/*`: read the tree, a project or a pane, and apply any operation `ilium ctl` offers. See [`ilium ctl`](cli-reference.md#ilium-ctl) for the commands; the routes mirror them one to one (`GET /v1/tree`, `GET /v1/panes/{id}`, `POST /v1/ops`, `POST /v1/panes/{id}/input`, `POST /v1/voice`, ...). `GET /v1/guide` returns the essentials.
+
+To close a worktree agent's pane from outside it, the same route as `ilium close-pane` is `POST /v1/ops` with `{"op":"close","pane":12,"worktree":"remove"}` (`keep`, `remove` or `remove-and-branch`). A refused removal returns HTTP 409 with `"code":"worktree-removal-refused"` and the server's reasons in `"error"`; the worktree is then left for you to inspect. A removal the server does not confirm in time returns HTTP 409 with the code `unconfirmed`; check the worktree before retrying. See [Wrap up a worktree agent](worktrees.md#wrap-up-a-worktree-agent).
 
 ## Reset forecasts
 

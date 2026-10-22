@@ -170,6 +170,22 @@ pub async fn handle_request(
     request: ClientRequest,
     direct_tx: &DirectEventSender,
 ) -> bool {
+    // Dialog snapshots are hints; lifecycle/working-directory changes invalidate
+    // them. Launch admission always performs fresh Git and ownership checks.
+    if matches!(
+        &request,
+        ClientRequest::NewPane { .. }
+            | ClientRequest::ClosePane { .. }
+            | ClientRequest::ChangeProjectFolder { .. }
+            | ClientRequest::CreateAgentInWorkspace { .. }
+            | ClientRequest::PruneWorkspace { .. }
+            | ClientRequest::RemoveWorkspace { .. }
+            | ClientRequest::ClosePaneWithWorkspaceDisposition { .. }
+            | ClientRequest::ReplacePaneWithCommand { .. }
+    ) {
+        state.repo_discovery_cache.invalidate();
+        state.repo_facts_cache.invalidate();
+    }
     let operation = request.diagnostic_name();
     let requested_node = request_error_node(&request);
     let target = {
@@ -1307,6 +1323,8 @@ async fn tree_snapshot(state: &ServerState) -> Tree {
 /// so this function's read-locked clone can never contend with a pending
 /// writer (see `ServerState`'s lock-ordering docs).
 pub(crate) async fn broadcast_and_persist(state: &ServerState) {
+    state.repo_discovery_cache.invalidate();
+    state.repo_facts_cache.invalidate();
     let snapshot = tree_snapshot(state).await;
     state
         .workspace_git_status_cache
@@ -1858,6 +1876,29 @@ pub(crate) async fn admitted_terminal_recovery_prefix(
     after_sequence: u64,
     through_sequence: u64,
 ) -> Result<Option<(ServerEvent, Option<Arc<ilium_execution::StorageAdmission>>)>, String> {
+    // A selected, silent PTY still has a valid current screen. Sequence zero
+    // means no output, rather than no initial state; send it once on reveal.
+    if through_sequence == 0 && after_sequence == 0 {
+        let snapshot = {
+            let panes = state.panes.read().await;
+            match panes.get(&pane_id) {
+                Some(PaneResource::Terminal(runtime)) => runtime.session.attach_snapshot(),
+                _ => None,
+            }
+        };
+        let Some(snapshot) = snapshot else {
+            return Ok(None);
+        };
+        let storage = reserve_connection_event_storage(
+            state,
+            snapshot.bytes.len(),
+            1,
+            ConnectionEventStorageClass::VisiblePaneRecovery,
+            Some(pane_id),
+        )
+        .await?;
+        return Ok(Some((terminal_snapshot_event(pane_id, snapshot), storage)));
+    }
     if through_sequence <= after_sequence {
         return Ok(None);
     }
@@ -4750,6 +4791,17 @@ async fn handle_new_pane(
     direct_tx: &DirectEventSender,
 ) {
     let result = create_pane(state, parent_group, kind, working_directory).await;
+    ilium_platform::startup_timing::record(
+        if result.is_ok() {
+            "creation_finished"
+        } else {
+            "creation_failed"
+        },
+        request_id,
+        result.as_ref().map_or(0, |pane| pane.0),
+        0,
+        0,
+    );
     if let Err(message) = &result {
         send_direct_error(direct_tx, message.clone()).await;
     }
@@ -5804,7 +5856,15 @@ pub(crate) async fn spawn_and_register_pane_with_deferred_workspace(
                 )
             })?;
             let quota = execution.pty_quota_group();
+            ilium_platform::startup_timing::record("spawn_begin", 0, pane_id.0, 0, 0);
             let spawned = pane::spawn_terminal_session(&origin, cwd, &identity, &quota)?;
+            ilium_platform::startup_timing::record(
+                "pty_ready",
+                0,
+                pane_id.0,
+                spawned.session.process_id().unwrap_or(0),
+                0,
+            );
             let pending_generated_session_id = spawned.session_id;
             let session = spawned.session;
             // Subscribe before registration so the receiver retains output
@@ -9511,6 +9571,7 @@ mod tests {
         {
             runtime.session.kill().expect("cleanup owned fixture");
         };
+        state.execution.get().expect("bank").request_shutdown();
     }
 
     #[tokio::test]
@@ -9614,15 +9675,15 @@ mod tests {
             })
             .unwrap();
         let first = receiver.recv().await.unwrap();
-        let producer = tokio::spawn(async move {
-            tokio::task::yield_now().await;
-            sender
-                .send(ilium_pty::PtyOutputChunk {
-                    sequence: 2,
-                    bytes: b"second".to_vec().into(),
-                })
-                .unwrap();
-        });
+        // Queued before collecting: a producer task raced the 750 us follow-up window
+        // and failed under ni-vm load. The window itself is a timing budget, not the
+        // merge contract this test pins.
+        sender
+            .send(ilium_pty::PtyOutputChunk {
+                sequence: 2,
+                bytes: b"second".to_vec().into(),
+            })
+            .unwrap();
 
         let OutputBurst::Merged {
             first_sequence,
@@ -9632,7 +9693,6 @@ mod tests {
         else {
             panic!("contiguous output must not require replay");
         };
-        producer.await.unwrap();
         assert_eq!((first_sequence, sequence), (1, 2));
         assert_eq!(bytes, b"firstsecond");
     }

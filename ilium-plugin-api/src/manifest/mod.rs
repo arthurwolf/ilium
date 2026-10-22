@@ -9,14 +9,14 @@ mod diagnostic;
 mod syntax;
 mod validate;
 
-pub use component::{check_component, ComponentSummary};
+pub use component::{ComponentSummary, check_component};
 pub use diagnostic::{Diagnostic, Stage};
 pub use syntax::{
-    parse_activation, parse_chord, parse_when, ActivationTrigger, Chord, WhenExpr, ACTIVATION_KINDS,
+    ACTIVATION_KINDS, ActivationTrigger, Chord, WhenExpr, parse_activation, parse_chord, parse_when,
 };
 pub use validate::{
-    json_schema, parse_manifest, validate, validate_json, CheckMode, CorePluginSummary,
-    InstalledSummary, ValidationContext,
+    CheckMode, CorePluginSummary, InstalledSummary, ValidationContext, json_schema, parse_manifest,
+    validate, validate_json,
 };
 
 use serde::{Deserialize, Serialize};
@@ -58,6 +58,12 @@ pub struct Manifest {
     /// `https://` source repository (reference-manifest.md PKG-023).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repository: Option<String>,
+    /// Declared data use, shown during review (SEC-267).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub data_use: Vec<DataUse>,
+    /// Publisher security contact (SEC-268).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub security_contact: Option<String>,
     /// The server component (reference-manifest.md PKG-024).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub server: Option<ComponentDecl>,
@@ -146,10 +152,13 @@ pub struct Capabilities {
 /// The `requires` object (reference-dependency-resolution.md "The requires object").
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct Requires {
+    /// Per-service activation wait, absent means 2000 ms (PKG-326).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wait_ms: Option<u32>,
     /// Host version range (reference-dependency-resolution.md).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub host: Option<String>,
-    /// Services as `<interface>@<range>` strings; the range defaults to `*`
+    /// Services as `<interface>@<major>.<minor>.<patch>` strings
     /// (reference-dependency-resolution.md). Parse one with [`ServiceRequirement::parse`].
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub services: Vec<String>,
@@ -163,15 +172,43 @@ pub struct Requires {
 pub struct ServiceRequirement {
     /// Service interface name (reference-dependency-resolution.md).
     pub name: String,
-    /// Version range, `*` when omitted (reference-dependency-resolution.md).
+    /// Full minimum compatible version (reference-dependency-resolution.md PKG-327).
     pub version: String,
 }
 
 impl ServiceRequirement {
-    /// Parses `<interface>@<range>`; a bad entry is `manifest.requires-invalid`
+    /// Parses `<interface>@<major>.<minor>.<patch>`; a bad entry is `manifest.service-version`
     /// (reference-dependency-resolution.md).
-    pub fn parse(_text: &str) -> Result<ServiceRequirement, Diagnostic> {
-        unimplemented!("api::manifest::ServiceRequirement::parse")
+    pub fn parse(text: &str) -> Result<ServiceRequirement, Diagnostic> {
+        let invalid = || {
+            validate::finding(
+                "manifest.service-version",
+                "/requires/services",
+                "A service requires interface@major.minor.patch.",
+                3,
+            )
+        };
+        let (name, version) = text.rsplit_once('@').ok_or_else(invalid)?;
+        if name.is_empty()
+            || name.contains('@')
+            || name.chars().any(char::is_whitespace)
+            || text.chars().count() > 300
+        {
+            return Err(invalid());
+        }
+        let parsed = semver::Version::parse(version).map_err(|_| invalid())?;
+        if !parsed.pre.is_empty()
+            || !parsed.build.is_empty()
+            || [parsed.major, parsed.minor, parsed.patch]
+                .into_iter()
+                .any(|part| part > i32::MAX as u64)
+        {
+            return Err(invalid());
+        }
+        Ok(ServiceRequirement {
+            name: name.into(),
+            version: version.into(),
+        })
     }
 }
 
@@ -220,4 +257,18 @@ pub struct FileEntry {
     pub length: u64,
     /// Lower-case hex sha256 (reference-package-format.md).
     pub sha256: String,
+}
+
+/// One publisher declaration of data use (SEC-267).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DataUse {
+    /// Data collected or processed.
+    pub what: String,
+    /// Processing or storage destination.
+    #[serde(rename = "where")]
+    pub where_: String,
+    /// Purpose disclosed to the user.
+    pub purpose: String,
+    /// Whether collection requires user opt-in.
+    pub opt_in: bool,
 }

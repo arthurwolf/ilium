@@ -16,6 +16,9 @@ pub enum HostError {
     /// The engine failed and cannot continue (`host.engine-failed`).
     #[error("the plugin engine failed")]
     EngineFailed,
+    /// A release-embedded precompile is incompatible and has no safe fallback.
+    #[error("the embedded precompiled component is incompatible")]
+    EmbeddedIncompatible,
     /// The sandbox helper binary is missing (`host.helper-missing`).
     #[error("the plugin helper is missing")]
     HelperMissing,
@@ -40,6 +43,7 @@ impl HostError {
             HostError::ImportPanic => Code(Cow::Borrowed("host.import-panic")),
             HostError::EngineError(_) => Code(Cow::Borrowed("host.engine-error")),
             HostError::EngineFailed => Code(Cow::Borrowed("host.engine-failed")),
+            HostError::EmbeddedIncompatible => Code(Cow::Borrowed("host.cwasm-incompatible")),
             HostError::HelperMissing => Code(Cow::Borrowed("host.helper-missing")),
             HostError::GrantsUnreadable => Code(Cow::Borrowed("host.grants-unreadable")),
             HostError::ShutdownTimeout => Code(Cow::Borrowed("host.shutdown-timeout")),
