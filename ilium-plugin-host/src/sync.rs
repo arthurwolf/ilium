@@ -12,14 +12,70 @@ pub use std::sync::atomic::{AtomicU64, Ordering};
 #[cfg(not(feature = "loom"))]
 pub use std::sync::{Arc, Mutex};
 
+use crate::error::HostError;
+
 /// Constant-time byte comparison for secrets (reference-threat-model.md SEC-376).
 pub fn constant_time_eq(_left: &[u8], _right: &[u8]) -> bool {
     unimplemented!("host::sync::constant_time_eq")
 }
 
+/// One installed plugin as recorded in a lockfile (reference-requirements-user-admin.md USR-241).
+#[derive(Debug, Clone, PartialEq)]
+pub struct LockEntry {
+    pub plugin_id: String,
+    pub version: String,
+    pub content_hash: String,
+    pub signing_key_id: String,
+    pub granted_permissions: Vec<String>,
+}
+
+/// Writes the installed plugin set as deterministic lockfile text: sorted entries, no timestamps,
+/// no machine paths, so two machines with the same set produce byte-identical files (USR-241, USR-243).
+pub fn export_lockfile(_entries: &[LockEntry]) -> String {
+    unimplemented!("host::sync::export_lockfile")
+}
+
+/// Reads lockfile text back into entries for `ilium plugin sync --locked` (USR-242).
+pub fn replay_lockfile(_lockfile_text: &str) -> Result<Vec<LockEntry>, HostError> {
+    unimplemented!("host::sync::replay_lockfile")
+}
+
 #[cfg(test)]
 mod tests {
-    use super::constant_time_eq;
+    use super::{constant_time_eq, export_lockfile, LockEntry};
+
+    fn sample_entry(plugin_id: &str) -> LockEntry {
+        LockEntry {
+            plugin_id: plugin_id.to_string(),
+            version: "1.2.3".to_string(),
+            content_hash: "sha256:abc123".to_string(),
+            signing_key_id: "key-main".to_string(),
+            granted_permissions: vec!["fs.read".to_string()],
+        }
+    }
+
+    /// REQ: USR-241
+    #[test]
+    fn lockfile_records_id_version_hash_key_and_grants() {
+        let text = export_lockfile(&[sample_entry("ilium.example.notes")]);
+        assert!(text.contains("ilium.example.notes"));
+        assert!(text.contains("1.2.3"));
+        assert!(text.contains("sha256:abc123"));
+        assert!(text.contains("key-main"));
+        assert!(text.contains("fs.read"));
+    }
+
+    /// REQ: USR-243
+    #[test]
+    fn lockfile_is_byte_identical_regardless_of_input_order() {
+        let first = sample_entry("ilium.example.alpha");
+        let second = sample_entry("ilium.example.beta");
+        assert_eq!(
+            export_lockfile(&[first.clone(), second.clone()]),
+            export_lockfile(&[second, first])
+        );
+    }
+
 
     /// REQ: SEC-376
     #[test]
