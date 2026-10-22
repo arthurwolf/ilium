@@ -75,6 +75,16 @@ Project and every-node pointers mandatory at either scope. Omit generation: clie
 </item>
 {{/each}}
 </items>
+{{#if attention_enabled}}
+<attention-queue>
+Also add the optional top-level key "attention" (never inside "children"; it must not change them): an array naming listed agents the user must look at now. Use only listed ids. Include an agent only when its content shows:
+- "question": it asks the user something or waits for approval or a choice;
+- "stuck": it repeats the same failing step or error without progress;
+- "waiting_on": it waits for another listed item's result (set "waiting_on" to that id);
+- "changed": it finished or changed meaningfully since the user last looked.
+Entry shape: {"id":12,"kind":"question","reason":"under 120 characters, plain words","question":"the exact question or empty string","status_summary":"one or two plain sentences on what the agent is doing or has done, under 300 characters","why_here":"why the user needs to look, under 300 characters","suggested_action":"the short next step for the user, under 300 characters","waiting_on":null,"priority":0-100}. Write the three briefing fields (status_summary, why_here, suggested_action) only from what the content shows; use an empty string for any you cannot support. Omit agents that are working normally or idle; an empty array is a valid answer.
+</attention-queue>
+{{/if}}
 {{#if retry_feedback}}
 <retry-feedback>
 Your prior answer was rejected; correct it and include every listed id once: {{{retry_feedback}}}

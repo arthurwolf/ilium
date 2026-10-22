@@ -94,6 +94,8 @@ pub struct ClientConfig {
     pub api: ApiSettings,
     /// Public reset-announcement polling and status-bar presentation.
     pub reset_planning: ResetPlanningSettings,
+    /// Attention queue: mode, press-to-sort, turbo width, expiry, model.
+    pub attention: crate::attention::AttentionSettings,
     /// Agent-spend indicators and how "expensive" is decided.
     pub cost: CostSettings,
     /// Summarizing a session through the Inference model and resuming from it.
@@ -124,6 +126,7 @@ impl Default for ClientConfig {
             debug: DebugSettings::default(),
             api: ApiSettings::default(),
             reset_planning: ResetPlanningSettings::default(),
+            attention: crate::attention::AttentionSettings::default(),
             cost: CostSettings::default(),
             remote_compaction: RemoteCompactionSettings::default(),
             onboarding: crate::onboarding::progress::OnboardingProgress::default(),
@@ -1230,6 +1233,8 @@ struct RawClientConfig {
     #[serde(default)]
     reset_planning: ResetPlanningSettings,
     #[serde(default)]
+    attention: crate::attention::AttentionSettings,
+    #[serde(default)]
     cost: CostSettings,
     #[serde(default)]
     remote_compaction: RemoteCompactionSettings,
@@ -1591,6 +1596,7 @@ pub fn load(config_dir: &Path) -> Result<ClientConfig, ClientError> {
         debug: raw.debug,
         api: raw.api,
         reset_planning: raw.reset_planning,
+        attention: raw.attention.normalized(),
         cost: raw.cost.sanitized(),
         remote_compaction: raw.remote_compaction.sanitized(),
         onboarding: raw.onboarding,
@@ -2305,6 +2311,18 @@ pub fn save_reset_planning_settings(
         source: Box::new(ConfigSaveError::Serialize(source)),
     })?;
     save_table(config_dir, "reset_planning", value)
+}
+pub fn save_attention_settings(
+    config_dir: &Path,
+    settings: &crate::attention::AttentionSettings,
+) -> Result<(), ClientError> {
+    let value = toml::Value::try_from(settings.clone().normalized()).map_err(|source| {
+        ClientError::ConfigSave {
+            path: config_dir.join("config.toml"),
+            source: Box::new(ConfigSaveError::Serialize(source)),
+        }
+    })?;
+    save_table(config_dir, "attention", value)
 }
 pub fn save_cost_settings(config_dir: &Path, settings: &CostSettings) -> Result<(), ClientError> {
     let value = toml::Value::try_from(settings).map_err(|source| ClientError::ConfigSave {
@@ -4322,6 +4340,54 @@ mod tests {
         let loaded = load(&dir).unwrap();
         assert_eq!(loaded.reset_planning, settings);
         assert!(!loaded.ui.show_context_menu_icons);
+    }
+
+    #[test]
+    fn attention_settings_default_shared_and_round_trip_beside_other_tables() {
+        use crate::attention::{AttentionMode, AttentionSettings};
+        let dir = scratch_dir();
+        assert_eq!(load(&dir).unwrap().attention, AttentionSettings::default());
+        std::fs::write(
+            dir.join("config.toml"),
+            "[ui]\nshow_context_menu_icons = false\n",
+        )
+        .unwrap();
+        let settings = AttentionSettings {
+            mode: AttentionMode::Turbo,
+            press_sorts: false,
+            show_briefing: false,
+            turbo_concurrency: 4,
+            expiry_seconds: 900,
+            model_override: Some("some-model".to_owned()),
+        };
+        save_attention_settings(&dir, &settings).unwrap();
+        let loaded = load(&dir).unwrap();
+        assert_eq!(loaded.attention, settings);
+        assert!(!loaded.ui.show_context_menu_icons);
+    }
+
+    #[test]
+    fn attention_settings_are_clamped_on_load_and_on_save() {
+        use crate::attention::AttentionSettings;
+        let dir = scratch_dir();
+        std::fs::write(
+            dir.join("config.toml"),
+            "[attention]\nturbo_concurrency = 200\nexpiry_seconds = 5\nmodel_override = \"\"\n",
+        )
+        .unwrap();
+        let loaded = load(&dir).unwrap().attention;
+        assert_eq!(loaded.turbo_concurrency, 64);
+        assert_eq!(loaded.expiry_seconds, 60);
+        assert_eq!(loaded.model_override, None);
+        let wild = AttentionSettings {
+            turbo_concurrency: 0,
+            expiry_seconds: u32::MAX,
+            ..AttentionSettings::default()
+        };
+        save_attention_settings(&dir, &wild).unwrap();
+        let reloaded = load(&dir).unwrap().attention;
+        assert_eq!(reloaded.turbo_concurrency, 1);
+        assert_eq!(reloaded.expiry_seconds, 86_400);
     }
 
     #[test]

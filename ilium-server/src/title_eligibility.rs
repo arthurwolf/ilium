@@ -655,11 +655,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn oversized_transcript_line_is_skipped_and_readable_records_still_count() {
+    async fn request_larger_than_discovery_line_limit_retains_exact_title_evidence() {
         const SESSION_ID: &str = "33333333-3333-4333-8333-333333333333";
-        // Must exceed the evidence reader's per-line cap (16 MiB, see
-        // ilium-agent-session/src/request_evidence.rs), so the line is skipped.
-        const MAX_LINE_BYTES: usize = 16 * 1024 * 1024;
+        let discovery_line_bytes = crate::session_id::TRANSCRIPT_READ_LIMITS.line_bytes;
 
         let home = tempfile::tempdir().unwrap();
         let project = home.path().join("project");
@@ -678,12 +676,12 @@ mod tests {
             "type": "event_msg",
             "payload": {
                 "type": "user_message",
-                "message": "x".repeat(MAX_LINE_BYTES),
+                "message": "x".repeat(discovery_line_bytes),
             },
         });
         let path = transcript_dir.join(format!("rollout-2026-10-08T00-00-00-{SESSION_ID}.jsonl"));
         std::fs::write(
-            path,
+            &path,
             format!(
                 "{}\n{}\n{}\n",
                 serde_json::to_string(&metadata).unwrap(),
@@ -693,6 +691,7 @@ mod tests {
         )
         .unwrap();
 
+        let last_record_end = std::fs::metadata(&path).unwrap().len();
         let (_, runtime, mut evidence) = fixture();
         let mut runtime = runtime;
         runtime.observation.session_id = Some(SESSION_ID.to_owned());
@@ -708,15 +707,11 @@ mod tests {
         )
         .await;
 
-        // Master's design (CHANGELOG: "skips oversized records") skips the
-        // oversized record and keeps the readable records before it usable.
         assert_eq!(collected.len(), 1);
-        assert!(
-            matches!(
-                collected[0].transcript,
-                GenuineRequestEvidence::Present { .. }
-            ),
-            "an oversized record is skipped; the readable records before it must still count",
+        assert_eq!(
+            collected[0].transcript,
+            GenuineRequestEvidence::Present { last_record_end },
+            "evidence scanning must parse the full request beyond the discovery line limit",
         );
     }
 

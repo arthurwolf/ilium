@@ -1651,6 +1651,10 @@ async fn send_initial_state(
     }
 }
 
+/// Extra bytes reserved per synchronized pane for output that arrives between
+/// the size estimate and the event build.
+const SYNCHRONIZATION_OUTPUT_GROWTH_ALLOWANCE_BYTES: usize = 1024 * 1024;
+
 /// Largest raw history reply one `TerminalHistory` request may return. Clients
 /// ask again for older output, so a large scroll never needs a large frame.
 const TERMINAL_HISTORY_MAX_BYTES: usize = 1024 * 1024;
@@ -1664,6 +1668,7 @@ enum TerminalOutputSynchronization<'a> {
     RecoverAfter(&'a HashMap<NodeId, u64>),
 }
 
+#[derive(Clone)]
 struct TerminalOutputEstimate {
     input: PtyInput,
     estimate: PtyOutputRecoveryEstimate,
@@ -1899,12 +1904,12 @@ pub(crate) async fn admitted_terminal_recovery_prefix(
                     // A replay rebuilds the whole journal on the client; the
                     // current screen snapshot shows the same state at once.
                     // The journal replay remains only when no snapshot exists.
-                    Some(PtyOutputRecovery::Replay(replay)) => Some(
-                        match runtime.session.attach_snapshot() {
+                    Some(PtyOutputRecovery::Replay(replay)) => {
+                        Some(match runtime.session.attach_snapshot() {
                             Some(snapshot) => terminal_snapshot_event(pane_id, snapshot),
                             None => terminal_replay_event(pane_id, replay),
-                        },
-                    ),
+                        })
+                    }
                     None => None,
                 }
             }
@@ -2097,8 +2102,14 @@ async fn admitted_state_synchronization_events(
             };
             total.checked_add(bytes)
         });
+        // Output keeps arriving while admission waits, so each estimated pane
+        // reserves headroom for the bytes it will have gained by build time.
+        let output_growth_allowance = estimates
+            .len()
+            .checked_mul(SYNCHRONIZATION_OUTPUT_GROWTH_ALLOWANCE_BYTES);
         let estimated_payload_bytes = estimated_payload_bytes
             .and_then(|bytes| bytes.checked_add(snapshot_bytes))
+            .and_then(|bytes| output_growth_allowance.and_then(|growth| bytes.checked_add(growth)))
             .ok_or_else(|| "state synchronization admission size overflow".to_owned())?;
         let producer_storage = reserve_connection_event_storage(
             state,
@@ -2163,10 +2174,19 @@ async fn admitted_state_synchronization_events(
                                     break;
                                 }
                                 matched_estimates.insert(*pane_id);
+                                // A busy pane has advanced (or evicted its oldest
+                                // journal chunks) since the estimate, which was taken
+                                // before an awaited reservation. Estimating again and
+                                // building from that fresh estimate shrinks the race to
+                                // two adjacent journal reads; the reservation headroom
+                                // and the final byte check bound the growth.
+                                let fresh = synchronization
+                                    .estimate_for(*pane_id, &runtime.session)
+                                    .unwrap_or_else(|| estimate.clone());
                                 match synchronization.event_from_estimate(
                                     *pane_id,
                                     &runtime.session,
-                                    estimate,
+                                    &fresh,
                                 ) {
                                     Some(event) => replay_events.push(event),
                                     None => {
@@ -2256,8 +2276,14 @@ async fn admitted_state_synchronization_events(
             let admitted_bytes = producer_storage
                 .as_ref()
                 .map_or(0, |storage| storage.resident_bytes());
-            if retained_event_bytes.is_none_or(|bytes| bytes > admitted_bytes) {
+            if retained_event_bytes.is_none() {
                 return Err("state synchronization exceeded byte admission".to_owned());
+            }
+            if retained_event_bytes.is_some_and(|bytes| bytes > admitted_bytes) {
+                // Output outgrew the reservation; reserve again from a new estimate.
+                discarded_attempts.push(("pane output outgrew the reservation", None));
+                drop(producer_storage);
+                continue;
             }
             return Ok((events, producer_storage));
         }
@@ -3298,9 +3324,6 @@ async fn idempotent_install_progress_monitor(
     request_id: u64,
     identity: ProgressSetRequestIdentity,
 ) -> Result<ilium_ipc::ProgressMonitorAccepted, ilium_ipc::ProgressMonitorRejection> {
-    // Cold path, one value per progress registration: boxing would only add
-    // indirection at every match site.
-    #[allow(clippy::large_enum_variant)]
     // Cold path, one value per progress registration: boxing would only add
     // indirection at every match site.
     #[allow(clippy::large_enum_variant)]

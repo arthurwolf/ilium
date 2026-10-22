@@ -134,7 +134,7 @@ impl ValueControl {
         let control_width = row.width - label_width - label_gap;
         let geometry = &mut prepared.geometry;
         geometry.label = Rect::new(row.x, row.y, label_width, 1);
-        prepared.label_text = clip_cells(spec.label, label_width);
+        prepared.label_text = clip_label_cells(spec.label, label_width);
         if control_width < 2 * step_width + 2 {
             geometry.open = Rect::new(control_x + control_width - 1, row.y, 1, 1);
             geometry.value_slot = Rect::new(control_x, row.y, control_width - 1, 1);
@@ -379,13 +379,28 @@ pub fn cell_width(text: &str) -> usize {
         .map(UnicodeWidthStr::width)
         .sum()
 }
+/// Clips text to `width` cells, cutting mid-word when the text does not fit.
+/// Values and dialog text use this; labels use `clip_label_cells`.
 pub fn clip_cells(text: &str, width: u16) -> String {
+    clip_cells_with_word_break(text, width, false)
+}
+
+/// Clips a label to `width` cells, ending at a whole word when that still shows
+/// at least a third of the room.
+pub fn clip_label_cells(text: &str, width: u16) -> String {
+    clip_cells_with_word_break(text, width, true)
+}
+
+fn clip_cells_with_word_break(text: &str, width: u16, prefer_word_break: bool) -> String {
     if width == 0 {
         return String::new();
     }
     let limit = usize::from(width);
     let mut output = String::new();
     let mut used = 0_usize;
+    // Byte length and cell width of the output just before the last word gap that
+    // fits, so a clipped label ends at a whole word instead of inside one.
+    let mut last_word_gap: Option<(usize, usize)> = None;
     for source in UnicodeSegmentation::graphemes(text, true) {
         let grapheme = if source.chars().any(char::is_control) {
             " "
@@ -397,9 +412,20 @@ pub fn clip_cells(text: &str, width: u16) -> String {
             continue;
         }
         if used + next_width <= limit {
+            if grapheme.trim().is_empty() {
+                last_word_gap = Some((output.len(), used));
+            }
             output.push_str(grapheme);
             used += next_width;
             continue;
+        }
+        if let Some((gap_bytes, gap_used)) = last_word_gap {
+            // Keep a word-ending cut only when it still shows at least a third of the room.
+            if prefer_word_break && gap_used * 3 >= limit {
+                output.truncate(gap_bytes);
+                output.push('…');
+                return output;
+            }
         }
         if used == limit {
             if let Some(last) = UnicodeSegmentation::graphemes(output.as_str(), true).next_back() {
@@ -986,6 +1012,11 @@ mod tests {
         assert_eq!(clip_cells("e\u{301}xy", 2), "e\u{301}…");
         assert_eq!(clip_cells("\u{301}", 4), "");
         assert_eq!(clip_cells("a\nb\tc\r\nd", 20), "a b c d");
+        // A clipped label ends at a whole word when that still shows a third of the room,
+        // and falls back to a mid-word cut when the last word gap is too early.
+        assert_eq!(clip_label_cells("Top-level destination", 15), "Top-level…");
+        assert_eq!(clip_label_cells("Top-level destination", 19), "Top-level…");
+        assert_eq!(clip_label_cells("a extraordinarily long", 10), "a extraor…");
         let emoji = "👩‍❤️‍💋‍👩";
         let emoji_width = cell_width(emoji) as u16;
         assert_eq!(clip_cells(emoji, emoji_width), emoji);

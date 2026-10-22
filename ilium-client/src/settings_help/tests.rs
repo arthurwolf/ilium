@@ -85,7 +85,7 @@ fn closing_help_restores_the_exact_settings_navigation_state() {
     };
 
     app.push_modal_over(
-        Mode::Settings(settings),
+        Mode::Settings(Box::new(settings)),
         Mode::SettingsHelp(super::dialog::SettingsHelpState::new(
             "VOICE-03",
             1,
@@ -125,6 +125,7 @@ fn expected_ids() -> BTreeSet<String> {
     add_range(&mut ids, "SND", 1, 9);
     add_range(&mut ids, "VOICE", 1, 14);
     add_range(&mut ids, "RESET", 1, 3);
+    add_range(&mut ids, "ATT", 1, 6);
     add_range(&mut ids, "COST", 1, 23);
     add_range(&mut ids, "RCOMP", 1, 17);
     add_range(&mut ids, "OPT", 1, 14);
@@ -375,10 +376,10 @@ STATUS_TAIL_64806_RECEIVED_NO_FIX",
             .render(&app.animation_settings, width, height, Duration::ZERO);
         let before = app.animation_settings.clone();
         app.push_modal_over(
-            Mode::Settings(SettingsState {
+            Mode::Settings(Box::new(SettingsState {
                 tab: SettingsTab::Animations,
                 ..Default::default()
-            }),
+            })),
             Mode::SettingsHelp(super::dialog::SettingsHelpState::new(
                 "AN-37",
                 1,

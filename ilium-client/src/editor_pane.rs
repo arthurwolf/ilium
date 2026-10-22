@@ -917,7 +917,10 @@ impl EditorPane {
                 self.textarea.lines(),
             ) {
                 Ok(()) => {}
-                Err(error) if error.ends_with("Busy") && Instant::now() < deadline => {
+                Err(error)
+                    if (error.ends_with("Busy") || error.ends_with("QueueFull"))
+                        && Instant::now() < deadline =>
+                {
                     std::thread::yield_now();
                 }
                 Err(error) => panic!("finite source fixture admission: {error}"),
@@ -935,7 +938,20 @@ impl EditorPane {
             );
             std::thread::yield_now();
         };
-        assert!(self.install_window(&completion, picker, width));
+        // Every editor test draws its reservations from one shared test bank, so
+        // a refusal can be transient under parallel load; retry inside a bound.
+        let install_deadline = Instant::now() + Duration::from_secs(10);
+        let mut installed = self.install_window(&completion, picker, width);
+        while !installed && Instant::now() < install_deadline {
+            std::thread::yield_now();
+            installed = self.install_window(&completion, picker, width);
+        }
+        let current = self.window_preparation_key(width, picker);
+        assert!(
+            installed,
+            "source window install refused: error={:?} current={current:?} completion={:?}",
+            self.preparation_error, completion.key,
+        );
         windows.cancel();
     }
     /// Both stages use one real finite client identity; no inline syntect DTO.
@@ -971,7 +987,10 @@ impl EditorPane {
                 self.textarea.lines(),
             ) {
                 Ok(()) => {}
-                Err(error) if error.ends_with("Busy") && Instant::now() < deadline => {
+                Err(error)
+                    if (error.ends_with("Busy") || error.ends_with("QueueFull"))
+                        && Instant::now() < deadline =>
+                {
                     std::thread::yield_now();
                 }
                 Err(error) => panic!("finite syntax fixture admission: {error}"),
@@ -985,7 +1004,14 @@ impl EditorPane {
             );
             std::thread::yield_now();
         };
-        assert!(self.install_window_styles(&completion));
+        // Same shared-bank admission as `install_window`: retry inside a bound.
+        let install_deadline = Instant::now() + Duration::from_secs(10);
+        let mut installed = self.install_window_styles(&completion);
+        while !installed && Instant::now() < install_deadline {
+            std::thread::yield_now();
+            installed = self.install_window_styles(&completion);
+        }
+        assert!(installed, "source window style install refused");
         syntax.cancel();
     }
     pub(crate) fn instance_identity(&self) -> std::sync::Arc<()> {
@@ -996,10 +1022,18 @@ impl EditorPane {
         let Some(path) = self.path.clone() else {
             return;
         };
-        let output = crate::execution::test_client()
-            .retirement()
-            .try_reserve::<Vec<crate::syntax::LineTokens>>(32 * 1024 * 1024)
-            .unwrap();
+        // The shared test bank can refuse transiently under parallel load; retry inside a bound.
+        let reservation_deadline = Instant::now() + Duration::from_secs(10);
+        let output = loop {
+            match crate::execution::test_client()
+                .retirement()
+                .try_reserve::<Vec<crate::syntax::LineTokens>>(32 * 1024 * 1024)
+            {
+                Ok(output) => break output,
+                Err(_) if Instant::now() < reservation_deadline => std::thread::yield_now(),
+                Err(reason) => panic!("highlight test reservation refused: {reason:?}"),
+            }
+        };
         *self.highlight_cache.get_mut() = crate::syntax::highlight(&path, self.textarea.lines())
             .map(|lines| HighlightCache {
                 revision: self.content_revision,

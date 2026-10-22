@@ -15,7 +15,9 @@ pub struct RealtimeTool {
 }
 
 /// Handle on the plugin's realtime tool bridge.
-pub struct Realtime<'a>(pub &'a mut FakeHost);
+pub struct Realtime<'a> {
+    pub _host: &'a mut FakeHost,
+}
 
 impl Realtime<'_> {
     /// Tools currently offered to the model.
@@ -74,7 +76,10 @@ impl Realtime<'_> {
 }
 
 /// Handle on an onboarding demo the plugin registered.
-pub struct OnboardingDemo<'a>(pub &'a mut FakeHost, pub String);
+pub struct OnboardingDemo<'a> {
+    pub _host: &'a mut FakeHost,
+    pub _name: String,
+}
 
 impl OnboardingDemo<'_> {
     /// Tool names of the demo.
@@ -106,10 +111,13 @@ pub trait VoiceHostExt {
 
 impl VoiceHostExt for FakeHost {
     fn realtime(&mut self) -> Realtime<'_> {
-        Realtime(self)
+        Realtime { _host: self }
     }
 
     fn onboarding_demo(&mut self, name: &str) -> OnboardingDemo<'_> {
-        OnboardingDemo(self, name.to_string())
+        OnboardingDemo {
+            _host: self,
+            _name: name.to_string(),
+        }
     }
 }

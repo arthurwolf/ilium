@@ -2727,3 +2727,11 @@ fn doc_pkg_305_page_calls_auto_update_a_policy_item() {
     let page = manual_page("reference-install-and-update.md");
     assert!(page.contains("Auto-update is a policy item"));
 }
+
+#[test]
+fn pkg_300_stale_candidate_cannot_create_an_action_after_auto_updates_are_disabled() {
+    assert_eq!(decide(&config(""), &plain_candidate()), AutoAction::None);
+    let mut metered = config("[plugins]\nauto_update = \"install\"\n");
+    metered.os_metered = true;
+    assert_eq!(decide(&metered, &plain_candidate()), AutoAction::None);
+}

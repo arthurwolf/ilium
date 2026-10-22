@@ -675,21 +675,19 @@ pub fn prepare_native_shared(
                     if tint.is_none() {
                         tint = Some(NativeTint::load(sources, cancel)?);
                     }
-                    tint.as_ref()
-                        .ok_or(Error::Source)?
-                        .sample_native_rgb(
-                            &binding.map,
-                            NativeRequest {
-                                source: binding.map.source(),
-                                java_position,
-                                kind,
-                                climate_policy: ClimatePolicy::RenderEarlierWith1193,
-                                world_seed: Some(world_seed),
-                                blend_radius,
-                            },
-                            &mut tint_memo,
-                            cancel,
-                        )?
+                    tint.as_ref().ok_or(Error::Source)?.sample_native_rgb(
+                        &binding.map,
+                        NativeRequest {
+                            source: binding.map.source(),
+                            java_position,
+                            kind,
+                            climate_policy: ClimatePolicy::RenderEarlierWith1193,
+                            world_seed: Some(world_seed),
+                            blend_radius,
+                        },
+                        &mut tint_memo,
+                        cancel,
+                    )?
                 }
             };
             tints.insert(index, color.map(|channel| f32::from(channel) / 255.0));

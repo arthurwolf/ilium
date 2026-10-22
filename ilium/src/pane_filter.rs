@@ -97,13 +97,9 @@ pub(crate) struct PaneFilterArgs {
 
     /// Keep agent panes in these states. `idle` also covers `done` (an
     /// agent that finished a turn nobody has looked at yet).
-    #[arg(
-        long = "state",
-        value_enum,
-        value_delimiter = ',',
-        value_name = "STATE"
-    )]
-    pub(crate) states: Vec<StateSelector>,
+    /// Values: working, waiting-approval, waiting-subagents, settling, idle, done.
+    #[arg(long = "state", value_delimiter = ',', value_name = "STATE")]
+    pub(crate) states: Vec<String>,
 
     /// Keep panes of these kinds.
     #[arg(long = "kind", value_enum, value_delimiter = ',', value_name = "KIND")]
@@ -402,6 +398,13 @@ impl PaneFilterArgs {
     /// Validates and resolves the selectors. `cwd` anchors relative project
     /// paths and `--here`.
     pub(crate) fn compile(&self, cwd: &Path) -> Result<PaneFilter, String> {
+        // Selection errors use the commands' structured error channel, rather
+        // than being rejected by clap before the command can emit JSON.
+        let states = self
+            .states
+            .iter()
+            .map(|state| StateSelector::from_str(state, false))
+            .collect::<Result<Vec<_>, _>>()?;
         if self.invert && self.matches.is_empty() && self.regexes.is_empty() {
             return Err("--invert needs at least one --match or --regex to invert".to_owned());
         }
@@ -454,7 +457,7 @@ impl PaneFilterArgs {
                 .iter()
                 .map(|agent| agent.to_lowercase())
                 .collect(),
-            states: self.states.clone(),
+            states,
             kinds: self.kinds.clone(),
             pane_ids: self.pane_ids.iter().copied().map(NodeId).collect(),
         })
@@ -831,7 +834,7 @@ mod tests {
     fn agent_state_kind_session_and_pane_selectors_narrow_together() {
         let filter = compile(PaneFilterArgs {
             agents: vec!["CLAUDE".to_owned(), "codex".to_owned()],
-            states: vec![StateSelector::Idle],
+            states: vec!["idle".to_owned()],
             sessions: vec!["default".to_owned()],
             pane_ids: vec![1, 2, 3, 4],
             ..PaneFilterArgs::default()
@@ -854,7 +857,7 @@ mod tests {
         assert!(!filter.accepts(&other_session));
 
         let done_only = compile(PaneFilterArgs {
-            states: vec![StateSelector::Done],
+            states: vec!["done".to_owned()],
             ..PaneFilterArgs::default()
         });
         assert!(!done_only.accepts(&agent_pane(1, "x", "/w", "Codex", AgentStateName::Idle)));

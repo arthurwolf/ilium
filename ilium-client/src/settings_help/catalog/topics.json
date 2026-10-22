@@ -1113,9 +1113,9 @@
     "title": "Last prompt banner",
     "explanation": "“Show the last exactly reconstructed prompt successfully submitted to a detected agent, retaining it when later input cannot be recognized.”",
     "specimen": "Use a detected-agent pane with a banner above its transcript. Provide a manually stepped sequence:\n\nThe banner contains “Explain this test”; a new draft is being entered, but the banner remains unchanged.\n\n“Summarize this log” is successfully submitted and exactly reconstructed; the banner updates.\n\nLater input is not reconstructable; the transcript may change, but the banner still says “Summarize this log.”\n\nWith the setting off, the same transcript appears without the banner.\n\nRepeat the recognized-submission specimen with typed and pasted sample input.",
-    "states": "Off/on, unsubmitted draft, recognized submission, and unrecognized input after a previously captured prompt.",
+    "states": "Off/on, unsubmitted draft, recognized submission, and unrecognized input after a previously captured prompt. Also show the banner’s bottom-right mini toolbar: previous and next prompt (each leaves a blank slot at the oldest or newest prompt), copy, full text (+) and close; and the agent toolbar’s re-open icon once the banner is closed for that agent.",
     "motion": "Manual frame advancement is sufficient. Do not animate banner updates merely as characters are typed.",
-    "caveat": "The banner is the last captured submission, which may not be the most recent actual submission after unrecognized input. Never “helpfully” infer replacement text or clear the previous banner.",
+    "caveat": "Closing the banner hides it for that agent only and does not change this setting. The banner is the last captured submission, which may not be the most recent actual submission after unrecognized input. Never “helpfully” infer replacement text or clear the previous banner.",
     "frames": [
       "Use a detected-agent pane with a banner above its transcript. Provide a manually stepped sequence:\n\nThe banner contains “Explain this test”; a new draft is being entered, but the banner remains unchanged.\n\n“Summarize this log” is successfully submitted and exactly reconstructed; the banner updates.\n\nLater input is not reconstructable; the transcript may change, but the banner still says “Summarize this log.”\n\nWith the setting off, the same transcript appears without the banner.\n\nRepeat the recognized-submission specimen with typed and pasted sample input."
     ]
@@ -4569,6 +4569,78 @@
     "caveat": "Toggling resizes every displayed terminal, because the rules occupy reserved rows.",
     "frames": [
       "Show a detected-agent pane with its toolbar, last prompt and one progress monitor, twice at the same width:\n\nFrames ON\n╭─ pane ───────────────────────╮\n│ toolbar                      │\n├─ ❯ last prompt ──────────────┤\n│ ▎ Explain this test          │\n├──────────────────────────────┤\n│ terminal                     │\n├─ ◔ monitors ─────────────────┤\n│ ◐ running ▕███▍    ▏  42%    │\n╰──────────────────────────────╯\n\nFrames OFF\nThe same content with no rules; the rows they used belong to the terminal."
+    ]
+  },
+  {
+    "id": "ATT-01",
+    "title": "Attention mode",
+    "explanation": "“Choose how the attention queue is fed: Off hides it, Instant only uses what agent detection already knows and calls no LLM, Shared adds the attention question to the Sort call, Turbo asks one parallel LLM call per agent.”",
+    "specimen": "Attention mode ........ ‹ Instant only (no LLM) ›\n\nOff            queue hidden, nothing computed\nInstant only   detection facts only, no LLM call\nShared         rides on the Sort call\nTurbo          one parallel LLM call per agent",
+    "states": "Off, Instant only (no LLM), Shared with Sort, Turbo (parallel LLM). Only Shared and Turbo ever call an LLM; Instant only never does, so it costs nothing and sends no pane text anywhere.",
+    "motion": "None.",
+    "caveat": "Instant only can list approvals and stopped goals that detection already sees, but it cannot judge what a quiet pane is waiting for. Turbo uses many more LLM calls than Shared.",
+    "frames": [
+      "Attention mode ........ ‹ Instant only (no LLM) ›\n\nOff            queue hidden, nothing computed\nInstant only   detection facts only, no LLM call\nShared         rides on the Sort call\nTurbo          one parallel LLM call per agent"
+    ]
+  },
+  {
+    "id": "ATT-02",
+    "title": "Sort refreshes attention",
+    "explanation": "“When On, pressing Sort also refreshes the attention queue so one press updates both.”",
+    "specimen": "Sort refreshes attention ........ ‹ ☑ On ›\n\nOn   press Sort: tree order and queue refresh together\nOff  press Sort: tree order only",
+    "states": "On and Off. Off keeps Sort for tree order alone. The queue is unaffected when Attention mode is Off.",
+    "motion": "None.",
+    "caveat": "Turning it Off does not hide the queue; it only stops the Sort press from refreshing it.",
+    "frames": [
+      "Sort refreshes attention ........ ‹ ☑ On ›\n\nOn   press Sort: tree order and queue refresh together\nOff  press Sort: tree order only"
+    ]
+  },
+  {
+    "id": "ATT-03",
+    "title": "Turbo parallel calls",
+    "explanation": "“Set how many attention LLM calls Turbo mode may have in flight at once, from 1 to 64.”",
+    "specimen": "Turbo parallel calls ........ ‹ 16 ›\n\n1 .. 64  calls in flight at the same time\nOne call per agent; extra agents wait their turn",
+    "states": "A whole number from 1 to 64; the default is 16. Values outside the range are clamped when the file is loaded.",
+    "motion": "None.",
+    "caveat": "Higher values finish a refresh sooner but can hit provider rate limits. It only applies in Turbo mode.",
+    "frames": [
+      "Turbo parallel calls ........ ‹ 16 ›\n\n1 .. 64  calls in flight at the same time\nOne call per agent; extra agents wait their turn"
+    ]
+  },
+  {
+    "id": "ATT-04",
+    "title": "Forget stale items after",
+    "explanation": "“Set how long an attention item stays listed after the live state stops supporting it, from 60 seconds to 24 hours.”",
+    "specimen": "Forget stale items after ........ ‹ 1800 s ›\n\nItem no longer supported by the pane\n  ... waits this long, then leaves the queue",
+    "states": "Whole seconds from 60 to 86400; the default is 1800 (30 minutes). The arrows step by 60 seconds.",
+    "motion": "None.",
+    "caveat": "An item that is still supported never expires. A shorter time keeps the queue clean; a longer time keeps items you may have missed.",
+    "frames": [
+      "Forget stale items after ........ ‹ 1800 s ›\n\nItem no longer supported by the pane\n  ... waits this long, then leaves the queue"
+    ]
+  },
+  {
+    "id": "ATT-05",
+    "title": "Attention model",
+    "explanation": "“Choose the model used for attention calls. Same as titles follows whatever model names your titles.”",
+    "specimen": "Attention model ........ ‹ Same as titles ›\n\nSame as titles   use the title naming model\nOther entries    models of the selected provider",
+    "states": "Same as titles, or one of the models offered by the provider selected under Models. A saved model outside that list stays selectable.",
+    "motion": "None.",
+    "caveat": "The list follows the provider chosen on the Models tab; switching provider does not rewrite a saved override. It does nothing in Off or Instant only mode.",
+    "frames": [
+      "Attention model ........ ‹ Same as titles ›\n\nSame as titles   use the title naming model\nOther entries    models of the selected provider"
+    ]
+  },
+  {
+    "id": "ATT-06",
+    "title": "Show briefing on arrival",
+    "explanation": "“When On, reaching an agent from the attention queue shows a box at the top of that agent saying why you were brought there, what the agent is doing, and what it needs from you.”",
+    "specimen": "Show briefing on arrival ........ ‹ ☑ On ›\n\nOn   a box above the terminal explains why you are here\nOff  you land on the agent with no extra box",
+    "states": "On and Off; the default is On. The box only ever appears while Attention mode is not Off. In Instant only mode it shows wording derived from agent detection, marked automatic; in Shared and Turbo mode it shows the model's wording, marked AI.",
+    "motion": "None.",
+    "caveat": "Each box can be dismissed with its x or folded to one line, and it comes back only for a new attention item on that agent. Turning the setting Off removes every open box at once.",
+    "frames": [
+      "Show briefing on arrival ........ ‹ ☑ On ›\n\nOn   a box above the terminal explains why you are here\nOff  you land on the agent with no extra box"
     ]
   }
 ]

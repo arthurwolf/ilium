@@ -326,11 +326,11 @@ mod tests {
             let directory = tempfile::tempdir().unwrap();
             let mut app = App::new("prefix-save".into(), directory.path().into());
             app.config_dir = Some(directory.path().into());
-            app.mode = Mode::Settings(crate::app::SettingsState {
+            app.mode = Mode::Settings(Box::new(crate::app::SettingsState {
                 tab: SettingsTab::Keyboard,
                 selected_row: field.row(),
                 ..Default::default()
-            });
+            }));
             let original = app.keyboard_settings;
             let bindings = app.keybindings.clone();
             std::fs::write(directory.path().join("config.toml"), "[keyboard\n").unwrap();
