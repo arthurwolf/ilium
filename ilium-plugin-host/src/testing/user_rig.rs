@@ -5,24 +5,58 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, SystemTime};
 
 use sha2::{Digest, Sha256};
 
+use crate::audit::{AuditActor, AuditContext};
+use crate::cli::local_install::factory;
 use crate::cli::{CliEnv, CliOutput};
-use crate::lifecycle::StartMode;
+use crate::install::{Consent, ConsentDecision, ConsentRequest};
+use crate::lifecycle::{LifecycleManager, StartMode};
 use crate::registry_client::{FetchError, Fetcher};
 use crate::signing::{SignedAt, SigningKey};
+use crate::trust::{TrustDocument, TrustRepository};
 
 pub use ilium_plugin_api::platform::Platform;
 
-/// Fetcher for a rig with no network interface: every request fails as unreachable.
-struct UnreachableFetcher;
+/// Fetcher for a rig with no network interface: every request fails as unreachable, and each
+/// requested URL is recorded so the rig can report what was attempted.
+struct UnreachableFetcher {
+    requests: Arc<Mutex<Vec<String>>>,
+}
 
 impl Fetcher for UnreachableFetcher {
-    fn get(&self, _url: &str) -> Result<Vec<u8>, FetchError> {
+    fn get(&self, url: &str) -> Result<Vec<u8>, FetchError> {
+        // A poisoned lock still holds every URL recorded so far, so recording continues through it.
+        let mut requests = self.requests.lock().unwrap_or_else(PoisonError::into_inner);
+        requests.push(url.to_owned());
         Err(FetchError::Unreachable)
+    }
+}
+
+/// Consent that approves exactly the grants a package requests, as the default review does.
+struct ApproveRequested;
+
+impl Consent for ApproveRequested {
+    fn decide(&self, request: &ConsentRequest) -> ConsentDecision {
+        ConsentDecision::Approve(request.requested.clone())
+    }
+}
+
+/// Collects every path below `directory`, depth first, without following a missing directory.
+fn collect_paths(directory: &Path, found: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(directory) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let is_directory = path.is_dir();
+        found.push(path.clone());
+        if is_directory {
+            collect_paths(&path, found);
+        }
     }
 }
 
@@ -218,6 +252,25 @@ impl KeyPair {
     }
 }
 
+/// One declaration or behaviour a [`PackageSpec`] builder was given, in the order it was given.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum PackageDeclaration {
+    StartWritesFile(String),
+    ActivationTraps,
+    RenderTraps(String),
+    ExportTraps(String),
+    Pane(String),
+    Service(String),
+    ConsumesService { provider: String, service: String },
+    DefinesPoint(String),
+    DefinesFilterPoint(String),
+    DefinesVetoPoint(String),
+    ContributesTo { owner: String, point: String },
+    ContributesWithPriority { owner: String, point: String, priority: u32 },
+    Hook { owner: String, point: String, behaviour: HookBehaviour },
+    AddsDecorations,
+}
+
 /// A plugin package to install, built in memory.
 #[derive(Debug, Clone)]
 pub struct PackageSpec {
@@ -231,6 +284,8 @@ pub struct PackageSpec {
     replaces: Vec<String>,
     corrupt_archive: bool,
     corrupt_signature: bool,
+    /// Builder declarations, kept in the order given; `build_bytes` does not serialize them yet.
+    declarations: Vec<PackageDeclaration>,
 }
 
 impl PackageSpec {
@@ -246,6 +301,7 @@ impl PackageSpec {
             replaces: Vec::new(),
             corrupt_archive: false,
             corrupt_signature: false,
+            declarations: Vec::new(),
         }
     }
 
@@ -271,23 +327,30 @@ impl PackageSpec {
     }
 
     /// The plugin writes a data file on start.
-    pub fn start_writes_file(self, _name: &str) -> PackageSpec {
-        unimplemented!("host::testing::user_rig::PackageSpec::start_writes_file")
+    pub fn start_writes_file(mut self, name: &str) -> PackageSpec {
+        self.declarations
+            .push(PackageDeclaration::StartWritesFile(name.to_owned()));
+        self
     }
 
     /// The plugin traps on activation.
-    pub fn activation_traps(self) -> PackageSpec {
-        unimplemented!("host::testing::user_rig::PackageSpec::activation_traps")
+    pub fn activation_traps(mut self) -> PackageSpec {
+        self.declarations.push(PackageDeclaration::ActivationTraps);
+        self
     }
 
     /// The plugin traps when rendering a view.
-    pub fn render_traps(self, _view: &str) -> PackageSpec {
-        unimplemented!("host::testing::user_rig::PackageSpec::render_traps")
+    pub fn render_traps(mut self, view: &str) -> PackageSpec {
+        self.declarations
+            .push(PackageDeclaration::RenderTraps(view.to_owned()));
+        self
     }
 
     /// The plugin traps in an export.
-    pub fn export_traps(self, _export: &str) -> PackageSpec {
-        unimplemented!("host::testing::user_rig::PackageSpec::export_traps")
+    pub fn export_traps(mut self, export: &str) -> PackageSpec {
+        self.declarations
+            .push(PackageDeclaration::ExportTraps(export.to_owned()));
+        self
     }
 
     /// Corrupts one file hash of the package.
@@ -320,58 +383,88 @@ impl PackageSpec {
     }
 
     /// A pane kind the plugin provides.
-    pub fn provides_pane(self, _kind: &str) -> PackageSpec {
-        unimplemented!("host::testing::user_rig::PackageSpec::provides_pane")
+    pub fn provides_pane(mut self, kind: &str) -> PackageSpec {
+        self.declarations
+            .push(PackageDeclaration::Pane(kind.to_owned()));
+        self
     }
 
     /// A service the plugin provides.
-    pub fn provides_service(self, _service: &str) -> PackageSpec {
-        unimplemented!("host::testing::user_rig::PackageSpec::provides_service")
+    pub fn provides_service(mut self, service: &str) -> PackageSpec {
+        self.declarations
+            .push(PackageDeclaration::Service(service.to_owned()));
+        self
     }
 
     /// A service of another plugin this one consumes.
-    pub fn consumes_service(self, _provider: &str, _service: &str) -> PackageSpec {
-        unimplemented!("host::testing::user_rig::PackageSpec::consumes_service")
+    pub fn consumes_service(mut self, provider: &str, service: &str) -> PackageSpec {
+        self.declarations.push(PackageDeclaration::ConsumesService {
+            provider: provider.to_owned(),
+            service: service.to_owned(),
+        });
+        self
     }
 
     /// An extension point the plugin defines.
-    pub fn defines_point(self, _point: &str) -> PackageSpec {
-        unimplemented!("host::testing::user_rig::PackageSpec::defines_point")
+    pub fn defines_point(mut self, point: &str) -> PackageSpec {
+        self.declarations
+            .push(PackageDeclaration::DefinesPoint(point.to_owned()));
+        self
     }
 
     /// A filter point the plugin defines.
-    pub fn defines_filter_point(self, _point: &str) -> PackageSpec {
-        unimplemented!("host::testing::user_rig::PackageSpec::defines_filter_point")
+    pub fn defines_filter_point(mut self, point: &str) -> PackageSpec {
+        self.declarations
+            .push(PackageDeclaration::DefinesFilterPoint(point.to_owned()));
+        self
     }
 
     /// A veto point the plugin defines.
-    pub fn defines_veto_point(self, _point: &str) -> PackageSpec {
-        unimplemented!("host::testing::user_rig::PackageSpec::defines_veto_point")
+    pub fn defines_veto_point(mut self, point: &str) -> PackageSpec {
+        self.declarations
+            .push(PackageDeclaration::DefinesVetoPoint(point.to_owned()));
+        self
     }
 
     /// A contribution to another plugin's point.
-    pub fn contributes_to(self, _owner: &str, _point: &str) -> PackageSpec {
-        unimplemented!("host::testing::user_rig::PackageSpec::contributes_to")
+    pub fn contributes_to(mut self, owner: &str, point: &str) -> PackageSpec {
+        self.declarations.push(PackageDeclaration::ContributesTo {
+            owner: owner.to_owned(),
+            point: point.to_owned(),
+        });
+        self
     }
 
     /// A contribution with an explicit priority.
     pub fn contributes_with_priority(
-        self,
-        _owner: &str,
-        _point: &str,
-        _priority: u32,
+        mut self,
+        owner: &str,
+        point: &str,
+        priority: u32,
     ) -> PackageSpec {
-        unimplemented!("host::testing::user_rig::PackageSpec::contributes_with_priority")
+        self.declarations
+            .push(PackageDeclaration::ContributesWithPriority {
+                owner: owner.to_owned(),
+                point: point.to_owned(),
+                priority,
+            });
+        self
     }
 
     /// A hook handler on another plugin's point.
-    pub fn hook(self, _owner: &str, _point: &str, _behaviour: HookBehaviour) -> PackageSpec {
-        unimplemented!("host::testing::user_rig::PackageSpec::hook")
+    pub fn hook(mut self, owner: &str, point: &str, behaviour: HookBehaviour) -> PackageSpec {
+        self.declarations.push(PackageDeclaration::Hook {
+            owner: owner.to_owned(),
+            point: point.to_owned(),
+            behaviour,
+        });
+        self
     }
 
     /// The plugin adds tree decorations.
-    pub fn adds_decorations(self) -> PackageSpec {
-        unimplemented!("host::testing::user_rig::PackageSpec::adds_decorations")
+    pub fn adds_decorations(mut self) -> PackageSpec {
+        self.declarations.push(PackageDeclaration::AddsDecorations);
+        self
     }
 
     /// The package bytes.
@@ -468,6 +561,24 @@ pub struct UserRig {
     root: PathBuf,
     platform: Platform,
     is_ci: bool,
+    /// Milliseconds the rig clock has been advanced past the wall clock.
+    clock_offset_ms: u64,
+    /// URLs the rig's fetcher was asked for, in order; shared with the fetcher `cli_env` hands out.
+    requests: Arc<Mutex<Vec<String>>>,
+    /// The registry URL set by `configure_registry`; the fetcher does not reach it yet.
+    registry_url: Option<String>,
+    /// The project set by `switch_project`.
+    project_path: Option<PathBuf>,
+    /// The kill point set by `kill_host_at`; no install consults it yet.
+    kill_point: Option<KillPoint>,
+    /// Plugin settings keyed by `(plugin id, setting key)`.
+    plugin_settings: BTreeMap<(String, String), String>,
+    /// Toast texts currently shown, oldest first.
+    toasts: Vec<String>,
+    /// Whether a plugin has locked user input.
+    input_locked: bool,
+    /// Journal lines per plugin id, oldest first.
+    journal_lines: BTreeMap<String, Vec<String>>,
 }
 
 impl Drop for UserRig {
@@ -514,7 +625,23 @@ impl UserRig {
             root,
             platform,
             is_ci: false,
+            clock_offset_ms: 0,
+            requests: Arc::new(Mutex::new(Vec::new())),
+            registry_url: None,
+            project_path: None,
+            kill_point: None,
+            plugin_settings: BTreeMap::new(),
+            toasts: Vec::new(),
+            input_locked: false,
+            journal_lines: BTreeMap::new(),
         }
+    }
+
+    /// The rig clock: the wall clock plus whatever `advance_ms` added.
+    fn now(&self) -> SystemTime {
+        SystemTime::now()
+            .checked_add(Duration::from_millis(self.clock_offset_ms))
+            .unwrap_or(SystemTime::UNIX_EPOCH)
     }
 
     /// The environment every `ilium plugin` run of this rig uses.
@@ -524,9 +651,11 @@ impl UserRig {
             self.state_dir(),
             self.config_dir(),
             self.root.join("home"),
-            SystemTime::now(),
+            self.now(),
             self.is_ci,
-            Arc::new(UnreachableFetcher),
+            Arc::new(UnreachableFetcher {
+                requests: Arc::clone(&self.requests),
+            }),
         );
         env.cache_dir = self.cache_dir();
         env.platform = self.platform;
@@ -545,8 +674,39 @@ impl UserRig {
     }
 
     /// Installs a package file with extra arguments.
-    pub fn install_file(&mut self, _package: &PackageSpec, _args: &[&str]) -> CliOutput {
-        unimplemented!("host::testing::user_rig::UserRig::install_file")
+    pub fn install_file(&mut self, package: &PackageSpec, args: &[&str]) -> CliOutput {
+        let package_path = self
+            .scratch_dir()
+            .join(format!("{}-{}.iliumpkg", package.id, package.version));
+        std::fs::write(&package_path, package.build_bytes())
+            .unwrap_or_else(|error| panic!("write package {}: {error}", package_path.display()));
+        let consent: Arc<dyn Consent + Send + Sync> = Arc::new(ApproveRequested);
+        let audit_context = AuditContext {
+            session: "user-rig".to_owned(),
+            actor: AuditActor {
+                kind: "cli".to_owned(),
+                pane: None,
+                plugin: None,
+            },
+        };
+        let mut env = self.cli_env();
+        env.cwd = self.root.clone();
+        let backend = match factory(&env, consent, audit_context) {
+            Ok(backend) => backend,
+            Err(diagnostic) => {
+                return CliOutput {
+                    exit_code: 1,
+                    stdout_jsonl: Vec::new(),
+                    stderr: diagnostic.message.clone(),
+                    stdout_raw: String::new(),
+                    stdout_text: String::new(),
+                };
+            }
+        };
+        let env = env.with_installer(backend);
+        let mut owned = vec!["install".to_owned(), package_path.display().to_string()];
+        owned.extend(args.iter().map(|argument| (*argument).to_owned()));
+        crate::cli::run(&owned, &env)
     }
 
     /// Starts an install without waiting for its review.
@@ -565,7 +725,22 @@ impl UserRig {
 
     /// The rows of `ilium plugin list`.
     pub fn list(&mut self) -> Vec<PluginRow> {
-        unimplemented!("host::testing::user_rig::UserRig::list")
+        // The rig attaches no session, so `list` reports session.unreachable and yields no rows.
+        let output = self.cli(&["list", "--json"]);
+        output
+            .stdout_jsonl
+            .iter()
+            .filter(|record| record["type"] == "plugin")
+            .map(|record| PluginRow {
+                id: record["id"].as_str().unwrap_or_default().to_owned(),
+                version: record["version"].as_str().unwrap_or_default().to_owned(),
+                tier: record["tier"].as_str().unwrap_or_default().to_owned(),
+                state: record["state"].as_str().unwrap_or_default().to_owned(),
+                reason: record["reason"].as_str().map(str::to_owned),
+                message: record["message"].as_str().map(str::to_owned),
+                untrusted: record["untrusted"].as_bool().unwrap_or(false),
+            })
+            .collect()
     }
 
     /// Sets the CI environment flag.
@@ -574,8 +749,8 @@ impl UserRig {
     }
 
     /// Points the rig at a registry URL.
-    pub fn configure_registry(&mut self, _url: &str) {
-        unimplemented!("host::testing::user_rig::UserRig::configure_registry")
+    pub fn configure_registry(&mut self, url: &str) {
+        self.registry_url = Some(url.to_owned());
     }
 
     /// How often the install instructions of a package ran.
@@ -612,27 +787,31 @@ impl UserRig {
 
     /// The grant store file.
     pub fn grants_path(&self) -> PathBuf {
-        unimplemented!("host::testing::user_rig::UserRig::grants_path")
+        self.state_dir().join("grants.json")
     }
 
     /// The trust store file.
     pub fn trust_store_path(&self) -> PathBuf {
-        unimplemented!("host::testing::user_rig::UserRig::trust_store_path")
+        self.state_dir().join("trust.json")
     }
 
     /// The audit directory holding `audit.jsonl` and its rotations.
     pub fn audit_dir(&self) -> PathBuf {
-        unimplemented!("host::testing::user_rig::UserRig::audit_dir")
+        self.state_dir().join("audit")
     }
 
     /// Files the host created outside the XDG roots.
     pub fn files_outside_xdg_roots(&self) -> Vec<PathBuf> {
-        unimplemented!("host::testing::user_rig::UserRig::files_outside_xdg_roots")
+        let mut found = Vec::new();
+        collect_paths(&self.root.join("home"), &mut found);
+        found.into_iter().filter(|path| path.is_file()).collect()
     }
 
     /// Every path the host created.
     pub fn paths_created_by_the_host(&self) -> Vec<PathBuf> {
-        unimplemented!("host::testing::user_rig::UserRig::paths_created_by_the_host")
+        let mut found = Vec::new();
+        collect_paths(&self.root, &mut found);
+        found
     }
 
     /// Sets the umask of the host process.
@@ -657,45 +836,51 @@ impl UserRig {
     }
 
     /// Opens (creates) a project and returns its path.
-    pub fn open_project(&mut self, _name: &str) -> PathBuf {
-        unimplemented!("host::testing::user_rig::UserRig::open_project")
+    pub fn open_project(&mut self, name: &str) -> PathBuf {
+        let path = self.scratch_dir().join("projects").join(name);
+        std::fs::create_dir_all(&path)
+            .unwrap_or_else(|error| panic!("open_project {}: {error}", path.display()));
+        path
     }
 
     /// Switches the server to another project.
-    pub fn switch_project(&mut self, _path: &Path) {
-        unimplemented!("host::testing::user_rig::UserRig::switch_project")
+    pub fn switch_project(&mut self, path: &Path) {
+        self.project_path = Some(path.to_path_buf());
     }
 
     // ---- Server and clock -----------------------------------------------------------------
 
     /// Starts the server.
     pub fn start_server(&mut self) {
-        unimplemented!("host::testing::user_rig::UserRig::start_server")
+        self.start_server_mode(StartMode::Normal);
     }
 
     /// Starts the server in a mode.
-    pub fn start_server_mode(&mut self, _mode: StartMode) {
-        unimplemented!("host::testing::user_rig::UserRig::start_server_mode")
+    pub fn start_server_mode(&mut self, mode: StartMode) {
+        // Production lifecycle start is still a stub: this call is the intended red state.
+        let _report = LifecycleManager.start(mode);
     }
 
     /// Restarts the server.
     pub fn restart_server(&mut self) {
-        unimplemented!("host::testing::user_rig::UserRig::restart_server")
+        self.stop_server();
+        self.start_server();
     }
 
     /// Stops the server.
     pub fn stop_server(&mut self) {
-        unimplemented!("host::testing::user_rig::UserRig::stop_server")
+        // Production lifecycle shutdown is still a stub: this call is the intended red state.
+        let _report = LifecycleManager.shutdown(Duration::from_secs(5));
     }
 
     /// Advances the clock.
-    pub fn advance_ms(&mut self, _ms: u64) {
-        unimplemented!("host::testing::user_rig::UserRig::advance_ms")
+    pub fn advance_ms(&mut self, ms: u64) {
+        self.clock_offset_ms = self.clock_offset_ms.saturating_add(ms);
     }
 
     /// Kills the host at a point of the next install or uninstall.
-    pub fn kill_host_at(&mut self, _point: KillPoint) {
-        unimplemented!("host::testing::user_rig::UserRig::kill_host_at")
+    pub fn kill_host_at(&mut self, point: KillPoint) {
+        self.kill_point = Some(point);
     }
 
     /// The startup trace of the last server start.
@@ -758,8 +943,29 @@ impl UserRig {
     // ---- Grants, trust and state ----------------------------------------------------------
 
     /// The grant entries of a plugin.
-    pub fn grant_entries(&self, _id: &str) -> Vec<GrantEntry> {
-        unimplemented!("host::testing::user_rig::UserRig::grant_entries")
+    pub fn grant_entries(&self, id: &str) -> Vec<GrantEntry> {
+        // The grant store file keeps the granted grants per side; a missing or unreadable file
+        // holds no grants.
+        let Ok(text) = std::fs::read_to_string(self.grants_path()) else {
+            return Vec::new();
+        };
+        let Ok(document) = serde_json::from_str::<serde_json::Value>(&text) else {
+            return Vec::new();
+        };
+        let mut entries = Vec::new();
+        for side in ["server", "client"] {
+            let Some(grants) = document["plugins"][id]["grants"][side].as_array() else {
+                continue;
+            };
+            for grant in grants.iter().filter_map(serde_json::Value::as_str) {
+                entries.push(GrantEntry {
+                    grant: grant.to_owned(),
+                    side: side.to_owned(),
+                    state: "granted".to_owned(),
+                });
+            }
+        }
+        entries
     }
 
     /// Trusts a publisher key.
@@ -769,7 +975,17 @@ impl UserRig {
 
     /// The trusted key fingerprints.
     pub fn trusted_keys(&self) -> Vec<String> {
-        unimplemented!("host::testing::user_rig::UserRig::trusted_keys")
+        // A missing or unreadable trust store reads as no trusted keys.
+        TrustRepository::new(self.trust_store_path(), TrustDocument::default())
+            .and_then(|repository| repository.snapshot_at(self.now()))
+            .map(|snapshot| {
+                snapshot
+                    .keys()
+                    .iter()
+                    .map(|resolved| resolved.entry.key_id.clone())
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     /// The grant-store bytes expected after a grant is given.
@@ -778,13 +994,16 @@ impl UserRig {
     }
 
     /// Sets a plugin setting.
-    pub fn set_plugin_setting(&mut self, _id: &str, _key: &str, _value: &str) {
-        unimplemented!("host::testing::user_rig::UserRig::set_plugin_setting")
+    pub fn set_plugin_setting(&mut self, id: &str, key: &str, value: &str) {
+        self.plugin_settings
+            .insert((id.to_owned(), key.to_owned()), value.to_owned());
     }
 
     /// A plugin setting.
-    pub fn plugin_setting(&self, _id: &str, _key: &str) -> Option<String> {
-        unimplemented!("host::testing::user_rig::UserRig::plugin_setting")
+    pub fn plugin_setting(&self, id: &str, key: &str) -> Option<String> {
+        self.plugin_settings
+            .get(&(id.to_owned(), key.to_owned()))
+            .cloned()
     }
 
     /// Writes a file into a plugin's cache directory.
@@ -870,28 +1089,28 @@ impl UserRig {
     }
 
     /// A plugin shows a toast.
-    pub fn plugin_toast(&mut self, _id: &str, _text: &str) {
-        unimplemented!("host::testing::user_rig::UserRig::plugin_toast")
+    pub fn plugin_toast(&mut self, _id: &str, text: &str) {
+        self.toasts.push(text.to_owned());
     }
 
     /// The toasts visible now.
     pub fn visible_toasts(&self) -> Vec<String> {
-        unimplemented!("host::testing::user_rig::UserRig::visible_toasts")
+        self.toasts.clone()
     }
 
     /// Dismisses every toast.
     pub fn clear_toasts(&mut self) {
-        unimplemented!("host::testing::user_rig::UserRig::clear_toasts")
+        self.toasts.clear();
     }
 
     /// A plugin locks user input.
     pub fn plugin_locks_input(&mut self, _id: &str) {
-        unimplemented!("host::testing::user_rig::UserRig::plugin_locks_input")
+        self.input_locked = true;
     }
 
     /// Whether user input is locked.
     pub fn input_locked(&self) -> bool {
-        unimplemented!("host::testing::user_rig::UserRig::input_locked")
+        self.input_locked
     }
 
     /// Whether the clipboard-access indicator is visible.
@@ -900,18 +1119,28 @@ impl UserRig {
     }
 
     /// A plugin logs one line at a level.
-    pub fn plugin_logs(&mut self, _id: &str, _level: &str, _line: &str) {
-        unimplemented!("host::testing::user_rig::UserRig::plugin_logs")
+    pub fn plugin_logs(&mut self, id: &str, level: &str, line: &str) {
+        self.journal_lines
+            .entry(id.to_owned())
+            .or_default()
+            .push(format!("{level}: {line}"));
     }
 
-    /// A plugin logs `bytes` bytes.
-    pub fn plugin_logs_bytes(&mut self, _id: &str, _bytes: usize) {
-        unimplemented!("host::testing::user_rig::UserRig::plugin_logs_bytes")
+    /// A plugin logs `bytes` bytes. The rig records a write as one journal line of that length,
+    /// so a zero-byte write leaves no line.
+    pub fn plugin_logs_bytes(&mut self, id: &str, bytes: usize) {
+        if bytes == 0 {
+            return;
+        }
+        self.journal_lines
+            .entry(id.to_owned())
+            .or_default()
+            .push("x".repeat(bytes));
     }
 
     /// The journal lines of a plugin.
-    pub fn log_lines(&self, _id: &str) -> Vec<String> {
-        unimplemented!("host::testing::user_rig::UserRig::log_lines")
+    pub fn log_lines(&self, id: &str) -> Vec<String> {
+        self.journal_lines.get(id).cloned().unwrap_or_default()
     }
 
     /// Makes a plugin trap on its next call.
@@ -948,12 +1177,18 @@ impl UserRig {
 
     /// The network requests made.
     pub fn network_requests(&self) -> Vec<String> {
-        unimplemented!("host::testing::user_rig::UserRig::network_requests")
+        self.requests
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 
     /// How often the fetcher was called.
     pub fn fetch_calls(&self) -> usize {
-        unimplemented!("host::testing::user_rig::UserRig::fetch_calls")
+        self.requests
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .len()
     }
 
     /// Turns request logging on or off.
@@ -1071,8 +1306,15 @@ impl UserRig {
     }
 
     /// The audit records of one event kind.
-    pub fn audit_records_of(&self, _event: &str) -> Vec<serde_json::Value> {
-        unimplemented!("host::testing::user_rig::UserRig::audit_records_of")
+    pub fn audit_records_of(&self, event: &str) -> Vec<serde_json::Value> {
+        // A missing or unreadable audit log holds no records, as the production reader reports.
+        crate::stores::AuditLog::open(&self.state_dir())
+            .map(|log| log.entries())
+            .unwrap_or_default()
+            .iter()
+            .filter(|entry| entry.kind == event)
+            .filter_map(|entry| serde_json::from_str(&entry.line).ok())
+            .collect()
     }
 }
 

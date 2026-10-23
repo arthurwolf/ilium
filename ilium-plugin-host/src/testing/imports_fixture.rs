@@ -3,6 +3,8 @@
 //! imports-core, SET-*, WIT:ilium:host/*). Test support only.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use ilium_plugin_api::generated::host::plugins::InstanceState;
@@ -10,10 +12,16 @@ use ilium_plugin_api::generated::host::{
     Bucket, ChildHandle, FieldError, HostClock, HostCodec, HostFs, HostHttp, HostJobs, HostJournal,
     HostLog, HostPanes, HostProcess, HostSettings, HostStorage, HostTimers, HostTree,
 };
-use ilium_plugin_api::generated::types::{
-    ErrorCode, Event, FsPath, MeterSegment, NodeId, Outcome, PluginError, RequestId, RichSpan,
-    RowState, StreamId, WatchId,
+use ilium_plugin_api::generated::types::intents::{
+    CreateGroupSpec, CreatePaneSpec, SetNodeLockedSpec,
 };
+use ilium_plugin_api::generated::types::tree::Placement;
+use ilium_plugin_api::generated::types::{
+    ErrorCode, Event, FsPath, Intent, MeterSegment, NodeId, Outcome, PluginError, RequestId,
+    RichSpan, RowState, StreamId, WatchId,
+};
+use ilium_plugin_api::ids::PluginId;
+use ilium_plugin_api::kernel::{KernelFacade, Origin};
 use ilium_plugin_api::side::Side;
 use ilium_plugin_api::Tier;
 
@@ -27,8 +35,12 @@ use crate::imports::log::LogImport;
 use crate::imports::panes::PanesImport;
 use crate::imports::process::ProcessImport;
 use crate::imports::settings::SettingsImport;
+use crate::imports::storage::{
+    StorageAuthorization, StorageImport, StorageImportContext, StorageInstanceState,
+};
 use crate::imports::timers::TimersImport;
 use crate::imports::tree::TreeImport;
+use crate::storage::StorageContext;
 use crate::telemetry::LogLine;
 use crate::testing::harness::{HarnessHandle, HostHarness, NullGuest};
 
@@ -68,6 +80,128 @@ pub type JobRunner = Box<dyn FnMut(&str, &[u8]) -> Result<Vec<u8>, PluginError>>
 
 /// Pump rounds that `pump` and `advance` ask the production harness to run.
 const PUMP_ROUNDS: u32 = 64;
+
+/// Longest settings validate answer that still saves, in virtual time (SET-022).
+const SETTINGS_VALIDATE_BUDGET: Duration = Duration::from_millis(100);
+
+/// Largest settings patch a save accepts, in bytes (SET-024).
+const SETTINGS_PATCH_LIMIT_BYTES: usize = 256 * 1024;
+
+/// Longest text value a settings patch may carry, in characters (SET-024).
+const SETTINGS_TEXT_LIMIT_CHARS: usize = 4096;
+
+/// Bucket quota of the fixture's storage engine, in bytes.
+const FIXTURE_BUCKET_LIMIT_BYTES: usize = 64 * 1024 * 1024;
+
+/// Shared quota of the fixture's storage engine, in bytes.
+const FIXTURE_SHARED_LIMIT_BYTES: usize = 128 * 1024 * 1024;
+
+/// Numbers the storage roots of fixtures built in this process.
+static STORAGE_ROOT_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+/// A fresh directory for one fixture's storage engine, unique within this process.
+fn fixture_storage_root() -> PathBuf {
+    let sequence = STORAGE_ROOT_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    std::env::temp_dir().join(format!(
+        "ilium-imports-fixture-{}-{sequence}",
+        std::process::id()
+    ))
+}
+
+/// The production storage import of the fixture plugin, opened on its own root.
+/// Storage is always granted (api-storage.md), so the fixture always holds one.
+fn open_fixture_storage(root: &Path, tier: Tier, side: Side) -> StorageImport {
+    let plugin = PluginId("test.imports".to_owned());
+    let context = StorageImportContext {
+        plugin: plugin.clone(),
+        side,
+        scope: StorageContext {
+            project: None,
+            session: None,
+            data_version: 1,
+        },
+        tier,
+        bucket_limit_bytes: FIXTURE_BUCKET_LIMIT_BYTES,
+        shared_limit_bytes: FIXTURE_SHARED_LIMIT_BYTES,
+    };
+    let authorization = Arc::new(Mutex::new(StorageAuthorization::new(
+        plugin,
+        side,
+        StorageInstanceState::Active,
+    )));
+    StorageImport::open(root, context, authorization, |_, _| {})
+        .unwrap_or_else(|error| panic!("imports fixture storage did not open: {}", error.message))
+}
+
+/// Refuses a settings patch that is too large or holds a text value over 4096 characters (SET-024).
+fn check_patch_limits(patch_json: &str) -> Result<(), String> {
+    if patch_json.len() > SETTINGS_PATCH_LIMIT_BYTES {
+        return Err(format!(
+            "settings patch of {} bytes exceeds 256 KiB",
+            patch_json.len()
+        ));
+    }
+    let patch: serde_json::Value =
+        serde_json::from_str(patch_json).map_err(|error| error.to_string())?;
+    let longest_text = longest_text_chars(&patch);
+    if longest_text > SETTINGS_TEXT_LIMIT_CHARS {
+        return Err(format!(
+            "settings text of {longest_text} characters exceeds 4096"
+        ));
+    }
+    Ok(())
+}
+
+/// The character count of the longest string anywhere inside a JSON value.
+fn longest_text_chars(value: &serde_json::Value) -> usize {
+    match value {
+        serde_json::Value::String(text) => text.chars().count(),
+        serde_json::Value::Array(items) => items.iter().map(longest_text_chars).max().unwrap_or(0),
+        serde_json::Value::Object(map) => map.values().map(longest_text_chars).max().unwrap_or(0),
+        _ => 0,
+    }
+}
+
+/// The stored settings object with the patch's keys written over it; the validate hook sees this view.
+fn merge_settings_patch(stored_json: &str, patch_json: &str) -> Result<String, String> {
+    let mut merged: serde_json::Map<String, serde_json::Value> =
+        serde_json::from_str(stored_json).unwrap_or_default();
+    let patch: serde_json::Map<String, serde_json::Value> = serde_json::from_str(patch_json)
+        .map_err(|error| format!("settings patch is not a JSON object: {error}"))?;
+    merged.extend(patch);
+    serde_json::to_string(&merged).map_err(|error| error.to_string())
+}
+
+/// Creates a node through the fake kernel's intent path and returns its id.
+/// A refused intent is a fixture misuse, so it panics with the node kind named.
+fn create_fixture_node(harness: &HarnessHandle, intent: Intent, kind_text: &str) -> NodeId {
+    match harness.kernel().apply_intent(&Origin::Kernel, intent) {
+        Outcome::OkNode(node) => node,
+        _ => panic!("imports fixture could not create {kind_text}"),
+    }
+}
+
+/// The create-pane intent of a terminal pane, under an optional parent.
+fn terminal_pane_spec(parent: Option<NodeId>, title: &str) -> CreatePaneSpec {
+    CreatePaneSpec {
+        parent,
+        title: title.to_owned(),
+        content_kind: "terminal".to_owned(),
+        cwd: None,
+        command: None,
+        initial_input: None,
+    }
+}
+
+/// The create-group intent of an empty group, under an optional parent.
+fn empty_group_spec(parent: Option<NodeId>, title: &str) -> CreateGroupSpec {
+    CreateGroupSpec {
+        parent,
+        title: title.to_owned(),
+        placement: Placement::InsideLast,
+        children: Vec::new(),
+    }
+}
 
 /// Builder inputs that have no production sink yet; kept so the setters stay total.
 struct FixtureConfig {
@@ -174,9 +308,12 @@ impl ImportsFixtureBuilder {
     /// exports nothing, so every import call reaches the production import implementations.
     pub fn build(self) -> ImportsFixture {
         let grant_refs: Vec<&str> = self.grants.iter().map(String::as_str).collect();
+        let tier = self.tier.unwrap_or(Tier::T3);
+        let side = self.side.unwrap_or(Side::Server);
+        let storage_import = open_fixture_storage(&fixture_storage_root(), tier, side);
         let harness = HostHarness::new()
-            .tier(self.tier.unwrap_or(Tier::T3))
-            .side(self.side.unwrap_or(Side::Server))
+            .tier(tier)
+            .side(side)
             .grants(&grant_refs)
             .with_native_guest(Box::new(NullGuest))
             .build()
@@ -205,6 +342,9 @@ impl ImportsFixtureBuilder {
             settings_import: SettingsImport,
             timers_import: TimersImport,
             tree_import: TreeImport,
+            storage_import,
+            save_trace: Vec::new(),
+            validate_trap_pending: false,
         }
     }
 }
@@ -271,6 +411,11 @@ pub struct ImportsFixture {
     settings_import: SettingsImport,
     timers_import: TimersImport,
     tree_import: TreeImport,
+    storage_import: StorageImport,
+    /// Steps of the last `user_save`, in the order they ran.
+    save_trace: Vec<String>,
+    /// Set by `make_next_validate_trap`; consumed by the next settings-validate call.
+    validate_trap_pending: bool,
 }
 
 impl std::fmt::Debug for ImportsFixture {
@@ -337,7 +482,7 @@ impl ImportsFixture {
 
     /// The `storage` import.
     pub fn storage(&mut self) -> &mut dyn HostStorage {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::storage")
+        &mut self.storage_import
     }
 
     /// The `timers` import.
@@ -377,13 +522,23 @@ impl ImportsFixture {
     }
 
     /// Keeps async requests pending.
-    pub fn hold_async_completions(&mut self, _on: bool) {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::hold_async_completions")
+    pub fn hold_async_completions(&mut self, on: bool) {
+        // The kernel hook holds only the next request; releasing clears that hold.
+        if on {
+            self.harness.kernel().hold_next_request();
+        } else {
+            let _ = self.harness.kernel().take_hold_next_request();
+        }
     }
 
     /// Waits for the outcome of a request.
-    pub fn wait_outcome(&mut self, _request: RequestId, _timeout: Duration) -> Option<Outcome> {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::wait_outcome")
+    pub fn wait_outcome(&mut self, request: RequestId, timeout: Duration) -> Option<Outcome> {
+        self.harness.advance_clock(timeout);
+        self.harness.pump(PUMP_ROUNDS);
+        self.harness
+            .take_result(request)
+            .ok()
+            .map(|result| result.outcome)
     }
 
     /// Every log line so far.
@@ -393,12 +548,15 @@ impl ImportsFixture {
 
     /// Every event delivered to the fixture plugin.
     pub fn events(&self) -> Vec<Event> {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::events")
+        let kernel = self.harness.kernel();
+        let state = kernel.state();
+        let events: Vec<Event> = state.events.iter().cloned().collect();
+        events
     }
 
     /// Every event delivered to a plugin.
-    pub fn events_of(&self, _plugin: &str) -> Vec<Event> {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::events_of")
+    pub fn events_of(&self, plugin: &str) -> Vec<Event> {
+        self.harness.emitted_events(plugin)
     }
 
     /// The settings target last opened.
@@ -422,8 +580,10 @@ impl ImportsFixture {
     }
 
     /// The stored value of a setting.
-    pub fn settings_value(&self, _key: &str) -> serde_json::Value {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::settings_value")
+    pub fn settings_value(&self, key: &str) -> serde_json::Value {
+        self.harness
+            .stored_setting(key)
+            .unwrap_or(serde_json::Value::Null)
     }
 
     /// Whether the plugin instance is stopped.
@@ -483,22 +643,74 @@ impl ImportsFixture {
 
     /// The steps of the last save.
     pub fn save_trace(&self) -> Vec<String> {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::save_trace")
+        self.save_trace.clone()
     }
 
     /// Replaces the stored settings JSON.
-    pub fn restore_stored_json(&mut self, _json: &str) {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::restore_stored_json")
+    pub fn restore_stored_json(&mut self, json: &str) {
+        self.settings_import
+            .set_json(json.to_owned())
+            .unwrap_or_else(|error| panic!("stored settings did not restore: {}", error.message));
     }
 
     /// The user edits a row.
-    pub fn user_edit(&mut self, _key: &str, _value_json: &str, _input: UserInput) -> UserSave {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::user_edit")
+    pub fn user_edit(&mut self, key: &str, value_json: &str, input: UserInput) -> UserSave {
+        match input {
+            UserInput::Toggle | UserInput::Choice | UserInput::DialogConfirm => {
+                let value: serde_json::Value = match serde_json::from_str(value_json) {
+                    Ok(value) => value,
+                    Err(error) => return UserSave::Refused(error.to_string()),
+                };
+                let mut patch = serde_json::Map::new();
+                patch.insert(key.to_owned(), value);
+                self.user_save(&serde_json::Value::Object(patch).to_string())
+            }
+            // Debounced inputs save after the 600 ms pause; no production debounce hook exists yet.
+            UserInput::NumberStep | UserInput::Typed | UserInput::TextArea => UserSave::Pending,
+        }
     }
 
-    /// The user saves a patch.
-    pub fn user_save(&mut self, _patch_json: &str) -> UserSave {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::user_save")
+    /// The user saves a patch: size and text limits, then the validate export, then the write.
+    pub fn user_save(&mut self, patch_json: &str) -> UserSave {
+        self.save_trace.clear();
+        self.save_trace.push("limits".to_owned());
+        if let Err(reason) = check_patch_limits(patch_json) {
+            return UserSave::Refused(reason);
+        }
+        let stored_json = self.settings_import.get_json();
+        let merged_json = match merge_settings_patch(&stored_json, patch_json) {
+            Ok(merged_json) => merged_json,
+            Err(reason) => return UserSave::Refused(reason),
+        };
+        if let Some(latency) = self.config.settings_validate_latency {
+            if latency > SETTINGS_VALIDATE_BUDGET {
+                return UserSave::Refused(format!(
+                    "settings-validate answered after {} ms",
+                    latency.as_millis()
+                ));
+            }
+        }
+        if let Some(validate) = self.config.settings_validate.as_mut() {
+            self.save_trace.push("settings-validate".to_owned());
+            if std::mem::take(&mut self.validate_trap_pending) {
+                self.save_trace.push("settings-validate trapped".to_owned());
+                return UserSave::Refused("settings-validate trapped".to_owned());
+            }
+            if let Err(errors) = validate(patch_json, &merged_json) {
+                let reason = errors.first().map_or_else(
+                    || "settings-validate refused the patch".to_owned(),
+                    |error| error.message.clone(),
+                );
+                return UserSave::Refused(reason);
+            }
+        }
+        match self.settings_import.set_json(patch_json.to_owned()) {
+            Ok(()) => {
+                self.save_trace.push("settings-changed".to_owned());
+                UserSave::Saved
+            }
+            Err(error) => UserSave::Refused(error.message),
+        }
     }
 
     /// The next job traps.
@@ -520,24 +732,24 @@ impl ImportsFixture {
 
     /// The next settings-validate call traps.
     pub fn make_next_validate_trap(&mut self) {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::make_next_validate_trap")
+        self.validate_trap_pending = true;
     }
 
     /// Stops the plugin instance.
     pub fn stop_plugin(&mut self) {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::stop_plugin")
+        self.harness.deactivate_plugin();
     }
 
     /// Starts a background request.
     pub fn start_background_request(&mut self) -> RequestId {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::start_background_request")
+        self.jobs_import
+            .start("background".to_owned(), Vec::new())
+            .unwrap_or_else(|error| panic!("background request refused: {}", error.message))
     }
 
-    /// Completes a background request.
+    /// Completes a background request. The harness hook completes the oldest pending one.
     pub fn complete_background_request(&mut self, _request: RequestId) {
-        unimplemented!(
-            "host::testing::imports_fixture::ImportsFixture::complete_background_request"
-        )
+        self.harness.complete_oldest_request();
     }
 
     /// The user chooses paths in the picker.
@@ -581,34 +793,56 @@ impl ImportsFixture {
     }
 
     /// Adds a terminal pane.
-    pub fn add_terminal_pane(&mut self, _title: &str, _columns: u16, _rows: u16) -> NodeId {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::add_terminal_pane")
+    pub fn add_terminal_pane(&mut self, title: &str, columns: u16, rows: u16) -> NodeId {
+        let pane = create_fixture_node(
+            &self.harness,
+            Intent::CreatePane(terminal_pane_spec(None, title)),
+            "a terminal pane",
+        );
+        self.harness.kernel().set_pane_size(pane, columns, rows);
+        pane
     }
 
     /// Adds a pane restored from a snapshot.
-    pub fn add_restored_pane(&mut self, _title: &str, _columns: u16, _rows: u16) -> NodeId {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::add_restored_pane")
+    pub fn add_restored_pane(&mut self, title: &str, columns: u16, rows: u16) -> NodeId {
+        let pane = self.add_terminal_pane(title, columns, rows);
+        self.harness.kernel().set_pane_restored(pane, true);
+        pane
     }
 
     /// Adds a group.
-    pub fn add_group(&mut self, _title: &str) -> NodeId {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::add_group")
+    pub fn add_group(&mut self, title: &str) -> NodeId {
+        create_fixture_node(
+            &self.harness,
+            Intent::CreateGroup(empty_group_spec(None, title)),
+            "a group",
+        )
     }
 
     /// Adds a group under a parent.
-    pub fn add_group_under(&mut self, _parent: NodeId, _title: &str) -> NodeId {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::add_group_under")
+    pub fn add_group_under(&mut self, parent: NodeId, title: &str) -> NodeId {
+        create_fixture_node(
+            &self.harness,
+            Intent::CreateGroup(empty_group_spec(Some(parent), title)),
+            "a group under a parent",
+        )
     }
 
     /// Adds a terminal pane under a parent.
     pub fn add_terminal_pane_under(
         &mut self,
-        _parent: NodeId,
-        _title: &str,
-        _columns: u16,
-        _rows: u16,
+        parent: NodeId,
+        title: &str,
+        columns: u16,
+        rows: u16,
     ) -> NodeId {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::add_terminal_pane_under")
+        let pane = create_fixture_node(
+            &self.harness,
+            Intent::CreatePane(terminal_pane_spec(Some(parent), title)),
+            "a terminal pane under a parent",
+        );
+        self.harness.kernel().set_pane_size(pane, columns, rows);
+        pane
     }
 
     /// Exits a pane.
@@ -617,18 +851,24 @@ impl ImportsFixture {
     }
 
     /// Focuses a pane.
-    pub fn focus_pane(&mut self, _pane: NodeId) {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::focus_pane")
+    pub fn focus_pane(&mut self, pane: NodeId) {
+        self.harness.kernel().state().focus = Some(pane);
     }
 
     /// Records a host journal entry (`pane-created`, `pane-exited`, `input-sent`).
-    pub fn record_host_journal_entry(&mut self, _pane: NodeId, _kind: &str) {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::record_host_journal_entry")
+    pub fn record_host_journal_entry(&mut self, pane: NodeId, kind: &str) {
+        self.harness
+            .kernel()
+            .state()
+            .journal
+            .insert((pane, kind.to_owned()));
     }
 
     /// Takes a storage lease as a second caller.
-    pub fn other_caller_lease(&mut self, _key: &str, _ttl_millis: u32) -> bool {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::other_caller_lease")
+    pub fn other_caller_lease(&mut self, key: &str, ttl_millis: u32) -> bool {
+        self.storage_import
+            .try_lease(key, ttl_millis)
+            .unwrap_or(false)
     }
 
     /// Makes the on-disk data version of a bucket newer.
@@ -649,8 +889,14 @@ impl ImportsFixture {
     }
 
     /// Locks a node.
-    pub fn lock_node(&mut self, _node: NodeId) {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::lock_node")
+    pub fn lock_node(&mut self, node: NodeId) {
+        let outcome = self.harness.kernel().apply_intent(
+            &Origin::Kernel,
+            Intent::SetNodeLocked(SetNodeLockedSpec { node, locked: true }),
+        );
+        if !matches!(outcome, Outcome::Ok) {
+            panic!("imports fixture could not lock the node");
+        }
     }
 
     /// Renames a node.

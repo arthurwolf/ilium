@@ -531,7 +531,7 @@ pub struct Effects {
 impl Effects {
     /// Whether any effect is held.
     pub fn any(&self) -> bool {
-        unimplemented!("host::testing::ops::Effects::any")
+        self.input_lock || self.stream_open || self.child_running
     }
 }
 
@@ -546,16 +546,24 @@ pub struct PluginRow {
     pub text: String,
     /// Whether the row has an enable switch.
     pub has_switch: bool,
+    /// The grants shown on the row as `(grant, state)` pairs, in row order.
+    grants: Vec<(String, String)>,
 }
 
 impl PluginRow {
     /// The grants shown on the row as `(grant, state)` pairs.
     pub fn grant_states(&self) -> Vec<(String, String)> {
-        unimplemented!("PluginRow::grant_states")
+        self.grants.clone()
     }
 
-    pub fn field(&self, _name: &str) -> Option<String> {
-        unimplemented!("PluginRow::field")
+    pub fn field(&self, name: &str) -> Option<String> {
+        match name {
+            "state" => Some(self.state.clone()),
+            "health" => Some(self.health.clone()),
+            "text" => Some(self.text.clone()),
+            "has_switch" => Some(self.has_switch.to_string()),
+            _ => None,
+        }
     }
 }
 

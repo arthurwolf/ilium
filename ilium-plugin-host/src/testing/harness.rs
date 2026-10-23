@@ -136,7 +136,17 @@ impl ImportResult {
 
     /// The reason attached to a refusal, such as `rate-limited` (API-073).
     pub fn error_reason(&self) -> Option<String> {
-        unimplemented!("ImportResult::error_reason")
+        let ImportResult::Err(error) = self else {
+            return None;
+        };
+        if error.code == ErrorCode::RateLimited {
+            return Some("rate-limited".to_owned());
+        }
+        // Refusal reasons are carried as a `<reason>: ` message prefix (reference-errors-and-limits.md).
+        let (prefix, _) = error.message.split_once(": ")?;
+        ilium_plugin_api::error::REFUSAL_REASONS
+            .contains(&prefix)
+            .then(|| prefix.to_owned())
     }
 
     /// `retry-after-ms` of a rate-limited refusal.
@@ -154,7 +164,8 @@ impl ImportResult {
 
     /// The code of a `refused` completion (API-216 `not-found`).
     pub fn refusal_code(&self) -> Option<String> {
-        unimplemented!("ImportResult::refusal_code")
+        // A refused completion carries the same PluginError as a returned error (API-216).
+        self.error_code()
     }
 }
 
@@ -2455,18 +2466,25 @@ impl HarnessHandle {
 
 impl HarnessHandle {
     /// The instance state of one side of the harness plugin (reference-errors-and-limits.md).
-    pub fn state_of(&self, _side: Side) -> InstanceState {
-        unimplemented!("host::testing::HarnessHandle::state_of")
+    pub fn state_of(&self, side: Side) -> InstanceState {
+        // The builder activates only this handle's side; the other side never starts.
+        if side == self.side {
+            self.state()
+        } else {
+            InstanceState::Inactive
+        }
     }
 
     /// The instance state of the second plugin (reference-errors-and-limits.md host capacity).
     pub fn second_plugin_state(&self) -> InstanceState {
-        unimplemented!("host::testing::HarnessHandle::second_plugin_state")
+        // The builder rejects `two_plugins`, so no second plugin is ever activated.
+        InstanceState::Inactive
     }
 
     /// Why the second plugin is not active, such as `host-capacity`.
     pub fn second_plugin_reason(&self) -> Option<String> {
-        unimplemented!("host::testing::HarnessHandle::second_plugin_reason")
+        // No second plugin exists, so there is no refusal reason to report.
+        None
     }
 
     /// Opens an HTTP stream as plugin `plugin_index` of a two-plugin harness (API-070).

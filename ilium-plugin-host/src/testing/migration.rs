@@ -221,7 +221,9 @@ impl StorageHandle {
 
     /// Whether the storage offers compare-and-set.
     pub fn has_compare_and_set(&self) -> bool {
-        unimplemented!("host::testing::migration::StorageHandle::has_compare_and_set")
+        // The storage interface offers put, get, remove, keys and write-batch only; no
+        // compare-and-set operation exists in ilium-plugin-api or the production storage.
+        false
     }
 
     /// Every key of a bucket with its value.
