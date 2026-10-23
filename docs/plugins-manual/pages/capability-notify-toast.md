@@ -198,6 +198,23 @@ A toast expires. An event the user must act on or learn about MUST also be avail
 |---|---|---|---|
 | CAP-883 | Persistent twin of a toast | A toast for an error or an action-needed event MUST be paired with a persistent text signal (panel row or status line) that remains after the toast duration. A toast with no persistent twin for such an event is refused by the plugin check with `a11y.toast-only` | `src/docs/notifications.md` |
 
+### Accessibility
+
+The host draws the toast. The plugin sends text, a tone and optional buttons, and gets back only the outcome of the submission and the invocation of a button's command. The plugin cannot set an accessible label, cannot read the toast back and cannot choose how it is announced. The manual does not document a screen-reader announcement for toasts, so a plugin MUST NOT assume that one is made. Put the meaning in the `title` and `body`, and treat the toast as a short extra notice. The general rules for host widgets, such as the linear screen-reader mode and focus order, are in [Theming and readable output](/pages/accessibility-and-theming/).
+
+**Colour and words.** The `tone` is a colour role, so it is not a signal on its own. The title or body MUST say what happened, for example `Export failed: disk full`, and not only `danger`. The countdown bar is drawn with `━` and `─`, so its filled and empty parts differ in shape, not only in colour. It shows how much time is left, but it carries no meaning of its own.
+
+**Reduced motion.** When the user turns on reduced motion, the countdown is not drawn as a shrinking bar. The client shows the fixed text `5 s left`, updated once per second, as [api-toast](/pages/api-toast/) describes. The plugin does nothing to switch this on and off. A toast with no animation has the same timeout as one with a bar.
+
+**Time to read and act.** The plugin chooses the time with `duration-ms`, from 1,000 to 30,000 ms, and the default is 5,000 ms. The host does not extend a toast for a slow reader, and the manual documents no pause while the pointer or the keyboard is on a toast. A user who reads slowly, or who uses a screen reader, may miss the toast, so:
+
+- For an error or an action that needs the user, set `duration-ms` to the longest value the message needs, up to 30,000 ms, or use a `danger` tone, which stays until the user dismisses it while a client is attached.
+- Pair the toast with a persistent text signal, as [CAP-883](#toasts-are-never-the-only-signal) requires. That signal is the only way to guarantee that the user can still read the event later.
+
+**Keyboard.** A toast never takes keyboard focus away from the pane the user types in, so the user is never pulled out of their work. The buttons answer to a click, and the manual documents no keyboard route to them. A plugin MUST NOT put the only way to run an action in a toast button. Put the same command in a panel or a settings row whose controls the user can reach with the keyboard, as [USR-303](/pages/accessibility-and-theming/) requires for host-drawn plugin screens. A toast needs no keyboard dismissal: it leaves by itself when its time runs out, and the plugin can remove it with `dismiss-toast`.
+
+**Motion and attention.** The rate limit of 3 toasts per 10 s keeps a plugin from pulling the user's attention again and again. A plugin that replaces a toast by its `id` restarts the countdown, so it SHOULD replace a toast for progress only at a useful moment, not on every tick.
+
 ### Related pages
 
 - [notify.desktop](/pages/capability-notify-desktop/).

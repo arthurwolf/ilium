@@ -334,6 +334,16 @@ The plugin writes its own log lines. They appear in `ilium plugin logs`:
 
 Keep each `on-events` call short. One `next-frame` call per timer event normally fits the handler deadline, because the host decodes ahead.
 
+### Photosensitivity
+
+Flashing or strobing pictures can trigger seizures in people with photosensitive epilepsy. The host does not measure what a plugin draws, so the flash limit is the plugin's duty. The warning and the off switch are the host's duty to the user.
+
+- **Flash limit.** A plugin that draws video MUST keep its output within WCAG 2.3.1 ("Three Flashes or Below Threshold"). In practice that means no more than three flashes in any one-second period. Flashing areas that add up to more than a quarter of any 1,024 by 768 pixel area are over the limit. Saturated red flashes follow the stricter red-flash rule of the same criterion. The Harding Flash and Pattern Analyzer is the reference check for a new scene or video treatment.
+- **Source video.** A user-picked file can strobe even when the plugin draws nothing extra. The plugin MUST either hold, average or blur frames so that the output stays within the limit, or stop drawing and show the fallback image. The `frames-per-second` value in `VideoInfo` is the source rate, not the output rate, so a plugin must not treat a low frame rate as a safe one.
+- **Warning.** The review dialog MUST show one line for a package that requests `media.video` or `gpu.kernels`: "Can show flashing images. Photosensitive viewers may be affected." The line is a warning. It does not change the grant or its risk tier.
+- **Off switch.** The user turns the plugin off at once in Settings > Plugins, or with `ilium plugin disable <id>` ([install and manage](/pages/user-install-and-manage/)). Revoking the grant in Settings > Plugins > <plugin> > Capabilities, or with `ilium plugin grants <id> --revoke media.video`, stops the video at once. Open video ids then end, and later calls return `not-found` ([edge cases](#edge-cases-and-errors)). An administrator can switch off every third-party plugin with `ilium plugin disable --all-third-party --reason <text>` ([enterprise deployment](/pages/guide-enterprise-deployment/)).
+- **GPU kernels.** The same limit, warning and switch apply to a scene that calls `gpu.kernels`, because a kernel can produce the same flashing output. See [gpu.kernels](/pages/capability-gpu-kernels/).
+
 ### Who requests it
 
 The native video scene becomes the bundled scene plugin `ilium.video` in Phase 4d. It is the first first-party user of this capability ([api-media](/pages/api-media/)).

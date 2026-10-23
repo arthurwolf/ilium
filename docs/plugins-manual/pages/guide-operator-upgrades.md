@@ -144,6 +144,37 @@ An operator who manages many machines or sessions applies a plugin update to a s
 - [LIF-307] A rollout MUST halt on its own when the plugin fails inside the failure window on a host of the current stage. A halted rollout MUST stop widening, MUST log `rollout.halt` with the plugin id and version, and MUST NOT roll back hosts that already updated.
 - [LIF-308] An operator MUST be able to resume a halted rollout or cancel it with `ilium plugin rollout resume <id>` and `ilium plugin rollout cancel <id>`, and each command MUST write an audit event.
 
+#### Stage shares and the placement of a host
+
+A rollout names its stages as cumulative shares of the host population, written as a percentage with two decimal places (steps of 0.01 %). The shares MUST increase from stage to stage, and the last stage MUST be 100 %. Example shares (proposed, owner to confirm): stage 1 at 1 %, stage 2 at 10 %, stage 3 at 50 %, stage 4 at 100 %.
+
+A host is placed by a number that it computes itself, the same way on every start:
+
+1. The host reads its installation key. The server creates the key once, at its first start, and keeps it in its own state directory beside `installed.json`. Each user has their own state ([SEC-199]), so each user session is a separate host, and two users on one machine give two placements.
+2. The host computes the SHA-256 of the text `<rollout id>:<installation key>`.
+3. The host reads the first four bytes of that digest as a big-endian integer and takes it modulo 10,000. The result is the bucket, from 0 (0.00 %) to 9,999 (99.99 %).
+4. The host is in stage *k* when its bucket is below the cumulative share of stage *k* (in units of 0.01 %). It applies the update only when the bucket is below the share of the current stage. Otherwise it reports `held`.
+
+Consequences an operator can rely on:
+
+- **Stable across restarts.** The bucket depends only on the rollout id and the installation key, so a restart gives the same answer. A host held before a restart is still held after it, and a host that has applied the update keeps it.
+- **Widening keeps earlier hosts in.** Raising a stage's share only raises the cutoff. A host below an earlier cutoff stays below every later one, so no host moves out of a stage that it has entered.
+- **Different rollouts place hosts differently.** The rollout id is part of the digest, so the same machine is not always in the first stage.
+- **A host moves only if its key changes.** Deleting the state directory creates a new installation key, which can move the host into another stage.
+
+The stage holds about its share of the hosts, not exactly that share: a hash spreads hosts at random. For a population of 300 installations, stage 1 at 1 % expects about 3 hosts and stage 2 at 10 % about 30. The count of hosts actually in a stage is known only from the hosts that report their stage (see the next section). The manual does not yet define a fleet-level count (owner to confirm).
+
+#### What an administrator sees for a held host
+
+- **Version and state.** A held host keeps the installed version. Its package state stays `installed-enabled`, as for any update that has not yet been applied. The newer version is shown in `update-available` from the cached registry data.
+- **The `held` value.** `ilium plugin list --json` reports `held` for the plugin's pending rollout update, as [LIF-306] requires. `held` is not one of the package states in [Plugin lifecycle states](/pages/reference-plugin-lifecycle-states/), so the field that carries it is to be confirmed by the owner. The output also gives the host's stage number for that rollout (owner to confirm).
+- **Not a failure.** A held host has `failed` false and is not counted by the halt rule of [LIF-307], which counts only hosts in the current stage.
+- **When it updates.** A held host applies the update at its first update check after its stage's cutoff includes its bucket. It does not need a restart for that.
+- **Audit.** Proposed, owner to confirm: one `rollout.held` audit event when a host first holds the update, and one `rollout.applied` event when it applies it. Both must be added to the audit catalogue of [Audit log](/pages/reference-audit-log/) before they are written.
+- **Fleet view.** Held hosts are visible on each machine only. `ilium plugin list --json --inventory` ([USR-341]) has a fixed field list without the rollout stage, so a fleet tool sees a held host as running the old version and cannot tell it from a host that was never offered the update. An administrator who needs the held count across machines must run `ilium plugin list --json` on each machine, as for crash counts ([Enterprise deployment](/pages/guide-enterprise-deployment/)). The owner needs to decide whether the inventory carries the stage.
+
+Halt, using the example shares above: in stage 1 (about 3 hosts of 300), one counted failure of the new version on a host in that stage halts the rollout under [LIF-307]. Stage 2 does not open, and the hosts that already updated keep the new version. The admin must then decide, by [LIF-308], whether to resume or cancel. How a failure on one host reaches the rollout record, and how many failures count as a halt, are not yet defined (owner to confirm).
+
 ## Operator runbook for failure modes
 
 Each entry gives detection, mitigation and recovery. The runbook is part of the contract: the commands and codes it names MUST exist.

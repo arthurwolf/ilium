@@ -52,6 +52,25 @@ Every function that returns a result may return `not-permitted`, `revoked` and `
 
 A value over a per-call cap is refused with `invalid-argument` before anything is written. The host never truncates a value silently, except that log lines are cut and marked.
 
+### Disk full and read-only data
+
+A full disk is not a quota. When a write fails because the physical disk has no room, the call returns `io` with the message `no-space`. The host never reports this as `quota-exceeded`, which stays for the plugin's own limits, such as a bucket or the `disk_mib` limit [LIF-119]. Check the message to tell the two apart.
+
+| Situation | What the call returns | What is left |
+|---|---|---|
+| `put` or `write-batch` on storage | `io` with `no-space` | A refused `put` keeps the previous value. A failed batch rolls back as a whole. |
+| A file write under `data` or `cache` | `io` with `no-space`. An async call arrives as `failed(io)` in its completion. | The old file stays. |
+| A plugin `log` line | No error. The host drops the line and keeps a count. | Nothing is written for that line. |
+| Install or update (a host action, not a plugin call) | `install.no-space`, refused before any write | The old version stays installed and enabled. |
+
+A `no-space` error is not a plugin failure. The plugin is not trapped, is not restarted and does not count toward the three-failure rule [LIF-173]. Plugins keep running while free space is low. Log the failure yourself at `error` so the user sees it in `ilium plugin logs <id>`, as the [storage page](/pages/api-storage/) example does.
+
+The host reacts to falling free space in steps. The thresholds below are proposed values in the [offline and low disk reference](/pages/reference-offline-and-low-disk/) and may still change. Below 512 MiB the host evicts the plugin cache and the compile cache. Below 128 MiB it stops plugin log writes except `error` lines. Below 64 MiB it blocks installs, updates and migrations. The footer shows one warning with the free space. No step stops the running plugins.
+
+When the user frees space, the host resumes installs and log writes without a restart, and a storage write that returned `no-space` succeeds on retry. Retry only after a delay or after space has been freed, never in a loop.
+
+If the data folder is not writable, Ilium runs in read-only mode. Installed plugins keep running. Install, update, uninstall, enable, disable and storage writes fail with `io` and the message `read-only`, which is not a failure either. The footer shows "Plugin data is read-only." The host re-checks the folder every 30 seconds and leaves read-only mode without a restart once it is writable again.
+
 ## Rate limits and retries
 
 A `rate-limited` error is not a plugin bug. Wait for `retry-after-ms`, then try the same call again. A refused submission reports the same error in its outcome:

@@ -600,6 +600,25 @@ export function onAction(event: Extract<Event, { tag: 'ui-action' }>): Submissio
 }
 ```
 
+### Index contents, redaction and retention
+
+This section covers only the Meaning results of [Search by meaning](#2-search-by-meaning). Exact search, the built-in `Ctrl+B` `f` search described in the Workspace search part of the Panes and layout page of the user documentation, is local to the client and sends nothing to an AI provider. The Meaning group is the only result path of this plugin that sends text to a provider.
+
+**What is indexed.** The index holds one vector per text, keyed by the pane id. The server embeds each pane's title and screen snippet. The plugin sends each text as it is, so it must cut a snippet to 8 KiB before the call: `embed` fails with `invalid-argument` for a text over 8 KiB, for more than 256 texts, or for an empty list ([vector and embeddings](/pages/api-vector/)).
+
+**Where the text goes.** `embed` sends the texts to the inference provider the user selected. With a remote provider the screen snippets leave the machine, so treat the Meaning group like a completion for privacy. Each `embed` call passes the AI admission gate with the purpose `workspace search` and adds one privacy-log record with no text in it. The privacy log keeps 90 days or 16 MiB, whichever is smaller ([privacy log, SEC-265](/pages/user-plugin-security-and-privacy/#the-privacy-log); [what is kept](/pages/core-plugin-inference/#what-is-kept-and-for-how-long)).
+
+**Passwords and secrets.** The manual does not state that the search index removes secrets, tokens or password prompts before embedding. The rules it does state do not cover this path: the host removes hidden password prompt regions from scrollback reads only ([terminal reads](/pages/primitives-terminal-reads/)), and the log redaction in [Secrets](/pages/reference-secrets/) applies to log lines, audit records and error strings, not to embedding input. A screen can show a token printed by a command or a password typed at a prompt ([terminal.read-screen](/pages/capability-terminal-read-screen/)). Until the search plugin defines its own filter, do not assume that a snippet is free of secrets. A plugin that builds a similar index should replace matching values with `[redacted]` before it calls `embed`, as the `redact` helper of [Recap](/pages/core-plugin-recap/) does. The recap redaction rule is stated in its own page; the search index does not inherit it.
+
+**Persistence.** `create-index` stores the index in the plugin's data scope, so it is kept on disk ([vector API](/pages/api-vector/)). The manual does not state a rule that removes entries of a pane that closes. The plugin must remove those entries itself with `remove-entries`, which ignores an id that is not in the index. `drop-index` deletes the whole index and frees its quota. A changed text is embedded again and stored with `upsert` under the same id, which replaces the old entry.
+
+**Turning Meaning off.** Exact search keeps working with no embeddings, because it never calls `embed`. To stop the Meaning group without losing the other groups, do either of these:
+
+- Select no embedding provider. `embed` then fails with `unsupported`, and the plugin falls back to a plain text filter ([vector API](/pages/api-vector/)).
+- Refuse or revoke the `inference.embed` grant. `embed` then fails with `not-permitted`, and the same fallback applies.
+
+In both cases only the Meaning rows are missing; the other groups are unchanged.
+
 ### Extension points
 
 Other plugins change what `ilium.core.search` does through the points below. The plugin owns each point (grant `extensions.provide:ilium.core.search/<point>`). Contributors need `extensions.contribute:ilium.core.search/<point>`. See [Extension points](/pages/api-extension-points/) for the mechanism and [Extending core plugins](/pages/extending-core-plugins/) for the five ways to work with a core feature.

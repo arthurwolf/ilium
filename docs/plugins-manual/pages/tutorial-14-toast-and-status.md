@@ -319,6 +319,61 @@ The dedup key uses only allowed characters: letters, digits, `:` and `-`. A key 
 
 A segment never grows past its `max_width`. Longer text is cut with `…`. When the bar is still too narrow, the lowest `priority` goes first, and it returns when the window widens. None of this is an error. Write short text: `2 working` fits `max_width: 16`.
 
+### Translatable strings
+
+This plugin shows two kinds of text to people: the toast title `An agent finished` and the segment text `N working`. The examples above hard-code English. A plugin that ships in more languages keeps every such string in one table, keyed by a message id, and looks it up in the language the user chose. The host does not provide a locale ([AUT-601]), so the plugin asks for one itself.
+
+- **Ids and text.** The toast `id` (`finished`), the segment id (`working`) and the dedup key are identifiers. They stay in English in every language. Only the text a person reads is translated. [AUT-610]
+- **Language setting.** Add a `choice` row with the key `language` to the plugin's settings and default it to `en`. Read it in `on_events`. The settings row title stays in the manifest in one language. [AUT-609]
+- **Lookup order.** Try the exact tag (`pt-BR`), then the language without region (`pt`), then `en`. A missing message falls back to the English text and never shows the message id. A language tag with no table at all shows English. [USR-312] [AUT-608]
+- **Placeholders, not joins.** Write the count into the message as `{count}`. Do not join the number and a word in code, because word order differs between languages. Plural forms are separate messages: a language that needs more than one form gets one message for each form it uses.
+- **Length.** Translations often run about 30 percent longer than English. Measure segment text with `display_width`, not `len()` or `String.length`. [AUT-602] [AUT-605] The toast title stays within 60 characters and the body within 200, as above. For the segment, check the longest text at the largest count you expect. `max_width` is 16 in this tutorial, so a text such as `12 en cours` (11 cells) fits. If a language needs more, raise `max_width` up to 40. Do not expect a cut to be an error; it only hides the end of the word.
+- **Host words.** The host's own words around the toast, such as the `Show toasts` grant row, stay in the host's language. The plugin must not rely on them matching its own. [AUT-619]
+
+Rust. The table is a `match`, with the English text as the last arm of each id. The lookup takes only the base language from the tag, so `de-AT` finds `de`.
+
+```rust
+/// The text for a message id in one language. Unknown languages use English.
+pub fn message(language: &str, id: &str) -> &'static str {
+    let base_language = language.split('-').next().unwrap_or("en");
+    match (base_language, id) {
+        ("de", "finished") => "Ein Agent ist fertig",
+        ("de", "working") => "{count} aktiv",
+        ("fr", "finished") => "Un agent a terminé",
+        ("fr", "working") => "{count} en cours",
+        (_, "finished") => "An agent finished",
+        (_, "working") => "{count} working",
+        // Only the two ids of this plugin exist. An unknown id shows nothing, never the id itself.
+        _ => "",
+    }
+}
+
+/// The segment text for a language, or `None` when nothing is working.
+pub fn segment_text(language: &str, count: usize) -> Option<String> {
+    (count > 0).then(|| message(language, "working").replace("{count}", &count.to_string()))
+}
+```
+
+Once the plugin has a language setting, `segment_text` takes the language. The tests above then pass `"en"` as the first argument, and `segment_text("en", 2)` still gives `2 working`.
+
+TypeScript. The same table as a map of tags to ids.
+
+```ts
+const MESSAGES: Record<string, Record<string, string>> = {
+  en: { finished: 'An agent finished', working: '{count} working' },
+  de: { finished: 'Ein Agent ist fertig', working: '{count} aktiv' },
+  fr: { finished: 'Un agent a terminé', working: '{count} en cours' },
+};
+
+/** The text for a message id in one language. Unknown tags use English. */
+export function message(language: string, id: string): string {
+  const tag = [language, language.split('-')[0]].find((candidate) => candidate in MESSAGES) ?? 'en';
+  return MESSAGES[tag][id] ?? MESSAGES.en[id] ?? '';
+}
+```
+
+A language change does not redraw the segment by itself. The segment shows the old text until the next count change, because `refreshSegment` and its `shown` value skip an update when the count is the same. To apply a new language at once, set `shown` back to `undefined` when the setting changes, so the next batch sends the text again.
+
 ### Points to notice
 
 - The toast is fire-and-forget: it needs no reply, and a failed toast never stops the status-bar update.
@@ -449,5 +504,6 @@ When one agent finishes, the toast opens at the same time as the count falls to 
 - [Capability: notify.toast](/pages/capability-notify-toast/) describes the toast grant.
 - [Intents and outcomes](/pages/api-intents/) explains submissions, dedup keys and outcomes.
 - [Tutorial 13](/pages/tutorial-13-keys-and-when/) binds keys to a toast command.
+- [Internationalisation](/pages/guide-internationalisation/) covers the lookup order, the language row and the `en-XA` pseudo-locale check that this tutorial's strings must pass.
 
 API checked against `ilium:plugin@0.1.0`.

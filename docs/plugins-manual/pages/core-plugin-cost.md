@@ -667,6 +667,29 @@ function contextWindow(pane: string): number | undefined {
 }
 ```
 
+### Currency and number formatting
+
+Each price entry names its `currency` as an ISO 4217 code such as `USD` or `EUR`. The built-in table is priced in US dollars. The plugin follows these rules everywhere it shows or adds up an amount:
+
+- **No conversion.** The plugin holds no exchange rates. It never converts one currency into another, so no figure mixes currencies.
+- **One total per currency.** Spend is kept per currency. A view that shows more than one currency shows one figure for each, in ascending order of code, joined with ` + `, for example `$4.10 + EUR 1.20`.
+- **Symbol.** USD amounts show `$` in front of the number. Every other code is written before the number with a space, for example `EUR 1.20`. The plugin never guesses a symbol for a code.
+- **Digits and separators.** Every amount has exactly two decimal places, with `.` as the decimal mark and `,` between groups of three digits from 1,000 up, for example `$1,234.50`. The host gives the plugin no locale ([AUT-601](/pages/guide-internationalisation/)), so this format does not follow the user's language or region.
+- **Rounding.** Each turn's cost is worked out in full precision from the price table and the token counts, then rounded to the nearest cent, with halves rounded away from zero. Totals add up these rounded cent values. They are never built by adding up the text that was shown.
+- **Zero.** An amount of zero shows `$0.00`. An entry priced at zero, such as the local-model example above, adds nothing to spend in its currency.
+- **Unit option.** The Dollars unit shows each amount in its own currency under these rules. It does not convert anything to dollars.
+- **Sort by cost.** Panes are ordered by currency code first (ascending), then by amount (highest first). Amounts in different currencies are never compared.
+- **Budget.** `budget_usd` is compared only with USD spend. Spend in other currencies does not count toward it. Quota percentages do not depend on currency.
+
+The format strings in "Unit, display and sort by cost" show only the USD case. Other currencies follow the rules above.
+
+| Amount | Currency | Shown as |
+|---|---|---|
+| 6.1234 | USD | `$6.12` |
+| 1234.5 | USD | `$1,234.50` |
+| 1.2 | EUR | `EUR 1.20` |
+| 0 | USD | `$0.00` |
+
 ### Extension points
 
 Other plugins change what `ilium.core.cost` does through the points below. The plugin owns each point (grant `extensions.provide:ilium.core.cost/<point>`). Contributors need `extensions.contribute:ilium.core.cost/<point>`. See [Extension points](/pages/api-extension-points/) for the mechanism and [Extending core plugins](/pages/extending-core-plugins/) for the five ways to work with a core feature.

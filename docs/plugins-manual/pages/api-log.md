@@ -59,6 +59,29 @@ The message is a Rust `&str` or a TypeScript `string`. An empty message writes a
 
 A manifest value above the ceiling is clamped to it, and the host logs the clamp. The user can set the same key in `config.toml` under `[plugins.limits]`, for every plugin or for the whole session.
 
+### Retention and disk use
+
+Each plugin writes to one log file per session, in `<state>/plugins/logs/<session-slug>/`. The host bounds the size of that file by rotation and deletion, as set out in [The plugin log](/pages/reference-plugin-files/#the-plugin-log):
+
+| Rule | Value | What happens |
+|---|---|---|
+| Rotation size | 4 MiB | When the active `<id>.log` passes 4 MiB, it becomes `<id>.log.1`, and each older rotated file moves up one number |
+| Rotated files kept | 4 (`.log.1` to `.log.4`) | The old `.log.4` is deleted at each rotation |
+| Maximum disk use per plugin and session | about 20 MiB (5 files) | The active file and the four rotated files together |
+| Rotated file age | 14 days | Rotated files older than 14 days are deleted at server start |
+| Logs after uninstall | Kept 7 days, then deleted | `uninstall --purge` deletes them at once |
+
+No manifest key or `config.toml` key changes these values in this version. The only log key is the rate limit above. To see how many bytes a plugin's log uses, run `ilium plugin du <id>`, which reports logs beside the store, data, storage, cache and backups.
+
+The proposed rules [HST-600](#production-additions-t8-observability-perf) and [HST-601](#production-additions-t8-observability-perf) below would change these numbers: 3 rotated files and a 16 MiB total, and a daily sweep. Until the owner chooses one set, the table above is the set that the user pages publish.
+
+To delete a plugin's old log before any rule changes, first keep a copy if you need one, with `ilium plugin logs <id> > <file>`. The copy is plain text, so read it before you share it. Then choose one of these commands:
+
+1. `ilium plugin erase-data`, for that one plugin. It shows the counts per data kind and asks for confirmation. It also deletes the plugin's settings, grants, data, crash records and log, and it reports what it deleted and what it kept ([USR-246](/pages/user-privacy/)). The plugin stays installed.
+2. `ilium plugin uninstall <id> --purge`, when you also want the plugin removed. It deletes the log at once ([USR-209](/pages/reference-plugin-files/)).
+
+The manual defines no command that deletes only a log file, and deleting files under the state folder by hand is not documented.
+
 ### Rate limit
 
 Each side instance of a plugin has its own budget of lines per second. Lines within the budget are appended to the log in order. Lines over the budget are dropped and counted. Once per second in which lines were dropped, the host writes one summary line at level `warn` that gives the number of dropped lines. The summary line does not use the budget, so it always appears.

@@ -296,6 +296,35 @@ The user runs the plugin's own CLI command. The plugin writes one JSON line per 
 | Reach | The same plugin id, commands declared in `contributes.commands` only |
 | Tier | Tier 1 and signed tier 2 |
 
+### Retry, backoff and slow targets
+
+The kernel never resends a `send`. A failed send or a timed-out reply stays failed until the plugin calls again, so retry, backoff and the decision to give up belong to the plugin. Without these rules, one slow session multiplies across every session a broadcast reaches.
+
+Decide each retry from the outcome:
+
+| Outcome | What it tells you | Retry? |
+|---|---|---|
+| `send` returns `busy` | This plugin already has its pending requests full (64 by default, see Limits). Nothing reached the target. | Yes: wait 1 s, then 2 s, then 4 s, and stop after three retries. |
+| `send` returns `not-permitted`, `not-found` or `invalid-argument` | The grant, the target's state or the arguments are wrong. A disabled target also returns `not-permitted`. | No. Fix the cause first. |
+| Completion `timed-out` | The target is alive but did not answer within 30 s. It may be slow, busy or stuck. | At most one retry to the same session, after 2 s. |
+| Completion `network` | The target's socket closed. The session stopped or restarted. | No retry to that name in this invocation. Call `list-live` again, and send only if the session is listed. |
+
+The plugin's own rules for a fan-out:
+
+1. Keep at most 16 sends in flight per invocation and queue the rest. This stays well under the 64 pending requests of the plugin, so a broadcast cannot make its own unrelated calls return `busy`.
+2. Send at most one request at a time to the same session and command. Start a new invocation's request to that session only after the earlier one completes or times out.
+3. Mark a session `slow` after its second `timed-out` and send it nothing else in that invocation.
+4. Finish the invocation no later than 65 s after it starts (a 30 s wait, the 2 s pause, a second 30 s wait, and a margin). Report every session that still has no outcome as `timed-out` and call `cli::finish`.
+
+Telling a slow target from a stopped one:
+
+- **Slow:** `timed-out`, while the session is still in `list-live`. Keep the session, report it, and try again in a later invocation.
+- **Stopped:** completion `network`, or the name is missing from `list-live`. Do not keep retrying it.
+- A reply that arrives after `timed-out` is never delivered. `take-reply` returns `none`, so do not wait for it.
+- Counts such as `panes` and `attached-clients` in `live-session` describe the session's layout, not its health. Use the outcomes above to judge health.
+
+If the target's plugin traps, the kernel restarts it under the back-off in [errors and limits](/pages/reference-errors-and-limits/#restart-and-disable-rule). A third failure within 10 minutes disables the plugin, and every later `send` to it returns `not-permitted`.
+
 ### Edge cases
 
 | Situation | Result |

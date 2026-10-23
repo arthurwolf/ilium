@@ -98,6 +98,18 @@ timers::at(clock::now_unix_millis() + 86_400_000, "nightly-scan")?;
 timers.at(clock.nowUnixMillis() + 86_400_000n, 'nightly-scan');
 ```
 
+### Wall-clock jumps and durable timers
+
+`timers.at` takes a due time in UTC epoch milliseconds, and the host stores it with the snapshot. The wall clock is only the reference for that due time. While Ilium runs, a pending durable timer does not depend on the wall clock: when it is armed, the host converts the wall-clock time remaining into a deadline on the monotonic clock, and that deadline decides when the timer fires. The rules for each kind of clock change follow from that.
+
+- **Clock set or corrected while Ilium runs** (a manual change, an NTP correction): the deadline does not move. A forward jump does not fire the timer early, and a backward jump does not delay it. Because `late-by-millis` is measured on the wall clock (see below), a forward jump shows up as lateness on the event, so a plugin that compares lateness with a threshold must allow for it.
+- **Daylight-saving change while Ilium runs**: no effect. The due time is UTC, so a change of the local offset does not move it. The plugin stores times as UTC, as [time zones](/pages/api-clock-and-timers/#time-zones-and-locale) require.
+- **Suspend and resume**: a due time that passes during a suspend makes the timer fire once after resume. The host does not replay the missed periods of a repeating schedule, and it does not fire the timer before its due time.
+- **Clock changed while Ilium is stopped**: the wall clock is the only reference at the next start. A forward change makes the timer overdue, so it fires once after the next activation with a large `late-by-millis`. A backward change moves the fire time later by the amount moved back. In neither case does the timer fire early in real time.
+- `late-by-millis` is the wall-clock time between the due time and the moment the event is delivered, never below zero. The plugin decides what a late timer means, as in [Events](/pages/api-events/).
+
+Test: with a fake host that moves the wall clock and the monotonic clock separately, arm `timers.at` 60 s ahead. Move the wall clock forward 10 minutes and assert no event before 60 s of monotonic time. Move it back one hour and assert the event still comes at 60 s of monotonic time. Stop the host with the timer pending, move the wall clock back one hour, start it and assert no event until the wall clock reaches the due time.
+
 ## Activation order
 
 The host decides which plugins start and in which order. This section is normative.
@@ -446,6 +458,25 @@ Settings rows follow the plugin's state. A value is never deleted by disable, fa
 | Uninstalled | gone from the rail | gone | kept until the user purges them with `ilium plugin uninstall --purge` or "Forget settings" on the recovery page |
 
 A reinstalled plugin reads its kept values again. The recovery page is the only settings screen that stays reachable when the plugin is disabled.
+
+#### Kept data after uninstall
+
+A default uninstall removes the package, grants, cache and extension order. It keeps the plugin's settings, its data directory, its global storage bucket, its project and session buckets and its update backups ([Install, update and uninstall](/pages/reference-install-update-uninstall/#uninstall)). The log is kept for 7 days and then deleted. No maximum age applies to the kept data: Ilium never deletes it on a timer.
+
+The kept data is removed only by an explicit action:
+
+- `ilium plugin uninstall <id> --purge`, or the Delete data choice in the uninstall dialog, removes the settings, data, buckets, backups and log at once.
+- Forget settings on the recovery page removes the settings values only. The data stays.
+- A project whose plugin was purged keeps its plugin buckets until the project is next opened. Ilium then removes them there. A project that is never opened keeps them.
+
+**Size.** `ilium plugin du <plugin-id> [--json]` reports, as an integer number of bytes, what that plugin id uses in the store, data, storage buckets, cache, logs and backups ([Plugin files on disk](/pages/reference-plugin-files/)). After a default uninstall the store entries and the cache are gone, so the figure is the kept data, the buckets, the backups and the log until its 7 days end. Project data of a plugin that is no longer installed is listed by `ilium plugin doctor` as orphaned, with its size. Ilium never deletes orphaned project data automatically.
+
+**Reinstall.** A reinstalled plugin reads the kept data again, and the data version stamps decide what happens to it ([Data migration](/pages/guide-data-migration/)):
+
+- A version with the same or a higher `data_version` activates. A higher number runs the `migrator` once per bucket before `activate`.
+- A version with a lower `data_version` than a stamp is refused with `migration.data-newer`. The user then runs the command with `--restore-backup` or with `--discard-data`.
+
+Test: uninstall a plugin that has data and a global bucket, set the fake clock 400 days ahead, start Ilium and assert that both are still on disk. Run `ilium plugin du` and compare its bytes with the files. Reinstall an older version and assert `migration.data-newer`.
 
 ## Revocation and grant changes
 

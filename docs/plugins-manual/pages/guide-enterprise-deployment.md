@@ -101,6 +101,18 @@ ilium plugin inspect ./dist/example.team-rules-1.0.0.iliumpkg
 3. Run `ilium plugin audit --event policy-loaded` and `--event policy-violation`.
 4. Look at the Plugins screen. A forced or locked item shows a lock mark.
 
+### Locked items as text
+
+The lock mark in step 4 is a symbol only. The text below gives the same state to a screen reader and to a script. The rules are proposed and owned by the policy owner, so they carry no requirement ID; confirm them before release.
+
+- A plugin in `force_enabled` or `force_disabled` shows the row text `Locked by your administrator` beside its enable control. The lock mark may stay, but never alone.
+- A key in `settings.locked` shows the text `Locked by your administrator` and its policy value on its settings row.
+- `ilium plugin list --json` adds a field `"lock"` to each plugin: `"force-enabled"`, `"force-disabled"` or `null`. The text mode of `ilium plugin list` prints the same word in its state column, as `locked: force-enabled`.
+- A script that tries to change a forced plugin gets `not-permitted` with reason `policy` ([SEC-189]), so a fleet check can test the policy by calling `ilium plugin enable <id>` or `ilium plugin disable <id>` and reading the exit code and reason.
+- With `[ui] screen_reader = true` ([USR-305]), a locked control is read with its label, its role word and the words `locked by your administrator`, for example `Enable plugin, unchecked, locked by your administrator`.
+
+To verify the text: run `ilium plugin list --json` on a machine where a plugin is forced, and check that its `"lock"` field matches the policy file. Then open the Plugins screen with the screen reader setting on and check that the row is read with the words above.
+
 ## Audit export and emergency disable
 
 Target behaviour (specified here before the code is written).
@@ -156,6 +168,13 @@ Contract: `ilium:plugin@0.1.0`.
 - [HST-687] A system-wide install MUST be stored read-only for users (owner root/administrator, no write for others), MUST be verified by `manifest.sha256` on each server start for each user, and MUST be loaded by many users concurrently without a per-user copy; compiled-component cache for it MUST be per user.
 - [HST-688] When two users open the same project folder, each user's session MUST keep its own grants, and project buckets MUST be stored per user (keyed by user id) or the host MUST refuse the second user with `project.owned-by-other-user`; a plugin MUST NOT be able to read the other user's project bucket. The `.ilium` folder permissions of 0700 MUST NOT be widened by the host.
 - [HST-689] The host MUST provide `ilium plugin admin purge-user <user>` (proposed, owner to confirm) for an administrator that deletes the plugin data, storage, grants, logs and cache of that user under the user's roots, requires `--yes`, writes a system audit entry and refuses a user with a running session server (`purge.user-active`).
+
+The two per-user caps have no default value in this manual. An unset key means no cap, because no policy key sets a cap for a session resource yet ([SEC-950]). The owner must pick each number before release. The behaviour below is proposed and owner to confirm; it has no requirement ID.
+
+- **Active-plugin cap, enabling.** `max_user_active_plugins` counts the plugins of one user that are enabled and running, bundled T1 plugins included. Enabling a plugin that would take the count over the cap returns `not-permitted` with reason `policy.user-quota`, and the plugin stays off. The plugins already running are not affected. The reason code is new; add it to the stable reason codes of [Admin policy](/pages/reference-admin-policy/) ([SEC-115]) when it is confirmed.
+- **Active-plugin cap, start.** When the policy is loaded at start and the enabled plugins are more than the cap, the host starts them in the order of [LIF-046] until the cap is reached. The rest stay enabled, keep their grants, settings and data, and do not run. The notice names `policy.user-quota`. They start at a later start, once the count is under the cap.
+- **Lowering a cap.** A lowered cap takes effect at the next start, like any policy edit ([Administration guide](/pages/guide-administration/)). A running plugin is not stopped and no data is deleted.
+- **Disk cap.** The cap is checked when a plugin is installed or upgraded. An install or upgrade that would exceed `max_user_plugin_disk_mib` is refused with `policy.user-quota`, as HST-686 states. A plugin's own writes stay limited by its `disk_mib` ([Files](/pages/api-fs/)), so the user cap does not make a running plugin's writes fail.
 
 ## Plugin logs and metrics on managed machines
 

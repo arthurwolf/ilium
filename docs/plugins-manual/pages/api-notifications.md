@@ -223,6 +223,27 @@ export const { lifecycle, handler } = definePlugin({
 
 The sound id check happens per submission, so one bad id never stops a notice from showing. A refused submission does not reserve its key, so the plugin can fix the id and retry with the same key.
 
+#### Quiet state, suppression and screen readers
+
+The host has no quiet-hours, do-not-disturb or focus-mode state that a plugin can read or wait for. The user controls quiet state in Settings, and the plugin cannot see those settings:
+
+- **Desktop switches.** The master switch `enabled` under `[notifications]`, which turns every desktop notification off, and the per-event switches are described in the user notifications page (`src/docs/notifications.md`).
+- **Sound.** Setting the sound source to `muted` plays nothing. The same page covers the sound source choices.
+
+The manual does not state whether these switches also silence a notice that a plugin submits with `notify`. Plugins must not assume either way.
+
+A successful outcome never reports suppression:
+
+- `ok` means the host accepted the submission and queued the notice or the sound, as described above. It does not mean the user saw or heard it.
+- No outcome says that the user's quiet state, a muted sound or the desktop's own handling dropped a notice. A plugin cannot tell a shown notice from a silenced one.
+- Do not retry an `ok`, and do not retry a `duplicate(request-ref)`. Retry only a `refused(rate-limited)`, after `retry-after-ms`.
+
+If a plugin needs a quiet mode of its own, it adds a setting, as the [sound tutorial](/pages/tutorial-17-help-and-sound/) does for its sound. The plugin then skips the submission when its own setting is on. The grant and the setting are separate, so turning the setting off does not change the grant.
+
+A core veto is a different case. The `before-notify` point of the core notifications path can refuse a notice with `extension.vetoed`, as the [hooks tutorial](/pages/tutorial-19-stop-core-actions-with-hooks/) shows for quiet hours. That point belongs to core notices. The manual does not document whether a plugin's `notify` passes through it, so the plugin must not rely on it.
+
+Screen readers get no notice from Ilium. The manual defines no announcement path for `notify` or `play-sound`. The `[ui] screen_reader` mode applies to widgets that a plugin draws in a view, not to desktop notices. A notice reaches the user only through the operating system's notification service or the client footer. So each notice carries its meaning in its text: put the status word in `title`, such as "Failed" or "Needs approval", and never rely on the urgency or the sound alone. See [accessibility and theming](/pages/accessibility-and-theming/).
+
 ### What the user sees
 
 When the terminal pane the notice is about has focus in an attached client, the desktop notice is replaced by an in-app notice in the client footer. When no attached client reports focus, the desktop notice is shown. A sound plays either way.

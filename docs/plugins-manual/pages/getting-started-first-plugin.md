@@ -378,6 +378,37 @@ The contract lets the same intent carry more than text. The extended `set-decora
 <p>The slot id in the code and in <code>contributes.decoration_slots</code> must match exactly. A mismatch does not stop the build. Each submission then fails with <code>refused(invalid-argument)</code>, and no badge appears.</p>
 </div>
 
+### Support bundle for a bug report
+
+A single log line often does not show why a plugin failed. When a bug report needs the log, the state, the limits and the crash history together, ask the user for one support bundle. One command writes it:
+
+```bash
+ilium plugin support-bundle example.agent-tools --out agent-tools-support.zip
+```
+
+The `<file>` must not exist yet. The archive holds exactly these four text entries and no others:
+
+| Entry | Contents |
+|---|---|
+| `summary.txt` | Plugin id, version and digest, Ilium version, operating system and grants. It also holds the output of `ilium plugin status` and `ilium plugin doctor`, and the count of log lines dropped to fit the size limit. |
+| `log.txt` | The newest 200 log lines of the plugin. |
+| `stats.txt` | The output of `ilium plugin stats`, the resource use against each limit. |
+| `crashes.txt` | One record for each helper crash, kill or out-of-memory kill in the last 30 days, with the time in UTC, the version, the side, the reason, the exit status and the export that was running. |
+
+The steps for the user are these:
+
+1. Run the same command with `--dry-run` added. It prints the file names, the sizes and the count of redactions for each rule, and writes nothing.
+2. Run the command without `--dry-run`. The bundle is at most 8 MiB. When the log is too large, the oldest lines go first.
+3. Open the zip and read `summary.txt` and `log.txt` before you send it. Nothing leaves the machine by itself. Ilium does not upload the bundle.
+
+The bundle works for a plugin in state `failed`, `blocked` or `incompatible`, and for a plugin whose helper is missing. Writing it does not change the plugin's state, grants or health counters. A failed write leaves no partial file. An id that is not installed fails with `bundle.plugin-unknown`.
+
+What the bundle leaves out is part of the contract. It redacts credential headers, URL parameters and home-directory paths, which print as `~`. It shows each plugin payload as a byte count only. It never contains the plugin's data folder, so your notes, your stored state and the content of any file the plugin read stay out. It has no trace recordings and no grant secrets. A secret value in a settings row is not in the output of `ilium plugin ... --json` either.
+
+The one part that comes from your plugin is `log.txt`. Keep it clean by following the log rule in [Publishing and support](/pages/guide-publishing-and-support/#supporting-your-users): write counts and ids, never secrets, file contents or whole payloads. The Diagnostics screen has the same build as a "Build support bundle" button. It shows the file list and size first, and its default button is Cancel. The full rules are in [Diagnostics](/pages/core-plugin-diagnostics/#support-bundle).
+
+For your own bug report template, ask for the bundle together with the answers in [A template for bug reports](/pages/guide-publishing-and-support/#a-template-for-bug-reports). Do not ask a user for `--unredacted` output. That flag works only for a plugin installed with `ilium plugin dev`. [AUT-314]
+
 ### See also
 
 - [Tutorial step 1: agent badge](/pages/tutorial-01-agent-badge/) builds on this plugin and handles every activity state. [Tutorial step 2](/pages/tutorial-02-command-and-settings/) adds a command and a setting.

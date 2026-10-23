@@ -425,6 +425,34 @@ When the grant is declined, the subcommand is hidden from help and the command f
 | Invocation deadline | none; open until `finish` or the caller disconnects | none |
 | `on-events` deadline | 20 ms (50 ms at tier 1) | trap |
 
+### Diagnostics and support
+
+The host adds no debug switch to a contributed command. It passes `argv` unchanged and writes nothing about verbosity, so a subcommand is as verbose as its plugin makes it. Two settings control what the plugin log keeps, and neither is per invocation:
+
+| Setting | How to set it | Scope |
+|---|---|---|
+| Threshold of one plugin | `ilium plugin log-level <id> debug`, and `ilium plugin log-level <id> --reset` to go back | All sides of the plugin, until the session stops ([log-level](/pages/reference-plugin-cli/#logs-and-log-level)) |
+| Default threshold | Environment variable `ILIUM_PLUGIN_LOG_LEVEL` | Read by a session server when it starts. Setting it on one `ilium <name>` call does not change a server that is already running. |
+
+The default threshold is `info`, so `debug` and `trace` lines are dropped, not stored ([DEV-653](/pages/reference-debugging-tools/)). Raise the threshold before the failure happens. `ilium plugin logs --level` only filters lines that were already stored.
+
+For plugin authors:
+
+- Write the detail a user may need later with the `log` import ([log](/pages/api-log/)): `debug` for the steps taken, `warn` or `error` for the failure. Write to standard error only the text the user must see at the terminal.
+- A plugin that wants a verbose run defines its own flag, for example `--debug`, lists it in `arguments_schema` and parses it from `argv`. The host defines no such flag, so name it in the plugin README.
+- Do not log `argv` values or standard input content as they are. They can hold private text. Log a count or an id instead. A log line is 16 KiB at most ([AUT-315](/pages/guide-publishing-and-support/)).
+
+When a user reports a failed subcommand, ask for this evidence, after checking it for secrets:
+
+1. The exact command line, and the exit status printed by `echo $?` right after it. The kernel uses exit code 2 for `unknown command` and exit code 1 when the owner is disabled or the plugin stopped during the call ([CLI compatibility](/pages/reference-cli-compatibility/)).
+2. Standard output and standard error in separate files, for example `ilium <name> <arguments> >out.txt 2>err.txt`. A pipe carries only standard output.
+3. The Ilium version (`ilium --version`), and whether a server was running.
+4. `ilium plugin info <id>`, which shows the version and grants. A declined `cli.contribute` hides the subcommand, so `unknown command` points to that grant.
+5. `ilium plugin status <id>` and `ilium plugin logs <id> --tail 200`. Host lines show refused calls, traps, restarts and failed activations. The page does not define a log line for each invocation, so a missing line does not prove the call never arrived.
+6. `ilium plugin doctor`, when the failure may come from the host or the sandbox rather than the plugin.
+
+Do not ask for unredacted trace output or for the content of standard input. Ask for its byte or line count. Use the report template in [Publishing and support](/pages/guide-publishing-and-support/#a-template-for-bug-reports) to collect the rest.
+
 ### Edge cases
 
 | Situation | Result |

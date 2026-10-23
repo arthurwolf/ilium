@@ -468,6 +468,17 @@ Intent::SetDecoration(SetDecorationSpec {
 
 The fields are the WIT record fields in both languages (`frames` is a list of styled text, `frame-ms` is at least 90). The tutorial keeps the plain badge in the following steps. `spans`, `visibility` and `tone` are the other new fields.
 
+**Accessibility of the extended decoration.** A terminal has no accessibility tree, so the badge must name its state in words. Colour and motion only add to that text. These rules apply to every decoration this step draws:
+
+- **Text carries the state.** The label (`working`, `idle`, `approve?`) names the activity. A reader who cannot tell the accent colour from the muted one, or who cannot see the spinner, still reads the state. Never let a tone or a spinner frame be the only sign of a state ([AUT-501]).
+- **Reduced motion.** When the user turns on reduced motion, the host shows the first frame of `frames` and steps no further, so the spinner becomes one still glyph (`⠋` in this step) beside its label. The plugin needs no code for this, because it runs no timer of its own. A plugin that does run an animating timer must read `reduced-motion` from `theme-extras()` and stop it ([AUT-502]). The host behaviour is in [API tree chrome](/pages/api-tree-chrome/).
+- **Frames change the glyph only.** Every frame keeps the same colour role, and only the glyph changes. Stay within the limits in [API tree chrome](/pages/api-tree-chrome/): 2 to 16 frames, and `frame-ms` of 90 or more. The frames of this step use 120.
+- **Colour comes from roles.** A `tone` or a span role takes its colour from the theme, never from a fixed RGB value ([AUT-504]). Colour can disappear in a monochrome terminal, under `NO_COLOR` or in a 16-colour theme. The plugin cannot detect `NO_COLOR` itself, because `theme-extras()` does not report that colour is off. The manual requires the host to keep its own widget states readable without colour (USR-300). It does not make that promise for decoration text, so the badge must stay readable without colour.
+- **Emphasis by attribute.** If a state needs more weight, add `bold` through the style's `add` modifiers. Bold, underline and reverse are the attribute cues that work beside colour (USR-300).
+- **The tooltip adds detail.** A tooltip appears only on hover. It may explain the state, for example why the agent is running, but it must not hold the only copy of a state.
+
+Check the accessible behaviour in two runs. Turn on reduced motion and confirm the spinner stops moving. Then view the tree with colour removed (a monochrome or 16-colour terminal) and confirm that each badge still names its state.
+
 ### Edge cases and errors
 
 The kernel answers every submission with one outcome. These are the outcomes this step can meet:

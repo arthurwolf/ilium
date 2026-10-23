@@ -247,6 +247,31 @@ An author MUST publish a way to reach them, in the README and in the package des
 
 A version number, once published, MUST NOT be reused for different content. The host refuses it with `package.version-reused`. [AUT-319]
 
+## Support window and end of support
+
+The manual sets no support period for a plugin. The author sets it, and the author states it in the README and on the release page. The rules below show what the author can promise and what the host already does, so that the promise does not contradict them.
+
+| State | Meaning | What an installed user sees |
+|---|---|---|
+| Supported | The author publishes fixes for the named versions | Updates appear in `ilium plugin update` as usual |
+| Deprecated | The plugin or a version is marked with a message, and optionally a successor (registry only) | The client shows the message and offers the successor. Installs still work. [PKG-397] |
+| End of support | The author publishes no more fixes and says so in the README and the final release notes | No update arrives. The installed copy keeps running. The manual defines no host warning for an unmaintained plugin. |
+| Retired | The author stops the plugin (`ilium plugin disable <id>` or `uninstall <id>` by the user) | The user removes it. Yank does not remove an installed copy: it "leaves it working where it is installed." [PKG-396] |
+
+### Host limits that set the upper bound
+
+A plugin's support can last no longer than the host still accepts its contract version. The host loads the current contract minor and the one before it ([ABI evolution](/pages/reference-abi-evolution/)). A package whose `api` is outside that window is refused at install with `package.api-unsupported`. The last `0.x` minor loads with one `deprecated` record and is refused after the removal major ([ABI major versions](/pages/reference-abi-major-versions/)). An author who supports an old contract minor must therefore say when that minor stops working, and must not promise more.
+
+### Notice before an end-of-support date
+
+- The author SHOULD state the end-of-support date in the README and in the release notes of the last supported version. Give at least 90 days' notice, the same period that the host uses for a registry retirement ([AUT-951]). This is a recommended practice of this manual, not a host rule.
+- The author SHOULD put the same date in the `deprecate` message, so that a registry client shows it at the moment a user sees the plugin.
+- A removal of an SDK item, a CLI flag or a plugin feature has its own notice rule. The item keeps working for at least two minors after the release that marks it ([API-083], [DEV-998]). Do not shorten that period when you end support.
+
+### Abandoned namespaces
+
+A registry operator may reclaim an id that has no release for 24 months and no answer from its owner to two notices sent 30 days apart. Such an id is marked abandoned in the signed metadata ([PKG-703]). An author who wants to keep an id must therefore publish a release, or answer a notice, before that point. A reclaimed id never reuses the version numbers or keys of the earlier owner.
+
 ## Edge cases and errors
 
 | Situation | Result | Fix |

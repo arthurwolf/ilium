@@ -166,6 +166,54 @@ keep_days = 365
 
 **[SEC-199]** Multi-user machines: see [Enterprise deployment](/pages/guide-enterprise-deployment/). Each user has their own stores and runtime directory. The system policy applies to all users. No store is shared between users.
 
+### Stopping a blocked plugin now
+
+Today a policy edit reaches a running server only at its next start ([SEC-188]). A plugin that is already running and that the policy now blocks keeps running until then. The fleet-wide switch that stops every third-party plugin is [SEC-457] in [Enterprise deployment](/pages/guide-enterprise-deployment/). The rules below define a per-plugin path that removes the wait. They are a proposal (proposed, owner to confirm). Until the owner accepts them, [SEC-188] applies unchanged and these rules have no effect.
+
+- **Trigger.** The server re-reads the system policy file when `ilium plugin policy reload` runs, and when the file's content hash changes. The hash is checked every 10 seconds. The maximum exposure window is 60 seconds from the moment the new file is written to the moment the stop takes effect (proposed value).
+- **Effect on a running plugin.** If the new effective policy blocks a running plugin through `plugins.deny_ids`, `packages.allowed_tiers`, `packages.allow_third_party` or a publisher rule, the server deactivates that plugin at once. Its state becomes `disabled-by-policy` ([plugin lifecycle states](/pages/reference-plugin-lifecycle-states/)). The state is not written to `installed.json`, so the plugin starts again without any user action when the policy stops blocking it. Its data and settings stay on disk.
+- **Calls after the stop.** From the deactivation on, every host call of that plugin returns `not-permitted` with reason `policy`, as in [SEC-184]. The user cannot re-enable it while the policy blocks it. The enable call returns `not-permitted` with the refusal code in its message.
+- **User-visible notice.** The client shows `Disabled by your administrator`, the text of [SEC-186], on the plugin's row and in the notice list. The refusal code is not shown in the notice. It is recorded in the audit log, as [SEC-115] requires.
+- **Audit records.** Two records are written before the stop is reported to the user: `policy-violation` with the matching reason code and the plugin id, and `plugin-state-changed` with reason `policy`. See [Audit log](/pages/reference-audit-log/).
+- **Malformed file at reload.** A live reload that reads a malformed file fails closed in the same way as at start ([SEC-187]). Third-party plugins stop with `policy.invalid`, and the server shows `Admin policy is invalid: <line and message>`.
+- **Relaxing a policy.** A live reload that lifts a block starts again only the plugins that the policy itself stopped. It does not start a plugin that the user disabled.
+- **Until the owner accepts this.** On 0.1.0 the exposure window of a blocked running plugin lasts until the next start on that machine. An administrator can narrow it by running `ilium plugin disable <id> --reason <text>` for each account, which stops the plugin for that account only and does not stop it for other users, or by stopping all third-party plugins with [SEC-457].
+
+Test: deny the id of a running plugin in the system file, run `ilium plugin policy reload`, and assert within 60 seconds that the plugin is `disabled-by-policy`, that its host calls return `not-permitted` with reason `policy`, and that the audit log holds `policy-violation` and `plugin-state-changed`. Then remove the deny entry, reload, and assert that the plugin is enabled again without user action.
+
+### Previewing a policy change
+
+`ilium plugin policy show` ([SEC-191]) prints the merged values, but not which installed plugins, grants or settings those values would change. The command below is a proposal (proposed, owner to confirm) that fills that gap. It is the preview step to run before the first ring of a rollout in [Administration](/pages/guide-administration/).
+
+`ilium plugin policy check <candidate-file> [--user-file <path>]` reads a candidate policy file in the schema of [Schema](#schema). It merges the candidate, in place of the system file, with the user file of [SEC-180] using the rules of [SEC-181]. It then compares the result with the installed set and prints the effect on each item it would change at the next start.
+
+- **Changes nothing.** The check writes no file, no `installed.json`, no grant, no setting and no audit record, and it shows no notice. It runs without a running server.
+- **Output.** JSONL on standard output: one line per affected item, then one `summary` line. Each affected line has the fields `type` (`plugin`, `grant`, `setting` or `policy`), `plugin_id`, `item` (the grant name or setting key, when the type has one), `effect`, `reason` (a code from [SEC-115] or the policy key that causes the effect) and `state_at_next_start`.
+- **Effects.** Each row of the table below is one line type. Items with no effect produce no line.
+
+| Candidate rule | Installed item affected | `effect` | `reason` |
+|---|---|---|---|
+| `plugins.deny_ids`, `packages.allowed_tiers`, `packages.allow_third_party`, a publisher rule | Installed plugin the rule blocks | `disabled` | `policy.id-denied`, `policy.tier-denied`, `policy.third-party-denied` or `policy.publisher-denied` |
+| `packages.blocked_versions` ([SEC-951], if accepted) | Installed copy of a listed version | `disabled` | `policy.version-denied` |
+| `plugins.force_enabled` | Listed plugin that is not installed | `missing` | `policy` ([SEC-189]) |
+| `plugins.force_enabled` blocked by `plugins.deny_ids` | Listed plugin | `conflict` | `policy.id-denied` |
+| `plugins.force_disabled` | Listed plugin that the user could enable | `locked` | `policy` ([SEC-189]) |
+| `grants.deny`, `grants.max_risk` | Grant the rule matches, held by a plugin | `revoked` | `grants.deny` or `grants.max_risk` ([SEC-198]) |
+| `grants.deny`, `grants.max_risk` | Grant the rule matches, not yet held | `locked` | same as above |
+| `extensions.deny_points` | Contribution to a listed point | `locked` | `extensions.deny_points` ([SEC-382]) |
+| `settings.locked` | Setting key whose stored user value differs from the locked value | `locked` | `settings.locked` ([SEC-190]); the stored user value is kept and ignored |
+| `inference.allowed_providers` | Configured provider not in the list | `refused` | `policy` |
+| `projects.allow_project_values = false` | Plugin values in known project folders | `ignored` | `projects.allow_project_values`; one line per plugin with the count |
+
+`grants.deny_combinations` lines carry reason `grants.deny_combinations`; their effect follows [SEC-004]. Changes to `network.*` are reported as the grant lines they lock, with reason `network.deny_hosts` or `network.allow_hosts`, under the rules of [Network egress](/pages/reference-network-egress/).
+
+- **Summary.** The `summary` line gives the count of affected lines for each `type` and `effect`, and the count of plugins that would be disabled or refused.
+- **Malformed candidate.** A candidate that fails the checks of [SEC-187] prints one `policy` line with `effect` `invalid` and `reason` `policy.invalid`, including the line number and message. It also prints one `refused` line with reason `policy.invalid` for every installed T2 and T3 plugin, because those would refuse to load.
+- **Exit status.** `0` when no installed plugin, grant or setting would change. `1` when at least one would change, or when the candidate is invalid. A script can gate a rollout on the exit status.
+- **Rollout.** Run `check` on the candidate and then `ilium plugin policy show` on the first ring ([USR-108]). Compare the `disabled` and `refused` lines with the plugins the users need.
+
+Test: write a candidate that denies one installed plugin id and one grant the plugin holds. Assert a `disabled` line with reason `policy.id-denied`, a `revoked` line for the grant, exit status 1, and no change to the state folder, the config folder or the audit log (compare file hashes before and after). Then write a malformed candidate and assert one `invalid` line and one `refused` line per installed T2 and T3 plugin.
+
 ## Ceilings, versions, retention and notices
 
 ### Resource ceilings

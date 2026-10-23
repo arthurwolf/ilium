@@ -329,6 +329,49 @@ function timedProvider<T>(name: string, work: () => T): T {
 
 The `log` import is one of several tools. The trace, the widget tree inspector, the profiler and the memory view are specified in [Debugging tools](/pages/reference-debugging-tools/). Symptoms from users, listed by phase with a fix for each, are in [Troubleshooting](/pages/guide-troubleshooting/). A plugin MUST NOT depend on `--unredacted` traces to diagnose a user's problem, because that flag works only for a plugin installed with `dev`. [AUT-804]
 
+### Bug report procedure
+
+Ask for the same evidence each time. Only `ilium plugin support-bundle <id> --out <file>` writes a support bundle, and no other command may offer a second format ([USR-104]). The command needs a running session. The file name must not exist yet: an existing file is never overwritten, and the command fails with `support-bundle.exists` and exit 2 ([DEV-832]).
+
+Collect these items:
+
+1. **Support bundle.** The zip holds exactly `summary.txt`, `log.txt` (the newest 200 lines of the plugin log), `stats.txt` and `crashes.txt` ([USR-221]). `summary.txt` lists the Ilium version, plugin id, version, tier, state, platform, host API range, failure count, redaction counts, dropped log lines and a SHA-256 of the other three entries ([USR-335]). The bundle is capped at 8 MiB. When the cap cuts it, the oldest log lines go first and the summary says so ([USR-224], [DEV-833]). Add `--include-host` only when the host may be the cause. It adds the last 500 host log lines, redacted, and the summary names the addition ([USR-334]).
+2. **Versions.** `ilium --version`, and `ilium plugin --version`, which prints the CLI version, the contract version and the supported WIT versions without a session ([DEV-906]).
+3. **Installed package.** The line of `ilium plugin list --json --inventory` for the plugin. It holds the id, version, tier, content hash, signing key id, state and granted permissions, with no paths under the user's home ([USR-341]). `ilium plugin inspect <id> --verify` recomputes the package hashes and prints a `diff` record for each mismatch; a mismatch exits 1 with `inspect.hash-mismatch` ([DEV-801]).
+4. **Environment.** `ilium plugin doctor` as text. Exit 4 means at least one item failed; a warning does not change the exit code ([DEV-811]). The output names state folders, so the user replaces the home folder with `~` before sending it. `doctor` writes text only, never a bundle.
+5. **Steps taken.** The user's own account of the command, the exit status and what happened. The template in [Publishing and support](/pages/guide-publishing-and-support/#a-template-for-bug-reports) lists the fields.
+
+Do not ask for these. Unredacted traces: `--unredacted` works only for a `dev` install ([AUT-314], [AUT-804]). Restore bytes or storage: the bundle holds neither, so ask for the plugin's own restore warning line from `log.txt` instead. Standard input content: ask for its byte or line count only, because the content may be private text.
+
+### Redaction check before sharing
+
+The host redacts the bundle as follows ([USR-222]):
+
+| Item | In the bundle | Rule |
+|---|---|---|
+| Credential headers, such as `Authorization:` | Redacted | [USR-222] |
+| URL parameters | Redacted | [USR-222] |
+| Home-directory paths | Shown as `~` | [USR-222] |
+| Plugin payloads | Byte count only | [USR-222] |
+| Values equal to a plugin secret, and their base64 and percent-encoded forms | Replaced with `<redacted>` | [SEC-223], [SEC-243] |
+
+Redaction is a safety net, not permission to log secrets: a plugin MUST NOT write them ([AUT-315]). The rules above do not name process arguments in the grant-sensitive lines, or free text in your own `log` calls, so read those lines by hand. Check the bundle in this order:
+
+1. Run `ilium plugin support-bundle <id> --dry-run`. It prints the file names, sizes and the count of redactions per rule, and writes no zip ([USR-332]). A count of zero for a rule that your test data should trigger is a finding.
+2. Read the redacted `summary.txt` and `log.txt` in the viewer the host opens after a bundle is built ([USR-332]).
+3. Search each file for every known form of each plugin secret: plain, base64 and percent-encoded. Keep the forms in a file outside the bundle folder and pass it with `grep -F -f`, so they stay out of the shell history. Also search for the home folder. Every count must be 0.
+4. If any count is not 0, do not attach the bundle. Fix the plugin so it stops writing that value, then rotate the secret with `ilium plugin secret rotate <id> <name>` ([SEC-451]), because the value has reached a log file.
+
+The bundle is the user's file. Ilium never uploads it, and the author never receives it unless the user sends it ([USR-106], [USR-332]).
+
+### Reproducing a trap from a report
+
+1. In `log.txt`, find the first `trap in <export>` entry and its frame lines. Later restarts usually repeat it ([Lifecycle](/pages/lifecycle/#failure-counting-and-restart)).
+2. Ask for a replay file, not the trace text: `ilium plugin trace <id> --last 100 --record trace.replay`. Payloads in a normal trace are redacted ([DEV-672]). The manual does not say whether `--record` keeps payload bytes, so read the file before the user sends it.
+3. Run `ilium plugin test --replay trace.replay`. It exits 0 on a match and 3 on divergence ([DEV-544]). A deadline trap reproduces, because the recorded host call times are replayed on the fake clock ([DEV-725]). In component mode a trap is a test failure unless the test calls `expect_trap` ([DEV-403]).
+4. When the trap depends on restored state, write a fixture with a `restart` step that carries base64 restore bytes ([Test harness reference](/pages/reference-test-harness/)). Build the bytes with the layout your code writes, whose first byte names the format ([AUT-206]). Restore bytes reach an instance only when its `data_version` matches the writer's ([LIF-103]), so set the same `data_version` in the fixture. The bundle has no restore bytes, so generate them from your own code and never ask the user for theirs.
+5. Fix the cause, run the replay again until it exits 0, and keep the fixture in the test suite so the failure does not return ([AUT-316]). Testing commands are in [Testing plugins](/pages/testing/).
+
 ## What the user sees
 
 When a plugin is disabled, the tree footer shows notice N14 with the plugin name and the failing export, and Settings > Plugins shows the same text. N14 is defined once, with its render, in [Lifecycle](/pages/lifecycle/#failure-counting-and-restart).

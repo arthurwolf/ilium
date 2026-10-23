@@ -741,6 +741,41 @@ Retention at the provider is set by the provider, not by Ilium. Ilium does not s
 - [COR-951] Settings MUST show, for the selected provider, the data retention statement configured in its provider entry, or the text "retention unknown" when the entry has none. Settings MUST NOT imply that Ilium enforces that statement.
 - [COR-952] Before the first request to a remote provider, the user MUST confirm that provider's retention statement once, the same way as the voice provider in [Core dumps, swap and provider retention](/pages/core-plugin-voice/#core-dumps-swap-and-provider-retention) ([COR-106]). A local provider sends nothing off the machine and needs no confirmation.
 
+### Offline switch and provider failures
+
+This section lists every way a model request through this plugin can fail, the error code the caller receives, and whether a retry can help. The codes are those of the [inference API errors](/pages/api-inference/#errors) and the [refusal reasons](/pages/reference-errors-and-limits/#refusal-reasons).
+
+**Offline switch.** When the offline switch is on (`network.offline` in Settings, or `offline = true` in the administrator policy, see [Network egress](/pages/reference-network-egress/)), every AI request fails with `not-permitted` and the reason `offline`. The error message starts with `offline: `, and the plugin log line ends with `(offline)`. The switch also refuses a local provider on `localhost`, so a local provider is not a way around it. The Test provider sample above writes `failed` into the Last test row in this case, because it gets no completion back.
+
+**Switching offline during a request.** The outcome depends on whether the reply is streamed.
+
+- A streamed reply (the [stream tokens](#2-stream-tokens) sample) ends with `not-permitted`, reason `offline`, when the switch turns on while the stream is open.
+- A request that is not streamed, and whose HTTP call has already left the machine when the switch turns on, has no outcome stated in the manual. A plugin must not assume the provider did or did not answer. It should treat the result as unknown and check the next reply it receives.
+- A request that has not yet started its HTTP call fails with `offline` when that call would start.
+
+**Failure table.** Each row is what the calling plugin receives. The plugin never sees a wording for the user; the manual defines no user-facing text for these errors.
+
+| Failure | Code and reason | Retry |
+|---|---|---|
+| Offline switch on | `not-permitted`, reason `offline` | No, until the switch is off |
+| Switch turned on during a stream | `not-permitted`, reason `offline` | No, until the switch is off |
+| No provider selected | `not-found`, at once; nothing is sent | No |
+| Grant declined, or the admission policy refuses the purpose or provider | `not-permitted` | No |
+| Provider unreachable, connection fails, or a forced proxy is down | `network`; there is no direct fallback when a proxy is forced | Yes |
+| Provider does not answer within 120 000 ms (the `timeout_millis` in the examples) | `timed-out` | Yes |
+| Pending request passes its 120 s host lifetime ([requests and outcomes](/pages/requests-and-outcomes/)) | `cancelled` | No, start the work again |
+| Admission gate throttles the request | `rate-limited`, with `retry-after-ms` | Yes, after the delay |
+| Daily token or request budget spent | `quota-exceeded`, with `retry-after-ms` set to the next UTC day | After that time, or after the user raises the limit |
+| CPU budget of the execution group spent | `quota-exceeded`, with `retry-after-ms` | Yes, after the delay |
+| 64 pending requests already held by the plugin | `busy` | Yes, later |
+| Input over 4 MiB, schema over 64 KiB or not valid JSON, reply text over 4 MiB | `invalid-argument` | No, fix the call |
+| Grant revoked while the call is in flight | `revoked`; the plugin is activated again | No |
+| Provider's own error, for example an HTTP error such as an authorization failure | The provider's own code passes through unchanged | Depends on that code |
+
+The manual gives no separate code for an authorization failure at the provider. Such a failure reaches the plugin as the provider's own error, so a plugin that needs to show a specific message for a wrong key must read the provider's code and message itself.
+
+**Two limits at 120 seconds.** The provider call has a 120 s timeout (`timed-out`), and a pending request has a 120 s host lifetime (`cancelled`). The manual does not say which one fires first when both are reached, so a plugin should treat either code as a time-out.
+
 ### Security
 
 Risk marks of this plugin's extension points follow the corrected table in [Extension security](/pages/reference-extension-security/) ([SEC-293]).

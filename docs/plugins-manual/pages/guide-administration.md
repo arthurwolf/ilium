@@ -136,6 +136,24 @@ jq -r 'select(.event=="grant-given") | [.ts,.plugin_id,.grant] | @tsv' "$XDG_STA
 
 The audit file is per user, in the user's state folder, because Ilium runs as that user. For a central copy set `[audit] sink = "syslog"` or `"journald"`. If the file cannot be written, no action is refused: the server queues up to 1,000 records, retries every 10 s and shows a notice.
 
+#### Audit size and retention defaults
+
+| Setting | Default | Range you can set | What it controls |
+|---|---|---|---|
+| `audit.max_mib` | 64 MiB | policy key | Size at which `audit.jsonl` is rotated |
+| `audit.keep_days` | 365 days | policy key | Age after which a rotated file is deleted |
+| Audit and crash storage ceiling | 256 MiB | not a policy key | Total size of audit and crash records together |
+
+Use these defaults to size the disk. Each user's log grows until it reaches `audit.max_mib`, then it is renamed to `audit-<first seq>.jsonl` and a new file starts. The hash chain continues into the new file, so `ilium plugin audit --verify` covers the rotated files as well. Rotated files are deleted at server start once they are older than `audit.keep_days`. A policy of `keep_days = 180` therefore deletes a rotated file once it is older than 180 days, not 365.
+
+What happens at each limit:
+
+- **Size reached (`audit.max_mib`).** The file rotates. No record is refused or dropped.
+- **Total storage reaches 256 MiB.** The host deletes the oldest rotated files first, even if they are still inside `audit.keep_days`, and writes one record that states how many files it removed. The page does not name a policy key that changes this ceiling, so plan disk space for the 256 MiB limit as it stands.
+- **Disk full, so a record cannot be written.** The server keeps running and holds up to 1,000 records in memory, retries every 10 s, and shows a notice. When the queue is full, the oldest `grant-refused` and `egress-host-first-use` records are dropped first. The `audit-dropped` record that counts the loss is written when space returns.
+
+To check the rotation and size on a machine, run `ls -lh "$XDG_STATE_HOME/ilium/audit/"`. Several `audit-<seq>.jsonl` files near 64 MiB each is normal. If the folder approaches 256 MiB, either allow more disk per user or lower `audit.keep_days` so old files are removed sooner. For a central copy of every record, set `audit.sink` as described above.
+
 ### Respond to a bad plugin
 
 1. **Stop it now.** Add its id to `plugins.deny_ids`. At the next server start every copy is disabled and shows "Blocked by policy".

@@ -236,6 +236,21 @@ The install dialog shows one row for the grant, in the server or client group. T
 - Every admitted request is recorded in the privacy log. Use a `purpose` that the user can recognise in that log.
 - The grant does not let the plugin pick a provider or bypass the gate.
 
+#### Log retention
+
+Two logs record an inference call. Neither holds prompt or reply text ([COR-950](/pages/core-plugin-inference/#what-is-kept-and-for-how-long)).
+
+| Log | Location (Linux) | Kept | Deleted by |
+|---|---|---|---|
+| Privacy log, `inference.jsonl` | `~/.local/state/ilium/privacy/inference.jsonl` | 90 days or 16 MiB, whichever is smaller. When the cap is reached, the oldest records go first. | Settings > Privacy > Clear |
+| Plugin log, one file per plugin | `<state>/plugins/logs/<session-slug>/<id>.log` (`<state>` is `~/.local/state/ilium` on Linux) | The active file and four rotated files. The file rotates at 4 MiB, and rotated files older than 14 days are removed at server start. After an uninstall, the log is removed 7 days later. | `ilium plugin logs --clear <id>`; `--purge` or `ilium plugin erase-data` |
+
+- The privacy log keeps the fields listed in [SEC-265](/pages/user-plugin-security-and-privacy/#the-privacy-log): `purpose`, `provider`, `model` and token counts. Ilium does not redact these fields early. A record leaves the log only by age, by the size cap or by Clear.
+- The plugin log keeps the lines your plugin writes with `log`, plus host lines for refusals and traps. Its limit is 200 lines per second. Extra lines are dropped and counted in one `warn` summary line. Do not write prompt, reply or note text into it.
+- The plugin cannot read its own log. Only the user who owns the folder can read it ([reference: plugin files](/pages/reference-plugin-files/#the-plugin-log)).
+- A user who wants the record gone can clear the privacy log at once. The plugin log holds whatever the plugin wrote, so review it before sending it to support.
+- When a bug report needs evidence, ask for `ilium plugin logs <id>` and `ilium privacy log --plugin <id>`. The privacy log shows which calls were admitted, but not what they said.
+
 ### Who requests it
 
 First-party plugins from [feature traceability](/pages/reference-feature-traceability/):

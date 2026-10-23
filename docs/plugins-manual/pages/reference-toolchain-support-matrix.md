@@ -22,6 +22,30 @@ Requirement ids of this page are in the range `DEV-882` to `DEV-884`. The comple
 
 Each rule names its failure code. A failure prints a `diagnostic` record in JSONL or one line on standard error in text, and the process exit code follows [Plugin command-line reference](/pages/reference-plugin-cli/#exit-codes).
 
+### Tested versions
+
+- Each host minor release has one row in the support table of this page ([DEV-962]). [DEV-989] requires the newest tested version of each tool (Rust, Bun and `wasm-tools`) to be listed in this page, so the table names it for each minor.
+- A toolchain newer than the newest tested version is not refused. `ilium plugin doctor` reports it as `untested` (warning, exit 0), and `ilium plugin build` still succeeds.
+- A toolchain older than the minimum is refused with `toolchain.too-old` before any build starts, as [DEV-883] states.
+- The minimum Rust version is 1.90 and the minimum Bun version is 1.2, as [Set up a toolchain](/pages/getting-started-toolchain/) states. This page does not yet give a minimum `wasm-tools` version.
+
+### Raising a minimum and retiring an old toolchain
+
+- A patch release never raises a minimum. A raise appears in the release notes of a minor release at least one minor before it takes effect ([DEV-988]).
+- A raised minimum keeps the previous minimum working for at least two minor releases after the raise, as [DEV-897] requires for the SDK minimums. This page does not state a separate overlap for the host minimums.
+- A toolchain below the raised minimum is refused with `toolchain.too-old` by `doctor` and by `build`, as [DEV-883] states.
+- A host minor past its end-of-support date keeps loading plugins. It reports `support: "end-of-life"` and writes one `host.end-of-life` warning per server start ([DEV-965]).
+
+### Changes in component bytes from a toolchain change
+
+- [DEV-882] promises identical component bytes across hosts when the toolchain versions are the same. It does not promise identical bytes across toolchain versions. A new Rust or `wasm-tools` release that changes the bytes is therefore not a breach of this page, but the package hash changes with it.
+- A build is reproducible only with pinned inputs ([DEV-893]). The recorded toolchain in `dist/build.json` must match the installed one. When it does not, `ilium plugin verify-reproducible` fails with `build.unpinned-input` before it builds. See [Reproducible builds](/pages/guide-reproducible-builds/).
+- Projects that need a fixed toolchain set exact versions in `ilium-toolchain.json` ([DEV-990], owner to confirm the file name). A mismatch fails `ilium plugin build` with `toolchain.pin-mismatch`.
+- Steps when a new toolchain is installed for a project:
+  1. Run `ilium plugin doctor`. Note any `untested` warning.
+  2. Run `ilium plugin verify-reproducible` on the project with the new toolchain.
+  3. Update the recorded or pinned versions in the same change that rebuilds the component.
+
 ## See also
 
 - [Plugin command-line reference](/pages/reference-plugin-cli/)

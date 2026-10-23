@@ -496,6 +496,24 @@ function activityLabel(activity: AgentActivity): string {
 
 In the TypeScript builders, the props object comes first and the child handles follow. `tree(root)` returns the `UiTree`.
 
+### Keyboard, screen reader and colour
+
+The panel is operated from the keyboard alone. The table is the only focusable widget in it, so Tab has nothing to move to inside the panel. The host reserves Escape for closing the panel. The keys the table takes are listed in [Widgets: collections](/pages/widgets-collections/#table).
+
+| Key | What the table does | What this step's code does |
+|---|---|---|
+| Up, Down | Moves the highlight one row. | Sends `selected`; the handler invalidates the view, so the status line updates. |
+| PageUp, PageDown, Home, End | Moves the highlight by a page or to the first or last row. | Same as Up and Down. |
+| Left, Right | Scrolls columns that are hidden at a narrow width. | Nothing. |
+| Enter | Sends `activated` with the row index. | Nothing. The handler ignores `activated`, so Enter has no visible effect in this step. |
+| Escape | Closes the panel. | Nothing. The host closes the topmost popup or panel first. |
+
+- **Focus order.** The panel has one focusable widget, so no `tab-index` is set. If a later step adds a focusable widget to the panel, reading order (top to bottom, left to right) is the default order and the plugin should keep it. See [Focus order](/pages/ui-model/#focus-order).
+- **What a reader gets.** The table is read in column order: Pane, Activity, Signature, Objective. The header row is text, so it is read as the column names. The rows are plain text, and the plugin sends nothing else for them. The highlight is drawn in the `selection` role, which is reversed, so it stays visible without colour. Under `[ui] screen_reader = true` the host draws a linear mode in which each focusable element is read on its own line with its role and state (see [Accessibility and theming](/pages/accessibility-and-theming/#production-additions-t7-users-privacy-a11y)). The plugin does not set a label for the table, and the status line below it repeats the goal of the selected row, so the goal is read after each move even if a reader does not announce row changes.
+- **Colour.** The panel sets no colour. Each state is a word in the Activity column (`working`, `idle`, `approve?`, `done`, `menu`), so no state depends on colour or on a glyph. A user with no colour, or with `NO_COLOR` set, still reads every state. The Settings toggle for `panel_show_idle` also shows its state as text (`[ On ]` or `[ Off ]`), not as a colour.
+- **Narrow areas.** A panel must work in `compact` density at 40 columns (AUT-503 in [Accessibility and theming](/pages/accessibility-and-theming/#what-the-contract-does-not-provide)). This step uses the `widths` form, which has no `priority`, so the host cannot choose which column to drop first. For a panel that must fit 40 columns, use the `columns` form with a `priority` on each column, as [Widgets: collections](/pages/widgets-collections/#table) describes.
+- **Empty list.** With no agents only the header is drawn. A screen-reader user then hears the column names and nothing else. A plugin that wants to say so can write "No agents running." into the status line, which this step does not do.
+
 ### Test it
 
 The logic moved into the core crate, so its tests now run on the host with no bindings. The client has no unit test in this step, because `render` needs the host. Check the panel by hand.

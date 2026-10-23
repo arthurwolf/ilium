@@ -115,6 +115,22 @@ An author looks the code in an install error up in the error table above and cha
 | `trust.key-exists` | `keygen` found existing key files | Choose another `--out` folder |
 | Users report a problem you cannot see | Traces are redacted | Ask for `logs`, `status` and `stats`, not unredacted traces |
 
+### Privacy requests about your plugin's data
+
+A user may ask you for a copy of their data, or for its erasure. You never receive the user's data, so the work runs on the user's machine with the host's commands, and you help by naming the right command and by checking the result. The user-facing rules are in [Plugin privacy](/pages/user-privacy/).
+
+1. **Find out which request it is.** A copy is an export. Erasure removes the data. Ask which plugin id is meant, and whether the user wants one plugin or all of them.
+2. **Ask for a copy.** The user runs `ilium plugin export-data`. It writes one folder with a `manifest.json` (format version `1`, the Ilium version, the UTC time and a SHA-256 for each file) and one subfolder per plugin. It refuses a folder that is not empty, with `export.target-not-empty`, so the user names a new folder. It covers plugin settings, grants, plugin logs, audit records and crash records. The plugin's own storage is copied by `ilium plugin data export <id> <dir>`, which writes each bucket as JSON lines. The command needs no network. [USR-245], [USR-323], [HST-656]
+3. **Do not ask for the files themselves.** When the user needs to show you a problem, ask for `ilium plugin support-bundle <id> --out <file>` instead. It holds the newest 200 lines of the plugin log, the stats and the crash records, and no plugin data folder and no grant secrets. It is 8 MiB or smaller, and its summary states any lines it dropped. [USR-221], [USR-223], [USR-224]
+4. **Erase one plugin.** The user runs `ilium plugin erase-data <id>`. It shows the plugin name and the total size, and the default answer is No. It removes the plugin's settings, grants, data, storage, logs, crash records, pre-migration backups, cache and consent records. It reports what it kept. [USR-246], [USR-326], [USR-327]
+5. **Erase every plugin.** The user runs `ilium plugin erase-data` without an id. The command asks the user to type `erase`, or accepts `--yes-erase-all` for a script. [USR-327]
+6. **Uninstall first.** Recommend `ilium plugin uninstall <id>` before erasure, so the plugin cannot write new data while it is erased. Erasure works on a plugin in any state, even when its code does not load. [USR-328]
+7. **Check the result.** The command prints one line per data kind, `erased <kind>: <n> files, <bytes> bytes, remaining 0`, and exits with 0 when every kind it did not keep is empty. If it exits with 3, it lists the paths it could not delete under `erase.incomplete`. The user sends you those lines, not the files. [USR-325]
+8. **Name what is kept.** The audit log is kept for `audit.keep_days` (365 days by default) even after erasure. The erase report names it. Copies the user wrote elsewhere, such as a file from `ilium plugin export <id>`, are not deleted by the command, and the user must delete them. [SEC-224], [USR-248], [HST-977]
+9. **Handle the data you hold.** If your plugin sent the user's data to a host or service you run, erasure on the user's machine does not reach it. You must erase that copy yourself, and you should tell the user that you did. Each party answers for the data it holds ([Plugin privacy](/pages/user-privacy/)).
+
+Requirement ids of the commands are in [Plugin privacy](/pages/user-privacy/) and [Install, update and uninstall](/pages/reference-install-update-uninstall/).
+
 ## When it still fails
 
 `ilium plugin bisect` halves the set of enabled third-party plugins, so it finds a plugin that clashes with yours. Start Ilium in safe mode to see whether a third-party plugin is the cause. See [Safe mode and troubleshooting](/pages/user-safe-mode-and-troubleshooting/). A report to the host project SHOULD contain the Ilium version, the plugin id and version, the manifest, the last 100 log lines and a test that reproduces it. [AUT-803]

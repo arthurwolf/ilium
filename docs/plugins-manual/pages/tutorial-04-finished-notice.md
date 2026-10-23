@@ -457,6 +457,21 @@ The manifest of this tutorial already lists `notify.toast` in `capabilities.serv
 
 Limits: `notify` 6 per minute, `play-sound` 4 per second, `agent-action` 20 per second per pane. A refused submission does not reserve its key.
 
+#### No notification service
+
+A desktop notice needs the desktop's notification service. Some sessions have none: an SSH login with no D-Bus session bus, a headless machine, or a minimal desktop with no notification daemon. In those sessions the `notify` submission still completes as `ok`, because `ok` means the notice was queued, not shown. No outcome, refusal code or request-completed field reports the missing service, so the plugin cannot detect it from the outcome.
+
+What the user sees and what the plugin gets in that case:
+
+- **The user sees no desktop pop-up.** Nothing on the screen says the notice was dropped. If an attached client reports terminal focus, the finish message still appears in the client footer, because that path does not use the desktop service.
+- **The plugin receives `ok` for `notify`.** Do not retry it, and do not treat the missing pop-up as a failure. The retry rule for `ok` in [notifications](/pages/api-notifications/) applies.
+- **The sound is a separate submission.** `play-sound` depends on the audio device, not on the notification service. It completes as `failed(io)` when the client has no audio output (see [sound.play](/pages/capability-sound-play/)). Whether a sound id inside `notify` plays when no notice can be shown is not defined by the manual, so this step submits `play-sound` on its own.
+- **The plugin log shows nothing for the dropped notice.** `ilium plugin logs` records the plugin's own lines and the refusal lines of the host. A notice that was queued and not shown leaves no line there, so the step's log cannot prove the user was not notified.
+
+Handle this case in the plugin, not in the host. Keep the in-app record of each finish: a toast with `notify.toast` (see [in-app toast](#in-app-toast)) or the status line of the agents panel from [step 3](/pages/tutorial-03-panel/). These show in the Ilium client and do not need a desktop service. Keep the notice's text self-explanatory too, because a screen reader gets nothing from `notify` (see [notifications](/pages/api-notifications/)).
+
+To test the case, start the session with `DBUS_SESSION_BUS_ADDRESS` set to a socket path that does not exist, finish an agent, and check two things: the `notify` submission still reports `ok` in `ilium plugin test` output, and no pop-up appears on the desktop. The second check is manual. The expected result is the one above; the step does not add a retry or a fallback that depends on the desktop.
+
 ### Test it
 
 Run the plugin, start an agent, and let it finish. The notice and the sound appear, and `ilium plugin logs` shows the outcome. When an attached client reports terminal focus on the pane, the notice goes to the client footer instead of the desktop.

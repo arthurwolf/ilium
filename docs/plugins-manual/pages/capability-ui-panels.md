@@ -331,6 +331,18 @@ The run log panel from the Rust example, after two presses of Refresh, looks lik
 - Widgets that have a key keep their selection, scroll offset and typed text across renders.
 - Colours follow the theme. The host applies the leader-row and icon rules to every view without extra code.
 
+## Translated text and locale
+
+The host does not tell a plugin the user's locale, time zone or language. A plugin that shows translated text picks its own language, usually from a `choice` settings row, and passes finished strings to the `ui` functions. The full rules are in [Internationalisation](/pages/guide-internationalisation/). This section lists what they mean for a view.
+
+- **Where plugin text appears.** A view's labels, paragraphs and titles, the text of a `toast` or `notice`, a `badge` or status segment, a help topic, and the one-line reason a plugin gives for a grant in its manifest. The host shows each of these as the plugin wrote it, apart from removing terminal escape sequences and cutting to the width.
+- **Manifest titles have one value.** The `title` of a `panels` entry, a `settings` tab and an `onboarding_steps` entry is read from the manifest, not from a view, so it cannot change with the user's language. Keep those titles in one language and put translated text in the tree that `render` returns. Identifiers (`id`, command ids, setting keys) are never translated.
+- **Width.** Measure every string with `display-width` and cut only at a grapheme boundary. A cut ends with `…`, which takes one cell. A translated label is often 30 percent longer than the English text, so leave room and do not assume a fixed width. In a `leader-row`, the host shrinks the value first, then the label.
+- **Limits by surface.** A string that exceeds its box is cut with `…` and never overflows. A badge is cut at 12 cells, and a toast title and body have the length limits of [Events and intents](/pages/reference-events-and-intents/). The grant reason in the review dialog is cut at the dialog width, which is 70 columns, and a plugin should keep it within 60 cells after translation. See [Grant review and consent](/pages/reference-grant-review-and-consent/).
+- **Right-to-left text is not supported.** The host draws each line from left to right, does not reorder bidirectional text and does not mirror a layout. Put right-to-left text in its own row, apart from left-to-right labels, and say in the plugin README that such text is not laid out correctly.
+- **Fallback.** A plugin that ships several languages reads them from `i18n/<tag>.json`. A missing message falls back to one default language, normally English, and never shows the message id. A language tag that the plugin does not ship uses the default language. Host text such as the review dialog's fixed words, buttons and Settings labels follows the host's own language setting. It is not translated by the plugin, and the plugin must not rely on it matching its own language.
+- **Testing.** Run the view with the `en-XA` pseudo-locale, which expands every string by 40 percent. `ilium plugin lint` fails a view that clips or overflows at that locale with `i18n.layout-overflow`.
+
 ## See also
 
 - [widgets-index](/pages/widgets-index/) for every widget and its props.

@@ -145,3 +145,53 @@ Replacement of core plugins follows [SEC-300] to [SEC-306] in [Extension securit
 - [COR-228] If a replacement of a core plugin fails 3 times within 60 seconds after becoming owner, the kernel MUST return ownership to the original core plugin, mark the replacement failed with core.replacement-rolled-back, and post a notice.
 - [COR-229] At most one enabled plugin MAY replace a given core plugin id; enabling a second MUST be refused with core.replacement-conflict naming the current owner.
 - [COR-230] Core plugins MUST be versioned with the server build; at boot the server MUST refuse an installed override of a core plugin whose declared host ABI is incompatible, falling back to the bundled copy and logging core.abi-mismatch.
+
+## Localisation of core plugin text
+
+This section sets the rules for the text the 30 core plugins show, the times and numbers they display, and whether their detection depends on language. The authoring rules for third-party plugins are in [Internationalisation](/pages/guide-internationalisation/) and [Localisation and text direction](/pages/api-ui/#localisation-and-text-direction). The rules below apply them to core plugins. They add no requirement IDs.
+
+### Which text is translatable
+
+Translatable text is every title, label, help text, notice, toast body and error message that a person reads in a core plugin view or a Settings row. Each one has a message id in the plugin's own catalogue, `i18n/<tag>.json`, a flat object of message id to string, as in [api-ui](/pages/api-ui/#localisation-and-text-direction). English is the fallback for every id.
+
+These stay in English in every language:
+
+- identifiers: plugin ids such as `ilium.core.chatroom`, command ids, setting keys, error codes such as `core.data-newer`, event and topic names, stored section names, grant ids and capability names;
+- CLI command names, flags and output lines, such as `chatroom message sent` ([chatroom](/pages/core-plugin-chatroom/)), and log lines, because scripts, hooks and agents match them;
+- text that people or agents write: chatroom messages, notes, branch names and agent output. This is data, shown exactly as written.
+
+Lookup order is the exact tag, then the language without region, then `en`. A missing id shows the English text and never the id. If a catalogue fails to load, the core plugin shows English. The permission review and the recovery page follow the same rule, and the recovery page is always in English ([user permissions](/pages/user-permissions-explained/)).
+
+Settings row titles and help come from the plugin manifest, which has one value, so they stay in the manifest language, English. This follows the rule for third-party settings in [Internationalisation](/pages/guide-internationalisation/#your-own-strings).
+
+### Language setting
+
+The User Interface tab of [Settings](/pages/core-plugin-settings/) has theme, motion, density and stable glyphs. It has no language choice in this release, so core plugins show English. If a language choice is added, it belongs to the Settings plugin, and each core plugin reads it through [settings](/pages/api-settings/) and then uses the lookup order above.
+
+### Times
+
+- **Stored times are UTC.** Plugin data keeps UTC milliseconds, never local text ([Internationalisation](/pages/guide-internationalisation/#time)). The audit log `ts` is UTC ([audit log](/pages/reference-audit-log/)), and crash records hold the time in UTC as RFC 3339 ([diagnostics](/pages/core-plugin-diagnostics/)).
+- **Absolute times are shown as `YYYY-MM-DD HH:mm:ss`** with the zone written out, in every language. A relative form such as `3 min ago` is allowed for recent events.
+- **Chatroom records are the one local-time exception.** A record line is `- YYYY-MM-DD HH:mm:ss +HH:MM | <author> | <content>`, local time with its offset ([chatroom-B01](/pages/core-plugin-chatroom/)). The offset keeps the time unambiguous for agents that read `CHATROOM.md` on other machines. Changing this format is a change of the file format, not a translation.
+- **Log file names** use the local date and time (`log-<local date and time>.txt`, [diagnostics](/pages/core-plugin-diagnostics/)). They are names for people to sort, not timestamps to parse.
+
+### Numbers, money and units
+
+- The decimal mark is a dot and there is no group separator, in the UI as well as in machine-readable output. This release has no decimal-mark setting.
+- Money is stored as integer cents and shown with two decimal places and its currency sign, such as `$6.12` ([cost](/pages/core-plugin-cost/)). Rounding happens only when formatting.
+- Sizes use metric units. Token counts use a `k` suffix, such as `412k` ([cost](/pages/core-plugin-cost/)).
+
+### Detection and display language
+
+Detection does not depend on the language that Ilium shows.
+
+- **Agent identity uses process names**, such as `process_names` in the signature registry ([agent detection](/pages/core-plugin-agent-detect/)). Process names do not change with language.
+- **Activity states come from the text an agent CLI prints**, matched by the built-in signatures and by `activity-rules` regular expressions ([signatures](/pages/capability-agent-signatures/)). The built-in patterns are English, for example `esc to interrupt` for working and `Do you want to proceed?` for approval. They match the agent's output, so an agent that prints in another language may not match them. A user then adds an `activity-rules` entry with a regular expression for that wording.
+- **The interstitial auto-answer rule** matches the English text of Claude Code's "resume full session" prompt ([agent detection](/pages/core-plugin-agent-detect/)), with the same limit.
+
+### Tests for core plugin text
+
+- Load a test catalogue and check that a core view and a Settings row use its text.
+- Remove one message id from a catalogue and check that the English text is shown and the id is not.
+- Break a catalogue and check that the recovery page is in English.
+- Once a language choice exists, run the English detection fixtures with that language selected and check that the classification does not change. This confirms that detection reads the agent's output and not the display language.

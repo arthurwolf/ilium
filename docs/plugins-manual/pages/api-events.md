@@ -555,6 +555,31 @@ Events themselves do not fail. Keep the handler short. Move slow work to a job (
 <p>A trap or a deadline breach ends the instance and cancels its pending requests. The new instance starts with empty state, so re-read any state it needs from the tree or from storage.</p>
 </div>
 
+### Operator view: queue depth, drops and restarts
+
+An operator reads the event pipeline with the CLI. No log parsing is needed. Every figure is kept per plugin and per side (server, client or scene).
+
+| Question | Command | Figure |
+|---|---|---|
+| Is the queue filling up now? | `ilium plugin stats <id> --json` | `queue_depth`, a gauge with a high-water mark |
+| How high did it get? | `ilium plugin status <id>` | `queue_high_water`, the highest queue length since the instance began |
+| Which events were dropped, and how many? | `ilium plugin stats <id> --json` | `events_dropped`, counted per event kind over the retained 24 hours |
+| How often did the plugin restart, and why? | `ilium plugin stats <id> --json` | `restarts` by reason, and `failures` by reason |
+| Is it failing right now? | `ilium plugin status <id> --json` | `failures_in_window`, `traps`, `near_misses` and `quota_hits` |
+| What happened on each day? | `ilium plugin status <id> --days <n>` | One summary per day for up to 30 days. A day with a restart or an upgrade is marked |
+| Collect the numbers centrally | `ilium plugin metrics` | Prometheus text on standard output, with names prefixed `ilium_plugin_` and the labels `plugin`, `side` and `class` |
+
+The per-kind `events_dropped` counter and the `events-dropped` event answer different questions. The event tells the plugin, inside its own batch, how many events it lost per (event, source) pair. The counter tells the operator how many were lost per event kind, across the whole retained window.
+
+Limits of these figures:
+
+- They live in memory. They are kept in hourly buckets for 24 hours, are never written to disk, and reset when the server restarts. Read them before a restart if you need them.
+- A plugin cannot read another plugin's counters. Only the kernel, the CLI and the user interface read them.
+- The queue alert fires when the queue holds 768 or more of the 1,024 default entries within one minute. A queue that stays near full means the handler is slower than the event rate. See [Health and watchdog](/pages/reference-health-and-watchdog/) for the alert table and [Telemetry and plugin health](/pages/reference-host-telemetry/) for the full counter list.
+- A restart that a never-dropped event causes counts as a failure. It moves the plugin toward the restart rule in [Lifecycle](/pages/lifecycle/#failure-counting-and-restart), so the third failure within 10 minutes disables that side.
+
+A slow or stuck plugin is diagnosed in this order: run `ilium plugin status <id>` to read the health and `queue_high_water`. Then run `ilium plugin stats <id> --json` to read `events_dropped` and `restarts`. Then read the plugin log with `ilium plugin logs <id>` for slow `on-events` calls, traps and the restart lines. The log is the place for the cause. The counters show only how often it happened.
+
 ### What the user sees
 
 Events are not shown directly. The user sees their effects: a sound plays, a decoration appears, and the plugin's log lines appear in `ilium plugin logs`. A refused submission and every trap are written to the log with the plugin id, the interface and the function. When a plugin is disabled after repeated failures, the tree footer shows a notice, and the user re-enables the plugin from settings or the kernel recovery page.

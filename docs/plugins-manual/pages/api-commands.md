@@ -438,6 +438,15 @@ Manifest errors (the install is refused with the key path):
 | `manifest.contribution-target` | `row_actions.applies_to` names an unknown target |
 | `manifest.grant-wildcard` | A `commands.invoke` grant uses a wildcard where the pattern grammar does not allow one, such as `*/status` or `ilium.git/prefix*` |
 
+#### What the user sees when an invocation fails
+
+The palette shows no status for an invocation, and the kernel draws no message when a command is refused or fails. A failure therefore looks like the absence of the expected effect. The outcomes below are the ones this page defines; each one is visible to the user only through the effect of the command, if any.
+
+- An invocation refused because the command is disabled with `set-state` completes as `refused(conflict)` when it comes from a keybinding or the palette. The command stays listed, dimmed, and the keybinding does nothing.
+- A command that is running when its owning plugin is disabled completes as `cancelled`, as the completion table above states. The command's own effect may be partly done, because the plugin stopped in the middle of its work.
+- A refused invocation is written to the plugin log as a refusal line. Read it with `ilium plugin logs <plugin-id>`, as the [audio](/pages/capability-audio/) page shows for a voice plugin. The log is the only record of the refusal, because a disabled plugin receives no events and can draw nothing.
+- A notice or [toast](/pages/api-toast/) about a failed command can only come from the owning plugin while it is enabled and handling `command-invoked`. A plugin that wants the user to see a reason for a failure must draw it itself, for example with a `notice` in a view ([widgets-status-and-feedback](/pages/widgets-status-and-feedback/)).
+
 ### Limits
 
 | Limit | Value |

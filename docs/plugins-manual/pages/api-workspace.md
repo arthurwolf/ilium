@@ -364,6 +364,27 @@ Edge cases:
 - The records are the kernel's view. A plugin that has forgotten a worktree id can find the record again with `list`, matching on `path`.
 - Every refusal is logged with the plugin id and function, and shows in `ilium plugin logs`.
 
+### Orphaned worktrees after a crash or reboot
+
+An orphan is a worktree folder that no custody record covers, or a record that no pane owns any more while its folder remains. There are two ways to get one:
+
+- **The server dies between `git worktree add` and `register`.** Git knows the worktree, so it appears in `git worktree list`, but the kernel has no record. Nothing in Ilium can release it, and the `in_use` check does not protect it. Recovery is a Git procedure, below.
+- **A restart or reboot with records in place.** Custody records are part of the session snapshot, so they return with the session. A record whose owner pane is gone has `owner` set to `none`. Its release is a plugin call, so it waits until the plugin runs again: a disabled plugin or a revoked grant means no call reaches the kernel. A reboot also ends every process, so afterwards `in_use` is false for every worktree unless a process was started in it again.
+
+The kernel and the plugin never delete a folder on their own, and neither offers pruning or branch deletion. The steps below run from a shell in the repository, so they need neither Ilium nor the plugin to be running. Run them only when no Ilium session is starting, or when you have checked that the folder is not in use.
+
+1. List what Git knows: `git -C <repository> worktree list --porcelain`. Note each `worktree` path and its `branch` line.
+2. List the folders in the worktree root, the value of `workspace.worktree_root` (default `<parent of the project>/<project name>.worktrees/`): `ls <worktree_root>`.
+3. A folder in step 2 that is missing from step 1 is a leftover, typically from the crash case above. A path in step 1 whose folder is gone is a stale Git entry. `git -C <repository> worktree prune` clears stale entries only; it never touches a folder that exists.
+4. For each leftover folder, check that it is clean and unused before you remove it:
+   - `git -C <path> status --porcelain` must print nothing. Any output means uncommitted changes, and the folder must be kept until someone has read them.
+   - No process may have the folder as its working directory. `find /proc/[0-9]*/cwd -lname '<path>*' 2>/dev/null` must print nothing. This is the same test as `in_use`.
+5. Remove only the folders that passed step 4: `git -C <repository> worktree remove <path>`. Git refuses a dirty folder. Do not add `--force` until step 4 has been read and the folder is known to be disposable. Then run `git -C <repository> worktree prune`.
+6. Branches stay. `git -C <repository> branch -d <branch>` deletes a branch only when it is merged. Use `-D` only after reading `git log <branch>` and deciding the commits are not needed.
+7. For a record whose owner is `none` and whose folder is now removed, the plugin releases it on its next run, following Example 2 above. Removing the folder does not remove the record.
+
+`rm -rf` on a worktree folder is not a substitute. It leaves Git's admin entry behind and destroys uncommitted work. Removal blockers in the Worktrees plugin (uncommitted changes, a running process) apply the same checks as steps 4 and 5; see [Worktrees](/pages/core-plugin-worktrees/).
+
 ### Used by
 
 - Agent in a new Git worktree: calls `register` after `process.run` creates the worktree.

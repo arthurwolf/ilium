@@ -146,6 +146,35 @@ If the replacement imports the old data on its own initiative, it needs a permis
 
 Core plugins are updated together with Ilium. You never update one on its own. When you update Ilium, every core plugin changes to the version inside it. Third-party plugins are unaffected. A third-party plugin built for an older interface version may be refused after an Ilium update with the message "built for an interface version this Ilium does not support" (code `package.api-unsupported`). See [Install and manage plugins](/pages/user-install-and-manage/).
 
+### Accessibility of core plugin screens
+
+This section gives, for each screen a core plugin draws, the keyboard path, the text form of what is shown, and the focus order. The general rules for host-drawn widgets are in [Accessibility and theming](/pages/accessibility-and-theming/) and [USR-300] to [USR-307] in the requirements list. The host does not read your operating system's accessibility settings. Set the options in `[ui]` yourself: `screen_reader = true` for the linear reader mode, `contrast = "high"` for high contrast, and the **Reduce motion** row on the User Interface tab (`motion_level`) for less motion.
+
+Baseline for every core plugin screen:
+
+- Tab and Shift+Tab follow the focus order in [Focus order](/pages/ui-model/#focus-order). Tab never traps focus, and Esc always leaves a modal dialog.
+- The focused widget differs from the others by an attribute besides colour: reverse, bold or a `>` marker. Exactly one widget per window has focus.
+- With `screen_reader = true`, each focusable element is one line in focus order, with its role word and state (button, checked, unchecked, selected, N of M). Box-drawing characters and spinner frames are not read.
+- Sounds and desktop notices are not a screen-reader channel. Each notice carries its status word in its title, for example "Failed" or "Needs approval" ([Notifications](/pages/core-plugin-notifications/)).
+
+| Screen | Keyboard path | Text form of the content | Focus order |
+|---|---|---|---|
+| Voice strip (F8 or voice button) | Hold `F8`, release to send, `Esc` cancels | The state line "Listening", the partial transcript line and the hint line are text. The level meter is glyphs only | Not stated: the manual gives the strip no focus stop |
+| Voice confirmation "Close pane?" | `Esc` Cancel, `Enter` Close pane | The line "You said: ..." and the line stating what closes | Modal: the two buttons, `Esc` leaves |
+| Voice typed input | `ilium voice say` from the command line, no screen needed | JSONL output, one object per line | Not applicable |
+| Location picker (Braille world map) | `Tab` switches Address and Coordinates. Arrows move the crosshair one Braille dot, Shift+Arrows ten dots. In Address, type a place: the search starts after 300 ms and lists up to 5 results. Up and Down choose a result, `Enter` uses it, `Escape` cancels | The Selected row names the place and shows the point. The map itself is a picture with no text form | Not stated in the manual; Tab switches Address and Coordinates |
+| Kanban board | Not documented: the manual names no key for moving a card (open item below) | Column names and card titles are text. A board backed by a Markdown file can be read as text in an [Editor](/pages/core-plugin-editor/) pane | Columns and cards in reading order, left to right and top to bottom |
+| Tree decorations (badges, subtitles, footers) | Decorations are not focusable. Use the tree row that carries them, which is a focusable tree list | A decoration's text is part of its tree row. The manual does not say how a screen reader announces it, and an icon without a label has no text form | Follows the tree row order |
+| Animated backgrounds (Ambient look, Scenes) | Settings rows are keyboard-operated like any settings row | The backgrounds carry no text. The settings rows and the preview row are text | Settings rows in their tab order |
+
+Notes on the rows above:
+
+- Under **Reduce motion**, a plugin that animates draws one static frame, and the host stops decorative animations. The exact behaviour per surface is in [Reduce motion and photosensitivity](/pages/core-plugin-ambient/#reduce-motion-and-photosensitivity). The manual states no flash-rate limit for scenes, so Reduce motion is not a tested guarantee for users with photosensitive epilepsy.
+- A stale tree decoration (its plugin stopped responding) is shown in the muted colour only, as [Tree decorations](/pages/capability-tree-decorate/) describes. A colour-only state does not meet [USR-300] and needs a text cue. Until that cue exists, a screen-reader user cannot tell a stale decoration from a current one.
+- No platform is named as screen-reader supported yet. The release check [USR-951] is pending, and [USR-950] applies: until a release names the reader and terminal it passed with, do not describe that platform as screen-reader supported.
+
+Open items, stated so they can be tested: the Kanban card-move keys, a text cue for a stale tree decoration, and a text equivalent for the voice level meter. Each needs an owner decision before a release can claim full coverage.
+
 ### Errors and edge cases
 
 | Situation | What happens |

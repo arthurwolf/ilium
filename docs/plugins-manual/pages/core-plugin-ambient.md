@@ -613,6 +613,41 @@ Side basis: `ilium.core.ambient/palettes` is client because the palette is drawn
 - [Storage](/pages/api-storage/)
 - [Events](/pages/api-events/)
 
+### Reduce motion and photosensitivity
+
+The Reduce motion row on the User Interface tab of Settings (the `[ui]` key `motion_level`, see [config and data migration](/pages/reference-config-and-data-migration/)) is the user's one switch for less motion. This plugin does not own the row, and the Settings plugin draws it. This section says what the row changes for animated backgrounds and where each rule comes from, so the tests can check it.
+
+What reduce motion changes, by surface, when the setting is on:
+
+| Surface | Behaviour with reduce motion on | Rule |
+|---|---|---|
+| Host spinner, busy state of a progress row, decoration frames | One static frame, the first frame of `frames`. The host steps no further frames. | [accessibility and theming](/pages/accessibility-and-theming/), [decorations](/pages/tutorial-01-agent-badge/) |
+| Activity icon of a working agent in the tree | The working icon stays on its first frame. The idle still icon does not change. See [agent detection](/pages/core-plugin-agent-detect/#activity-icons-in-the-tree). | Same as the spinner |
+| Hover and scroll animation of host widgets | None drawn. | [accessibility and theming](/pages/accessibility-and-theming/) |
+| Host-run decorative animations | Stopped. | [USR-307] |
+| Plugin that animates | Reads `reduced-motion` from `theme-extras()` and draws one static frame. It stops its own animating timers. | [AUT-502], [UI API](/pages/api-ui/) |
+| Full-view redraws of a plugin that animates | At most one per second. A plugin timer under 1000 ms that only redraws logs `ui.motion-ignored` once per session. | [USR-307] |
+| Toast | No animation. | [notify toast](/pages/capability-notify-toast/) |
+| Animated scene in the background | **Not defined yet.** See Open points below. | None |
+
+The scene rows of the Animations tab, the live preview row and the animated background are the surfaces this page covers. The colour and look rows keep working with reduce motion on: the setting changes motion, not colour.
+
+#### Contrast limits
+
+This manual sets no limit for the shared look's contrast control. The contrast limits that exist are for the theme colour roles of the host, not for animated scenes: every built-in theme gives each role at least 4.5:1 against the background [USR-301], and `[ui] contrast = "high"` raises every role to at least 7:1 [USR-302]. A scene draws its tone through the shared look, so it is covered by neither rule.
+
+#### Flash rate and photosensitivity
+
+The manual states no flash-rate limit for animated backgrounds: no maximum number of luminance changes per second and no maximum flash area. A scene may run up to 60 frames per second (`frame_rate_cap`, see [scene API](/pages/api-scenes/)), and the manual does not restrict what changes between frames. A user who relies on reduce motion for photosensitive epilepsy therefore has no tested guarantee for scenes. The guarantee exists only for the surfaces in the table above.
+
+#### Open points
+
+These points are not decided in this manual. The owner of this page must decide them before the tests for scenes can be written.
+
+1. **Scenes under reduce motion.** Choose one: (a) the scene draws one still frame, the same rule as the spinner, or (b) the scene keeps running and the host caps its presentation to one frame per second, the USR-307 rule. Recommendation: (a), because it reuses the rule that the spinner and the agent icon already follow and it is the only option that gives a fixed, testable frame.
+2. **Flash-rate limit.** Choose a maximum rate, for example a number of flashes per second and the largest flashing area, and state how the host measures it. Without a limit there is nothing to test against.
+3. **Preview row.** Decide whether the live `preview` row of the Animations tab follows rule 1, since it draws the same frames as the scene.
+
 ### See also
 
 - [Core replacement matrix](/pages/reference-core-replacement-matrix/) for the surface, stored data, CLI names and install codes that a replacement of this plugin must keep.

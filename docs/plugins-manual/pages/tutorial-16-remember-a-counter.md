@@ -67,6 +67,25 @@ This tutorial uses `project`. A counter that belongs to a project should not lea
 - A `put` replaces the whole value or changes nothing. A failed `put` leaves the old value.
 - `get` of a missing key returns nothing. It is not an error.
 
+### What happens to the saved count
+
+The `project` bucket outlives the plugin code. These are the rules the counter depends on. The full storage rules are in [Storage API](/pages/api-storage/), and the uninstall rules are in [Lifecycle](/pages/lifecycle/).
+
+- **Disable.** Turning the plugin off, or a disable after repeated failures, deletes nothing. A disabled plugin runs no code, so it cannot read or write `count`. Turning it on again finds the saved value.
+- **Uninstall.** A plain `ilium plugin uninstall example.counter` removes the package, the grants and the cache. It keeps the `project` bucket, along with the `global` and `session` buckets, the data directory and the update backups. Ilium never deletes kept data on a timer. The log is deleted 7 days after uninstall.
+- **Delete the count.** `ilium plugin uninstall example.counter --purge`, or the Delete data choice in the uninstall dialog, removes the buckets, the data, the backups and the log at once. The project copy of the count is removed when that project is next opened. A project that is never opened keeps it.
+- **Reinstall.** Installing the same id again reads the kept count, so the count continues. Storage of a plugin that was uninstalled without `--purge` is not readable by any other plugin.
+- **Upgrade that changes the layout.** The counter stores eight little-endian bytes, which is layout version 1. The manifest has no `data_version` key, so the version is 1. A change of layout must raise `data_version` and ship a migrator. Otherwise no migration runs, `decode_count` sees bytes it does not expect and returns 0, and the count resets without any error.
+
+To change the layout safely:
+
+1. Add `"data_version": 2` to the manifest. It must be an unsigned 32-bit integer ([LIF-100]).
+2. Add `"migrator"` to `client.exports` and write `migrate(from, to)`. It reads the old bytes of each bucket, writes the new layout with `write-batch`, which applies all entries or none, and removes the old key only after the write succeeds. The code shape is in [Data migration](/pages/guide-data-migration/).
+3. Before `migrate` runs, the host copies the buckets and the data directory to a backup. The cap is `migration_backup_mib`, 2048 MiB by default. If `migrate` fails, the host restores the backup and keeps the old version. The update then shows `Update failed, rolled back`.
+4. The host stamps version 2 only after `migrate` succeeds, and only then calls `activate`.
+
+The `project` bucket migrates when a session of that project first activates the plugin, not when the update is installed ([LIF-104]). A project that is not opened keeps version 1 data until it is. After a migration, a rollback to the older version is refused with `migration.data-newer`. The user can then restore the pre-update backup, which loses what was written since, or discard the data.
+
 ### Manifest
 
 ```json

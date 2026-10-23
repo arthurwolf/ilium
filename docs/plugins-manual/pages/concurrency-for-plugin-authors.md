@@ -97,6 +97,19 @@ What this means for your code:
 1. **Whether a job may write `storage`.** [Runtime model](/pages/reference-runtime-model/#1-instances-and-threads) says a job shares data with the main instance "through `storage`, `fs` and messages". [jobs](/pages/api-jobs/#what-a-job-instance-can-call) lists only `storage.get` and `storage.keys` for a job, and returns `unsupported` for any other import. This page follows the jobs list, so [DEV-838] forbids a job from keeping state in storage. If the runtime model is the correct one, a job can write storage, and [DEV-838] is stricter than the host needs. The owners of the two pages must decide which one is normative.
 2. **Yield of job runs.** [Scheduling](/pages/reference-host-scheduling/#activation-and-yielding) allows job runs to yield, but the jobs page does not describe it. This page does not promise any yield behaviour for jobs. The consequence for an author is that the wall time of a job can grow while other plugins run, and the wall time limit still applies. The decision is whether the jobs page should say so.
 
+Both items stay open until their owner records the decision on this page. Until then the stated default below applies, and tests pin the default, not the open alternative.
+
+| Item | Owner | Decision date | Stated default until closed |
+|---|---|---|---|
+| Whether a job may write `storage` | The owners of [Runtime model](/pages/reference-runtime-model/) and [jobs](/pages/api-jobs/), who must agree on one page | Proposed 2026-11-06, owner to confirm | A job may call `storage.get` and `storage.keys` only. `storage.set` from a job returns `unsupported`, as the jobs list says. A job that needs to hand data back uses its output bytes or progress values. |
+| Whether job runs may yield | The owner of [jobs](/pages/api-jobs/) and [Scheduling](/pages/reference-host-scheduling/#activation-and-yielding) | Proposed 2026-11-06, owner to confirm | A job may be suspended while other plugins run, so its wall time can grow. Your code MUST NOT assume that a job runs without pauses. The job's own wall-time limit applies to the full elapsed time, pauses included. |
+
+How the defaults are tested until the items close:
+
+- A test of a job that calls `storage.set` asserts the `unsupported` result, not a successful write.
+- A test of a long job asserts that its result is correct when the job is paused and resumed, and that a job past its wall-time limit is cancelled at that limit, not at its CPU time.
+- When an owner closes an item, the owner replaces its row in the table with the decision, the date, and the rule ids that now apply, then updates the tests that pinned the default.
+
 ## See also
 
 - [Scheduling, deadlines and cancellation](/pages/reference-host-scheduling/) for the normative call classes, the queue and the trap steps

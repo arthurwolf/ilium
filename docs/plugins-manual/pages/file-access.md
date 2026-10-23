@@ -452,6 +452,22 @@ Every call returns a plugin error with one of these codes. The table lists the c
 | `lock` | `invalid-argument` (bad path) | `conflict` (held and timeout 0), `timed-out`, `not-found` |
 | `pick` | `busy` (a picker is already open) | `cancelled` when the user cancels |
 
+### Crash, power loss and full disk during a replace
+
+A `replace` write and a `write-atomic` call both write a temporary sibling in the target's folder, then rename it over the target. The outcome depends on when the failure happens.
+
+| Failure point | Target file | Temporary sibling | Call result |
+|---|---|---|---|
+| Before the rename, the plugin or the host is killed | Keeps its previous bytes | May remain, with a name such as `notes.md.tmp` | No result is delivered; the plugin restarts and must read the target again |
+| The disk fills while the temporary file is written | Keeps its previous bytes | Partly written; its removal is not specified (see below) | `io` (or `quota-exceeded` when the plugin's own limit is hit) |
+| After the rename | Holds the new bytes | None | `()` or `take-written` as normal |
+
+A reader therefore sees either the old file or the new file, never a mix. The rename is the commit point. Nothing is written to the target before it.
+
+- A killed write leaves the previous content in place. The plugin must not assume that its write happened until it reads the target again or receives a completed result.
+- The manual does not yet define whether a leftover temporary sibling is removed at the next start of the plugin or the host. Until that rule is written, a plugin must not read a `*.tmp` sibling as data, and it must not depend on one being removed. A plugin that writes often should use a name it can recognise and clean up in its own `activate` step.
+- A `write-atomic` that completes with `conflict` has not changed the target, so the plugin can read again and retry.
+
 ## What the user sees
 
 - High-risk scopes appear in the review dialog unchecked, and the user must check each one. See [Capabilities and grants](/pages/capabilities/).

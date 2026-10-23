@@ -485,6 +485,40 @@ A provider's own failure, for example an HTTP error from its service, passes thr
 
 A plugin can raise `pending_requests` in its manifest `limits`. The ceiling is 256 for T1 plugins and 64 for T2 and T3 plugins. The host clamps a higher request to the ceiling and logs it.
 
+### Budget per plugin
+
+The limits above cap the size and the number of calls. The budget caps how much model use one plugin can spend. It is separate from the CPU budget of the execution group in the error table, which measures plugin CPU time, not model spend. The budget is proposed, owner to confirm.
+
+Each plugin id has two counters, one for tokens and one for requests, and both count across every side and every job of that plugin.
+
+| Counter | Default limit | Window | What is counted |
+|---|---|---|---|
+| Tokens | 200,000 | One day, 00:00 to 24:00 UTC | `input-tokens` plus `output-tokens` of each completion that returns |
+| Requests | 500 | One day, 00:00 to 24:00 UTC | Each request that the admission gate admits |
+
+The UTC day is the clock of the privacy log ([SEC-265]). The user can change either limit for each plugin in Settings > Inference. A limit of 0 refuses every call from that plugin until the user raises it.
+
+**Counting rules**
+
+- A request counts once, when the gate admits it. A request that the grant, the admission policy or the budget refuses counts nothing and writes no privacy line.
+- Tokens are added when the completion returns, using the counts that the provider reported. A request that ends in an error adds its request count and no tokens.
+- A call is admitted only while both counters are below their limits. Requests still in flight add their tokens when they return, so the token counter can pass its limit by the size of those replies. Set `max-output-tokens` on requests to bound that overshoot.
+
+**When a limit is spent**
+
+- The call returns `quota-exceeded` at once. Nothing is sent to the provider, and the request is not counted.
+- `retry-after-ms` is set to the time until the next UTC day starts. Retry after that time, or after the user raises the limit.
+- The refusal counts as a quota hit in plugin health (see [Health and watchdog](/pages/reference-health-and-watchdog/)). It is a normal refusal, not a failure of the plugin side.
+- A plugin cannot read its remaining budget and cannot change its own limits. The manifest `limits` object does not contain a budget key.
+
+**What the user sees**
+
+- In Settings > Inference, each plugin with a budget has a row with a meter for tokens and one for requests, showing used and limit. A meter at 80 % or more of either limit changes to the warning tone.
+- The first refusal in each UTC day also shows a toast in Ilium with the plugin name and the time the budget renews. The toast is host-shown; the plugin does not send it.
+- The privacy log holds one line for each admitted call, as described under [Security](#security). A call refused by the budget writes no line. Settings > Privacy is still the place to audit what was sent, see [User security and privacy](/pages/user-plugin-security-and-privacy/).
+
+The rate limit of the gate (`rate-limited`, with `retry-after-ms`) is a different mechanism. It throttles calls over a short interval and does not depend on the spent amount.
+
 ### What the user sees
 
 - **Install review.** The review dialog shows the grant as a row of the side that asks. The user can decline it, and a plugin without the grant still installs.

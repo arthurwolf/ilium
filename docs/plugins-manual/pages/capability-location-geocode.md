@@ -170,6 +170,24 @@ Show the provider attribution that the host supplies next to results, as the pro
 
 Results are cached for 24 hours by query text, so repeating a search is free.
 
+### Offline use and the 24-hour cache
+
+The cache is kept by the host, not by the plugin. It is checked before the provider is contacted, so a search whose answer is cached is served without a network request. The rules for the cache and for offline use are these:
+
+| Situation | Outcome | Notes |
+|---|---|---|
+| Search text has an answer cached less than 24 hours ago, network down | list of places | No provider contact; the plugin gets the cached list. |
+| Search text has an answer cached less than 24 hours ago, network up | list of places | No provider contact. |
+| No cached answer, provider unreachable | `network` | The same outcome as the provider row above. |
+| Cached answer older than 24 hours, provider unreachable | `network` | An expired answer is removed and is not served. |
+| Reverse lookup, provider unreachable | `network` | Whether reverse lookups are served from the cache is not stated (owner to confirm); the cache is keyed by query text. |
+
+- A cache hit and a cache miss look the same to the plugin when the network is down, except that a hit returns places and a miss returns `network`. A plugin that needs an answer while offline should keep its own copy in the `shared` storage bucket (see [Storage](/pages/api-storage/)), which the host may clear at any time.
+- The one-time consent still applies to every call. Whether a cached answer is served after the user withdraws consent is not stated in the manual (owner to confirm).
+- Whether cache hits count against the rate limit of one request per second is not stated in the manual (owner to confirm).
+- The cache folder, its size limit and its eviction order are not stated in the manual (owner to confirm). It is outside the plugin's `data` and `cache` folders, so the `disk_mib` limit ([Files](/pages/api-fs/)) does not count it, and the disk-pressure steps ([Offline and low disk](/pages/reference-offline-and-low-disk/)) name only the plugin cache and the compile cache.
+- The 24-hour limit is a retention rule: the host must not keep a result longer than that ([User privacy](/pages/user-privacy/)). Erasing a plugin's data does not clear the geocode cache, because the erase list does not include it (owner to confirm). The cache clears itself within 24 hours in any case.
+
 ### What the user sees
 
 The review dialog lists the grant when a package is installed or first activated. The line states that place names are sent to a lookup service.

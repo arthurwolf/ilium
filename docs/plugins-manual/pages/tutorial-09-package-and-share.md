@@ -221,6 +221,23 @@ ilium plugin install dist/com.example.agent-tools-0.1.0.iliumpkg
 
 If the key is not trusted yet, the install dialog offers `Trust publisher` and shows the key fingerprint. Declining refuses the install.
 
+### Keys: rotation, revocation and loss
+
+The publisher key decides which signed updates an installed plugin accepts. The table gives the author's step and what an installed user sees in each case. The rules are in [Signing and trust](/pages/reference-signing-and-trust/), and the release routine is in [Publishing and support](/pages/guide-publishing-and-support/).
+
+| Situation | What the author does | What an installed user sees |
+|---|---|---|
+| Planned rotation, old key still safe | Create a new key with `keygen` for the same publisher id. Sign a rotation statement with the old key, in the format of [Signing and trust](/pages/reference-signing-and-trust/). Ship it with the first release signed by the new key. | The update is refused with `package.publisher-key-changed` until the user runs `ilium plugin trust add --rotation <rotation.json>`. After that the update installs, and the old key stays trusted until it is revoked. The current version keeps running meanwhile. |
+| Key compromised | Stop signing. Create a new key with the same publisher id. Publish a revocation statement for the old key with reason `compromised`, sign it with the new key if the old key is not safe, and release a new version signed by the new key. Announce the new fingerprint on the release channel. | Installed plugins signed by the old key stop at once and enter the state `disabled-blocked`, with the reason shown. The package stays installed and no data is deleted. They run again only after `ilium plugin enable <id> --accept-risk`, or after an update signed by a trusted key of the same publisher. New installs of that key are refused with `trust.key-revoked`. |
+| Key retired or superseded | Publish a revocation statement with reason `superseded` or `retired`, and continue with the new key. | Plugins keep running at T2 with the badge `key retired`. Their later updates must come from a trusted key of the same publisher id. |
+| Key lost, no copy | Nothing can be rotated, because no one can sign a rotation statement. Start a new publisher id and new plugin ids, and tell users. | Nothing is revoked, so the installed copies keep running, but the old publisher id gets no more signed updates. The new plugin id installs as a new package with its own review. Trust the new key only after its fingerprint arrives by a second route. |
+
+A user can act on a key without waiting for the author:
+
+- `ilium plugin trust revoke <key_id> --reason compromised` marks the key revoked on this machine, with the effects of the table above. The reason is `compromised`, `superseded` or `retired`.
+- `ilium plugin trust remove <key_id>` is refused with `trust.in-use` while an installed plugin is signed by that key. With `--force`, those plugins go to `disabled-untrusted`: they stop, show a badge, and keep their grants and settings. Trusting the key again restarts them.
+- `ilium plugin trust add --additional <publisher.pub>` adds a second key for a publisher id that already has one. In an interactive session it asks you to type `replace`.
+
 ### Review dialog
 
 The dialog appears before the plugin is enabled. It shows the name, the version, the publisher, the package state and the description. Below that it lists one row per capability, grouped by side. A row with a HIGH label needs an explicit choice from the user.
@@ -298,6 +315,30 @@ The plugin appears in Settings > Plugins. A T3 plugin keeps a `dev` badge there.
 
 Revoke a grant later with Settings > Plugins > com.example.agent-tools > Capabilities, or with `ilium plugin grants com.example.agent-tools --revoke notify.desktop`.
 
+### Roll back a bad update
+
+Ilium rolls back by itself when a new version fails its first activation. The old version comes back, the toast `Update failed, rolled back` appears, and the log shows `update.rolled-back`. Nothing else is needed in that case.
+
+Use these steps when the new version starts but behaves badly:
+
+1. Save a copy of the data first: `ilium plugin export com.example.agent-tools --out <file>`. This is the only copy that survives a later update.
+2. Run `ilium plugin rollback com.example.agent-tools`. The one previous version kept on disk becomes active. The command needs no network.
+3. If the command stops with `migration.data-newer` (exit 1), it has changed nothing. Choose one of two flags and run it again:
+   - `--restore-backup` restores the data copy taken before the last update. Everything written since that update is lost.
+   - `--discard-data` deletes the plugin's data and storage. The plugin starts empty on the old version.
+4. Read the first lines of the log with `ilium plugin logs com.example.agent-tools --tail 3`. The old version should log `activated` and then `ready`.
+5. The bad version is marked `skip`, so it is not chosen again by accident. To allow it again after a fix, install it with `--unskip`.
+
+What the user sees after a rollback depends on what the update did:
+
+| Case | Data and storage | Settings and grants |
+|---|---|---|
+| The update did not change the data version | The old version reads the same data. Nothing is lost. | Kept. |
+| The update migrated the data and kept a copy | Refused until step 3 is done. | Kept. A setting value that the old schema rejects is reset to its default and logged as `settings.value-reset`. |
+| No copy exists, because the update used `--no-backup` or a later update replaced the copy | Refused with `rollback.no-backup`. Restore from an export or a whole-host archive taken earlier. | Kept. |
+
+Do not uninstall the plugin to get back to the old version. Uninstall deletes the grants, and a reinstall asks for them again. The rule that keeps a rollback safe is set by the plugin author: the old version must still read the new data. See [Storage](/pages/api-storage/#downgrade-and-rollback) and [Data migration](/pages/guide-data-migration/).
+
 ### Share
 
 A registry is optional (decision D27). Without one, you share the file. With one, `ilium plugin publish <file> --registry <url>` uploads a signed package to a registry ([Distribution commands](/pages/reference-plugin-distribution-cli/)). The package is a file, and you pass it on by any channel you choose, such as e-mail, a shared folder or a file host. If the package is signed, send `publisher.pub` with it, and send the SHA-256 of the package and the key fingerprint by another route. The registry protocol is in [Registry reference](/pages/reference-registry/), and the steps in [Publishing guide](/pages/guide-publishing/). The full release routine, with changelog, support and key loss, is in [Publishing and support](/pages/guide-publishing-and-support/). Before every release you MUST run `ilium plugin check`, `lint` and `test`. [AUT-320]
@@ -305,6 +346,21 @@ A registry is optional (decision D27). Without one, you share the file. With one
 - A newer version of an installed id is an update. The dialog shows only the new capabilities.
 - A lower version is refused unless the person adds `--allow-downgrade`.
 - Before you share, install the archive once on your own machine and read the log.
+
+### Offline and air-gapped sharing
+
+The file route needs no network from start to finish. These steps stay on the local machine:
+
+- `pack`, `inspect --verify` and `sign` read and write local files only.
+- `trust add <publisher.pub>` writes the local trust store.
+- `install <file>.iliumpkg` never contacts the network, with or without `--allow-unsigned`.
+- A running plugin needs no network. Only its own `http` calls do.
+
+These steps need a network, and a machine without one cannot use them: `publish --registry`, `install` from a URL or a registry id, update checks, and the refresh of registry revocation lists. A machine with no registry configured fetches none of these.
+
+For a site with no connection, `ilium plugin export-bundle <dir> <id>` writes an offline bundle on a connected machine. Copy the bundle across and install from it with the `--from-bundle` option of `install`, as listed in [Distribution commands](/pages/reference-plugin-distribution-cli/).
+
+Revocations on an offline machine come only from its own trust store (written by `trust revoke`) and from the system trust file that an administrator pushes. A registry revocation list that has not been refreshed for 7 days shows `Revocation data is stale`, and Ilium keeps enforcing it. Pinning a registry root key on an air-gapped machine is covered in [Enterprise deployment](/pages/guide-enterprise-deployment/).
 
 ### Edge cases and errors
 

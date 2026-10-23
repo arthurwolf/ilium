@@ -100,6 +100,41 @@ The `ServiceCall` and `ServiceReply` types and the `ServiceProvider` trait are i
 - A provider that is installed but not running is started by the call. The call waits up to the provider's activation deadline (`activate_deadline_ms`, 2 seconds by default at T2 and T3) and then waits for the reply. If the activation deadline passes first, the request fails with `timed-out`.
 - A provider that is not installed or is disabled returns `not-found` at once.
 
+### Upgrading a provider
+
+The kernel compares the version in each caller's `requires.services` entry with the version the provider lists in `provides`. A full version in `requires` means the minimum compatible version, a caret range: `com.example.titles/suggest@1.0.0` means `^1.0.0`. A short form such as `@1.0` or a range is refused with `manifest.service-version`. For a major of 0, the minor must be equal and the patch is ignored, so `@0.1.0` accepts 0.1.x only. The full rule is in [requirements: services](/pages/reference-requirements-services-topics/) and [dependency resolution](/pages/reference-dependency-resolution/#the-requires-object).
+
+Effect of one provider update on a caller that requires `@1.0.0`:
+
+| Provider version after the update | Caller state | What the caller sees |
+|---|---|---|
+| 1.0.0 or 1.0.1 | Satisfied | Calls work as before. |
+| 1.1.0 or 1.7.2 | Satisfied | Calls work. The new optional fields are ignored by a caller that does not read them. |
+| 2.0.0 | Not satisfied | A new activation waits for a compatible provider, up to `wait_ms`. An active caller goes inactive until it is updated. Calls to the name return `not-found`. |
+| 0.2.0 (caller on `@0.1.0`) | Not satisfied | The same as a major change. |
+
+What the kernel does and does not do at update time:
+
+- The update of a provider is not refused because a caller no longer fits. Services never block an install, see [dependency resolution](/pages/reference-dependency-resolution/). The manual defines no install-time warning for this case, so the caller's state and the `not-found` results are the only signs.
+- Plugin-defined services are unstable in 0.x, and both sides list `plugin-services` in `unstable`. A change to the service API means the caller and the provider must be updated together. See [versioning](/pages/versioning/).
+- An update that restarts the provider completes its pending deferred calls as `failed(cancelled)`, see the table in [edge cases and error codes](#edge-cases-and-error-codes).
+- A payload is checked against the provider's current `params` when the call runs. If a provider changes a schema and does not change the version, old callers get `invalid-argument` at once and the version check passes.
+
+Rules for the provider when it changes its schema:
+
+- A minor bump is for additive changes only: add optional input fields, add result fields, and never remove, rename or retype a field. A caller on the previous minor keeps working.
+- Adding a required input field, removing or renaming a field, or changing a type is a major bump. Every caller on the old major stops being satisfied. The manual does not describe one plugin serving two majors at once, so update the callers and the provider together.
+- Set the new `version` in the provider's `contributes.services.provides` entry in the same release as the schema change. Test the new major against a caller that still requires the old one. That caller must show the outcome in the table above, not a silent failure.
+
+Rules for the caller when it is upgraded or the provider is missing:
+
+- Require the lowest version the caller can work with, not the latest one. A caller that requires `@1.1.0` for an optional field blocks its own activation on a 1.0.0 provider.
+- Treat `not-found` (no installed and enabled provider, or the provider was just switched off) and `unsupported` (the provider is older and lacks the method) as the signal to run the fallback. Do not treat them as a bug in the caller.
+- Treat `invalid-argument` as a caller bug or a schema change. Fix the payload or the required version. Do not fall back silently, because the same payload fails on every call.
+- A provider that is uninstalled or disabled returns `not-found` at once. Install never fails for a missing provider.
+
+Test the upgrade before release: run the caller against the provider at each version in its range and once with no provider. Install the new provider over the old one, run the same command again, and check that the caller's output does not change for the fallback case. The step-by-step version of this test is in [tutorial 22](/pages/tutorial-22-versioned-service-with-fallbacks/).
+
 ### Example: Rust provider and caller
 
 The provider offers `com.example.titles/suggest`. It answers at once for short notes and defers longer ones to a task that calls `reply` later. The caller is a second plugin that submits a note when a command runs.

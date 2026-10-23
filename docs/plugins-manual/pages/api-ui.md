@@ -365,12 +365,79 @@ A `secret` text input sends its value in `changed` and `submitted`, because the 
 host redacts that value in logs and never stores it in the snapshot. Text that contains escape
 sequences has them removed, and the host logs one warning per view.
 
+### Localisation and text direction
+
+The `ui` import gives no locale, no user interface language and no time zone. A plugin cannot learn them
+from the host, so it offers a language choice in its own settings (a `choice` row) and keeps identifiers
+in English. [AUT-601] See [Internationalisation](/pages/guide-internationalisation/).
+
+- **Plugin text is shown raw.** Titles, labels, popup text, notices and the reason of a grant are shown as the
+  plugin supplied them. The host does not translate them, and a plugin does not change the host's own words.
+- **Translations.** A plugin that ships several languages keeps them in `i18n/<tag>.json`, a flat object of
+  message id to string, with a tag such as `de` or `pt-BR`. Lookup tries the exact tag, then the language
+  without region, then `en`. A missing message falls back to English and never shows the message id. [USR-310]
+  [USR-312] [AUT-608]
+- **Identifiers stay English.** Command ids, setting keys, error codes and event names are never translated.
+  Only titles shown to people may change language. [AUT-610]
+- **Width.** Measure every string with `display_width` (`display-width` in WIT), never with `len()`,
+  `chars().count()` or `String.length`. The host counts 2 cells for a grapheme cluster whose base is East Asian
+  Width W or F, or that carries U+FE0F, and 0 for control-only clusters. Everything else, including East Asian
+  Ambiguous characters and Nerd Font private-use glyphs, counts as 1. A wide glyph is never split at an edge.
+  See [Cell width](/pages/ui-model/#cell-width). [AUT-602] [USR-315]
+- **Fit.** Leave room for labels about 30 percent longer than the English text, and do not depend on a fixed
+  width. [AUT-605] A string that exceeds its box is truncated with `…`, and `ilium plugin lint` fails a view
+  that clips at the pseudo-locale `en-XA` with `i18n.layout-overflow` (`en-XA` expands strings by 40 percent,
+  proposed, owner to confirm). [USR-316]
+- **Right-to-left text.** The host draws each line left to right. It does not reorder bidirectional text and
+  does not mirror a layout. A plugin must not promise correct right-to-left display, and keeps such text in its
+  own row, apart from left-to-right labels. [AUT-607]
+
 ## What the user sees
 
 - A non-modal panel takes the whole content area. A modal panel is centred at 80 percent by 80 percent by default.
 - Escape follows the order in [Escape](/pages/ui-model/#escape): a capturing key-capture, a text selection, the topmost popup, then a modal panel.
 - Popups and panels are painted with the user's theme. The user alone chooses the theme and the
   `ui.stable_glyphs` setting, which the plugin reads from `theme()`.
+
+### Accessibility baseline
+
+The host gives a plugin view a defined baseline. The plugin supplies the labels, and the host supplies focus,
+contrast and the reduced-motion setting. The terminal has no accessibility tree and there is no accessible-label
+or screen-reader import, so the meaning of a view must be carried in text. [AUT-501]
+[Accessibility and theming](/pages/accessibility-and-theming/) gives the full contract; the points a plugin author
+depends on are these.
+
+- **Keyboard only.** Every action on a host-drawn plugin screen is reachable with the keyboard alone, and Tab
+  never traps focus. [USR-303] Focus order follows the [focus order](/pages/ui-model/#focus-order) of the tree:
+  `tab-index` 1 and up first, then the rest in tree order. A negative `tab-index` is skipped by Tab. A disabled node
+  stays in the focus order. Escape follows the [Escape](/pages/ui-model/#escape) order and always leaves a modal
+  plugin dialog. [USR-303]
+- **Focus indicator.** The focused widget differs from unfocused widgets by at least one attribute besides colour
+  (reverse, bold or a `>` marker), and exactly one widget per window carries focus. [USR-304]
+- **Names.** Every focusable widget (button, toggle, input, list row) carries a non-empty text label. A focusable
+  widget without one is rejected by the view validator with `ui.label-missing`, which names the widget. An
+  icon-only button supplies a `label`, which is read in screen-reader mode. [USR-306] A tree tooltip doubles as
+  the accessible name of its node; see [Tree chrome](/pages/api-tree-chrome/).
+- **Screen-reader mode.** When the user sets `[ui] screen_reader = true`, the host draws widgets one logical
+  element per line, in focus order, with role words such as button, checked, unchecked and selected, and without
+  box-drawing characters or spinner frames. [USR-305] The plugin does nothing extra for this mode beyond the labels above.
+- **Colour is never the only signal.** Every state that a view shows by colour (error, warning, success, selected,
+  disabled, focus) also has a word, glyph or attribute. [USR-300] [AUT-501]
+- **Contrast.** The host guarantees at least 4.5:1 between each text role (`foreground`, `muted`, `accent`,
+  `success`, `warning`, `danger`, and `info` from `theme-extras`) and the background in every built-in theme.
+  The user can raise every role to at least 7:1 with `[ui] contrast = "high"`. [USR-301] [USR-302]
+  A plugin uses the colour roles, not `rgb` or `indexed` colours, because only a role follows the theme and its
+  contrast. A plugin that picks its own colour owns the contrast of that colour. [AUT-504]
+- **Reduced motion.** `theme-extras().reduced-motion` is always present, so the plugin reads it and does not
+  assume a value. When it is true, the plugin draws one static frame and stops its own animating timers. [AUT-502]
+  When it is false, the plugin may animate, but the view must still say the same thing as text when the animation
+  is not running.
+- **Icons.** Stable glyphs are an opt-in setting. When they are off, the plugin's normal icons are drawn, and
+  each icon-only control keeps a text label that remains when icons are not drawn. [AUT-503] A plugin must work
+  in `compact` density at 40 columns. [AUT-503]
+- **Operating system settings.** The host reads only its own `[ui]` settings. It does not read the operating
+  system's high-contrast or reduced-motion setting, so a user who relies on those must set the `[ui]` options.
+  See the table in [Accessibility and theming](/pages/accessibility-and-theming/#operating-system-settings).
 
 ## Used by
 

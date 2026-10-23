@@ -173,6 +173,37 @@ A plugin asks for a higher value in its manifest. The host clamps the request to
 <figcaption>The review dialog for a package that requests fs.write:project, drawn with the client's dialog characters: rounded corners, dotted leaders and the hint bar. Checked rows are granted; a high-risk row starts unchecked.</figcaption>
 </figure>
 
+#### Diagnosing a failed write
+
+Every failure is one of two things: a code returned by the call, or a code in the `request-completed` outcome that arrives later. The plugin log records the grant refusals, the host lines and the plugin's own lines. Use this table to match a symptom to the code and the log line to search.
+
+| Symptom | Code and where it arrives | Search the plugin log for | Next step |
+|---|---|---|---|
+| Writes always fail with `not-permitted` | Call, reason `declined` | A refusal line that names the grant, for example `fs.write:project`, and ends with `declined` | `ilium plugin info <id>` lists the grants. The user grants the row in Settings > Plugins. |
+| Write to a path outside the scope, or through a symbolic link | Call, `not-permitted`, reason `scope` | A refusal line that ends with `scope` | Fix the path in the plugin. The grant does not change. |
+| Writes stop after the user revokes a grant | Call `revoked`, or completion `failed(revoked)` for a write still pending | The re-activation that follows the revocation. `ilium plugin info <id>` shows the grants that remain. | Expected behaviour. The plugin must run without the grant. |
+| `busy` or `quota-exceeded` at the call | Call only | None defined by the host. A plugin that needs a record must log the code itself. | For `busy`, wait for pending requests to finish (`pending_requests`, 64 by default). For `quota-exceeded`, wait `retry-after-ms`. Then retry. |
+| `failed(quota-exceeded)` on a completion | Completion | The plugin's own line for the failed write | `ilium plugin stats <id>` shows use against `disk_mib`. Free space in `data` or `cache`. The limit comes from the plugin's manifest and the tier ceiling, so only the plugin author can raise it. |
+| `failed(io)` with the message `no-space` | Completion | The plugin's own line for the failed write | The physical disk is full. Free disk space, then retry. |
+| `failed(conflict)` or `failed(not-found)` | Completion | The info line `write <scope> <path> <mode>`, which is written when the call is made, plus the plugin's own warning | `create-new` found a file, or the parent folder is missing. Check the path. |
+| `cancelled` on a write | Completion | `ilium plugin status <id>` shows a restart or disable at that time | The plugin stopped, the user cancelled, or the host shut down. It is not a failure, and it does not count toward the restart rule. Start the work again. |
+| Plugin disabled after repeated failures | A notice, and the plugin side is disabled | The first trap in `ilium plugin logs <id> --tail 200`, because later restarts repeat it | Disable happens on the third failure within 10 minutes on that side. Fix the first trap. |
+
+The info line is written when the call is made, before the completion arrives. A line in the log therefore does not show that the write succeeded. Check the completion outcome before deciding what happened.
+
+For a problem that happens only at a low log level, raise the threshold before reproducing it. The default threshold is `info`, which drops `debug` lines. Run `ilium plugin log-level <id> debug`, then `ilium plugin log-level <id> --reset` afterwards ([log-level](/pages/reference-plugin-cli/#logs-and-log-level)).
+
+#### What to collect from a user
+
+The manual defines no single support-bundle file. A support report is the set of command outputs listed in [Supporting your users](/pages/guide-publishing-and-support/#supporting-your-users), with the [bug-report template](/pages/guide-publishing-and-support/#a-template-for-bug-reports) filled in. For a file-write problem, ask for:
+
+- `ilium plugin logs <id> --tail 200`, which is the main evidence.
+- `ilium plugin status <id>` and `ilium plugin stats <id>`, for the failure window and the use against each limit.
+- `ilium plugin info <id>`, for the version and the granted rows.
+- `ilium plugin doctor`, when the sandbox or the host may be the cause.
+
+The log lines name file paths and byte counts, not file contents. Ask the user to check the paths for private names before sharing them. Do not ask for unredacted trace output or for file contents. A byte count is enough.
+
 ### When the grant is declined
 
 A declined grant links the write imports to stubs that return `not-permitted` at once. The plugin keeps running and can show the error to the user. A write call whose capability the manifest never requested traps the instance instead, because that is a plugin bug.

@@ -336,6 +336,36 @@ export function indexBytes(): Uint8Array | undefined {
 
 Errors: the 1 MiB value cap applies to `shared` like every bucket, so a larger value is `invalid-argument`. `shared` never returns `quota-exceeded` for size: when the bucket exceeds `shared_cache_mib`, the oldest entries go. The key rules are those of the other buckets.
 
+### Downgrade and rollback
+
+Each bucket carries the data version stamp described in [LIF-121](#batches-durability-and-concurrency). The stamp only moves up: a plugin version can be activated only if its `data_version` is at least the stamp of every bucket in scope. A downgrade or rollback to an older plugin version against newer data is therefore refused, and the host never converts newer data downward.
+
+**What the host keeps for you**
+
+- **Pre-update copy.** When an update raises `data_version`, the host copies the buckets in scope and the data directory to `backups/<id>/` before it runs the migration. The copy is skipped when the update does not raise `data_version`, because then no migration runs. The copy is skipped too when `migration_backup_mib = 0` or the update uses `--no-backup`, and an oversized backup is refused with `migration.backup-too-large` unless `--no-backup` is given. See [data migration](/pages/guide-data-migration/).
+- **Only the newest copy is kept.** After a successful update, the host deletes older copies of that plugin. A rollback can restore only the copy taken before the most recent update. If that copy is missing, the rollback fails with `rollback.no-backup`.
+- **The installed store.** The previous package stays in the store, so `ilium plugin rollback <id>` needs no network.
+
+**Procedure before you roll back**
+
+1. Read the stored stamp with `ilium plugin info <id> --json`.
+2. Copy the data you may need with `ilium plugin export <id> --out <file>` ([LIF-290 to LIF-292](/pages/reference-install-update-uninstall/)). This copy is the only one that survives a later update.
+3. Run `ilium plugin rollback <id>`. The previous version is activated if the stamp allows it.
+4. If the host refuses with `migration.data-newer` (exit 1), it has changed nothing. Choose one of the two flags below and run the command again:
+   - `--restore-backup` restores the copy taken before the last update. Everything written since that update is lost.
+   - `--discard-data` deletes the plugin's buckets and data directory. The plugin starts empty on the old version.
+
+| Situation | What happens | What the user does |
+|---|---|---|
+| Update did not change `data_version` | No migration ran, so the old version reads the same data | `ilium plugin rollback <id>` |
+| Update migrated data and kept a copy | Rollback is refused with `migration.data-newer` | `--restore-backup` (loses later writes) or `--discard-data` |
+| Update ran with `--no-backup`, or the backup cap was exceeded | No copy exists; a failed migration could not be undone | Restore from an export or a whole-host archive taken earlier |
+| A later update succeeded | The copy from the earlier update was deleted | Restore from an export or a whole-host archive |
+
+**Writing a plugin that can be rolled back.** Keep the data readable by the previous release for at least one release, by adding new keys instead of changing the meaning of existing ones ([AUT-208](/pages/guide-compatibility-and-upgrades/#downgrades-and-rollbacks)). A user who rolls back then loses nothing. A plugin that cannot keep old data readable should say so in its release notes, so that the user knows to export first.
+
+**Operators.** A single-plugin export is not a schedule. For production data, run `ilium plugin backup` on a schedule and test a restore, as described in [backup and restore](/pages/guide-backup-and-restore/).
+
 ### See also
 
 - [fs](/pages/api-fs/) for files, which suit large data.

@@ -524,6 +524,33 @@ The client calls `drop_side` from the `drag-over` arm of its action handler, kee
 | Drag over the source row itself | `drop_side` returns none, so no line is drawn. |
 | Pane restarted after a save | The node and its metadata come back from the snapshot, so the list loads again. |
 
+### Where the notes are stored and who can read them
+
+Notes are plain text. The host does not encrypt them, and the notes pane is not a place for secrets.
+
+- **Where.** The note bytes are the pane node's metadata. The kernel saves them in the session snapshot,
+  `<project>/.ilium/sessions/<session name>.json`, in the project folder of the session. It writes the
+  snapshot atomically, at most 750 ms after the last change. See
+  [Config and data migration](/pages/reference-config-and-data-migration/).
+- **Who can read them.** The host adds no encryption at rest. Anyone who can open the snapshot file reads
+  every note in it. The manual does not fix the file mode of the snapshot, so check it with `stat` on your
+  system. If the project is under version control, check that `.ilium/` is ignored before you keep private
+  notes there. No other plugin can read the notes, because metadata is per plugin and per node
+  ([tree.metadata](/pages/capability-tree-metadata/)).
+- **Closing the pane.** The host removes the pane's metadata with its node. There is no separate delete call.
+  Older copies remain until they are removed by hand: the rolling backups under
+  `<project>/.ilium/backups/<name>/` when `backups_enabled` is set, and the `<name>.pre-restore.json` copies
+  kept for the last two starts. See [Config and data migration](/pages/reference-config-and-data-migration/).
+- **Uninstalling the plugin.** Without `--purge`, the notes stay in the snapshot, and a reinstall finds them
+  again. With `--purge`, the host deletes them from the live session and adds a tombstone, so other projects
+  delete theirs when they next open. See [Install, update and uninstall](/pages/reference-install-update-uninstall/).
+- **Crashes.** A crash loses the memory state. The notes come back as of the last snapshot, so a note
+  typed in the last 750 ms before the crash may be missing. See
+  [Persistence and restart](/pages/reference-persistence-and-restart/).
+- **Secrets.** Do not type passwords, tokens or API keys into a note. The secrets store, the keyring or
+  `secrets.json`, holds only secret settings rows and is never used for note text. See
+  [Secrets](/pages/reference-secrets/).
+
 ### Test it
 
 Run the core tests, then run the plugin in development mode.
