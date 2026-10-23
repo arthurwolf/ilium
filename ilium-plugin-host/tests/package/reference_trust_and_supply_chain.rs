@@ -48,11 +48,12 @@ fn installed_fixture() -> CliFixture {
     let path = fixture.work().join("installed-fixture.iliumpkg");
     write_file(&path, &signed);
     let consent = std::sync::Arc::new(InstalledFixtureConsent::default());
-    let backend = factory(&fixture.env, consent.clone(), AuditContext {
+    let audit_context = AuditContext {
         session: "trust-supply-chain-install-fixture".into(),
         actor: AuditActor { kind: "cli".into(), pane: None, plugin: None },
-    }).expect("explicit local installation service");
-    fixture.env = fixture.env.clone().with_installer(backend);
+    };
+    let backend = factory(&fixture.env, consent.clone(), audit_context.clone()).expect("explicit local installation service");
+    fixture.env = fixture.env.clone().with_installer(backend).with_audit_context(audit_context);
     let out = run_cli(&fixture, &["install", path.to_str().expect("fixture package path"), "--json"]);
     assert_eq!(out.exit_code, 0, "{}", all_text(&out));
     assert_eq!(consent.0.load(std::sync::atomic::Ordering::SeqCst), 1);

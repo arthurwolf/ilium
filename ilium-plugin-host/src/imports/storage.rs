@@ -178,8 +178,13 @@ impl StorageImport {
         self.engine.write_batch(bucket.as_str(), &entries)
     }
     pub fn try_lease(&self, key: &str, ttl_millis: u32) -> Result<bool, PluginError> {
+        self.lease_at(key, ttl_millis, std::time::SystemTime::now())
+    }
+    /// Explicit host clock sample for deterministic replay/testing. The same
+    /// instance authorization remains held through the durable lease mutation.
+    pub fn lease_at(&self, key: &str, ttl_millis: u32, now: std::time::SystemTime) -> Result<bool, PluginError> {
         let _permit = authorize(&self.authorization, &self.context)?;
-        self.engine.lease(key, ttl_millis)
+        self.engine.lease_at(key, ttl_millis, now)
     }
 
     fn report<T>(

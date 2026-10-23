@@ -1686,6 +1686,40 @@ struct PluginLogRate {
     dropped: u64,
 }
 
+/// Fixed-memory rate accounting for one actual admitted runtime instance.
+/// Share this object across all of that instance's log import handles. The host
+/// must not recreate it to reopen quota; a new instance receives a new budget.
+#[derive(Debug)]
+pub struct PluginLogInstanceBudget {
+    instance: u64,
+    side: Side,
+    rate: PluginLogRate,
+}
+
+impl PluginLogInstanceBudget {
+    pub fn new(actual_instance: u64, side: Side) -> Result<Self, Refusal> {
+        if actual_instance == 0 {
+            return Err(log_refusal(
+                "log.instance-invalid",
+                "an actual nonzero runtime instance identity is required",
+            ));
+        }
+        Ok(Self {
+            instance: actual_instance,
+            side,
+            rate: PluginLogRate::default(),
+        })
+    }
+
+    pub fn instance(&self) -> u64 {
+        self.instance
+    }
+
+    pub fn side(&self) -> Side {
+        self.side
+    }
+}
+
 /// A private, cross-process serialized plugin log. Files are reopened under the lock so
 /// rotation by another writer never leaves this writer appending to an archived inode.
 /// The host supplies real local timestamps and one shared monotonic clock origin.
@@ -1838,10 +1872,15 @@ impl PluginLog {
         }
         Ok(())
     }
-    fn advance_rate(&self, at: &str, now_ms: u64, rate: &mut PluginLogRate) -> Result<(), Refusal> {
+    fn advance_rate_window(
+        &self,
+        at: &str,
+        now_ms: u64,
+        rate: &mut PluginLogRate,
+    ) -> Result<bool, Refusal> {
         let Some(start) = rate.window_start_ms else {
             rate.window_start_ms = Some(now_ms);
-            return Ok(());
+            return Ok(false);
         };
         if now_ms < start {
             return Err(log_refusal(
@@ -1850,7 +1889,7 @@ impl PluginLog {
             ));
         }
         if now_ms - start < 1000 {
-            return Ok(());
+            return Ok(false);
         }
         if rate.dropped != 0 {
             self.append(
@@ -1864,7 +1903,82 @@ impl PluginLog {
             window_start_ms: Some(now_ms),
             ..PluginLogRate::default()
         };
-        self.save_rate(rate)
+        Ok(true)
+    }
+
+    fn advance_rate(&self, at: &str, now_ms: u64, rate: &mut PluginLogRate) -> Result<(), Refusal> {
+        if self.advance_rate_window(at, now_ms, rate)? {
+            self.save_rate(rate)?;
+        }
+        Ok(())
+    }
+
+    /// Uses the caller's instance-owned budget, never the legacy persisted rate.
+    /// Reserve admission before appending: an I/O failure does not reopen quota.
+    pub fn write_plugin_for_instance(
+        &mut self,
+        at: &str,
+        now_ms: u64,
+        budget: &mut PluginLogInstanceBudget,
+        level: LogLevel,
+        message: &str,
+    ) -> bool {
+        if level < self.config.threshold {
+            return false;
+        }
+        let result = (|| {
+            if !valid_log_time(at) {
+                return Err(log_refusal(
+                    "log.time-invalid",
+                    "a real local timestamp YYYY-MM-DD HH:mm:ss is required",
+                ));
+            }
+            let _lock = self.lock()?;
+            self.advance_rate_window(at, now_ms, &mut budget.rate)?;
+            if budget.rate.admitted >= self.config.rate_per_second {
+                budget.rate.dropped = budget.rate.dropped.saturating_add(1);
+                return Ok(false);
+            }
+            budget.rate.admitted = budget.rate.admitted.saturating_add(1);
+            let side = match budget.side {
+                Side::Server => LogSide::Server,
+                Side::Client => LogSide::Client,
+                Side::Scene => LogSide::Scene,
+            };
+            self.append(at, level, side, message)?;
+            Ok(true)
+        })();
+        match result {
+            Ok(written) => written,
+            Err(error) => {
+                self.last_error = Some(error);
+                false
+            }
+        }
+    }
+
+    /// Flushes a due instance suppression summary without consuming guest quota.
+    /// The owning runtime must retain and tick the budget through final draining.
+    pub fn tick_instance(
+        &mut self,
+        at: &str,
+        now_ms: u64,
+        budget: &mut PluginLogInstanceBudget,
+    ) {
+        let result = (|| {
+            if !valid_log_time(at) {
+                return Err(log_refusal(
+                    "log.time-invalid",
+                    "a real local timestamp YYYY-MM-DD HH:mm:ss is required",
+                ));
+            }
+            let _lock = self.lock()?;
+            self.advance_rate_window(at, now_ms, &mut budget.rate)?;
+            Ok(())
+        })();
+        if let Err(error) = result {
+            self.last_error = Some(error);
+        }
     }
 
     /// Writes a host metadata line, outside the guest line budget.
