@@ -56,6 +56,22 @@ impl std::str::FromStr for Risk {
     }
 }
 
+impl std::fmt::Display for Grant {
+    /// The grant text as written in the manifest.
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for Grant {
+    type Err = Diagnostic;
+
+    /// Parses a manifest grant; same rules as [`Grant::parse`].
+    fn from_str(text: &str) -> Result<Grant, Diagnostic> {
+        Grant::parse(text)
+    }
+}
+
 /// One row of the grant table (reference-capabilities.md "Capability table").
 #[derive(Debug, Clone)]
 pub struct GrantInfo {
