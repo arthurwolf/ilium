@@ -1106,6 +1106,7 @@ fn catalog_retained_fixture() -> Bundle {
         jar: PathBuf::from("/synthetic/client.jar"),
         selected: None,
         native_jar: None,
+        prepared_cache: None,
         warnings: vec![String::from("synthetic warning")],
         _catalog_reservation: Arc::new(
             budget

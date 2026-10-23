@@ -91,7 +91,7 @@ fn data_use_and_activation_wait_survive_parsing() {
     value["data_use"] = json!([{"what":"Name","where":"Local","purpose":"Display","opt_in":true}]);
     value["requires"] = json!({"wait_ms":5000});
     let manifest = parse_manifest(&value.to_string()).unwrap();
-    assert_eq!(manifest.requires.wait_ms, Some(5000));
+    assert_eq!(manifest.requires.as_ref().and_then(|requires| requires.wait_ms), Some(5000));
     assert_eq!(manifest.data_use[0].where_, "Local");
 }
 #[test]

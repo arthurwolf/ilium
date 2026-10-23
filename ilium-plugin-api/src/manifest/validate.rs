@@ -739,14 +739,14 @@ const MANIFEST_SCHEMA: &str = r###"{
       "maxLength": 128,
       "pattern": "^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?){1,7}$"
     },
-    "name": {"type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f  ‪-‮⁦-⁩]+$"},
+    "name": {"type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029\\u202a-\\u202e\\u2066-\\u2069]+$"},
     "version": {
       "type": "string",
       "maxLength": 64,
       "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?(\\+[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?$"
     },
-    "publisher": {"type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f  ‪-‮⁦-⁩]+$"},
-    "description": {"type": "string", "maxLength": 500, "pattern": "^[^\\u0000-\\u0009\\u000b-\\u001f\\u007f-\\u009f  ‪-‮⁦-⁩]*$"},
+    "publisher": {"type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029\\u202a-\\u202e\\u2066-\\u2069]+$"},
+    "description": {"type": "string", "maxLength": 500, "pattern": "^[^\\u0000-\\u0009\\u000b-\\u001f\\u007f-\\u009f\\u2028\\u2029\\u202a-\\u202e\\u2066-\\u2069]*$"},
     "license": {"type": "string", "minLength": 1, "maxLength": 128},
     "icon": {"type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"},
     "categories": {
@@ -1677,7 +1677,7 @@ fn semantics(manifest: &Manifest, context: &ValidationContext) -> Vec<Diagnostic
         let mut services = BTreeSet::new();
         for (index, service) in requires.services.iter().enumerate() {
             match super::ServiceRequirement::parse(service) {
-                Ok(service) if services.insert(service.name) => {}
+                Ok(service) if services.insert(service.name.clone()) => {}
                 Ok(_) => errors.push(finding(
                     "manifest.requires-invalid",
                     format!("/requires/services/{index}"),
