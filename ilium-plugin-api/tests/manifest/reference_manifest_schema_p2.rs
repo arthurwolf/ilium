@@ -1,7 +1,7 @@
 //! reference-manifest-schema.md, part 2: PKG-578, PKG-579, PKG-581..PKG-583.
 
 use ilium_plugin_api::manifest::Diagnostic;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::support::*;
 
@@ -199,13 +199,13 @@ fn pkg_582_a_non_reserved_name_is_not_reserved() {
 
 /// REQ: PKG-582
 #[test]
-fn pkg_582_a_reserved_alias_is_refused_cli_name_reserved() {
+fn pkg_582_undeclared_alias_field_is_refused_before_reserved_name_checks() {
     let value = set(
         client(),
         "/contributes/cli",
         json!([{ "name": "tool", "summary": "S", "aliases": ["help"] }]),
     );
-    assert_has(&errors(&value), "manifest.cli-name-reserved");
+    assert_has(&errors(&value), "manifest.unknown-key");
 }
 
 /// REQ: PKG-582
@@ -225,14 +225,15 @@ fn pkg_582_taken_is_used_for_a_name_of_another_plugin_only() {
 
 /// REQ: PKG-583
 #[test]
-fn pkg_583_an_unknown_risk_refused_point_risk() {
+fn pkg_583_an_unknown_risk_is_refused_at_the_schema_stage() {
     for risk in ["low", "medium", "HIGH", ""] {
         let value = set(
             client(),
             "/contributes/extension_points",
             point(json!(risk)),
         );
-        assert_has(&errors(&value), "manifest.point-risk");
+        // PKG-562 maps enum failures to schema errors before stage-10 risk admission.
+        assert_codes(&errors(&value), &["manifest.schema"]);
     }
 }
 
@@ -245,7 +246,7 @@ fn pkg_583_known_risks_are_not_point_risk() {
             "/contributes/extension_points",
             point(json!(risk)),
         );
-        assert_lacks(&errors(&value), "manifest.point-risk");
+        assert_clean(&value);
     }
 }
 
@@ -261,7 +262,7 @@ fn pkg_583_a_missing_risk_defaults_to_standard_and_is_not_point_risk() {
         "/contributes/extension_points",
         point(json!("critical")),
     );
-    assert_has(&errors(&unknown), "manifest.point-risk");
+    assert_has(&errors(&unknown), "manifest.schema");
 }
 
 /// REQ: PKG-583

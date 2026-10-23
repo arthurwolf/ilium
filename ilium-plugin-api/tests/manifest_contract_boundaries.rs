@@ -91,7 +91,7 @@ fn data_use_and_activation_wait_survive_parsing() {
     value["data_use"] = json!([{"what":"Name","where":"Local","purpose":"Display","opt_in":true}]);
     value["requires"] = json!({"wait_ms":5000});
     let manifest = parse_manifest(&value.to_string()).unwrap();
-    assert_eq!(manifest.requires.wait_ms, Some(5000));
+    assert_eq!(manifest.requires.unwrap().wait_ms, Some(5000));
     assert_eq!(manifest.data_use[0].where_, "Local");
 }
 #[test]
@@ -141,4 +141,169 @@ fn settings_rows_reject_wrong_fields_and_defaults() {
     let errors = codes(&value, CheckMode::Check);
     assert!(errors.contains(&"manifest.settings-default".into()));
     assert!(errors.contains(&"manifest.settings-row-field".into()));
+}
+
+#[test]
+fn specialized_schema_failures_keep_their_catalogue_code_and_message() {
+    let mut value = source();
+    value["version"] = json!("v1.2.3");
+    let diagnostics = validate_json(&value.to_string(), &context(CheckMode::Check));
+    assert_eq!(diagnostics[0].code.as_str(), "manifest.version-invalid");
+    assert_eq!(
+        diagnostics[0].message,
+        "The version \"v1.2.3\" is not a valid semantic version."
+    );
+    value = source();
+    value["data_version"] = json!(0);
+    let diagnostics = validate_json(&value.to_string(), &context(CheckMode::Check));
+    assert_eq!(
+        diagnostics[0].message,
+        "data_version must be an integer from 1 to 4294967295. Found 0."
+    );
+    value = source();
+    value["id"] = json!(format!(
+        "{}.{}.{}.{}",
+        "a".repeat(32),
+        "b".repeat(32),
+        "c".repeat(32),
+        "d".repeat(30)
+    ));
+    assert_eq!(codes(&value, CheckMode::Check), ["manifest.schema"]);
+}
+
+#[test]
+fn requires_shape_and_bounds_have_schema_diagnostics() {
+    for requires in [
+        json!(false),
+        json!({"wait_ms":5001}),
+        json!({"plugins":"wrong"}),
+    ] {
+        let mut value = source();
+        value["requires"] = requires;
+        assert_eq!(codes(&value, CheckMode::Check), ["manifest.schema"]);
+    }
+}
+
+#[test]
+fn kernel_subcommands_cannot_be_plugin_cli_names() {
+    for name in ["plugin", "session", "kill-session", "help", "version"] {
+        let mut value = source();
+        value["contributes"] = json!({"cli":[{"name":name,"summary":"Tool"}]});
+        assert!(codes(&value, CheckMode::Check).contains(&"manifest.cli-name-reserved".into()));
+    }
+}
+
+#[test]
+fn extension_point_cross_fields_follow_mode_and_risk() {
+    for extra in [
+        json!({"on_failure":"pass"}),
+        json!({"final_check":true}),
+        json!({"reply_schema":{"type":"object"}}),
+    ] {
+        let mut point = json!({"id":"before","kind":"hook","mode":"observe","payload_schema":{"type":"object"}});
+        point
+            .as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        let mut value = source();
+        value["contributes"] = json!({"extension_points":[point]});
+        assert!(
+            codes(&value, CheckMode::Check).contains(&"manifest.extension-point-invalid".into())
+        );
+    }
+}
+
+#[test]
+fn malformed_grants_have_capability_diagnostics_instead_of_generic_schema() {
+    let mut value = source();
+    value["capabilities"] = json!({"client":["Tree.Read"]});
+    let errors = codes(&value, CheckMode::Check);
+    assert!(
+        errors
+            .iter()
+            .any(|code| code.starts_with("manifest.grant-"))
+    );
+    assert!(!errors.contains(&"manifest.schema".into()));
+}
+
+#[test]
+fn settings_keys_are_unique_across_inline_sections() {
+    let mut value = source();
+    value["contributes"] = json!({"settings":[{"kind":"tab","id":"main","title":"Example","sections":[
+        {"id":"first","rows":[{"type":"toggle","key":"enabled","title":"Enabled","default":true}]},
+        {"id":"second","rows":[{"type":"toggle","key":"enabled","title":"Again","default":false}]}
+    ]}]});
+    assert!(codes(&value, CheckMode::Check).contains(&"manifest.settings-key-clash".into()));
+}
+
+#[test]
+fn string_length_failures_are_schema_errors_even_for_named_patterns() {
+    for (field, text) in [
+        ("name", "n".repeat(65)),
+        ("publisher", "p".repeat(65)),
+        ("description", "d".repeat(501)),
+        ("version", format!("1.0.0+{}", "a".repeat(59))),
+    ] {
+        let mut value = source();
+        value[field] = json!(text);
+        assert_eq!(
+            codes(&value, CheckMode::Check),
+            ["manifest.schema"],
+            "{field}"
+        );
+    }
+}
+
+#[test]
+fn description_allows_empty_text_and_line_feeds() {
+    for text in ["", "first\nsecond"] {
+        let mut value = source();
+        value["description"] = json!(text);
+        assert!(codes(&value, CheckMode::Check).is_empty());
+    }
+    let mut value = source();
+    value["description"] = json!("bad\u{0009}tab");
+    assert!(codes(&value, CheckMode::Check).contains(&"manifest.display-name".into()));
+}
+
+#[test]
+fn requires_wrong_type_is_a_schema_failure() {
+    let mut value = source();
+    value["requires"] = Value::Null;
+    assert_eq!(codes(&value, CheckMode::Check), ["manifest.schema"]);
+}
+
+#[test]
+fn grant_side_validation_precedes_tier_admission() {
+    let mut value = source();
+    value["capabilities"] = json!({"client":["sessions.cross"]});
+    let errors = validate_json(&value.to_string(), &context(CheckMode::Check));
+    assert!(
+        errors.iter().any(
+            |error| error.code.as_str() == "manifest.grant-side" && error.stage.unwrap().0 == 4
+        )
+    );
+}
+
+#[test]
+fn command_creation_and_long_lived_processes_require_base_grants() {
+    for (grant, prerequisite) in [
+        ("panes.create-command:htop", "panes.create"),
+        ("process.long-lived", "process.run:tail"),
+    ] {
+        let mut value = source();
+        value["capabilities"] = json!({"client":[grant]});
+        assert!(codes(&value, CheckMode::Check).contains(&"manifest.grant-dependency".into()));
+        value["capabilities"] = json!({"client":[grant, prerequisite]});
+        assert!(codes(&value, CheckMode::Check).is_empty());
+    }
+}
+
+#[test]
+fn published_topics_use_the_owning_plugin_id_and_slash() {
+    let mut value = source();
+    value["contributes"] = json!({"topics":{"publishes":["other.plugin/ready"]}});
+    assert!(codes(&value, CheckMode::Check).contains(&"manifest.contribution-target".into()));
+    value["contributes"]["topics"]["publishes"] = json!(["example.boundaries/ready"]);
+    assert!(codes(&value, CheckMode::Check).is_empty());
 }

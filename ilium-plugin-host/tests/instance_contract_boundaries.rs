@@ -115,8 +115,10 @@ fn restore_caps_and_activation_errors_do_not_retain_guest_memory() {
     let (mut guest, observations) = fixture();
     guest.saved_size = (1 << 20) + 1;
     let mut instance = PluginInstance::from_guest(Box::new(guest));
-    let mut activation = Activation::default();
-    activation.restored = Some(vec![0; (1 << 20) + 1]);
+    let activation = Activation {
+        restored: Some(vec![0; (1 << 20) + 1]),
+        ..Activation::default()
+    };
     instance.activate(activation).unwrap();
     assert_eq!(observations.lock().unwrap().restore_size, None);
     assert_eq!(instance.deactivate(DeactivationReason::Granted), None);

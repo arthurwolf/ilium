@@ -74,12 +74,14 @@ fn trapped_guest_cannot_submit_or_keep_running() {
     assert_eq!(host.submit(submission(Intent::CloseNode(NodeId(1)), 1)), Err(ErrorCode::Cancelled));
 }
 #[test]
-fn manual_clock_is_monotonic_and_wasm_is_explicitly_unavailable() {
+fn manual_clock_is_monotonic_and_empty_component_reports_missing_lifecycle() {
     let host = HostHarness::new().build().unwrap();
     host.advance_clock(Duration::from_millis(42));
     host.inject_clock_jump(Duration::from_secs(500));
     assert_eq!(host.now_monotonic(), Duration::from_millis(42));
-    assert!(HostHarness::new().with_wat("(component)").build().unwrap_err().to_string().contains("WebAssembly backend"));
+    let component = HostHarness::new().with_wat("(component)").build().unwrap();
+    assert_eq!(component.state(), InstanceState::RestartScheduled);
+    assert_eq!(component.failures()[0].code.as_str(), "trap.abi");
 }
 #[test]
 fn invalid_and_declined_grants_never_enter_activation() {
@@ -188,6 +190,15 @@ fn repeated_completion_backpressure_retains_every_outcome_until_guest_accepts_it
     }).collect();
     correlations.sort_unstable();
     assert_eq!(correlations, (1..=24 * 256).collect::<Vec<u64>>());
-    assert!(outcomes.iter().all(|result| matches!(&result.outcome,
-        Outcome::Refused(error) if error.code == ErrorCode::NotFound)));
+    // The T3 pending-request ceiling is 64, even though this fixture requested
+    // 256 (reference-errors-and-limits.md API-073). Each callback submits 256
+    // requests together: its first 64 reach the missing-node kernel check, and
+    // the remaining 192 must complete as capacity refusals, never disappear.
+    assert!(host.logs().iter().any(|line| line.message.contains("pending_requests clamped from 256 to 64")));
+    for result in &outcomes {
+        let RequestRef::Submission(correlation) = &result.request else { unreachable!() };
+        let expected = if (correlation - 1) % 256 < 64 { ErrorCode::NotFound } else { ErrorCode::Busy };
+        assert!(matches!(&result.outcome, Outcome::Refused(error) if error.code == expected),
+            "correlation {correlation} should be refused({expected:?}), got {:?}", result.outcome);
+    }
 }

@@ -5,7 +5,7 @@ use super::support::*;
 use ed25519_dalek::Signer;
 use ilium_plugin_host::cli::CliOutput;
 use ilium_plugin_host::package::read_package;
-use ilium_plugin_host::signing::{verify, PublicKey, TrustStore, TrustedKey};
+use ilium_plugin_host::signing::{PublicKey, TrustStore, TrustedKey};
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime};
 
@@ -170,12 +170,18 @@ pub fn trust_of(n: u8, publisher_id: &str) -> TrustStore {
 
 /// First error code from reading then verifying, or "accepted".
 pub fn refusal(bytes: &[u8], trust: &TrustStore) -> String {
+    refusal_with_keys(bytes, trust, &[])
+}
+
+/// Public verification keys do not grant trust. Countersignature tests must
+/// supply these bytes explicitly; a fingerprint alone cannot verify Ed25519.
+pub fn refusal_with_keys(bytes: &[u8], trust: &TrustStore, known: &[TrustedKey]) -> String {
     match read_package(bytes) {
         Err(diagnostics) => error_codes(&diagnostics)
             .first()
             .cloned()
             .unwrap_or_else(|| "no-error-code".into()),
-        Ok(package) => match verify(&package, trust, now()) {
+        Ok(package) => match ilium_plugin_host::signing::verify_with_public_keys(&package, trust, known, now()) {
             Err(d) => d.code.as_str().to_string(),
             Ok(_) => "accepted".into(),
         },

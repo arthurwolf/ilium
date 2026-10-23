@@ -115,6 +115,7 @@ The character set is deliberately ASCII. It removes Unicode normalisation (NFC a
 | `README.md`, `CHANGELOG.md`, `LICENSE`, `NOTICE` | Documents shown by Settings > Plugins and the store. |
 | `sbom.json` | The software bill of materials. See [Publishing guide](/pages/guide-publishing/). |
 | `build-info.json` | The build record. See [Publishing guide](/pages/guide-publishing/). |
+| `sbom.spdx.json`, `provenance.json` | Optional SPDX dependency and in-toto build statements, listed and hashed as ordinary files (SEC-155). Displayed without establishing trust. |
 
 | Id | Rule |
 |---|---|
@@ -170,7 +171,7 @@ Packing is a pure function of the project directory. The same inputs give the sa
 
 | Id | Rule |
 |---|---|
-| [PKG-143] | **Input set.** `pack` includes: the source `manifest.json`; the built components `server.wasm`, `client.wasm` and `scene.wasm` for each declared side, taken from the build output folder; every file under `assets/`, `help/`, `sounds/`, `screenshots/` and `src/`; and `README.md`, `CHANGELOG.md`, `LICENSE`, `NOTICE`, `sbom.json` and `build-info.json` when present. Nothing else is included. |
+| [PKG-143] | **Input set.** `pack` includes: the source `manifest.json`; the built components `server.wasm`, `client.wasm` and `scene.wasm` for each declared side, taken from the build output folder; every file under `assets/`, `help/`, `sounds/`, `screenshots/` and `src/`; and `README.md`, `CHANGELOG.md`, `LICENSE`, `NOTICE`, `sbom.json`, `build-info.json`, `sbom.spdx.json` and `provenance.json` when present. Nothing else is included. |
 | [PKG-144] | **Ignore rules.** Inside the included folders `pack` skips files whose name starts with `.`, `*~`, `*.swp`, `*.tmp`, and the folders `.git`, `target`, `node_modules` and `dist`. A skipped file is reported as a `warning` line. A file that remains and breaks a path rule of this page stops `pack` with the code of that rule. |
 | [PKG-145] | **Manifest serialisation.** `pack` parses the source manifest, removes any `files` key, builds the inventory, and writes the packed manifest as UTF-8 without a byte order mark, with 2-space indentation, `\n` line endings and one final `\n`. Top-level keys are written in the order of the table in [Manifest reference](/pages/reference-manifest/#top-level-keys), and `files` last. Keys of nested objects keep the order of their schema table; unknown nested maps (settings values, extension entries) sort by key in byte order. Arrays hold one item per line, except that an empty array prints `[]` and an empty object prints `{}` on the key line. Strings escape only `"`, `\` and U+0000 to U+001F; the control characters use `\uXXXX` with lowercase hexadecimal, except `\n`, `\t`, `\r`, `\b` and `\f`. Non-ASCII text is written as UTF-8. Numbers are integers in decimal without a sign `+` and without an exponent; a non-integer number is refused. |
 | [PKG-146] | **Archive order and fields.** Entries are written in the order of [PKG-122] with the header values of [PKG-100] to [PKG-108]. |

@@ -322,6 +322,12 @@ impl Dispatcher {
     /// Production completion handoff keeps side and instance identity. The adapter must
     /// enqueue every returned result; use this instead of the plugin-wide diagnostic drain.
     pub fn outcomes_for(&self, origin: &Origin) -> Vec<RequestResult> {
+        self.take_outcomes_for(origin, usize::MAX)
+    }
+
+    /// Transfer a bounded prefix, retaining the remaining outcomes and their
+    /// pending-request admission with this dispatcher until a later handoff.
+    pub fn take_outcomes_for(&self, origin: &Origin, maximum: usize) -> Vec<RequestResult> {
         let Some(id) = plugin(origin) else {
             return Vec::new();
         };
@@ -329,7 +335,7 @@ impl Dispatcher {
         let mut results = Vec::new();
         if let Some(queue) = state.outcomes.get_mut(id) {
             queue.retain(|(owner, result)| {
-                if owner == origin {
+                if owner == origin && results.len() < maximum {
                     results.push(result.clone());
                     false
                 } else {

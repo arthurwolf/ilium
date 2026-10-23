@@ -116,6 +116,9 @@ pub struct FakeKernelState {
     pub confirmations: BTreeSet<NodeId>,
     pub manual_titles: BTreeSet<NodeId>,
     pub status: BTreeMap<NodeId, String>,
+    pub styled_status: BTreeMap<NodeId, ilium_plugin_api::generated::types::text::StyledText>,
+    pub basic_activities: BTreeMap<NodeId, AgentActivity>,
+    pub pane_kind_registry: BTreeMap<String, (String, ilium_plugin_api::generated::types::tree::PrimitiveKind)>,
     pub catalogs: BTreeMap<String, Vec<CatalogItem>>,
     pub catalog_delays: BTreeMap<String, Duration>,
     pub audio_devices: Vec<AudioDevice>,
@@ -565,11 +568,8 @@ impl FakeKernel {
 
     /// The activity of a pane as the kernel reports it.
     pub fn pane_activity(&self, pane: NodeId) -> Option<AgentActivity> {
-        self.state()
-            .nodes
-            .iter()
-            .find(|node| node.id == pane)
-            .and_then(|node| node.agent.as_ref().map(|agent| agent.activity))
+        let state = self.state();
+        state.basic_activities.get(&pane).copied().or_else(|| state.nodes.iter().find(|node| node.id == pane).and_then(|node| node.agent.as_ref().map(|agent| agent.activity)))
     }
 
     /// The activity a pane had before any detector ran.
@@ -673,6 +673,17 @@ impl FakeKernel {
             state.manual_titles.insert(pane);
             state.epoch = state.epoch.saturating_add(1);
         }
+    }
+
+    /// Seeds the authoritative registry with an admitted manifest's exact kind and owner.
+    /// Merely giving a node a namespaced content kind grants no primitive authority.
+    pub fn register_pane_kind(&self, plugin: &str, kind: &str, primitive: ilium_plugin_api::generated::types::tree::PrimitiveKind) {
+        self.state().pane_kind_registry.insert(kind.into(), (plugin.into(), primitive));
+    }
+
+    /// Complete footer spans, including styles supplied by the plugin.
+    pub fn pane_status_spans(&self, pane: NodeId) -> Option<ilium_plugin_api::generated::types::text::StyledText> {
+        self.state().styled_status.get(&pane).cloned()
     }
 
     /// A pane's status text.
@@ -1931,4 +1942,41 @@ fn admit_rate(state: &mut FakeKernelState, key: String, maximum: usize, window: 
     }
     times.push_back(state.clock);
     true
+}
+
+impl crate::imports::basic::BasicBackend for FakeKernel {
+    fn apply_basic(&self, plugin: &str, pane: NodeId, change: crate::imports::basic::BasicChange) -> Result<(), PluginError> {
+        use crate::imports::basic::BasicChange;
+        let mut state = self.state();
+        let Some(index) = state.nodes.iter().position(|node| node.id == pane && basic_kind_owned(&state, node, plugin)) else {
+            return Err(PluginError::new(ErrorCode::NotPermitted, "pane is not owned by this plugin"));
+        };
+        match change {
+            BasicChange::Title(title) => {
+                if state.manual_titles.contains(&pane) { return Err(PluginError::new(ErrorCode::Conflict, "manual title takes precedence")); }
+                state.nodes[index].title = title;
+                state.nodes[index].revision = state.nodes[index].revision.saturating_add(1);
+            }
+            BasicChange::Status(status) => {
+                state.status.insert(pane, status.iter().map(|span| span.text.as_str()).collect());
+                state.styled_status.insert(pane, status);
+            }
+            BasicChange::Focus => state.focus = Some(pane),
+            BasicChange::Activity(activity) => { state.basic_activities.insert(pane, activity); }
+            BasicChange::Dirty(dirty) => { if dirty { state.dirty.insert(pane); } else { state.dirty.remove(&pane); } }
+        }
+        state.epoch = state.epoch.saturating_add(1);
+        Ok(())
+    }
+    fn basic_size(&self, plugin: &str, pane: NodeId) -> Option<(u16,u16)> {
+        let state = self.state();
+        state.nodes.iter().find(|node| node.id == pane && basic_kind_owned(&state, node, plugin))?;
+        state.sizes.get(&pane).copied()
+    }
+}
+
+fn basic_kind_owned(state: &FakeKernelState, node: &TreeNode, plugin: &str) -> bool {
+    node.class == NodeClass::Pane && node.content_kind.as_ref()
+        .and_then(|kind| state.pane_kind_registry.get(kind))
+        .is_some_and(|(owner, primitive)| owner == plugin && *primitive == ilium_plugin_api::generated::types::tree::PrimitiveKind::Basic)
 }
