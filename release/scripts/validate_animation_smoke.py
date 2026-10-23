@@ -274,9 +274,9 @@ def linux_events(rows, *, command, formats, target, package_files,
             artifact_path = artifact.get('path')
             terminal_log = terminal.get('log')
             require(isinstance(artifact_path, str) and isinstance(terminal_log, str) and
-                    Path(artifact_path).is_absolute() and Path(terminal_log).is_absolute() and
-                    Path(terminal_log).name == kind + '-host.log' and
-                    Path(artifact_path) == Path(terminal_log).with_name(
+                    PurePosixPath(artifact_path).is_absolute() and PurePosixPath(terminal_log).is_absolute() and
+                    PurePosixPath(terminal_log).name == kind + '-host.log' and
+                    PurePosixPath(artifact_path) == PurePosixPath(terminal_log).with_name(
                         kind + '-host-installed-animation.json') and
                     artifact == {'type': 'artifact', 'path': artifact_path,
                                  'sha256': hashlib.sha256(encoded_proof).hexdigest(),
@@ -430,7 +430,7 @@ def validate(marker, *, target, tag, audit_path, source_root, packages, archive_
                      archive_sha256=archive_sha256, audit_sha256=sha(audit_path),
                      source=marker['source_files'], tag=tag, proofs=host)
         mount = marker.get('appimage_fuse')
-        require(isinstance(mount, dict) and Path(mount.get('fuse_mount', '')).is_absolute() and
+        require(isinstance(mount, dict) and PurePosixPath(mount.get('fuse_mount', '')).is_absolute() and
                 any(isinstance(row, list) and len(row) == 2 and row[0] == mount['fuse_mount'] and
                     row[1].startswith('fuse') for row in mount.get('mount_records', [])),
                 'Linux AppImage acceptance lacks a real FUSE mount record')
