@@ -7403,11 +7403,13 @@ where
         let input_cancel_generation = *runtime.agent_input_cancel.borrow();
         (ProbeRequest::for_runtime(runtime), input_cancel_generation)
     };
+    let mut probe_unavailable: Option<String> = None;
     let probe_observation = if probe_request.needs_inspection() {
         match probe(probe_request).await {
             Ok(observed) => Some(observed),
             Err(error) => {
                 tracing::debug!(pane_id = pane_id.0, %error, "input preflight unavailable");
+                probe_unavailable = Some(error.to_string());
                 None
             }
         }
@@ -7487,8 +7489,15 @@ where
             && (rejection.is_none() || (is_user_directed && !cancelled_during_preflight));
         if !is_user_directed {
             if let Some(reason) = rejection {
+                // The probe's own failure (deadline, admission, or identity
+                // mismatch) is otherwise lost; name it so a refused delivery
+                // says which of those it was.
+                let probe_outcome = probe_unavailable.map_or_else(
+                    || "probe completed".to_string(),
+                    |error| format!("probe unavailable: {error}"),
+                );
                 return Err(format!(
-                    "automatic input refused for pane {pane_id:?}: {reason}"
+                    "automatic input refused for pane {pane_id:?}: {reason} ({probe_outcome})"
                 ));
             }
         }

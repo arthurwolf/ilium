@@ -238,6 +238,11 @@ pub struct VoiceShutdownOutcome {
     _metadata: AudioCustody,
 }
 
+/// Longest a voice event waits for a contended quota admission section before
+/// failing. Contention clears within microseconds; this bound only stops a
+/// genuinely wedged holder from stalling the voice actor forever.
+const ADMISSION_CONTENTION_BUDGET: std::time::Duration = std::time::Duration::from_secs(2);
+
 #[derive(Clone)]
 pub(crate) struct EventSender {
     sender: mpsc::Sender<VoiceEventReceipt>,
@@ -269,17 +274,37 @@ impl EventSender {
             .ok_or_else(|| {
                 VoiceError::AudioPreparation("voice event allocation size overflow".into())
             })?;
-        let allocation = self
-            .quota
-            .reserve_external_storage(bytes)
-            .map_err(|reason| {
-                VoiceError::AudioPreparation(format!("voice event admission: {reason:?}"))
-            })?;
+        let allocation = self.reserve_bytes(bytes).await?;
         let allocation = std::sync::Arc::new(allocation);
         if let Some(event) = make(allocation.clone()) {
             permit.send(VoiceEventReceipt { event, allocation });
         }
         Ok(())
+    }
+    /// `Busy` means another thread is inside the quota ledger's short admission
+    /// section at this instant, not that the budget is exhausted. Yield and
+    /// retry for a bounded time; any other refusal, or contention that outlasts
+    /// the bound, fails the event as before. Failing at once killed the voice
+    /// session on a loaded runner and dropped queued typed turns.
+    async fn reserve_bytes(
+        &self,
+        bytes: usize,
+    ) -> Result<ilium_execution::StorageAdmission, VoiceError> {
+        let started = std::time::Instant::now();
+        loop {
+            match self.quota.reserve_external_storage(bytes) {
+                Err(ilium_execution::RejectReason::Busy)
+                    if started.elapsed() < ADMISSION_CONTENTION_BUDGET =>
+                {
+                    tokio::task::yield_now().await;
+                }
+                result => {
+                    return result.map_err(|reason| {
+                        VoiceError::AudioPreparation(format!("voice event admission: {reason:?}"))
+                    });
+                }
+            }
+        }
     }
     pub(crate) async fn send_state(&self, state: VoiceConnectionState) -> Result<(), VoiceError> {
         let capacity = match &state {

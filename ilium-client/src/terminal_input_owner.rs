@@ -1024,6 +1024,10 @@ impl InputDriver {
                         return Ok(None);
                     }
                 }
+                // Shutdown cancels a blocking console read after requesting stop.
+                // That cancellation is the planned end of this reader, not user
+                // input lost, so it must not replace a restart or quit with an error.
+                Err(_) if self.shared.stop.is_stopped() => return Ok(None),
                 Err(source) => {
                     let failure = match &mut self.reader {
                         InputReader::Native(custody) => InputFailure { kind: InputFailureKind::NativeRead {
@@ -2156,6 +2160,44 @@ mod tests {
         drop(receiver);
         drop(session);
         assert_eq!(quota.snapshot().worker_threads, 0);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn read_error_after_planned_stop_is_not_an_input_failure() {
+        let _serial = INPUT_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let quota = quota();
+        let reservation = InputReservation::prepare(&quota).expect("input admission");
+        let session = reservation.session_claim();
+        let (read_started, started) = mpsc::channel();
+        let (release_read, read_released) = mpsc::channel::<()>();
+        let (owner, _receiver) = reservation
+            .start_with_reader(move |_| {
+                let _ = read_started.send(());
+                read_released.recv().map_err(io::Error::other)?;
+                // Windows reports a console read cancelled by shutdown as
+                // ERROR_OPERATION_ABORTED (995).
+                Err(io::Error::from_raw_os_error(995))
+            })
+            .expect("reader");
+        started
+            .recv_timeout(Duration::from_secs(5))
+            .expect("read blocked");
+        let ticket = owner.worker.ticket();
+        let mut retirement = owner.stop();
+        release_read.send(()).expect("release the cancelled read");
+        assert_eq!(
+            ticket.join_until(Instant::now() + Duration::from_secs(5)),
+            Ok(WorkerExit::Joined)
+        );
+        let report = retirement.try_complete().expect("actual reader retirement");
+        assert!(
+            report.failure().is_none(),
+            "a read cancelled by a requested stop must not become an input failure: {:?}",
+            report.failure().map(ToString::to_string)
+        );
+        drop(session);
     }
 
     #[tokio::test(flavor = "current_thread")]

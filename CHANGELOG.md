@@ -30,6 +30,10 @@ development period. Dates are commit dates (`YYYY-MM-DD`).
 - The board's stale-write message now leads with "press r to reload" and puts the file path last, so a long path can no longer clip the guidance.
 - A slow or failed agent identity check no longer drops a typed keystroke from the last-prompt banner and prompt tracking.
 - `ilium ctl close --worktree remove` now says why a worktree removal was refused (for example, a process still running inside it) instead of timing out after 30 seconds, and refuses up front when it runs from inside the worktree it would remove.
+- Typed and spoken voice turns no longer end the voice session when the quota ledger is briefly contended: an event waits up to 2 s for the admission section to clear, so queued turns are not dropped.
+- Restart and quit no longer report a failed terminal read when the input reader is cancelled during shutdown (Windows reports it as error 995); the requested client restart now runs.
+- A refused automatic input says whether its agent identity probe completed or was unavailable, and why, so a refused broadcast can be diagnosed.
+- The Windows PTY smoke test waits for the Voice control footer to render instead of sampling one partially drawn frame.
 
 ### Changed
 - Hovering a footer agent icon reuses a successful repository check for 30 seconds instead of queuing another Git snapshot, so the worktree buttons are enabled at once and fewer slow queries pile up under load; creating a worktree still revalidates.

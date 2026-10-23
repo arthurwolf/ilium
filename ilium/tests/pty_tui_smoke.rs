@@ -1553,8 +1553,20 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         "expected the complete Voice control settings surface, got: {:?}",
         tui.screen_text()
     );
+    // The footer is redrawn with each frame, so a single snapshot taken while
+    // the Voice tab's frame is still arriving can miss it (the failing CI run
+    // showed it present on a later read of the same screen). Wait for the
+    // frame instead of sampling one partial frame.
+    let global_voice_footer_shown = wait_until(
+        || {
+            let screen = tui.screen_text();
+            screen.contains("VOICE OFF") && screen.contains("F8")
+        },
+        WAIT_TIMEOUT,
+    )
+    .await;
     assert!(
-        tui.screen_text().contains("VOICE OFF") && tui.screen_text().contains("F8"),
+        global_voice_footer_shown,
         "expected the global voice control over Settings, and it was present \
          both on the plain frame and with Settings first opened, so the Voice \
          control tab's own rendering displaced it. terminal is {:?}, rows \
