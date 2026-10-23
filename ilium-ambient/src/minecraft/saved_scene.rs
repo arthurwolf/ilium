@@ -2388,6 +2388,10 @@ fn prepare_selection(
         "Starting the finite route survey across qualified saved-map windows",
     );
     progress.route_candidates(0, MAX_ROUTE_QUALIFICATIONS);
+    // Why candidate lines fail coverage, counted per tier and reported in the tier's audit line.
+    let estimate_rejections = std::cell::Cell::new(0_usize);
+    let footprint_rejections = std::cell::Cell::new(0_usize);
+    let unallocated_rejections = std::cell::Cell::new(0_usize);
     let mut candidate_eligibility = |source: super::evidence::Source,
                                      line: super::coverage::Line,
                                      focus_y: f64,
@@ -2406,6 +2410,7 @@ fn prepare_selection(
             Err(
                 super::source_footprint::Error::Invalid | super::source_footprint::Error::Limit,
             ) => {
+                estimate_rejections.set(estimate_rejections.get() + 1);
                 work.charge(128)?;
                 let pass = selection_pass_number.get().max(1);
                 progress.work(
@@ -2452,16 +2457,21 @@ fn prepare_selection(
             Err(
                 super::source_footprint::Error::Invalid | super::source_footprint::Error::Limit,
             ) => {
+                footprint_rejections.set(footprint_rejections.get() + 1);
                 return Ok(false);
             }
             Err(error @ super::source_footprint::Error::Asset(_)) => {
                 return Err(tours::Error::CandidateCoverage(error.to_string()));
             }
         };
-        Ok(footprint
+        let covered = footprint
             .support_chunks()
             .iter()
-            .all(|position| allocated.contains(position)))
+            .all(|position| allocated.contains(position));
+        if !covered {
+            unallocated_rejections.set(unallocated_rejections.get() + 1);
+        }
+        Ok(covered)
     };
     let qualified: Option<(Plan, Arc<projected_route::PreparedRoute>, f64)> =
         qualify_in_tier_order(
@@ -2547,6 +2557,12 @@ fn prepare_selection(
                         selection.audit.usable_lines,
                         selection.audit.source_coverage_rejections,
                         selection.audit.immediate_repeats,
+                    ));
+                    let estimate_count = estimate_rejections.replace(0);
+                    let footprint_count = footprint_rejections.replace(0);
+                    let unallocated_count = unallocated_rejections.replace(0);
+                    progress.record(&format!(
+                        "Coverage rejections in tier {choice:?} {maximum_length}: estimate invalid or over limit {estimate_count}, footprint invalid or over limit {footprint_count}, support chunks not allocated {unallocated_count}",
                     ));
                     return Ok(SurveyStep::EmptyTier);
                 };

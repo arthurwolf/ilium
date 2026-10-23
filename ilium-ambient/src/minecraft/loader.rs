@@ -12,7 +12,9 @@ const MAX_SECTIONS: usize = 32;
 const MAX_STORAGE_CHARGE: usize = 128 << 20;
 // The projected route source is a separately admitted, bounded read. Catalog
 // windows retain their original 128-chunk and 32-MiB defaults.
-pub const MAX_PROJECTED_CHUNKS: usize = 512;
+// Count proxy; MAX_PROJECTED_STORAGE_CHARGE bounds the memory. Matches the footprint cap
+// in source_footprint.rs so a request admitted there is never refused here.
+pub const MAX_PROJECTED_CHUNKS: usize = 1024;
 pub const MAX_PROJECTED_STORAGE_CHARGE: usize = 192 << 20;
 
 /// Chunk-coordinate request around a Minecraft [x, z] block anchor. This only
@@ -91,7 +93,6 @@ pub enum ReadError {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Rejection {
     Absent,
-    ProtoChunk,
     IncompleteSections,
     CoordinateMismatch,
     Read(String),
@@ -389,9 +390,7 @@ fn load_with_ceiling(
             Ok(Some(decoded)) => {
                 if decoded.identity.position != position {
                     Rejection::CoordinateMismatch
-                } else if !decoded.is_full() {
-                    Rejection::ProtoChunk
-                } else if !decoded.has_full_coverage(limits.min_section, limits.max_section) {
+                } else if !decoded.has_block_coverage(limits.min_section, limits.max_section) {
                     Rejection::IncompleteSections
                 } else {
                     // Retain no partial window on exhaustion. One decoded chunk

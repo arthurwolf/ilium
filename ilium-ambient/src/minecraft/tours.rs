@@ -21,7 +21,8 @@ use std::{
 
 const MAX_MAPS: usize = 16;
 const MAX_CHUNKS: usize = 384;
-const MAX_PROJECTED_CHUNKS: usize = 512;
+// Same count as loader::MAX_PROJECTED_CHUNKS; see the note there.
+const MAX_PROJECTED_CHUNKS: usize = 1024;
 const MAX_TARGETS: usize = 2304;
 const MAX_OWNERS: usize = 8192;
 const RECENT_RUNS: u64 = 8;
@@ -161,7 +162,7 @@ impl PreparedMap {
                 || !(region::MIN_DATA_VERSION..=region::MAX_DATA_VERSION)
                     .contains(&chunk.identity.data_version)
                 || !chunk.sections_present
-                || !chunk.has_full_coverage(-4, 19)
+                || !chunk.has_block_coverage(-4, 19)
             {
                 return Err(Error::Invalid("unqualified coverage"));
             }
