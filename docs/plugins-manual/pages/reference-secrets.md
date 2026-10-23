@@ -100,6 +100,46 @@ export async function callApi(): Promise<Uint8Array> {
 
 **[SEC-964]** (proposed, owner to confirm) A secret lost by a keyring change ([SEC-963]) or by a restore ([SEC-250]) is re-entered by the user, one secret row at a time, on the settings tab of the plugin that owns the row. The host MUST NOT offer a bulk import of secrets, and it MUST NOT export a secret to make re-entry easier ([SEC-250]). A plugin SHOULD show a clear message that names the missing row when its secret is unset, and MUST NOT retry a request with an empty credential. Test: restore a snapshot that holds a plugin secret, assert that the row is empty, re-enter the value, and assert that `get-json` returns the value to the plugin.
 
+## Secrets in host memory and in child processes
+
+[SEC-247] gives only plugin guidance. This section states what the host itself does with a secret while it holds it. The rules are host requirements and carry the IDs of the rules they extend; where no ID exists yet the row says so.
+
+**[SEC-247]** (host side) The kernel reads a secret from the keyring just in time, that is when `settings.get-json` or an internal consumer such as a provider call needs it, and holds the plaintext in a buffer whose type zeroises on drop (Rust `zeroize`). The buffer is zeroised when the request ends, on success and on error. The kernel keeps no long-lived plaintext cache of a secret. The only other plaintext copy is the redaction list of [SEC-243], and a rotated value stays there for no longer than the 60 s window of [SEC-246].
+
+**[SEC-033]** (host side) The host never places a secret value in the argv or the environment of a `process.run` child or of a pane command. `/proc/<pid>/cmdline` and `/proc/<pid>/environ` can be read by other processes of the same user, and redaction ([SEC-243], [SEC-066]) only hides a value in text the host writes afterwards. A plugin that needs a secret in a child sends it on stdin or in a request header. A call that carries a stored secret value in `args` or `env` is not detected by value; a plugin that does this by its own code is the plugin's defect, as for [SEC-245]. The host side of the rule is that no host feature (a `{secret:key}` style substitution, a provider helper, a pane launcher) writes a secret into argv or environment.
+
+**[SEC-244]** (host side) The server never includes a secret value in an IPC frame to the client, except to the side that owns the row: the settings editor of the owning plugin or of the kernel tab receives the value only when the user opens that row with reveal, and then only up to `reveal_last` characters ([SEC-248]). All other frames, including the render cache and `settings-changed`, carry the key name only.
+
+**[SEC-445]** (scope) Core dumps and crash reports are covered by [SEC-445] and [SEC-446] in the [Audit log](/pages/reference-audit-log/).
+
+Accepted limit: the host cannot control the swap area or the hibernation image of the operating system, so plaintext that was in memory when the system swapped or hibernated can persist on disk. Users who need to rule this out use encrypted swap or disable hibernation. This limit is the same as for data at rest in [SEC-958].
+
+| Test | Setup | Pass condition |
+|---|---|---|
+| Argv and environment | Store a secret, run a `process.run` child and a pane command through every host feature that can read settings, then read `/proc/<pid>/cmdline` and `/proc/<pid>/environ` of each | The secret value (raw and the variants of [SEC-243]) appears in neither file |
+| Zeroise after request | Call `settings.get-json` for a secret in a debug build with a memory probe | The buffer reads as zero after the call returns |
+| IPC frames | Capture all frames sent to a client while a secret is stored and rotated | No frame holds the value except the reveal frame of the owner |
+
+## Secrets in a whole-host archive versus one-at-a-time re-entry
+
+Two pages answer how secrets survive a restore: the [Backup and restore](/pages/guide-backup-and-restore/) guide describes `ilium plugin backup --include-secrets` ([HST-652], [HST-960]), and [SEC-964] says a lost secret is re-entered one row at a time. The exact rule is this.
+
+**[HST-652]** (secrets) `ilium plugin backup` leaves secrets out unless `--include-secrets` is given. With the flag, the archive holds the secret values in the plaintext form of [SEC-958]; the archive is not encrypted, so the user protects it like the keyring itself (mode 0600, encrypted disk or storage).
+
+**[SEC-250]** (restore rules) A restore of an archive made with `--include-secrets`:
+
+| Restore target | Result |
+|---|---|
+| Same machine, same keyring | The secrets are written back to the keyring (or to `secrets.json` under [SEC-241]) and the plugins read them with `settings.get-json`. |
+| Another machine, or a keyring that was reset | The values are not usable there; each secret is treated as unset ([SEC-963]), the plugin gets a `settings-changed` event, and the user re-enters each row ([SEC-964]). |
+| Archive made without `--include-secrets` | Every secret row is empty after the restore ([SEC-250]); the user re-enters them. |
+
+There is no bulk import and no bulk export of secrets in any case: `--include-secrets` is an archive of a whole host for disaster recovery, not an import path for a single row ([SEC-964]).
+
+**[LIF-290]** (secrets) `ilium plugin export <id> --out <file>` never includes a secret, with or without any other option. The settings values in that archive are the non-secret rows only; a secret row appears as unset. Test: store a secret, export the plugin, list the archive and search every entry for the value and its [SEC-243] variants; none is found.
+
+An operator planning recovery therefore records, outside Ilium, where each credential comes from, and uses `--include-secrets` only when the restore target is the same machine and keyring.
+
 ## Edge cases
 
 | Situation | Result |

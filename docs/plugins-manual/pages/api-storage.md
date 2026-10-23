@@ -366,6 +366,47 @@ Each bucket carries the data version stamp described in [LIF-121](#batches-durab
 
 **Operators.** A single-plugin export is not a schedule. For production data, run `ilium plugin backup` on a schedule and test a restore, as described in [backup and restore](/pages/guide-backup-and-restore/).
 
+### Bucket files: format, inspection and space reclamation
+
+Each bucket is one file: `global.db` under `<data>/plugins/storage/<id>/` (see [plugin files](/pages/reference-plugin-files/)), and one database file per project and per session under `<project>/.ilium/`. The files are the host's private format, not a public one.
+
+- **Format.** Every bucket file is a single-file transactional key-value database that carries a format number ([LIF-304]). It has one writer at a time: the per-bucket lock of [LIF-120] is taken before any change, in every process. A file can be opened by any number of readers only through the host.
+- **Opaque.** No tool outside the host may read or edit a bucket file, copy it while a server runs, or merge two files. A copy made that way can be torn. The only supported way to read data outside the host is `ilium plugin data export <id> <dir>` ([HST-656]), which writes JSON lines of base64 key and value plus the data version.
+- **Newer format.** A host that finds a bucket with a newer format number than it knows starts the plugin disabled, logs `host.format-newer` naming the file, and leaves the file untouched ([LIF-305]).
+- **Space reclamation.** A `put` that replaces a value, and a `remove`, free the old value for reuse inside the file at once, so later writes fill that space first. The file itself does not shrink then. The host shrinks a file only at a compaction, which runs when the bucket is first opened in a server's lifetime, after the integrity check of [HST-657], and when `ilium plugin doctor --fix` runs ([HST-696]). Compaction is a copy into a new file and an atomic rename, so a crash during it leaves the old file intact ([HST-680]). It needs free disk space equal to the live data; without it, the compaction is skipped and doctor reports it.
+- **Quota counts live data.** The quota of the [Rules](#rules) section counts live key bytes and value bytes. Dead space, index overhead and the free pages that await compaction are not counted. So the bucket size that `ilium plugin du` reports ([HST-651]) can be larger than the quota, and this is not a fault. A plugin never gets `quota-exceeded` because of dead space.
+- **Why a file keeps growing after deletes.** The deleted bytes are reused but not returned to the disk until the next compaction. To shrink it at once, stop the server and run `ilium plugin doctor --fix`.
+
+**Offline support commands.** For a plugin that cannot start, with the server stopped, support staff can read the data without a running host:
+
+```
+ilium plugin data list <id> [--bucket <scope>] [--project <path>] [--json]
+ilium plugin data get <id> <key> [--bucket <scope>] [--project <path>]
+```
+
+`--bucket` is `global` (the default), `project` or `session`. `--project` names the project directory for `project` and `session`; it defaults to the current directory. `list` prints one line per key with the key and the value size in bytes; `--json` prints one JSON object per key with `key`, `size` and `value` as base64. `get` prints the base64 value of one key. Both open the file read-only and never change it or run a compaction. If a server holds the bucket lock, the command exits 1 with `storage.bucket-in-use`. If the file fails the integrity check, it exits 1 with `storage.corrupt` and names the file. A missing key makes `get` exit 1 with `storage.key-not-found`. Full reading of data for migration still goes through `data export`.
+
+### Seeing another session's writes
+
+The `global` and `project` buckets are written by several session servers and client sides at once. The rule for readers is simple: there is no per-process cache. Every `get` and every `keys` reads the committed state of the bucket file, so a `put` that has returned in session A ([LIF-118]) is seen by the next `get` in session B. A read never sees half of a write, because writes are atomic ([LIF-117], [LIF-120]). The host sends no change event for storage: a plugin that needs to react to another session's write must read again, for example on a timer or when a pane is focused.
+
+| Bucket | Writers | Visibility to another session |
+|---|---|---|
+| `global` | all sessions and client sides | the next read after the write returns |
+| `project` | all sessions of the same canonical project directory | the next read after the write returns |
+| `session` | one session only | not applicable: a session bucket is single-writer by construction |
+| `shared` | all sessions of the user | the next read; the host may also have cleared it, so rebuild on a miss |
+
+**Author pattern for state across sessions**
+
+1. Keep the state in one value with a version field, and read it before you change it.
+2. Write with `write-batch` so a value and its version change together ([LIF-117]). Two sessions that write the same key at once are ordered by the bucket lock, and the last writer wins ([LIF-120]); there is no compare-and-set. Put a counter or a time in the value and check it after reading if you need to detect a lost update.
+3. A write from a plugin instance older than the data version stamp fails with `conflict` (`stale-data-version`, [LIF-121]). Treat it as a signal to restart on the current version, not to retry the same write.
+4. For a refresh that only one session should do, use `lease` on the `shared` bucket (see [the lease](#the-shared-bucket-and-the-lease)). A session that gets false reads the old value.
+5. Keep one invariant inside one bucket. The host does not make two buckets consistent with each other, and a backup does not claim it either ([HST-961]).
+
+Enabling, disabling and uninstalling a plugin reach every running session within 2 seconds ([LIF-163]); that is a plugin lifecycle fact, not a storage change event.
+
 ### See also
 
 - [fs](/pages/api-fs/) for files, which suit large data.

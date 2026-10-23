@@ -146,6 +146,94 @@ Replacement of core plugins follows [SEC-300] to [SEC-306] in [Extension securit
 - [COR-229] At most one enabled plugin MAY replace a given core plugin id; enabling a second MUST be refused with core.replacement-conflict naming the current owner.
 - [COR-230] Core plugins MUST be versioned with the server build; at boot the server MUST refuse an installed override of a core plugin whose declared host ABI is incompatible, falling back to the bundled copy and logging core.abi-mismatch.
 
+### Out-of-band fixes for core plugins
+
+There is no core-plugin patch channel. [PKG-234] stands: a package whose `id` starts with `ilium.` is refused with `manifest.id-reserved`, even with a valid signature, and core plugins change only with a new Ilium release. No `ilium.core.*` package is accepted from the store, a file, a URL or the host release channel of [PKG-953], and no release key signs one ([SEC-426] covers host binaries only).
+
+- **Delivery path.** A fix to a core plugin ships inside a host patch release. [DEV-966] requires that patch for every host minor still inside its support period ([SEC-966], [DEV-964]: at least 12 months), and a patch MUST NOT change any WIT interface, limit, error code or manifest key. The patched plugin reaches users with the binary, through the release channel and rollout of [PKG-953].
+- **Timeline.** The fix-to-release time is bounded by the disclosure rules of [Security response](/pages/reference-security-response/): acknowledgement within 3 working days, embargo of at most 90 days from the report or until a fix is released ([SEC-321]), and a patched Wasmtime within 14 days of the upstream fix, 48 hours when exploited in the wild ([SEC-331]). Sandbox escapes are rated Critical ([HST-520]).
+- **What [COR-230] means.** It does not create an update path. It guards against a stale or foreign copy of a core plugin found in the plugin store, for example left by an older host. At boot the server compares the declared host ABI of any such copy; when it is incompatible, the server uses the copy bundled with the running binary and logs `core.abi-mismatch`. A compatible copy is still not used: the bundled copy must match the hash table of [COR-222], and a mismatch gives `core.integrity-failed`.
+- **Mitigation before the release.** Until the patch ships, the user can disable a disableable core plugin ([COR-209], effective within 2 seconds) or, for the four essential plugins, use safe mode ([Safe mode and recovery](/pages/user-safe-mode-and-troubleshooting/)). The advisory names the plugin id and the workaround.
+- **Failure modes.** A patched build whose core plugin fails first activation is a release defect: the user keeps the previous binary, since the installer keeps the earlier version ([Host release verification](/pages/reference-host-release-verification/)); the kernel fallback of [Replaceable and disableable](/pages/reference-kernel-and-boot/#replaceable-and-disableable) covers the essential plugins at run time.
+
+Test: place a copy of `ilium.core.titles` with an incompatible ABI in the plugin store and assert `core.abi-mismatch` and bundled behaviour; install a package with id `ilium.core.titles` and assert `manifest.id-reserved`.
+
+### Retiring a core plugin
+
+The project may remove one of the 30 bundled core plugins in a host release. It follows the same notice rule as a plugin feature ([DEV-885]) and the end-of-life display of [PKG-710].
+
+1. **Notice.** The plugin is marked `deprecated` for at least two minor releases before the release that drops it. The mark shows in the Plugins tab (a "Deprecated" badge with the removal release and the successor id, if any), in `ilium plugin list`, and in `ilium plugin deprecations`, and the release notes name it. A deprecated plugin keeps working and keeps its capabilities.
+2. **Dropping release.** The release removes the bundled plugin. The count of core plugins and the table above change in the same release, and [COR-050] is updated with them.
+3. **Stored data.** Nothing is deleted. The plugin's snapshot sections, Settings keys and project buckets stay on disk and are kept unmodified ([HST-692]). `ilium plugin doctor` lists them as orphaned data ([HST-696]), and `ilium plugin export` writes them out. Removal of orphaned data is a user action under [LIF-290], never automatic.
+4. **Dependants.** A plugin that `requires` the retired id, or contributes to its points, goes dormant with the notice `core.retired` naming the id and the successor; nothing is deleted and it resumes if the id returns. When a successor core plugin takes over the surface, the release names it and the surface ids are handed over unchanged, so contributions keep working ([EXT-051]).
+5. **Offer as a package.** The project MAY publish the retired plugin as a T2 package under a non-reserved id (never `ilium.`, [PKG-234]). The package is a new plugin: it does not inherit the stored sections automatically, and the user imports them with the migration steps of [LIF-958].
+
+A retired id cannot be reused by a third party, because `ilium.` stays reserved. Listing a retired core plugin in `replaces` fails with `manifest.replaces-unknown`.
+
+### Contract sections: the ten domain pages that still lack one
+
+[COR-203] is not yet met on the pages of Terminal, Agent detection, Titles, Settings, Ambient look, Scenes, Notifications, Tree, Layout and Keys and help: none has a `### Contract` heading. Until each page has one, [COR-204] and [COR-205] have nothing to check for them. Each page MUST add the section in this form:
+
+| Row | Content |
+|---|---|
+| Owned services | `services:` items of the matrix row |
+| Owned topics | `topics:` items |
+| Owned extension points | `points:` items |
+| Owned commands | `commands:` items |
+| Owned CLI names | `cli:` items and the CLI names column |
+| Owned stored sections | the "Stored data" column, as snapshot section ids and Settings tables |
+| Flags | `essential`, `disableable`, `replaceable` |
+| Parity suite | `ilium-core-<name>-parity` |
+
+Values come from the [replacement matrix](/pages/reference-core-replacement-matrix/) and [Kernel and boot](/pages/reference-kernel-and-boot/#replaceable-and-disableable):
+
+| Page | Services / topics / points | Commands, CLI | Stored sections | Flags (essential / disableable / replaceable) | Suite |
+|---|---|---|---|---|---|
+| Terminal | `transfer`; `screen-changed`; `before-send-input`, `open-link`, `link-actions` | none | Settings table `[terminal]` | no / yes / yes | `ilium-core-terminal-parity` |
+| Agent detection | `state`; `state-changed`; `activity-rules`, `classify` | none | `[ui]`, `[detection]` | no / yes / yes | `ilium-core-agent-detect-parity` |
+| Titles | `suggest`; `title-applied`; `before-apply-title`, `title-styles` | none | `[inference]` (Titles), `[triggers]` | no / yes / yes | `ilium-core-titles-parity` |
+| Settings | the Settings screen services | none | owns the config files | yes / no / no | `ilium-core-settings-parity` |
+| Ambient look | `look`, `set-setting`; `look-changed`; `palettes`, `style-presets` | none | project YAML `animation` | no / yes / yes | `ilium-core-ambient-parity` |
+| Scenes | `catalog`; none; `scene-packs`, `scene-data-sources` | none | see below | no / yes / yes | `ilium-core-scenes-parity` |
+| Notifications | `notify`; `raised`; `before-notify`, `channels` | none | `[sound]`, `[notifications]`, key `muted` | no / yes / yes | `ilium-core-notifications-parity` |
+| Tree | `bookmarks`; `changed`; `before-move`, `before-close`, `node-sorts` | none | see below | yes / no / yes | `ilium-core-tree-parity` |
+| Layout | `presets`; `changed`; `layout-presets`, `before-split` | none | see below | yes / no / yes | `ilium-core-layout-parity` |
+| Keys and help | `bindings`; `changed`; `key-hints`, `help-sources` | `show-keys`, `show-plugins` | `[keyboard]`, `[keybindings]` | no / yes / yes | `ilium-core-keys-and-help-parity` |
+
+Settings is not replaceable and has no matrix row ([DEV-846] row list); its Contract states `replaceable: false` and lists the settings screen and config file ownership from the kernel page.
+
+**Cells that read `none named` (matrix open decision 2).** Tree, Layout and Scenes own the following stored sections, which the Contract MUST name so the parity suite can check them: Tree owns the tree and bookmarks sections of the snapshot (section id `ilium.core.tree`); Layout owns the layout section (`ilium.core.layout`, split ratios and focus order); Scenes owns the scene choice and scene control values, stored in the project YAML `animation` table shared with Ambient look, with the scene section id `ilium.core.scenes` for per-pane scene state. Where the baseline stores nothing for a plugin, the Contract says `none` and the suite asserts no section is written.
+
+**Undeclared `surface` (matrix open decision 3).** A core manifest that declares `replaceable: true` MUST carry a `surface` equal to the matrix row's items; the Contract section and the manifest are compared by the suite, and a difference fails it ([COR-203]). A manifest without `surface` for a replaceable plugin fails the build.
+
+Test: for each of the ten pages, `rg '### Contract'` finds one heading and `ilium plugin conformance <id>` ([COR-205]) runs the named suite and covers every row.
+
+### Platform notes per core plugin
+
+The user-visible behaviour of these plugins differs by platform. The support matrix, terminals and colour rules are in [Platform support](/pages/reference-platform-support/) ([HST-389], [HST-390]). The tested platforms are Linux (x86_64, aarch64), macOS (aarch64) and Windows (x86_64); all core plugins are T1 and run on all three ([HST-381]).
+
+| Plugin | Linux | macOS | Windows |
+|---|---|---|---|
+| Terminal | PTY from the OS | PTY from the OS | ConPTY; the terminal host sets key reports and colour depth |
+| Agent detection | Process-tree walk through procfs | Process-tree walk through the system process list | Process-tree walk through the Windows process snapshot; process names carry `.exe` and are matched without it |
+| Notifications | Desktop notice through the desktop notification service; sound through the system audio backend | The system notification centre; the system audio backend | The Windows toast service; the system audio backend; a missing backend gives `refused` on that channel only ([CAP-885]) |
+| Scenes | GPU backend if the host offers one, otherwise CPU | Same rule | Same rule; the `api-gpu` area is unstable |
+| Ambient look | Colour depth set by the outer terminal | Terminal.app may offer fewer colours than iTerm2 | Windows Terminal; colours are mapped to the nearest the terminal offers ([HST-390]) |
+
+A plugin whose platform backend is absent reports it in `ilium plugin info`; it does not fail the other platforms' behaviour. T2 and T3 plugins are refused on macOS and Windows with `sandbox.unavailable` ([HST-380]).
+
+### Replacement and the replaced plugin's data: one rule
+
+[COR-098] (the replacement reads the replaced plugin's data without loss) and [SEC-300] with [SEC-306] (a replacement never inherits data, and the replaced plugin's data folder stays inaccessible) are reconciled by splitting the data in two classes.
+
+**Transfers on replacement** (the user contract of [COR-097]): snapshot sections declared under the replaced section ids, Settings keys and tables, and buckets keyed by the surface id of the replaced plugin (the "Stored data to leave alone" column of the [matrix](/pages/reference-core-replacement-matrix/)).
+
+**Never transfers**: the replaced plugin's private `data/<id>/` folder ([SEC-306]), its secrets, and its grants and consents ([SEC-300]).
+
+**How the host hands data over.** The transferable stores are not copied. The host gives the replacement a read-write view of those stores under the surface ids, not under the replaced plugin's id, and the view is the same storage the core plugin uses. Because one storage is shared, nothing needs to flow back: on `replacement-off` ([COR-099]) ownership returns to the core plugin and everything written during the replacement is readable by it. Each store keeps its `schema_version`; a section newer than the core plugin reads fails `core.data-newer` ([COR-210]) and the replacement is then refused at enable time, as [COR-099] requires. The audit log records `replacement-on` and `replacement-off` ([SEC-306]) and the store hand-over as one `replacement-data-view` record naming the stores.
+
+**Parity test ([COR-098]).** The suite writes sample data with the core plugin, enables the replacement, reads every transferable store and compares it byte for byte, writes new data, disables the replacement, and asserts the core plugin reads both. It also asserts that the replacement opening `data/<core id>/` fails with a permission error and that no secret or grant is visible.
+
 ## Localisation of core plugin text
 
 This section sets the rules for the text the 30 core plugins show, the times and numbers they display, and whether their detection depends on language. The authoring rules for third-party plugins are in [Internationalisation](/pages/guide-internationalisation/) and [Localisation and text direction](/pages/api-ui/#localisation-and-text-direction). The rules below apply them to core plugins. They add no requirement IDs.

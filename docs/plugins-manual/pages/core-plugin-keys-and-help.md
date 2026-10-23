@@ -700,6 +700,59 @@ The table gives the values that [EXT-052] requires for each point this plugin ow
 | `ilium.core.keys-and-help/key-hints` | client | 0.1.0 (default) | none (default) | 64 entries (default) | no (default) |
 | `ilium.core.keys-and-help/help-sources` | client | 0.1.0 (default) | none (default) | 64 entries (default) | no (default) |
 
+### Help viewer: topic index, search and opening a topic from a view
+
+The help viewer is the pane the user opens with `F1` (preset binding `show-keys` in prefix mode, see the manifest above) or from the command palette. This plugin draws it; the topics come from the kernel help registry, which holds every topic declared under `contributes.help` by every installed plugin (see [help and plugins](/pages/api-help-and-plugins/)).
+
+**Index.** The index lists topics grouped by plugin. Groups appear in the locale order of the plugin display names (the interface language chosen in Settings, then English for a plugin without a translation). Inside a group, topics keep the order of the plugin's `contributes.help` array. A topic row shows the manifest `title`; the group heading shows the plugin name. Selecting a row, or pressing Enter on it, opens the Markdown in the right-hand pane. `Esc` closes the viewer and returns focus to the pane that had it.
+
+**Search.** The search box above the index matches the topic title and the topic body, with the same rules as Settings search (case-insensitive, accent-insensitive, every word of the query must match, see [Settings plugin](/pages/core-plugin-settings/)). Matching rows stay in their groups; groups with no match are hidden. A plugin author SHOULD name each command, setting and view in a topic so a search finds it. [DEV-788] An empty result shows "No topic matches." and keeps the box focused.
+
+**A plugin that is off.** The index still lists the topics of an installed plugin that is switched off. Its group heading and rows are dim and carry the label `plugin off`. Opening one works: the registry reads the Markdown from the installed package, which does not need the plugin to run. The topic body starts with the notice "This plugin is off. Turn it on in Plugins." A plugin that is uninstalled has no topics.
+
+**Opening a topic from a view.** Today only a settings row can name a topic (the row key `help`). This page specifies the same key on every widget of a plugin view:
+
+- A widget MAY set `help: "<plugin-id>/<local-id>"`, where `<local-id>` is an `id` declared in `contributes.help`. The plugin id is the plugin that owns the topic, so a view can point at a topic of its own plugin or at one of another plugin that is installed.
+- When that widget has focus and the user presses `F1`, the help viewer opens on that topic. With no `help` on the focused widget, `F1` falls back to the nearest ancestor widget that has one, then to the index.
+- The id is validated at install. A topic of the plugin's own id that is not in `contributes.help` is refused with `manifest.settings-help` semantics for views: `manifest.view-help` and the message `help topic "<id>" at <json path> is not in contributes.help`. A topic of another plugin cannot be checked at install; if it is missing at run time the viewer opens the index and shows "Help topic not found: <id>" for the rest of the keypress. The widget tree stays valid.
+- `help` is a hint attribute. It needs no grant and gives the plugin no read access to the other plugin's text.
+
+**No `ui.open-help` call.** The manual deliberately has no call that opens the help viewer from plugin code (tutorial 17 says the same). A plugin that could open help at will could take over the screen without a user action, and a plugin running in the background could do it on a timer. Opening help stays a user gesture: `F1`, the palette, or a click on a `help`-marked widget. A plugin that wants to offer help shows a toast or a button, and the button carries `help`.
+
+**`help::topics()`.** A plugin with `help.read` can list topics to build its own menu: `help::topics() -> Vec<HelpTopicInfo>` (TypeScript `topics(): HelpTopicInfo[]`). Each entry has `id` (global `<plugin-id>/<local-id>`), `plugin` (plugin id), `title`, and `plugin_enabled` (false when the owning plugin is off). The list is read-only, holds titles and ids but no body (read the body with `help::topic(id)`), is ordered like the index, and is empty with a `warn` log line when `help.read` is declined or revoked. [COR-011]
+
+### Keybinding conflicts: what Settings > Keys shows and how the user resolves them
+
+Precedence is fixed: the user's remap wins, then kernel built-ins, then T1, then T2 and T3 plugins; within a rank the first installed plugin wins (see [Contributes keys](/pages/reference-manifest/)). The losing binding is inactive and is never deleted.
+
+**The conflict list.** The Keyboard tab shows a section "Conflicts" at the top whenever at least one exists, with a count in the tab label. Each row has:
+
+- the chord, in display form (for example `Ctrl+Shift+K`);
+- the winner: `Kernel: Paste in pane`, `Your remap: <command>`, or `<plugin name>: <command title>`;
+- the losers, one per line, each with its plugin name and command title and the label `inactive`.
+
+**Repair keys.** Focus a loser and press `Enter` to open the key-capture field and rebind it to another chord (the same picker as in sample 3 above, with the collision check). Press `Delete` on a row whose winner is `Your remap` to remove that remap; the next in precedence order then becomes active at once. `?` on a row opens the per-row help topic that explains the rule. Every step works from the keyboard. [USR-303]
+
+**What a plugin sees.** `keys.grab` returns `conflict` when another plugin already holds the chord in the same scope (see [keys](/pages/api-keys/)); a grab never takes a chord from the keymap, and a chord the user bound is not grabbable by a plugin without the user having removed the remap. A plugin that shows its own hints MUST re-read bindings on `keymap-changed`: that event is sent after any remap or conflict change, and it is the event to handle (there is no separate `binding-changed` event). The re-read `bindings()` marks a lost binding with `active: false`, so a hint can be hidden.
+
+**At install.** The linter (`ilium plugin lint`) warns `keybinding.kernel-reserved` on a default chord that the kernel reserves. This is a warning for developers; the install itself follows the rule in the next section.
+
+**Updates never rebind silently.** A plugin update that adds or changes a default chord which now collides with a chord the user already uses leaves the user's binding in place; the new chord is inactive and appears in the conflict list. A user binding is never moved or removed by an update. [COR-011]
+
+### Plugin keybindings versus the kernel keymap: conflict rule
+
+A `contributes.keybindings` entry (`command`, `chord`, `mode`, see the [manifest reference](/pages/reference-manifest/)) is checked against four sets: the 35 core actions in the table above, the kernel-reserved keys (the prefix chord and the keys the terminal passes through), the user's remaps, and the bindings of other plugins. The check compares `chord` within the same `mode` (`global`, `prefix` or `pane:<kind>`); a `global` chord also collides with the same chord in any mode.
+
+| Collision with | At install | At run time |
+|---|---|---|
+| A kernel-reserved key | Refused: `manifest.keybinding-reserved` | not reached |
+| One of the 35 core actions | Installed; the plugin binding is inactive and listed | Kernel wins |
+| A user remap | Installed; inactive and listed | User wins |
+| Another plugin | Installed; the second plugin to install is inactive and listed (same rank) | Higher tier wins, then first installed |
+| Two entries of the same plugin | Refused: `manifest.keybinding-conflict` | not reached |
+
+Precedence is: kernel, user remap, core plugin (T1), third-party (T2 and T3) by installation order. The order is stable across restarts because it comes from the install record, not from activation timing. A plugin is never refused only because another plugin holds the chord: it installs and the user resolves the clash in Settings > Keys (see the previous section). `manifest.keybinding-reserved` and `manifest.keybinding-conflict` are the only refusals, and each message names the entry's JSON path and the chord. The collision check of the remap picker (see the Action names section) is this same rule applied to a typed chord, so the picker and the installer never disagree. [COR-011]
+
 ### ABI used
 
 - [Kernel settings and keymap](/pages/api-kernel-settings-and-keymap/)

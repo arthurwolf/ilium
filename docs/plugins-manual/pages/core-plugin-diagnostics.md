@@ -738,3 +738,83 @@ The bundle is specified in three places (USR-221 to USR-226 above, LIF-312 to LI
 **[USR-106]** Retention MUST follow one period for bundles from either origin. A bundle that the host offers after a plugin enters `failed` (LIF-314) MUST be held in the server state folder and MUST be deleted at the next start once it is 14 days old. A file that `support-bundle --out <file>` wrote MUST belong to the user: Ilium MUST NOT delete, move, rename, send or read it after it is written.
 
 **[USR-953]** A change to the bundle contents, the line count, the size cap or the retention period MUST change this section first. The matching rows of the user-admin register (USR-221 to USR-224, USR-334, USR-335), the lifecycle register (LIF-312 to LIF-314) and the host telemetry register (HST-636) MUST then be updated in the same change, so that no register keeps a superseded value.
+
+## Support bundle for the whole install (`support-bundle --all`)
+
+Every bundle above is about one plugin. A user whose session is slow, whose loop hangs or whose disk is full often cannot name the plugin at fault, and has nothing to attach. `ilium plugin support-bundle --all <file>` writes one archive of the whole install, so support reads one file and does not ask the user to run a dozen commands. It is the same bundle contract as [USR-104](#production-additions-support-bundle-contract), not a second format: the same command, the same owner (`ilium.core.diagnostics`), the same redaction and the same retention. The only change is the scope, which is the install and not one plugin.
+
+`ilium plugin support-bundle --all --out <file>`
+
+`--all` replaces the `<id>` argument. Giving both `<id>` and `--all` exits with the error `bundle.scope-conflict` and writes nothing. Giving neither exits with `bundle.scope-missing`. `--include-host` is accepted and is already implied, so it changes nothing.
+
+### When to use it
+
+| Symptom | Use | Why |
+|---|---|---|
+| One plugin fails, is blocked or misbehaves | `support-bundle <id>` | The per-plugin bundle holds that plugin's own log lines, stats and crash records ([USR-334]). |
+| The whole session is slow or unresponsive | `support-bundle --all` | The cause may be the host, the disk or several plugins at once. |
+| A loop hangs and no plugin is named | `support-bundle --all` | The host log and the failure windows show which deadline was missed. |
+| The host started in read-only state or reports `disk.pressure` | `support-bundle --all` | The disk state and the cache eviction steps are recorded together. |
+| Ilium restarted several times in a row | `support-bundle --all` | The crash-loop guard level and marks are recorded. |
+
+### What the archive holds
+
+The archive holds exactly these entries and no other. Names that end in `/` are folders inside the zip.
+
+| Entry | Content |
+|---|---|
+| `summary.txt` | The keys of [USR-335] for the install: Ilium version, platform, host API range, the scope line `scope: all`, the redaction counts per rule, the dropped log line count, the count of installed plugins, and a SHA-256 of every other entry. |
+| `doctor.txt` | The output of `ilium plugin doctor` ([USR-337]): one `ok`, `warn` or `fail` line for each check. |
+| `inventory.json` | The output of `ilium plugin list --json --inventory` ([USR-341]): id, version, tier, content hash, key id, state and granted permissions of every installed plugin. |
+| `host.txt` | The host version and platform record: Ilium version and build, operating system and version, CPU architecture, host API range, and the server start time in UTC (RFC 3339). |
+| `host-log.txt` | The last 2,000 lines (proposed, owner to confirm) of the host log, redacted. |
+| `host-crash.txt` | The newest host crash record, or the line `none recorded`. The record holds the time, the reason, the exit status and the phase that was running, and no stack memory or payloads ([USR-227] gives the same limit for helper records). |
+| `health/<id>.txt` | For each installed plugin: its state, its health counters and the failure window (failures counted, window length, the time of the newest failure, and the next possible retry). |
+| `crashes.txt` | The crash records of every plugin ([USR-227]), kept within the limits of [USR-228]. |
+| `counters.txt` | The host counters: loops started and stalled, deadline breaches, refused calls, journal size, cache sizes and the count of queued events. Values are numbers. |
+| `disk.txt` | The `disk.pressure` state and the read-only state: the free space on the data volume, the current step of [HST-661] and whether the host is read-only, with the reason. |
+| `crash-loop.txt` | The crash-loop guard level and the crash marks with their times. See [Safe mode and recovery](/pages/user-safe-mode-and-troubleshooting/). |
+| `policy.txt` | The effective admin policy with every secret value replaced by `[redacted]`. Keys, kill lists and allow lists stay readable. |
+
+The per-plugin entries `log.txt` and `stats.txt` are not part of the whole-install archive. A plugin's own log lines appear only in the host log when the host wrote them. For a plugin's own diary, use the per-plugin command.
+
+### What is left out
+
+- [USR-222] applies unchanged. Every entry passes through the redaction before it is written: credential headers, URL parameters and home-directory paths (shown as `~`) are removed, and payloads appear as a byte count only.
+- [USR-223] applies unchanged. The archive MUST NOT contain any plugin data folder, trace recording, grant secret or file content.
+- The archive MUST NOT contain the trust store, the private or public key files in it, or the lock file contents. `inventory.json` names the signing key id of a plugin and nothing more.
+- The archive MUST NOT contain a manifest, because [USR-105] applies: the grant list appears in `summary.txt` for a per-plugin bundle and in `inventory.json` here, and nowhere else.
+- Environment variables whose names contain `KEY`, `TOKEN` or `SECRET` show their name and `[redacted]` as value ([DEV-941] uses the same rule).
+
+### Size cap and trimming
+
+[USR-224] gives the cap: 8 MiB. When the archive would be larger, the command drops the oldest lines of `host-log.txt` first, then the oldest records of `crashes.txt`, and writes the number dropped from each into `summary.txt`. It never drops `summary.txt`, `doctor.txt`, `inventory.json`, `disk.txt` or `crash-loop.txt`. If those alone exceed the cap, the command exits with `bundle.too-large` and writes nothing. The command prints the cut as a warning line as well.
+
+### Output and hash
+
+The command prints one `support-bundle` record, as `DEV-831` requires, with the extra fields `scope` (`all`), `path`, `size` in bytes, `sha256` (the hash of the whole zip file) and `dropped`. Then it prints the hash on a line of its own, so the user can read it to support and support can check the file they receive:
+
+```
+$ ilium plugin support-bundle --all --out ilium-support-all.zip
+wrote ilium-support-all.zip (2.4 MiB, 12 entries + 31 health files)
+sha256 9f2c...e41a
+```
+
+When `--out` is not given, the name is `ilium-support-all-<YYYYMMDD-HHmmss>.zip` in the current folder, following [USR-335].
+
+### Who decides, and what the user sees
+
+The user starts the command, or the Diagnostics screen button "Build support bundle" with the scope "Whole install". [USR-226] applies: the dialog lists the entries and the total size before it writes, and its default button is Cancel. After the build the host shows the redacted `summary.txt` and `host-log.txt` in a viewer ([USR-332]), and `--dry-run` prints the entry names, sizes and redaction counts per rule without writing a zip. Ilium MUST NOT upload the archive. A file written by `--out` belongs to the user, as [USR-106] says.
+
+### Failure modes
+
+| Situation | Behaviour |
+|---|---|
+| The data volume is read-only or full | The command exits with `bundle.write-failed` and leaves no file at the target ([USR-225]). It still prints the dry-run listing so that the user can copy it by hand. |
+| The host log is missing or unreadable | `host-log.txt` holds the line `host log unavailable: <reason>`. The command does not fail. |
+| One plugin's health record cannot be read | `health/<id>.txt` holds `health unavailable: <reason>`. The other entries are still written. |
+| The host is in safe mode or the crash-loop guard has stopped plugins | The command works and reads state only. It does not start a plugin or change any guard mark. |
+| The target file already exists | The command exits with `bundle.exists` and does not overwrite it. |
+| A build takes long | It stops at 30 s (proposed, owner to confirm) for 64 plugins and exits with `bundle.timeout`, leaving no file. |
+
+Writing the archive MUST NOT change any plugin state, grant, health counter, failure window or guard mark ([USR-225]).

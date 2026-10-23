@@ -223,3 +223,64 @@ The backup procedure in [Back up and move plugins to another machine](#back-up-a
 **[HST-962]** The archive is plain data and holds personal data, so `ilium plugin backup` MUST create the `.partial` file and the final archive with mode `0600`, MUST create the folder beside them with mode `0700` when it creates the folder, and MUST refuse to write the archive inside `<data>/plugins/` with `backup.inside-live-root` (proposed, owner to confirm), so that a copy never sits in the live tree. The host does not encrypt archives in this version, and the command output MUST say so and name the archive path. Erasure requests under [HST-978](/pages/guide-backup-and-restore/) reach only the live data root and the archives the administrator keeps; a copy that a user made outside Ilium is not reached by the host. Test: run the backup into a folder of mode `0755` and into the live root, and assert the mode of both files and the two refusals or results.
 
 **[HST-963]** `ilium plugin restore` MUST compare the `data_version` stamp of each bucket in the archive with the `data_version` of the plugin package that will be active after the restore, before it changes any file. A stamp higher than that version MUST be refused with `migration.data-newer` (exit 1) and MUST NOT be overridden by `--merge` or `--replace`; the restore succeeds only after a version with that data version is installed. A stamp lower than that version MUST be migrated by the update path after the data is written, and the host MUST take the pre-update backup of [LIF-107](/pages/guide-data-migration/) first. A plugin that is not installed and has no package in the archive MUST be refused with `restore.plugin-not-installed` (proposed, owner to confirm) and the message MUST name the plugin id. Test: restore an archive with stamp 3 into a profile whose plugin has data version 2, and assert the refusal and an unchanged listing; repeat with stamp 1, and with an uninstalled plugin and no package in the archive.
+
+### Cloud-synced and roaming folders
+
+The lock and flush rules of this page assume one machine and a local disk. A folder that a sync client copies to other machines breaks both assumptions, and a network filesystem is only part of that case ([HST-665](#production-additions-t10-operations) covers NFS, SMB and FUSE-remote). This section covers `<data>/plugins`, `<state>`, `<config>` and a project's `.ilium/` folder when any of them sits inside Dropbox, iCloud Drive, OneDrive, Google Drive, Syncthing or a Windows roaming profile.
+
+**What goes wrong.** The risks below are properties of those products, not of Ilium, and the host cannot repair them after the fact.
+
+- `installed.lock` and the per-bucket locks are OS advisory locks ([LIF-066], [LIF-120]). They exist only inside one machine's kernel. A sync client does not honour them, so two machines can each hold the lock and each write `installed.json` or `global.db` at the same time. The last upload wins and the other write is lost.
+- The fsync rule of [LIF-118] means the change is on the local disk when `put` returns. It says nothing about the copy a sync client uploads. A client can upload a bucket file while the host is half-way through a write, and another machine then opens a torn file. The integrity check of [HST-657] moves such a file aside and starts an empty bucket, which loses the data.
+- A sync client that sees two writers keeps both files and names the second one, for example `global (conflicted copy).db`, `installed (conflicted copy 2026-10-23).json` or `installed-DESKTOP-ABC.json`. Nothing reads these files, so the registry the host uses can be the older of the two.
+- The `data_version` stamp of a bucket ([LIF-107]) can go backwards. A machine with an older plugin version syncs its bucket over a newer one, and the newer plugin then finds a lower stamp than it wrote. The host would migrate that bucket again.
+
+**What the host does (proposed, owner to confirm).** At start, and again when a root is changed with `plugins.data_dir` ([HST-669](#production-additions-t10-operations)), the host checks each root for the signals below. A match is not proof of syncing, so the host never stops a plugin because of a match alone.
+
+| Signal | Where it is looked for |
+|---|---|
+| `.dropbox`, `.dropbox.cache` | the root or any parent folder |
+| `.icloud` placeholder files, or a path under `~/Library/Mobile Documents/` | the root or any parent folder |
+| `desktop.ini`, or the Windows file attributes of OneDrive (`RECALL_ON_DATA_ACCESS`, `PINNED`, `UNPINNED`), or a path under `%OneDrive%`, `%OneDriveCommercial%` | the root or any parent folder |
+| a path under the Google Drive mount (`G:\My Drive`, `~/Google Drive`, `~/Library/CloudStorage/GoogleDrive-*`) | the root path |
+| `.stfolder`, `.stignore` | the root or any parent folder |
+| a path under a Windows roaming profile (`%APPDATA%` that is the roaming `AppData\Roaming`, not `%LOCALAPPDATA%`) | the root path |
+
+On a match the host:
+
+1. logs `host.synced-folder` once per run and per root, naming the folder, the signal and the product it believes it saw;
+2. keeps running, and shows a warning row on the Plugins screen that names the folder, says that locks and writes are not safe there and points to the alternative below. The row stays until the root moves or the signal is gone;
+3. lists the finding in `ilium plugin doctor` and in the result of `ilium plugin du`.
+
+The warning is not an error. Many users keep a project's `.ilium/` folder in a synced folder on purpose, and plugin settings in it are small text files that merge well.
+
+**Conflict copies.** The host looks in each root for files that match the conflict naming of the products above next to `installed.json`, `trust.json`, `grants.json`, `consents.json`, `config.toml` and every `*.db` bucket. While a conflict copy of `installed.json` exists the host MUST refuse every write to `installed.json`, so install, update, uninstall, enable and disable fail with `install.registry-conflict` (proposed, owner to confirm) and exit code 4, with the message naming both files. Reads keep working and enabled plugins keep running. The user resolves it by comparing the two files, keeping one, deleting the copy and running `ilium plugin doctor`. A conflict copy of a bucket file is listed by `ilium plugin doctor` but does not stop writes, because the host opens the file with the exact name only.
+
+**Supported alternative.** Keep all roots local, and do not point `plugins.data_dir` or `XDG_*` variables into a synced folder. Move data between machines with `ilium plugin backup` and `restore` ([HST-652](#production-additions-t10-operations), [HST-653](#production-additions-t10-operations)), or for one plugin with `ilium plugin export` and `import` ([LIF-290]). A synced folder can hold the archive file: the archive is written to `<file>.partial` and renamed, so the sync client sees a finished file. The archive must not be written inside `<data>/plugins/` ([HST-962](#backup-contents-consistency-and-restore-rules)).
+
+Failure modes: a sync client that locks a file during upload makes the host's write fail with `io`, which the host retries as it does any `io` failure; a placeholder file (`.icloud`, OneDrive online-only) that is not downloaded reads as missing and the host reports `data.root-invalid` ([HST-669](#production-additions-t10-operations)) for a root, or opens an empty bucket for a bucket file after the integrity check fails.
+
+### Which export to use: formats side by side
+
+Five kinds of copy exist. They answer different questions and are not interchangeable.
+
+| | Single-plugin archive | Whole-host archive | Bucket JSON lines | Privacy folder | Pre-migration copy |
+|---|---|---|---|---|---|
+| Command | `ilium plugin export <id> --out <file>` | `ilium plugin backup <file.tar.zst>` | `ilium plugin data export <id> <dir>` | `ilium plugin export-data` | written by the host before `migrate` |
+| Counterpart | `ilium plugin import <id> --from <file>` ([LIF-292]) | `ilium plugin restore <file>` ([HST-653](#production-additions-t10-operations)) | `ilium plugin data import <id> <dir>` ([HST-656]) | `ilium plugin import-data <folder>` ([USR-262]) | restored by the host on a failed migration ([LIF-107]) |
+| Format name | not yet named in the requirements; it carries a format version and an unknown one is refused with `import.format-unsupported` | `backup.json` with `format: "ilium-backup/1"` ([HST-654](#production-additions-t10-operations)) | JSON lines, one object per key, with `data_version` | `manifest.json` with format `1` and SHA-256 per file ([USR-323]) | none; a copy of the live layout |
+| Holds | the plugin's data folder, its buckets of every scope, non-secret settings values | store, `installed.json`, `trust.json`, buckets, settings; grants with `--include-grants`; secrets only with `--include-secrets` | every bucket of one plugin: base64 key, base64 value, data version | settings, project storage references, grants, plugin logs, audit records, crash records, as readable files | global, project and session buckets and the data directory of one plugin at one version |
+| Never holds | secrets in any form ([LIF-290]), grants, the package | cache, logs, staging, compile cache, `backups/`, secrets by default ([HST-960]) | package, settings, grants, files of the data folder | bucket bytes, the package, secrets | the package, settings, grants |
+| Human can read it | no (archive) | no (archive) | partly: keys and values are base64 | yes | no |
+| Checks on restore | id match, format version | every entry hash, host version, `data_version` ([HST-963](#backup-contents-consistency-and-restore-rules)) | `migration.data-newer` for a higher data version | target plugins installed, grants re-checked against machine policy | none; used by the update path |
+| Other OS | not stated | data bytes unchanged, T2/T3 plugins of another platform refused at load ([HST-655](#production-additions-t10-operations)) | bytes are OS independent | files are OS independent | same machine only |
+| Unknown format number | `import.format-unsupported` | `restore.format-unsupported` for an unknown major format ([HST-654](#production-additions-t10-operations)); `restore.host-newer` for a newer host unless `--force` | no format number is defined today | no refusal is defined today | not applicable |
+
+**Rules of choice.**
+
+- To move or restore a machine, use `backup` and `restore`. The privacy folder carries no bucket bytes and no package, so a machine moved with `export-data` loses plugin data.
+- To move one plugin, use `export` and `import` for a full copy, or `data export` and `data import` when the target already has the plugin and only the buckets move.
+- To read what the host holds about a user, or to answer a data-access request, use `export-data` ([USR-245]). It is a report, not a backup.
+- The pre-migration copy is for the host. Do not copy it by hand, because the next committed update keeps only the newest ([LIF-107]).
+
+**Stable interchange format.** [LIF-304] gives every on-disk format a number, but only the whole-host archive has a defined refusal for an unknown major number ([HST-654](#production-additions-t10-operations)). Third-party tools may therefore depend on `ilium-backup/1` and on `backup.json` fields (format, host version, creation time, OS, per-entry SHA-256), and on nothing else. The bucket JSON-lines layout, the privacy-folder file names and the single-plugin archive layout may change between host versions. Tools that need them must read the format number first and stop on a number they do not know.

@@ -691,6 +691,40 @@ Side basis: the page routes every move and close through server-side intents, an
 
 Risk marks of this plugin's extension points follow the corrected table in [Extension security](/pages/reference-extension-security/) ([SEC-293]).
 
+### Stored data and session size limits
+
+**Stored sections.** The Tree plugin owns three kinds of stored data. None of them is the tree itself, which the kernel snapshots with the session ([Persistence and restart](/pages/reference-persistence-and-restart/)).
+
+| Section | What it holds | Where it lives | Limit |
+|---|---|---|---|
+| Bookmarks | One flag per bookmarked node. The plugin writes the byte `1` with `tree.set-metadata` and mirrors it with `set-bookmarked`; an empty value means not bookmarked. | Plugin bytes on the node ([tree.metadata](/pages/capability-tree-metadata/)) | `node_metadata_kib`, default 64 KiB per node, ceiling 256 KiB. Past it `set-metadata` fails with `quota-exceeded` ([api-tree](/pages/api-tree/)). |
+| Sort choice | The id of the chosen order from the `node-sorts` point (the Order By choice of the User Interface tab). | The plugin's settings | One id. An id that no `node-sorts` entry provides any more falls back to the default order. |
+| Collapsed groups | Which groups are shown closed. | Per-node plugin bytes, like bookmarks | Same per-node limit as bookmarks. A node that is gone drops its entry. |
+
+The Contract section of this page ([COR-203]) must list these three as the owned stored sections, and the [replacement matrix](/pages/reference-core-replacement-matrix/) row must name them, because a replacement of the plugin has to read or migrate them. The matrix row currently says none; that is the gap this section closes.
+
+**Per-call limit.** One `restructure` call accepts at most 256 operations; more is `refused(invalid-argument)` ([PAN-021]). The limit is per call, not per session. A session can hold more nodes than one call may touch.
+
+**Session size limits.** No limit on the size of one session is stated in any requirement file yet. The values below are proposed, owner to confirm, and are the figures the Tree plugin is written against:
+
+| Limit | Proposed value | When exceeded |
+|---|---|---|
+| Nodes in one session (groups, folders and panes together) | 1,000 | `create-group`, `create-folder` and any pane creation are `refused(invalid-argument)`; the tree is unchanged. |
+| Panes in one session | 200 | Creating or restoring a pane is `refused(invalid-argument)`; the error message names the limit. |
+| Depth of nesting | 16 levels | A `move-node`, `create-group` with `children`, or `restructure` that would make a node deeper than this is `refused(invalid-argument)`. |
+
+Refusals are ordinary outcomes ([requests and outcomes](/pages/requests-and-outcomes/)). A refused `restructure` is all or nothing, so a batch that would cross a limit changes nothing. The user sees the refusal as a one-line notice, and `ilium plugin logs ilium.core.tree` shows `refused(invalid-argument)` with the limit that was hit. The host never closes or rearranges existing nodes to make room. The depth limit of 32 in [ABI-061] is a different limit: it bounds decoded values, not tree depth.
+
+**Performance envelope.** The budgets assume a size, not a ceiling ([host budgets](/pages/reference-host-budgets/)). B4 is measured at 300 nodes: 200 decoration updates plus one tree re-render cost under 1 ms extra through the contribution store. B8 is measured at 30 panes: detection `classify` stays under 0.5 ms per pane. A session larger than that still works up to the limits above, but the budgets are not promised there. A plugin that decorates every node of a 1,000-node tree should coalesce its updates on `tree-changed` as the "Order the tree" sample does.
+
+**Failure modes.**
+
+- A restore that would exceed a limit (for example a session saved before the limit was set) loads the nodes up to the limit, in tree order, and reports the rest as skipped in the log. No process is started for a skipped pane.
+- A plugin that ignores `refused(invalid-argument)` and retries in a loop is limited by the intent rate limits of [events and intents](/pages/events-and-intents/), not by the tree.
+- Replacing the plugin ([COR-216]) keeps all three limits, because the kernel enforces them, not the plugin.
+
+Requirement ids for this section: [PAN-021], [COR-203], [COR-216]. The three session limits have no id yet.
+
 ## Production additions: T6-core-plugins
 
 - **[COR-216]** Replacing ilium.core.tree MUST be performed with no pane closed and no PTY restarted, and the tree contents MUST be identical before and after the switch as compared by node id, kind, parent and order.

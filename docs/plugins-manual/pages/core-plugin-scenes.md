@@ -684,3 +684,78 @@ The table gives the values that the core extension points table requires for eac
 - [Core plugins](/pages/core-plugins/)
 - [Ambient look plugin](/pages/core-plugin-ambient/), the shared look every scene gets
 - [Tutorial: an ambient scene](/pages/tutorial-07-ambient-scene/)
+
+## Production additions: T6-core-plugins
+
+### Live-data scenes without network
+
+This section covers the scenes whose data comes over HTTP: OpenStreetMap, Satellite clouds, Earth at night and Stars overhead (its optional space-weather overlay), plus the other live-data scenes of the catalogue. Each holds an `http:<host>` grant per source and the `cache` scope. The values below are the shipped behaviour described in the user documentation (maps, space and live data page); a replacement of the Scenes plugin MUST keep them. [COR-011]
+
+**Rule 1: the frame never waits for the network.** A fetch runs on a worker owned by the scene, never inside `render`. The `render` call only reads the newest data already in memory or in the cache. A request that is slow, hung or failing therefore costs no render time, and the frame budget of [RND-001] (1,000 ms divided by the effective frame rate, rounded down: 33 ms at 30 fps, at most 50 ms with `frame_deadline_ms`) is never spent on a fetch. A scene whose `render` blocks on a response misses the budget, and the host skips that frame as [RND-001] states. A scene that is hidden or has the background off does no fetch work either ([HST-265]).
+
+**Rule 2: stale data is served, and labelled.**
+
+| State | What the scene draws | What the Scene status row says |
+|---|---|---|
+| Fresh data, or a refresh in progress | The newest data. | Progress while downloading, then the age of the data. |
+| Fetch failed, a cached copy exists | The last good copy, unchanged. A failed refresh never blanks the display. | An offline or error message together with the age of the copy (a staleness label such as `from 3 h ago`). |
+| Fetch failed, no cached copy | The scene's own empty base (the map outline, the dark Earth, the star field without overlay). It draws no spinner and no frozen partial image. | An offline message that names the source. The row is the only explanation, so it is never empty. |
+| Cached copy older than its refresh interval and the network is back | The old copy until the new data has been completely received, then one switch to the new data. | Back to the age of the new data. |
+
+A copy is never discarded because it is old. Only a successful replacement, the size budget, or the user clearing the cache removes it. Recovery is automatic: the next successful refresh clears the offline message, so the user does nothing.
+
+**Rule 3: bounded cache.** Downloads go to the `ambient` folder of the platform cache directory (the `cache` scope), not to a plugin data folder, so the host may remove them at any time and the scene rebuilds them. The per-scene limits are:
+
+| Scene | Cache content | Size limit | Refresh | Retry after a failure |
+|---|---|---|---|---|
+| Earth at night | A mosaic of NASA GIBS tiles, cached as a PNG | 120 MiB for the tile cache; 15 tiles at level 2, at most 50 at level 3 | Every few hours | 5 minutes; the last good mosaic stays on screen |
+| Satellite clouds | Weather-satellite images on an epoch-aligned time grid, so a refresh reuses images already cached | Bounded by the History setting (latest image, 6, 12 or 24 hours of frames) | When a newer image exists | Next scheduled refresh; the last image stays |
+| OpenStreetMap | One bounded query per place (about 0.016 by 0.024 degrees), 16 MiB response cap, 15-second timeout | The cached query result per place | On a place change only | No automatic retry after an HTTP error. A request starts at most every 60 seconds; HTTP 429 or 503 extends the wait, using `Retry-After` when present. |
+| Stars overhead | The star catalogue is bundled and needs no network. The space-weather overlay holds its last response. | One response | At the source floor | Bounded back-off; the stars stay without the overlay |
+| Live aircraft, boats, earthquakes, graphs | Responses, shared on disk by every Ilium client of the machine | Response size limits per source | From 60 s (earthquakes) to 900 s (anonymous aircraft); a requested interval below the floor is raised to it | Bounded back-off |
+
+The cache limits are the user-documented ones; the plugin-visible `cache` buckets of the storage API also have their own budget (`shared_cache_mib`, 64 MiB by default) described in [Storage API](/pages/api-storage/), and the oldest entries go first when it is exceeded. A scene whose data exceeds that budget keeps the newest entries and refetches the rest.
+
+**Rule 4: retry and back-off.** A failed or malformed fetch retries no sooner than the source's minimum interval, and repeated failures lengthen the delay with a bounded back-off, so a dead network costs one small request per interval, not a loop. A request the user cancels (scene change, background off) is not retried. Several clients of one machine share the floor through a local reservation, so extra clients do not multiply requests.
+
+**Failure modes and who decides.**
+
+- A host refused by the `http:<host>` grant is not a network fault. The call fails with the usual capability error ([http API](/pages/api-http/)); the scene shows the same status row as an offline fetch and the grant review decides, not the scene.
+- A response over the size cap, with a wrong content type or malformed, is treated as a failed fetch and the cached copy stays.
+- A scene must never show an old copy without its age. The staleness label is part of the scene's contract, and the check rules refuse no scene for it today, so the conformance suite checks it with the network blocked.
+
+Test to run: start each of the four scenes with the network blocked and no cache, then with a warm cache. Check the status row text in both cases, that the frame time stays inside [RND-001], that no frame is skipped, and that unblocking the network recovers without a restart.
+
+### Stored data: per-scene control values, scene packs and cached loops
+
+The replacement matrix lists the stored data of the Scenes plugin as `none named`. The Contract of this plugin names the stored data below, as [COR-203] requires, and [COR-011] makes it part of the behaviour a replacement MUST keep.
+
+| Stored item | Where | Owner | Content |
+|---|---|---|---|
+| Scene choice and per-scene control values | The project YAML `animation` table: `animation.scene.<scene-id>` for each scene's controls, and the scene `kind` | Scenes. The shared look under `animation.look` belongs to [Ambient look](/pages/core-plugin-ambient/) and is never repeated per scene. | One value per control row, written under the exclusive lock the kernel and plugins share ([Configuration and data migration](/pages/reference-config-and-data-migration/)). |
+| Per-pane scene state | Scene section id `ilium.core.scenes` of the session snapshot | Scenes | The scene state needed to restore a pane's scene. The chosen scene per client is part of the `animation` table and of this section. |
+| Scene packs | Files with the extension `.iliumanim` in the `animation-plugins` folder under the Ilium data directory or the config directory, plus the bundled ones beside the animation helper | The user or the installer | Archives, never extracted. |
+| Cached loops | Packed Braille frames in memory only. Nothing is written to disk. | Scenes | At most 128 MiB of packed frames per cache. |
+| Network caches | The `ambient` folder of the platform cache directory | Scenes (and rebuildable) | See the table in the previous section. |
+
+**Cached pre-rendered loops.** A loop cache is built by a cancellable worker at 30 frames per second for 1 to 120 seconds (default 60). It holds packed Braille geometry only, so a change of colour, palette, preset, filter, brightness or panel never rebuilds it. A request whose projected size would exceed 128 MiB is not cached: the scene plays in Live mode and the Cache status row says so. Because the cache is memory-only, a restart, a scene change or a terminal resize drops it and the worker builds it again. There is no loop file on disk to size, back up or clean.
+
+**Installing, listing and removing a scene pack.**
+
+1. Install: copy the `.iliumanim` file into one of the folders above. Ilium does not create the folders; the installer does. There is no extraction: the verified files are loaded into memory on demand.
+2. List: **Settings, Animations, Plugin** shows each valid package by name and version. At most 256 packages are listed; the bundled ones keep their slots. An invalid archive is never evaluated and appears in the **Issues** row with its path and the failure. Only regular files are read, so symlinks and nested folders are ignored.
+3. Remove: delete the file from its folder. The package disappears from the list at the next scan. A scene that was active falls back to the previous native scene. The package's saved settings stay in the `animation` table, so installing the same package again restores them. Bundled packages are removed by the installer, not by the user.
+4. Capability choices: **Allow this session**, **Always allow this scope**, **Deny this session** and **Always deny this scope** are stored with the package's scope; removing the file does not clear them.
+
+A `scene-packs` entry contributed by another plugin ([Extension points](#extension-points)) is a list of scene ids with preset control values. It stores nothing of its own: choosing the pack writes the same `animation.scene.<scene-id>` values, and removing the contributing plugin removes the offer but leaves the written values.
+
+**What stays on disk.** [COR-022] says disabling a core plugin MUST NOT delete its data.
+
+| Action | Removed | Kept |
+|---|---|---|
+| Disable `ilium.core.scenes` | Nothing | The `animation` table, the `ilium.core.scenes` snapshot section, the pack files and the network caches. The background shows no scene while the plugin is off; enabling it again restores the choice and the values. |
+| Remove a scene pack file | The package from the list | Its control values and capability choices |
+| Uninstall a replacement of the Scenes plugin | Its own store | The `animation` table and snapshot section, so the built-in plugin or another replacement reads them |
+| Clear the cache from the host | Network caches | Everything else; the scenes refetch |
+
+A replacement that keeps the surface of this plugin MUST read and write the `animation.scene.<scene-id>` and `ilium.core.scenes` sections above unchanged, so the user's choices survive the switch. Test: set a control in three scenes, disable the plugin, check the YAML and snapshot are byte-identical, enable it and check the scene and values return; install and delete a pack file and check the list, the status row and that its saved values remain.

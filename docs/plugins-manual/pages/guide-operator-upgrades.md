@@ -175,6 +175,64 @@ The stage holds about its share of the hosts, not exactly that share: a hash spr
 
 Halt, using the example shares above: in stage 1 (about 3 hosts of 300), one counted failure of the new version on a host in that stage halts the rollout under [LIF-307]. Stage 2 does not open, and the hosts that already updated keep the new version. The admin must then decide, by [LIF-308], whether to resume or cancel. How a failure on one host reaches the rollout record, and how many failures count as a halt, are not yet defined (owner to confirm).
 
+#### How a host failure reaches the rollout record, and the halt threshold
+
+This section defines the signal path that [LIF-307] needs. The rules that follow refine [LIF-306], [LIF-307] and [LIF-308]; they add no new requirement id. Wording that has no id yet is marked "proposed, owner to confirm".
+
+**Where the rollout record lives.** The record is a file named `rollout-<rollout id>.json` in the rollout state directory that the administrator names with `rollout_state_dir` in `/etc/ilium/policy.toml` (see [Enterprise deployment](/pages/guide-enterprise-deployment/)). The directory is a path every host of the fleet can read and write, for example a mounted share. The policy file holds the stage shares and the halt threshold; the state directory holds only what changes at run time. Fields of the record:
+
+| Field | Meaning |
+|---|---|
+| `rollout` | The rollout id |
+| `plugin`, `version` | The plugin id and the version being rolled out |
+| `stage` | The current stage number, starting at 1 |
+| `state` | `open`, `halted` or `cancelled` |
+| `failures` | A list of counted failures, one entry per host and failure: `bucket`, `ts` (UTC ISO 8601) and the failure code |
+
+A host with no `rollout_state_dir` cannot take part in a staged rollout. It stays `held` and the policy reports `policy.invalid` at start (proposed, owner to confirm).
+
+**How a host reports a counted failure.** A host in the current stage reports in two steps, both on the host itself:
+
+1. The host writes the audit event of the failure (`failure-disable` or the trap record named in [Audit log](/pages/reference-audit-log/)) for the new version.
+2. The host appends one entry to `failures` of the rollout record. It takes the file lock, re-reads the record, appends and writes the file by replacing it atomically, so two hosts never lose each other's entry.
+
+A failure is counted only when all of these hold: the host is in the current stage (its bucket is below the cutoff of that stage), the plugin version is the version of the rollout, and the failure is one that counts toward the crash-loop guard of HST-400 (a trap, a crash or a missed deadline; not a `deactivate.deadline` at a stop). A held host never reports, because it never ran the new version. A failure of an older version is not counted.
+
+A host that cannot write the record (the directory is unreachable or locked for more than 5 s) logs `rollout.record-unwritable`, keeps the failure in memory, and retries at its next update check. While it has an unwritten failure it MUST NOT widen the rollout (proposed, owner to confirm).
+
+**The halt threshold.** The rollout halts when the record holds 3 counted failures from at least 2 different hosts within 10 minutes, or 3 counted failures from one host (the crash-loop limit of HST-400, which already stops that host). Both numbers, and the 10-minute window, are the defaults and can be set per rollout in the policy as `halt_failures`, `halt_hosts` and `halt_window_seconds`; a value below 1 is refused with `policy.invalid`. Stage 1 of the example in [Stage shares and the placement of a host](#stage-shares-and-the-placement-of-a-host) holds about 3 hosts of 300, so a single crash-looping host in it halts the rollout.
+
+The first host that reads a record meeting the threshold sets `state` to `halted`, logs `rollout.halt` with the plugin id and version ([LIF-307]), and writes the audit event `rollout.halt`. Every other host reads `state` at its next update check, which is at most one check interval later. A halted rollout does not open the next stage, and hosts that already updated keep the new version. `ilium plugin rollout resume <id>` sets `state` to `open` and clears `failures`; `ilium plugin rollout cancel <id>` sets it to `cancelled` and every host stays on its current version ([LIF-308]).
+
+**What the administrator reads on a host.** `ilium plugin list --json` carries a `rollout` object on each plugin that has a pending rollout update, and no `rollout` field on others:
+
+| Field | Value |
+|---|---|
+| `rollout.id` | The rollout id |
+| `rollout.state` | `held`, `applied`, `halted` or `cancelled` |
+| `rollout.stage` | The stage number of this host (the lowest stage whose cutoff includes its bucket) |
+| `rollout.current_stage` | The stage the rollout is at now |
+
+A host is `held` when `rollout.stage` is greater than `rollout.current_stage`. A host that was never offered the update has no `rollout` object, so the administrator tells the two apart by its presence. A halted rollout shows `halted` on held hosts and on hosts that applied the update. The package state stays `installed-enabled` in all cases. The `--inventory` output of [USR-341] keeps its fixed field list and does not carry `rollout`; the fleet count of held hosts is read from the `rollout.held` and `rollout.applied` audit events, or from `rollout.stage` on each machine.
+
+**Audit events.** Two events are added to the catalogue of [Audit log](/pages/reference-audit-log/); `rollout.halt` and the resume and cancel events of [LIF-308] are written beside them.
+
+| Event | When |
+|---|---|
+| `rollout.held` | A host first holds a rollout update; once per host, rollout and version |
+| `rollout.applied` | A host applies a rollout update after its stage opened |
+
+Both carry `plugin_id`, `version`, the rollout id in `target`, the stage number in `reason` and `result` `ok`.
+
+| Situation | What happens | Code or log line |
+|---|---|---|
+| Counted failure while the record is unwritable | Kept in memory, retried, widening blocked | `rollout.record-unwritable` |
+| Threshold reached | State becomes `halted`, one audit event | `rollout.halt` |
+| `resume` or `cancel` on a rollout that is not halted | Refused, nothing changes | `usage.invalid-value` |
+| Threshold value below 1 in the policy | The policy is refused | `policy.invalid` |
+
+Test of the path: with a state directory shared by two hosts in stage 1, fail the new version three times on one host, and assert that `rollout.state` reads `halted` on the other host within one check interval and that stage 2 hosts stay `held`.
+
 ## Operator runbook for failure modes
 
 Each entry gives detection, mitigation and recovery. The runbook is part of the contract: the commands and codes it names MUST exist.

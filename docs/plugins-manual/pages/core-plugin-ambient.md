@@ -628,7 +628,7 @@ What reduce motion changes, by surface, when the setting is on:
 | Plugin that animates | Reads `reduced-motion` from `theme-extras()` and draws one static frame. It stops its own animating timers. | [AUT-502], [UI API](/pages/api-ui/) |
 | Full-view redraws of a plugin that animates | At most one per second. A plugin timer under 1000 ms that only redraws logs `ui.motion-ignored` once per session. | [USR-307] |
 | Toast | No animation. | [notify toast](/pages/capability-notify-toast/) |
-| Animated scene in the background | **Not defined yet.** See Open points below. | None |
+| Animated scene in the background | One still frame; see Decisions for the three open points under reduce motion below. | [USR-307] |
 
 The scene rows of the Animations tab, the live preview row and the animated background are the surfaces this page covers. The colour and look rows keep working with reduce motion on: the setting changes motion, not colour.
 
@@ -638,15 +638,36 @@ This manual sets no limit for the shared look's contrast control. The contrast l
 
 #### Flash rate and photosensitivity
 
-The manual states no flash-rate limit for animated backgrounds: no maximum number of luminance changes per second and no maximum flash area. A scene may run up to 60 frames per second (`frame_rate_cap`, see [scene API](/pages/api-scenes/)), and the manual does not restrict what changes between frames. A user who relies on reduce motion for photosensitive epilepsy therefore has no tested guarantee for scenes. The guarantee exists only for the surfaces in the table above.
+A scene may run up to 60 frames per second (`frame_rate_cap`, see [scene API](/pages/api-scenes/)). The look painter limits what changes between frames for every scene, with or without reduce motion; the limits are in the decisions below.
 
-#### Open points
+#### Decisions for the three open points under reduce motion
 
-These points are not decided in this manual. The owner of this page must decide them before the tests for scenes can be written.
+These decisions close the three points that were open. They apply to every scene, built in or from a plugin, because they are enforced by the look painter in the client kernel and not by the scene.
 
-1. **Scenes under reduce motion.** Choose one: (a) the scene draws one still frame, the same rule as the spinner, or (b) the scene keeps running and the host caps its presentation to one frame per second, the USR-307 rule. Recommendation: (a), because it reuses the rule that the spinner and the agent icon already follow and it is the only option that gives a fixed, testable frame.
-2. **Flash-rate limit.** Choose a maximum rate, for example a number of flashes per second and the largest flashing area, and state how the host measures it. Without a limit there is nothing to test against.
-3. **Preview row.** Decide whether the live `preview` row of the Animations tab follows rule 1, since it draws the same frames as the scene.
+**1. Scenes under reduce motion: one still frame.** When `motion_level` is reduced, the host stops calling `tick` on every scene. Each scene family behaves as follows:
+
+| Scene family | With reduce motion on |
+|---|---|
+| Generative (pipes, stars, night lights, clouds, spectrum) | Paused on the frame it had when the setting changed, or on its first frame if the setting was already on at start. |
+| Video and image sequences | Paused on the current frame, or on frame 0 at start. Playback position is kept, so turning the setting off resumes from there. |
+| Sky and map scenes (Live mode) | One frame drawn from the shared location and the clock at the moment the scene starts; no further clock updates. |
+| Semantic animation | The scene may still be switched by workspace state, and the new scene draws one still frame. A switch is not animated and has no cross-fade. |
+
+The rate cap of option (b) is not used: a still frame is the only result that has a fixed, testable pixel output. The host still repaints the cell grid when the user changes a look control (palette, filter, dithering), because that is a user action and not motion. A plugin scene that sets `frame_rate_cap` above 0 gets no ticks while the setting is on; it is not told to stop, and it must not rely on wall-clock timers to animate (AUT-502, [UI API](/pages/api-ui/)).
+
+**2. Flash-rate limit: the look painter, for every scene.** The painter measures the area-weighted mean relative luminance of the background panel for every presented frame. It enforces:
+
+- At most 3 general flashes per rolling second. A flash is a pair of opposite changes of mean relative luminance, each of at least 0.10, over an area of at least 25 percent of the panel.
+- A total of at most 0.30 absolute change of mean relative luminance per rolling second, summed over all frames of that second.
+- Never a saturated red flash: the same limits apply to the red channel alone, on a 0.20 change.
+
+When a frame would break a limit, the painter blends it toward the previous presented frame until the limit holds, and records `ui.flash-limited` in the client log once per scene start. The scene is not told and keeps its own state. The measurement uses the frame after palette, filter, brightness, contrast and invert are applied, so a look setting cannot raise a scene above the limit. The frame deadline stays the one in [RND-001]: a frame that is blended still counts as presented in time. These limits are always on; reduce motion does not relax them and no setting turns them off.
+
+**3. Preview row: static.** The live `preview` row of the Animations tab follows decision 1. With reduce motion on it draws one still frame of the selected scene, the same frame the background shows, and it redraws only when the user changes the scene or a look control. Its Loop and Live labels stay visible; a note in the row reads "Motion is reduced", so the user knows why it does not move. With reduce motion off it follows decision 2 like the background.
+
+Failure modes: if the painter cannot measure a frame (for example an empty raster), it presents the previous frame and logs `ui.flash-limited` with reason `unmeasurable`. If the setting changes while a frame is being produced, the frame in flight is finished and shown, and the next tick is skipped.
+
+Requirement wording: USR-307 and AUT-502 cover the host and plugin timers; the flash limits in decision 2 and the still-frame rule for scenes in decision 1 have no requirement ID yet and need two new entries in the requirements files. RND-001 is cited only for the frame deadline.
 
 ### See also
 

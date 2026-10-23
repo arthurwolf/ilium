@@ -295,6 +295,68 @@ A custom signature has the class `other`. It gets an identity and an icon, but n
 
 **Polling.** `working_poll_seconds` (default 10) and `idle_poll_seconds` (default 45) in `[detection]` set the adaptive loop. The loop itself stays in the kernel.
 
+### Signature maintenance: versioning, fixtures and the policy when an agent CLI changes its UI
+
+Agent CLIs change their screens without notice, so the signature set is maintained like code, not like data.
+
+**Versioning.** The built-in signatures are part of this core plugin, and core plugins are versioned with the server build ([COR-230]). A server build carries exactly one signature set. At boot the server refuses an installed override of this plugin whose declared host ABI is incompatible, logs `core.abi-mismatch` and runs the bundled copy, so a stale override can never replace the signatures a build was tested with. `ilium plugin list` shows the plugin version, which equals the build's signature-set version.
+
+**Fixtures.** Every built-in signature is backed by captured screen fixtures: real vt100 screen text of the agent mid-turn, idle, awaiting approval and showing a menu, plus a plain shell prompt. The parity suite classifies each fixture and compares the result with the expected activity. No test runs a real `claude` or `codex` binary. A fixture that starts failing after an agent CLI update is a bug report against the signature. The fixture's expected value is never loosened to make the test pass.
+
+**Policy when an agent CLI changes its UI.**
+
+1. Capture the new screen text as a fixture next to the old one.
+2. Update the signature so that both the old and the new screens classify correctly, unless the old version is retired (below).
+3. Ship the change in the next server build. The change is listed under Changed or Fixed in the release notes with the agent CLI name and the version range it affects.
+
+**Added and retired agent CLIs.** A release announces an added agent CLI under Added in the release notes. A retired signature is announced under Removed one release before it goes, and stays in the set for at least that one release (proposed, owner to confirm). A pane that matches a retired signature keeps its identity for that release and shows the note `Agent CLI retired in the next release` in the Agents panel. After removal the pane is shown as a plain shell, unless a plugin or a custom signature matches it.
+
+**Precedence when the same process name matches more than one source.** The kernel uses the first match, in this order:
+
+1. A `[[detection.custom_signatures]]` entry in `config.toml`. It is the user's explicit choice and wins over everything.
+2. A built-in signature of this plugin.
+3. A signature from another plugin's [agent.signatures](/pages/capability-agent-signatures/) contribution. When two plugins match, detectors run T1 first, then by plugin id, and the first signature id wins ([HST-452]).
+
+A custom entry that shadows a built-in signature has class `other`, so the user loses the launch, resume and transcript contract of the built-in entry for that process name. `ilium plugin check` and the Agent Monitoring tab show a warning `signature shadowed` naming both sources. A plugin signature never shadows a built-in one. A plugin `resume` command is accepted only under the rules of [SEC-042], and plugin regular expressions use the linear-time engine of [SEC-046], so a conflicting or hostile signature can only lose the precedence contest or be refused, never stall detection.
+
+**Live application.** Signature changes apply live without a restart ([COR-024], see [Kernel and boot](/pages/reference-kernel-and-boot/)). After a change to `config.toml` or to a plugin's signatures, the loop reclassifies all panes on the next tick. During the reclassification window, which is at most one detection interval plus the 2 second reclassification bound of [COR-219], a pane keeps its previous icon and activity. Then the icon changes to the new result. The user sees no blank state and no flicker through `none`. A signature that fails to parse is skipped, the previous set stays active and diagnostics shows the line (see [Diagnostics](/pages/core-plugin-diagnostics/)).
+
+### Auto-answered prompts: audit line, opt-out and limits
+
+The auto-answer described under [Interstitial prompts](#interstitial-prompts-signatures-states-and-status-line) types into the user's agent session without a user action, so it is visible, bounded and switchable.
+
+**Switch.** `auto_answer_interstitial_prompts` in the `[detection]` table is a boolean, default `true`. The Agent Monitoring tab shows the same switch and saves it at once. The change is live ([COR-024]). When it is `false`, no keystroke is sent and the prompt stays on the screen for the user.
+
+**Prompts answered.** The list is closed:
+
+| Agent | Prompt matched | Answer sent |
+|---|---|---|
+| Claude Code | The "resume full session" dialog | One keystroke that selects the full-session option, followed by Enter |
+
+No other prompt is answered. Approval questions (`awaiting-approval`) are never answered by this feature. A new entry in the list needs a signature change under the maintenance policy above.
+
+**Audit line.** Each auto-answer writes one line to the plugin log of `ilium.core.agent-detect`, on the model of [PAN-032], with these fields: the node id of the pane, the signature id, the prompt id, the answer text and the time (`YYYY-MM-DD HH:mm:ss`). Read it with `ilium plugin logs ilium.core.agent-detect`.
+
+**Limits.** The plugin answers once per agent process. It also answers at most 3 times per pane per minute (proposed, owner to confirm). A fourth match in the minute is not answered and logs `auto-answer.rate-limited`.
+
+**Changed prompt text.** The answer is sent only when the matched text equals the known prompt text exactly. When the text has changed, nothing is sent, the line `auto-answer.prompt-changed` is written with the node id, signature id and the first 80 characters of the unknown dialog's title row, and diagnostics shows a warning. Because detector calls run on the plugin executor ([HST-450]), a slow or failed call also sends nothing.
+
+### Screen text handed to detectors: privacy and retention rules
+
+A `detector` export receives the screen of every unidentified or identified pane: the `rows` list of the `detector-screen` record, plus `title` and `cursor-row` ([agent.signatures](/pages/capability-agent-signatures/#the-detector-export)). A screen can show a token or a typed password, as [User privacy](/pages/user-privacy/) says for search and recap, and detectors see it more often than those features do.
+
+**Rules for the plugin.**
+
+- A detector MUST NOT write screen text to storage, logs or settings, and MUST NOT send it through any network, message or topic capability. `classify` is pure and has no file or network access, and the sandbox enforces this for a detector.
+- A detector MUST NOT put screen text in the `objective` or `goal` strings beyond the text of the agent's own objective line.
+- The text is valid only for the one call. The host does not keep a copy for the plugin between calls.
+
+**What the host passes.** Only the rows needed for classification: the visible rows of the pane (the `columns` by `rows` grid), never scrollback, and only for panes with a changed screen `revision`. Rows of a pane the plugin's grant does not cover are not sent.
+
+**Tier and grant.** Receiving screen text needs the `agent.signatures` grant (class normal, tier S, server side) and a `detector` entry in `server.exports`. A package that lists `detector` without the grant fails to load with an install error.
+
+**What the user sees.** `ilium plugin permissions <id>` lists `agent.signatures` for the plugin, and the review dialog at install and update states `Reads the screen text of your panes`. The user can refuse the grant. Without it the package installs without the detector, or the install is cancelled, and the pane falls back to the built-in signatures. Revoking the grant takes effect live and the next tick calls no detector of that plugin. For this core plugin, the grant list equals its manifest and cannot be extended ([COR-221]).
+
 ### Kernel tabs this plugin owns
 
 This plugin is the single owner of the following built-in Settings tabs. It holds `settings.write-kernel:<tab>` for each one (T1 only, one holder per tab, see [kernel settings](/pages/api-kernel-settings-and-keymap/#writing-a-kernel-tab)). The values stay in the same `config.toml` tables as before, so no user setting moves. [COR-030] [COR-033]

@@ -755,3 +755,31 @@ Risk marks of this plugin's extension points follow the corrected table in [Exte
 ## Production additions: T6-core-plugins
 
 - [COR-218] The PTY and vt100 state MUST be owned by the kernel; disabling or crashing `ilium.core.terminal` MUST NOT kill, resize or detach any PTY, and input typed by the user MUST still reach the focused pane. Test: disable the terminal plugin, and separately crash it in a test, then assert that each PTY keeps running at its size, and type into the focused pane and assert that the input arrives.
+
+### Emulation contract: what the kernel vt100 supports and what the plugin sees
+
+The kernel owns the PTY and the vt100 state ([COR-218], [COR-010]). The Terminal plugin and any third-party reader see the emulator only through the [terminal reads](/pages/primitives-terminal-reads/) (`read-screen`, `read-cells`, `history-text`). The table lists what that emulation does.
+
+| Feature | Kernel behaviour | What the plugin sees |
+| --- | --- | --- |
+| Colour | Indexed (256) and 24-bit `rgb` colours are stored per cell. The client expects at least 256 colours from the outer terminal; with fewer it still starts and maps each colour to the nearest one offered ([HST-390]). | Cell colour as `default`, `indexed` or `rgb` in `read-cells`, never the mapped value. |
+| OSC 8 hyperlinks | Parsed and kept as the cell's link target. | The target is the basis of the `open-link` point: a click on such a cell offers `link_kind` and `text` to the hook. A plugin cannot change how OSC 8 is parsed. |
+| OSC 52 clipboard | Never acted on by the emulator or the plugin. It is handled only by the clipboard capability ([api-clipboard](/pages/api-clipboard/)). | Nothing. A plugin without `clipboard.write` cannot cause a clipboard write through this sequence. |
+| OSC 0 and 2 titles | Parsed and handed to the titles plugin (see Pane title from the terminal). | The title string, not the raw sequence. |
+| Bracketed paste | Tracked per pane (mode 2004). Paste is wrapped only when the program turned the mode on. | `before-send-input` sees the text with `source` set, before wrapping. |
+| Mouse reporting | Modes 1000, 1002, 1003 and the 1006 encoding are tracked per pane. When on, the program gets mouse events; otherwise the client keeps the mouse for selection. | The mode is not exposed as an event; a plugin cannot inject mouse reports. |
+| Alternate screen | Modes 1047 and 1049 switch screens. The alternate screen has no scrollback. | `read-screen` returns the active screen; `history-text` returns main-screen scrollback only. |
+
+Not supported: sixel and kitty graphics, and OSC 133 shell-integration marks. When such a sequence arrives the emulator drops it, draws nothing, keeps the surrounding text intact and writes one debug line to the server log per pane per minute (the sequence kind only, never the payload). The program is not told the feature is missing beyond the absence of a reply to its capability query. Prompt marks therefore do not exist, and a plugin must not rely on them to find command boundaries.
+
+A replacement terminal plugin may change none of the emulation: it is kernel behaviour and the replacement keeps working on the same cells ([COR-218]). It may layer on top of it: link actions and detectors, input filters through `before-send-input`, highlights and the pane view in its own panels.
+
+### In-pane history search: owner, keys and fallback
+
+Two searches exist. Workspace search (F-009, owned by the search plugin) searches across panes. Searching the scrollback of one pane is owned by the Terminal plugin and is a different feature ([COR-011]).
+
+- **Open and navigate.** The Terminal plugin opens the in-pane search bar for the focused terminal pane through its command (bound in the keymap like every plugin command; the key is listed in Keys and help, not fixed here). `Enter` goes to the next match, `Shift+Enter` to the previous one, `Esc` closes the bar and returns the view to the live tail.
+- **Source.** The search runs `search-history` on the pane through the `terminal.history` grant ([history capability](/pages/capability-terminal-history/), [terminal reads](/pages/primitives-terminal-reads/)). The expression is the Rust `regex` dialect, at most 512 bytes; invalid input shows the message of `invalid-argument` in the bar and keeps the last good matches.
+- **Limits.** The searched text is cut to the newest lines at a line boundary when it exceeds 4 MiB, so older matches are not found. At most 10,000 matches are kept; the bar shows `10000+` when there are more. A search that times out shows `timed-out` and can be repeated.
+- **Plugin off.** When the Terminal plugin is disabled, crashed or without the grant, the user keeps the kernel scrolling and scrollback only. There is no in-pane search bar. Workspace search of the search plugin still finds text in the pane. Running programs and their input are unaffected ([COR-022], [COR-213]).
+- **Fallback table.** The Terminal row of the fallback table in [Kernel and boot](/pages/reference-kernel-and-boot/) says only that history transfer is lost. This behaviour differs from plain scrolling, so that row needs the words "and no in-pane history search".

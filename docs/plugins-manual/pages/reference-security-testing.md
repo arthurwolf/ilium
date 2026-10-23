@@ -139,3 +139,65 @@ Contract: `ilium:plugin@0.1.0`.
 **[SEC-705]** The project MUST fuzz the manifest parser, the package archive reader, the signature/metadata parsers and the dispatcher channel decoder in continuous fuzzing with a corpus kept in the repository, and a crash found MUST block the next release until fixed or triaged as not exploitable in writing.
 
 **[SEC-733]** The hostile-plugin suite MUST contain at least one fixture for each of: fork bomb, memory bomb, fd exhaustion, infinite loop, symlink swap during open (TOCTOU), path traversal, environment leak, network probe, ptrace of sibling and abuse of a revoked grant, and each fixture MUST be run on every release candidate with a pass/fail line in JSONL.
+
+## Independent security assessment
+
+First-party fuzzing ([SEC-340], [SEC-705]) and the hostile-plugin suite ([SEC-345], [SEC-733]) are written by the people who wrote the code, so they share its blind spots. A sandbox that confines unsigned third-party code is a security product, and operators who enable T3 plugins ([Enterprise deployment](/pages/guide-enterprise-deployment/)) will ask for evidence from someone else. This section defines that evidence. The cadence, time boxes and ownership below are proposed, owner to confirm. No requirement id exists for them yet; they are written as rules of this page and listed in the notes of the change that added them.
+
+An **assessor** is a person or firm outside the project team, with no commit rights to the plugin host, hired for this work. A **scope document** is the written agreement of what the assessor may test.
+
+### When an assessment is required
+
+An assessment of the whole in-scope surface MUST be completed and retested before each major host release (a change of the first version number). A focused assessment of the changed component MUST also be completed before any release that changes one of these:
+
+- the seccomp allowlist of the sandbox helper (the denied calls of [SEC-067]);
+- the namespace, cgroup or mount setup of the helper ([Sandbox reference](/pages/reference-sandbox/));
+- the signature verifier or the metadata parsers it uses ([Trust and supply chain](/pages/reference-trust-and-supply-chain/));
+- the registry client, its pinning and rollback checks;
+- the grant review path (review dialog, `grants.json` handling, consent storage).
+
+If none of the above changed and the release is not major, no new assessment is needed, and the release notes name the latest assessment that still applies. A release that needs an assessment and has no completed, retested one MUST NOT be tagged; the release checklist ([Release rollout](/pages/reference-release-rollout/)) fails with `release.assessment-missing`.
+
+### Scope document
+
+The scope document is written before work starts and MUST contain:
+
+| Part | Content |
+|---|---|
+| In scope | The four components above, as named release commits; the hostile-plugin suite ([SEC-345]) and fixtures of `tests/security-fixtures/` ([SEC-348]) as starting material |
+| Out of scope | Third-party plugins, the operating system kernel, social engineering of staff, denial of service against the project's own servers |
+| Rules | Test only on machines the assessor controls; no access to real signing keys; a test signing key and test registry are provided |
+| Time boxes | Full assessment: 20 working days of effort. Focused assessment: 8 working days. Retest: 3 working days |
+| Contact | The security contact of `SECURITY.md`; critical findings are sent at once, not at the end |
+| Confidentiality | Findings stay private until the release carrying the fixes is published |
+
+### Rating findings
+
+Each finding is rated with the severities of [HST-520]: a flaw in the host, the Wasmtime configuration or the sandbox helper is at least High, and a sandbox escape is Critical. A flaw in the verifier, registry client or grant review path that lets unsigned or unreviewed code run, or grants a permission the user did not approve, is rated High or Critical on the same scale. Lower findings are rated Medium, Low or Informational by the assessor, and the project may only raise a rating, not lower it, without a written reason attached to the finding.
+
+### From finding to advisory
+
+1. Every High or Critical finding enters the advisory process of [Reporting a vulnerability in the host or sandbox](/pages/reference-security-response/) on the day it is received, with the clocks of [HST-521] (fix within 30 days for Critical and 60 days for High).
+2. A CVE id is requested through a CNA before the advisory is published ([SEC-702]); the advisory is exported as OSV JSON ([SEC-700]).
+3. Each fixed High or Critical finding adds a regression fixture named with its advisory id ([SEC-704]).
+4. An actively exploited finding follows [SEC-729].
+5. Medium and lower findings are tracked as ordinary issues and MUST be fixed or accepted in writing (reason, owner, date) before the release.
+
+### Retest rule
+
+After the fixes, the assessor retests every High and Critical finding and a sample of the others. A finding is closed only when the assessor states it is fixed. The release is blocked while a Critical or High finding is open, or when it is closed only by the project's own judgment. If the assessor cannot retest within 3 working days of a request, the release waits; the project does not substitute its own retest.
+
+### Published report
+
+A redacted report is published with the release notes: scope, assessor name, dates, finding counts per severity, each finding's title, rating, status and advisory id. Redaction removes exploit detail for any finding whose advisory is not yet public, and nothing else; the project MUST NOT remove a finding from the published list. Operators can read it without a login.
+
+### Failure modes
+
+| Situation | Result |
+|---|---|
+| No assessor available before a required release | Release not tagged; the owner may delay or ship without the affected feature, never with a statement that an assessment happened |
+| Assessor finds a Critical late | Release blocked; clocks of [HST-521] start on receipt |
+| Finding disputed by the project | Both views recorded in the report; the assessor's rating stands unless the assessor changes it |
+| Report cannot be redacted without hiding a finding | Published after the fix release, with a note giving the reason |
+
+Cadence, firm selection and budget are proposed, owner to confirm.

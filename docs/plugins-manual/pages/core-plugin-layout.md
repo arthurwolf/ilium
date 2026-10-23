@@ -476,6 +476,24 @@ The main manifest grants `extensions.provide:ilium.core.layout/layout-presets` a
 - [Layout and containers](/pages/widgets-layout-and-containers/), [Data display](/pages/widgets-data-display/), [UI model](/pages/ui-model/), [Retained mode](/pages/retained-mode/), [ui.panels](/pages/capability-ui-panels/)
 - [Pointer](/pages/api-pointer/), [Events](/pages/api-events/), [Commands](/pages/api-commands/), [Messages and topics](/pages/api-messages-and-topics/)
 
+### Stored data and what the user keeps while Layout is off
+
+**What Layout owns.** The replacement matrix lists the stored data of Layout as `none named`. The matrix open decision 2 ([Core plugins](/pages/core-plugins/)) assigns it one stored section, the layout section with section id `ilium.core.layout`. It holds the split ratios and focus order of each group, the saved presets (the entries the user saved with `layout.preset`, each a name plus a template in the grammar of the `layout-presets` point) and the last preset applied to each group, so the chooser can mark it. The contributed templates of other plugins are not stored here: they are re-read from their plugins on every start. Where the baseline stores nothing, the Contract section says `none` and the parity suite asserts that nothing is written ([COR-203]).
+
+**Where it lives.** The section is part of the project session snapshot, `<project>/.ilium/sessions/<session_name>.json`, next to the tree and bookmarks sections of `ilium.core.tree`. User presets are therefore per project and per session; they are not in the user config file `~/.config/ilium/config.toml`. Deleting the session file removes them.
+
+**Layout cannot be disabled.** Layout is essential ([Core plugins](/pages/core-plugins/#which-core-plugins-can-be-disabled)): the Plugins screen shows a lock instead of a switch, no disable command exists, and safe mode keeps it running. Three states can still take the plugin away, and the user keeps different things in each:
+
+| State | Existing splits and sizes | Saved presets and last preset per group | New splits, presets, resizing |
+| --- | --- | --- | --- |
+| Failing (third and later failure) | Kept: the kernel owns the solved layout and its rectangles. | Kept in the snapshot, not readable until the plugin is back. | The plugin restarts after 5 s and the essential-failure banner shows ([LIF-042]). Until then the kernel keys and the mouse still resize and split with its built-in solver. |
+| Replaced by another plugin that keeps the surface | Kept. | Kept if the replacement reads section `ilium.core.layout`; otherwise left untouched, never deleted ([COR-022]). | The replacement decides. |
+| Replaced by a plugin that omits the surface | Kept. | Left untouched on disk and not offered. | Install is refused with `manifest.replaces-surface-incomplete`. |
+
+In every state the data is not deleted ([COR-022]). A user who finds the presets missing has lost the plugin that lists them, not the file.
+
+**Limits a replacement must respect.** The kernel checks every layout a Layout plugin proposes ([COR-217]): a pane narrower than 4 cells or shorter than 2 rows, or a node that is missing or duplicated, is rejected with `layout.invalid` and the previous layout stays. The width limit is marked proposed and awaits the owner. A preset that cannot fit the current screen is therefore refused at apply time, not stored as broken; the user sees the error toast and the old arrangement.
+
 ### See also
 
 - [Core replacement matrix](/pages/reference-core-replacement-matrix/) for the surface, stored data, CLI names and install codes that a replacement of this plugin must keep.

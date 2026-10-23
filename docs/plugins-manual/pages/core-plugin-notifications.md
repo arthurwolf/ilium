@@ -571,6 +571,44 @@ definePlugin({
 
 A handler that is late, traps or returns a reply the mode does not allow counts as `pass`. See [Extension points](/pages/api-extension-points/#hooks).
 
+### Notice log: what the user can read back after a missed notice
+
+A toast, a desktop notice and a sound are momentary. The attention mark survives, but it says only that a node needs you, not what was said. The plugin therefore keeps a durable notice log in the server, so a notice raised while no client was attached, or while you were away, can be read hours later. [CAP-885]
+
+- **What is recorded.** One entry per notice the plugin handles, whether it came from the plugin's own agent-event handling or from another plugin's `notify` submission. An entry holds the time (`YYYY-MM-DD HH:mm:ss`, local), the source plugin id (`ilium.core.notifications` for the plugin's own alerts), the pane id and the pane title when the notice names a pane, the notice title, the event kind, the urgency and the outcome.
+- **Outcome values.** `shown` (at least one channel delivered), `suppressed` (a user switch, the `before-notify` veto or quiet state stopped every channel; the entry names which one), and `deduped` (the dedup key or the merge window folded it into an earlier entry; the entry names that entry). A `refused` or `failed` sound or desktop channel is recorded per channel on the entry and, as [CAP-885] requires, never removes the other channels or the entry itself. The in-app text is always part of the entry.
+- **Notices raised with no client attached.** The entry is written when the server handles the notice, not when a client draws it. The toast of such a notice is still discarded by the rule in [notify.toast](/pages/capability-notify-toast/) (a queued toast older than its duration is never shown), but its entry stays in the log and its attention mark stays on the node.
+- **Size cap and retention.** The log keeps the newest 1,000 entries and drops anything older than 30 days, whichever bound is reached first. A body is stored cut at 200 characters, the toast limit. When the oldest entries are dropped the log records one `log-trimmed` line with the count, so a gap is visible rather than silent. Rotation is by the server and needs no action from you.
+- **Where it lives.** In the plugin's own server storage (see [Storage](/pages/api-storage/)), so it follows the plugin's quota and survives a server restart as described in [persistence and restart](/pages/reference-persistence-and-restart/). Disabling the plugin keeps the stored entries read-only. Uninstalling it with its data removes them.
+- **Where you read it.** The Notifications panel (chrome command `notifications.open-log`, bound by default to nothing so it never collides with a user key) lists entries newest first with the columns time, source, pane, title and outcome, filters by outcome and source, and has a Clear action that asks for confirmation. From a shell, `ilium notices` prints the same entries as lines, `ilium notices --json` prints one JSON object per entry, and `--since <YYYY-MM-DD HH:mm:ss>` and `--outcome <value>` narrow the output. Opening an entry for a live pane focuses that pane and acknowledges its attention mark.
+- **Who may read it.** The user, through the panel and the command. A plugin cannot read the log: it holds other plugins' titles and pane names, so no capability exposes it. A plugin that needs its own history keeps it in its own storage.
+- **Failure modes.** If the log cannot be written (storage full or quota reached), the notice is still delivered, the entry is dropped, and the plugin raises one health warning `notice-log-unwritable` instead of one per notice. If the stored log is unreadable at start, it is moved aside as `notice-log.corrupt`, a new empty log starts, and the panel shows "The notice log was unreadable and has been reset." Errors never block a notice.
+
+### User switches and plugin-submitted notices: one rule
+
+The user's switches win over every plugin. A notice or sound that a third-party plugin submits through `notify` or `play-sound` is treated exactly like the plugin's own, and no plugin can bypass a switch. [CAP-885]
+
+| Switch | Effect on a plugin's `notify` | Effect on a plugin's `play-sound` |
+|---|---|---|
+| `[notifications] enabled = false` | Desktop channel off. The submission returns `ok` with `suppressed(user-disabled)` and the in-app text still shows | None |
+| A per-event switch off | Desktop channel off for that event kind only, same result | None |
+| `[sound] source = muted` | None | Nothing plays. Returns `ok` with `suppressed(muted)` |
+
+Order of evaluation, for every submission:
+
+1. **Permission and argument checks** (grant, rate limit, field limits). These return `refused(...)` as documented in [notifications and sounds](/pages/api-notifications/).
+2. **`before-notify` hook.** It runs first, so a plugin sees the notice as submitted and may veto it. A veto records `suppressed(vetoed)` with the vetoing plugin id.
+3. **User switches.** Applied last, so the switch is final: a handler cannot re-enable a channel the user turned off, and a hook that passes does not override a switch.
+4. **Delivery** per channel, then the log entry.
+
+Details that follow from the rule:
+
+- The in-app text is always delivered, because the master switch governs desktop notices, not the window you are already looking at ([CAP-885]). A user who wants no toast removes the grant of `notify.toast` for that plugin in the permissions view.
+- A suppressed submission is not an error and not a `refused`. It returns `ok` with a `suppressed` reason, so a plugin that retries on failure does not loop. The plugin may read the reason but cannot learn the switch values.
+- A suppressed notice still gets a log entry and the attention mark, so the user can find it later.
+- Switches are read at submission time. Turning a switch on does not replay notices suppressed earlier; they stay readable in the notice log.
+- This replaces the earlier statement in [notifications and sounds](/pages/api-notifications/) that the manual does not say whether the switches apply to plugin notices. They apply.
+
 ### Extension points this plugin owns
 
 The table gives the values that [EXT-052] requires for each point this plugin owns. The values come from the defaults in [Extension points](/pages/api-extension-points/) and are marked (default). Both points are server: the manifest grants `extensions.provide` for each on the server side, and the contributor example grants `extensions.contribute` on the server side, where its handler runs.

@@ -612,6 +612,100 @@ A plugin test that passes or fails between runs with the same code is a defect, 
 - **[DEV-961]** A conformance case of the [Conformance suite](/pages/reference-conformance-suite/) MUST NOT be quarantined. A `fail` verdict of a conformance case MUST keep the exit code 3 of [DEV-602].
 - **[DEV-963]** A test that fails on one attempt and passes on a later attempt MUST be listed as flaky in the summary of the run, with the number of attempts. A retry MUST NOT turn such a test into a plain pass.
 
+## Golden renders across host and harness releases
+
+A golden file ([Snapshot and golden files](#snapshot-and-golden-files)) is the only automated check of how a plugin looks. Its bytes depend on the renderer of the harness, which is the client renderer of [DEV-441]. This section says which releases may change those bytes and how an author reacts.
+
+- **[DEV-500]** A golden file taken from a `render` MUST start with the header line `# ilium-golden render=<n> contract=<version>`. `<n>` is the integer harness render version of the harness that wrote it, and `<version>` is the host contract version that was rendered with. The header is not part of the compared text.
+- **[DEV-888]** Two runs with the same harness version, host contract version and plugin MUST give the same rendered bytes. The harness render version is a separate counter from the harness version of the test report and is printed by `ilium plugin test --version`.
+- **[DEV-445]** Only a release that changes the bytes of some `render` MAY raise the harness render version. Such a change is widget drawing, the layout algorithm, box characters or the wide-character rules of [DEV-441]. A host patch release MUST NOT change rendered bytes. A host minor or major release MAY, and then the release notes MUST list under "Render changes" each affected widget and the new render version.
+- **[DEV-501]** When the header version differs from the running harness, `ilium plugin test` MUST fail the golden check with `golden.renderer-changed`, naming both versions and the release notes entry, and MUST NOT print the diff as the primary failure. The diff is printed after it, so the author can see whether the change touches the plugin.
+- **[DEV-503]** The golden check MUST NOT be repaired in CI. The author procedure is: read the release notes and the diff; confirm every changed line is expected; run `ilium plugin test --update` on a developer machine (this sets `ILIUM_PLUGIN_UPDATE_GOLDEN=1`, [DEV-501]); review the changed golden files in version control; commit them. Running the update with `CI` set still fails with `harness.golden-update-in-ci`.
+- **[DEV-933]** `ilium plugin test --host-contract <version>` MUST render with the renderer of that contract version. A plugin that supports several minors MAY keep one golden directory per minor, for example `tests/golden/0.1/` and `tests/golden/0.2/`, and select it from the test with the `--host-contract` value that the test reads from `host.contract_version()` (TypeScript `host.contractVersion()`). A golden whose header `contract` differs from the contract being rendered fails with `golden.renderer-changed`.
+- **[DEV-502]** A golden file with no header, or with a header the harness cannot parse, MUST be treated as a missing golden file and fail with `harness.golden-missing`; update mode rewrites it with a header.
+
+A host minor release that changes rendering therefore fails the golden check of every affected plugin with one stable code, not an unexplained diff, and the fix is a reviewed update, never a CI step.
+
+## Fakes for every host import
+
+Every import group of the host contract has a fake. Setup calls are made on the host before activation or at any time during a test. The accessor `host.<service>().calls()` returns the recorded calls in order, each with its arguments and the fake instant.
+
+| Import group | Setup call | Recorded-call accessor | Default when nothing is registered |
+|---|---|---|---|
+| Clipboard | `host.clipboard().returns(text)`, `.fails(code)` | `host.clipboard().calls()` | Write is recorded and succeeds. Read returns `harness.unexpected-call`. |
+| Toast | `host.toast().fails(code)` | `host.toast().calls()` | Recorded and succeeds. |
+| Desktop notifications | `host.notifications().fails(code)` | `host.notifications().calls()` | Recorded and succeeds. |
+| Sound | `host.sound().fails(code)` | `host.sound().calls()` | Recorded and succeeds. |
+| Open external | `host.open_external().fails(code)` | `host.open_external().calls()` | Recorded and succeeds. No program or browser is started. |
+| Secrets | `host.secrets().returns(name, value)`, `.fails(code)` | `host.secrets().calls()` | Store is recorded and succeeds. Read of an unset name returns `harness.unexpected-call`. Values are never printed in failure output. |
+| Topics (publish, subscribe) | `host.topics().expect_subscribe(topic)`, `host.topics().emit(topic, payload)` | `host.topics().calls()` | Publish is recorded and succeeds with zero subscribers. Subscribe is recorded and succeeds. |
+| Workspace | `host.workspace().returns(snapshot)` | `host.workspace().calls()` | Read returns `harness.unexpected-call`. |
+| Keymap | `host.keymap().returns(bindings)` | `host.keymap().calls()` | Registering is recorded and succeeds. Reading returns `harness.unexpected-call`. |
+| Location and geocode | `host.location().returns(fix)`, `host.geocode().returns(query, result)` | `host.location().calls()`, `host.geocode().calls()` | Returns `harness.unexpected-call`. No network is used. |
+| Inference | `host.inference().returns(reply)`, `.fails(code)` | `host.inference().calls()` | Returns `harness.unexpected-call`. |
+| GPU kernels | `host.gpu().returns(kernel, bytes)`, `.fails(code)` | `host.gpu().calls()` | Returns `harness.unexpected-call`. |
+| Media and audio | `host.media().returns(handle, bytes)` | `host.media().calls()` | Open is recorded and succeeds with an empty stream. Decode returns `harness.unexpected-call`. |
+| Help | `host.help().fails(code)` | `host.help().calls()` | Registering a topic is recorded and succeeds. |
+| Terminal write and read | `host.terminal().returns(node_id, screen_text)`, `.fails(code)` | `host.terminal().calls()` | Write is recorded and succeeds. Read returns `harness.unexpected-call`. |
+
+Existing fakes (clock, file system, process, network, storage and settings, tree, jobs and CLI) are defined above and keep their rules ([DEV-460], [DEV-462]).
+
+- **[DEV-889]** A call to a fake whose capability the test did not grant MUST fail with `capability.denied` before any fake behaviour runs, as for every other import.
+- **[DEV-563]** `calls()` MUST return records with the same field names in Rust and camelCase in TypeScript.
+- **[DEV-400]** Every fake of this table MUST exist in native and component mode with the same API.
+- **[DEV-460]** A service that returns data and has no registered answer MUST return `Err(internal)` with a message that starts with `harness.unexpected-call:`, and the test MUST fail at teardown with `harness.unexpected-call` unless `allow_unexpected()` was set.
+- **[DEV-462]** A host import for which the table has no row MUST fail the test with `harness.import-unfaked`, naming the import. It MUST NOT succeed silently. A new contract version that adds an import without a fake therefore breaks the test visibly until the harness is updated.
+
+## Time zone, locale and daylight saving in a test
+
+The default is UTC and locale `C` ([DEV-451], [DEV-414]).
+
+| Rust | TypeScript | Effect |
+|---|---|---|
+| `.time_zone("Europe/Zurich")` | `.timeZone("Europe/Zurich")` | Sets the IANA zone returned by the plugin's local-time imports. |
+| `.locale("de-CH")` | `.locale("de-CH")` | Sets the BCP 47 locale returned by the locale imports. |
+
+- **[DEV-451]** Without these builders the zone MUST be UTC and the locale `C`. An unknown zone MUST fail with `harness.time-zone-unknown`, an invalid locale tag with `harness.locale-invalid`. Both builders are closed after activation like every builder ([harness.setup-closed]).
+- **[DEV-414]** The fake clock stays a UTC instant count. The zone only changes how that instant converts to local fields. `advance_clock(ms)` always advances exactly `ms` real milliseconds, so across a spring-forward boundary the local wall clock jumps by 1 hour more than `ms` shows, and across a fall-back boundary the same local time occurs twice. A local day can therefore last 23, 24 or 25 hours.
+- **[DEV-925]** The conformance suite ignores these builders and always runs with TZ `UTC` and locale `C`. They are for the plugin's own tests only.
+
+Worked fixture (Europe/Zurich, spring-forward on 2030-03-31 at 02:00 local):
+
+```rust
+// 2030-03-31 00:30:00 UTC is 01:30 in Zurich (UTC+1). At 01:00 UTC clocks jump to 03:00 (UTC+2).
+let mut host = FakeHost::builder().time_zone("Europe/Zurich").locale("de-CH").build();
+host.set_clock(1901147400_000); // 2030-03-31 00:30:00 UTC
+host.activate();
+host.advance_clock(3_600_000);     // one real hour: 01:30 UTC is 03:30 local
+assert_eq!(host.render(ViewTarget::Panel("clock".into()), 40, 3).text().trim(), "03:30");
+```
+
+
+The test asserts that a reminder set for 02:30 local fires at 03:30 local, and that a reminder set for a time in the repeated hour of the fall-back day fires once.
+
+## Theme and terminal capabilities of a render
+
+- **[DEV-441]** `render` uses the theme named `ilium-dark` and colour depth `true-color` by default. The four user colour overrides MUST NOT apply unless the test sets them with `.colors(overrides)`; the default render ignores any real configuration of the machine.
+- **[DEV-445]** `.theme(name)` (TypeScript `.theme(name)`) selects a built-in theme by name, for example `ilium-dark` or `ilium-light`. An unknown name MUST fail with `harness.theme-unknown`. `.color_depth(ColorDepth::TrueColor | Color256 | Color16)` (TypeScript `.colorDepth('true-color' | '256' | '16')`) selects the depth, and colours are reduced to it as the client does.
+- **[DEV-563]** `Cell.foreground` and `Cell.background` are resolved colour values at the selected depth (a hex colour at true-color, a palette index at 256 and 16), never theme token names. A cell drawn with the default colour has the value `default`.
+- **[DEV-500]** A golden file taken from a render MUST also record `theme=<name> depth=<depth>` in its header. Comparing under another theme or depth MUST fail with `golden.theme-mismatch`, not with a diff.
+- A plugin that must look right in both themes keeps one golden file per theme and renders with `.theme("ilium-dark")` and `.theme("ilium-light")` in two tests.
+
+## Testing against real core plugins
+
+`install_core(name)` installs a stub ([DEV-483]). A test can ask for the real component instead.
+
+| Rust | TypeScript | Effect |
+|---|---|---|
+| `.install_core(id).real()` | `.installCore(id, { real: true })` | Loads the actual core plugin component shipped with the installed host. |
+
+- **[DEV-483]** `real()` MUST load the component from the installed host's bundled core plugin set, with the same grants and limits the core plugin has in a session. It works in component mode only. In native mode it MUST fail with `harness.core-needs-component-mode`. If the installed host does not ship that component, it MUST fail with `harness.core-component-missing`.
+- **[DEV-489]** Every core plugin of the Core stubs table supports `real()` when the host ships it. The real component needs from the session: the settings of its own settings page (`session.settings(id).set(...)`, default values otherwise) and a storage snapshot (`session.storage(id).load(file)`, empty otherwise). Hook order, reply merging and service payloads are those of the real component. The stub replies of [DEV-489] do not apply.
+- **[DEV-480]** The behaviour of a real core plugin in a test MUST equal the behaviour of the host of the same release. A test written against `real()` can therefore change result when the host is updated, and the author should run it under each supported `--host-contract` ([DEV-933]).
+- **[DEV-482]** Real and stub core plugins MAY be mixed in one session. Extension points are run by the session as before.
+
+Error codes added by these sections: `golden.renderer-changed`, `golden.theme-mismatch`, `harness.import-unfaked`, `harness.time-zone-unknown`, `harness.locale-invalid`, `harness.theme-unknown`, `harness.core-component-missing`, `harness.core-needs-component-mode`.
+
 ## See also
 
 - [Testing plugins](/pages/testing/)

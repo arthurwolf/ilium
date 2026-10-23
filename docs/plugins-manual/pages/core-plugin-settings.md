@@ -78,7 +78,7 @@ The Plugins tab, `ilium plugin list`, the recovery page and every user page use 
 | On | Enabled and running | `installed-enabled`, `healthy` | Turn off, update, remove |
 | On, slow | Enabled and running, but over a soft limit | `installed-enabled`, `degraded` | Turn off, read the log |
 | Restarting | Stopped by an error, a restart is scheduled | `installed-enabled`, `restarting` | Turn off |
-| Failed | Stopped after 3 failures in 10 minutes | `installed-enabled` with a side `stopped-by-failure`, `failed` | Turn on (clears the count), reset failures, remove |
+| Failed | Stopped after 3 failures within 60 seconds ([COR-200]) | `installed-enabled` with a side `stopped-by-failure`, `failed` | Turn on (clears the count), reset failures, remove |
 | Off | Turned off by the user, the CLI or safe mode | `installed-disabled-by-user`, `disabled` | Turn on |
 | Waiting for <owner> | Needs a plugin that is off or missing | `dormant` | Turn on or install the owner |
 | Blocked by policy | An administrator rule forbids it | `disabled-by-policy`, `disabled` | Nothing; ask the administrator |
@@ -627,3 +627,50 @@ Project-scope values are ignored until the project is trusted ([SEC-311]). See [
 ## Production additions: T6-core-plugins
 
 - [COR-215] While ilium.core.settings is down, the kernel MUST serve the last committed settings values read-only to all plugins, reject writes with settings.unavailable, and open the recovery page on the key bound to recovery.
+
+### Guided setup: who may add a step, ordering, failure and re-run
+
+The guided setup is the first-run flow that `ilium --onboarding` starts. Its steps come from the manifest field `onboarding_steps` and from entries collected at the `ilium.core.settings/onboarding-steps` point ([Extension points this plugin owns](#extension-points-this-plugin-owns)). The rules below are the whole contract. [COR-011]
+
+**Who may contribute a step.**
+
+- A core plugin (tier T0) may contribute a step on a fresh install.
+- A plugin of tier T2 or T3 may contribute a step only after the user has reviewed that plugin. A fresh install has reviewed none, so on a fresh install no T2 or T3 step is shown. The flow ends with one line that names how many steps were held back, and the steps appear in the next run of the guided setup after the user reviews and enables the plugin.
+- The point is a `standard` collect point. A plugin that does not hold `extensions.provide:ilium.core.settings/onboarding-steps` has its entries refused with the usual capability error, and the flow does not mention it.
+
+**Order.** Steps sort by `order`, ascending. Equal `order` values are broken by plugin id (byte order), then by the position of the step in that plugin's manifest. The sort is stable, so the same installation always shows the same sequence.
+
+**Step count cap.** The point accepts 64 entries. Above the cap the host keeps the first 64 in the order above, drops the rest, and shows one line at the end of the flow: `N more steps were not shown`.
+
+**A step whose owner cannot run.** If the owner plugin is off, `failed`, uninstalled, `dormant`, or traps or times out while the step is drawn, the host skips that step, shows a one-line notice (`Skipped <title>: <plugin id> is not running`), and continues with the next step. One broken step never ends the flow.
+
+**Moving through the flow.**
+
+- Esc skips the current step and records its id as skipped.
+- Back returns to the previous step with its answers still filled in.
+- If the terminal closes, the next `ilium --onboarding` or the next start resumes at the first step that is neither done nor skipped. Answers entered in earlier steps are already kept.
+
+**What is recorded.** The `[onboarding]` table of `config.toml` holds `done` (true after the last step), the list of skipped step ids, and the host version that completed the flow.
+
+**Plugins added later.** A plugin installed or updated after the setup finished does not re-run the flow. It gets only its own first-run prompt ([USR-014]).
+
+**Re-running.** `ilium --onboarding` and Settings > Guided setup start the flow again. Stored answers are kept and shown as the default of each step. A step is applied only when the user confirms it, so a re-run never resets a value the user does not touch. Skipped step ids are cleared when the flow reaches the end.
+
+### Accessibility and language rows, CLI flags and environment variables
+
+The User Interface tab has three rows for the options that decide whether the screen is usable at all: **Screen reader mode** (`[ui] screen_reader`, default false, [USR-305]), **High contrast** (`[ui] contrast`, `normal` or `high`, [USR-302]) and **Language** (`[ui] language`, a language tag, [USR-311]). Like the other rows they save at once.
+
+A user who cannot read the screen cannot open Settings, so each option can also be set before any screen is drawn:
+
+| Option | CLI flag | Environment variable | Config key |
+|---|---|---|---|
+| Linear screen-reader mode | `--screen-reader` | `ILIUM_SCREEN_READER=1` | `[ui] screen_reader` |
+| High contrast | `--contrast high` | `ILIUM_CONTRAST=high` | `[ui] contrast` |
+| UI language | `--language <tag>` | `ILIUM_LANG` | `[ui] language` |
+
+The flags act on attach. The precedence is the flag, then the environment variable, then the config value. For the language, the full order of [USR-311] still applies below the config value (`LC_ALL`, `LC_MESSAGES`, `LANG`, then `en`). A flag or variable applies to that run only and is not written to `config.toml`. The guided setup honours all three from its first step. The same three rows are added to the tab list of [The 26 tabs and who owns them](#the-26-tabs-and-who-owns-them) under `user-interface`.
+
+### Consistency fixes: tab count and the failure window
+
+- **Tab count.** The numbered list above has 26 rows. [Kernel and boot](/pages/reference-kernel-and-boot/) counts 25 frozen kernel tab ids. Rows 1 to 25 are the kernel ids. Row 26, `setup`, is the tab contributed by the Agent setup plugin and is not a kernel id. The Plugins tab is drawn by this plugin and is outside the numbered list, so it is in neither count.
+- **Failure window.** The Failed row of the Plugins tab reads `Stopped after 3 failures within 60 seconds`, the single value of [COR-200]. [COR-228] uses the same window for a replacement of a core plugin. The state words stay those of [USR-161] and [USR-162].

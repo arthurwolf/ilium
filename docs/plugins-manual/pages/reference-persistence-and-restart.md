@@ -96,6 +96,38 @@ Two servers, or two sessions, can point at the same project directory. They must
 - [COR-101] When two servers use different sessions of the same project, writes to shared config files and plugin data directories MUST be serialized by the lock and MUST use last-writer-wins per file with an atomic replace, never a partial write.
 - [COR-102] A server that loses the lock, or finds a lock held by a dead process, MUST stop writing, MUST take over a stale lock only after verifying that the owner process no longer exists, and MUST log the decision.
 
+### Client process crash and terminal restore
+
+The TUI client is a separate process from the session server. A crash of the client, whether a panic, a fatal signal that can be caught, or a kill, ends only that client. This section states what the server keeps, what the user's terminal looks like afterwards, and what the next `ilium attach` finds.
+
+| Question | Rule |
+|---|---|
+| Does the server stop? | No. The server, every server side of every plugin, every helper and every other attached client keep running. The failure count, restart timer and enabled state of each plugin are unchanged [HST-010] [HST-013]. |
+| What happens to the crashed client's plugin sides? | The server closes the dead connection and drops that client's client host. Client-side memory is gone. Client restore bytes are not written, because `deactivate` did not run on that client (see [Restore bytes](#restore-bytes)). The bytes stored from the last clean detach of any client stay in the snapshot. |
+| Who restores the terminal? | The client, before it exits and before it writes its own crash record. See the order below. |
+| How does the user get back in? | `ilium attach` (or a bare `ilium` in the project) connects to the running session. The server sends a full snapshot of the tree and replays pane output as for any attach [Reference, host IPC](/pages/reference-host-ipc/). |
+| What does a plugin client side see? | A new client instance is created and activated. `activation.reason` is `reconnected`, and `activation.restored` holds the client restore bytes stored per plugin id (last writer wins [LIF-153]). Contributions (views, commands) are resent as a replica, as the Client reconnect column of the matrix says. |
+
+Terminal restore order. A panic hook and an at-exit guard both run the same idempotent restore routine, so a second call does nothing:
+
+1. Disable mouse reporting (all xterm tracking and encoding modes the client enabled).
+2. Leave the alternate screen.
+3. Leave raw mode and restore the saved terminal attributes.
+4. Show the cursor and reset text attributes.
+5. Only then write the crash record and print one line on standard error naming the record file.
+
+If a step fails (for example the terminal is already closed), the routine logs the error code `client.terminal-restore-failed` into the crash record and continues with the next step. It never loops and never blocks the exit for more than 1 second.
+
+The crash record uses the same folder, file mode, content rule and retention as the host crash records: only the plugin id (absent for a crash outside a plugin), the error code, the host version and host frames, redacted before storage [SEC-446]. Retention and deletion follow [Reference, audit log](/pages/reference-audit-log/); the client adds no second period or count. A client crash adds one `crash-report` audit record naming the file.
+
+Failure modes. A kill by `SIGKILL` cannot run any handler, so the terminal is not restored by the client; the user runs `reset`, and the server and plugins are unaffected in the same way. Attaching again while the old connection is still being torn down is allowed: the server accepts the new client at once and the old one is closed in the background.
+
+- [HST-010] A crash of the client MUST NOT stop the server or any plugin side, and MUST NOT change any plugin's failure count, restart timer or enabled state [HST-013]. Test: kill the client under a PTY, then list plugins through a second client and compare with the list taken before.
+- [LIF-150] The Client reconnect column MUST hold after a crash exactly as after a clean detach, except that the crashed client's own restore bytes are not stored. Test: set a marker in every row, kill the client, attach again, and read the markers.
+- [SEC-446] The client crash record MUST contain only the plugin id, error code, host version and host frames. Test: the redaction test runs over a record written by a forced client panic.
+
+Test for terminal restore: spawn the real client under a PTY (`ilium-pty`), wait for the alternate screen, then force a panic and, in a second run, `SIGTERM` the client. Read the PTY output and assert that it contains the reset sequences for mouse reporting, the alternate screen and the cursor, that the terminal attributes read back from the PTY are the saved cooked-mode attributes, that one crash record exists and passes redaction, and that the server's plugin list is identical before and after.
+
 ### See also
 
 - [Plugin lifecycle states](/pages/reference-plugin-lifecycle-states/)

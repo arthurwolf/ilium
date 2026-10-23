@@ -384,3 +384,66 @@ The host reads only its own `[ui]` settings. It does not read the operating syst
 | Linux (GNOME) | High Contrast theme, Animations off | No | Use `[ui] contrast = "high"` and the reduced-motion setting (USR-302, USR-307) |
 
 - **[USR-952]** The host MUST NOT change any value that a plugin receives from an operating system accessibility setting. When a later version reads one, the `[ui]` value MUST win if both are set, and `ilium plugin doctor` MUST print each accessibility value with its source, `[ui]` or the operating system, as [USR-311](/pages/guide-internationalisation/) does for the UI language (proposed, owner to confirm).
+
+### Theme extras carry the contrast level
+
+USR-302 and AUT-504 let a plugin follow `[ui] contrast = "high"`. `theme-extras` therefore carries the setting. The contract adds one field and one enum:
+
+```wit
+enum contrast-level { normal, high }
+record theme-extras { reduced-motion: bool, density: density, info: u32, selection: u32, border: u32, icon-mode: icon-mode, contrast: contrast-level }
+```
+
+| Rule | Behaviour |
+|---|---|
+| Source | `contrast` is `high` exactly when `[ui] contrast = "high"` (USR-302). Any other value of the key, or a missing key, gives `normal`. |
+| Change | A flip in either direction delivers `theme-changed`, in the same coalesced burst as any other theme change. The event carries no payload, so the plugin calls `theme-extras()` again. |
+| Host widgets | When `high`, every role is already raised to at least 7:1 and `muted` is drawn in the foreground colour. `info`, `selection` and `border` in `theme-extras` hold the raised values. |
+| Plugin that uses roles only | Needs no code. It satisfies AUT-504 and stays inside USR-302. |
+| Plugin that draws its own colour (`rgb`, `indexed`) | When `contrast` is `high` it MUST either switch to roles, or use a foreground and background pair of at least 7:1 on resolved RGB, and MUST NOT use a pair under 7:1 for text. A plugin that ignores the field still renders without error (USR-302) and fails the review of AUT-504. |
+| Operating system | The host does not read the operating system contrast setting (USR-952), so the field follows `[ui]` only. |
+
+The `theme_extras()` sample on this page and the `theme-extras` record in the WIT reference both gain the `contrast` field and the `contrast-level` enum. Rust reads `ui::theme_extras().contrast == ContrastLevel::High`, TypeScript reads `themeExtras().contrast === "high"`. Test: a fixture plugin that draws one `rgb` pair runs with `contrast = "normal"` and `"high"`, and the check passes only when the high run uses roles or a pair of at least 7:1 and `theme-changed` arrived once per flip.
+
+### Blink modifiers and the flash limit for ordinary views
+
+The `modifiers` flags of a `style` include `slow-blink` and `rapid-blink`. The rules for ordinary views, which have no `media.video` and no scene, are:
+
+- When `reduced-motion` is on, the host ignores both blink flags and draws the text steady.
+- The host never renders `rapid-blink`. It strips the flag before painting, in every mode, and logs one warning per view at level warn.
+- `slow-blink` is drawn only when reduced motion is off. The host sets its rate below one change per second.
+- A plugin that animates with `ui.invalidate` or with timers MUST stay under three flashes in any one second over any area larger than a quarter of the view. A flash is a pair of opposing changes of relative luminance of 10 percent or more. This follows WCAG 2.3.1, Three Flashes or Below Threshold, the same limit that [video](/pages/capability-media-video/) and [ambient scenes](/pages/core-plugin-ambient/#reduce-motion-and-photosensitivity) use. [AUT-502] and [USR-307] apply on top of it.
+- The host rate-limits `invalidate` to the frame cap of the display settings. Calls above the cap are merged into the next frame and are not an error. The cap protects the host, and it does not make a plugin pass the flash limit.
+- `ilium plugin lint` reports `ui.flash-risk` for a timer below 100 ms whose handler changes a colour, and `--deny warnings` turns it into a failure. A timer that only moves a counter does not trigger it.
+
+Test: a fixture view alternates two high-contrast backgrounds every 100 ms. The check must find the `ui.flash-risk` lint finding, and a run with reduced motion on must show one steady frame. A view that is below the limit passes both checks.
+
+### Terminals without UTF-8: ASCII fallback
+
+The host decides at start whether the terminal can show UTF-8 and box drawing. It reads `LC_ALL`, `LC_CTYPE`, `LANG` and `TERM` in that order, and runs a probe that prints one wide glyph and reads the cursor position back. The terminal is treated as ASCII-only when the locale is not UTF-8, when `TERM` is `linux` or `dumb`, or when the probe shows the glyph was not drawn as one cell.
+
+| Part | In ASCII mode |
+|---|---|
+| Stable-glyph mode | Forced on, whatever `use_stable_glyphs` says. The setting is not changed on disk. |
+| Borders | Drawn with `+`, `-` and `|`. |
+| Leaders | Drawn with `.` instead of `…`, with the same spacing rule as the [leader rule](#the-leader-rule). |
+| Icons | Replaced by status words, for example `OK`, `FAIL`, `WARN`. |
+| `theme-extras.icon-mode` | Reports `ascii`. The enum becomes `normal`, `stable`, `ascii`. A plugin keeps icon names and follows the mode as it does for `stable`. `theme().stable-glyphs` is true in this mode. |
+| Plugin text | A non-ASCII character is transliterated when the host has a mapping (`é` to `e`), otherwise replaced by `?`. Text is never sent as bytes the terminal would garble. |
+| Setup | The guided setup shows one warning on the first run in this mode: the locale is not UTF-8, and the fix is `export LANG=C.UTF-8`. It is not repeated in later runs. |
+
+Reduced capability is not an error. A plugin trap is not caused by the mode. Test: run the fixture view under `LANG=C` and `TERM=linux` and assert that no byte above 0x7F reaches the terminal, that borders use `+-|`, that `icon-mode` reads `ascii` and that the setup warning appears once. USR-300 still holds in this mode, because every state also has a word. The environment allowlist for helpers is in [SEC-027](/pages/reference-security-policy/) and does not change here.
+
+### Theme contract: what a theme is, where it loads from, and why plugins ship none
+
+A theme is a kernel-native object. It is the one domain feature that is not rebuilt as a plugin (feature F-092, [COR-010](/pages/reference-requirements-core-parity/)), because the look painter must work with `--no-plugins`, and a plugin theme would leave the recovery page unreadable when plugins are off.
+
+- **Built-in themes.** The kernel ships the themes selectable by `[ui] color_scheme`. Each defines the six colour roles of USR-301 (`danger`, `warning`, `success`, `muted`, `accent`, `info`) plus `background` and the foreground.
+- **Overrides.** The `[theme]` table holds four keys: `accent_bg`, `accent_fg`, `border_focused` and `border_unfocused`. They change those four colours of the selected theme and nothing else. See [configuration](/pages/reference-config-and-data-migration/).
+- **High contrast.** `[ui] contrast = "high"` raises the roles to 7:1 (USR-302) and reaches plugins through `contrast` above.
+- **Files.** The loader of USR-301 reads theme files from `{config}/ilium/themes/**`. A file is a TOML table with a `name`, a `base` (a built-in theme), and the six role colours as `#RRGGBB` strings. A missing role is taken from `base`. An unknown key, an invalid colour or a name that matches a built-in theme refuses that file only.
+- **Validation.** Every role is checked against the background on resolved RGB. A role under 4.5:1 refuses the theme with `theme.low-contrast` naming the role (USR-301). The user keeps the previous theme and sees the error in the theme picker.
+- **Plugins.** A plugin cannot contribute a theme. `themes` is not a manifest key ([reference-manifest](/pages/reference-manifest/)). A plugin may read the theme folder only with `fs.read:path:{config}/ilium/themes/**` ([capability-fs-read](/pages/capability-fs-read/)), which gives it read access and no way to apply a theme.
+- **Alternative.** A plugin may offer a `catalog` of swatches, as in [api-catalogs](/pages/api-catalogs/). It belongs to the plugin and never changes the Ilium theme. The user changes the theme in Settings, in `[ui] color_scheme`, or by adding a file to the theme folder.
+
+Failure modes: an unreadable file is skipped with one warning in the host log. A theme that fails validation is never applied, even partially. With `--no-plugins` the same themes load, because no plugin takes part.

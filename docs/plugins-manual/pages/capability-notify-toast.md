@@ -215,6 +215,50 @@ The host draws the toast. The plugin sends text, a tone and optional buttons, an
 
 **Motion and attention.** The rate limit of 3 toasts per 10 s keeps a plugin from pulling the user's attention again and again. A plugin that replaces a toast by its `id` restarts the countdown, so it SHOULD replace a toast for progress only at a useful moment, not on every tick.
 
+### Toast timing for slow readers, keyboard focus and the linear reader mode
+
+This section states what the host does with a toast's timer, where a closed toast can still be read, and how a toast reaches a user in the linear reader mode. It overrides the cautious wording above where the two differ: the host does pause and does announce, as described here. The plugin controls none of it.
+
+| ID | Rule | Exact value | Source |
+|---|---|---|---|
+| USR-088 | Stack limit | At most 3 toasts are alive at once per the rate limit of 3 per 10 s per plugin. A toast beyond the rate is refused with `rate-limited`; a toast that fits the rate but would be a fourth on screen replaces the oldest one | `src/docs/notifications.md` |
+| USR-305 | Linear reader mode covers toasts | With `[ui] screen_reader = true` a toast is a logical element of the linear mode, rendered without box-drawing, bar or spinner characters, and inserted at the top of the focus order | `src/docs/notifications.md` |
+| CAP-884 | Channels are independent | A toast, its history entry and any desktop notice of the same event stay separate; losing one leaves the text of the others unchanged | `src/docs/notifications.md` |
+
+**Pause on pointer or focus.** The countdown of a toast stops while the pointer is over the toast or while keyboard focus is on it, and it continues with the time that was left when the pointer leaves or focus moves away. A paused toast does not shrink its bar and does not change its `N s left` text. Pausing never extends `duration-ms` beyond what is left, and a toast that is replaced by its `id` restarts its countdown in full, paused or not.
+
+**Reader modes.** When `[ui] screen_reader = true` or reduced motion is on (see [Settings plugin](/pages/core-plugin-settings/)), the minimum time rules change:
+
+| Toast | Default mode | Screen reader or reduced motion |
+|---|---|---|
+| Plain toast (no buttons) | `duration-ms`, 1,000 to 30,000 ms, default 5,000 ms | At least 10 s: a smaller `duration-ms` is raised to 10 s, a larger one is kept |
+| Toast with one or two buttons | `duration-ms` | Stays until the user dismisses it or runs a button |
+| `danger` toast | Stays until dismissed while a client is attached | Same |
+| Toast queued with no client attached | Discarded after its duration | Same; the raised minimum applies only once a client shows it |
+
+The host applies these values after it accepts the intent. The plugin gets `ok` for the same submission in every mode and cannot ask which mode is on.
+
+**Notification history.** Every shown toast is also written to the notification history, with its plugin, tone, title, body and button labels, so a reader can open it after it closes, expires or is replaced. A toast that was refused (`rate-limited`, `invalid-argument`, `not-permitted`) is not written. The history is the host's list described in [Notifications of the core plugin](/pages/core-plugin-notifications/); the plugin cannot read or edit it. This makes the history, not the toast, the place a slow reader can always reach, and it does not replace the persistent twin that CAP-883 requires for errors.
+
+**Linear reader mode.** With `[ui] screen_reader = true` the client announces a toast as one line, in this exact form, and inserts that element at the top of the focus order so the cursor moves to it:
+
+```
+Notice from <plugin>: <title>. <body>
+```
+
+`<plugin>` is the plugin's display name, `<title>` and `<body>` are the plain text of the fields (rich text spans are read as their text), and the `. <body>` part is left out when there is no body. Buttons follow as separate lines with the role word `button`. When the toast leaves, focus returns to the element that had it. Because the toast is announced as text, the tone is not spoken, so the title MUST carry the status word, as the colour rule above says.
+
+**What the plugin can observe.** Only the outcome of the `toast` intent (`ok`, or `refused` with `not-permitted`, `rate-limited`, `invalid-argument` or `not-found`) and the invocation of a button's command. The plugin cannot see whether the toast was paused, whether it was announced, how long it stayed, whether it was dropped as the oldest of a full stack, or whether it is in the history. A plugin MUST therefore not time its own follow-up on the assumption that the toast is gone after `duration-ms`.
+
+**Failure modes.**
+
+| Situation | What happens |
+|---|---|
+| A fourth toast arrives while 3 are alive | The oldest toast is dropped from the screen at once, even if it was paused or had buttons; its history entry stays |
+| Pointer rests on a toast for a long time | The toast stays; the next toasts queue behind the stack limit and replace the oldest one only after it leaves or is replaced |
+| `screen_reader = true` and a toast with buttons that the user ignores | It stays until dismissed; the persistent twin of CAP-883 still has to exist |
+| Two toasts share an `id` | The second replaces the first in place and restarts the countdown |
+
 ### Related pages
 
 - [notify.desktop](/pages/capability-notify-desktop/).

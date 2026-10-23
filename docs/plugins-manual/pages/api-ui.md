@@ -52,6 +52,7 @@ Rust imports these from `ilium_plugin_sdk::host::ui`. TypeScript imports them fr
 | `widget_state(view, key)` | `Option` | Reads the host-owned state of a widget: selection, offset, tab, text, expansion or check. |
 | `set_widget_state(view, key, state)` | `Result` | Changes that state, for example to select row 0 of a list. |
 | `display_width(text)` | `u16` | Width in cells of a text, using the host's rules for icons and wide glyphs. |
+| `language()` | `string` | The active UI language as a BCP 47 tag, for example `de` or `pt-BR`. Never returns an error code. |
 | `theme()` | `ThemeTokens` | The theme colours, whether the theme is dark, and whether stable glyphs are on. |
 | `write_surface(view, key, first_row, format, data)` | `Result` | Writes pixels into a `surface` widget, starting at `first_row`. |
 
@@ -80,6 +81,7 @@ The host sends these events to `handler.on-events` for the plugin's own views.
 |---|---|---|
 | `ui-action` | `view`, `key`, `action-id`, `kind`, `value` | Never dropped; `scrolled` is coalesced. |
 | `view-visibility` | `view`, `visible` | Coalesced. |
+| `language-changed` | `language` (string) | Sent when the active UI language changes, delivered like `theme-changed`. |
 | `theme-changed` | none | Sent when the user changes the theme, after the host has repainted the last tree. One `views.render` per open view follows. |
 
 The `key` is the widget's key. In 0.1.0 `action-id` is always a copy of `key`. The `kind` is one of `activated`, `changed`, `submitted`, `selected`,
@@ -367,9 +369,10 @@ sequences has them removed, and the host logs one warning per view.
 
 ### Localisation and text direction
 
-The `ui` import gives no locale, no user interface language and no time zone. A plugin cannot learn them
-from the host, so it offers a language choice in its own settings (a `choice` row) and keeps identifiers
-in English. [AUT-601] See [Internationalisation](/pages/guide-internationalisation/).
+The `ui` import tells a plugin the user interface language (`language()`) and delivers `language-changed`
+when it changes; the host formats local times itself, so a plugin needs no time zone. A plugin keeps identifiers
+in English. [AUT-601] See [Internationalisation](/pages/guide-internationalisation/) and
+[the host tells a plugin its UI language](#localisation-the-host-tells-a-plugin-its-ui-language).
 
 - **Plugin text is shown raw.** Titles, labels, popup text, notices and the reason of a grant are shown as the
   plugin supplied them. The host does not translate them, and a plugin does not change the host's own words.
@@ -391,6 +394,40 @@ in English. [AUT-601] See [Internationalisation](/pages/guide-internationalisati
 - **Right-to-left text.** The host draws each line left to right. It does not reorder bidirectional text and
   does not mirror a layout. A plugin must not promise correct right-to-left display, and keeps such text in its
   own row, apart from left-to-right labels. [AUT-607]
+
+## Localisation: the host tells a plugin its UI language and UTC offset
+
+Earlier versions of this page said that a plugin could not learn the user's language. That is superseded: the
+host has one UI language setting and propagates it, so the user never meets a second language switch inside a
+plugin. [AUT-601]
+
+- **Who decides.** The host chooses the language once per session in this order: `[ui] language`, `ILIUM_LANG`,
+  `LC_ALL`, `LC_MESSAGES`, `LANG`, then `en`. [USR-311] The plugin never sets it. `ui.language()` returns that
+  same tag, the one the host catalogue uses, as a canonical BCP 47 string (`de`, `fr`, `pt-BR`), never empty and
+  never an error. It needs only the `ui` grant the plugin already has.
+- **Change at run time.** When the user changes `[ui] language` in the settings, the host delivers
+  `language-changed` with the new tag to every active plugin that holds `ui`, after it has repainted its own
+  chrome, and triggers one `views.render` per open view, coalesced in the same 16 ms window as
+  `theme-changed`. The event is never dropped; only the latest tag matters, so a burst is delivered as one
+  event with the final tag. A plugin looks its strings up again at its next render and need not call
+  `invalidate`. [USR-311]
+- **Plugin catalogue.** The plugin picks messages from `i18n/<tag>.json` with the lookup order exact tag, language
+  without region, then `en`; a missing message or a placeholder-count mismatch falls back to English for that one
+  message only. [USR-312] A tag for which the plugin ships no catalogue at all shows the English text; the host
+  does not translate plugin text and logs nothing for this case.
+- **The `choice` row is optional.** A plugin does not have to offer a language row. A plugin that does offer one
+  MUST treat it as an override with a first value `host` ("follow the interface language"), and `host` is
+  the default. A stored explicit tag wins over `ui.language()` until the user picks `host` again. [AUT-601]
+- **Time zone.** The `ui` import has no UTC offset and `ilium:plugin@0.1.0` gains no `utc-offset-minutes()`
+  function. The host formats local times and dates for people: a plugin passes UTC milliseconds in a
+  `timestamp` or `relative-time` text node and the host renders it with the language's date order and separators
+  and the user's local offset. [USR-314] Log, audit and machine-readable output stay in UTC
+  `YYYY-MM-DD HH:mm:ss`. A plugin that builds its own time string states the zone or shows relative time. [AUT-616]
+- **Failure modes.** A `language()` result is a hint, not a promise that a catalogue exists. A malformed
+  `i18n/<tag>.json` is refused at load with `i18n.catalogue-invalid` and the plugin uses English. A plugin without
+  the `ui` grant gets `not-permitted` from `language()` like any other `ui` call.
+- **Test.** On the fake host set the language to `de`, render, assert German text, send `language-changed` with
+  `fr`, render again and assert French; repeat with a tag that has no catalogue and assert English.
 
 ## What the user sees
 

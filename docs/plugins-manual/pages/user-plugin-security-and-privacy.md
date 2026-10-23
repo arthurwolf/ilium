@@ -62,6 +62,27 @@ You can change your mind any time: Settings > Plugins > Capabilities revokes one
 
 To report a bad plugin, use the contact in its Details. For a flaw in Ilium itself, follow [Security response](/pages/reference-security-response/).
 
+## If you suspect a plugin is malicious
+
+Act in this order. Steps 1 and 2 take under a minute and lose nothing; the later steps are destructive or send information, so do them after you know what happened.
+
+1. **Stop it now.** Run `ilium plugin kill <id> --reason <text>`, or use the kill action for the plugin in the Plugins screen (Settings > Plugins). Kill stops the plugin on the server and in every attached client, sets it to `disabled-by-admin`, cancels its pending requests as `cancelled`, and writes `plugin.killed` to the audit log with the reason and the time [HST-516, HST-517]. The server stops within 1 s and each attached client within 5 s. Kill differs from disable: a disabled plugin can be turned on again by anyone with the Space key or `ilium plugin enable`, while a killed plugin is refused at activation, also after a restart, until you run `ilium plugin unkill <id>`. Kill works in safe mode and with no network. It keeps the plugin's grants, settings and data, so the evidence in step 2 stays. If you do not know which plugin it is, start Ilium with `ilium --safe-mode` first ([Security response](/pages/reference-security-response/)), then kill the one you find.
+2. **Check what it reached.** Run `ilium plugin audit --plugin <id> --since 7d` [SEC-227]. Read the `egress-host-first-use` records (hosts it contacted for the first time), the process-run records (programs it started) and the records of writes outside its own data folder ([Audit log](/pages/reference-audit-log/)). Run `ilium plugin audit --verify` to check that the log was not edited. The log is local and shows what the host saw; a plugin that was granted a wide capability can do more than one record shows.
+3. **Rotate every secret it could read.** For each secret the plugin held or was granted, set a new value at the service that issued it first, then run `ilium plugin secret rotate <id> <name>` to replace the stored value [SEC-451]. The old value is overwritten in the secret store and the audit log records the rotation without the value. Rotating the stored value does not cancel the old one at the remote service; revoke it there.
+4. **Report it.** Run `ilium plugin report <id>`. It prints the plugin's `contact` and `security_contact`, its version and its key fingerprint, and sends nothing by itself, even with the network on [USR-349]. Then send that text yourself to the plugin's `security_contact` and to the registry abuse contact. The registry acknowledges a report within 1 business day and decides on active malware or a stolen key within 24 hours (yank or takedown, or a stated reason for none), and records the decision in its transparency log [PKG-705]. A takedown or a `compromised` key revocation then shows the plugin as `Blocked` for everyone who installed it [USR-174].
+5. **Deal with the publisher key if the publisher is the problem.** If you trust the key for other plugins, run `ilium plugin trust remove <key_id>` (add `--force` when plugins depend on it). The other plugins from that key stay installed and show `untrusted` [DEV-127]. Say in the report that the key may be stolen, so the registry can revoke it.
+6. **Remove it.** Run `ilium plugin uninstall <id> --purge` to delete the plugin, its data and its logs at once. If you want to keep the evidence for the report, export the audit records first (`ilium plugin audit --plugin <id> > audit.jsonl`). To erase what an ordinary uninstall leaves behind (crash records, consent records), run `ilium plugin erase-data` for that plugin; it shows counts per data kind, asks for confirmation (the default is No) and reports what was deleted and what was kept [USR-246].
+
+Failure modes:
+
+| Situation | Result |
+|---|---|
+| `kill` or `unkill` names an id that is not installed | Exit code 5, `not found` |
+| No session is running | Exit code 6; start Ilium, or start it in safe mode, and run the command again |
+| A client is offline when you run `kill` | It learns the killed state before it activates the plugin when it reconnects |
+| `unkill` on a plugin that is not killed | No change; the command says so |
+| You `unkill` a plugin that a registry takedown or key revocation blocks | It stays `Blocked` (`registry.takedown` or `trust.key-revoked`) |
+
 ## Rules for plugin authors
 
 **[SEC-266]** A plugin that sends telemetry MUST make it opt-in, through a setting that is visible in its settings page and that defaults to off.

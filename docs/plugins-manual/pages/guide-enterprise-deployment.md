@@ -198,3 +198,161 @@ The system trust store is `/etc/ilium/trust.json` ([PKG-222]). The effective tru
 - [PKG-984] To revoke a compromised key across the fleet, the administrator MUST push a revocation statement ([PKG-242]) in the same change as the new file, then run the post-push checks of [PKG-982]. A machine not yet reached keeps trusting the key until the new file arrives.
 - [PKG-985] On an air-gapped machine, the registry root key MUST be pinned with `ilium plugin registry add <url> --root-key <key_id>` ([PKG-411]) only after the `key_id` has been compared with the publisher's published fingerprint through a second channel, such as a signed release note. The pinned `key_id` MUST be written to the change record. Root keys are never taken from a mirror alone.
 
+
+## Distributing policy, trust and lockfile with a configuration-management tool
+
+A fleet is configured by a management tool, not by hand. Three files are managed: the system `policy.toml` ([SEC-180]), the system trust store `trust.json` ([PKG-465], [PKG-980]) and the plugin lockfile ([USR-241]). The recipes below are examples of the pattern for each platform; the pattern is the requirement, the tool is your choice. The rules without an ID are new and owner to confirm.
+
+### What each file needs
+
+| File | Linux | macOS | Windows | Pushed by |
+|---|---|---|---|---|
+| `policy.toml` | `/etc/ilium/`, root:root, 0644 | `/Library/Application Support/Ilium/`, root:wheel, 0644 | `%ProgramData%\Ilium\`, write for Administrators and SYSTEM only | The management tool, as root |
+| `trust.json` | `/etc/ilium/`, root:root, 0644 | same folder as the policy, root:wheel, 0644 | same folder as the policy, same ACL | `ilium plugin trust add <file> --tier T2 --system` as root, or a whole-file push ([PKG-981]) |
+| plugin lockfile | any path the user can read, for example `/etc/ilium/ilium-plugins.lock`, 0644 | same idea | same idea | Written by the tool; applied by each user, see below |
+
+A policy or trust file that another user can write is refused at load ([USR-207]), so the mode is not optional. Write through a temporary file in the same folder, fsync and rename, so a session starting during the push never reads half a file. The policy is read at start only ([SEC-188]): a push does not change a running session, and the effect begins at the next session start.
+
+The lockfile is the one file that is applied per user, because the plugin install directory belongs to each user ([SEC-194]). The management tool puts the file in place and runs `ilium plugin sync --locked <lockfile>` as the user, for example from a login script. The sync installs the missing entries at the pinned version, removes extras and fails with `lock.mismatch`, changing nothing, if a hash or key id differs ([USR-242]). A grant that the machine policy forbids stays off and is reported as `Blocked by your administrator`; the sync never raises a grant above what the lockfile records ([USR-244]). Produce the file once, on a reference machine, with `ilium plugin lock`; it is deterministic text, so the same set always gives the same bytes and a changed hash in version control means a changed set ([USR-243]).
+
+### Linux, with a configuration-management tool
+
+Declare the three files as managed resources with the owner and mode above, and make the tool's own atomic-replace option the push method. In Ansible, for example:
+
+```yaml
+- name: Ilium policy
+  ansible.builtin.copy:
+    src: files/policy.toml
+    dest: /etc/ilium/policy.toml
+    owner: root
+    group: root
+    mode: "0644"
+  register: ilium_policy
+- name: Ilium system trust store
+  ansible.builtin.copy:
+    src: files/trust.json
+    dest: /etc/ilium/trust.json
+    owner: root
+    group: root
+    mode: "0644"
+- name: Check the effective policy
+  ansible.builtin.command: ilium plugin policy show
+  register: ilium_policy_show
+  changed_when: false
+  failed_when: "'used' not in ilium_policy_show.stdout"
+```
+
+The `copy` module writes through a temporary file and renames it. Puppet, Chef and Salt resources with the same owner and mode are equivalent. Add a trust entry without owning the whole file with `ilium plugin trust add key.pub --tier T2 --system`, run as root; the entry has `added_by: admin` and the user cannot remove it ([PKG-465]).
+
+### macOS, with a profile or MDM script
+
+macOS has no plugin policy key in a configuration profile. Use the MDM's script or package payload to run a root script that does what the Linux recipe does:
+
+```sh
+#!/bin/sh
+set -eu
+dir="/Library/Application Support/Ilium"
+mkdir -p "$dir"
+for f in policy.toml trust.json; do
+  install -m 0644 -o root -g wheel "/private/var/tmp/ilium-staging/$f" "$dir/.$f.new"
+  mv "$dir/.$f.new" "$dir/$f"
+done
+```
+
+`mv` inside one folder is the rename. The MDM re-runs the script on its own schedule, which also repairs a file someone changed. Remove the staging files after the run.
+
+### Windows, with a management script
+
+Run a script as SYSTEM from the management agent (Intune, a scheduled task, a group-policy startup script):
+
+```powershell
+$dir = Join-Path $env:ProgramData 'Ilium'
+New-Item -ItemType Directory -Force -Path $dir | Out-Null
+foreach ($f in 'policy.toml','trust.json') {
+  Copy-Item "C:\ProgramData\IliumStaging\$f" "$dir\$f.new" -Force
+  Move-Item "$dir\$f.new" "$dir\$f" -Force
+}
+icacls $dir /inheritance:r /grant:r "SYSTEM:(OI)(CI)F" "Administrators:(OI)(CI)F" "Users:(OI)(CI)RX" | Out-Null
+```
+
+The ACL gives ordinary users read and execute only. A file that a non-administrator can write is treated as in the Linux case.
+
+### The check after each write
+
+A management run is not finished when the file is written. It runs these checks on the machine and reports a failure to the tool:
+
+1. `ilium plugin policy show` ([SEC-191]). The `policy-source` line for the system file must say `used` with the SHA-256 recorded in the change record, and the `policy` line must equal the expected values. A file marked `ignored`, or `policy.invalid` in the audit log, is a failed push ([SEC-187]).
+2. `ilium plugin trust list` and `ilium plugin doctor` ([PKG-982]). The key list must equal the source file.
+3. `ilium plugin list --json --inventory` ([USR-341]). Compare the output, which is sorted by id and has no home paths, with the expected set derived from the lockfile. Any difference in version, hash, key id or state is a failed run.
+
+### Staging through the rings
+
+Treat the three files as one change and roll them out together through the rings of [USR-109]: a first ring of at most five machines, each later ring at most twice the size, and the next ring only after one working day with no `policy-violation` or `policy.invalid` event. Run the checks above on the first ring before the second starts ([USR-108]). Keep the previous copies of the three files until every ring has passed, so that a revert is a rename back and a session restart ([USR-107]). In the tool, a ring is a host group; the tool's own staged-rollout feature moves the files, and the checks gate the move.
+
+### Never push these
+
+- User grants (`grants.json`), consent records (`consents.json`) and project trust. They are decisions of one user on one machine ([SEC-194]); a pushed copy would grant permissions nobody gave, and the policy is the only administrator control over them.
+- Secrets, keyring entries and registry tokens.
+- Anything under a user's `<data>`, `<state>` or `<cache>` folders, the audit log, the per-plugin random identifier, and the runtime directory.
+- A per-user `ILIUM_TRUST_STORE` for fleet keys ([PKG-982]).
+
+## Ilium over SSH and moving a profile between machines
+
+### Ilium on a remote machine over SSH
+
+When you run Ilium in an SSH session, the server, the plugins and every file are on the remote machine. Your local machine only displays the terminal. In practice:
+
+- **Policy, trust and sandbox.** The policy, the system trust store and the sandbox are those of the remote host ([SEC-180], [SEC-199]). A policy on your laptop has no effect on a session on the server, and the Linux sandbox requirement applies to the remote machine.
+- **Stores.** The grants, consents, secrets, audit log and install directory are those of your account on the remote machine ([SEC-194]).
+- **Clipboard.** There is no desktop clipboard on the remote host. When the terminal supports OSC 52, a copy is written through that sequence and reaches your local clipboard; with neither route, `write-text` returns `unsupported` ([Clipboard](/pages/api-clipboard/)). Some terminals and multiplexers block OSC 52 by default; allow it in the terminal.
+- **Desktop notifications.** Without a session bus on the remote host, desktop notifications are unavailable. The client footer still shows notices, and a plugin that asks for a desktop notice receives the unavailable result.
+- **HTTP API.** The HTTP API listens on the loopback address of the remote machine only ([HTTP API](/pages/api-http-api/)). To reach it from your laptop, forward a port through SSH (`ssh -L`); never bind it to a public address.
+- **Sockets and runtime directory.** The session sockets and the runtime directory stay on the remote machine and are not meant to be forwarded or copied.
+- **Locks.** If your home directory is on a network filesystem, the host detects it and starts with the lock scheme of [HST-665]; run one session server per account and machine.
+- **Closing the connection.** Losing the SSH connection ends the client, not the session server; the next login attaches to the same session.
+
+### What you can copy to another machine
+
+| Item | Copy it? | Why |
+|---|---|---|
+| Settings (`config.toml` without secrets) | Yes | Plain preferences; check paths in them |
+| Keymaps | Yes | Plain text |
+| Plugin lockfile | Yes | Deterministic text with no machine paths ([USR-243]) |
+| Trust entries | Yes, as entries added with `ilium plugin trust add` | Each machine decides what it trusts; a system policy still applies |
+| Secrets and keyring entries | No | They belong to one machine's keyring; set them again on the new machine |
+| Sockets and runtime directory | No | They are tied to one running server |
+| `<state>` folders (logs, crash records, snapshots, installation key) | No | They describe one machine and one install |
+| Consent records and `grants.json` | No | A decision is made again on each machine ([SEC-194]) |
+| Per-plugin random identifier | No | It must be random per install and changes on purge or erase ([USR-330]); a copy would link two machines |
+
+### Reproducing a plugin set on a new machine
+
+1. On the old machine run `ilium plugin lock` and keep the file.
+2. Copy the lockfile, your settings and your keymaps to the new machine.
+3. Add the trust entries you need, if the policy allows it.
+4. Run `ilium plugin sync --locked <lockfile>`. It installs the pinned versions and fails with `lock.mismatch`, without changes, if a hash or key id differs ([USR-242]).
+5. Grant the permissions again. A replayed grant that the new machine's policy forbids stays off and is reported as `Blocked by your administrator` ([USR-244]).
+6. Run `ilium plugin list --json --inventory` on both machines and compare ([USR-341]).
+
+## Removing Ilium from a managed machine
+
+Plugin uninstall and data erasure are covered elsewhere ([Plugin privacy](/pages/user-privacy/)); this section covers the host itself. The order matters, because the per-plugin commands need the host to be present. The exact folder names are the ones in [Plugin files](/pages/reference-plugin-files/).
+
+1. **Stop the sessions cleanly.** Ask each user to end their sessions, or end each with a clean stop, not a kill signal ([LIF-296]). A kill skips `deactivate` and loses restore bytes. `purge-user` refuses a user with a running session server (`purge.user-active`, [HST-689]).
+2. **Erase the plugin data, before the binary is removed.** For each user run `ilium plugin admin purge-user <user> --yes` ([HST-689]) as the administrator, or have each user run `ilium plugin erase-data` for every plugin ([USR-246], [USR-327]). Check the output: it prints `erased <kind>: <n> files, <bytes> bytes, remaining 0` and exits 3 with `erase.incomplete` if a path could not be deleted ([USR-325]). Both commands print a `not cleaned` line for files a plugin wrote into a project or home folder, which no Ilium command removes ([Plugin privacy](/pages/user-privacy/)).
+3. **Remove the system files.** Delete `policy.toml` and `trust.json` from the system folder of the platform (see the table above), then the binaries and the notices file whose path `ilium --version --verbose` prints. Do this with the same tool that installed them.
+4. **Remove what stays in each user's profile.** Nothing in steps 1 to 3 removes everything a user has:
+
+| What stays | Where | Remove with |
+|---|---|---|
+| Settings and keymaps | the user's config folder | delete the `ilium` folder there |
+| Audit log | the user's state folder | delete it after your retention period; export it first if you must keep it |
+| Crash records | the user's state folder; kept 30 days by default ([SEC-955]) | `ilium plugin erase-data`, or delete the folder |
+| Snapshots and session state | `<project>/.ilium/` of each project | delete the folder |
+| Cache | the user's cache folder | delete the `ilium` folder there |
+| Keyring secrets | the user's keyring | removed by `purge-user` and `erase-data`; check with the keyring tool |
+
+   Deleting a user's folders is the administrator's act on that user's own data; it falls under the retention table of the privacy page ([USR-348], [USR-955]).
+5. **Confirm the machine is clean.** `ilium` is no longer on the path. A search of the system folders and each user's config, data, state and cache folders for `ilium` finds nothing, and the fleet tool's installed-software inventory no longer lists the package. Where the software inventory cannot see user folders, run the folder search as a management job and record its result.
+
+If a machine is wiped or retired as an image, run step 2 for every user first ([USR-955]); deleting the disk later removes the data, but only the commands above produce the audit entry and the report.

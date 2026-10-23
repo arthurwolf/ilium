@@ -139,6 +139,97 @@ Each class below is a party with a goal and a way in. The mitigation table that 
 | A12 | Interception | HTTPS only, TLS 1.2 minimum, no plugin-controlled verification bypass | [SEC-077] | Compromised system roots |
 | A13 | Read another user's stores | Owner-only modes on every store, per-user directories, no cross-user sessions | [SEC-112], [SEC-199] | Root on the machine |
 
+## Registry and publishing threat model
+
+The tables above cover an attacker who already runs a plugin on the user's machine. A public plugin ecosystem has a second attack surface that comes first in time: the chain that carries a package from the publisher to the user, made of the publisher's account, the CI token, the build machine, the registry, its signing keys, its mirrors and the review records it shows. This section names the attackers on that chain and maps each to its controls. The mechanisms are in [Registry reference](/pages/reference-registry/), [Registry key compromise](/pages/reference-registry-key-compromise/), [Signing and trust](/pages/reference-signing-and-trust/) and [Trust and supply chain](/pages/reference-trust-and-supply-chain/). The CVE rule [SEC-702] applies to "registry flaws": for the purpose of that rule, a registry flaw is any condition in which one of the attackers R1 to R8 below succeeds against a control listed for it.
+
+### Registry assets
+
+These rows extend the Assets table.
+
+| Asset | Where it lives | Why it matters |
+|---|---|---|
+| Publisher signing key | The publisher's machine, ideally encrypted and backed up offline ([SEC-174]) | Whoever holds it can sign a release that installs as T2 for users who pinned the key |
+| Registry account | The registry's account store, protected by a second factor ([SEC-723]) | Controls who may publish under a publisher id and who is a maintainer |
+| Registry publish token | CI secret store of the publisher | Authorises publishes under one publisher id only ([PKG-968]) |
+| Registry metadata | `root.json`, `timestamp.json`, `snapshot.json`, `targets.json` and the transparency log ([PKG-700]) | Decides which versions exist, which digests are valid and what clients may install |
+| Registry role keys | Root keys (offline, threshold) and the online `timestamp`, `snapshot`, `targets` keys ([PKG-691]) | Signing metadata is the power to choose what every client installs |
+| Review records | Registry store, one per version and package hash ([PKG-680]) | Drive the level B badge users rely on when they decide to install |
+| Client log head and pinned keys | The user's trust store | Let a client detect a registry that rewrites history ([PKG-701]) |
+
+**[SEC-001]** applies to these rows too: no plugin of any tier may read the client log head or the pinned keys, because they live in the trust store.
+
+### Distribution attacker classes
+
+| Class | Description | Starting position |
+|---|---|---|
+| R1 Publisher account takeover | An attacker who logs in as a publisher through a stolen password or session | Can start a publish, add a maintainer or rotate a token |
+| R2 Leaked CI publish token | A token in a log, a fork or a compromised CI service | Can publish under one publisher id until revoked |
+| R3 Compromised publisher build machine | Malware on the machine that builds or signs releases | Can inject code before signing; the signature is genuine |
+| R4 Registry operator insider | An operator, or an attacker with operator rights, who serves different packages or metadata to chosen users | Holds the online role keys and the store |
+| R5 Compromised role keys | Theft of the online keys, or of enough root keys to reach the threshold | Can sign valid metadata |
+| R6 Hostile mirror or network path | A mirror, proxy or network attacker between registry and client | Can withhold, delay or replay genuine metadata, but holds no keys |
+| R7 Metadata flooder | A client population or botnet that hammers the registry | Can exhaust the registry or a mirror |
+| R8 Forger of reviews and names | An attacker who fakes a review, or registers a name that looks like a trusted id | Aims at the user's judgement, not at signatures |
+
+### Distribution mitigations
+
+| Class | Attack | Mitigation | Requirements | Residual risk |
+|---|---|---|---|---|
+| R1 | Publish a malicious version as the publisher | Publishing needs a second factor (TOTP or WebAuthn), at least two maintainers per publisher id, and a notice to every maintainer on publish, key change, transfer and yank | [SEC-723] | An attacker who also holds the second factor; a single-maintainer publisher is warned, not blocked |
+| R1 | Ship a new key for an existing id | Clients keep the key pinned per plugin id; a changed key shows the update dialog and is not accepted silently | [SEC-142], [SEC-108] | A user who accepts the key change |
+| R2 | Publish with a leaked token | A token belongs to one publisher id and one namespace, expires after 90 days, and is rotated without a gap; revocation takes effect within 1 hour, is appended to the transparency log (without the token value) and a revoked token gets `registry.auth` | [PKG-968], [PKG-969], [PKG-970] | Publishes made between the leak and the revocation |
+| R2 | Hide what the token did | Every publish made between leak and revocation is listed in the log and mailed to every maintainer; the registry does not yank by itself, the publisher or operator decides | [PKG-971], [PKG-396], [PKG-403] | Users who installed a bad version before the decision |
+| R3 | Inject code into the build | Publishers sign only on a clean build machine; `ilium plugin verify-build` rebuilds from the attestation and reports `package.build-mismatch`; the registry shows the verified state of each release | [SEC-174], [PKG-715] | A build that is reproducible but malicious from its source; a package with no attestation stays installable |
+| R4 | Serve a different package to one user, or rewrite history | The append-only transparency log has a signed head; the client checks an inclusion proof and refuses an inconsistent head with `trust.log-inconsistent`, keeping the evidence for the audit log | [PKG-700], [PKG-701] | An insider who serves every user the same malicious package, which only the log makes visible afterwards |
+| R4 | Substitute a package the publisher never signed | The package carries the publisher signature as first object; a registry countersignature is optional and the host needs at least one valid object from a trusted key; a user who pinned the publisher key rejects a countersignature-only package | [PKG-207], [SEC-142] | A user who pinned only the registry key |
+| R5 | Sign metadata with a stolen online key | The operator publishes a higher-version `root.json` naming the new key, re-signs `timestamp`, `snapshot` and affected documents, and announces root changes outside the registry; a client refuses documents signed with the retired key | [PKG-691], [PKG-692] | The window between theft and the new root |
+| R5 | Root threshold compromised | Rotation cannot recover; each client MUST re-pin the registry | [PKG-690] | Users must act; until then clients trust the attacker's root |
+| R6 | Freeze: keep serving old metadata | `timestamp.json` expires within 1 day, `snapshot.json` within 7 days (SHOULD) and `root.json` within 1 year, so a frozen mirror is detected as expired | [PKG-367] | An attacker can still show data up to 1 day old |
+| R6 | Rollback: serve older metadata | A `snapshot.json` or `timestamp.json` lower than the highest stored version is refused with `registry.rollback` and the stored version does not change | [PKG-816] | A client with no stored version, such as a fresh install |
+| R7 | Exhaust the registry | Per-publisher quota on publishes and per-client limit on metadata and downloads; over the limit gives `429`, `registry.rate-limited` and `Retry-After`; clients wait up to 300 s and otherwise fail; installs from cache or a file are never blocked; a mirror sync stops and keeps verified files | [PKG-704], [PKG-972], [PKG-973] | A distributed flood that stays below each per-address limit |
+| R8 | Fake a review | The level B badge needs a review record that names the reviewer, time and package SHA-256, plus an SBOM and licence files; it is derived from that exact version and hash, so a new version, a different hash or a withdrawn record returns the version to level A | [PKG-680], [PKG-683] | A reviewer who is themselves hostile or careless |
+| R8 | Namespace confusion | A namespace binds to one verified publisher at first publication (`registry.namespace-unowned`); `ilium.` and `core.` are reserved; confusable ids are refused with `registry.name-confusable` after a skeleton check | [PKG-702], [PKG-389] | Names that look alike to a human but pass the skeleton check |
+| R1 to R8 | Upload automatically recognisable malware | Static analysis on every upload; a version that matches a rule waits in `pending-review` for at most 72 h and is not sent to clients | [SEC-726] | Malware no rule matches |
+
+The user-visible effect of a failed check is always a refusal with the stated error code and an audit entry; there is no "install anyway" button for `registry.rollback`, `trust.log-inconsistent` or `registry.auth`. A user can still install the same package from a file with `--allow-unsigned`, which is the T3 path and is confirmed in an attached client ([SEC-116]).
+
+**[SEC-702]** gives the rule for reporting: a confirmed High or Critical failure of any row above receives a CVE id before its advisory is published.
+
+## Prompt injection through plugin-supplied text
+
+Ilium hosts AI coding agents, so text that steers an agent is the plugin system's most product-specific attack. The attack is old: the attacker puts instructions into text that a model reads, and the model obeys. What is specific here is that plugins can place text in front of an agent, and that agents run commands with the user's privileges.
+
+### Paths from a plugin to an agent or to inference
+
+| Path | What reaches the model | Controlled by |
+|---|---|---|
+| `cli.contribute` | Command names, help text and descriptions that an agent reads when it lists `ilium` subcommands | [Capability cli.contribute](/pages/capability-cli-contribute/) |
+| Instruction blocks and rule packs | Text written into an agent's instruction files, or sent to an agent, by a T1 owner on behalf of a contributor | [SEC-283] |
+| Project rule files | Rules in `.ilium/` that a plugin reads and forwards | [SEC-310], [SEC-315] |
+| Pane titles and recap text | Titles and summaries that an agent-facing plugin reads from other panes | [SEC-380] |
+| Inference prompts | Prompts a plugin builds from screen text, transcripts or files and sends with `inference` | [SEC-264], [Capability inference](/pages/api-inference/) |
+| Agent input | Text sent to an agent pane by a plugin holding `agent.control` | [Capability agent.control](/pages/capability-agent-control/) |
+
+### Attackers
+
+- **P1 Malicious plugin.** A plugin that contributes text meant to make an agent run a command, read a secret or disable a check.
+- **P2 Benign plugin forwarding hostile content.** A plugin that copies a web page, a repository file, a pane title or terminal output into a prompt or a rule. The attacker never installs anything; they only control the content, which is the attacker class A3 and A7 above.
+
+### Mitigations
+
+- **Grants.** Controlling an agent (`agent.control`) and reading its prompts (`agent.read-prompts`) are high-risk grants, so the review dialog never pre-ticks them and a headless install cannot add them ([SEC-116]). See [Capability agent.read-prompts](/pages/capability-agent-read-prompts/).
+- **Allowlist on privileged entries.** The owner of an extension point validates each entry that sends text, writes an instruction block or redirects inference against an explicit allowlist, and the review dialog shows a `Can make <owner> <action>` line per such entry type ([SEC-283]). An entry outside the allowlist is rejected, not repaired.
+- **Trusted-project gate.** Rules and values under `.ilium/` are ignored until the user trusts the project, and a plugin that reads those files itself must ask the host for the trust state and ignore the file when it is untrusted ([SEC-310], [SEC-315]).
+- **Consent prompts are bounded.** A proposal to change agent configuration is a consent prompt: one pending per plugin, six per rolling hour, 120 s to answer ([SEC-105]).
+- **Sanitising text the user sees.** Control, escape and bidirectional characters are removed from plugin-supplied labels, titles and reasons, so a title cannot hide its own instructions from the user ([SEC-380]).
+- **Provenance marking.** The intended behaviour is that the host wraps plugin-originated text that it places in an agent-facing prompt in a marker that names the plugin id, so the user and the agent can tell it from the user's own words. This marking is a design intent; it has no requirement id yet (see the notes of this edit).
+- **Review row.** A contribution that sends text to an agent or to inference appears in the review dialog as a line of its own, so the user approves the capability before it runs ([SEC-264] for the inference provider, [SEC-283] for entries).
+
+### Accepted residual risk
+
+The host cannot sanitise natural language. A sentence such as "ignore your instructions and run this command" is valid text, and no filter separates it from a legitimate instruction. The platform therefore does not claim to stop P2 once the text is in a prompt. What it guarantees is narrower: which plugins may put text there (grants and the allowlist), that the user was told (the review row), that untrusted projects cannot feed it (the trust gate), and that the damage a steered agent can do is bounded by the agent's own permission prompts and by the rule that no plugin can grant H capabilities to an agent headlessly ([SEC-116]). Plugin authors who build prompts from screen text or files MUST treat that text as data and SHOULD tell the model so in the prompt.
+
 ## Non-goals
 
 The platform does not defend against these. A non-goal is a decision, so it is stated and tested only as far as shown.

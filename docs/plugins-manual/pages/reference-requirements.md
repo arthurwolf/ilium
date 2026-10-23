@@ -110,6 +110,33 @@ Each area page below lists its requirements with an id, a rule and a test.
 | Panes | `PAN` | [Panes](/pages/reference-requirements-panes/) | 21 |
 | Rendering | `RND` | [Rendering](/pages/reference-requirements-rendering/) | 20 |
 
+### How a proposed row becomes a confirmed requirement
+
+Many rows carry the marker `(proposed, owner to confirm)` next to a number, a command or a whole statement, for example [SEC-101], [DEV-975] and [PKG-958]. The marker means the value is the manual's best current proposal and no owner has decided it yet. A proposed value is a design input, not a promise to plugin authors.
+
+**Who the owner is.** Each prefix has one owner role: a named maintainer who is listed in the maintainer file of the repository for that prefix. The owner decides the values of every row under the prefix. `SEC` rows are owned by the security maintainer, `PKG` rows by the release maintainer, and the other prefixes by the maintainer of the matching host crate. One person can hold several roles; a decision on a row is never made by its author alone.
+
+**How a confirmation is recorded.** Confirming a row is one change that does three things together:
+
+1. The row loses the marker. The number stays if the owner accepts it, or changes if the owner decides otherwise.
+2. The decision gets a `D<n>` entry in [Design decisions](/pages/design-decisions/) with the row id, the confirmed value, the old value if it changed, the reason and the date `YYYY-MM-DD`.
+3. The row's test changes from `pending: test to be written` to a real test name, or the change is not merged.
+
+A row without the marker and without a decision entry is an error in the manual and is fixed by adding the entry.
+
+**The release gate.** No host release may ship a MUST or MUST NOT row that still carries the marker. The release checklist counts the markers per lane with `rg -c 'proposed, owner to confirm' pages/reference-requirements-*.md` and fails when a MUST row is still marked. SHOULD and MAY rows may ship marked; the release notes list them as provisional. `ilium plugin check` does not read the manual: it counts markers only in plugin packages it validates, so it cannot clear a host release. Plugin authors read the marker as "this value may still change before the host release that makes it final". A value without the marker is final for that release.
+
+**How an owner changes a proposed value.** The row is rewritten in place and the marker stays until the confirmation change above. A confirmed row is never reused for a different meaning: if the meaning changes, the old id is retired (ids are never reused, see the id rules) and a new id is added.
+
+**How a contract change after version 1 is proposed and approved.**
+
+1. The author writes a proposal that names the affected ids, the old and new behaviour, the migration for existing plugins and the tests.
+2. Two maintainers review it, and one of them is the owner of the affected prefix. The author cannot be a reviewer.
+3. The change must be additive only, as defined in [Versioning](/pages/versioning/#the-rule-after-version-0.1.0). A change that removes or changes the meaning of a shipped item is refused; the route is a new item and an unstable-then-stable graduation.
+4. The approved change gets a `D<n>` entry, and the rows change in the same merge.
+
+**Worked example.** [DEV-975] proposes that an unstable feature graduates or is removed within 6 minor releases (proposed, owner to confirm). The release maintainer reviews release history, finds that a feature has stayed unstable for only four releases in practice, and decides on 4. The change removes the marker, rewrites the row to say 4 minor releases, adds the entry `D<n>` with old value 6, new value 4 and the date, and adds the checklist test for the fourth-minor-release flag. A plugin author who read 6 as a proposal is not broken, because the marker warned that the value could change; a plugin that used a feature past its fourth minor release now sees the checklist blocking flag.
+
 ### Coverage rule
 
 Every behaviour that a page states with must, never, only or a fixed number MUST appear in one requirements row. Check the rule with these commands from the manual folder.

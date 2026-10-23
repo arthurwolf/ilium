@@ -847,6 +847,88 @@ export const { lifecycle, handler, views } = definePlugin({
 | The `ui.panels` grant is declined | Every `ui` import returns `not-permitted`, and the panel is not registered. |
 | The grant changes during a call | `revoked`. The plugin is activated again. |
 
+### Input methods, dead keys, compose sequences and non-US keyboard layouts
+
+The host never sees the keyboard. It sees the bytes and key reports that the outer terminal sends after the operating system, the keyboard layout and the input method have finished their work. Everything below follows from that one fact.
+
+**Composed text.** An input method (a CJK IME, a Vietnamese Telex or VNI engine, a dead key or a Compose sequence) shows its pre-edit text inside the terminal emulator or in the operating system's own candidate window. The host receives only the committed result. A `text-input` or `text-area` therefore inserts one complete grapheme cluster per commit and never a partial code point or a half-built syllable. The `text` value of `changed` and `submitted` is always valid UTF-8 and always ends on a grapheme boundary. The plugin hears nothing during pre-edit, and the debounce of [When the plugin hears about a change](#when-the-plugin-hears-about-a-change) starts at the commit, not at the first key of the sequence. [WID-026]
+
+| Typed by the user | What the terminal sends | What the widget stores |
+|---|---|---|
+| Dead acute then `e` (French or Spanish layout) | `é` (U+00E9) | one grapheme, `é` |
+| Compose, `a`, `e` | `æ` (U+00E6) | one grapheme, `æ` |
+| AltGr+`e` on a German layout | `€` (U+20AC) | one grapheme, `€` |
+| Telex `d`, `d` (Vietnamese) | `đ` (U+0111) | one grapheme, `đ` |
+| IME commit of `日本語` | three characters in one paste-like burst | three graphemes, one `changed` after the debounce |
+| Dead key then a key that does not combine | both characters, in order | two graphemes |
+| Dead key then Escape | nothing, the dead key is dropped by the operating system | the text is unchanged and no event is sent |
+
+A terminal that sends a decomposed form (`e` plus U+0301) gives a text with a base letter and a combining mark. The caret and Backspace treat the pair as one grapheme, so one Backspace removes both. The host does not normalise the text to NFC or NFD, because the stored value must equal what the user typed. A plugin that compares text MUST normalise it itself. `max-length` counts characters (Unicode scalar values) in a `text-input`, so a decomposed `é` uses two of them. `max-bytes` of a `text-area` counts UTF-8 bytes. The host refuses a commit that does not fit entirely: it never inserts half of an IME result.
+
+**Layouts and `key-capture`.** A `key-capture` widget records the chord that the terminal reports for the key the user pressed. It does not read scan codes and it does not know the layout. On an AZERTY keyboard the key that is `Q` on a US keyboard reports `a`, so the user who presses it gets `Ctrl+A`, and the widget stores `Ctrl+A`. On Dvorak the key at the US `S` position reports `o`. The stored chord is exactly what the terminal sent, and the display shows the layout-independent name of that chord: the letter in upper case, named keys spelled out (`Enter`, `Tab`, `F5`, `PageUp`), and modifiers in the fixed order `Ctrl+Alt+Shift+Super+` followed by the key. A chord captured on one layout is therefore the same string the same keys produce on that layout later, and it is also what the plugin applies, for example through `contributes.commands`. A user who changes layout changes which physical key produces a stored chord, but never the chord string. A plugin MUST NOT translate a captured chord to a physical position.
+
+**Chords the terminal consumes.** Some chords never reach the host, because the terminal emulator or the operating system keeps them: `Ctrl+Shift+C`, `Ctrl+Shift+V`, `Ctrl+Shift+T` and similar emulator shortcuts, `Alt+Tab`, and on some emulators AltGr combinations, which the emulator may deliver as `Ctrl+Alt` or as the composed character. In the legacy keyboard protocol some chords also collapse into the same byte: `Ctrl+I` is Tab, `Ctrl+M` is Enter, `Ctrl+Shift` plus a letter is `Ctrl` plus that letter. The widget cannot tell a swallowed chord from a chord that was never pressed. It keeps waiting, and the user leaves with Escape, which sends `closed`. When the host knows the terminal cannot report a chord class at all (for example `Ctrl+Shift` plus a letter under the legacy protocol), a field that already holds such a chord and a capture that the user starts show the muted text `not available in this terminal` in place of the value, and the widget takes no chord that it cannot report. A chord that the plugin set through `chord` is kept and shown as set; only the capture is blocked. The `reserved-check` still runs for every chord that was taken.
+
+**Kitty keyboard protocol.** When the outer terminal supports the kitty keyboard protocol, the client enables it at start and `key-capture` uses it automatically. The terminal then reports the exact modifiers (including `Ctrl+Shift` and `Super`), the key as the layout produced it, and separate press and release events. Every chord of the grammar can be taken. No prop switches this on or off, and a plugin cannot tell which protocol is active from the widget. A plugin that must work on both protocols should offer chords such as `Alt+C` or named keys, as [Keys](/pages/api-keys/) recommends.
+
+| Case | Result |
+|---|---|
+| IME is still composing | No event. The pre-edit text is not in the widget. |
+| IME commit larger than the room left by `max-length` or `max-bytes` | The whole commit is refused, no event is sent. |
+| AltGr character on a terminal that reports it as `Ctrl+Alt` | Text widgets insert the character when the terminal also sends the composed text, and ignore the report otherwise. `key-capture` stores `Ctrl+Alt+<key>`. |
+| `key-capture` and a chord the terminal consumes | The capture keeps waiting. Escape sends `closed`. |
+| `key-capture` and a chord class that the active protocol cannot report | `not available in this terminal`, no capture. |
+| Kitty protocol present | Exact modifiers, used automatically. |
+| Layout changes while a capture runs | The next chord is taken as the new layout reports it. |
+
+**Test fixtures.** The fixtures run on the fake host with a scripted terminal that sends the listed bytes.
+
+| Fixture | Input | Expected |
+|---|---|---|
+| `input_dead_key_acute_e` | `U+00E9` into a `text-input` | text `é`, one `changed` after 600 ms |
+| `input_decomposed_backspace` | `e`, `U+0301`, Backspace | text is empty after one Backspace |
+| `input_ime_commit_cjk` | `日本語` as one burst | text `日本語`, three graphemes, one `changed` |
+| `input_ime_refused_at_limit` | `max-length` 2, commit `日本語` | text unchanged, no event |
+| `capture_azerty_a` | AZERTY key reporting `Ctrl+A` | `changed` with `Ctrl+A` |
+| `capture_dvorak_o` | Dvorak key reporting `Ctrl+O` | `changed` with `Ctrl+O` |
+| `capture_swallowed_chord` | no bytes after Enter, then Escape | no `changed`, one `closed` |
+| `capture_legacy_ctrl_shift` | legacy protocol, `chord` `Ctrl+Shift+K` | capture blocked, `not available in this terminal` |
+| `capture_kitty_ctrl_shift` | kitty protocol, `Ctrl+Shift+K` report | `changed` with `Ctrl+Shift+K` |
+
+Requirement ids for this section: [WID-026] for the debounce of committed text, [USR-303] for keyboard operation. The rules on normalisation, refusal of oversize commits and `not available in this terminal` have no requirement id yet.
+
+### Bidirectional text in input widgets
+
+[AUT-607] states that the host draws cells from left to right and does not reorder or mirror right-to-left text. For `text-input` and `text-area` this means that the widget edits the string and the terminal decides how it looks.
+
+| Operation | Behaviour |
+|---|---|
+| Storage and events | The text is kept and sent in logical order, the order in which the user typed it. The `text` value of `changed` and `submitted` is that string. |
+| Left and Right | Move the caret one grapheme backward and forward in the string. They follow the string, not the screen, so inside a Hebrew word Left moves toward the end of the word on screen. |
+| Home and End | Go to the start and the end of the logical line, not to the left or right screen edge. |
+| Backspace and Delete | Remove the grapheme before and after the caret in logical order. |
+| Selection | Spans one logical range. On screen a range that crosses a direction change can look split into several pieces. |
+| Insertion | A typed character lands at the caret's logical position. The terminal may show it left or right of the previous one. |
+| Bidi controls | The host inserts none (no U+200E, U+200F or U+202A to U+202E). Pasted overrides and isolates (U+202A to U+202E and U+2066 to U+2069) are stripped before the text reaches the widget, so a paste cannot reverse the display of the text around it. The marks U+200E and U+200F are kept, because they are legitimate user text. |
+| Width | Cells are measured as for any text ([USR-315]), so the caret, truncation with `…` and the leaders are right for Arabic and Hebrew letters, which are one cell wide. |
+| Visual order | Decided by the terminal. Many terminals apply no bidi algorithm at all and show the string cell by cell, left to right. Others reorder it. The host cannot detect which. |
+
+Because the caret is logical and the screen is not, a user typing Arabic in a settings row on a terminal that reorders can see the caret jump when the direction changes. This is a property of the terminal and no plugin can fix it. Two plugins that follow this table behave the same for the same script, and a plugin MUST NOT implement its own caret movement for right-to-left text.
+
+**Recommendation.** When a plugin needs correct display of Arabic or Hebrew, it shows that content read-only in a `text` widget in its own row, see [Text](/pages/widgets-text/), as [Internationalisation](/pages/guide-internationalisation/#right-to-left-text) says. It uses `text-input` or `text-area` for such scripts only when the user must edit them, and then states in its README that the display depends on the terminal. [AUT-607]
+
+| Case | Result |
+|---|---|
+| Hebrew text of 20 graphemes, caret at the end, Left pressed | The caret is before the 20th grapheme. One `changed` is not sent, because the text did not change. |
+| Paste of text with U+202E | The override is removed, the rest is inserted, one `changed` follows after the debounce. |
+| Mixed Hebrew and Latin text, Home | The caret goes to index 0 of the string. |
+| Selection from the middle of the Hebrew run to the middle of the Latin run | One logical range. Copy gives the characters of that range in logical order. |
+| `max-length` with Hebrew text | Counts Unicode scalar values, so niqqud marks count. |
+
+**Test fixture.** The fixture `bidi_mixed_hebrew_latin` uses the text `abc שלום def` in a `text-input` and in a `text-area`. Expected results: the stored and sent value is exactly `abc שלום def`; from the end of the text, four Left presses leave the caret between `ם` and the space, regardless of how the fake terminal draws the string; Home goes to index 0 and End to the end; shift-selecting the Hebrew word gives the range of its four graphemes; a paste of `‮abc` stores `abc` with no `U+202E` in the value; and `max-length` 12 accepts the 12 characters exactly. A second fixture, `bidi_arabic_read_only_text`, shows Arabic in a `text` widget and checks that no event is sent.
+
+Requirement ids for this section: [AUT-607], [USR-315], [WID-026]. The caret rules, the stripping of pasted overrides and the two fixtures have no requirement id yet.
+
 Requirement ids for this page: [WID-026], [WID-027]. See the [requirements index](/pages/reference-requirements/).
 
 ### See also

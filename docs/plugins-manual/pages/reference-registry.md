@@ -46,6 +46,8 @@ All paths are relative to the registry base URL, for example `https://plugins.ex
 | `revocations.json` | Revoked keys and blocked ids |
 | `blobs/<sha256>.iliumpkg` | One package, named by its hash |
 | `categories.json` | The closed list of categories (optional; a built-in list applies when absent) |
+| `quarantine.json` | The signed emergency-disable feed |
+| `log/head.json`, `log/entries/<n>.json`, `log/proofs/<sha256>.json`, `log/consistency/<m>-<n>.json` | The transparency log (optional; see its section) |
 
 ## Metadata documents
 
@@ -373,6 +375,170 @@ This section is target behaviour for the public plugin system. A namespace is th
 
 - [PKG-702] The registry MUST bind each namespace to one verified publisher at its first publication. It MUST refuse a publication by any other publisher with `registry.namespace-unowned`, MUST reserve the prefixes `ilium.` and `core.` for the project, and MUST refuse a new id that is confusable with an existing id after Unicode normalisation, case folding and removal of separators, with `registry.name-confusable`.
 - [PKG-703] A namespace with no published release for 24 months and no answer from its owner to two notices sent 30 days apart MUST be marked abandoned in the signed metadata. Only an abandoned namespace MAY be reclaimed, and a reclaimed id MUST NOT reuse the version numbers or the keys of the earlier owner, and MUST be announced in the transparency log.
+
+## Security metadata refresh independent of auto_update
+
+The setting `[plugins] auto_update` ([PKG-300]) controls only whether the host looks for and offers new package versions. Key revocations ([PKG-407], [PKG-247]), takedowns ([PKG-403]) and quarantines ([EXT-057]) reach a host only through metadata, so the host fetches that metadata on its own schedule.
+
+| Item | Behaviour |
+|---|---|
+| Who refreshes | A host with at least one URL in `[plugins.registry] urls` ([PKG-377]). A host with no configured registry makes no request. |
+| What is fetched | `timestamp.json`; when its snapshot version changed, `snapshot.json`; then only `revocations.json`, the quarantine feed (below) and the transparency log head, when `snapshot.json` lists a newer version of them. The order is that of [PKG-370]. |
+| Cadence | Every 6 hours with a random delay of up to 15 minutes, and once at server start, whatever `auto_update` is set to (`off`, `notify` or `install`). The cadence is fixed and `auto_update_interval_hours` ([PKG-301]) does not change it. |
+| What it never does | It never reads `index.json` or `plugins/<id>.json` for new versions, never shows an update notice, and never downloads a package. Update checks stay under `auto_update`. |
+| Switching it off | Only `[plugins] security_refresh = off` (default `on`) stops it. The host then makes no request without a user command, and shows `Security refresh is off` in `ilium plugin status` and on the Plugins screen. |
+| Policy | `security_refresh` is a policy item like `auto_update` ([PKG-305]). An administrator can set it and lock it ([Administrator policy](/pages/reference-admin-policy/)). A locked value shows `Set by your administrator` and a user edit is refused with `policy.locked`. |
+| Failure | A failed refresh (network, `registry.signature-invalid`, `registry.rollback`) keeps the cached documents and keeps enforcing them. The next attempt follows the retry waits of [PKG-373], then the next 6-hour slot. |
+| Stale data | After 7 days without a successful refresh the revocation data is stale ([EXT-072]). The host keeps enforcing it and shows `Revocation data is stale` with the date of the last success, in the Plugins screen header and in `ilium plugin status`. |
+| `--offline` | With `--offline` or `[plugins.registry] offline = true` ([PKG-378]) no refresh runs. The stale rule still counts the days since the last success, so an offline host shows the warning after 7 days. |
+
+## Transparency log documents and inclusion proofs
+
+The log of [PKG-700] is part of the file tree. It is an append-only Merkle tree (RFC 9162 hashing, SHA-256) over the entries below.
+
+| Path | Content |
+|---|---|
+| `log/head.json` | The signed head. Listed in `snapshot.json` like any metadata document |
+| `log/entries/<n>.json` | Entry number `n` (from 0), unsigned; its leaf hash is `SHA-256(0x00 \|\| JCS(entry))` |
+| `log/proofs/<sha256>.json` | The inclusion proof of the package whose digest is `<sha256>`; one file per package |
+| `log/consistency/<m>-<n>.json` | The consistency proof between tree sizes `m` and `n`; produced on request by a static copy for the sizes the registry publishes (every size that was a head) |
+
+**Entry.** A JSON object with the fields `index` (integer), `type` (`publish`, `yank`, `unyank`, `takedown`, `key-rotation`, `owner-change`, `token-revocation`, `recovery`), `plugin_id` (null for `token-revocation` and `recovery` of an account), `version` (null when not per version), `sha256` (package digest, null when none), `key_id`, `time` (UTC) and `previous` (the SHA-256 of the JCS form of entry `index - 1`; 64 zero hex digits for entry 0). A token value never appears ([PKG-970]).
+
+**Head.** `{ "signed": { "type": "log-head", "spec", "version", "expires", "tree_size", "root_hash" }, "signatures": [...] }`, signed with the `timestamp` role keys by the threshold of `root.json`, with the wrapper of every metadata document. `version` never goes down ([PKG-366]).
+
+**Inclusion proof.** `{ "tree_size", "leaf_index", "leaf_hash", "path": ["<hex>", ...] }`. The client rebuilds the root from the leaf hash and the path and compares it with `root_hash` of the head it holds.
+
+| Rule | Basis |
+|---|---|
+| Before each install or update the client fetches `log/head.json` and the proof of the package, verifies the head signature and the proof, and refuses on failure with `registry.signature-invalid` ([PKG-701]). | PKG-701 |
+| The client stores the last head it accepted. For a new head with a larger `tree_size` it fetches the consistency proof and verifies it; a head that is not an extension, or a smaller `tree_size`, is refused with `registry.rollback` and the stored head stays. | PKG-701 |
+| Size caps: `head.json` 16 KiB, one entry 8 KiB, one proof 4 KiB (at most 40 path hashes), one consistency proof 8 KiB. A larger response is aborted with `registry.size`. | PKG-369 |
+| Expiry: a head expires within 7 days of issue and is renewed by re-signing without content change, as `snapshot.json` is ([PKG-367]). An expired head is `registry.metadata-expired`. | PKG-367 |
+| A mirror copies `log/` byte for byte ([PKG-408]); a partial mirror ([PKG-409]) copies the head, the entries and proofs of its blobs, and the consistency proofs. A bundle ([PKG-412]) carries the head and the proof of each blob; the client checks them with the rules above, and `--offline` skips only the head expiry check. | PKG-408, PKG-412 |
+| Absence: a registry whose `root.json` has no `log` key (`"log": { "required": true }` declares one) has no log. The client then skips the check, shows `This registry has no transparency log` in the plugin detail view, and does not treat that as an error. When the root declares a log and the head or a proof is missing, the install is refused with `registry.not-found`. | PKG-700 |
+| The client keeps the log head per registry, so a registry that later drops its declared log is detected only by a new root that the client accepts under [PKG-364]. | PKG-364 |
+
+## The emergency-disable feed document
+
+The feed that [EXT-057] polls is the file `quarantine.json`. It is listed in `snapshot.json` with `version`, `sha256` and `length`, has the wrapper of every metadata document and is signed with the `timestamp` role keys ([PKG-653] applies by analogy). A feed without a valid signature of the threshold is refused with `registry.signature-invalid` and ignored ([EXT-057]).
+
+```json
+{
+  "signed": {
+    "type": "quarantine", "spec": "ilium-registry/1", "version": 6, "expires": "2026-10-19 12:00:00",
+    "entries": [
+      { "id": "com.example.notes", "versions": ">=1.2.0 <1.2.4", "reason": "Reads files outside its scope",
+        "severity": "high", "issued": "2026-10-12 10:00:00", "withdrawn": false }
+    ]
+  },
+  "signatures": []
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `id` | Plugin id |
+| `versions` | A version range in the syntax of [Versions and dependencies](/pages/reference-dependency-resolution/) |
+| `reason` | 1 to 500 characters of plain text |
+| `severity` | `low`, `medium`, `high` or `critical` |
+| `issued` | UTC time of the entry |
+| `withdrawn` | `true` lifts the quarantine of that range ([EXT-059]) |
+
+Limits: 1 MiB, at most 5,000 entries, expiry within 7 days (renewed by re-signing). A later entry for the same `id` and `versions` replaces the earlier one.
+
+| | Quarantine (`quarantine.json`) | Takedown (`revocations.json` `blocked_ids`) |
+|---|---|---|
+| Scope | A version range | An id or version |
+| Reversible | Yes, by a newer entry with `withdrawn: true` or by an upgrade to a version outside the range | No; the blob is removed ([PKG-403]) |
+| Resulting state | `quarantined` | `disabled-blocked` |
+
+The package state `quarantined` is added to [Plugin lifecycle states](/pages/reference-plugin-lifecycle-states/): running instances are stopped within 60 s of the poll, the package is not instantiated, its data is kept ([EXT-058]), the plugin is listed as `quarantined` with `reason` and `severity`, and `ilium plugin enable` is refused. Only a withdrawal or an upgrade lifts it ([EXT-059]). The feed is fetched in the refresh of "Security metadata refresh independent of auto_update".
+
+## Release notes in the signed version entry
+
+Each entry of `versions` in `plugins/<id>.json` has these extra fields:
+
+| Field | Type | Rule |
+|---|---|---|
+| `notes` | string | Plain text, at most 2,000 characters, no control characters except line feed |
+| `notes_url` | string or absent | An HTTPS URL to the full changelog |
+| `security` | boolean | `true` marks a security fix |
+
+`ilium plugin publish --notes <file>` reads `notes` from the file. Without the option the publisher takes the top section of the package's `CHANGELOG.md` (the file is a package file, not a manifest key, see [AUT-321]), cut at 2,000 characters. A publish with `notes` above 2,000 characters, with a control character, or with a `notes_url` that is not HTTPS is refused with `registry.policy` and the detail `notes-invalid`.
+
+The client takes the text from the signed entry, so the update notice of [PKG-304] and the store detail view ([PKG-535]) show it before any download. An absent field shows `No release notes`. `security: true` adds `Security fix` to the notice. The link in the notice is `notes_url` when present. The text is rendered as plain text and never as markup.
+
+## Notice to users running a yanked version
+
+At each metadata refresh the client compares the installed `active_version` of every plugin with the yank records of `plugins/<id>.json` ([PKG-396], [PKG-801]).
+
+| Rule | Behaviour |
+|---|---|
+| Notice | When the active version is yanked, the client shows a notice with the plugin name, the version, the yank `reason` and the newest non-yanked version. Actions: Update, Later, Keep this version. |
+| Frequency | At most once per version per 7 days; Later hides it for that period as in [PKG-304]; Keep this version hides it until the version changes. |
+| Listing | `ilium plugin list` and `ilium plugin status` show `yanked` on that version, with the reason in `--json`. |
+| Auto-update | With `auto_update = install` ([PKG-300]) a yank whose reason starts with `security:` is applied at the next safe point ([PKG-358] pins are overridden), unless an administrator pins the version in policy ([SEC-723] covers who may yank). A yank for any other reason is only offered. |
+| Locks | A lock file naming the yanked version still installs by sha256 with the warning of [PKG-803]. |
+| Offline | The notice appears at the first refresh after the host is online. |
+
+## Publisher account recovery and loss of the second factor
+
+These duties belong to the registry operator, under "Publish tokens".
+
+| Rule | Behaviour |
+|---|---|
+| Recovery codes | When a second factor is enrolled ([SEC-723]) the registry shows 10 single-use recovery codes once. Using one allows a new factor to be enrolled. |
+| Route for `user.<name>` | Without a code, another maintainer of the publisher id confirms the recovery with their own second factor. |
+| Route for a domain id | The publisher proves control with a fresh DNS TXT record ([PKG-386]). |
+| Hold | A recovered account cannot publish for 7 days. Every maintainer gets a notice on request, at the end of the hold and when it ends. Any maintainer can cancel the hold. |
+| Keys | A recovery never issues or changes a signing key. A key change stays under [PKG-238]. Tokens issued before the recovery are revoked ([PKG-970]). |
+| Sole maintainer unreachable | The namespace is not changed. If no version is published for 730 days the dormancy rule of [PKG-655] starts. |
+| Log | Each recovery, hold and cancel is a `recovery` entry in the transparency log ([PKG-819]). |
+
+## Retention of published versions and operator backups
+
+| Version kind | Retention |
+|---|---|
+| `stable` | Kept as long as any installed copy may update from it. Removed only by takedown ([PKG-399], [PKG-403]). |
+| `beta` and prerelease | Kept for at least 180 days after a later stable version is published. After that the operator may prune it with 30 days' notice on the plugin page. |
+| Pruned version | Its blob is removed and `plugins/<id>.json` keeps a `pruned` tombstone `{ "version", "sha256", "time" }` ([PKG-821] keeps the same form for takedowns). A lock file naming it fails with `registry.not-found`; the message names the tombstone and the `pruned` time. |
+
+Operator duties: back up the whole file tree and the signing keys (root keys offline, [PKG-690]); restore into an empty location at least every 90 days and check that `snapshot.json` hashes match. If a restore loses entries, the operator updates the status page within 1 hour ([AUT-952]) and re-publishes from the transparency log. Retirement of a registry URL follows [AUT-951]. For the procedure see [Administrator failure runbook](/pages/guide-admin-failure-runbook/).
+
+## Paid and licensed plugins
+
+| Rule | Behaviour |
+|---|---|
+| Protocol | The registry carries no payment, licence or entitlement data and never gates a download on payment. |
+| Declaration | A plugin that checks a licence key or subscription says so in its `description`, declares the `http` grant to the exact licensing host, works in a reduced mode without the key, and sets `license` to an SPDX expression of the proprietary terms ([PKG-019]; `LicenseRef-` expressions are valid). |
+| Refusal | A plugin that hides a paywall or disables itself without that declaration is refused under [PKG-402] with `registry.policy` and the detail `undeclared-licensing`. |
+| Index | The version entry has a boolean `licensing`. When `true` the store detail view shows `Requires a licence key` next to the grants ([PKG-535]). An absent field means `false`. |
+| Ratings | Ratings stay out of scope ([PKG-406]). |
+
+## Publisher security advisories for a plugin version
+
+A publisher marks their own versions as vulnerable with a signed `advisories` array in `plugins/<id>.json`. Each entry has the OSV fields of [SEC-700]: `id`, `aliases`, `affected` (ranges), `severity`, `fixed`, `published`, `summary`.
+
+| Rule | Behaviour |
+|---|---|
+| Publishing | `ilium plugin advisory publish <id> --file <osv.json>` is signed by a trusted key of the owner. A signer who is not an owner is refused with `registry.not-owner` ([PKG-800]). The registry appends an entry to the transparency log. |
+| Plugins screen | A plugin with an installed affected version shows `Security update available` with the severity, in `ilium plugin list` too. |
+| Update | The client prefers the `fixed` version. |
+| Install | A fresh install of an affected version is refused unless `--accept-risk` is passed. |
+| Takedown and project advisories | An advisory does not stop the plugin; a takedown ([PKG-403]) does. Project advisories ([SEC-703]) may lead to a quarantine ([EXT-057]) when the publisher does not act. |
+
+## Operator security hardening
+
+| Area | Rule |
+|---|---|
+| Tokens | Stored only as salted argon2id hashes and shown once at issue ([PKG-968]). |
+| Keys | Online role keys in an HSM or cloud KMS with a signing audit log; root keys offline ([PKG-690], [PKG-691]). |
+| Audit | Every publish, yank, owner change and token event goes to an operator audit log, mirrored publicly by the transparency log ([PKG-970]). |
+| Alerts | First publish from a new address, a publish outside the publisher's usual hours, and a burst of versions (above the quota of [PKG-704]) alert the operator. |
+| Abuse | The intake of [PKG-705] acknowledges within 1 business day. |
+| Logs | Access logs keep addresses at most as long as [USR-956]. |
+| Recovery | Backup and disaster recovery: [Administrator failure runbook](/pages/guide-admin-failure-runbook/). |
 
 ## Edge cases
 

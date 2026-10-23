@@ -23,6 +23,7 @@ Contract version: `ilium:plugin@0.1.0`. Requirement ids have the form `[USR-nnn]
 - What a plugin can do to you
 - Where to manage plugins
 - Common tasks
+- Getting help inside Ilium
 - Errors and edge cases
 - Requirements
 
@@ -113,6 +114,19 @@ Open **Settings** with `Ctrl+B` then `:`, or press the gear in the tree footer. 
 | Know what is sent where | Read the privacy page | [Plugin privacy](/pages/user-privacy/) |
 | Lock plugins on a shared machine | Write a policy file | [Administration guide](/pages/guide-administration/) |
 | Find a quick answer | Questions and answers | [Plugin FAQ](/pages/user-faq/) |
+
+### Getting help inside Ilium
+
+Every explanation you need is reachable from the screen that raised the question, without a browser.
+
+- **Help viewer.** Open it with the command `Show the key reference` of the Keys and help core plugin (`Ctrl+B` then `F1`), or from the command palette under the category Help. Core plugin topics and every installed plugin's help topics appear in one list. Each plugin's topics are grouped under that plugin's name. A plugin you turned off keeps its topics listed, marked "off", so you can still read what it does before you turn it on.
+- **Search.** Type in the search box of the help viewer. It matches the text of topics, so it finds the commands, settings and views that a plugin names in its topics (a plugin author SHOULD name each one, [DEV-788]). It searches the language you chose for the interface when the plugin ships a translation, and otherwise the English text. A plugin that names nothing in its topics can only be found by its name and title.
+- **Tooltip.** Press `F1` while any button, row, field or panel has focus. A short tooltip appears next to it with its purpose and its key. Press `Esc` to close it. A plugin that gave no tooltip text shows the element's title only.
+- **Codes in notices.** A notice or command-line message that shows a code (for example `plugin.not-found`) can be explained with `ilium plugin explain <code>`. It prints one sentence for the cause and one for the next step and exits 0. For a code Ilium does not know it prints nothing useful and exits 2 ([USR-347]). The output is in English.
+- **A plugin that stopped.** Open Settings, then Plugins, and select the row. The Health column and the detail show the reason in plain words. See [Plugin health for users](/pages/user-plugin-health/).
+- **Reporting a problem.** Use the `support` link in the plugin's store entry, shown on its detail page. For a plugin installed from a file, use the contact its publisher gave you. A plugin without a `support` link shows "no support link". Ilium never sends a report for you.
+
+What works offline: the help viewer, its search, the F1 tooltip, `ilium plugin explain` and the Plugin health page read only local files and need no network. Only the `support` link needs a network, because it opens in your browser. If the plugin's help files are missing from the install, its group in the help viewer shows "help not installed", and the other plugins' topics are unaffected.
 
 ### Errors and edge cases
 

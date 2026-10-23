@@ -211,8 +211,31 @@ The `correlation` value is a `bigint` in TypeScript. It names the submission, so
 | Same key within 10 minutes | `duplicate(request-ref)`; no second notice | Nothing. The first notice stands. |
 | More than 6 notices per minute | `refused(rate-limited)` for the extra ones | Wait a minute, or merge the notices. |
 | Grant revoked later | Later submissions are `refused(not-permitted)`; queued notices stay | Re-read the grant on activation. |
+| No desktop notification service: SSH or headless session, Linux without a freedesktop notification daemon on the session bus, Windows without a usable toast registration, macOS with notification permission denied | `ok`. The host queues the notice, finds no working desktop backend, and shows the notice in the client footer and sets the attention mark on the pane's row instead. The sound still plays if an audio backend exists | Nothing. Do not treat `ok` as proof that a desktop notice appeared; keep the in-app twin ([CAP-882]). |
+| No desktop service and no client attached | `ok`; the notice is kept in the notice history and shown in the footer when a client attaches | Nothing. |
 
 A notice already queued is not recalled if the grant is revoked afterwards. The desktop may also hide a notice under its own focus or do-not-disturb rules. The plugin receives `ok` in both cases, because `ok` means the notice was queued, not that the user saw it.
+
+### No desktop notification service available
+
+Many Ilium sessions run where no desktop exists: a terminal multiplexer used over SSH, a headless server, a container. The server process runs on that host, so it looks for a notification service on that host, not on the machine where the user's terminal is.
+
+| Host | What the host looks for | Result when it is missing |
+|---|---|---|
+| SSH or headless session | A reachable desktop session (no display, no session bus) | Desktop channel unavailable |
+| Linux | A freedesktop notification daemon on the user session bus | Desktop channel unavailable |
+| Windows | A toast registration for the Ilium application id | Desktop channel unavailable |
+| macOS | Notification permission granted to the host process | Desktop channel unavailable |
+
+The host probes the backend when the desktop channel is first used and again after each failure, at most once a minute. A probe result is never cached across a server restart.
+
+**What the plugin receives.** `ok`. The grant is valid and the notice was accepted, so the outcome does not change, and the plugin cannot learn which channel showed it. A plugin must not depend on a desktop notice appearing ([CAP-882]). The `notifications` core plugin treats the missing channel as a `refused` result on that channel only, logs it, and still delivers the in-app text and the other channels ([CAP-885]); see [core plugins](/pages/core-plugins/#alert-channels).
+
+**Fallback.** The notice becomes a client footer notice, as in the focused case above, and the pane's row gets the attention mark, which stays until the user looks at the pane or the event ends. The title keeps its plugin-name prefix, and the same sanitising and rate limits apply ([SEC-045]).
+
+**What the user sees.** The desktop notifications row in Settings shows `unavailable` with the reason (`no display`, `no notification daemon`, `toast not registered` or `permission denied`) instead of an on/off state. The row cannot be switched on while the reason holds. It returns to its normal state after the next successful probe. `ilium plugin info` for the notifying plugin lists the same reason, as described in [core plugins](/pages/core-plugins/).
+
+Requirement wording for this behaviour is proposed and needs an ID in the requirements files; [HST-389] and [CAP-885] are the nearest existing IDs ([Platform support](/pages/reference-platform-support/)).
 
 ### What the user sees
 

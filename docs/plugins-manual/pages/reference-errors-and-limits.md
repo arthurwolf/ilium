@@ -266,6 +266,7 @@ The table lists the per-plugin limits. The values belong to API version `ilium:p
 | `decorations` | 4,096 | 16,384 | 4,096 | `refused(quota-exceeded)` |
 | `node_metadata_kib` | 64 | 256 | 64 | `quota-exceeded` |
 | `storage_bucket_mib` | 16 | 256 | 16 | `quota-exceeded` |
+| `storage_bucket_keys` (entries per bucket) | 65,536 | 262,144 | 65,536 | `quota-exceeded` (`key-count`) |
 | `disk_mib` (`data` plus `cache`) | 256 | 4,096 | 256 | `failed(quota-exceeded)` |
 | `fs_write_mib` (one call) | 16 | 64 | 16 | `invalid-argument` |
 | `fs_read_all_mib` | 64 | 512 | 64 | `failed(quota-exceeded)` |
@@ -856,6 +857,35 @@ Target behaviour of the production plugin system.
 - [ABI-061] The host MUST bound the nesting depth of every decoded WIT value, including nested JSON strings and recursive widget trees, at 32 levels, and MUST NOT let decoding recurse on the native stack beyond that bound.
 - [ABI-062] A value nested deeper than the bound MUST be refused with the stable code `abi.depth-exceeded` and MUST NOT trap the plugin or the host.
 - [ABI-063] The host MUST bound decoding work per call by the same limits whether the value comes from a plugin return or from a host-built event, and MUST count a refusal in the ABI refusal metric of ABI-079.
+
+### Entries per bucket and the unpaged `keys` call
+
+A bucket is bounded by bytes (`storage_bucket_mib`, 16 MiB by default) and also by the number of entries it holds. Without an entry cap, a bucket of 256-byte keys and tiny values holds tens of thousands of entries, and one `keys` call would copy every key into the plugin's linear memory. This section defines the entry cap, the size of a `keys` result and the paged call.
+
+**The entry cap.** `storage_bucket_keys` counts the keys of one bucket: 65,536 by default and 262,144 at the T1 ceiling. T2 and T3 plugins use the default and may ask for a lower value only; the T2 and T3 ceiling is the default. The cap applies to each project bucket and each session bucket separately, like the byte quota ([HST-674]). A `put` of a new key into a bucket that already holds `storage_bucket_keys` entries returns `quota-exceeded` with the message `key-count`. A `put` that replaces the value of an existing key is not a new entry and is never refused for the key count. `remove` frees an entry at once.
+
+**Two quotas, one check order.** The byte quota and the entry cap are independent. A write is refused when either is exceeded. The host checks the entry cap first, then the byte quota, so the message names the first limit that failed: `key-count` or the byte message. A bucket can be full by bytes with few entries (large values), or full by entries with few bytes (many tiny values). With the default limits the 16 MiB byte quota is reached first only when the average entry is larger than 256 bytes.
+
+**`write-batch`.** A batch is atomic ([LIF-117]). The host counts the entries the batch would add (keys not yet in the bucket, minus keys it removes) and checks the cap on the final state, not entry by entry. A batch that would leave the bucket over `storage_bucket_keys` returns `quota-exceeded` with the message `key-count`, keeps every previous value and writes nothing. The batch limits of 256 entries and 4 MiB are unchanged. A batch that removes some keys and adds the same number of new keys passes at a full bucket. Durability follows [LIF-118]: the call returns after the flush.
+
+**The size of a `keys` result.** `keys(bucket, prefix)` returns at most 4,096 keys, sorted by byte order. With the 256-byte key maximum the result is at most about 1 MiB. If the prefix matches more than 4,096 keys, the call returns `invalid-argument` with the message `keys-result-too-large` and no partial list, so a plugin never reads a silently cut list. The plugin then narrows the prefix or pages.
+
+**Paged listing.** `keys-page(bucket, prefix, cursor, limit)` returns `keys-page-result`: a list of at most `limit` keys in byte order and a `next-cursor`. `limit` is 1 to 1,024. An empty `cursor` starts at the first match. The `next-cursor` is empty on the last page. A cursor is an opaque string of at most 300 bytes; the plugin must not parse it. An unusable cursor returns `invalid-argument` with the message `cursor`. Paging does not hold a snapshot: a key added or removed between two pages may or may not appear, but a key present for the whole walk appears exactly once and no key appears twice.
+
+| Call | Success | Errors |
+|---|---|---|
+| `put` of a new key | stored | `quota-exceeded` (`key-count` or the byte message), `invalid-argument` |
+| `write-batch` | all entries applied | `quota-exceeded` (`key-count`), `invalid-argument` (over 256 entries or 4 MiB) |
+| `keys` | up to 4,096 keys | `invalid-argument` (`keys-result-too-large`) |
+| `keys-page` | up to `limit` keys and a cursor | `invalid-argument` (`cursor`, or `limit` outside 1 to 1,024) |
+
+**What the user sees.** A refused write is not shown in the interface: the plugin decides how to react. `ilium plugin limits <id>` shows `storage_bucket_keys` with the requested and applied values and the entry count of each bucket ([HST-683]). `ilium plugin logs` records each `key-count` refusal once per minute per bucket.
+
+**Failure modes.** A plugin that ignores `quota-exceeded` on `put` loses the new entry but keeps its old data. A plugin that calls `keys` with an empty prefix on a large bucket gets `keys-result-too-large` and no data; it must use `keys-page`. A crash during a `keys-page` walk leaves no host state, since the cursor lives in the plugin.
+
+The SDKs expose `storage::keys_page` in Rust and `storage.keysPage` in TypeScript. See [Storage](/pages/api-storage/) and [Persistence and restart](/pages/reference-persistence-and-restart/).
+
+- Proposed rules (owner to confirm; no requirement ID is assigned yet): the host MUST bound each bucket to `storage_bucket_keys` entries and refuse the excess with `quota-exceeded` (`key-count`); `keys` MUST return at most 4,096 keys or `invalid-argument` (`keys-result-too-large`); `keys-page` MUST return at most 1,024 keys per page with an opaque cursor.
 
 ## Production additions: T3-abi-api
 

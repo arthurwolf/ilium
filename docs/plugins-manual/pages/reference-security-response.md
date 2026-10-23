@@ -95,6 +95,37 @@ Target behaviour (specified here before the code is written).
 - [SEC-440] The disclosure policy MUST state a safe harbor: the project MUST NOT start or support legal action against a reporter who acts in good faith, tests only their own installation, stops at proof of the issue and keeps the report private until the embargo of [SEC-321] ends.
 - [SEC-441] A reporter who asks for it MUST be credited by name or handle in the advisory of [SEC-322]; a reporter who asks for anonymity MUST NOT be named. The project MAY shorten the embargo by agreement with the reporter, and MUST NOT lengthen it past the 90 days of [SEC-321] without the reporter's written consent.
 
+## Researcher rewards and acknowledgement
+
+This section says what a reporter receives for a valid report. It extends the safe harbor of [SEC-440] and the credit rule of [SEC-441]. Amounts and the programme decision are proposed, owner to confirm; until the owner confirms them, the page published with the product MUST state the no-bounty position below and nothing else.
+
+**Rewards.** The project runs no cash bounty at launch (proposed, owner to confirm). A valid report earns credit, and the project MAY pay an ex-gratia reward for a Critical or High host or sandbox flaw ([HST-520]) once the owner funds one. The proposed table, all in euros, paid once per distinct flaw:
+
+| Rating of the confirmed flaw | Proposed reward |
+|---|---|
+| Critical (sandbox escape, authentication bypass in the host) | 5000 (proposed, owner to confirm) |
+| High | 1500 (proposed, owner to confirm) |
+| Medium | 300 (proposed, owner to confirm) |
+| Low | Credit only |
+
+The project rates the flaw with the CVSS v4 vector of [SEC-700], and the rating in the advisory is the rating that is paid. The security contact decides the rating and the amount, tells the reporter both in writing with the acknowledgement of [SEC-321], and gives the reasons if the rating differs from the reporter's. The project pays only after the fix is released and the advisory is published. A reporter who disagrees can ask for one review by a second maintainer, whose decision is final.
+
+**Credit.** Credit does not depend on a reward. Every valid report that leads to an advisory is named in `credits` of that advisory ([SEC-700]) by the name or handle the reporter chose, or not named at all if they asked for anonymity ([SEC-441]). The project keeps a hall-of-fame page listing each credited reporter with the advisory id and the year; a reporter can ask to be removed from it at any time, and the advisory keeps the entry only if they did not ask for anonymity. Co-reporters of the same flaw are all credited when they reported before the fix was released.
+
+**Ineligible reports.** The project closes these without a reward or hall-of-fame entry and tells the reporter the reason:
+
+- Social engineering or phishing of maintainers, publishers or users.
+- Denial of service against the registry, the documentation site or the project's infrastructure, including volumetric tests. A resource-exhaustion flaw in the host that a plugin without a grant can trigger is not in this class and stays eligible.
+- Reports of accepted risks and non-goals listed in the [Threat model](/pages/reference-threat-model/), such as other local processes running as the same user.
+- Findings in a third-party plugin: these follow [SEC-703] and go to the publisher, though the reporter is still credited when the publisher publishes an advisory.
+- Automated scanner output with no working proof, and testing that breaks the safe harbor conditions of [SEC-440] (another user's installation, data access beyond proof of the issue).
+
+An ineligible report that is still a real defect is handled as an ordinary bug and the reporter is told where it went. Ineligibility never removes the safe harbor for a reporter who acted in good faith.
+
+**Duplicates.** The first report received by the security contact that contains enough detail to reproduce the flaw earns the reward and the lead credit; the receipt time of [SEC-321] decides. Later reports of the same root cause are duplicates: they earn credit as co-reporters but no second reward. A report already known to the project is answered with `duplicate` and the id of the tracking record ([EXT-069]), never with the earlier reporter's name. Different flaws that share a fix are paid separately if their root causes differ.
+
+**Failure modes.** If funding is withdrawn, the project MUST update this section and the `security.txt` policy link before the next release, and reports already acknowledged keep the terms in force when they were acknowledged. A reporter who reports publicly before the embargo of [SEC-321] ends forfeits the reward but keeps credit.
+
 ## Edge cases
 
 | Situation | Result |

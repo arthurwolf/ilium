@@ -232,6 +232,53 @@ Test: write a candidate that denies one installed plugin id and one grant the pl
 
 **[SEC-954]** (proposed, owner to confirm) Every deletion of an audit or crash file by the storage ceiling or by `audit.keep_days` MUST write one `audit-retention-deleted` record first, with the file name, the age in days, the bytes freed and the rule that applied (`keep-days` or `storage-ceiling`). The record is written to the current audit file, so the deletion stays visible after the file is gone. Test: trigger each rule and read back the record.
 
+### Policy keys for plugin log threshold and retention
+
+An administrator pins plugin log verbosity and bounds log age on a fleet with three keys under `[plugins]`. Forwarding logs off the machine is not offered ([HST-993]), so local threshold and retention are the only levers.
+
+```toml
+[plugins]
+log_level        = "warn"   # default: unset (the host default applies); one of error, warn, info, debug, trace
+log_level_locked = true     # default: false; true refuses a lower threshold from the user
+log_keep_days    = 7        # default: 14; int, 1 to 3650
+log_total_mib    = 128      # default: 256; int, 16 to 4096
+```
+
+**Meaning of each key** (all `(proposed, owner to confirm)` except where an ID is cited):
+
+- `plugins.log_level` is the default threshold for every plugin log of every user. It is applied before `ILIUM_PLUGIN_LOG_LEVEL`. An invalid value makes the file malformed under [SEC-187].
+- `plugins.log_level_locked` decides whether the value can be changed. `false` (or absent): the user may override per plugin with `ilium plugin log-level <id> <level>`. `true`: the threshold is fixed for all plugins and the command and the environment variable are refused or ignored (below).
+- `plugins.log_keep_days` is the age after which a rotated log file is deleted, at rotation, at server start and once every 24 hours, matching [HST-601] whose 14-day value is the default.
+- `plugins.log_total_mib` is the per-user cap of [HST-670]; its eviction rule (oldest rotated file of the largest log, never the active file, `log.cap-evict` at most once a minute) is unchanged.
+
+**Precedence.** The effective threshold for a plugin is resolved in this order, first match wins: (1) `plugins.log_level` when `log_level_locked = true`; (2) the per-plugin setting made by `ilium plugin log-level` ([DEV-654]); (3) `ILIUM_PLUGIN_LOG_LEVEL` in the server environment; (4) `plugins.log_level` when not locked; (5) the host default. This keeps [DEV-654] (command beats variable) and puts the policy at the bottom when unlocked and at the top when locked. A user policy file can only make the value stricter by [SEC-181]: for `log_level` the more verbose of the two is not accepted, so the user file cannot lower the threshold the system file sets; `log_level_locked` combines by logical OR; `log_keep_days` and `log_total_mib` take the smaller value.
+
+**What the user sees.** When the threshold is locked, `ilium plugin log-level` prints the effective level and the field `policy.locked`, for example `example.pane-tools  warn  policy.locked`. A set attempt exits with status 1 and prints `policy.locked` with the text `Set by your administrator`, the same code and text as [SEC-186] and the registry rows. The environment variable is ignored under a lock and the server writes one `warn` line to the host log at start, naming the variable. `ilium plugin log-level` with no argument still works and shows the effective value and where it came from (`policy`, `command`, `environment` or `default`).
+
+**Scope of retention.** The keys apply to plugin log files only ([Plugin files](/pages/reference-plugin-files/)). They never apply to the audit log: its age and size are owned by `audit.keep_days`, `audit.max_mib` and [SEC-950], [SEC-953] and [SEC-954], and no `plugins.log_*` key can shorten them. A deletion by `plugins.log_keep_days` removes only rotated files; the active file is never deleted. Lowering `log_keep_days` in a later policy takes effect at the next start or 24-hour sweep, and the files removed are counted in one `log.retention-evict` line of the host log, not in the audit log. Raising a threshold or retention never recovers lines already dropped.
+
+**Failure modes.** A value out of range makes the file malformed ([SEC-187]) and the whole policy is refused. A deletion that fails (file in use, permission) is logged once per sweep and retried at the next sweep; it does not stop the server. A policy that sets `log_level = "trace"` with `log_total_mib` smaller than 4 times the 4 MiB rotation size ([HST-600]) is accepted, and the cap then evicts rotated files continuously; `ilium plugin doctor` shows a warning line `log cap smaller than rotation`.
+
+Test: with a fake session and a test policy file, (1) set `log_level = "warn"`, unlocked, with no user setting and `ILIUM_PLUGIN_LOG_LEVEL=debug`: assert the effective level is `debug` and its source `environment`; run `ilium plugin log-level example.pane-tools error` and assert `error`, source `command`. (2) Set `log_level_locked = true` and repeat: assert effective `warn`, the field `policy.locked`, a refused set with exit status 1, and the start-up warning. (3) Set `log_keep_days = 7`; create rotated files aged 3, 8 and 20 days, restart, and assert only the 3-day file remains and the active file is untouched. (4) Set `log_total_mib = 16`, fill the logs above it and assert `log.cap-evict` and that the audit files are unchanged by hash. Read the effective values back after each step with `ilium plugin policy show` and `ilium plugin log-level`.
+
+### Time-based retention of plugin data set by policy
+
+The policy has no key that deletes plugin data by age in this version. Plugin data, session buckets and the kept data of uninstalled plugins are never removed by a timer. This is a decision, not a gap: [LIF-958] forbids any automatic process from deleting the kept data of an uninstalled plugin, and no `plugins.data_retention_days` key (0 meaning never) exists. An administrator who wants a retention period must use the tools below, which a person or a script runs on purpose.
+
+| Need | Tool | Effect |
+|---|---|---|
+| Delete one user's plugin data, storage, grants, logs and cache | `ilium plugin admin purge-user <user> --yes` ([HST-689]) | System audit entry; refused with `purge.user-active` while the user's session server runs |
+| Delete session buckets unused for a period | `ilium plugin data prune --older-than <days>` ([HST-674]) | Runs on request only; closing a session never deletes its bucket |
+| Delete one uninstalled plugin's kept data | `ilium plugin uninstall <id> --purge` | The only removal path for kept data besides the uninstall dialog ([LIF-958]) |
+| Find kept data and its size | `ilium plugin doctor` | Lists orphaned data with size; no deletion |
+| Bound audit and crash files | `audit.keep_days` and the ceiling of [USR-258] | Deletions write `audit-retention-deleted` ([SEC-954]) |
+
+The retention table of [USR-955] lists each kind of data with its default retention (kept until a command removes it) and the command above that deletes it. An administrator can run the two deleting commands from a scheduler under their own account, for example a weekly `ilium plugin data prune --older-than 90`; the audit log then shows the actor as that account, and the host never starts the deletion itself.
+
+**If the owner later wants a policy key.** It would have to be a separate decision that amends [LIF-958] to read "unless the policy sets a retention period", defines a key such as `plugins.data_retention_days` (int, 0 = never, default 0), requires one `audit-retention-deleted` record per deletion with the rule `policy-data-retention` ([SEC-954]), and adds a warning line to `ilium plugin doctor` seven days before the first deletion. Until that amendment is accepted, a policy file that contains `plugins.data_retention_days` is malformed under [SEC-187] (unknown key) and refused, so the key can never be set by accident on a fleet.
+
+Test: write a policy file containing `plugins.data_retention_days = 30` and assert `policy.invalid` and third parties not loading. Then uninstall a plugin without `--purge`, advance the clock 2 years, restart, and assert every kept path exists and `ilium plugin doctor` lists it ([LIF-958]); run `ilium plugin data prune --older-than 90` and assert only session buckets older than 90 days are removed.
+
 ### Schema versions
 
 **[SEC-101]** (proposed, owner to confirm) Schema version `1` is the only version in 0.1.0 ([SEC-187]). A later schema version is introduced in a release note, and a server MUST keep reading the previous version for two minor releases after it is introduced (proposed, owner to confirm). A server that reads a `version` it does not support treats the file as malformed under [SEC-187]. Because a key that a newer server understands is an unknown key to an older server, the staged path is: write the file as `version = 1` until every machine runs a server that reads the new key, then change the version. The file is not ignored key by key, so [SEC-187] stays the only rule for unknown keys. Test: a file with `version = 2` on a server that supports 1 is refused with `policy.invalid` and third parties do not load.

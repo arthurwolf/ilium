@@ -301,6 +301,64 @@ The rows of a plugin tab and of a section follow the same timing (see the [auto-
 <figcaption>Rows and custom pages both save through the settings store, which validates each patch against the compiled schema. The kernel recovery page is outside this path.</figcaption>
 </figure>
 
+## Where a value comes from: global, project or policy, and clearing a project value
+
+A row whose entry has `scope: "project"` (compiled to `x-scope`) can hold up to three values at once: the **global** value in the user's config, a **project** value saved for the open project, and a value fixed by **machine policy**. The Settings screen shows the one that applies and says where it came from.
+
+### Origin of the value that applies
+
+Exactly one origin applies to a row. The first match wins, in this order.
+
+| Origin | Shown after the value | Who set it | Can the user change it here? |
+|---|---|---|---|
+| `policy` | `policy` with a lock glyph, in the muted colour | The administrator, through machine policy ([Admin policy reference](/pages/reference-admin-policy/)) | No. The row is read-only and its help line reads `Blocked by your administrator`. Per-user choices never widen policy (USR-253). |
+| `project` | `project` | The user, while this project was open, in a row with `scope: "project"` | Yes. Editing writes the project value again. |
+| `global` | `global` | The user in an earlier session, or the schema `default` when nothing is stored | Yes. Editing a project-scoped row creates a project value and leaves the global one untouched. |
+
+A row without `scope: "project"` has only the global and policy origins. It shows no `project` marker.
+
+The marker is drawn after the value and before the `+` or `›` control, in the dim colour, one blank cell on each side. It is also announced by the screen reader line of the row, for example `Badge limit, 12 items, project value`.
+
+### The non-default marker
+
+The `•` marker means that the value that applies differs from the schema `default`. It does not say which origin set it. The origin marker does:
+
+- `• project`: a project value differs from the default.
+- `• global`: the user's global value differs from the default. No project value exists.
+- `• policy`: policy fixes a value that differs from the default.
+- No `•` with `global`: nothing is stored, or the stored value equals the default.
+- No `•` with `project`: a project value exists and equals the default. It still overrides a different global value, so the marker `project` is shown.
+
+### Clearing a project value
+
+To drop only the project override, select the row and use one of these. All three remove the project value and keep the global one:
+
+| Control | Effect |
+|---|---|
+| `R` | Clears the project value of the selected row. The row then shows the global value with `global`. |
+| Action `Use global value` in the row's action menu | Same as `R`. It is listed only when a project value exists. |
+| `r` | Resets the row to its schema `default`. For a project row it writes the default as the project value (origin `project`). It does not fall back to the global value. |
+
+`R` and `Use global value` do nothing, and are not listed, when the row has no project value, when no project is open, or when policy fixes the row. A `null` patch from a plugin through `set-json` behaves like `r`, not like `R`: it resets to `default` and does not remove the project value. A key removed from the project file is picked up on the next read and raises `settings-changed` with origin `reset`.
+
+### How a plugin reads the origin
+
+`get-json` returns only the applying values. A plugin that needs to know where a value came from reads the call `settings.read`, which returns each key as `{ "value": ..., "source": "global" | "project" | "policy" }`. `source` is the same origin the screen shows. A plugin never sees the global value behind a project value, nor the value a policy replaced. Secret values keep their rules: a plugin that does not own the key reads an empty string and the source `global`.
+
+### What Forget settings exports
+
+Forget settings (USR-163) asks for confirmation and, before it deletes, offers to save an export of the values it will remove. The export lists one entry per key with `key`, `value`, `source` and, for `project` values, the project path. Keys whose origin is `policy` are listed with their `source` but are not deleted, because Forget settings removes only the user's and the open project's values.
+
+### Failure modes
+
+| Situation | What the user sees |
+|---|---|
+| A project file is unreadable or breaks the schema | The row falls back to the global value, shows `global`, and the plugin's Details page lists `Project settings ignored: <reason>`. |
+| Policy fixes a row while a project value exists | The row shows `policy`. The project value stays on disk but is ignored until policy releases the row. |
+| The project is closed while Settings is open | Origin markers change to `global`, and `R` is hidden. |
+
+Related requirements: USR-163 (Forget settings) and USR-253 (policy wins over a user choice).
+
 ## Errors and edge cases
 
 | Error or event | When | What happens |

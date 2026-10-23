@@ -37,6 +37,22 @@ A **publisher** is the person or organisation that signs a package. A **key** is
 
 **[SEC-178]** Public key file `publisher.pub` is a UTF-8 JSON document `{ "version": 1, "publisher": "Example Corp", "algorithm": "ed25519", "public_key": "<base64url, 32 bytes>" }`. The private key file `publisher.key` has mode 0600 and contains the 32-byte seed in base64url, wrapped by a passphrase (Argon2id and XChaCha20-Poly1305) unless `--no-passphrase` is given.
 
+## Which page defines the signature format
+
+This page and [Signing and trust](/pages/reference-signing-and-trust/) describe the same signature in different words. A signer and a verifier built from different pages would refuse every package, so one page is normative. **[Signing and trust](/pages/reference-signing-and-trust/) is the single normative source for the wire format of the signature, the signed message and the rotation statement.** Where this page differs, the text there wins, and an implementation follows it.
+
+| Question | Normative answer (Signing and trust) | Superseded wording on this page |
+|---|---|---|
+| What bytes are signed | The message `M` of PKG-201: `ilium-plugin-signature-v1`, `0x00`, the publisher id, `0x00`, then the 32 raw bytes of the SHA-256 of `manifest.json`. That SHA-256 is taken over the exact archived bytes of the `manifest.json` entry. The host does not parse, canonicalise or re-serialise the manifest first (PKG-202). | SEC-140: the RFC 8785 canonical form of `manifest.json`, with the prefix `ilium-plugin-manifest-v1\n` |
+| Shape of the `signature` entry | `{ "format": "ilium-sig/1", "signatures": [ ... ] }` with 1 to 4 objects holding `algorithm`, `key_id`, `publisher_id`, `signature`, `signed_at`; the first is the publisher, a later one may be a registry countersignature; at most 16 KiB (PKG-204 to PKG-208) | SEC-141: a single object with `version`, `algorithm`, `key_id`, `signature` |
+| Rotation statement | `rotation.json` of format `ilium-rot/1`, keyed by `publisher_id` and carrying the `new_key` (PKG-238) | SEC-143: a statement keyed by `plugin_id` with `new_key_id` |
+
+Why exact bytes: signing the archived bytes removes the parser from the trust boundary. Duplicate member names, number forms and Unicode escapes cannot be read differently by the signer and the verifier, because neither reads the manifest before the hash. The duplicate-key refusal `manifest.duplicate-key` of SEC-140 still applies, but only after the signature has verified, when the manifest is parsed for use.
+
+What stays valid on this page: SEC-153 (every other file is hashed in the manifest, so the signature covers the package), SEC-177 (the fingerprint and `key_id` are the SHA-256 of the raw public key) and the refusal codes `manifest.signature-invalid`, `package.signature-format` and `package.publisher-key-changed`. Treat the SEC-140, SEC-141 and SEC-143 wording above as superseded by PKG-200 to PKG-208 and PKG-238; the SEC-459 rule on a closed algorithm allow-list applies to both.
+
+The test vector to build fixtures from is the one in [Signing and trust](/pages/reference-signing-and-trust/#test-vector): seed `000102...1f`, publisher id `example`, the 402-byte minimal manifest, `key_id` `56475aa75463474c0285df5dbf2bcab73da651358839e9b77481b2eab107708c`, and the signature `8efe7370...a6507`. It is stated there once and is not repeated here, so it cannot drift. A verifier that reproduces it, and refuses the negative vectors PKG-248 to PKG-258, conforms.
+
 ## The trust store
 
 **[SEC-144]** The trust store ([SEC-112]) holds public keys the user trusts. A key may be trusted under one publisher name; one publisher name may have several keys. `ilium plugin trust remove <key_id>` removes a key. Installed plugins signed by it stop loading at the next activation and show `Publisher no longer trusted`; they are not uninstalled and their data stays. Trusting the key again reactivates them.
@@ -87,6 +103,19 @@ A `runtime` entry names an advisory (`advisory`, a non-empty string), the affect
 
 **[SEC-149]** A package that matches an entry is refused at install with `package.blocked`, and an installed plugin that matches is disabled at the next load with a notice `Blocked: <reason>`. Its data is kept. The audit log records `blocklist-hit`. A blocked plugin cannot be enabled by `plugins.manage`, the Plugins screen or the CLI.
 
+## Blocklist and emergency-disable refresh for hosts with no registry
+
+No registry is configured by default (decision D27). A host that installs from files would otherwise never receive a revocation between releases, and the stale warning of EXT-072 would show for ever after 7 days. So the project runs a **revocation feed**, and every host polls it unless policy turns it off.
+
+- **Location and key.** The feed URL is compiled into the binary and printed by `ilium --version --verbose` as `revocation_feed`. The feed is signed with a dedicated feed key whose public half is also compiled in; it is not the release key, so a leaked feed key cannot sign a release. The feed key has its own compromise rule: the compromise is announced under [Release key compromise](/pages/reference-release-key-compromise/), a new feed key ships in the next release, and per SEC-425 a feed signed by any key other than the compiled-in one is refused, the last good copy is kept and an audit line is written.
+- **Content.** The feed is a blocklist in the format of SEC-148 (`package-sha256`, `plugin`, `publisher-key` and `runtime` entries), plus the emergency-disable entries that EXT-057 and EXT-058 define for a registry feed. Entries are matched and enforced as in SEC-149 and EXT-058.
+- **Polling.** The host fetches the feed at start and then every 6 hours plus a random jitter of up to 30 minutes, the same period EXT-057 sets for a registry. A fetch uses HTTPS with certificate validation, a 10 s timeout and a 1 MiB size cap, and sends a conditional request (`If-None-Match`) so an unchanged feed costs one small reply. A failed fetch is retried with back-off from 5 minutes up to the normal period and never blocks start.
+- **Privacy.** The request carries only the path and the standard headers with `User-Agent: ilium/<version>`, exactly as PKG-376 requires of a registry client: no identifier, no list of installed plugins, no install count. The project reads only its own server logs.
+- **Policy.** `[packages] revocation_feed = false` turns the poll off. `[packages] revocation_feed_url = "<https url or file path>"` points the host at an internal mirror of the signed feed, which is verified with the same compiled-in key; it can only redirect the source, never the key. Air-gapped fleets mirror the file and distribute it with `blocklist_file` or the mirror URL. See [Admin policy](/pages/reference-admin-policy/).
+- **Runtime advisories.** A `runtime` entry of SEC-171 reaches installed binaries through this feed between releases. The feed is the channel the host uses to "add" the entry to the release blocklist: the entry is held beside the release blocklist, is not written into the binary, and is dropped when a release that fixes the Wasmtime version no longer matches it. SEC-729 (an emergency-disable entry within 4 hours of confirmation) is met by publishing to this feed, which hosts pick up within one poll period.
+- **Merging.** The effective blocklist is the union of the release blocklist, the feed, the policy blocklist (SEC-147) and the emergency-disable feed of each configured registry (PKG-407). A match in any source blocks; deny wins, as in the edge-case table. A source that fails verification is ignored on its own and does not affect the others.
+- **Staleness.** The 7 days of EXT-072 count from the last successful verified refresh of the feed. A stale feed is kept and enforced, and the user sees `Revocation data is stale`. A host with the feed turned off by policy has no refresh source: it enforces the release blocklist and the policy blocklist, and shows `Revocation data is stale` only for a policy blocklist file or mirror that has not been updated for 7 days. It does not show the warning for the release blocklist, which is current as of the release (its age is the release age; see SEC-967 for the advisory check). Such a host receives no revocations between releases, and the Plugins screen says `Revocation feed: off by policy`.
+
 ## Archive parsing
 
 A `.iliumpkg` is a ZIP file. ZIP has many ambiguities that attackers use. The reader is strict.
@@ -135,6 +164,22 @@ A `.iliumpkg` is a ZIP file. ZIP has many ambiguities that attackers use. The re
 **[SEC-422]** Licence policy. A dependency whose licence is outside the allow list of the repository (`deny.toml`, permissive licences and the Apache-2.0 WITH LLVM-exception expression Wasmtime uses) fails the release check. A dependency with no declared licence also fails.
 
 **[SEC-423]** Runtime visibility. `ilium --version --verbose` prints the path of the notices file and the Wasmtime licence expression. An installed binary without the notices file next to it prints `notices: missing`.
+
+## Dependency advisory scanning for the host release
+
+SEC-171 names the Wasmtime feed and four codec families. The rule extends to the whole `Cargo.lock` of the host, so the host meets the bar that DEV-896 sets for publishers.
+
+- Every CI run and every release job runs an advisory scan of `Cargo.lock` against the RustSec database with `cargo audit` or `cargo deny check advisories`. An advisory with no recorded review fails the job.
+- A new or upgraded dependency needs a review record (`cargo vet` audit or an equivalent note in the pull request) before it merges. The same `deny.toml` that enforces SEC-422 holds the advisory policy.
+- The response times of SEC-171 apply to any crate reachable from plugin input: HTTP, TLS, archive, JSON, image, audio and video crates, not only Wasmtime and the codecs.
+- An advisory accepted without a fix is listed with its reason in the release notes and appears in the `advisories` of `ilium version --json` (SEC-967) when it affects the shipped version.
+- The scan database is refreshed on each run, so a release cannot ship on a stale database.
+
+## Software bill of materials and provenance of a host release
+
+- Every host release ships a machine-readable SBOM in CycloneDX JSON next to `SHA256SUMS` (SEC-428), named `ilium-<version>.cdx.json`, and listed in `SHA256SUMS`. It is generated from the same `Cargo.lock` as `THIRD-PARTY-NOTICES` (SEC-420) and covers the binaries and the bundled core plugin components (SEC-176). The set of components in the SBOM equals the set in `THIRD-PARTY-NOTICES` (SEC-421); a difference fails the release check.
+- The build attestation names the SBOM and the archives by SHA-256, so a procurement team verifies in order: the archive hash against `SHA256SUMS` ([Host release verification](/pages/reference-host-release-verification/)), the attestation over those hashes, then the SBOM hash named in the attestation.
+- Host builds are reproducible: two builds from the same tag with the pinned toolchain, `--locked` (SEC-170) and no network produce byte-identical archives, as SEC-727 requires. The SBOM format is the one SEC-727 names. Plugin packages may carry their own SBOM (SEC-155, PKG-680) and are verified with DEV-892.
 
 ## Advice for publishers
 

@@ -239,6 +239,51 @@ export const migrator = {
 
 The test calls `migrate` twice on the same fixture and compares the data. The second call must change nothing. The fake host can start with an old data version (`with_data_version`) and a stored snapshot (`with_storage_snapshot`), so the test starts from the layout of version 1.4.0. See [Data migration](/pages/guide-data-migration/).
 
+## Giving users a portable export of plugin content
+
+A plugin that holds content the user wrote, such as notes, bookmarks, task lists or snippets, owes the user a way to take that content out in a format that other programs can read. The host cannot do this for you, because the host does not know what your data means.
+
+### What the host gives you, and why it is not enough
+
+| Host tool | What it writes | Why it is not a content export |
+|---|---|---|
+| `ilium plugin export <id> --out <file>` (LIF-290) | One archive of the data directory, the buckets and the settings values | Written for the administrator, bound to the plugin id, with no schema for the content |
+| `ilium plugin data export <id> <dir>` (HST-656) | Every bucket as JSON lines of base64 keys and values, plus the data version | The bytes are opaque, the keys are your internal ids, and the import refuses another plugin id and any data version higher than the installed plugin's with `migration.data-newer` |
+
+Both tools move a plugin's state between hosts that run the same plugin. They are the right tool for backups ([Backup and restore](/pages/guide-backup-and-restore/)). A user cannot open them in another program, cannot read them without decoding base64, and cannot take them to a different plugin. Do not point users to them as your export.
+
+### What the plugin offers
+
+The plugin MUST provide an export command and an import command in its own interface (a command, a menu action or a button in its pane). [AUT-216]
+
+1. **Format.** Write an open format: Markdown for prose, JSON with a documented schema for structured items, or CSV for flat tables. Do not write base64 or internal ids as the only identity of an item.
+2. **Destination.** Ask the user for the path with the `fs.pick` capability (a `save-file` pick), then write it with `fs.write:picked` ([fs.pick](/pages/capability-fs-pick/), [fs.write](/pages/capability-fs-write/)). Never choose a path yourself and never write outside a scope that was granted. A declined pick returns a normal outcome and the plugin writes nothing.
+3. **Existing file.** Use `create-new` unless the user confirmed an overwrite. A `conflict` result is shown as a message, not as an error, and the existing file stays untouched.
+4. **Completeness.** Export every item of the user, not only what is visible or filtered. Write to a temporary name inside the same scope and rename on success, so a failed export never leaves a half written file at the final name ([Atomic writes](/pages/api-fs-atomic-and-tail/)).
+5. **Result.** Show the item count and the path when it is done. When a write fails (grant missing, disk full, path refused) show the error code and write nothing further.
+
+### Document and version the schema
+
+Describe the format in a page under `help/` in the package: every field, its type, which fields may be missing, and an example. Put a `schema_version` integer in the file (for JSON), a header comment (for Markdown front matter) or a header row (for CSV). Raise it when a field changes meaning or disappears, and treat that like any other breaking change in [What each kind of change needs](#what-each-kind-of-change-needs). A plugin MUST version its export schema and document it in `help/`. [AUT-217]
+
+### The import counterpart
+
+The import reads a path chosen with a `open-file` pick and the `fs.read:picked` grant. It MUST:
+
+- accept the current schema and the previous schema, as long as a published version that wrote the previous schema is inside the support window of [AUT-211]/[AUT-212] (the same window in which `requires` and prereleases are supported). Unknown extra fields are ignored; a missing required field rejects that item only;
+- refuse a file whose `schema_version` is higher than the plugin knows, with a message that names the version and asks the user to update the plugin, and import nothing;
+- validate the whole file first and apply it in one `storage.batch`, so an import that fails halfway changes nothing;
+- be idempotent: importing the same file twice must not duplicate items. Match on a stable key that your export writes, or ask the user to choose between skip, replace and keep both;
+- report the counts of added, replaced and skipped items.
+
+### Privacy declarations require an export
+
+A plugin that declares `[privacy] collects` for user content (see the manifest table in [Privacy](/pages/user-privacy/), USR-329) states that it keeps that content. Such a plugin MUST offer the export and import described here, and its `help/` page MUST name the format. [AUT-218]
+
+### Test it
+
+Test with the fake host: fill the plugin with items, run the export, parse the file with an ordinary parser, wipe the data, run the import, and compare the items. Then import a fixture written by the previous schema and a fixture with a higher `schema_version`, and assert the refusal. See [Backwards-compatibility test matrix](/pages/guide-backwards-compatibility-test-matrix/).
+
 ## Edge cases and errors
 
 | Situation | What happens | What the author does |

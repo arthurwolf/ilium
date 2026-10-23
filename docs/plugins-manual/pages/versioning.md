@@ -211,6 +211,50 @@ The contract version `ilium:plugin@0.1.0` is one thing. Each extension point has
 - Expect a refusal for a package whose `api` is outside the window. Rebuild it with an SDK for a version the host supports.
 - Read [Compatibility and upgrades](/pages/guide-compatibility-and-upgrades/) before you rename anything, change a data layout or raise a version. The plugin MUST keep every name of the stable public list across its own releases. [AUT-214]
 
+## Stability index of every public surface
+
+This index is the one place that lists what an author or an operator can depend on, which version identifier each surface carries, how it may change, and how much warning a change gets. The rules themselves live on the owning pages; this table points to them. The four stability classes are:
+
+- **Frozen**: the shape and meaning never change inside one contract major. Only an additive item in the way the owning page allows is possible.
+- **Additive**: a release may add items (a case, a field, a code, a rule), never remove or change one. A consumer treats an unknown addition as unknown, not as an error.
+- **Deprecate-then-remove**: an item may leave, but only after a release marks it deprecated and names the stop release. Until then it behaves as before.
+- **Unstable**: the item may change or vanish in any release, with no notice period. It is usable only after an explicit opt-in.
+
+| Surface | Version identifier | Class | Minimum notice before a breaking change | Owning page |
+|---|---|---|---|---|
+| WIT contract | `ilium:plugin@0.1.0`, the manifest `api` key and the `ilium:api-version` section | Frozen per released minor, additive across minors; unstable features excepted | A removal needs the marking release plus two minors. A new minor adds items only; a break needs a new major | [ABI evolution](/pages/reference-abi-evolution/), [ABI major versions](/pages/reference-abi-major-versions/) |
+| Unstable features of the contract (`ui-calendar`, `plugin-services`, `gpu-kernels`, `websocket`) | The feature name in the manifest `unstable` key | Unstable | None. Read the changelog before upgrading; a removed name fails with `manifest.unstable-unknown` | This page |
+| Stable public names (pane kind ids, command ids, settings keys, decoration slots, topic names) | The string itself | Frozen once a release used it | None allowed; add a new name and keep the old one working | This page |
+| Rust and TypeScript SDK items | The SDK package version, taken from the contract version | Deprecate-then-remove | A deprecated item keeps its signature and behaviour until its stated removal minor, at least two minors after the marking release; a patch release never removes one | [SDK deprecation](/pages/reference-sdk-deprecation/) |
+| SDK `testing` module and the test harness | `harness_version` (`sdk-testing <version>` or `cli-host <version>`) | Additive for API; behaviour is stated per `harness_version` | A run with a different `harness_version` is not required to match; pin the CLI and SDK together | [Plugin test harness](/pages/reference-plugin-test-harness/) |
+| `ilium plugin` JSONL records, `type` values, exit codes | Release of the command line | Exit code numbers and meanings are frozen. Record shapes are additive and deprecate-then-remove | A breaking change only in a release with a new minor number, listed in that release's notes. Removing or renaming a value of `step`, `kind`, `severity`, `status` or `side` is breaking; adding one is not [DEV-860] [DEV-861] [DEV-862] | [CLI output stability](/pages/reference-cli-output-stability/) |
+| Package format and `ilium-pkg` inventory | The package format stages and the 300 MiB size limit [PKG-130] | Additive; a refusal always carries a `package.*` code | Stated with the contract: a package outside the window is refused with `package.api-unsupported` | [Package format](/pages/reference-package-format/) |
+| Manifest schema | The manifest keys with the `api` value; the `ilium-sig/1` signature document | Additive; keys are added, never repurposed | Follows the contract version and the 2-minor removal gap [ABI-052] | [Manifest schema](/pages/reference-manifest-schema/) |
+| Fixture (`schema: 1`), expectation, replay | Fixture `schema: 1`; replay version 1 | Frozen at the stated number; any other replay version is refused with `replay.version-unsupported` [DEV-542] | A change raises the number. The harness refuses the old and the new number it does not know; no silent reading | [Test harness](/pages/reference-test-harness/) |
+| Test report and conformance report | `ilium-test-report/1`, `ilium-conformance/1` | Frozen at the stated number (proposed, owner to confirm) | A shape change raises the trailing number; a reader treats an unknown number as unreadable, not as the old shape | [Plugin test harness](/pages/reference-plugin-test-harness/), [Conformance suite](/pages/reference-conformance-suite/) |
+| Conformance suite catalogue | Suite version `MAJOR.MINOR` | Additive inside a major: a minor only adds cases; a major may remove or change one [DEV-924] | `--suite-version <v>` keeps running an embedded older catalogue; a catalogue the CLI no longer embeds fails with `usage.suite-unavailable` | [Conformance suite](/pages/reference-conformance-suite/) |
+| Check and lint rule ids | The rule id, such as `component.import-ungranted` | Additive: new ids appear; an id keeps its meaning (proposed, owner to confirm) | A removed or renamed id is a CLI deprecation with a release-notes entry and a `deprecated` warning | [Check and lint rules](/pages/reference-check-and-lint-rules/) |
+| Golden render output | Golden files under the project, rewritten only by `--update` | Unstable across host releases (proposed, owner to confirm) | None; a host release may change pixels. Re-record with `--update` locally, never in CI | [Plugin test harness](/pages/reference-plugin-test-harness/) |
+| Registry API | `ilium-registry/1`; the `spec` field of every signed document | Frozen per protocol number, additive within it | A change raises the protocol number; the integer `version` is a rollback counter, not a format version | [Registry](/pages/reference-registry/) |
+| Settings schema | The manifest `api` value; the row types of the contract | Additive | Row types are appended; none is removed inside a major | [Settings schema](/pages/reference-settings-schema/) |
+| Error codes and limits | The code string; the limit values in the tables | Codes: additive, frozen once released. Fixed caps: may rise, never fall inside a major (proposed, owner to confirm). Message text: unstable | A new code is a minor change; a plugin treats an unknown code as a failed call of unspecified cause (`Unknown` variant). Never match on `message` [API-088] [ABI-082] | [Errors and limits](/pages/reference-errors-and-limits/) |
+
+### How to read the index
+
+- A frozen or additive surface never forces you to change a plugin or a script because of an upgrade within its major. An unstable surface can.
+- The minimum notice is the shortest warning the project promises. A deprecation shows up in the release notes of the marking release, with one entry that names the item, the kind of change (`deprecated` or `breaking`) and the stop release. In the command line, every use of a deprecated item also prints one `warning` record with the code `deprecated` or one line on standard error.
+- The release notes are the authority for dates. If the index and the release notes of a release disagree, the release notes win and the index is corrected.
+- A surface marked "proposed, owner to confirm" has a version identifier today but no stated change policy yet. Until the owner confirms it, treat it as additive and expect a refusal, not a silent misreading, when a number you do not know appears.
+
+### What a consumer does with each class
+
+| Class | What you do |
+|---|---|
+| Frozen | Depend on it. Pin the identifier your tool wrote and refuse any other. |
+| Additive | Ignore what you do not know. Never fail on an unknown field, case, code or rule id. |
+| Deprecate-then-remove | Watch for the `deprecated` notice in CI output and release notes. Change before the stop release. |
+| Unstable | Use it only in development, behind its opt-in, and re-test on every upgrade. |
+
 ## Documentation versions
 
 The manual has its own versions. Each host release has one manual snapshot that describes that release, and the rules for which snapshot matches which host, how long it stays online and how corrections reach it are in [Reference, documentation versions](/pages/reference-documentation-versions/). Use that page to find the manual for the host you run. The `api` string on this page names the contract, not the manual.

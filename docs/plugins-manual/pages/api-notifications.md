@@ -244,6 +244,20 @@ A core veto is a different case. The `before-notify` point of the core notificat
 
 Screen readers get no notice from Ilium. The manual defines no announcement path for `notify` or `play-sound`. The `[ui] screen_reader` mode applies to widgets that a plugin draws in a view, not to desktop notices. A notice reaches the user only through the operating system's notification service or the client footer. So each notice carries its meaning in its text: put the status word in `title`, such as "Failed" or "Needs approval", and never rely on the urgency or the sound alone. See [accessibility and theming](/pages/accessibility-and-theming/).
 
+### Do-not-disturb, quiet hours and the user's sound switches apply to plugin notices
+
+The user's quiet switches belong to the user, not to the plugin. They filter a plugin `notify` or `play-sound` the same way they filter a notice raised by the kernel. A plugin cannot override them, cannot read them and does not need to.
+
+- **Switches that apply.** Desktop notices off (`enabled` under `[notifications]`), the per-event switches, the sound source set to `muted`, a quiet-hours veto contributed to the `before-notify` extension point of the [notifications core plugin](/pages/core-plugin-notifications/), and the operating system's own do-not-disturb or focus mode. A silenced `notify` shows nothing. A silenced `play-sound`, or a `notify.sound`, plays nothing.
+- **Outcome the plugin gets.** The submission still completes as `ok`. There is no `suppressed` outcome, and no `delivered` field: `ok` means the notice was queued, not that the user saw or heard it ([capability-notify-desktop](/pages/capability-notify-desktop/)). The plugin cannot tell a silenced notice from a shown one, so it must not retry an `ok`. Retrying only spends the rate limit of 6 notices per minute and 4 sounds per second, and the dedup window already stops a keyed repeat.
+- **Urgency does not bypass.** `urgency: high` sets the native priority of the notice, as the urgency table shows. It is not a request to override the user. A `high` notice is silenced by the same switches as a `low` one. The user's switch beats the plugin's urgency, and the plugin has no grant that changes this.
+- **History still records it.** A notice that a switch or a veto silenced is still entered in the notification history with its plugin id, title and time, so the user can read at 08:00 what was held back at 03:00. Silencing hides the interruption, not the record.
+- **Screen readers.** The `[ui] screen_reader` mode does not turn a silenced notice back on. The text signal of the same event stays unchanged when a channel is off, so a status word in `title` and in the history is the channel a screen reader user relies on ([CAP-884], [accessibility and theming](/pages/accessibility-and-theming/)).
+- **Rate limit still applies.** Toast-style flooding is capped before any switch is checked: [USR-088] drops toasts beyond 3 per 10 seconds per plugin, and the notice limits in the errors table above apply even when the user has everything muted.
+- **Failure modes.** If the quiet-hours handler traps or exceeds its 20 ms deadline, the veto is not applied for that notice and the user's own switches still decide. If the operating system drops the notice, the plugin still sees `ok`.
+
+Test: set sounds to `muted` and desktop notices off, submit one `notify` with `urgency: high` and `sound` set, and one `play-sound`. Expect both to complete as `ok`, no desktop notice and no audio, and one history entry for the notice. Then turn the switches on, add a quiet-hours veto for the current time, and repeat. Expect the same result.
+
 ### What the user sees
 
 When the terminal pane the notice is about has focus in an attached client, the desktop notice is replaced by an in-app notice in the client footer. When no attached client reports focus, the desktop notice is shown. A sound plays either way.

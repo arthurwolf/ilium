@@ -119,6 +119,52 @@ These values are a choice for the project owner. The repository does not set the
 - Decision needed: whether a refusal by the aggregate ceiling gets its own error code instead of the `host-capacity` reason. Default: no new code, so that refusals look the same to plugin authors as session refusals.
 - Decision needed: whether the memory of a job is counted apart from its plugin side's instance reservation. Default: it is counted within that reservation, so no separate job accounting is added.
 
+## Load shedding when an aggregate ceiling stays exhausted
+
+Target behaviour. The aggregate ceilings only refuse the next allocation ([HST-503]). If the session memory pool, the aggregate CPU bucket of [HST-128] or the handle ceiling stays at its limit, every plugin that needs more is refused in turn and the session degrades by chance. Load shedding gives the host one fixed order for pausing plugins, so that the session degrades the same way every time and the user is told what was paused. All timings here are proposed, owner to confirm.
+
+### When shedding starts
+
+- The host samples the three ceilings once per second. A ceiling counts as exhausted at a sample when the memory pool has less than the smallest pending reservation free, when the CPU bucket of [HST-128] is empty, or when the handle ceiling is reached.
+- Shedding starts when one ceiling has been exhausted at every sample for 60 s in a row. One sample that is not exhausted restarts the 60 s count.
+- Shedding runs for one ceiling at a time. The host sheds one plugin, waits 5 s for the freed resource to show in the samples, and sheds the next only if the ceiling is still exhausted. It stops as soon as one sample is not exhausted.
+- A refusal by the ceiling still behaves as [HST-503] says while the 60 s run. Shedding adds to that rule and does not replace it.
+
+### Order of candidate selection
+
+The host picks the next plugin to shed with these steps, first match wins. The decision belongs to the host and cannot be changed by a plugin or by a manifest.
+
+1. Essential core plugins are never candidates (LIF-042). The same holds for a plugin with a pending install, upgrade or rollback, and for a plugin that holds the only copy of unsaved user data it has declared through its save hook.
+2. Dormant optional plugins first. A plugin is dormant when it has no visible view, no pending request in either direction and no running job. Among dormant plugins, the one with the oldest last activity goes first. Ties are broken by plugin id in ascending byte order.
+3. Then non-dormant optional plugins, ordered by their share of the exhausted resource, largest first: `memory_bytes` for the memory pool, `cpu_pct` for the CPU bucket, `handles` for the handle ceiling, as shown in `ilium plugin top` ([HST-634]). Ties go to the oldest last activity, then to plugin id.
+4. A plugin that is the cause of the exhaustion is not treated specially. The order above is the only order.
+
+If no candidate is left, the host sheds nothing, keeps logging the aggregate refusals and shows no further notice.
+
+### What a shed plugin sees and becomes
+
+- The host stops both sides of the plugin with the normal stop path (a `plugin-state-changed` event with reason `shed`, then the grace period of the lifecycle) and releases the reservations of those sides.
+- The package returns to `installed`, with the side reason `host-capacity`. It does not become `failed` or `failure_stopped`, no failure is counted in the 10-minute rule or the 24-hour window ([HST-950]), and the backoff of [LIF-141] is not started.
+- The host writes one log record `host.shed <plugin id> <limit>`, where `<limit>` is `memory`, `cpu` or `handles`. It shows one footer notice per shedding run, naming the number of paused plugins and the first of them, for example `Paused 3 plugins to free memory (ilium plugin top)`. A second run within 10 minutes updates the same notice and does not add one.
+- `ilium plugin top` marks a shed plugin with the state `shed` in its state column, with its resource columns at zero, and lists it after the active rows. `ilium plugin status` lists it as inactive with the reason `host-capacity` and the line `shed since <time>`.
+
+### Reactivation
+
+- A shed plugin is reactivated automatically when the limit it was shed for has had 20 percent headroom at every sample for 60 s in a row: at least 20 percent of the pool free, 20 percent of the CPU bucket held, or the handle count at or below 80 percent of the ceiling.
+- Reactivation uses the admission order of [HST-502] over all waiting requests and shed plugins together, and starts one plugin per 5 s so that the headroom is not spent at once. Each start passes the checks of [HST-509] again.
+- If the host sheds the plugin again within 10 minutes of its reactivation, the plugin stays shed until the user starts it with `ilium plugin enable <plugin id>` or the headroom rule holds again after 10 minutes, whichever comes first. This stops a cycle of shedding and starting.
+- The user can start a shed plugin at any time. The start is then an ordinary activation and may be refused with `host-capacity`.
+
+### Failure modes
+
+- If stopping a candidate takes longer than its grace period, the host ends it as the lifecycle does, still without counting a failure, and goes on to the next candidate only after the 5 s wait.
+- If the host restarts while plugins are shed, the shed marker is dropped and all plugins start by the admission order of [HST-502]; shedding begins again only after a new 60 s run.
+- A policy key that disables a plugin wins over reactivation: a plugin disabled while shed stays disabled.
+
+### Test
+
+Fill the pool with three optional plugins: A with a visible view, B with a pending request, and C dormant with the oldest last activity, using a small `session_memory_mib`. Request a fourth activation and hold the pool full for 60 s. Assert that C is shed first with `host.shed <C id> memory` logged once, one footer notice shown, `ilium plugin top` showing `shed` for C, no failure counted for C, and A and B still active. Then free 20 percent of the pool for 60 s and assert that C is active again.
+
 ## Number of installed and active plugins
 
 Memory and thread ceilings bound what plugins use, but the count of plugins is a limit of its own: startup time, the tree mirror and the settings list all grow with it. The startup budget is set for the 40 bundled plugins only, so a larger set needs an explicit rule.

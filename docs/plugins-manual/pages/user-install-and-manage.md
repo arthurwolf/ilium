@@ -23,6 +23,7 @@ Contract version: `ilium:plugin@0.1.0`. Requirement ids have the form `[USR-nnn]
 - First start of a bundled plugin
 - Turn a plugin on or off
 - Update a plugin
+- What changed after an update
 - Remove a plugin
 - Look at a plugin
 - Settings and the recovery page
@@ -167,6 +168,37 @@ There is no automatic update. To update, get the new package file and install it
 - [USR-123] An update MUST show only permissions that the installed version did not request, and MUST keep the answers already given. Test: update from a package with two grants to one with three and assert one new row.
 - [USR-124] A failed update MUST restore the previous version and its data and MUST show "Update failed, rolled back". Test: update to a package whose activation fails and assert the version in `ilium plugin list`.
 - [USR-125] Ilium MUST NOT check for, download or install updates by itself unless the user has set `[plugins] auto_update` to `notify` or `install`; the default is `off`. Test: with two plugins installed and the default setting, run for one hour with request logging and assert that no update request is made; then set `auto_update = notify` and assert that a check is made.
+
+### What changed after an update
+
+You learn about changes in two places: once after the host (Ilium itself) is updated, and per plugin when a plugin is updated or has an update waiting. Neither screen runs any plugin code. Both are drawn by Ilium from text it already holds.
+
+**After a host update.** On the first attach after Ilium was updated, the client shows one notice, `Ilium 1.x: what changed`, where `1.x` is the new version. It appears once per version and per user: the shown version is recorded in your own state folder, so a second attach, another window, or a downgrade and re-upgrade to the same version does not show it again. Press `Enter` to open the host changelog in the help viewer, or `Esc` to dismiss it. The notice never blocks the tree and never takes keyboard focus away from a pane. In a script with no attached client nothing is shown and nothing is recorded.
+
+**After a plugin update.** The update notice of [PKG-304] (plugin, old and new version, new grants, link to the changelog) is extended. Its link opens **Settings > Plugins > (plugin) > What changed**. The same list stays available there after the update, so you can read it later. It shows the part of the plugin's own changelog between the version you had installed and the version now installed (or offered), newest version first. Entries are grouped under **Added**, **Changed** and **Fixed**, in that order. A group with no entries is not shown. A new permission is listed on the notice and in the review dialog as before. The changelog never replaces that review and never grants anything.
+
+**How a plugin ships its changelog.** The author puts a `CHANGELOG.md` at the root of the package; `ilium plugin pack` includes it when present (see [Package format](/pages/reference-package-format/)). The manifest has no key for it. Ilium reads it from the package, not from the network, so the text is the one the publisher signed.
+
+| Rule | Value |
+|---|---|
+| Format | Keep a Changelog headings: `## [1.3.0] - 2026-10-23`, then `### Added`, `### Changed`, `### Fixed` |
+| Size read | The first 64 KiB. The rest is ignored and the list ends with `Older notes are in the package` |
+| Markdown subset | Paragraphs, `-` bullets, `` `code` ``, `*emphasis*`, `**strong**`, and links shown as their text followed by the address in brackets |
+| Not rendered | Raw HTML, images, tables, and scripts. They are shown as plain text |
+| Text safety | Control characters and terminal escape sequences are removed before display |
+| Version match | Headings are matched by version. If the installed version has no heading, the whole readable text up to the size limit is shown |
+
+If the package has no `CHANGELOG.md`, or it has no entry newer than the installed version, the page shows `No notes from the publisher`. This is not an error: the update proceeds the same way and the notice still lists the grants. When a registry entry carries `notes` or `security: true` (see [Registry](/pages/reference-registry/)), that text is shown above the list and `Security fix` is added to the notice.
+
+**Mute.** Each plugin has a **Mute update notes** toggle on its What changed page. A muted plugin shows no notice for its updates and no badge, but the list stays readable on the page and its new permissions are still shown in the review dialog, because that dialog is part of the install and cannot be muted. The toggle is saved as you change it and is stored per user. Muting does not change `[plugins] auto_update` (see [USR-125]); with `install`, updates that need no new grants still install, silently when muted.
+
+Failure modes:
+
+- A `CHANGELOG.md` that is not valid UTF-8 is shown as `No notes from the publisher` and the install or update is not affected.
+- A very long line is wrapped at the viewer width. At 80 columns nothing is cut.
+- If the host changelog cannot be opened, the notice says `Notes are not available` and offers `Esc` only.
+
+- [PKG-304] The update notice lists the plugin, the old and new version, the new grants and the link to the changelog, and the user can Update, Later or Skip this version. Test: install version 1, offer version 2 with a `CHANGELOG.md` holding one Added and one Fixed entry, and assert that the What changed page shows exactly those two groups; repeat with no changelog and assert `No notes from the publisher`.
 
 ### Remove a plugin
 

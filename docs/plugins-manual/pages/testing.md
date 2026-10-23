@@ -639,6 +639,79 @@ A host implementation passes when each line holds. Each line cites the requireme
 
 - [LIF-279] The fake host MUST offer the methods in the table, and its results MUST match the real host for the lines above. Test: run the same fixtures against both.
 
+## Testing a plugin's upgrade path end to end
+
+Every user meets the upgrade path on each release: Ilium deactivates the running instance with the reason `upgrade`, loads the new component and activates it with the restore bytes and the stored data. This is the path most likely to lose state, and a single test can cover it across two builds of the same plugin. [Hot update and rollback](/pages/reference-install-and-update/) and [Data migration](/pages/guide-data-migration/) define the host side. This section shows the test.
+
+You will need:
+
+- The component of the previous release, kept in the repository as `tests/previous/<version>/dist/<side>.wasm` (for example `tests/previous/1.2.0/dist/server.wasm`) together with its manifest copy `tests/previous/<version>/manifest.json`, because the previous `data_version` and `api` must come from that release and not from the current source.
+- The storage snapshot of the previous `data_version`, for example `tests/fixtures/notes-v1.json`, in the `{bucket:{key:base64}}` form of [Test harness](/pages/reference-test-harness/).
+- A build of the current source with `ilium plugin build --release`, so that `dist/<side>.wasm` is the N+1 component.
+
+### Keep the previous release in the repository
+
+Fetch the file from the release artifacts of the previous tag, as the publishing guide describes in [Publishing](/pages/guide-publishing/), and commit it. Do not rebuild it from an old commit in CI: the test must exercise the bytes that users run. Check the digest that the release lists against the file before you commit it. Keep one file for the previous release only. The matrix of [Backwards-compatibility test matrix](/pages/guide-backwards-compatibility-test-matrix/) needs the previous `data_version` snapshot for each release that stores data (DEV-843) and nothing older. Delete `tests/previous/` files that are two releases old.
+
+### The test
+
+```rust
+#[test]
+fn upgrade_keeps_state_and_migrates_once() {
+    // Component mode: run with ILIUM_PLUGIN_TEST_MODE=component. Each manifest loads
+    // the dist/<side>.wasm that sits next to it.
+    // 1. Version N from the stored snapshot at data_version 1.
+    let mut old = FakeHost::for_manifest("tests/previous/1.2.0/manifest.json").unwrap()
+        .with_storage_snapshot("tests/fixtures/notes-v1.json").unwrap()
+        .with_data_version(1).unwrap();
+    old.activate::<Plugin>();
+    let first_half = old.fixture_events()[..3].to_vec();
+    old.deliver(first_half);
+    old.settle();
+    let bytes = old.deactivate(DeactivationReason::Upgrade).expect("N returns restore bytes");
+    // The snapshot file format is {bucket:{key:base64}}; this helper is test code.
+    write_snapshot_file("target/upgrade-after-n.json", &old.snapshot().storage);
+
+    // 2. Version N+1 on the storage that N left, then restart_with the restore bytes.
+    let mut new = FakeHost::for_manifest("manifest.json").unwrap()
+        .with_storage_snapshot("target/upgrade-after-n.json").unwrap()
+        .with_data_version(1).unwrap();
+    new.activate::<Plugin>();
+    new.restart_with(bytes.clone());
+    let second_half = new.fixture_events()[3..].to_vec();
+    new.deliver(second_half);
+    new.settle();
+
+    // 3. Assertions.
+    assert_eq!(new.restored(), Some(bytes));
+    assert_eq!(new.snapshot().instance, 2);
+    let migrations = new.logs().iter().filter(|l| l.message.starts_with("migrated 1 -> 2")).count();
+    assert_eq!(migrations, 1);
+    assert!(new.failures().is_empty());
+}
+```
+
+The assertions, in the order to write them:
+
+1. **The migration ran once.** Count the log line your `migrate` writes, and read the result of the second run from the snapshot. Calling `migrate` twice on the same snapshot must give the same data (DEV-844, LIF-106). The host calls `migrate` at most once per bucket and update (LIF-104).
+2. **The restored state is used.** `restored()` returns the bytes that N produced. The bytes survive only when the two builds share a `data_version`; when N+1 raises it, the host drops them and logs `restore.dropped-data-version` (LIF-103). A test for a release that raises `data_version` asserts `restored() == None` and asserts that the state is rebuilt from the migrated storage instead.
+3. **No event is lost.** Deliver the same list of events in two parts: the first part to N before `deactivate(upgrade)`, the second part to N+1 after `restart_with`. Compare the sum of the effects with the effects of an uninterrupted run on N+1. A mismatch means the plugin dropped an event, or counted one twice, at the swap.
+4. **Instance counter and failures.** `restart_with(bytes)` calls `deactivate(upgrade)`, discards its bytes, and activates with `instance` plus 1 and `restored` set to the bytes you give (DEV-494). It is not a failure, so `failures()` stays empty. `with_storage_snapshot` and `with_data_version` must come before `activate`, or they fail with `harness.setup-closed` (DEV-497).
+
+### CI
+
+The compatibility matrix job of [Backwards-compatibility test matrix](/pages/guide-backwards-compatibility-test-matrix/) runs this test as its migration cell, after `ilium plugin build --release`, with `--json` on every command, as [CI recipes](/pages/guide-ci-recipes/) describes. The job fails the pipeline when `tests/previous/<version>/dist/<side>.wasm` is missing or older than the previous release tag. `ilium plugin dev` shows the same sequence on each rebuild (DEV-712), so a local watch run is a quick manual check of the test.
+
+### Failure modes
+
+| Symptom | Likely cause |
+|---|---|
+| `restored()` is `None` after `restart_with` | `data_version` differs between the two builds (LIF-103), or N returned no bytes from `deactivate` |
+| Migration log line appears twice | `migrate` is not idempotent, or the test activated N+1 twice |
+| Events missing after the swap | N+1 reads its restore bytes before the event queue, or N did not flush its state in `deactivate` |
+| `harness.setup-closed` | A builder was called after `activate` |
+| `harness.snapshot-invalid` | The snapshot file does not have the `{bucket:{key:base64}}` shape |
+
 ## Edge cases and error codes
 
 A test should cover the refusal path as well as the success path. The fake host returns the same codes as the real host.

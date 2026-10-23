@@ -227,6 +227,46 @@ Turning a permission off takes effect at once. A call that is running when you t
 - [USR-085] A revoke MUST take effect for calls started after it, MUST make calls in flight return `revoked`, and MUST restart the plugin with the smaller set. Test: start a long call, revoke, and assert `revoked` and a restart in the log.
 - [USR-086] A HIGH grant MUST ask for confirmation in the attached client. Test: run `ilium plugin grants <id> --grant terminal.write` with a client attached and assert the prompt.
 
+### See what a plugin has actually used
+
+A permission you gave a year ago is still there today. Ilium therefore keeps a usage record for every grant, so you can see whether a plugin still uses what you allowed. The record is a pair of numbers per grant string: when it was last used, and how many times it was used since the plugin was installed.
+
+Where you see it:
+
+- On the plugin's **Details** page, each row of the **Capabilities** tab shows `last used <YYYY-MM-DD HH:mm:ss>` and `<n> calls`. A grant that was never used shows `never used`.
+- On the command line: `ilium plugin grants <id> --usage` prints one line per granted string with the same two values.
+- On the **Plugins** screen, every HIGH grant that the plugin holds (for example `agent.control`, `terminal.history`, `terminal.write`, `clipboard.read`) shows its last use beside the plugin name, so you do not need to open each plugin.
+
+```sh
+ilium plugin grants com.example.notes --usage
+```
+
+```text
+terminal.history   HIGH   last used 2026-10-21 18:02:40   1,204 calls
+clipboard.read     HIGH   never used                      0 calls
+tree.read          normal last used 2026-10-23 08:55:12   9,310 calls
+```
+
+How the numbers are made:
+
+- The host counts a use each time a host function checks the grant and lets the call through. A refused call (`not-permitted`) is not a use. The counters are kernel counters kept by the host itself, not read from the audit log. The audit log is a different record: it writes only the first request to each new host (`egress-host-first-use`) and the grant expiry line, so it cannot say how often a grant is used. See [Audit log](/pages/reference-audit-log/).
+- Counters are kept per plugin, per side and per grant string. A grant given to the client side and the server side shows one line per side.
+- The counters are stored in your own Ilium data, on your machine only. They are never sent to the plugin, to a project folder, to a registry or to any network host, and a plugin cannot read them.
+- What is not recorded: the content of any call (terminal text, clipboard text, file names, hosts, prompts), the program or pane involved, and the individual times of calls. Only the last time and the count are kept.
+- A counter is cleared when you uninstall the plugin. An update keeps the counters. A revoke keeps the counters and the line is shown as revoked.
+
+Unused grants (the 90-day threshold is proposed, the owner confirms it): a granted string with no use for 90 days, counted from the later of its last use and the day you granted it, is marked `unused` in the Capabilities tab and in `--usage` output. The mark has no effect on the plugin by itself; nothing is revoked automatically. When an update review dialog opens for a plugin that has unused grants, they are listed in a separate **Not used for 90 days** block with a revoke switch for each, and the key `r` revokes the focused one. The same revoke works at any time with `ilium plugin grants <id> --revoke <grant>`, and it follows the rules in [Change a permission later](#change-a-permission-later). A grant that carries an expiry shows `expired` instead; see [Grant review and consent](/pages/reference-grant-review-and-consent/).
+
+| Situation | What happens |
+|---|---|
+| The counter store cannot be read | The row shows `usage unavailable`. The grant itself is unaffected and keeps working |
+| The host crashed since the last use | The count can miss the last few calls. The last-used time can be older than the real one, never newer |
+| A non-interactive session | The `unused` mark is printed in the `--usage` output. No dialog opens and nothing is revoked |
+| A grant is declined | It has no usage line, because no call can pass |
+| The plugin was installed less than 90 days ago | Nothing is marked `unused` before day 90 |
+
+Related requirements: SEC-087 (first request to each new host in the audit log), SEC-118 (withdraw a decision at any time), SEC-717 (grant expiry), SEC-720 (update that widens a capability), USR-318 (consent decisions stored and listed with `ilium plugin consents <id>`).
+
 ### What happens when a call is refused
 
 The plugin keeps running. The call returns `not-permitted`, whether you declined the permission or turned it off. The host writes one line into the plugin's log:

@@ -236,3 +236,51 @@ API checked against `ilium:plugin@0.1.0`.
 - **[DEV-923]** `conformance` run with `--report <file>` MUST write a JSON document `ilium-conformance/1` containing the suite version, the CLI version, the plugin id and version, the manifest SHA-256, and every case record. The file MUST be byte-identical across two runs on the same inputs, and a registry MAY require it at publish.
 - **[DEV-924]** The suite MUST carry a version `MAJOR.MINOR`. `--suite-version <v>` MUST run exactly the catalogue of that version if the CLI still embeds it, else fail with `usage.suite-unavailable`. A MAJOR increase MAY remove or change a case and a MINOR increase MUST only add cases (DEV-610).
 - **[DEV-925]** The suite MUST ignore the user's home directory, the process environment other than the CLI variables, and the system time zone and locale: all cases MUST run with TZ `UTC`, locale `C` and an empty environment for the plugin, so a case result MUST be the same on any machine.
+
+## What a conformance pass means to users and registries
+
+A pass is a narrow statement. This section defines what an author may claim, how the report travels, how users see it and how long it stays valid.
+
+### The claim a pass supports
+
+A run with `--subject plugin` that exits 0 ([DEV-602]) and writes a report ([DEV-923]) supports exactly one sentence: "Plugin `<id>` version `<version>`, with manifest SHA-256 `<hash>`, conforms to the contract `ilium:plugin@0.1.0` as checked by conformance suite `<MAJOR.MINOR>`." The report names all four values, so the claim is tied to one build.
+
+A pass does not say that the plugin behaves well, is free of defects, is secure, respects privacy or is reviewed. The suite checks the contract only (see "The edge of the suite"). A `skip` is neither a pass nor a fail: the badge counts a report as a pass only when it has no `fail` record, and it lists the number of skipped cases next to the suite version so a reader can see how much was not checked. Authors MUST NOT describe a pass as an audit or as a security result. The registry listing text for the badge says "contract conformance" and nothing stronger.
+
+### Attaching the report
+
+- To a package: `ilium plugin test --conformance --report conformance.json` writes the `ilium-conformance/1` file, and `ilium plugin package` includes it as `conformance.json` when it exists next to the manifest. The report holds the manifest SHA-256, so the host rejects a report whose hash differs from the package manifest and treats the package as having no report.
+- To a registry listing: a registry that requires the report at publish ([DEV-923]) refuses a version without one. The refusal is returned at upload and names the missing file. A registry that does not require it accepts a version without a report and shows no badge. See [Registry reference](/pages/reference-registry/).
+- The registry checks that the report is well formed, that the plugin id, version and manifest hash match the package, and that no `fail` record is present. It does not run the suite again, so the report is the author's record. A registry that wants proof reruns the suite itself with `--suite-version` ([DEV-924]).
+
+### What users see
+
+The Plugin Store ([Plugin Store](/pages/user-plugin-store/)) shows a conformance badge on the plugin page of each version that has a report:
+
+| State | Badge text | Meaning |
+|---|---|---|
+| Current pass | `conformance: pass (suite 1.2)` | No `fail` record, and the suite version equals the newest version this host embeds |
+| Outdated | `conformance: outdated (suite 1.1)` | No `fail` record, but the suite version is older than the one the host embeds |
+| Failed | `conformance: fail (suite 1.2)` | At least one `fail` record. Only a registry that accepts failing reports shows this. |
+| No report | no badge | The version has no report |
+
+The suite version in the badge is the `suite` field of the report ([DEV-103]). The badge is derived per version and package hash and is never inherited from an earlier version, in the same way as the review level badge ([PKG-683]). The badge has no effect on install, activation or grants: a user can install a plugin with any badge state.
+
+### Older suite versions
+
+When the suite version of a report is older than the host's, the listing shows `conformance: outdated`. This is an information state, not a failure. The report stays attached and stays true for the suite version it names. The author refreshes it by running the current suite and publishing a new version, because a report is tied to one manifest hash and an upload of the same version with another report is refused as a changed version.
+
+### A fail after a MINOR suite release
+
+A MINOR suite release only adds cases ([DEV-924]), and a build that passed the previous MINOR MAY newly fail an added case ([DEV-106]). That outcome does not change anything for a version already published. The registry does not withdraw, yank or hide a published version because a newer suite would fail it, and the Plugin Store keeps showing the stored report with its old suite version, as `outdated` once the host embeds the newer suite. Only a run of the newer suite by the author produces a `fail` report, and publishing it is the author's choice for the next version. A registry that requires a passing report at publish applies the requirement to new uploads only, with the suite version the registry names in its own policy.
+
+A pipeline that must keep the old verdicts pins the catalogue with `--suite-version` ([DEV-924]). If the CLI no longer embeds that version, the run fails with `usage.suite-unavailable`, and the author runs the current suite instead.
+
+### Failure modes
+
+| Situation | Result |
+|---|---|
+| Report hash differs from the package manifest | Report ignored, no badge, upload warning |
+| Report is not `ilium-conformance/1` | Refused at upload by a registry that requires reports; ignored elsewhere |
+| Report has a `fail` record and the registry requires a pass | Upload refused |
+| Suite version is not known to the host (newer than the host) | Badge shows the version text and `conformance: pass` or `fail` without `outdated` |

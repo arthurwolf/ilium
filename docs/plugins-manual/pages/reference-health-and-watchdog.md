@@ -154,6 +154,31 @@ An administrator who alerts on plugins uses the health states and counters above
 - [LIF-955] An alert whose newest sample is older than 3 minutes (proposed, owner to confirm), which is three sampling intervals of LIF-953, is stale. A stale alert MUST show `no data`, MUST NOT show as clear, and MUST be treated as a failure of the monitoring. Test: stop the sampler and assert that each alert shows `no data` 3 minutes later.
 - [LIF-956] An operator alert MUST NOT be silenced by `ilium plugin mute <id>`, because that command mutes only the user notification of [HST-641]. Test: mute a degraded plugin and assert that the operator alert still fires.
 
+#### Operator alert rules for host conditions
+
+The rules above fire on one plugin's counters. The conditions below take a whole session down, so they are alerts of the host, not of a plugin. The host keeps one counter or event per condition (the series column). A series is read from `ilium plugin metrics --host --json` or, for an event, from the log line with the stated code. Every threshold in the table is proposed, owner to confirm, except the 2-second stall bound of [HST-618] and the 5-restart bound of [LIF-134], which this page already defines.
+
+| Alert | Series (source) | Fires when | Routing | Clears when |
+|---|---|---|---|---|
+| `host.loop-stalled` | `host.loop-stalled` log line and the count of ticks later than the watchdog bound of 2 s ([HST-618]) | 3 stalled ticks within 10 minutes (N = 3, M = 10) | Footer notice naming the plugin call that was running, one audit record, listed by `ilium plugin alerts` | 10 minutes with no stalled tick |
+| `helper.unstable` | helper restart count per session ([LIF-133], [LIF-134]) | more than 2 helper restarts within 10 minutes. This is an early warning before the 5-restart stop of LIF-134, which then sets the reason `helper.unstable` | Footer notice, audit record, `ilium plugin alerts` | 30 minutes with no restart, or the operator re-enables the stopped plugins |
+| `disk.pressure.<step>` | the `host.disk-low` event, field `step` ([HST-661], [HST-662]) | the volume enters a step. `<step>` is the step name of HST-662 (cache eviction, log reduction, install block) | Footer warning with free MiB, audit record, `ilium plugin alerts` with the step | free space returns above 64 MiB ([HST-663]) |
+| `audit.dropped` | audit queue overflow, records dropped ([SEC-225]) | 1 or more records dropped | Footer notice, the `audit-dropped` record with the count once space returns, `ilium plugin alerts` | the `audit-dropped` record is written and 10 minutes pass with no new drop |
+| `engine.recycled` | engine recycle count of the session | 2 or more recycles within 1 hour | Audit record, `ilium plugin alerts`. No footer notice for one recycle | 1 hour with no recycle |
+| `lock.takeover` | `lock.takeover` log line ([HST-697]) | any takeover | Audit record with the old holder's pid and boot id, `ilium plugin alerts` | acknowledged by `ilium plugin alerts --ack`, or 24 hours |
+| `handles.rising` | session handle count against the limit of [HST-128] | above 80 percent of the limit for 5 minutes | Footer notice, audit record, `ilium plugin alerts` | below 70 percent for 5 minutes |
+| `recovery.completed` | `recovery.completed` log line with its count ([HST-679]) after a start in which the crash-loop guard changed level ([LIF-294], [LIF-980]) | once per such start | Footer notice, audit record, `ilium plugin alerts` | acknowledged, or 24 hours. It reports a past event and is not a fault |
+
+Rules for these alerts. The wording of the rules is proposed:
+
+- A host alert is raised by the host without a sampling job. Like a plugin alert it has the states `open`, `no data` and `clear` of [LIF-955]. An operator sampling job that reads the host series follows [LIF-953] and [LIF-954].
+- A host alert is never silenced by `ilium plugin mute <id>` ([LIF-956]), because it belongs to no plugin.
+- `ilium plugin alerts` lists open alerts first, one line per alert with the id, the opened time, the count and the source code. With `--json` it prints one JSON line per alert when output is not a terminal. After a server restart the alerts are rebuilt from the audit log, and each stays open until its clearing condition is met after the restart.
+- While the host is overloaded (see Behaviour under machine overload), `host.loop-stalled` is still raised, because a stalled loop is what overload looks like. It carries the marker `overloaded`.
+- Failure modes: if the audit log cannot be written, the alert still shows in the footer and in `ilium plugin alerts`, and `audit.dropped` fires. If the series cannot be read, the alert shows `no data` and is never reported as clear.
+
+Test for LIF-952 extended to host alerts: with the fixture host, block the loop three times, kill a helper three times, fill the volume to each step, overflow the audit queue, force two engine recycles, take over a stale lock, raise the handle count to 81 percent, and finish a recovery after a crash-loop level change. Assert that each alert fires at its threshold and not before, and clears under its clearing condition.
+
 ### Edge cases
 
 | Situation | What happens |
@@ -163,6 +188,32 @@ An administrator who alerts on plugins uses the health states and counters above
 | `activate` never returns | The activate deadline traps it. One failure counts. |
 | A T1 plugin loops while the UI waits for its render | The render deadline traps it within 30 ms on the client. The view shows its last good frame, marked stale. |
 | The machine sleeps during a call | The monotonic clock may not advance; the host treats a gap of more than 1 s as a clock skip and does not count the call as a breach. |
+
+
+### Behaviour under machine overload
+
+Budgets, deadlines and the failure window of this page are specified for a host that is not overloaded ([LIF-125], [HST-081]). This section states what the host does when that premise fails, so that a busy laptop does not stop healthy plugins. The thresholds are proposed, owner to confirm.
+
+**Detection.** The host reads loop tick lateness and scheduler latency from the host counters that feed [HST-618]. The host is overloaded when the measured latency stays above 250 ms for more than 10 s. This is lower than the 2-second stall bound of HST-618, which stays a separate and faster alarm.
+
+**What is suspended while overloaded.**
+
+| Rule | While overloaded |
+|---|---|
+| Deadline traps ([LIF-125]) and watchdog misses | Still delivered to the plugin as a trap, but not counted in the failure window of [LIF-027] |
+| The restart rule ([LIF-028], [LIF-029], [LIF-030]) | Paused: no restart is scheduled, and no side moves to `stopped-by-failure` for a trap or a missed deadline that happened during the overload |
+| Health states ([LIF-122]) | Frozen at the last value. `ilium plugin status` and the Plugins screen show the marker `overloaded` beside the state, and `plugin-status` carries `"overloaded":true` |
+| Alert rules for plugin counters | Held, not cleared, until the overload ends |
+
+**What is still enforced.** Memory ceilings, the kill switch, and the protection of essential core plugins ([LIF-030], [LIF-042]) are never paused. A plugin that exceeds its memory ceiling is stopped as usual.
+
+**Signals.** On entry the host writes the log line `host.overloaded` and publishes the event `host.overloaded` with the measured latency in milliseconds and the time the overload began. The footer shows one notice, at most one per 60 s.
+
+**Recovery.** The host leaves the overloaded state when the latency stays under the threshold for 60 s. It then writes `host.overload-cleared` with the length of the overload, removes the marker, recomputes health from the failure window (which did not count the suspended traps), and resumes the restart rule. A trap that happened during the overload is never counted afterwards.
+
+**Failure modes.** If the latency counters cannot be read, the host assumes it is not overloaded and the counting rules stay in force. An overload that lasts longer than 10 minutes adds a warning to the diagnostics report.
+
+Test for the overload rules: start the fixture with a plugin that traps nothing, run a CPU hog that starves the host for 30 s, and assert that `host.overloaded` is written once with the latency, that no plugin is stopped for failure, that the health state stays frozen with the marker, and that after 60 s under the threshold `host.overload-cleared` is written and the marker is gone. Add a case where a plugin exceeds its memory ceiling during the hog and assert that it is still stopped.
 
 
 ### Correlation ids across a call chain

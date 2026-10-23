@@ -35,6 +35,44 @@ Run `ilium plugin keygen --publisher-id com.example --publisher "Example Labs" -
 | [PKG-493] | The private key MUST NOT be stored in the plugin repository. For CI, put it in a secret store and pass it through `ILIUM_PUBLISHER_KEY` (PEM text) or `ILIUM_PLUGIN_SIGNING_KEY` (path of a key file). |
 | [PKG-494] | Encrypt a key kept on disk. Pass the passphrase through `ILIUM_KEY_PASSPHRASE`, never on the command line. |
 
+## Publisher key custody and signing in CI
+
+A publisher key is the one secret that the whole trust of your plugins rests on. Everything the manual says about pinning, revocation and expiry (see [Signing and trust](/pages/reference-signing-and-trust/)) assumes the key stayed with you. This section turns the one-line advice of SEC-174 into a procedure.
+
+**Generate and store**
+
+1. Run `keygen` on a trusted machine that you control, not on a shared build server or a cloud shell.
+2. Encrypt the key at rest (PKG-211). Give the passphrase through `--passphrase-file` or `ILIUM_KEY_PASSPHRASE`, never on the command line (PKG-494). An empty passphrase is refused.
+3. Keep one key per publisher id. Do not copy the same key into two CI systems or to a colleague; use a second key with the same publisher id if two systems must sign, so that each can be revoked on its own.
+4. Keep an offline backup of the encrypted key and of a prepared rotation statement `rotation.json` (PKG-238) in a place that is not the repository (PKG-493).
+
+**Signing in CI**
+
+- Store the key in the CI secret store and pass it as `ILIUM_PUBLISHER_KEY` (PEM text) or `ILIUM_PLUGIN_SIGNING_KEY` (path of a key file) (PKG-493, PKG-213).
+- Bind the secret to the release branch or to release tags only. Jobs for pull requests and for forks MUST NOT see it. If a job without the secret reaches `sign`, the command fails with a missing-key error and no package is signed; make the job fail rather than fall back to an unsigned upload (`publish.unsigned`).
+- Run the sign step only after a clean checkout and the final `pack` (PKG-505). Do not print the environment in the log; mask the secret value in the CI settings.
+- Protect the release branch or tag so that only maintainers can create it; anyone who can push a release tag can make CI sign.
+
+**Rotation and departures**
+
+- Rotate when a maintainer with access to the key or to the CI secret leaves, and when the CLI warns about expiry. The registry refuses a publish signed with an expired key and the CLI warns 60 days before expiry (SEC-722).
+- To rotate, sign `rotation.json` with the old key and publish the next version signed by the new key (PKG-238). Users that pinned the old key accept the new one through the statement.
+- Registry accounts need a second factor, at least two maintainers per publisher id, and notify every maintainer on publish and key change (SEC-723). Check these notices after each rotation.
+
+**Review level B**
+
+A registry at review level B (PKG-401) reviews first publishes and packages that request high-risk grants. Such a publisher is expected to hold the key on a hardware token or in an encrypted file; a registry operator MAY refuse a publisher that signs with an unencrypted key kept in a CI variable only. Level B is not a statement that your key is safe; it is a statement that a person looked at the package.
+
+**If the key leaks**
+
+Act at once: revoke the key as `compromised` and follow the drill in [Release key compromise](/pages/reference-release-key-compromise/), [Registry key compromise](/pages/reference-registry-key-compromise/) and the runbook in [Signing and trust](/pages/reference-signing-and-trust/#a-compromised-key-the-publisher-runbook) (PKG-242 to PKG-247). Installed copies signed by that key become `disabled-blocked` until users take an update signed by another trusted key of your publisher id (USR-177).
+
+| Id | Rule |
+|---|---|
+| [SEC-174] | A publisher SHOULD keep the private key encrypted, store a backup offline, and sign only on a clean build machine. |
+| [PKG-493] | The private key MUST NOT be in the repository; CI uses a secret store. |
+| [PKG-494] | A key on disk is encrypted and the passphrase is passed through `ILIUM_KEY_PASSPHRASE`. |
+
 ## Reproducible builds
 
 A build is reproducible when two machines make the same package bytes from the same source. Reproducible builds let users and registries confirm that a package really comes from the source you published.
@@ -78,6 +116,35 @@ ilium plugin verify dist/com.example.git-tools-1.4.2.iliumpkg
 |---|---|
 | [PKG-505] | Sign only after the final `pack`. Changing any file after signing makes `manifest.file-hash` or `manifest.signature-invalid`. |
 | [PKG-506] | Run `verify` and install the file on a clean machine before you upload. |
+
+## Secret detection in pack and check
+
+`pack` includes every file under `src/` and `assets/` (PKG-143), and a published version can never be changed (PKG-394). A secret that enters a package therefore stays public. AUT-304 and AUT-306 forbid secrets and keys in a package; `ilium plugin pack` and `ilium plugin check` enforce this with an automated scan over the same input set that `pack` would include.
+
+**What the scan refuses**
+
+- A PEM block whose header contains `PRIVATE KEY` (for example `BEGIN PRIVATE KEY`, `BEGIN ENCRYPTED PRIVATE KEY`, `BEGIN OPENSSH PRIVATE KEY`).
+- A file named `publisher.key` or matching `*.key`, and a file named `.env` or `.env.*`.
+- A text string that matches a common token pattern, such as a registry token, a cloud access key id with its secret, a code-host personal access token, or a bearer token with a long random value. The scan reads text files only and skips files larger than 4 MiB.
+
+**What the user sees**
+
+The command exits 1 with the code `pack.secret-detected`, the path inside the package, the line number for a string match, and the rule that matched. It never prints the secret itself. `pack` writes no `.iliumpkg` when the scan fails, and `check` reports the same finding without packing.
+
+**False positives**
+
+A test fixture or sample may look like a secret. Run `ilium plugin pack --allow-secret-path <path>` (or the same flag on `check`) for that exact path. The flag may be repeated, takes a path relative to the project root and no globs, and each allowed path is listed in the command output and in `build-info.json` so that a reviewer sees it. Do not allow a real key; remove it from the project instead and, if it was ever published or committed, revoke it.
+
+**At upload**
+
+The registry repeats the scan on every upload as part of its automated static analysis (SEC-726), after the package format stages and the other checks of PKG-811. It does not honour `--allow-secret-path` blindly: a path allowed by the publisher is shown to the reviewer, and a PEM private key block is refused regardless. A refused upload fails with `registry.policy` and detail `secret-detected`, leaves no blob and no metadata change, and does not use up the version number.
+
+| Id | Rule |
+|---|---|
+| [PKG-143] | `pack` includes every file under `assets/`, `help/`, `sounds/`, `screenshots/` and `src/`; the scan covers this set. |
+| [AUT-304] | A package MUST NOT contain a secret, a key or a token. |
+| [AUT-306] | The secret key MUST NOT be committed, packaged or printed. |
+| [SEC-726] | The registry runs automated static analysis on every upload. |
 
 ## Publish
 

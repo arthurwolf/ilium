@@ -516,6 +516,117 @@ The `extension` template fills a hook of a core plugin. It requests `extensions.
 
 The test builds a `HookCall` with a payload that holds a secret, runs the handler with `host.run_hook` and asserts `HookReply::Replace`. The core plugin point is described in [Core extension points](/pages/reference-core-extension-points/).
 
+## Organisation and third-party templates
+
+The eight built-in templates are not the only source. A team that ships several plugins can keep a house template (its CI file, licence, publisher key id and lint settings) in a folder or a git repository and pass it to `new`. The project keeps the template drift check of DEV-937, because the template origin is recorded in `.ilium-template.json`.
+
+Command form:
+
+`ilium plugin new <dir> --id <id> --lang <rust|typescript> --template <path|git-url> [--ref <git-ref>] [other flags of new]`
+
+A `--template` value is a built-in name (DEV-260) when it matches one of the eight names. Otherwise it is a template location: a value that starts with `./`, `../` or `/`, or names an existing folder, is a local path. A value that starts with `https://`, `ssh://` or `git@` is a git url. Anything else fails with `new.template-unknown` (DEV-043) before any file is written. `--side` never accepts a location. When both flags are given they MUST name the same template or the command fails with `usage.conflict` (DEV-040).
+
+### Template folder layout
+
+```text
+house-template/
+  template.json            the descriptor, required
+  files/
+    rust/                  the files written for --lang rust
+    typescript/            the files written for --lang typescript
+    common/                the files written for every language
+```
+
+- Files in `common/` are written first, then the files of the chosen language. A path present in both is taken from the language folder.
+- Paths are relative to the new project. A path with `..`, an absolute path, a symbolic link or a file name that differs only by case from another is refused with `new.template-invalid`.
+- A file whose name ends in `.tmpl` is copied with placeholders replaced and the `.tmpl` suffix removed. Any other file is copied byte for byte, so binary files are safe.
+- The folder MAY hold other files, such as a `README.md` for the template maintainers. Only `template.json` and `files/` are read.
+
+### The descriptor
+
+`template.json` has these fields. A field that is not listed makes the template invalid.
+
+| Field | Type | Rule |
+|---|---|---|
+| `schema` | integer | Must be `1`. Another value fails with `new.template-schema-unsupported`. |
+| `name` | string | Matches `[a-z0-9-]+`. Must not equal a built-in template name. |
+| `version` | string | A semantic version. Recorded in `.ilium-template.json`. |
+| `languages` | array | One or both of `rust`, `typescript`. A folder `files/<lang>/` must exist for each. |
+| `sides` | array | A non-empty subset of `server`, `client`, `scene`. Describes the sides the files implement. |
+| `placeholders` | object | Optional extra placeholders, see below. |
+| `min_cli` | string | The lowest `ilium` version that can use the template. |
+
+- `new` MUST fail with `new.template-language-unsupported` when `--lang` is not in `languages`, and with `new.template-cli-too-old` when the installed CLI is older than `min_cli`. The message of the second one names both versions.
+- `sides` is informational for `new`. It is shown by `ilium plugin template verify` and written to `.ilium-template.json`. The template files themselves must contain a valid manifest for those sides.
+
+### Placeholders
+
+A third-party template uses the same placeholders as the built-in ones: `@@id@@`, `@@name@@`, `@@publisher@@`, `@@package@@`, `@@sdk@@` (DEV-264) and `@@package_ident@@` (DEV-275). Replacement and escaping follow DEV-264 and DEV-265.
+
+- The `placeholders` object adds house values, for example `{"publisher_key_id": "acme-2026-a", "licence": "Apache-2.0"}`. A name matches `[a-z_]+` and must not equal a built-in name. Its value is a string written as given and used for `@@publisher_key_id@@`. A user can override a house value with `--set <name>=<value>`; an unknown name fails with `new.placeholder-unknown`.
+- After replacement `new` MUST find no `@@name@@` token in a `.tmpl` file. Any left over fails with `new.placeholder-unresolved` naming the file and line, and no project is written. A file that is not `.tmpl` is never scanned, so an `@@` inside it is kept.
+- Replacement is a plain text substitution, not a template language. There are no loops, conditions or includes.
+
+### Fetching a git template
+
+- A git url is cloned shallow into a temporary folder. `--ref` selects a branch, tag or commit; without it the default branch is used. The commit that was cloned is recorded.
+- Fetching uses the `git` program on the path. Ilium prompts for no credentials: a url that needs a password fails with `new.template-fetch-failed`. Use a credential helper or an ssh agent.
+- The temporary folder is deleted when `new` ends, whether it succeeded or not. A network failure writes nothing into `<dir>`.
+- A template is data. `new` never runs a script from it, and the template folder cannot contain a hook that runs.
+
+### Verifying a template
+
+`ilium plugin template verify <path|git-url> [--lang <lang>]` is the check that the guarantee of DEV-270 still holds for a template. It is the tool for the template maintainer, and a CI job for the template repository SHOULD run it on every change.
+
+1. It reads and validates `template.json` and the folder layout.
+2. For each language in `languages` (or the one in `--lang`) and each placeholder set it picks a generated id, such as `example.verify-check`, and runs `new` into a scratch folder.
+3. In each project it runs `check`, `lint --deny warnings`, `build` and `test`, in this order, as DEV-270 states.
+4. It prints one JSON line per step, with `lang`, `step` and `ok`, and a final `summary` line. The exit code is `0` when every step of every language passes and `1` otherwise. A step that fails prints the same diagnostics as the command would, with the code (`lint.readme-missing`, for example).
+5. It deletes the scratch folders, even after a failure, unless `--keep` is given.
+
+`verify` needs the toolchains of the languages it checks. `ilium plugin doctor` (DEV-270) reports whether they are present; a missing one stops `verify` with `verify.toolchain-missing` and no template result.
+
+### Recording the origin
+
+`new` writes `.ilium-template.json` in the project root for every template, built-in or not. DEV-937 uses it. Its content:
+
+```json
+{
+  "schema": 1,
+  "origin": "git",
+  "location": "https://git.example.com/acme/plugin-template.git",
+  "ref": "v3",
+  "commit": "9f2c1e0",
+  "name": "acme-house",
+  "version": "3.1.0",
+  "lang": "rust",
+  "files": { "ci/plugin.yml": "sha256:...", "LICENSE": "sha256:..." }
+}
+```
+
+- `origin` is `builtin`, `path` or `git`. For `builtin`, `location` is the template name and `version` is the `ilium` version.
+- `files` lists each template-owned file with the hash of the template content after placeholder replacement. A file the user is expected to edit, such as `src/lib.rs`, is listed by the template author in `template.json` as `"editable": ["src/lib.rs"]`; editable files are not hashed and never drift.
+- With `check --template-drift` (DEV-937) the CLI re-reads the template from `location` and `ref` (for a `path`, the folder as it is now; for a `git` template, the recorded ref again, fetched fresh). It prints one `template.drift` warning per file whose template content differs from the recorded hash and does not change the project. When the template cannot be reached it prints `template.drift-unavailable` as a warning and exits as without the flag.
+- A project file edited by the user also differs from the hash. `template.drift` names which of the two changed: `template` when the template changed, `local` when only the project file changed, `both` when both did.
+- A project with no `.ilium-template.json` (created by a CLI that did not write it) is not an error. The drift check prints `template.drift-no-record` and stops.
+
+### Failure modes
+
+| Code | When |
+|---|---|
+| `new.template-unknown` | The value is not a built-in name or a reachable location. |
+| `new.template-invalid` | `template.json` or the folder layout breaks a rule above. |
+| `new.template-schema-unsupported` | `schema` is not `1`. |
+| `new.template-language-unsupported` | `--lang` is not in `languages`. |
+| `new.template-cli-too-old` | The CLI is older than `min_cli`. |
+| `new.template-fetch-failed` | `git` failed or timed out (60 s). |
+| `new.placeholder-unknown` | `--set` names a placeholder the template does not declare. |
+| `new.placeholder-unresolved` | A `@@token@@` is left in a `.tmpl` file. |
+
+- `new` writes no file when any of these fails (DEV-261).
+- A template cannot give an `ilium.` id to anyone: the reserved-id rule of DEV-262 applies to every template, including third-party ones.
+- Because `new` is deterministic (DEV-263), the same template, the same commit, the same flags and the same `ilium` version give byte-identical projects.
+
 ## Edge cases
 
 - **Existing folder.** An empty folder is accepted. A folder with only a `.git` directory counts as non-empty because of the file rule, so use `--force` for it.

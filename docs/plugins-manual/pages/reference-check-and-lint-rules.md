@@ -121,6 +121,63 @@ A lint finding record:
 - **[DEV-226]** `lint --deny warnings` MUST exit with 3 when any unsuppressed `warn` or `error` finding exists. `info` findings never affect the exit code.
 - **[DEV-227]** `check` MUST exit with 3 when any `error` finding exists, and `check` has no deny flag, because its three `warn` findings (`signature.absent` for an unsigned package, `component.size-warning` for a component from 8 to 32 MiB and `check.stale-build`) are normal during development.
 
+## Rule additions across CLI releases
+
+Every pipeline in [Plugin command-line reference](/pages/reference-plugin-cli/) runs `lint --deny warnings` ([DEV-760](/pages/reference-requirements-dev-tooling/)), and that command exits with 3 on any unsuppressed `warn` finding ([DEV-226], [DEV-011]). A new `warn` rule would therefore turn a green release pipeline red the day the author updates the CLI. This section states how a rule enters the catalogue, how its severity may change and how a pipeline chooses when to adopt new rules. It applies the policy of [DEV-858], [DEV-860] and [DEV-863] to rules and follows the shape of the conformance suite policy ([DEV-104], [DEV-105], [DEV-106], [DEV-924]).
+
+### Catalogue version
+
+The rule catalogue (every `check.*`, `manifest.*`, `component.*`, `signature.*` and `lint.*` code on this page) carries a version `MAJOR.MINOR`. A CLI release embeds its own catalogue version and every earlier catalogue version of the same MAJOR that it still supports. `ilium plugin lint --json` and `ilium plugin check --json` print the version that ran in the `summary` record as `rules_version`.
+
+| Release kind | What the catalogue may do |
+|---|---|
+| CLI PATCH | Nothing. No rule is added, removed, re-severitied or reworded in a way that changes a verdict. |
+| CLI MINOR | Add rules at severity `info`. Raise a rule from `info` to `warn`, or from `warn` to `error`, under the rules below. Bump the catalogue MINOR. |
+| CLI MAJOR | May remove a rule, change what a rule matches, or change its severity in any direction. Bump the catalogue MAJOR. |
+
+### Severity ladder
+
+- A new rule MUST ship at severity `info`. It prints but never changes the exit code ([DEV-226]).
+- A rule MAY be raised from `info` to `warn` only in a CLI minor that is at least one minor after the minor that introduced it.
+- A rule MAY be raised to `error` only in a CLI minor whose release notes name the rule id, the old and the new severity and the previous catalogue version, as one entry in the form of [DEV-863].
+- A rule MUST NOT be raised by more than one step in one release. A rule moves `info` to `warn` in one minor and `warn` to `error` in a later one.
+- Lowering a severity or retiring a rule MAY happen in any minor, because it can only turn a failing run green.
+- A rule's severity under a pinned catalogue version (below) is the severity that version defined, whatever the running CLI would use unpinned.
+
+### Rule ids
+
+- A rule id is never reused. A retired id stays reserved forever; a new rule that resembles it gets a new id.
+- Retired ids are listed in the release notes of the release that retires them and in `ilium plugin schema lint` under `retired_rules`, each with the catalogue version in which it last ran and, where one exists, the id that replaces it.
+- A `lint.toml` suppression that names a retired id does not raise `lint.suppression-unknown`. It raises `lint.suppression-unused` (`warn`) so the author removes it. A suppression naming an id that never existed still raises `lint.suppression-unknown`, as in [DEV-232].
+- A MINOR release that adds rules MUST list each new rule id with its severity in its release notes ([DEV-105] applied to rules).
+
+### Pinning the catalogue
+
+A pipeline pins the catalogue so that a CLI update never changes its verdict until the author chooses.
+
+```toml
+# lint.toml
+rules_version = "1.4"
+```
+
+- `ilium plugin lint --rules-version 1.4` and `ilium plugin check --rules-version 1.4` run exactly the catalogue of that version. The flag wins over `lint.toml`. Without either, the CLI runs its newest embedded catalogue.
+- Under a pin, rules added after the pinned version do not run and print no `lint.skipped` finding. Rules retired after the pinned version still run, so a pin does not hide a problem the CLI can still detect, until a MAJOR release drops that catalogue.
+- A pin never changes `check` verdicts that the install path also applies (for example `manifest.*` and `component.*` errors). The install path always enforces the running CLI's rules. A pin only freezes which rules `check` and `lint` report and at which severity.
+- The value is `MAJOR.MINOR` as two decimal integers separated by a dot. Anything else, including a patch component such as `1.4.2`, fails with `usage.rules-version-invalid` and exit 2.
+- A pin that names a version the CLI does not embed (older than it still supports, or newer than it) fails with `usage.rules-version-unavailable` and exit 2, before any rule runs. The message names the pinned version and the versions this CLI embeds. This is the same shape as `usage.suite-unavailable` in [DEV-924].
+- `ilium plugin schema lint` lists the embedded catalogue versions as `supported_rules_versions`.
+
+### What the author sees
+
+When the CLI runs a newer catalogue than the pin (for example a pipeline pinned to 1.4 on a CLI whose catalogue is 1.6), `lint` prints one `info` finding named `lint.catalogue-behind` that gives the pinned and the newest version and the rule ids added in between. The finding never changes the exit code. To adopt the new rules, raise the pin, run `lint`, and fix or suppress what it reports.
+
+### Failure modes
+
+- **Pipeline unpinned across a MINOR.** New rules appear at `info`, so the exit code is unchanged. A rule raised to `warn` or `error` was named in the release notes of that minor; the first run after the update fails with exit 3 and the finding names the rule id.
+- **Pin older than the CLI supports.** Exit 2 with `usage.rules-version-unavailable`. Raise the pin to a listed version or install the CLI release that still embeds the old one.
+- **Pin newer than the CLI.** Exit 2 with the same code, which tells the author to update the CLI.
+- **`lint.toml` pin and flag disagree.** The flag wins and `lint` prints an `info` finding `lint.rules-version-overridden`.
+
 ## Suppression
 
 A project suppresses a lint rule in a file named `lint.toml` in the project folder. Suppression is a per-project decision that a reviewer can read, so it carries a reason.

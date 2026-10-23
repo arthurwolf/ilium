@@ -145,6 +145,62 @@ An update is an install of a higher version of an installed id.
 | [PKG-304] | A notice lists the plugin, the old and new version, the new grants and the link to the changelog. The user can **Update**, **Later** (which hides the notice for that version for 7 days) or **Skip this version**. |
 | [PKG-305] | Auto-update is a policy item. An administrator can set `off` and lock it. |
 
+## Update of plugins installed from a file or a URL
+
+Ilium ships with no registry, so many plugins arrive as a file or a URL. Their update path is defined here. The record field `source` (see [PKG-265]) decides it, not the channel.
+
+| Id | Rule |
+|---|---|
+| [PKG-431] | `update` resolves candidates in the channel of the plugin. For `source: registry` that is `stable` or `beta`. For `source: url` and `source: file` the channel is `file` ([PKG-356]), and no registry is asked unless the plugin was adopted (see below). |
+| [PKG-260] | A candidate from a URL is downloaded into `<cache dir>/ilium/plugins/downloads/` and then handled as a local file. HTTPS only, at most 3 redirects, all to HTTPS. |
+
+### `source: url`
+
+1. The host reads `source_url` from the record. If the file `updates.json` exists beside the package (the same URL with the last path segment replaced by `updates.json`), the host fetches it first. The size limit is 1 MiB; a larger response is ignored with a warning.
+2. `updates.json` is a JSON object: `{ "schema": 1, "id": "<plugin id>", "latest": { "version": "<semver>", "url": "<https url of the package>", "package_sha256": "<64 hex>" }, "signature": { "key_id": "<64 hex>", "value": "<base64 Ed25519 signature>" } }`. The signature covers the canonical JSON of the object without `signature`. A file with `id` different from the installed id, a `schema` other than 1, a non-HTTPS `url` or a bad signature is ignored with `update.metadata-invalid`, and the host falls back to step 3.
+3. Without a valid `updates.json`, the host re-fetches `source_url` itself. A server that returns the same bytes (equal `package_sha256`) means no update.
+4. The downloaded package goes through the normal [install transaction](#the-install-transaction), with the checks of [Update](#update). It is offered only when its version is higher ([PKG-280]) and its signature key equals the recorded `key_id`. A different key follows [PKG-283] and is never installed automatically. An unsigned plugin (`key_id` null) may update only when the user passes `--allow-unsigned` for that command.
+5. The download is checked against `package_sha256` of `updates.json` when present; a mismatch aborts with `install.download-failed`.
+
+### `source: file`
+
+A file install records no location to look at. `ilium plugin update <id>` on such a plugin prints the warning `update.no-source` ("this plugin was installed from a file and has no update source; install a newer file or adopt a registry"), prints a `plugin` record with `changed: false` and exits 0. `update --all` does the same per plugin and counts it as unchanged. Auto-update ([PKG-300] to [PKG-305]) and the store's update badge skip these plugins silently. The user updates by running `ilium plugin install ./notes-1.3.0.iliumpkg`, which is an update by the rules of [Update] when the id is already installed.
+
+### Adopting a registry
+
+When a configured registry lists the id of a file-installed plugin, `ilium plugin update <id> --from-registry` fetches the newest allowed version from that registry. The host adopts the plugin only when the registry entry names the same id and the package is signed with the recorded `key_id`. On success it installs the version, sets `source: registry` and the channel of the registry entry, and keeps grants, data and settings. If the ids match but the key differs, the command fails with `signing.key-changed` and changes nothing. If no registry lists the id, it fails with `registry.not-found`, exit 5. Until adoption the channel stays `file`, and no registry update is ever offered for the plugin ([PKG-431]). `--from-registry` is not valid for `source: bundled` or `dev`.
+
+### What the user sees
+
+An update available for a `url` plugin appears as a notice with the content of [PKG-304] and as an update badge in the store. A `file` plugin shows no badge. If the registry later lists a `file` plugin, the store shows **Adopt registry updates** on its page, which runs the same command. Auto-update for `url` plugins obeys the exclusions of [LIF-727].
+
+| Situation | Result |
+|---|---|
+| `source_url` returns 404 or the network fails | `install.download-failed`, the installed version stays active |
+| `updates.json` names a lower or equal version | No update, no warning |
+| `updates.json` signed by a key other than `key_id` | Ignored as `update.metadata-invalid`; the package itself is still judged by its own signature |
+
+## Switching to a successor plugin
+
+A publisher can mark a plugin deprecated with a successor ([PKG-397]) or declare end of life with one ([PKG-710]). Clients show the successor ([PKG-533]). The switch below is what taking that offer does.
+
+`ilium plugin switch <old-id> --to <successor-id>` and the **Switch** button in the store run these steps:
+
+1. The successor is installed through the normal [install transaction](#the-install-transaction), including validation and the review dialog. Nothing is shortcut. The successor starts with its own grants, all asked in the review. Grants and trusted keys of the old plugin are never copied.
+2. The old plugin stays installed but is disabled with the reason `switching to <successor-id>`. It stays so until the user confirms at the end of the dialog or passes `--yes`.
+3. If the successor's manifest declares `succeeds: [<old-id>]`, the review dialog has a consent line **Copy data from `<old-id>`**. With consent, the host runs `ilium plugin export <old-id> --out <file>` ([LIF-290]) into a temporary file, and the successor's `migrator` imports it under its own `data_version` (compare [LIF-292]). If the manifest has no `succeeds`, no data is offered or copied, and the dialog says so. A migrator failure leaves the successor installed with empty data and the old plugin untouched, and prints `switch.data-failed`.
+4. On confirmation the old plugin is uninstalled without `--purge` ([PKG-293], [PKG-294]), so its data, storage and settings stay on disk. Grants and first-use answers are deleted as always ([LIF-083]).
+
+| Situation | Result |
+|---|---|
+| The successor's publisher key differs from the old one | Allowed. The review shows the new publisher, and the new key follows [Signing and trust](/pages/reference-signing-and-trust/). A `succeeds` claim from another key triggers an extra consent line naming both publishers |
+| The old plugin has dependants | The old plugin is not uninstalled. The command stops after step 3 with `dependency.in-use` ([PKG-349]), naming the dependants. The old plugin stays disabled and dependants are disabled with `requires <old-id>` until the user switches them or passes `--force` |
+| The user declines the confirmation | The successor stays installed and enabled, the old plugin is re-enabled, exit 1 with `install.cancelled` |
+| The successor is already installed | Steps 2 to 4 run without step 1 |
+| `<successor-id>` is not the deprecated plugin's named successor | Allowed; the switch only needs the `--to` id |
+
+The result line has `action` `installed` for the successor and a second line with `action` `uninstalled` for the old id.
+
 ## Codes and JSONL lines
 
 | Code | Cause |

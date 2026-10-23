@@ -40,6 +40,46 @@ The command line does not connect through a proxy unless one is configured. The 
 
 `NO_PROXY` is read in steps 2 and 3. It lists exact host names and domain suffixes, and a request to a listed host connects directly. A proxy that is named by the policy or by a setting is never bypassed by a fallback to a direct connection. Proxy credentials in a proxy URL are never printed in any record or message.
 
+### Authenticating proxies on managed networks
+
+This section is target behaviour. It adds no requirement id: the proxy choice is [PKG-374](/pages/reference-registry/), the HTTPS-only rule is [PKG-371](/pages/reference-registry/), and the header rule is [SEC-076](/pages/reference-network-egress/). The names marked "proposed" below are not yet in a requirements file.
+
+**Supported schemes.** The registry and update client supports one proxy authentication scheme: HTTP Basic, sent as a `Proxy-Authorization: Basic` header on the `CONNECT` request that opens the tunnel to the registry. It is sent only after the proxy has answered `407` with a `Proxy-Authenticate: Basic` challenge, or when the proxy URL carries credentials and the first `CONNECT` is sent with them. The proxy URL has the form `http://user:password@proxy.example.com:3128` or `https://user:password@proxy.example.com:3128`; user and password are percent-decoded. These are explicitly unsupported, and the client never attempts them:
+
+- NTLM and Negotiate (Kerberos): a `407` that offers only these schemes is a failure with the detail `unsupported-scheme`. The client does not use the logged-in user's ticket.
+- Digest: not supported, same detail.
+- A PAC file (proxy auto-configuration) or WPAD discovery: the client never fetches or runs one. A setting or a variable that holds a PAC URL is refused with `usage.invalid-value`. An administrator on a PAC network sets `[network] proxy` to the fixed proxy that the PAC file would choose.
+
+A site that can only offer NTLM or Kerberos runs a local forwarding proxy that adds Basic or no authentication, and names that proxy in `[network] proxy`.
+
+**Where a credential may be stored.**
+
+| Place | Allowed | Rule |
+|---|---|---|
+| `[network] proxy` in the administrator policy | Address only | A policy proxy URL that contains `user:password@` makes the policy invalid: `policy.invalid`, exit code 7. The policy file is readable by every user and is never a secret store. |
+| `[plugins.registry] proxy` in the user configuration | Address only | A URL with credentials in this file is refused with `usage.invalid-value`, and the message names the setting, never the password. |
+| `HTTPS_PROXY` | Yes | The URL may carry credentials. The variable is read once at the start of each command (see [Proxies](#proxies)). |
+| `ILIUM_PROXY_USER` and `ILIUM_PROXY_PASSWORD` (proposed, owner to confirm) | Yes | Supply credentials for a proxy URL without them, whichever source chose the proxy, including the policy. They are read once at the start of each command. If both the URL and the variables carry credentials, the URL wins. |
+| The user's secret store (proposed, owner to confirm) | Yes | The operating-system secret store entry named `ilium-proxy`, read when neither of the sources above supplies credentials. The command never writes to it. |
+
+An administrator who needs a mandatory authenticated proxy therefore writes the address in the policy and leaves the credentials to each user's environment or secret store.
+
+**What is sent.** The credential goes only to the proxy named by the chosen source, only over the `CONNECT` request, and never to the registry. The `Proxy-Authorization` header is removed before any redirect that changes origin ([SEC-076](/pages/reference-network-egress/)). A credential is never printed in a record, a message, a `diagnostic` or a log, and the proxy address is printed without its `user:password@` part.
+
+**When the proxy answers 407.**
+
+| Situation | Result |
+|---|---|
+| `407` with no credential available | `registry.proxy`, reason `proxy-auth`, detail `credentials-missing`, exit code 8. The message names the proxy host and the places in the table above. |
+| `407` after a credential was sent | `registry.proxy`, reason `proxy-auth`, detail `credentials-rejected`, exit code 8. |
+| `407` that offers only an unsupported scheme | `registry.proxy`, reason `proxy-auth`, detail `unsupported-scheme`, exit code 8. |
+
+A `407` is never retried, because a repeat with the same credential gives the same answer. The command makes no second attempt with another scheme, and it prints no part of the credential. `registry.proxy` and its exit code are those of the [failure code table](#connection-failure-codes).
+
+**The policy proxy stays mandatory.** When the proxy comes from `[network] proxy`, an authentication failure does not change the rules of [Proxies](#proxies): the command never connects directly, never falls back to a lower source, never ignores the proxy because of `NO_PROXY`, and never falls back to `http:`. The command fails with `registry.proxy` and no connection to the registry is attempted. For plugins, the host reports the same condition as `network` with no direct fallback ([Network egress](/pages/reference-network-egress/)). With a proxy from a user setting or from `HTTPS_PROXY`, a failed authentication fails the same way and does not fall back to a direct connection either, because [Proxies](#proxies) forbids bypassing a named proxy.
+
+**Offline mode and cached data.** `--offline` stops the command before the proxy check ([Order of checks](#order-of-checks)), so no credential is read. A valid cached index is used after a failed metadata request as the registry reference says, and then no `registry.proxy` code is printed for that request.
+
 ### Certificate authorities
 
 Registry and mirror requests verify TLS against two sets of roots, as [PKG-986](/pages/reference-registry/) says:

@@ -511,6 +511,40 @@ A `draggable` node dropped on a `drop-target` node produces one `dropped` action
 
 While a drag hovers a drop target, the host sends `drag-over` with `drag-over-value { source-key, target-key, index, accept }` once each time the target changes. The host decides the position from the pointer row inside the target's area, and `accept` carries the result: `before`, `after`, `inside` or `none`. For a `tree-item` with `expandable` set, the top third is `before`, the middle third is `inside` and the bottom third is `after`, with rows rounded down. For any other target, the top half is `before` and the bottom half is `after`. A target with `drop-target` unset accepts nothing. A drop sends `dropped` to the target key with the position in the `drop` value, and for a `tree-list` the target item id is `target-key`. The host draws the insertion line or the inside highlight, and scrolls the list when the pointer is near an edge.
 
+### Keyboard equivalent for drag and drop
+
+Every pointer drag has a keyboard route, as [USR-303] requires. The route sends the same actions as the pointer, so a plugin writes no second code path.
+
+1. **Mark.** On a focused `draggable` node, the user presses `Ctrl+Space` (the tmux preset) or `m` (the screen preset). The host marks the node, draws it with the `selected` role and sends no action yet. Only one node is marked at a time; marking another node moves the mark.
+2. **Move.** Arrow keys and Tab move focus to the next `drop-target` in focus order (see [Focus order](#focus-order) and [WID-018]). Nodes that are not a `drop-target` are skipped while a mark is active. On each candidate the host sends `drag-over` with the same `drag-over-value { source-key, target-key, index, accept }` as a pointer drag, so the plugin can show `accept`. Up and Down also step `index` through `before`, `inside` and `after` for the focused target, in that order, where the target allows them.
+3. **Drop.** Enter sends one `dropped` action with the same `drop(drop-value)` as a pointer drop. A target whose `accept` is `none` refuses Enter and the mark stays.
+4. **Cancel.** `Esc` clears the mark and sends no `dropped`. Esc leaves the mark first and only then follows the order in [Escape](#escape). A re-render that removes the marked node, or the target, also cancels it.
+
+In linear reader mode ([USR-305]) the host announces the marked item as `Moving <label>`, where `<label>` is the label of the node, and announces each candidate target with its `accept` word.
+
+## Empty, loading and failed states of a view
+
+Every list, table and panel that a plugin draws can have nothing to show, be waiting for data, or fail. The host defines one pattern for each state so that core plugins and third-party plugins look and read the same. A plugin does not draw its own blank screen, its own spinner frames or its own error box.
+
+| State | What the plugin returns | What the user sees |
+|---|---|---|
+| Empty | An `empty-state` in place of the list body | An icon slot, a one-line title, a one-line hint and an optional action button |
+| Loading | A `loading` state in place of the list body | The host `spinner` with a text label |
+| Data source failed | A `notice` with tone `danger` in place of the list body | A red banner with the plugin's own message and an optional Retry action |
+| `render` failed | Nothing: the host acts | The `USR-338` placeholder |
+
+**Empty.** The `empty-state` has four parts: an `icon` slot (optional, follows the icon preset), a title of one line, a hint of one line and at most one action `button`. A title or hint longer than one line is cut to the view width and ends with `…`. The action button is an ordinary `button` and sends `activated`.
+
+**Loading.** The `loading` state shows the host `spinner` with its text. With reduced motion ([accessibility-and-theming](/pages/accessibility-and-theming/)) it shows a static `…` and the text, with no frames. The plugin chooses a time limit in milliseconds when it returns the state. When the limit passes and the plugin has not returned a new tree, the host replaces the loading state with the failed state and sends `activated` to the retry action. A plugin that gives no limit gets 10 seconds.
+
+**Failed.** The host never guesses a failure of the plugin's data source: the plugin knows it, so it returns its own `notice` with `tone: danger` and a text that names what failed. When the `render` call itself fails or exceeds its budget, the host keeps the last good frame dimmed for at most 2 s and then draws the placeholder named in [USR-338], with the keys Retry and Details. No other window is blanked. The placeholder is the host's, so a plugin cannot style or replace it.
+
+**Keys and selection.** The widget keys of the list, table or panel itself (the `key` of the `list`, `table` or `tree-list`) stay the same in every state, so the host keeps selection, scroll offset and filter text across a state change. The `empty-state`, `loading` and `notice` nodes have their own keys, which must not equal the list key. When the list returns, the host restores the selected key if it is still present, or the nearest item if it is not. An empty list is not the same as a missing list: a plugin that removes the list key loses its saved selection.
+
+**Focus and reader mode.** An empty list still takes focus in linear reader mode ([USR-305]) and is announced as `List, empty`, followed by the title and the hint. A loading state is announced as `Loading` plus its text, and a danger `notice` is announced with its text. The action button of an empty state is focusable and comes after the title in focus order. In the failed state, Tab never traps ([USR-303]).
+
+**Tests.** A plugin has a test for each state it can return ([AUT-408]): an empty list, a loading state that reaches its time limit, and a failed data source.
+
 ## Settings views
 
 A `settings-page` tree uses a subset of the widgets. The subset is: `block`, `paragraph`, `tabs`, `separator`, `leader-row`, `%list`, `table`, `button` and `schema-form`, and also `layout`, `split`, `scroll-view`, `markdown`, `key-hints`, `diff-view`, `tree-list`, `check-list`, `gauge`, `line-gauge`, `sparkline`, `bar-chart`, `chart`, `canvas`, `progress-row`, `meter`, `minimap`, `badge`, `spinner`, `notice`, `icon`, `image`, `surface`, `location-picker` and `code-view` with `read-only: true`.

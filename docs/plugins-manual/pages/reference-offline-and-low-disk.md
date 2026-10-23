@@ -64,6 +64,41 @@ If the data folder is not writable, the host starts in a read-only mode. Install
 
 - [HST-664] The host MUST detect a non-writable data folder at start by creating and removing a probe file, MUST re-probe every 30 s, MUST leave read-only mode without restart when the probe succeeds and log `data.writable-again`, and MUST NOT lose storage writes already acknowledged. A plugin write attempted while read-only MUST return `io` with the message `read-only` and MUST NOT count as a failure.
 
+### Read-only data root
+
+The data folder check above covers a folder that cannot be written. This section covers the wider case: `<data>/plugins` (the plugin data root) or a project's `.ilium/` is on a read-only mount. Typical causes are live media, an immutable home folder, a container image, and a checked-out repository whose `.ilium` is mounted read-only. Each root is judged on its own, so a read-only `<data>/plugins` can sit beside a writable project `.ilium/`, and the other way round.
+
+**Detection.** The host probes each root at start by creating and removing a probe file (see HST-664). A root that fails the probe with a read-only error (`EROFS` on Unix, the read-only attribute or a read-only volume on Windows) is read-only. A root that fails for any other reason (permission denied, no space) is handled by the rules for that cause. A read-only network filesystem start (HST-665) ends in the same state.
+
+| Item | Behaviour in a read-only root |
+|---|---|
+| Start | The server starts. It never aborts because a root is read-only. |
+| Storage buckets | Opened read-only. Reads work; no journal, lock or temporary file is created in the root. |
+| Log | One line `host.data-readonly` at level `warn`, naming the root path and the cause, once per root per server start. |
+| Plugins screen | A banner "Plugin data is read-only: `<path>`" at the top, and the lifecycle actions are greyed with the reason. The footer shows the same notice as in the read-only data folder case. |
+| Plugin writes | Return `io` with the message `read-only`. Never `quota-exceeded` and never `no-space`. A read-only write does not count as a plugin failure. |
+| `install`, `update`, `uninstall`, `migrate`, `backup restore` | Refused with `install.readonly` (exit 1) before any write. Staging, locks and `installed.lock` are not touched. |
+| Data migration | Never started. The host does not call `migrate`, does not take the pre-migration copy and does not write the migration stamp. |
+| Enable, disable | Refused with `install.readonly`; the enabled set is the one on disk. |
+| `ilium plugin backup <file>` | Allowed when `<file>` is on a writable volume. It only reads the root. |
+| Leaving the state | When the next probe (30 s) succeeds, the host logs `data.writable-again`, reopens buckets read-write and lifts the refusals without a restart. |
+
+- A plugin never sees the mount, the path or the cause. It sees only `io` with the message `read-only`.
+- A plugin whose installed version needs a data migration (the stored data version is older than the manifest `data_version`) is kept at its installed version and loaded with its stored data, read-only. The plugin screen shows "Migration pending: data is read-only". The host never runs `migrate` against a stamp it cannot write, because a migration without its stamp would run again at every start.
+- The host MUST start, load and run installed plugins when `<data>/plugins` or a project's `.ilium/` is read-only, and MUST open storage buckets read-only; this extends [LIF-174] and [HST-664]. Test: mount the root read-only and start all fixtures.
+- A write to a read-only root MUST return `io` with the message `read-only`, never `quota-exceeded` ([LIF-119], [EXT-063]) and never `no-space` ([EXT-064]); the message `no-space` stays reserved for a full volume. Test: write to a read-only bucket and to a full one; compare the messages.
+- Install, update, uninstall, migrate and backup restore MUST fail with `install.readonly` before any write, and MUST log `host.data-readonly` once per root with the path. The reference page for these commands lists `install.read-only` for the registry root ([LIF-725]); the two codes name the same refusal and the spelling is to be reconciled in the install page and the requirements file. Test: chmod and remount each root read-only and run each command.
+- The host MUST NOT run a data migration against a read-only stamp, and MUST treat the free-space check of [LIF-107] as not applicable while the root is read-only, so the refusal is `install.readonly` and never `install.no-space`. Test: set the stored data version below the manifest version on a read-only mount; assert that `migrate` is not called and no file changes.
+
+#### Failure modes
+
+| Failure | Result |
+|---|---|
+| The root turns read-only while the server runs (remount, failing media) | The first failed write puts the root in read-only mode. Acknowledged writes stay; in-flight batch writes roll back with `io` `read-only`. |
+| Only the project `.ilium/` is read-only | Project-scoped writes fail with `io` `read-only`; global storage and installs of global plugins keep working. |
+| The probe file cannot be created for an unrelated reason | The reason is reported (for example `io` `permission-denied`), not `read-only`. |
+| Both roots are read-only | All lifecycle commands are refused; running plugins and the recovery page (`ilium plugin recovery`) still work, its repair actions are greyed. |
+
 ### Corruption
 
 | Damaged item | Handling |

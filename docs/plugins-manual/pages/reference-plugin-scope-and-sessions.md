@@ -88,6 +88,40 @@ Grants are global and are stored in `$XDG_STATE_HOME/ilium/grants.json`. The cou
 
 - [LIF-166] A grant change MUST apply to every session and the "Not now" counter MUST be shared. Test: answer in one session and open another.
 
+### Project folder moved, renamed, copied or deleted
+
+The project and session buckets live inside the project, under `<project>/.ilium/`, so they travel with the folder. Everything else that concerns a project is kept by the host outside the folder and is keyed by the canonical project path (the absolute path after symbolic links are resolved): the trust record in `project-trust.json` ([SEC-310](/pages/reference-extension-security/), format in [Grant review and consent](/pages/reference-grant-review-and-consent/)), the purge notes in `purged.json` ([HST-675](/pages/reference-plugin-files/)) and the backup selection of [HST-960](/pages/reference-plugin-files/). The project's `plugins.toml` enable overrides sit inside the folder and travel with it. Project buckets are stored per user ([HST-688](/pages/guide-enterprise-deployment/)): the bucket belongs to the user who created it, and a second user who opens the same folder gets separate grants and buckets, or the refusal `project.owned-by-other-user`.
+
+| Event | Trust | Buckets and `plugins.toml` | Host records |
+|---|---|---|---|
+| Moved or renamed | The new path is not in `project-trust.json`, so the project is untrusted and the trust prompt appears again. | Used unchanged. The `data_version` stamp of each bucket moves with it, so no migration runs. | The entry for the old path stays until it ages out (see below). |
+| Copied | The copy is untrusted; the original keeps its trust. | Two independent copies, both valid, with the `data_version` stamp copied. A change in one never reaches the other. | The copy is a new entry once it is opened. |
+| Deleted | The entry for the path stays, but nothing can use it. | Removed with the folder. The host does not keep a second copy. | No record remembers the contents. A purge note for the project never applies. |
+| Opened by another user | Trust is per user. | Separate buckets, or `project.owned-by-other-user` ([HST-688](/pages/guide-enterprise-deployment/)). | None shared. |
+
+Until the user trusts the new path, project values from `plugins.toml` and project-scoped hooks do not take effect, as for any untrusted project. Grants are global, not per project, so they are not lost by a move. Bucket quotas and the 1,000-bucket bound apply to the copy exactly as to the original ([HST-674](/pages/reference-persistence-and-restart/)); a copy therefore doubles the data on disk and nothing deduplicates it.
+
+#### Known-projects list
+
+Two normative rules need a list of projects the host has opened: the purge sweep of HST-675, which runs "once every known project has been opened", and the backup of HST-960, which archives "each project `.ilium/` folder that the host has opened". Before this section nothing defined that list. It is defined here, as the set of keys of one host file.
+
+- Location: `<data>/plugins/known-projects.json`, written with the same atomic-replace and owner-only rules as `project-trust.json`. It is per user, never shared between users.
+- Content: `{ "version": 1, "projects": { "<canonical path>": { "first_opened": "<ISO 8601>", "last_opened": "<ISO 8601>" } } }`.
+- Writer: the host adds or updates the entry when a session opens the folder, before any plugin of that project starts. Trust and the list are independent: an untrusted project is listed too, because its buckets still need purging and backup.
+- Ageing: an entry whose folder does not exist is marked missing the first time the host sees that, and is removed after 365 days of being missing, the same period as a purge note. An entry whose folder exists is never removed by age. The host never deletes a project folder or its buckets because an entry aged out.
+- Purge sweep: a project that is missing, or never opened again, cannot be cleaned, so its purge note stays for the full 365 days of [HST-675](/pages/reference-plugin-files/) and is then dropped, and the data in a folder that is later restored from a backup is not purged by it. The sweep is complete only for the projects whose folder exists.
+- Backup: `ilium plugin backup` archives the project `.ilium/` folders of listed entries whose folder exists. A missing entry is skipped with the warning `backup.project-missing` naming the path, and the exit code is unaffected.
+
+#### Doctor
+
+`ilium plugin doctor` reports a listed project whose folder no longer exists as a warning, `project.missing`, with the canonical path, the `last_opened` time and the day on which the entry will be removed. It reports a trust record with no listed project as `project.trust-orphan`. Neither check deletes anything; `ilium plugin doctor --fix` removes a missing entry and its trust record only when the user answers the prompt, or with `--yes`. A project with plugin data whose plugin is not installed remains an orphaned-data item as in [HST-675](/pages/reference-plugin-files/) and [LIF-958](/pages/reference-install-update-uninstall/).
+
+- [HST-675] The purge sweep and its cleaning of project data apply to the entries of `known-projects.json` whose folder exists, as defined above. Test: purge a plugin, delete one of two listed projects, open the other, and assert the note applies once and the missing project is reported by doctor.
+- [HST-960] The backup lists project `.ilium/` folders from `known-projects.json` and skips missing ones with `backup.project-missing`. Test: list two projects, delete one, run the backup and assert one project in `backup.json`.
+- [SEC-310] A moved, renamed or copied project folder MUST be untrusted until the user trusts its new canonical path. Test: trust a project, rename the folder, open it and assert the prompt and no applied project values.
+
+The file name `known-projects.json`, the 365-day ageing, the codes `backup.project-missing`, `project.missing` and `project.trust-orphan`, and the `--fix` behaviour are proposed, owner to confirm.
+
 ### See also
 
 - [Install, update and uninstall](/pages/reference-install-update-uninstall/)

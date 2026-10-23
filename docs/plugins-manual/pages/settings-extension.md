@@ -230,6 +230,22 @@ export function markLoading(): void {
 
 A plugin that needs a built-in value can read it. The grant `settings.read-kernel:<tab-id>` and the import `kernel-settings` return the values of that tab as read-only JSON, with secrets replaced by `<redacted>`. No plugin writes a built-in value; a link with `ilium://settings/<tab-id>#<key>` opens Settings at that row.
 
+### Pending restart: the notice and the Restart action
+
+A row with `applies: "restart"` draws `↻` after its value, but the marker alone does not say whether the change was taken. The kernel keeps one list of the changes that wait for a restart and shows it in one place.
+
+**What the user sees.** After the user changes such a row, the Settings screen shows one aggregated line above the tab content, for example `3 changes apply after restart`. The count is the number of distinct keys waiting, not the number of edits: changing the same key twice counts once, and setting it back to the value in use when the host started removes it from the list. A single key reads `1 change applies after restart`. Next to the line sits a **Restart** action.
+
+**The Restart action.** It runs the documented client-only restart: the client reconnects and reloads the values it uses, and the server and its panes are not touched, so no pane, session or running plugin of the server is stopped. A value that is owned by the server (for example `[api] port`, see the table "Live reload and restart" in [kernel and boot](/pages/reference-kernel-and-boot/)) still needs a server restart by the user. The line then stays, now naming only the keys that the client restart did not apply. [COR-024]
+
+**How long the line lives.** The line is part of the Settings screen, not of one tab: it stays visible when the user changes tabs, closes and reopens Settings, or the client reconnects. It clears when the host restarts and starts with the new values, or when the user sets every waiting key back to its running value.
+
+**Where the list is stored.** The list of waiting keys is written to `[settings] pending_restart` in `config.toml`, as an array of qualified keys (plugin keys as `<plugin-id>.<key>`). A plugin can read whether one of its own keys is waiting by reading `[settings] pending_restart` through its own settings access; it never sees the entries of other plugins. The host empties the list when it starts.
+
+**What the plugin receives.** The new value is stored at once and the plugin gets the `settings-changed` event for the key, with the new value and `applied: false`. `applied: false` means that the plugin must keep using the value it started with and must not act on the new one early. The value is applied at the next start; the plugin then reads it as an ordinary current value and no second event is sent. A key without `applies: "restart"` always arrives with `applied: true`. See [settings API](/pages/api-settings/) for the event and [reference-settings-schema](/pages/reference-settings-schema/) for the row fields.
+
+**Failure modes.** If the list cannot be written (read-only `config.toml`, full disk), the value is kept in memory, the row shows the write error in place of its description, and the line still counts the key for this run. If the client restart fails, the line stays and shows the error; nothing is lost because the values are already stored.
+
 ### Search
 
 Settings has a filter. Press `/` or `Ctrl+F` to open it, and type part of a name. The field replaces the `Esc or q to close` hint on the second header line. The filter matches tab titles, row titles, descriptions, section titles, keywords and keys, and for plugin rows the plugin name and id. A row hidden by `visible_when` is skipped. The rail then shows only the tabs with matches, each with a count, and the content shows only the matching rows, each with its section title and, for plugin rows, the plugin divider. Esc clears the filter, and a second Esc closes Settings.

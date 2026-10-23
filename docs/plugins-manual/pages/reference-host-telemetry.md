@@ -194,3 +194,65 @@ The registry below lists every code the host writes to a log line, with its leve
 - **[HST-980]** `ilium plugin erase-data <plugin-id>` MUST remove every span of that plugin from `<state>/plugin-trace.jsonl`, by writing a new file and renaming it over the old one, and MUST report the removed count as the kind `trace` ([USR-325]). Spans of other plugins MUST stay in place.
 - **[HST-981]** `ilium plugin export-data` MUST write the spans of the plugin as one JSON-lines file, using the fields of [HST-609], in the export folder ([USR-245]). Trace recordings MUST NOT be included in a support bundle ([USR-223]).
 
+
+## Host-level counters (session-wide, not per plugin)
+
+The counters above are keyed by plugin. Some incidents are not caused by a plugin: a slow machine, a hung main loop, a full memory pool or a full disk make healthy plugins look slow. This section defines the series that belong to the session server as a whole. They are printed by `ilium plugin metrics` (Prometheus text, standard output only, see [HST-612] and [HST-991]) and by `ilium plugin stats --host` (see [HST-644]), next to the per-plugin series. They carry no `plugin`, `side` or `class` label, so [HST-613] (label cardinality) is not affected, and they do not count toward the 64-series cap of a plugin side. The disk steps are defined in [Offline and low-disk behaviour](/pages/reference-offline-and-low-disk/) ([HST-661], [HST-663]); the loop watchdog is [HST-618]; the aggregate ceilings are in [Host aggregate limits](/pages/reference-host-aggregate-limits/); the audit queue is [SEC-225].
+
+### Series
+
+| Prometheus name | Type | Unit | Meaning |
+|---|---|---|---|
+| `ilium_host_loop_tick_seconds` | histogram | seconds | Duration of one kernel loop tick. Buckets 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000 ms and above. `ilium plugin stats --host` prints p50 and p99 in ms, read as the upper bound of the bucket that holds the percentile |
+| `ilium_host_loop_stalls_total` | counter | count | Ticks that did not complete within the watchdog threshold of 2 seconds ([HST-618]); one count per `host.loop-stalled` line |
+| `ilium_host_helpers_alive` | gauge | count | Helper processes currently running |
+| `ilium_host_helpers_restarted_total` | counter | count | Helper restarts, including the planned restart of an engine recycle |
+| `ilium_host_memory_pool_used_bytes` | gauge | bytes | Memory reserved against the aggregate ceiling of [HST-500] |
+| `ilium_host_memory_pool_ceiling_bytes` | gauge | bytes | The ceiling in force after policy keys and the tier clamp |
+| `ilium_host_ceiling_rejections_total` | counter | count | Activations or reservations refused by an aggregate ceiling, label `limit` |
+| `ilium_host_observability_dropped_total` | counter | count | Records lost by the host observability path, label `source` |
+| `ilium_host_engine_recycles_total` | counter | count | Wasmtime Engine recycles ([HST-515]) |
+| `ilium_host_disk_pressure_step` | gauge | step | Current disk-pressure step: 0 none, 1 caches evicted, 2 log writes reduced, 3 installs blocked ([HST-661]) |
+| `ilium_host_clients_attached` | gauge | count | Clients currently attached to this session server |
+
+The `limit` label of `ilium_host_ceiling_rejections_total` takes one value for each ceiling defined by [HST-500] to [HST-511] (for example `memory-pool`, `installed-plugins`, `active-sides`, `host-capacity`); the values are fixed by the host, so the label has at most 12 values. The `source` label of `ilium_host_observability_dropped_total` takes the values `audit-queue` (records dropped while the audit file could not be written, [SEC-225]), `log-queue` (the writer queue overflow of [HST-643], which is also the `host.observability.dropped` line) and `log-disk` (lines dropped under disk pressure, the number reported by the `log.dropped` line of [HST-663]). Each dropped record is counted exactly once, under the source that dropped it.
+
+### Retention and reset
+
+- Host series live in memory only. They are never written to disk and never sent over a network.
+- They are not tied to a plugin. A plugin restart, upgrade, disable or removal does not reset or change any of them.
+- They reset when the session server starts, like the per-plugin counters ([HST-357]). A client attach or detach does not reset them.
+- Gauges show the current value. Counters only rise until the next server start. The tick histogram keeps one cumulative set of buckets since server start, plus the hourly buckets of the last 24 hours that `ilium plugin stats --host --json` prints as one JSON line per hour with `type` set to `host`.
+- Recording a host series follows [HST-351]: at most 200 ns, no lock on the call path. Their memory counts toward the bound of [HST-644].
+
+### Reading the host series
+
+| Surface | Shows |
+|---|---|
+| `ilium plugin metrics` | Every host series beside the plugin series, with a `# HELP` and `# TYPE` line each |
+| `ilium plugin stats --host` | One line per series with the current value; the tick p50 and p99 in ms |
+| `ilium plugin stats --host --json` | The same as JSON lines with a `type` field |
+| Diagnostics report | A `Host` block with the same values, so that a support bundle can tell a host cause from a plugin cause |
+
+An alert rule for a plugin that is slow SHOULD first check that `ilium_host_loop_stalls_total` has not risen, that the tick p99 is below 50 ms and that `ilium_host_disk_pressure_step` is 0; if any of them is not, the cause is the host and the plugin is not at fault. A plugin whose breaches occur only while a host stall is counted MUST NOT be charged a failure for them, as for the late-call rule of [Health and watchdog](/pages/reference-health-and-watchdog/).
+
+### Edge cases
+
+| Situation | Result |
+|---|---|
+| The loop stalls for 10 seconds | One stall is counted for each tick that exceeded the threshold, and the one long tick lands in the top histogram bucket |
+| The memory ceiling is lowered by policy below the used bytes | `ceiling_bytes` shows the new value at once, no plugin is evicted ([HST-511]), and each refused activation counts one rejection |
+| A helper dies and is restarted | `helpers_alive` drops by one and returns, `helpers_restarted_total` rises by one, and the plugin side gets its own `helper.died` line |
+| The disk recovers above 64 MiB | The step gauge returns to 0 within 30 s of [HST-663], and the dropped log lines are added once to `log-disk` |
+| The metrics command runs while the server is not running | The command exits with code 1 and prints no series; it never invents zero values |
+
+### Test
+
+Scripted incident test, `host_telemetry_series`. On a fixture session with one healthy plugin, one memory pool of 64 MiB and a volume that the test can fill:
+
+1. Block the kernel loop for 3 seconds with a slow synchronous host call. Assert that `ilium_host_loop_stalls_total` is 1, the tick p99 is at least 2,000 ms, and `host.loop-stalled` was written.
+2. Request activations until the pool ceiling is hit. Assert that `ilium_host_memory_pool_used_bytes` is at most `ilium_host_memory_pool_ceiling_bytes`, that `ilium_host_ceiling_rejections_total{limit="memory-pool"}` equals the number of refusals, and that no active plugin was stopped.
+3. Fill the volume to below 128 MiB. Assert that `ilium_host_disk_pressure_step` is 2 and that dropped log lines raise `ilium_host_observability_dropped_total{source="log-disk"}`. Free the volume and assert that the gauge is 0 and one `log.dropped` line was written.
+4. Kill one helper, force one engine recycle and attach a second client. Assert the helper, recycle and client series.
+5. Read every series with `ilium plugin metrics` and with `ilium plugin stats --host --json`, and assert that all 11 names are present with the correct types, and that the values of both outputs agree.
+6. Restart the plugin and assert that no host series changed except by the steps above; restart the server and assert that every counter is 0.

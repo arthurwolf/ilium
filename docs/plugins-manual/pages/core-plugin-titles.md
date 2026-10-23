@@ -215,6 +215,54 @@ This plugin is the single owner of the following built-in Settings tabs. It hold
 
 If the plugin is disabled, the tab stays in the rail with its stored values shown read-only and the notice "Titles and organisation is disabled. Values are kept." The kernel keeps reading the keys it consumes itself (listed in the Consumer column of the key table in [config and data migration](/pages/reference-config-and-data-migration/)). Behaviour that only this plugin provides is off. The exact result for this plugin is its row in [kernel and boot](/pages/reference-kernel-and-boot/). [COR-022]
 
+### Inference unavailable, slow or over budget
+
+Naming calls a model for every pane, so the plugin has a defined path for each way the call can fail. The title of a pane never depends on the model: the model only improves it. [COR-011]
+
+**The non-AI path.** When the [inference](/pages/api-inference/) call fails with `not-found` (no provider selected, reported to the user as `inference.unavailable`) or `not-permitted` (grant declined or purpose refused), the plugin makes no further call for that event and builds the title without a model. The fallback title is the name of the foreground process of the pane, then a space and the last path segment of its working directory, cut to the title length limit (for example `claude billing-api`). A pane that has neither keeps its current title. The fallback goes through the same `ilium.core.titles/before-apply-title` hook and the same `rename-node` as an inferred title, so a hand-typed title is still never replaced. `not-found` and `not-permitted` are not retried; they are re-checked only when the provider setting or the grant changes (`kernel-settings-changed` for `inference`, or a grant change).
+
+**Retry after a failure.** Retryable failures are `timed-out`, `network`, `busy`, `rate-limited` and `quota-exceeded` (see [the error table](/pages/api-inference/#errors)). The plugin applies the fallback title at once, then retries the request for that pane at most 3 times, after 30 s, 2 min and 10 min. When the error carries `retry-after-ms`, the longer of that delay and the step above is used. After the third failure the pane keeps the fallback title until its next trigger (a new prompt, a session change). A failure of one pane never delays another pane, and the plugin never runs more than 2 title requests at the same time, so a provider outage does not become a retry storm.
+
+**Call caps.** The plugin sends at most 6 model calls per pane per hour and at most 120 per session per hour. A trigger over a cap is answered with the fallback title and no call; the counters are in memory and restart at zero with the server. Tree organisation counts as one call of the session. The cap is checked before the call, so a refused trigger costs nothing and writes no privacy line.
+
+**Token budget.** One title request sends at most 2,000 input tokens (the latest prompt cut to fit, plus the style instruction and the custom instructions) and asks for at most 32 output tokens. One tree organisation request sends at most 8,000 input tokens (pane titles and group names, without prompt text) and asks for at most 1,500 output tokens. The per-plugin spending budget of the host, described in [inference budgets](/pages/api-inference/), stays above these limits: when it refuses a call the plugin treats it as `quota-exceeded` and uses the fallback.
+
+**Timeout.** A suggestion that has not arrived 20 s after the request was sent is dropped: the plugin cancels the request (the result is `cancelled`, nothing is applied) and uses the fallback title. A reply that arrives after the drop is discarded and is never applied. The tree organisation request has a 60 s limit and, on timeout, leaves the tree unchanged.
+
+**A manual title ends inference for that pane.** Once the user has typed a title for a pane, the plugin makes no inference call for that pane for any trigger, cap or retry, and cancels any request already pending for it. Removing the manual title (the rename dialog with an empty value) makes the pane eligible again.
+
+**What the user sees while a title is pending.** The row keeps its previous title, or the fallback title if it never had one, and shows a dim `…` after the title for as long as the request is pending, at most 20 s. No dialog, toast or error line appears for a single failure. After the third failed retry the row shows the fallback title without the marker, and Settings > Titles shows one line, "Titles are not using the model: <reason>", where the reason is the error code in words ("no provider selected", "rate limited", "budget spent"). The line clears at the next successful title.
+
+| Situation | Model call | Title shown | Retry |
+|---|---|---|---|
+| `not-found` or `not-permitted` | none after the first | process name and working directory | on a settings or grant change |
+| `timed-out`, `network`, `busy` | yes | fallback, then the model title if a retry succeeds | 30 s, 2 min, 10 min |
+| `rate-limited`, `quota-exceeded` | yes | fallback | after `retry-after-ms` or the step, whichever is longer |
+| Per-pane or per-session cap reached | none | fallback | when the hour window moves |
+| Manual title on the pane | none | the manual title | never |
+| Suggestion pending over 20 s | cancelled | fallback | next trigger |
+
+The numeric limits in this section (3 retries, 2 concurrent requests, 6 and 120 calls per hour, 2,000 and 8,000 input tokens, 20 s and 60 s) are the proposed production defaults for this page; the owner confirms them.
+
+### Ownership of the `[inference]` table and the tree-tidy command
+
+The replacement matrix leaves two decisions open ([decision 5 and decision 6](/pages/reference-core-replacement-matrix/)). This page resolves them so that every stored section and every command has exactly one owner. [COR-203] [COR-011]
+
+**Decision 5: `ilium.core.inference` owns `[inference]`.** The config table `[inference]` (and its child `[inference.instructions]`) has one owner, [Inference providers](/pages/core-plugin-inference/). Only that plugin holds `settings.write-kernel:inference` and `settings.write-kernel:llm-instructions`. This plugin holds no write grant for either table. The `titles` tab above keeps its place in the Settings rail and keeps its rows (Title style, the prompt and session toggles, Instructions for titles), but their values are stored under the keys that `ilium.core.inference` owns, and a change in the tab reaches the owner as a settings write that the host routes to it. The `Config table` cell of the `titles` row therefore reads "view of `[inference]`; written by `ilium.core.inference`", and its `Readers` cell reads "Titles". `[triggers]` stays owned by this plugin.
+
+Titles reads the table through `settings.read-kernel:inference` (server and client side; add it to the `capabilities` of the manifest). It reads once at activation and again on every `kernel-settings-changed` event whose `tab` is `inference` or `llm-instructions`, using the `keys` list to refresh only what changed (see [kernel settings](/pages/api-kernel-settings-and-keymap/)). A change takes effect for the next trigger; a request already in flight finishes with the values it was sent with. If the read fails with `not-permitted` (grant revoked), Titles uses the built-in defaults, shows the "Titles are not using the model" line and keeps the fallback path of the previous section. If `ilium.core.inference` is disabled, the `[inference]` values stay as stored, `inference.unavailable` follows, and Titles uses the fallback path.
+
+**Decision 6: the tree-tidy command is declared by Titles.** The command that starts tree organisation, `ilium.core.titles/tidy-tree`, is declared in the `commands` of the Titles manifest, with the server side handler that asks the model and the client side preview panel. The matrix row keeps it as the single owner. A second plugin that declares the same command name is refused at install with the command-collision error of [commands](/pages/api-commands/), so a replacement of Titles takes the command with it and a disabled Titles removes the command from the palette and from key binding choices, instead of leaving a command that nobody answers. The one-step undo of an organisation stays with the tree, not with the command, so it works while Titles is disabled.
+
+| Item | Owner | Other plugins |
+|---|---|---|
+| Config table `[inference]` and `[inference.instructions]` | `ilium.core.inference` | Titles, Recap, Search, Smart copy, Compaction and Voice read it with `settings.read-kernel` |
+| Config table `[triggers]` | `ilium.core.titles` | none |
+| Command `tidy-tree` | `ilium.core.titles` | none |
+| Tab `titles` (rows) | `ilium.core.titles` | values stored by `ilium.core.inference` |
+
+The Contract section of this page, the replacement matrix row, and the complete manifest above must show these values, which is what [COR-203] checks. The manifest `capabilities` change is: add `settings.read-kernel:inference` and `settings.read-kernel:llm-instructions` on both sides, remove `settings.write-kernel:inference`, and add the `tidy-tree` entry to `commands`. The `Kernel tabs this plugin owns` table above and the manifest block are not rewritten by this addition; they are changed together with the code in the same change.
+
 ### Samples
 
 #### 1. Automatic pane titles

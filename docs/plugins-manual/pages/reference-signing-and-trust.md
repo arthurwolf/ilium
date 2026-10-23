@@ -110,6 +110,36 @@ The entry is named `signature` and holds a UTF-8 JSON document.
 
 **Fingerprint display.** The stored form is the 64-character hex string. The display form groups it in 16 groups of 4 characters separated by single spaces, and the dialog splits it into two lines of 8 groups. [PKG-216] A dialog or prompt that asks the user to trust a key MUST show all 64 characters. It MUST NOT show a truncated fingerprint as the only identification. A short form (the first 8 characters) MAY appear next to the full form in lists.
 
+### Signing with a hardware token or an external signer
+
+A file key on disk can be copied. A publisher who must keep the private key in a hardware token, a smart card or a cloud key management service (KMS) uses an **external signer**: a program that holds the key and signs on request. The private key never reaches the `ilium` process. [SEC-174] advises protecting the publisher key. [SEC-728] requires hardware custody for the Ilium release key. This section lets any publisher follow the same practice.
+
+`ilium plugin sign <package> --signer <command> --public-key <publisher.pub>` selects the external signer. The environment variable `ILIUM_SIGNER` holds the same command for CI use. `--signer` wins over `ILIUM_SIGNER`.
+
+| Id | Rule |
+|---|---|
+| Rule | The signer command is read from `--signer` or from `ILIUM_SIGNER`. Credentials for a KMS or a token PIN are never accepted as `ilium` flags; the signer program reads them from its own environment or prompt. As for the registry token ([PKG-442], [PKG-446]), a PIN, token or secret variable never appears in a log, record or error message. |
+| Rule | `--signer` excludes `--key` and `ILIUM_PUBLISHER_KEY`. Giving a signer together with either is refused with `sign.key-conflict`. With neither a key nor a signer, `sign` refuses with `sign.no-key`. |
+
+The contract between `ilium` and the signer is fixed:
+
+1. `ilium` builds the message `M` of [PKG-201] exactly as for a file key.
+2. It starts the signer command without a shell. The command text is split into arguments with POSIX shell quoting rules, and the program is found through `PATH`. The signer runs with the environment of `sign` minus `ILIUM_PUBLISHER_KEY` and `ILIUM_KEY_PASSPHRASE`.
+3. It writes the exact bytes of `M` to the signer's standard input and closes it. `M` is not hashed first: the signer receives the message of pure Ed25519 ([PKG-200]), not a digest.
+4. It reads the standard output until the signer exits. Exactly 64 raw bytes (not hex, not base64) are the signature. Standard error is shown to the user as diagnostic text and is never parsed.
+
+A PKCS#11 module is used through a signer program that wraps it (for example one that calls `C_Sign` with the `CKM_EDDSA` mechanism). The host does not load a PKCS#11 library itself, so no third-party native code runs inside `ilium`.
+
+| Id | Rule |
+|---|---|
+| Rule | The public key file is mandatory with `--signer` (`sign.public-key-required` when it is missing). It MUST pass [PKG-214]. The `key_id` and the `publisher_id` of the signature object come from this file, never from the signer. A publisher whose version should reach review level B ([PKG-680] lists the level B inputs) SHOULD keep the key in hardware, because review level B is the level that users rely on most. The registry shows no difference between a file key and a hardware key, so this is a publisher practice and not a registry check. |
+| Rule | Before it writes the package, `sign` verifies the returned 64 bytes against `M` with the public key from `--public-key`, using the strict rules of [PKG-203]. A signer that returns a signature for another key, another message or a non-canonical value is caught here. |
+| Rule | The signer is refused with `sign.signer-failed` when it cannot be started, exits with a non-zero status, writes other than 64 bytes, does not finish within 120 seconds (the process is then killed), or returns a signature that does not verify. The message names the reason in plain words and the signer's exit status. No package is written and no partial file remains. |
+
+The signing time follows [PKG-651]. An external signer does not set `signed_at`; `sign` does. Two runs with the same signer, `--signed-at` and manifest give byte-identical packages, because Ed25519 signatures are deterministic (a signer that adds randomness breaks reproducibility but not validity).
+
+The user sees one line while the signer runs, `Waiting for the signer ...`, so that a touch prompt on a token is not mistaken for a hang. In a non-interactive run the 120 second limit applies in the same way.
+
 ## Publisher identity
 
 The `publisher` field in the manifest is a display name. Anyone can write any display name. The identity that is checked is the publisher id and the key.
@@ -306,6 +336,36 @@ This section is target behaviour for the public plugin system. A validity window
 - [PKG-712] The host MUST allow a clock skew of 10 minutes at both ends of a validity window. Outside it, the host MUST refuse the signature with `trust.signature-expired` or `trust.signature-not-yet-valid`, and MUST NOT take the time from the package or from an unsigned source.
 - [PKG-713] When the host clock differs by more than 24 hours from the signed time of the registry metadata, the host MUST report `trust.clock-skew` with the measured difference and MUST refuse new installs and updates, but MUST keep already installed plugins running. The host MUST NOT disable a plugin only because its validity window ended after install.
 
+### Trusted signing time for validity windows and key expiry
+
+Two statements elsewhere in the manual seemed to disagree: [PKG-206] says the host never uses `signed_at` for a decision, and [EXT-071] says the host verifies against the signing time recorded in the signature. This section settles it.
+
+**[PKG-206] is normative.** The value `signed_at` is written by the signer and covered by nothing: [PKG-201] signs the publisher id and the manifest hash only, not the time. A holder of a stolen key can write any `signed_at`, so the host never trusts it. [EXT-071] is to be read as "the trusted signing time defined below, not the current clock". The wording of [EXT-071] in [Requirements: lifecycle operations](/pages/reference-requirements-lifecycle-ops/) and in [Trust and supply chain](/pages/reference-trust-and-supply-chain/#clock-skew-and-time-based-trust) must be amended to refer to this section.
+
+| Id | Rule |
+|---|---|
+| [PKG-207] | The only trusted time source is the registry countersignature. Its time is the `published_at` that the registry returns on publish ([PKG-809]) and writes into the countersignature object. The host calls this the **trusted signing time**. |
+| [SEC-722] | Key expiry is judged at the trusted signing time. A key is acceptable when the trusted signing time is not later than its expiry. A signature with a trusted signing time after the key's expiry is refused with `trust.signature-expired`. |
+| [PKG-712] | A validity window is judged against the trusted signing time with the 10 minute skew of this page. A time before the window is `trust.signature-not-yet-valid`, a time after it is `trust.signature-expired`. |
+
+What the host uses in each case:
+
+| Case | Time used | Result |
+|---|---|---|
+| Package from a registry, countersignature present and valid | `published_at` of the countersignature | Key expiry and windows are judged at that time |
+| Package from a registry, no countersignature | None | Refused with `manifest.signature-invalid`. A registry install requires the countersignature of [PKG-207] |
+| Package from a file or URL, countersignature present and valid | `published_at` of the countersignature | As for a registry package |
+| Package from a file or URL, no countersignature | The host clock at install, stored as `installed_at` in `installed.json` ([Install, update and uninstall](/pages/reference-install-update-uninstall/#the-registry-file)) | Key expiry and windows are judged at that install time. A key that is already expired at install time is refused with `trust.signature-expired`. `signed_at` is shown to the user as the publisher's claim and is never compared |
+| The key is revoked as `compromised` | Not time based | `trust.key-revoked` at install, whatever any time says ([PKG-244]). A claimed `signed_at` before the revocation never rescues the signature |
+
+Rules after install:
+
+- A key that expires after a file install does not stop the installed plugin and does not change its tier. The decision was made at install time. An update must itself pass the table above with its own trusted time.
+- A host clock that differs from the registry metadata time by more than 24 hours stops new installs and updates with `trust.clock-skew` ([PKG-713]). For a file install this check is made against the newest registry metadata the host holds; with none, the host clock is accepted and the install is marked in `installed.json` by `source: file`.
+- Because a file install trusts the local clock, a user who sets the clock back before an install can install a package signed by an expired key. This is a local choice by the owner of the machine, not an attack by the publisher. A package with a countersignature is not affected, because its time comes from the registry.
+
+Nothing in the first case uses `signed_at`. A tool may print it, but a test MUST NOT make any pass or fail depend on it.
+
 ## Edge cases
 
 | Situation | Result |
@@ -313,7 +373,7 @@ This section is target behaviour for the public plugin system. A validity window
 | Two valid signatures, one trusted and one not | The trusted one decides. The package is T2 |
 | The same key listed twice in `signatures` | Refused with `package.signature-format` |
 | The trust store file is unreadable | The effective set from that store is empty. Signed packages become untrusted. A warning is shown |
-| The clock is wrong | No decision depends on the clock, except a future `effective` time of a revocation |
+| The clock is wrong | No decision depends on `signed_at`. The clock matters for a future `effective` time of a revocation, for the install time of a file install without countersignature, and for `trust.clock-skew` (see the trusted signing time section) |
 | The publisher edits the manifest after signing | The signature fails. Pack again, then sign again |
 
 ## See also

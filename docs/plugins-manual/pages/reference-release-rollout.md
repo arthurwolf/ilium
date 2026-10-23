@@ -59,6 +59,54 @@ Decision needed: the signal the publisher uses to widen a rollout or to halt it.
 
 Decision needed: whether a client shows a notice when a version is withheld from it because of its cohort. The default is no notice, the same as the silent skip of yanked versions.
 
+## Publisher rollouts and operator stages: one cohort rule and settled record names
+
+Two mechanisms limit who receives a new version. The **publisher rollout** of this page is a percentage in the signed registry metadata and is set by the publisher (PKG-686 to PKG-689). The **operator stage** of [Upgrading Ilium and rolling back the host](/pages/guide-operator-upgrades/) is a policy-driven staged rollout set by the person who runs many machines (LIF-306 to LIF-308). They answer different questions and they compose. This section fixes how, and settles the open decisions above into rules.
+
+### One cohort function
+
+Both mechanisms place a host with one function. The separate random cohort value of PKG-687 is dropped.
+
+1. The host reads its installation key (kept beside `installed.json`, created once at the first start of the server).
+2. For a publisher rollout the host hashes the text `<plugin id>@<version>:<installation key>` with SHA-256. For an operator stage it hashes `<rollout id>:<installation key>`, as in the staged update rollout section of the operator guide.
+3. The host reads the first four bytes of the digest as a big-endian integer and takes it modulo 10,000. The result is the bucket, 0 to 9,999, in units of 0.01 %.
+4. The host is inside a share when its bucket is lower than the share in units of 0.01 %. A publisher percentage `n` is the share `n * 100`.
+
+The input text differs, so the two placements are independent: a host in the first operator stage is not therefore in the first publisher cohort. The bucket is stable across restarts and metadata refreshes, and widening only raises the cutoff, so a host never leaves a cohort that it has entered. The key and the bucket are never sent in any request, under the request privacy rule of the registry reference. Deleting the state directory creates a new key and can move the host.
+
+### Order of the two gates
+
+A host MUST pass both gates before it applies a version, and the gates are evaluated in this order:
+
+1. **Publisher gate.** The host takes the candidate versions from the verified `index.json` and removes every staged version whose `rollout_percent` does not cover its bucket (PKG-686). The result is the version the host would choose without the staged version.
+2. **Operator gate.** If a policy assigns the chosen update to an operator stage, the host applies it only when its operator bucket is below the current stage share (LIF-306). Otherwise it keeps the installed version and reports `held` in `ilium plugin list --json`.
+
+A version withheld by the publisher gate is never shown to the operator gate, so an operator cannot widen a version beyond what the publisher offers. A host that passes the publisher gate and is held by the operator gate reports `held`. A host outside the publisher cohort reports nothing, because the version is not offered to it. An operator stage cannot raise a publisher percentage, and a publisher percentage cannot release a host from an operator hold.
+
+The automatic halt differs by gate. The operator stage halts on its own when the plugin fails inside the failure window on a host of the current stage (LIF-307). A publisher rollout never halts on its own, because clients send no activation data (see the signal decision above).
+
+### Settled rules
+
+These rules replace the six "Decision needed" paragraphs above. The earlier wording stays as the record of the options.
+
+- **Record name.** Each version entry of `plugins/<id>.json` and `index.json` MAY carry `rollout_percent`, an integer from 0 to 100, next to `review_level`. An entry without the field has no rollout and counts as 100. A client MUST treat a value that is not an integer from 0 to 100 as invalid metadata and refuse it with `registry.signature-invalid` behaviour for that file, using no percentage from it.
+- **Command.** The publisher sets the percentage with `ilium plugin rollout <id>@<version> --percent <n>`. A value outside 0 to 100, or not a whole number, is refused with `usage.invalid-value`. The command acts on the registry only; the operator forms `ilium plugin rollout resume <id>` and `ilium plugin rollout cancel <id>` (LIF-308) take an id without `@<version>` and no `--percent`, and a mixed form is refused with `usage.invalid-value`. Errors `registry.namespace-unowned` and `registry.auth` follow PKG-689.
+- **Granularity.** The publisher percentage is a whole percentage. The operator stage keeps steps of 0.01 %. Both use the same 10,000-bucket function, so no second granularity exists in the client.
+- **Re-check before activation.** Immediately before it activates a version that has a `rollout_percent` below 100, a client MUST refresh `timestamp.json` and re-evaluate the publisher gate when the registry can be reached. If the version is now halted or no longer covers the bucket, the client MUST NOT activate it (PKG-688) and keeps the downloaded package for a later offer. When the registry cannot be reached, the client uses its cache under the offline rule of the registry reference and activates.
+- **No notice.** A client MUST NOT show a notice, warning or log entry above debug level for a version withheld by its cohort. Only the operator hold is visible, as `held`.
+- **No automatic move-back.** After a halt, a host that already activated the version keeps it. No client moves a host to the previous version because of a halt. Only a takedown under the registry reference removes a version from installed copies, and an operator who wants the previous version follows the rollback steps of the operator guide.
+
+### Failure behaviour of the combination
+
+| Situation | Result |
+|---|---|
+| Host outside the publisher cohort | No error, no notice. The host chooses the version it would have chosen without the staged version. |
+| Host inside the publisher cohort, outside the current operator stage | The update is not applied. `ilium plugin list --json` shows `held`. |
+| Publisher halts while an operator stage is open | The publisher gate stops the offer at the next refresh and at the pre-activation re-check. The operator stage has nothing to apply; its share is unchanged. |
+| Operator halts (`rollout.halt`) while the publisher percentage is below 100 | Both stop widening independently. Resuming the operator stage does not change the publisher percentage. |
+| Registry unreachable at the pre-activation re-check | The cached metadata is used under the offline rule. A halt reaches the host at its next successful refresh. |
+| Installation key missing or unreadable | The host creates a new key, which can move its bucket. It does not fail an install. |
+
 ## Inputs and outputs
 
 | Item | Value | Where it lives |

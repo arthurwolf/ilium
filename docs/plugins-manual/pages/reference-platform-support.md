@@ -97,18 +97,56 @@ The results of the conformance suite MUST be identical on every shipped platform
 - **[HST-387]** The conformance suite MUST pass on every shipped platform for T1 and, on Linux, for T2 and T3.
 - **[HST-388]** The performance gate MUST apply to the Linux x86_64 reference machine, and other platforms MUST record results without a gate.
 
+## Moving a data directory between operating systems
+
+A user moves to another operating system by taking a whole-host archive with `ilium plugin backup` and restoring it on the new machine ([Backup and restore](/pages/guide-backup-and-restore/), [Plugin files](/pages/reference-plugin-files/)). Copying the data directory by hand is not a supported route, because only the restore procedure applies the rules below. The restore decides everything; no plugin runs during it.
+
+- **[HST-655]** A restore on a different operating system MUST rewrite no plugin data bytes, MUST normalise path separators in `installed.json` and settings, MUST mark every T2/T3 plugin whose package targets an unavailable platform `refused-at-load` with `package.platform-unsupported` while keeping its data, and MUST list those plugins in the restore result.
+
+What the restore does, in order:
+
+1. It reads the OS recorded in `backup.json` ([HST-654]) and compares it with the running OS. When they differ, the cross-OS rules apply. When the archive format is unknown or the host is newer, the restore fails first with `restore.format-unsupported` or `restore.host-newer`.
+2. It copies plugin data and storage buckets byte for byte. Keys and values are not parsed, re-encoded or re-lined.
+3. It rewrites path separators to the new platform's form in `installed.json` and in the settings it restores. Plugin-visible paths stay `/` on every platform (HST-384).
+4. It checks each installed T2 and T3 plugin against the platform rules of the [Support matrix](#support-matrix). A plugin whose package targets a platform not available here (for example a Linux-only T2 plugin restored on Windows, which gets `sandbox.unavailable` under HST-380) is marked `refused-at-load` with `package.platform-unsupported`. Its data stays on disk and is included in later backups.
+5. The restore result lists every refused plugin with its id and error code. The user sees the same state in the plugin list.
+
+A refused plugin comes back when the user installs a build for the new platform: the data is still there and loads under the plugin's normal `data_version` rules.
+
+### What a plugin author must do for data that crosses operating systems
+
+The host does not translate plugin data, so the plugin must write data that means the same on every platform:
+
+- Store paths as relative paths with `/` separators, relative to a directory the host gives the plugin. Never store an absolute path, a drive letter or a home directory.
+- Never put OS-specific line endings (`\r\n`) or case-folded assumptions into keys. Keys that differ only by case collide on case-insensitive file systems (see the differences table).
+- Treat stored bytes as the plugin's own format. Start restore bytes with a format byte and fall back to defaults when it is unknown (AUT-206, [Compatibility and upgrades](/pages/guide-compatibility-and-upgrades/)).
+
+### The trust store does not move
+
+- **[HST-959]** A restored `trust.json` MUST NOT be trusted on its own. The keyed MAC of SEC-721 lives in the OS secret store of the machine that wrote it and does not travel. On a machine where the MAC cannot be verified, the host keeps the file as `trust.json.tampered-<YYYYMMDD-HHmmss>`, refuses T2 and T3 plugins with `trust.store-tampered`, and tells the user to run `ilium plugin trust add <publisher.pub>` for each publisher.
+
+A cross-OS restore therefore always needs the user to re-establish trust, even for plugins whose platform is supported; their data is intact but T2 and T3 plugins stay refused until then.
+
+| Situation after a cross-OS restore | State | Data |
+|---|---|---|
+| Plugin package targets the new platform, publisher re-trusted | Loads normally | Kept, unchanged |
+| Plugin package does not target the new platform | `refused-at-load`, `package.platform-unsupported` | Kept, unchanged |
+| Publisher not yet re-trusted | Refused, `trust.store-tampered` | Kept, unchanged |
+| Archive from an unknown format or a newer host | Restore fails, nothing written | Not applicable |
+
 ## Errors
 
 | Id | When | Effect |
 |---|---|---|
 | `sandbox.unavailable` | Platform or prerequisite missing for T2 or T3 | The plugin shows `Cannot start: sandbox unavailable` with the platform |
+| `package.platform-unsupported` | Installed package does not target this platform (restore on another OS, removed platform) | `refused-at-load`; data kept |
 | `host.cwasm-incompatible` | No `.cwasm` for the triple or fingerprint | Compiled at load; start is slower |
 
 ## Edge cases
 
 | Situation | Result |
 |---|---|
-| A user moves a data directory between operating systems | Plugin data is not portable; paths in plugin storage are the plugin's own business |
+| A user moves a data directory between operating systems | A whole-host restore rewrites no plugin data bytes and refuses, at load, plugins whose package does not target the new platform, keeping their data (HST-655). See [Moving a data directory between operating systems](#moving-a-data-directory-between-operating-systems) |
 | A T1 plugin on Windows uses `process.run` | Allowed with grant; the child sits in the job object |
 | A Linux host without user namespaces | T1 works; T2 and T3 get `sandbox.unavailable` with the sysctl |
 | Running under Rosetta on macOS | Not supported; the host reports the triple it was built for |

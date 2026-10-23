@@ -373,6 +373,84 @@ Requirement ids for this page: [WID-004], [WID-005], [WID-006], [WID-007]. See t
 
 A pane can be as narrow as 40 columns, and the solver gives each segment only what is left. A plugin SHOULD test every view at 40 columns by 12 rows, which is the size `lint.widget-missing-key` renders at, and SHOULD give a `min` constraint to a segment that must stay readable. [AUT-505] A fixed width in cells is wrong for text whose length depends on the language. A plugin SHOULD prefer `fill` and `percentage` for text segments. [AUT-506]
 
+## Minimum terminal size and what happens below it
+
+The kernel has one minimum for the whole product: **48 columns by 12 rows**. The host measures the whole terminal, not a panel. Every other width in the manual is a different thing. The 40 columns of [AUT-503] and [AUT-505] is the width of a single panel or pane inside a larger terminal, for example a 40-column sidebar in a 120-column terminal. The 80 columns of [USR-261] is the width at which the host-owned dialogs are tested, not a limit. The 48 columns of [USR-951] and [SEC-346] is the kernel minimum, and it is the width at which the review dialogs and the screen-reader walkthrough are checked before each release.
+
+### Below the minimum
+
+When the terminal is narrower than 48 columns or shorter than 12 rows, the host draws one line, centred in both directions, and nothing else:
+
+```
+Window too small: 48×12 needed, now 36×10
+```
+
+The line is plain text, not a widget. It is clipped to the terminal width when the terminal is narrower than the message, and it never wraps. The host:
+
+- sends no `render` call to any plugin view, panel, pane or screen while the terminal is below the minimum. A `render` that was already running finishes, and its result is discarded;
+- keeps every plugin instance alive. Nothing is paused or unloaded, and timers and events continue as before;
+- keeps handling the host's own keys, so `Ctrl+C` style quit and detach still work;
+- redraws all views with one `render` call each as soon as the size reaches the minimum again. The plugin sees one `area` change, not a series of them.
+
+Because no `render` is sent, a plugin cannot fail on a too-small terminal through the render path. A resize that crosses the minimum is therefore not a failure for the [restart and disable rule](/pages/reference-errors-and-limits/#restart-and-disable-rule) and does not count towards the three failures in 10 minutes.
+
+### Host-owned screens
+
+The consent dialogs, the key trust prompt and the Settings screen ([Settings plugin](/pages/core-plugin-settings/)) are drawn by the host. At the minimum and above, they fall back to a single scrollable column: label above value, one control per row, the full fingerprint and grant strings wrapped, and a scroll indicator when the content is taller than the terminal. Focus stays on the first focusable element, and on Cancel for the dialogs of [USR-261]. The dialogs stay operable down to 48 by 12 and are never truncated so that a grant or a risk word is hidden. Below the minimum the "Window too small" line replaces them, and any key other than a host key is ignored until the terminal grows, so no consent can be given on a screen the user cannot read.
+
+### The area a plugin receives
+
+Above the minimum, a panel can still be narrower than the `min_size` it declared in its manifest ([Manifest reference](/pages/reference-manifest/)). The host does not hide the panel and does not send a zero area. It sends an `area` clipped to the cells that exist, with `columns` at least 1 and `rows` at least 1, and the declared `min_size` is only a hint for placement. A view that needs more room than it was given draws what fits, and the host clips the rest at the edge of the panel. The plugin SHOULD choose a smaller layout for a narrow `area`, as in "Reading the area" above.
+
+A plugin MUST NOT trap on a small `area`, down to 1 by 1. A subtraction such as `area.columns - 4` on a `u16` that wraps or panics is a plugin bug. It ends the instance with a trap, and the restart rule then counts it. Use saturating arithmetic, give a `min` constraint only to segments that can be dropped, and when the area is too small to show anything useful, return a single `text` node, or an empty tree, rather than failing.
+
+**Rust**
+
+```rust
+fn render(area: Area) -> Tree {
+    // Saturating: area.columns can be 1.
+    let inner = area.columns.saturating_sub(4);
+    if inner < 10 || area.rows < 3 {
+        return Tree::text("…");
+    }
+    build_full_view(inner, area.rows)
+}
+```
+
+**TypeScript**
+
+```ts
+export function render(area: { columns: number; rows: number }) {
+  const inner = Math.max(0, area.columns - 4);
+  if (inner < 10 || area.rows < 3) return text('…');
+  return buildFullView(inner, area.rows);
+}
+```
+
+### Failure modes
+
+| Case | What happens |
+|---|---|
+| The terminal is below 48 by 12 | The centred "Window too small" line, no `render` calls, no plugin failure. |
+| A panel is narrower than its `min_size` | The plugin gets a clipped `area` of at least 1 by 1; the host clips the drawing. |
+| A plugin traps on a 1 by 1 area | `trap.*` for the instance, then the restart and disable rule. |
+| The terminal is resized quickly across the minimum | The host redraws once for the final size; intermediate sizes are not rendered. |
+| A pane is hidden by the user | No `render`; this is a visibility change, not a size change. |
+
+### Test
+
+A release test starts the host in a PTY with a plugin that records every `render` call, and resizes the PTY in steps: 120×40, 48×12, 36×10, 20×5, 1×1, and back to 120×40. It asserts that:
+
+- at 36×10, 20×5 and 1×1 the screen holds the "Window too small" line (clipped at 20 and 1 columns) and no other plugin text, with no stray escape sequences or half-drawn box characters, checked on the `vt100` screen of the PTY;
+- the recording plugin got no `render` call while the size was below the minimum;
+- no plugin instance trapped, and the failure counter of every plugin is still 0;
+- a second plugin that is given a 1×1 `area` directly by a test harness returns without a trap;
+- on the return to 120×40 every view is drawn again, in full, with one `render` call each.
+
+Proposed requirement wording, not yet in a requirements file (no ID exists, so none is written): the host MUST draw only the "Window too small" line and MUST NOT call `render` on any plugin while the terminal is below 48 columns by 12 rows; and a plugin MUST NOT trap on any `area` of at least 1 by 1.
+
+Related requirement ids: [AUT-503], [USR-261], [USR-951], [SEC-346], [USR-338].
+
 ## See also
 
 - [Layout and containers](/pages/widgets-layout-and-containers/) for `layout`, `block`, `split`, `scroll-view` and the other containers

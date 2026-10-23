@@ -222,6 +222,62 @@ Also test the failure path: feed a corrupt `prefs` value and assert that `migrat
 
 An update shows a progress line `Updating data of Notes (2 of 5 steps)` in the CLI. In Settings > Plugins the row shows `migrating` while the call runs. A failure shows the toast `Update failed, rolled back` and the log line `migration.failed`.
 
+### Data handover when a plugin changes id (fork, rename, publisher transfer)
+
+A plugin id is permanent (USR-126). An update keeps the id, and a package with another id is a different plugin. A fork, a rename, or a move to another publisher namespace therefore produces a new plugin with empty buckets, an empty data directory and default settings. The old id is not touched.
+
+Decision: there is no manifest field that lets a plugin claim another id's data. A plugin that could take over data by declaring a name in its own manifest would let any package read the data of any installed plugin, so the handover is always an act of the user, on the command line. The supported route is two commands, run by the user or by an administrator.
+
+1. `ilium plugin export old.id --out old.ilium-data` (LIF-290). The archive holds the data directory, the buckets and the settings values of the current project scope, and nothing else.
+2. `ilium plugin import new.id --from old.ilium-data --from-id old.id`. The flag `--from-id` names the id recorded in the archive and relaxes the id check of LIF-292 for exactly that one id.
+
+Without `--from-id`, `import` refuses an archive of another id with `import.id-mismatch` and leaves the data untouched (LIF-292). With `--from-id`, the following rules apply.
+
+| Item | Behaviour |
+|---|---|
+| Both plugins | Both ids MUST be installed on this host when the import runs. The new id need not be enabled. |
+| Archive id | `--from-id` MUST equal the id inside the archive. A different value is refused with `import.from-id-mismatch`. |
+| Data copied | Data directory, buckets (global, and the project and session buckets of the current project scope) and settings values, as they were exported. |
+| Not copied | Secrets, grants, first-use answers, trusted keys, logs and the package (LIF-290). The new plugin asks for its permissions and secrets again, as after a fresh install. |
+| Old id | Not changed. Its data stays on disk under the kept-data rules (LIF-958) until the user purges it, and `ilium plugin doctor` lists it as orphaned once the old plugin is uninstalled. |
+| Existing data of the new id | Replaced, as in LIF-292. Without `--yes` the command shows both ids and the sizes and asks once on a TTY. |
+| Data version | The archive carries the `data_version` stamps. If a stamp is higher than the `data_version` of the new plugin the import fails with `migration.data-newer`. If lower, the new plugin migrates at its next activation (LIF-104, LIF-111). |
+
+- [DM-1] `ilium plugin import <new-id> --from <file> --from-id <old-id>` MUST accept an archive whose recorded id is `<old-id>`, MUST refuse any other recorded id with `import.from-id-mismatch`, and MUST behave as LIF-292 in every other respect. Test: import an archive of `old.id` into `new.id` with the flag, with a wrong flag value, and without the flag.
+- [DM-2] The import MUST copy no grants, first-use answers, secrets, trusted keys or logs, and MUST NOT modify any file under the data, bucket or settings location of `<old-id>`. Test: hash the old id's folders before and after.
+- [DM-3] The import MUST write one audit record with action `plugin.data-handover`, the old id, the new id, the archive hash, the byte counts and the acting user, and the command MUST print both ids in its result line. Test: read the audit log after the import ([audit log](/pages/reference-audit-log/)).
+- [DM-4] The import MUST be atomic: on any error the data of `<new-id>` is as before (LIF-292). The new plugin MUST NOT be active while the import runs; an active plugin is stopped for the copy and started again after it, and `activate` sees the imported data.
+
+What the settings `renamed_from` mechanism covers (DEV-986): only a setting key renamed inside the same plugin id, read from the old key when the new one has no value. It does not move values between ids, does not touch buckets or files, and the alias ends after the version in `remove_in`. For a changed id, use the import above. For a renamed bucket key inside the same id, use `migrate` (LIF-104).
+
+Publisher transfer inside the same id needs no handover: the id and the data stay, and the key change is covered by USR-126. A namespace reclaimed under PKG-656 and PKG-703 gives the new owner an id that never inherits the earlier owner's data: the host reads the `reclaimed_from` record, and a plugin with such an id MUST be installed with empty data unless the user runs the import above. An author who renames a plugin SHOULD publish a final version of the old id with a notice that names the new id and the command, and MUST raise `version` for it (AUT-201).
+
+Failure modes: archive unreadable, `export.unknown-plugin`, `import.format-unsupported` (LIF-292), `import.id-mismatch`, `import.from-id-mismatch`, `install.no-space`. Each leaves the data of both ids untouched.
+
+### Oldest data version a plugin still migrates
+
+A plugin MUST migrate from any older stamp (LIF-104). A long-lived plugin eventually wants to drop its oldest migration steps. The manifest key `data.min_data_version` declares the lowest stamp that its `migrate(from, to)` still accepts.
+
+| Key | Type | Default | Rule |
+|---|---|---|---|
+| `data.min_data_version` | unsigned 32-bit integer | 1 | MUST be at least 1 and at most `data_version`. Otherwise the manifest is refused with `manifest.data-version` (LIF-100). |
+
+- [MD-1] When the lowest stamp among the buckets and the data directory in scope is below `min_data_version`, the host MUST NOT call `migrate`, MUST leave all data and the stamps untouched, MUST keep the previous version active, and MUST log and show `migration.too-old` with both numbers (the stamp found and `min_data_version`). Test: stamp 1 data, update to a plugin with `min_data_version = 3`, assert no call and unchanged data.
+- [MD-2] On `migration.too-old` the host MUST offer the two exits of LIF-111: `ilium plugin data export <id> --out <file>` writes the old bytes without changing them (the same archive as LIF-290), and `--discard-data` deletes the plugin's buckets and data directory and then activates the new version with fresh stamps. The user can also stay on the previous version. Test: each exit, and the unchanged state when neither is chosen.
+- [MD-3] `migration.too-old` is not a migration failure: it MUST NOT restore a backup, MUST NOT count in the failure window (LIF-105), and the update is reported as `held`, exit 1, stage I. A project or session bucket that is too old is reported when its session first activates the plugin (LIF-114), and the other buckets are not blocked.
+- [MD-4] `ilium plugin update <id> --dry-run-migrate` (DEV-985) MUST report `too-old` with the stamp and the minimum before the update is applied, and MUST change nothing.
+
+What the user sees: the update shows `Notes cannot migrate its data from version 1 (oldest supported: 3)` with the three choices, export, discard, or keep the old version, and Settings > Plugins shows the row as `held`.
+
+How an author drops old migration code safely:
+
+1. Find the last release that wrote the version to drop. Wait until the contract window for that release has passed, that is until no listed supported range still includes it (AUT-211, AUT-212, AUT-213).
+2. Raise `min_data_version` in the first later release, and write the old and new minimum in the changelog.
+3. Keep `migrate` correct for every stamp from `min_data_version` up; test it with fixtures for the minimum and for the current version (DEV-982 applies to the steps that remain).
+4. Run `ilium plugin update <id> --dry-run-migrate` against a profile with the dropped stamp to see `too-old` before publishing.
+
+Users who skipped many releases then get a clear choice, and the host never runs migration code on data it was not written for.
+
 ### See also
 
 - [Install, update and uninstall](/pages/reference-install-update-uninstall/)

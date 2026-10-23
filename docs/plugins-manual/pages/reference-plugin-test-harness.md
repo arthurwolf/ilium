@@ -36,6 +36,42 @@ This table covers `ilium plugin test` only. It applies the general codes of [Plu
 
 A failed case does not stop the run. Every selected case runs in sorted fixture-name order, so one report lists every failure of the run. The run ends early only for the run budget or an interrupt. A quarantined failure still returns 3; the pipeline excludes it by reading the `quarantined` flag of the report ([DEV-960]). A CI pipeline MUST NOT retry a release run ([DEV-956]).
 
+### Harness version and host fidelity
+
+`harness_version` names the code that stood in for the host during a run. Its value depends on the mode of the harness ([Test harness reference](/pages/reference-test-harness/), [DEV-400], [DEV-401]):
+
+| Mode | `harness_version` is | Where the host behaviour comes from |
+|---|---|---|
+| Native | The version of the SDK `testing` module that the test binary or script linked, for example `sdk-testing 0.4.2`. | The fake host inside the SDK. It does not enforce deadlines or the memory ceiling ([DEV-401]). |
+| Component | The version of the embedded test host of the installed `ilium` command line, for example `cli-host 0.4.2`. | The test host built into the CLI that runs `ilium plugin test`. |
+
+The value is `<source> <version>`, where `<source>` is `sdk-testing` or `cli-host`. The harness prints it in the `summary` record and writes it to the `harness_version` field of the report file, so [DEV-888] compares like with like. Two runs with a different `harness_version` are not required to match.
+
+Behaviour of the embedded host:
+
+- The embedded host of CLI release X behaves as the host of release X for every limit of [Errors and limits](/pages/reference-errors-and-limits/), every error code and every renderer of the UI model. A test that passes on it proves the behaviour of release X and no other release.
+- `--host-contract <version>` selects the embedded contract of an older host (proposed, owner to confirm). The CLI ships the contracts of the host contract versions it can still emulate. `harness_version` then reads `cli-host <cli version> (contract <version>)`, so the report records both the CLI that ran and the contract that it emulated.
+- A version that the CLI does not embed fails before any case runs with `usage.host-contract-unavailable` and exit 2, as in [DEV-933]. The message lists the versions that the installed CLI embeds.
+- `--host-contract` applies to component mode. In native mode the flag exits 2 with `usage.host-contract-unavailable`, because the SDK `testing` module carries exactly one contract and a native run cannot emulate another.
+
+When the SDK `testing` version and the embedded host of the CLI disagree on the host contract:
+
+| Difference | What the run does |
+|---|---|
+| Same contract major and minor | No message. |
+| Same major, different minor | The run goes on. The harness prints the `warning` code `test.harness-mismatch` once, naming both versions, and the report lists it in `warnings`. Exit code rules are unchanged, so a warning alone does not change the exit code. |
+| Different major | The run is refused before any case runs, with the error `test.harness-mismatch` and exit 1. The message names both versions and tells the author to align the SDK and the CLI. |
+
+The harness compares the contract that the SDK `testing` module declares in its metadata ([DEV-996]) with the contract of the embedded host that runs the component. The comparison happens in component mode, because only there do both artifacts take part. A native run uses the SDK alone and has nothing to compare.
+
+Consequences for CI:
+
+- A green run proves the behaviour of the `harness_version` in its report and nothing more. To prove the behaviour of the host a user will meet, a CI pipeline pins the CLI version and the SDK version together and runs the oldest and newest contract the manifest `requires` range admits ([DEV-933]).
+- A pipeline that wants no drift MAY treat `test.harness-mismatch` as an error by checking the `warnings` field of the report. The harness has no flag that turns the warning into a failure.
+- Upgrading the SDK without the CLI, or the CLI without the SDK, is allowed inside one contract major. Across a major the run is refused, so a stale tool cannot report a pass against a host that it does not model.
+
+The mapping from each SDK `testing` version to the host contract versions that it matches is part of the release metadata of the SDK ([DEV-996]) and is repeated in the compatibility table of [SDK deprecation and removal](/pages/reference-sdk-deprecation/). The matching table for the CLI lists the contracts each CLI release embeds. Both are published with the release, and the CLI prints its own with `ilium plugin test --host-contract list` (proposed, owner to confirm).
+
 ### Report file for CI
 
 `ilium plugin test --report <file>` writes one JSON document for the run (proposed, owner to confirm). The harness does not write JUnit XML. One schema serves every CI system, and JUnit has no fields for the seed, the harness version or the component hash that a rerun needs. A CI system that shows JUnit results converts this file in a step of its own.

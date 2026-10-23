@@ -173,6 +173,57 @@ Pre-migration backups are copies of a plugin's data and storage buckets, made be
 
 Crash records of an uninstalled plugin are deleted at once. `ilium plugin uninstall <id>`, with or without `--purge`, deletes every crash record of that plugin and leaves the records of other plugins alone. `--keep-data` does not keep crash records. This is the rule of [SEC-955](/pages/reference-audit-log/). Run the support bundle command above first if you need the records.
 
+### Crash-record retention: one number
+
+One retention applies to crash data: **30 days and at most 200 records** ([USR-236], [SEC-955](/pages/reference-audit-log/)). A record is deleted when it is more than 30 days old, and when more than 200 exist the oldest go first until 200 remain. Both values are proposed, owner to confirm. The words "crash record" (this page, [USR-229]) and "crash report" ([SEC-447] in [Audit log](/pages/reference-audit-log/)) name the same thing: one JSON file in `<state>/crashes/`, mode 0600, in a 0700 folder. The 14 days in the text of [SEC-447] are superseded by [SEC-955]; the owner must change that text so the three statements agree: [USR-236], the retention table above (row "Crash records") and [USR-348] all say 30 days / 200 records, and the doc check of [USR-348] compares the table with the same two constants.
+
+What deletes a record, and what the audit log shows:
+
+| Cause | Deleted | Audit record |
+|---|---|---|
+| Older than 30 days, or the 201st-oldest and beyond | At the next server start and at the 24-hour sweep, oldest first | One `audit-retention-deleted` record per file, written before the deletion ([SEC-954](/pages/reference-admin-policy/)); `rule` is `keep-days` for age, `storage-ceiling` when the count or size ceiling applied |
+| `ilium plugin uninstall <id>`, with or without `--purge` | At once, all records of that plugin | The uninstall record. No `audit-retention-deleted`, because no retention rule applied |
+| `ilium plugin erase-data` | At once ([USR-326]) | The erase record of [USR-248]. No `audit-retention-deleted` |
+
+Host crash records (`host-host-<time>.json`) belong to no plugin. Only age and count remove them, never an uninstall.
+
+### Files a plugin writes outside Ilium's folders
+
+A plugin granted `fs.write` for a `project`, home or custom scope writes ordinary files in that place. No Ilium command exports, erases, backs up or purges them. `export-data` ([USR-245]), `erase-data` ([USR-246]), `backup` ([HST-962]), `uninstall --purge` ([USR-209]) and `purge-user` ([HST-689]) cover only the plugin's `data`, `cache`, settings, logs, grants and the other kinds listed in [Delete a plugin's data](#delete-a-plugins-data). A file a plugin wrote to your project folder stays there after every one of them, and Ilium cannot tell which files in that folder the plugin wrote.
+
+Ilium therefore tells you what it cannot reach:
+
+- `ilium plugin data-report` ([USR-322]) and `ilium plugin erase-data` list, per plugin, every `fs.write` grant that allows writes outside `data` and `cache`, with its scope. They print the line `not cleaned: fs.write:<scope> (files written by the plugin stay in place)` for each. `erase-data` repeats the list in its kept-locations report ([USR-326]).
+- `ilium plugin uninstall <id> --purge` and `ilium plugin admin purge-user <user> --yes` print the same `not cleaned` line for each such scope the plugin held.
+- The record of what was written is the log. Every write, remove, rename and create-dir outside `data` and `cache` is logged at level `info` ([fs.write](/pages/capability-fs-write/), [Logging](/pages/api-log/)). Read it with the plugin's log file, or with `ilium plugin audit --plugin <id> --kind fs-write` (the `--kind` filter is proposed, owner to confirm). The log is deleted by `--purge` and `erase-data`, so copy the lines you need first.
+
+To clean up, read those lines, delete the files yourself, then run the purge. Rotated logs older than 14 days are gone, so writes older than that may have no record.
+
+### Removing Ilium itself: what stays on disk
+
+Uninstalling the Ilium binaries (package manager, `cargo uninstall`, deleting the app) removes executables only. Every row below stays. `<data>`, `<state>`, `<cache>` and `<config>` are the roots of [Plugin files on disk](/pages/reference-plugin-files/).
+
+| What stays | Where | Holds | Removed by a package uninstall? |
+|---|---|---|---|
+| Plugin store, data, storage, backups, purge notes | `<data>/plugins/` (`store`, per-plugin `data` and `storage`, `backups/`, `purged.json`) | Packages, plugin notes and settings data, pre-migration copies | No |
+| Grants, consents, trust, audit, crash records, logs | `<state>/` (`grants.json`, `consents.json`, trust files, `audit/`, `crashes/`, plugin logs, `secrets.json` if no keyring) | Your answers, what happened, screen-related error context | No |
+| Plugin cache | `<cache>/plugins/` | Compile cache and per-plugin caches | No |
+| Plugin settings and tables | `<config>/config.toml`, tables `[plugins]` and `[plugins."<id>"]` | Settings values, limits, extension order | No |
+| Per-project data | `<project>/.ilium/plugins/` and `<project>/.ilium/plugins.toml`, in every project folder you opened | Project storage, project plugin settings | No |
+| Secrets in the OS keyring | Secret Service, Keychain or Credential Manager, written for [SEC-240] secrets | API keys, webhook tokens | No |
+| Notification and protocol registrations | Desktop notification entries and protocol handlers the OS holds | Names and handlers | Only if the package removes them; not guaranteed |
+| Files written by plugins with `fs.write` outside `data`/`cache` | Wherever the grant pointed | Anything the plugin wrote | No, and never by Ilium ([above](#files-a-plugin-writes-outside-iliums-folders)) |
+
+**One command for a whole profile.** With the server stopped or not, run before you remove Ilium: `ilium plugin purge-all --yes` (proposed, owner to confirm). It deletes the `<data>/plugins/`, `<state>` plugin files, `<cache>/ilium/plugins/` and plugin tables of `config.toml` listed above, forgets the keyring secrets of [SEC-248], and prints counts per kind. It refuses with `purge.server-running` while a session server runs and without `--yes` it only prints the plan. The same rules as [SEC-194] apply per OS user: it touches only the calling user's roots. It does not clean project folders, plugin-written files or keyring entries it could not reach, and it names each as not cleaned.
+
+**Manual steps** (no Ilium binary left): stop every Ilium server, delete the four folders above (the plugin parts of `<data>`, `<state>`, `<cache>`; remove the `[plugins]` tables from `config.toml` or the file), then the project folders and the keyring.
+
+- **Project folders.** The host keeps no list of your projects, only the purge notes of [HST-675] for plugins you purged. Delete `.ilium/plugins/` and `.ilium/plugins.toml` in each project folder you used, one by one. Searching your disk for folders named `.ilium` finds them.
+- **Keyring.** Ilium cannot reach the keyring once it is gone. Use the keyring's own tool: Seahorse or `secret-tool` on Linux, Keychain Access on macOS, Credential Manager on Windows, and delete the entries whose service name is `ilium`. Run `ilium plugin purge-all --yes` first when you can, since it forgets them for you.
+- **Images and shared machines.** For a managed machine, the administrator runs `ilium plugin admin purge-user <user> --yes` ([HST-689]) for each user before the image is retired. Archives from `ilium plugin backup` are separate files that nothing here removes ([HST-962]).
+
+This is the only way to make [USR-246] and [USR-248] true for a machine that no longer runs Ilium: audit records are kept for `audit.keep_days` unless the audit folder is deleted by hand, which removes them without a record.
+
 ### Core plugins and AI providers
 
 Core plugins are made by the Ilium project and follow the same permission rules for high-risk abilities. Some of them send data to services you configure: the Inference plugin sends prompts to the AI provider you pick, the Voice plugin may use a speech service you set up (audio is sent only when that provider is remote, stays in memory, and transcripts are dropped when the voice session ends; see [Voice data and privacy](/pages/core-plugin-voice/#data-and-privacy)), and the Cost plugin may read agents' usage files. These behave as documented in the user documentation. A third-party plugin that asks for `inference` uses the same providers and the same privacy controls: the provider you choose for each purpose, and the AI admission gate, which checks every request against the `purpose` its caller named and records it in the privacy log (see [Inference](/pages/capability-inference/#risk-and-privacy-rules)). No separate setting exists for file names, paths or terminal text: a plugin sees them only through its own read grants, and sends them only if it puts them in a request. What the Inference plugin keeps and for how long is in [Inference providers](/pages/core-plugin-inference/#what-is-kept-and-for-how-long).

@@ -55,6 +55,7 @@ Terms used on this page:
 | `doctor` | no | The session check reports `warn` when no session is found. |
 | `install`, `uninstall`, `enable`, `disable`, `grants`, `list` | yes | They change or read the loaded set. |
 | `dev`, `logs`, `log-level`, `trace`, `profile` | yes | They read or drive a live instance. |
+| `kill <id> --reason <text>`, `unkill <id>` | yes | Stop a plugin and keep it from activating until `unkill` ([HST-516], [HST-517]). They work in safe mode and offline. See [If you suspect a plugin is malicious](/pages/user-plugin-security-and-privacy/). |
 
 The output default of each command is in [Which commands print text](#which-commands-print-text).
 
@@ -642,3 +643,106 @@ API checked against `ilium:plugin@0.1.0`.
 - **[DEV-940]** `pack --sbom` MUST write `dist/<id>-<version>.sbom.json` in CycloneDX 1.5 JSON listing every locked dependency with name, version and SHA-256 or registry checksum from the lock file, MUST be reproducible (DEV-099), and MUST print an `artifact` record of kind `sbom`.
 
 - **[DEV-941]** `ilium plugin doctor --bundle <file>` MUST write a zip of the doctor records, CLI and host versions, the manifest, the lock file hash and the last 200 log lines (proposed, owner to confirm) of the plugin, MUST redact values of environment variables whose names contain `KEY`, `TOKEN` or `SECRET`, and MUST NOT include source files, key files or the data folder.
+
+## A session that connects but does not answer
+
+[DEV-006] covers a session that cannot be reached. A hung server is different: it accepts the connection and never replies, which is the input-lock symptom in [Troubleshooting](/pages/guide-troubleshooting/). Without a rule, every diagnostic command would block at the moment the operator needs it most.
+
+- **[DEV-006]** (unresponsive session) A session command whose connection succeeds, but whose request receives no reply within the response timeout, MUST print one `error` record with the code `session.unresponsive`, then `summary`, then `result`, and exit with 6. The record MUST name the socket path and the server process ID, and MUST suggest `ilium plugin doctor` and `ilium plugin support-bundle --all`. The command MUST NOT retry and MUST NOT send the request a second time. The response timeout is 10 s by default (proposed, owner to confirm) and `--timeout <seconds>` (proposed) overrides it; a value of 0 or above 600 MUST exit 2 `usage.out-of-range`.
+- **[DEV-006]** (offline fallback) On `session.unresponsive`, a command listed as "falls back" in the table below MUST continue by reading on-disk state, print a `warning` record with the code `session.unresponsive-fallback`, mark every record it derived from disk with `source: "disk"`, and exit with the code its result would have. A command listed as "refuses" MUST stop at the error and exit 6.
+
+| Command | When the session is unresponsive | Source on disk |
+|---|---|---|
+| `logs` | falls back | The plugin log files. Lines written since the server hung are absent. |
+| `doctor` | falls back | Files, trust store and toolchain. The session check reports `fail` with `session.unresponsive`. |
+| `recovery` | falls back | The recovery files of the data folder ([HST-617], [HST-618]). |
+| `list` | falls back | `installed.json`. Each row carries `stale: true`, because the loaded state is unknown. |
+| `kill <id>`, `unkill <id>` | falls back | Writes the kill marker; the server applies it when it answers again ([HST-516]). |
+| `log-level`, `trace`, `profile`, `dev` | refuses | They need the live instance ([DEV-014]). |
+| `install`, `uninstall`, `enable`, `disable`, `grants` | refuses | They change the loaded set. |
+
+- **[DEV-014]** A command that refuses MUST NOT edit `installed.json` or any other state file as a substitute for the live call.
+
+The user-facing steps for a hung session are in [Safe mode and troubleshooting](/pages/user-safe-mode-and-troubleshooting/) ([USR-336]).
+
+## Language of command-line messages
+
+Decision: the command line prints human-readable text in English only, and `--json` is the stable form for anything a program reads. The command line does not follow `[ui] language` or `ILIUM_LANG`.
+
+- **[DEV-915]** (decision) The CLI MUST print text-mode messages in English whatever the interface language is. It MUST NOT read `[ui] language` or `ILIUM_LANG` to choose message text. Codes, rule names, keys and JSONL field names are never translated, so a script or a search for an error code works the same in every language.
+- **[AUT-623]** Plugin authors MUST NOT depend on the wording of a message. They match on `code` or `rule`.
+- **[USR-311]** Pages for users, `ilium plugin explain` and the store MUST state that command-line messages are in English only, and that the Settings screens and plugin dialogs follow the interface language. [USR-347] covers the store listing.
+- **[DEV-915]** (test) A CI test MUST assert that every error code in the [Error catalogue](#error-catalogue) is the same under each launch language, and that every human-readable CLI message either has an entry in the English message catalogue or is listed as English-only. A message in neither place MUST fail the build.
+
+## dev: non-code changes, dependents and several plugins
+
+[DEV-187] and [DEV-879] define the reload of a rebuilt side. This section states the rest.
+
+- **[DEV-185]** A change to `manifest.json`, to a file under `help/`, to `settings.schema` or to any other non-source file in the project MUST reinstall the development copy without a component rebuild. The reinstall MUST validate the manifest as `check` does; on failure it MUST keep the running instance and print the diagnostics, as in [DEV-879].
+- **[DEV-184]** A manifest change that adds a grant MUST show the review dialog for the new grants only. Until the user answers, the running instance MUST stay as it is. A change that removes a grant takes effect at the reload.
+- **[DEV-187]** The reload for a non-source change MUST print one `reload` record with `reason: "manifest"` and, for a change under `help/` or to `settings.schema`, `reason: "resources"`. A settings schema change MUST keep stored values that still validate and report the rest as `settings.value-dropped` warnings. The `restore_dropped` and `restored_bytes` fields of [DEV-188] apply unchanged.
+- **[DEV-712]** When the reloaded plugin provides a service or contributes to an extension point:
+  - A service call in flight at the moment of deactivation MUST complete as `failed(unavailable)`, or wait for the new instance up to the call deadline, and never run on both instances.
+  - Contributions of the old instance MUST be withdrawn when it deactivates and registered again when the new instance activates. Consumers MUST NOT see a half-registered set.
+  - Subscribers of the plugin MUST get one `plugin-changed` event after the new instance is active.
+- **[DEV-188]** A plugin that depends on the reloaded one MUST NOT be reloaded itself. It stays active and sees the sequence above.
+- **[DEV-853]** Two `dev` commands MAY run at once in the same session, for example a provider and its consumer in two projects. Each reloads only its own plugin. Each MUST use its own file watcher and its own lock ([DEV-901]), and the reloads MUST NOT be coalesced. The second `dev` for the same id MUST fail with `dev.id-installed`.
+- **[DEV-187]** (scene side) When the reloaded side is a scene, the running ambient animation MUST restart from the new instance's initial state, using the saved restore bytes when the scene declares support for them, and MUST keep the shared look settings. The animation MUST show the last frame during the reload and MUST NOT blank the background.
+
+## Published schemas and editor support
+
+Authored files are validated at run time with path-based errors ([DEV-511], [DEV-231], [DEV-903]). Each one also has a published JSON Schema, so an editor can complete and check it.
+
+| File | Command | Notes |
+|---|---|---|
+| `manifest.json` | `ilium plugin schema manifest` | Exists. See [Manifest schema](/pages/reference-manifest-schema/). |
+| Fixture | `ilium plugin schema fixture` | Test input files ([DEV-511]). |
+| Expectation | `ilium plugin schema expectation` | Golden and expected-output files. |
+| Replay | `ilium plugin schema replay` | Recorded sessions for `test`. |
+| Test report | `ilium plugin schema test-report` | The `--report` output of `test`. |
+| Conformance report | `ilium plugin schema conformance-report` | Output of the conformance run. |
+| `lint.toml` | `ilium plugin schema lint` | Includes `[[suppress]]` ([DEV-231]). |
+| `ilium-plugin.toml` | `ilium plugin schema project` | The keys of [DEV-903]. |
+| `ilium-toolchain.json` | `ilium plugin schema toolchain` | Toolchain pins. |
+| Settings schema | `ilium plugin schema settings` | The format of `settings.schema`. |
+
+- **[PKG-005]** `ilium plugin schema <kind>` MUST print the schema for the running CLI version to standard output, work offline, and exit 0. An unknown `<kind>` MUST exit 2 `usage.unknown-kind` and list the kinds.
+- **[DEV-937]** Each schema MUST have the URL form `https://schemas.ilium.dev/plugin/<host-version>/<kind>.schema.json` (proposed, owner to confirm) and the schema's `$id` MUST equal that URL. The page for each kind MUST name the host version it was checked against.
+- **[DEV-990]** `new` MUST write the `$schema` key into every generated file whose format allows it, set to the URL of the CLI's own version. `check` MUST report a `$schema` that names a newer host version than the CLI as `schema.version-newer`, and a file that fails its schema with the same path-based error as run time.
+- **[DEV-990]** (editor support) The project supports one editor integration: a Visual Studio Code extension (proposed, owner to confirm) that runs `check` and `lint` on save, shows their records as editor diagnostics, and reads the schemas above. Its status is "supported for the current and previous host version". Other editors get the schemas and the `--json` records and have no support commitment.
+
+## Data movement commands: export, import, backup, restore, data, export-data, erase-data
+
+Every command here follows the output model above. Synopses are in the table; shared rules follow it. The procedures are in [Backup and restore](/pages/guide-backup-and-restore/).
+
+| Command | Needs a session | Purpose |
+|---|---|---|
+| `ilium plugin export <id> --out <file>` | yes | One plugin's data and non-secret settings to an archive ([LIF-290]). |
+| `ilium plugin import <id> --from <file>` | yes | Read such an archive into an installed plugin ([LIF-291], [LIF-292]). |
+| `ilium plugin backup <file.tar.zst> [--include-grants] [--include-secrets] [--force]` | no | All plugin state to one archive ([HST-652]). |
+| `ilium plugin restore <file> [--dry-run] [--merge\|--replace] [--force]` | no | Restore a backup; the session server must be stopped ([HST-653]). |
+| `ilium plugin data export <id> <dir>` | yes | The plugin's data as plain files ([HST-656]). |
+| `ilium plugin data import <id> <dir>` | yes | Read plain files back ([HST-656]). |
+| `ilium plugin data prune --older-than <days>` | yes | Delete old plugin data ([HST-674]). |
+| `ilium plugin du [<id>] [--json]` | no | Bytes used per plugin and per folder ([HST-651]). |
+| `ilium plugin export-data`, `erase-data`, `data-report`, `import-data` | yes | The user's own data, as in the privacy flow ([USR-245], [USR-246], [USR-247], [USR-248], [USR-262]). |
+| `ilium session forget-plugin-state` | yes | Remove saved plugin state of a session ([HST-691]). |
+| `ilium plugin admin purge-user` | no | Remove a user's plugin data on a shared machine ([HST-689]). |
+
+- **[LIF-293]** Exit codes: 0 on success; 1 on a failed operation; 2 on a usage error; 3 when `restore --dry-run` finds a difference it would apply; 6 when a session command cannot reach its session; 130 on interrupt. An interrupted `export`, `backup` or `data export` MUST leave no partial output, as in [DEV-916].
+- **[LIF-293]** Each command MUST print `progress` records while it runs, one `artifact` record per file it writes (kind `export`, `backup` or `data`), then `summary` and `result`. `restore` MUST print one `plan` record per plugin before it changes anything. `du` MUST print one `usage` record per plugin with integer byte fields for store, data, storage, cache, logs and backups.
+- **[LIF-290]** `export` MUST NOT include a secret, with or without any option.
+- **[HST-652]** `backup` leaves out secrets, cache, logs, staging and the compile cache. `--include-grants` adds `grants.json` and `consents.json`. `--include-secrets` adds the secret values in plaintext, and the command MUST print a `warning` record saying the archive is not encrypted. `--force` replaces an existing target file.
+- **[HST-653]** `restore --merge` keeps plugins not in the archive; `--replace` removes them. `--dry-run` changes nothing. A failure leaves the state as it was before the command.
+
+| Code | Command | Exit | Meaning |
+|---|---|---|---|
+| `export.exists` | `export` | 1 | The `--out` file exists. |
+| `import.id-mismatch` | `import` | 1 | The archive was written for another plugin id. |
+| `import.format-unsupported` | `import` | 1 | The archive format is not known to this host. |
+| `restore.server-running` | `restore` | 1 | A session server is running; stop it first. |
+| `restore.format-unsupported` | `restore` | 1 | The archive has an unknown major format ([HST-654]). |
+| `restore.host-newer` | `restore` | 1 | The archive was written by a newer host ([HST-654]). |
+| `backup.inside-live-root` | `backup` | 1 | The target lies inside a folder the backup would read. |
+
+- **[HST-691]** The commands in the "yes" rows of the table MUST follow the unreachable and unresponsive rules in [DEV-006].

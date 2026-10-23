@@ -117,3 +117,60 @@ Contract: `ilium:plugin@0.1.0`.
 - **[SEC-955]** Crash record retention. One period and one count apply to every crash record of [SEC-447]: a crash record MUST be deleted once it is more than 30 days old (proposed, owner to confirm), and when more than 200 crash records exist the oldest MUST be deleted first until 200 remain (proposed, owner to confirm). The 14-day period in [SEC-447] is superseded by this rule and the owner MUST align that text; [USR-228], [USR-236] and [USR-348] already state 30 days and 200 records. `ilium plugin uninstall <id>`, with or without `--purge`, MUST delete every crash record of that plugin at once, so the `--purge` question for crash records is closed. Crash records are not deleted by `--keep-data`, which keeps data and storage only.
 - **[SEC-956]** Damaged final record. If the audit file ends in a line that is not a complete JSON object followed by a newline (a crash or power loss during a write leaves one), the server MUST, at its next start and before it appends any record: move those partial bytes to `audit-torn-<seq>.jsonl` in the audit directory, where `<seq>` is the `seq` the next record will take; truncate `audit.jsonl` to the end of its last complete record; append one `audit-torn` record (a new event, listed here and added to the catalogue of [SEC-222]) with `prev_hash` equal to the hash of that last complete record and `reason` naming the moved file. The partial bytes are not part of the chain and MUST NOT be hashed. The server MUST write this record once per moved file, and MUST NOT drop the partial bytes without moving them aside.
 - **[SEC-957]** Verification of a damaged final record. `ilium plugin audit --verify` MUST report a partial final line as `torn-tail` with its byte offset, and MUST NOT report it as a broken chain or as tampering. The chain check covers complete records only. A wrong `seq` or `prev_hash` in a complete record MUST still be reported as the first broken `seq` with exit code 3 ([SEC-730]). When the only finding is a `torn-tail` line, the command exits 0 (proposed, owner to confirm).
+
+## Crash record location, one rule
+
+Two pages gave two answers for where a crash record lives. [USR-229] says the server state folder. [SEC-447] says a 0700 folder beside the audit directory. This section names one path and replaces both statements.
+
+**The path.** Crash records live in `<state>/crashes/`, where `<state>` is the server state folder: Linux `$XDG_STATE_HOME/ilium/`, macOS `~/Library/Application Support/Ilium/state/`, Windows `%LOCALAPPDATA%\Ilium\state\`. The audit directory of [SEC-220] is `<state>/audit/`, so the audit directory and the crash folder share the parent `<state>`. "Beside the audit directory" in [SEC-447] and "the server state folder" in [USR-229] both describe this one folder. The path is proposed, owner to confirm.
+
+**Rules.**
+
+- The folder has mode 0700 and each file mode 0600 ([SEC-447]). It is in the deny set ([SEC-060]): no plugin scope reaches it, and it is never inside a plugin data folder ([USR-229]).
+- Records of plugins, of their helpers ([HST-518]) and of the host itself all go in this one folder. There is no second folder per kind.
+- A file is named `<kind>-<id>-<time>.json`. `<kind>` is `plugin`, `helper` or `host`. `<id>` is the plugin id, or `host` for a host crash. `<time>` is UTC `YYYYMMDDTHHMMSSZ`. If two records get the same name, the later one gets `-2`, `-3` and so on; no record overwrites another.
+- The content rules of [SEC-446] and [USR-227] apply: plugin id and version, side, reason, exit status, export name, host version and host frames, and no payloads, argument values, secrets or granted data. Core dumps are off ([SEC-445], [HST-519]); a dump an administrator enabled is never copied into this folder.
+- Each record written adds one `crash-report` audit record ([SEC-447], [SEC-222]) with `target` set to the file name.
+
+**Retention.** The rule is [SEC-955]: a record is deleted when more than 30 days old, and when more than 200 exist the oldest are deleted until 200 remain ([USR-228]). Both values are proposed, owner to confirm. The 14 days in [SEC-447] are superseded. `ilium plugin uninstall <id>`, with or without `--purge`, deletes every crash record of that plugin at once ([SEC-955]); `--keep-data` does not keep them. Host records (`host-host-<time>.json`) belong to no plugin and are removed only by age or count.
+
+**Who reads the folder.** `ilium plugin crashes` and the support bundle ([USR-229]) read only `<state>/crashes/`. `ilium plugin crashes --host` lists the host records. A record outside this folder is not listed and not bundled. A crash record is never sent anywhere unless the user runs the export command or attaches it to a bundle ([SEC-447]). If the folder is missing, the command lists nothing and exits 0; the server recreates it with mode 0700 at the next crash. If the record cannot be written (disk full), the server keeps running, writes the `crash-report` audit record with `result` `failed` and `reason` `crash-write-failed`, and shows a notice.
+
+**Requirements table change.** The row for [SEC-447] in the security-policy requirements file should read "Crash reports MUST be mode 0600 in `<state>/crashes/`, never be sent unprompted, and add a `crash-report` audit record; the 14-day period and the 'beside the audit directory' path are superseded by [SEC-955] and this section." The wording of [USR-229] stays valid.
+
+## Audit records for data movement and erasure
+
+The catalogue of [SEC-222] covers installs, grants, consent, trust and block events. A privacy or security review also needs to know when plugin data left the host or was destroyed, and a restore runbook needs the trail ([guide-backup-and-restore](/pages/guide-backup-and-restore/)). The events below are added to the catalogue. They are written exactly once per command run, by the kernel, at the end of the run, including refused and failed runs. Their names and fields are proposed, owner to confirm.
+
+| Event | Command |
+|---|---|
+| `data-export` | `ilium plugin export <id> --out <file>`, `ilium plugin export-data` ([USR-245]) |
+| `data-import` | `ilium plugin import-data <folder>` ([USR-262]) |
+| `backup` | `ilium plugin backup <file.tar.zst>` ([HST-652]) |
+| `restore` | `ilium plugin restore <file>` with `--merge` or `--replace`, and `--force`; a `--dry-run` writes none |
+| `data-report` | `ilium plugin data-report [<id>]` ([USR-322]) |
+| `erase-data` | `ilium plugin erase-data` ([USR-246]) |
+| `data-prune` | `ilium plugin data prune` |
+| `uninstall` with `reason` `purge` | `ilium plugin uninstall <id> --purge` or the Delete data choice ([HST-977]) |
+| `purge-user` | `ilium plugin admin purge-user <user>` ([HST-689]) |
+
+**Fields.** Each record uses the schema of [SEC-221] and adds these in the existing fields: `actor` is `cli` or `user-tui` (`policy` is never the actor of an erase); `plugin_id` names the plugin, or a comma-separated list of at most 20 ids followed by `+<n>` when more; `target` is the output path (export, backup), the input path (import, restore) or the user name (`purge-user`); `reason` carries the result code of the command; `result` is `ok`, `refused`, `cancelled` or `failed`. The flags used (for example `--merge`, `--force`, `--include-grants`, `--include-secrets`, `--yes`, `--yes-erase-all`) and the byte count and file count are written in a `detail` string of the form `flags=--merge,--force bytes=1048576 files=312`. Secret values are never written, and `--include-secrets` is recorded only as a flag.
+
+**What a record never holds.** The data itself: no setting values, file contents, storage keys, log lines or grant strings from the moved data. [SEC-223] applies. A path is written as given on the command line after resolving it to an absolute path, because the path is not plugin data.
+
+**Result codes.** The `reason` field uses the code the command printed, for example `restore.server-running` ([HST-974]), `purge.user-active` ([HST-689]) or `cancelled-by-user`. A run that exits non-zero writes `result` `failed` or `refused`.
+
+**Rules for specific commands.**
+
+- `restore` writes one record with the archive path, the mode (`merge` or `replace`), `--force` if given, and the counts of plugins restored and skipped. A refused restore into a live data root is recorded as `refused`.
+- `erase-data` writes one record per run with the plugins erased and the byte and file count per data kind. It also names the audit records it kept ([USR-248]).
+- `uninstall --purge` writes the normal `uninstall` record and the `detail` shows `purge=1`.
+- Copies the administrator wrote elsewhere are not deleted by these commands and are not tracked by the record ([HST-977]).
+
+**Which records the user can read, and which erasure keeps.** A user reads these records with `ilium plugin audit --event data-export` and so on ([SEC-227]). `ilium plugin export-data` includes the audit records that name that user's plugins ([USR-245]), so the user sees every export, restore and erasure involving their data. `ilium plugin erase-data` deletes data kinds, not the audit log: all of these records are kept for `audit.keep_days` (default 365) after the erasure ([SEC-224], [USR-248]) and the command lists them as kept with that period. They are deleted when the rotated file passes the period ([USR-220]). On a host where one user's records name another user (`purge-user` by an administrator), `export-data` includes only records whose `target` or `plugin_id` belongs to the requesting user.
+
+**Failure modes.**
+
+- If the audit file cannot be written, the command still completes and the record is queued and retried under [SEC-225]; `data-export` and `erase-data` records are not among the types dropped first.
+- If the process is killed after moving data and before the record is written, the next server start finds no record. The command prints the same facts on its standard output before it exits, so the operator has them; this gap is why the record is written before the command prints its final line where possible.
+- `--dry-run` and read-only listings (`data-report`) write `data-report` once but no record for a dry-run restore.

@@ -447,6 +447,25 @@ The palette shows no status for an invocation, and the kernel draws no message w
 - A refused invocation is written to the plugin log as a refusal line. Read it with `ilium plugin logs <plugin-id>`, as the [audio](/pages/capability-audio/) page shows for a voice plugin. The log is the only record of the refusal, because a disabled plugin receives no events and can draw nothing.
 - A notice or [toast](/pages/api-toast/) about a failed command can only come from the owning plugin while it is enabled and handling `command-invoked`. A plugin that wants the user to see a reason for a failure must draw it itself, for example with a `notice` in a view ([widgets-status-and-feedback](/pages/widgets-status-and-feedback/)).
 
+#### What the user sees when a plugin command fails
+
+This part covers a command the user started from the palette, a key or a menu, and whose handler then fails. It is different from the refusal cases above, which happen before the handler runs. The client shows one footer notice per failed command. The notice stays for 5 seconds and then goes away by itself.
+
+| What happened | Footer notice | Counts toward the three-failure rule |
+|---|---|---|
+| The handler returned `failed` with a message | `<Plugin>: <message>`, with the message the plugin returned | No |
+| The handler did not reply within 30 seconds (`failed(timed-out)`) | `<Plugin>: did not finish` | No |
+| The handler trapped | `Plugin <name> stopped: <export>` | Yes, as one failure |
+| The handler called a function without its grant and the call returned `not-permitted` | `<Plugin> needs the <grant name> permission`, with an Open Settings action | No |
+| The handler returned `ok` with no message | Nothing | No |
+
+- `<Plugin>` is the display name from the manifest. `<export>` is the failing export, here the command handler. After the third failure within 10 minutes the notice changes to the stopped notice of [Lifecycle](/pages/lifecycle/#failure-counting-and-restart), which replaces the 5 second notice.
+- A command that returns nothing shows nothing. The user cannot tell it from a no-op, so a plugin whose command can do nothing, for example because there is no pane to act on, SHOULD return `failed` with a short reason.
+- The message is plain text. The host removes control characters and bidirectional override characters before it draws the notice, does not read markup in it, and cuts it to 200 characters (proposed, owner to confirm) with a trailing `…` if it is longer. The notice shows one line; the rest is cut at the terminal width.
+- The host writes the full message to the plugin log with the command id, for example `command ilium.notes/new failed: <message>`. Read it with `ilium plugin logs <plugin-id>`.
+- `ilium plugin explain <code>` does not apply to the message. The message is written by the plugin and has no catalogue entry. Only the error code, such as `not-permitted` or `timed-out`, has an `explain` entry, as [USR-347] requires. The wording of the host's own part of the notice can change between minor releases, as [ABI-082] says for message text.
+- A refused install is a different case. Its text begins `Cannot install <name> <version>.` [USR-171].
+
 ### Limits
 
 | Limit | Value |

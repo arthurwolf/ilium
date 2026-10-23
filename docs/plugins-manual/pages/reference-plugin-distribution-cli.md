@@ -115,6 +115,77 @@ A source is a path to a `.iliumpkg` file, an `https://` URL, or a registry id wi
 | [PKG-442] | `publish` reads its credential from the environment variable `ILIUM_REGISTRY_TOKEN` or from `--token-file`. It MUST NOT accept the token as a flag value. |
 | [PKG-443] | `yank` and `deprecate` MUST NOT delete a blob. They change the signed metadata only (see [Registry reference](/pages/reference-registry/)). |
 
+## rollout, unyank, unlist, owner and transfer commands
+
+These are the publisher verbs that change what a registry offers. They complete [publish, yank, deprecate](#publish-yank-deprecate) and follow the rules of [Registry reference](/pages/reference-registry/) and [Release rollout](/pages/reference-release-rollout/). Each one needs a registry (`--registry <url>`, or the single configured one) and the publisher credentials in the table below.
+
+| Command | Effect | Signing key | Token |
+|---|---|---|---|
+| `ilium plugin rollout <id>@<version> --percent <n>` | Sets the share of clients offered that version. `0` halts the rollout, `100` completes it. | None. The change is a new signed `plugins/<id>.json` made by the registry. | `ILIUM_REGISTRY_TOKEN` or `--token-file` |
+| `ilium plugin yank <id>@<version> --reason <text> [--confirm-dependents]` | Withdraws a version. | A trusted key of the current publisher (`--key <file>` or `ILIUM_PUBLISHER_KEY`). | Same |
+| `ilium plugin unyank <id>@<version>` | Reverses a yank. | Same as `yank`. | Same |
+| `ilium plugin unlist <id>` and `relist <id>` | Removes the plugin from `index.json` and search, or puts it back. | Same as `yank`. | Same |
+| `ilium plugin owner add <id> <publisher-id>` and `owner remove <id> <publisher-id>` | Adds or removes an owner of the namespace. | A key of an existing owner. | Same |
+| `ilium plugin transfer <id> --to <publisher-id> --new-key <key_id>` | Moves the namespace to another publisher id. | A trusted key of the current owner signs the transfer statement. | Same |
+
+### Arguments and flags
+
+- `<n>` of `rollout` is a whole number from 0 to 100. A fraction, a negative number or a value above 100 fails with `usage.invalid-value` before any network access.
+- `--reason` of `yank` is 1 to 500 Unicode scalar values and is required (`usage.missing-argument` when absent).
+- `--confirm-dependents` of `yank` acknowledges the dependent count printed by the command (see PKG-823).
+- `transfer` names the new publisher with `--to` and the new publisher key with `--new-key`. The statement names both and is signed locally before it is sent.
+- The credentials come from the variables of [Environment variables](#environment-variables). A token is never a flag value ([PKG-442]).
+
+### Result record
+
+Each command prints one `result` record with `exit_code` and these fields, plus the common fields of [Plugin command line](/pages/reference-plugin-cli/#output-model).
+
+| Command | Fields besides `exit_code` |
+|---|---|
+| `rollout` | `id`, `version`, `percent`, `previous_percent`, `metadata_version` (the new higher version of `plugins/<id>.json`) |
+| `yank` | `id`, `version`, `yanked_at`, `yanked_by` (key fingerprint), `reason`, `dependents` (count) |
+| `unyank` | `id`, `version`, `log_entry` (transparency log index) |
+| `unlist`, `relist` | `id`, `listed` (`false` or `true`) |
+| `owner add`, `owner remove` | `id`, `publisher_id`, `owners` (list after the change), `log_entry` |
+| `transfer` | `id`, `from`, `to`, `new_key`, `log_entry` |
+
+### Rules
+
+| Id | Rule |
+|---|---|
+| [PKG-396] | `unyank` MUST reverse a yank of the named version. `yank` and `unyank` MUST NOT delete a blob ([PKG-443]). |
+| [PKG-398] | `unlist` MUST remove the plugin from `index.json` and search and keep `plugins/<id>.json` and the blobs. `relist` MUST restore the plugin to the index. Both MUST be idempotent. |
+| [PKG-689] | `rollout` MUST publish the new percentage as a signed `plugins/<id>.json` with a higher version number. A publisher outside the namespace MUST be refused with `registry.namespace-unowned`. A missing or refused token MUST be refused with `registry.auth`. |
+| [PKG-800] | `yank` and `unyank` MUST be signed by a trusted key of the current publisher. Any other signer MUST be refused with `registry.not-owner` and the metadata MUST stay unchanged. |
+| [PKG-801] | `yank` MUST record `yanked_at`, `yanked_by` and `reason`. Without `--reason` it MUST fail with `usage.missing-argument`. |
+| [PKG-802] | `unyank` MUST clear the yanked fields, MUST append a transparency log entry, MUST fail with `registry.not-yanked` when the version is not yanked, and MUST fail with `registry.taken-down` for a version removed by takedown. |
+| [PKG-819] | `owner add\|remove` MUST be signed by a key of an existing owner, MUST refuse removing the last owner with `registry.last-owner`, and MUST be logged. |
+| [PKG-390] | `transfer` MUST publish a transfer statement signed by a trusted key of the current owner, naming the new publisher id and key. The registry records `transferred_from` in the plugin metadata. |
+| [PKG-823] | `yank` MUST print the number of dependents and MUST require `--confirm-dependents` when it is above 0. Without the flag it MUST change nothing and exit 1. |
+
+### Error codes and exit codes
+
+| Code | When | Exit |
+|---|---|---|
+| `registry.not-owner` | The signing key is not a trusted key of the current owner. | 1 |
+| `registry.not-yanked` | `unyank` of a version that is not yanked. | 1 |
+| `registry.taken-down` | `unyank` of a version removed by takedown. | 1 |
+| `registry.last-owner` | `owner remove` would leave no owner. | 1 |
+| `registry.namespace-unowned` | The id is outside the namespace of the token. | 1 |
+| `registry.auth` | The token is missing, expired or refused. | 1 |
+| `usage.invalid-value` | A percentage outside 0 to 100, or a malformed id, version or publisher id. | 2 |
+| `usage.missing-argument` | `--reason`, `--percent` or `--to` is absent. | 2 |
+| `plugin.not-found` | The id or version is not in the registry. | 5 |
+| `registry.unreachable` | The registry cannot be reached. | 8 |
+
+Other failures follow [PKG-424]. A usage error is found before any key or network access ([PKG-425]).
+
+### Failure modes
+
+- A network failure after the request was sent leaves the outcome unknown. The command exits 8 and the next `info` shows the real state. Repeating `rollout`, `unlist`, `relist` or `unyank` is safe because each sets a state. A repeated `yank` of a yanked version keeps the first `yanked_at`.
+- `rollout --percent 0` halts the offer at each client's next refresh. It does not remove a copy that is already active.
+- A secret never appears in a record or log ([PKG-446]).
+
 ## keygen, sign and trust
 
 The commands and their rules are in [Signing and trust](/pages/reference-signing-and-trust/). The form of the key files, the trust store and the fingerprint is defined there only. The key forms in [Plugin command line](/pages/reference-plugin-cli/#keygen-sign-and-trust) follow it.

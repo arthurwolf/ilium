@@ -1095,6 +1095,54 @@ The SDK does not build packages. The `ilium plugin` command does that, from the 
 
 The SDK version has its own number, separate from the contract `ilium:plugin@0.1.0`. A new SDK release that keeps the contract compatible raises the minor or patch number. An SDK release that needs a new contract version raises the contract and writes the change in the changelog of the SDK. `ilium plugin check` fails with `manifest.api-version` when the component and the manifest name different contract versions. See [Versioning](/pages/versioning/).
 
+## SDK release lines and support window
+
+An SDK release line is one minor of the SDK, such as `0.4`, with its patch releases. A plugin that stays installed for years is built against one line, so the manual states which host contracts a line targets, how long it receives fixes and which parts of the SDK share its promises.
+
+### Which host contract minors a line targets
+
+Each SDK release declares in its metadata the lowest and highest host API minors its output loads on ([DEV-996]). `ilium plugin build` fails with `build.sdk-host-mismatch` when the manifest `api` falls outside that range. The table shows the shape of the metadata. The manifest `api` is `ilium:plugin@0.1.0` today, so every line targets minor `0.1`; the numbers of later rows are illustrative until a later contract exists.
+
+| SDK line | Lowest host API minor | Highest host API minor | Support state of the line |
+|---|---|---|---|
+| Line that first targets `0.1` | `0.1` | `0.1` | `supported` |
+| Line that adds contract `0.2` | `0.1` | `0.2` | `supported` |
+| Line older than the security window | `0.1` | `0.1` | `end-of-life` |
+
+- The range of a line never narrows in a patch release. A patch release declares the same lowest and highest minors as the minor it patches.
+- A line that needs a new contract version raises the highest minor in a new SDK minor and writes the change in its changelog, as the [SDK versioning policy](/pages/rust-sdk/#sdk-versioning-policy) says. A package built against it for a minor outside the range is refused at build time, and a component with a contract the manifest does not name is refused by `ilium plugin check` with `manifest.api-version`.
+- The compatibility table of each release is published with its release metadata and repeated in [SDK deprecation and removal](/pages/reference-sdk-deprecation/).
+
+### How long a line receives fixes
+
+- A vulnerability fix for the SDK is released as a patch to every host minor still inside its support period ([DEV-966], [DEV-964]). An SDK line that targets such a host minor receives the same fix as a patch, so its fix window is not shorter than the 12 months (proposed, owner to confirm) that [DEV-964] gives the host minor it targets.
+- When a line targets several host minors, its window ends with the latest security-fix end date among them. The support matrix of [Versioning](/pages/versioning/) lists the end date and shows `supported` up to it and `end-of-life` after it ([DEV-962]).
+- After the end date the line receives no further fixes. Plugins built with it keep loading unchanged, because the end date limits fixes and not loading ([DEV-962]).
+- Non-security fixes go to the newest line only, unless the release notes name an older line.
+- A raised minimum Rust or Bun version keeps the previous minimum building for at least two minor releases and is announced one minor in advance ([DEV-897]). That is a toolchain rule and does not extend the fix window of a line.
+- This manual states no separate window for the SDK. If the project sets one, it is a proposal for the owner to confirm.
+
+### The testing module and the conformance helpers
+
+The `testing` module (`testing::FakeHost` in Rust, `@ilium/plugin-sdk/testing` in TypeScript) and the conformance helpers ship in the same SDK release and follow the same semver and deprecation rules as the rest of the SDK:
+
+- An item of either marked for removal carries the mark and the changelog entry of [API-082] and [API-084], keeps its signature and behaviour until the removal minor ([API-083]), and ships its successor in the marking release ([API-085]).
+- Removal happens only in the minor named in the mark, never in a patch ([API-086]).
+- The `testing` metadata declares the contract range it matches ([DEV-996]); see [Test harness reference](/pages/reference-plugin-test-harness/). A test that runs against a contract outside that range fails in component mode and is not silently skipped.
+- A test written against a supported line keeps passing in later patches of that line. A change of the reported pass or fail result of a conformance case is a minor change and is listed in the changelog.
+
+### Patch releases
+
+A patch release of the SDK never changes the behaviour of a generated component: the same source built with the patched SDK yields the same exports, the same WIT interface use, the same limits and the same error codes. A patch fixes a defect inside an item, adds documentation, or ships a security fix ([DEV-966]). A patch removes no item ([API-083]) and changes no declared host range.
+
+### Where changes are published
+
+- Each release has a changelog entry with the Keep a Changelog headings. Marked items are under `Deprecated` and removed items under `Removed`, each naming the item, its successor and its removal minor ([API-084]).
+- The release notes carry toolchain minimum raises one minor before they take effect ([DEV-897]) and the compatibility table of the release.
+- Both are published with the release of the SDK package, `ilium-plugin-sdk` for Rust and `@ilium/plugin-sdk` for TypeScript. The host writes no deprecation record or log line for them ([API-087]). The same section is in [TypeScript SDK reference](/pages/typescript-sdk/).
+
+Requirement ids for this section: [DEV-897], [DEV-962], [DEV-964], [DEV-966], [DEV-996], [API-082], [API-083], [API-084], [API-085], [API-086], [API-087].
+
 ## Edge cases
 
 - A batch holds at most 256 events and a submission list at most 256 entries; a larger list traps the instance with `trap.submission-batch`.

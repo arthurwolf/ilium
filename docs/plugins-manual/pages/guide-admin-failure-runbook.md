@@ -199,6 +199,43 @@ The names are those used by the pages that define them. The audit log lists the 
 
 Who inside your organisation is told, and in what order, is not defined in the manual. See [Open decisions](#open-decisions).
 
+### Incident record and post-incident review
+
+Every section above tells you to "write it in the incident record". This section defines that record, so that incidents on different machines can be compared and handed to a publisher with the evidence the publishing guide asks for.
+
+**Where it lives.** The record is an entry in your site's change record, the same place where HST-992 requires you to document a copy of plugin logs on another machine. The manual does not prescribe a tool. The entry must be readable by the administrators who respond, and it must not hold the evidence itself: it holds the hashes and storage locations of the evidence. A support bundle can hold personal data ([USR-960], [USR-962]), so the bundle stays in storage with owner-only modes (0600 for files, 0700 for folders) and the record only points to it.
+
+**Fields.** Write one record per incident. Open it at the moment you first notice the problem, because the notification clocks in [Data-exposure incident](#data-exposure-incident) count from that moment.
+
+| Field | What to write | Where the value comes from |
+|---|---|---|
+| Incident id | One id from your change-record system, never reused. | Your change record. |
+| First noticed | Time `YYYY-MM-DD HH:mm:ss` with time zone, and how: user report, alert rule, the recovery page after the crash-loop guard, or an audit review. | Your own clock and the alert or ticket. |
+| Machines | Each affected machine, with the host version from `ilium --version --verbose`. | The command on each machine. |
+| Plugins | Each plugin id with the installed version and the version before it. | `ilium plugin status <id> --json`. |
+| Audit sequence range | Per machine and user: first and last audit record of the incident, and the file it was exported to. Start at the first `install` or `update` of the affected version and stop at `plugin.killed`. | `ilium plugin audit --export <file>`, later checked with `--verify` against its anchor line ([SEC-449]). |
+| Actions taken | One line per action with its time and the administrator: kill, `plugins.deny_ids`, `packages.blocklist_file` or `publishers.deny` entries, trust revocation, rollback, safe mode. | The shell history and the `plugin.killed`, `trust-remove` and `safe-mode` events. |
+| Kill-switch and quarantine entries pushed | Each entry, its text, the time it was pushed and the machines that acknowledged it. A machine without acknowledgement is "not confirmed". | [Isolated fleet](#isolated-fleet-propagation-and-acknowledgement). |
+| Evidence | For each audit export, status output and support bundle: file name, SHA-256 hash, storage location, and the date by which every copy must be deleted. | `sha256sum <file>`; the deletion date follows [USR-961]. |
+| User impact | Users and sessions affected, what they saw, and the data reached, with "unknown" where it cannot be shown. Never write "none" for what you could not establish. | Scope step of the data-exposure section. |
+| Closed | Time of closure and the name of the person who closed it. | Your change record. |
+
+**Failure modes of the record.**
+
+- A field you cannot fill is written as "unknown" with the reason. An empty field is not accepted at closure.
+- An evidence entry without a hash is not evidence: the publisher cannot tell whether the file was changed after the incident.
+- A record is closed only when its evidence is stored and the review below is started. The 90-day retention period of [USR-961] (proposed, owner to confirm) runs from the closure time.
+- When the incident is an active exploit, the project writes its own public post-mortem [SEC-729]. Your record is the input of your report to the project and does not replace it.
+
+**Post-incident review, within 7 days of closure.** The 7 days are a recommendation of this manual (proposed, owner to confirm). Tick each item in the record.
+
+1. **Crash-loop guard.** If the incident involved start crashes, confirm that the guard cleared: one start has stayed up for 5 minutes after startup completed ([Crash loop](#crash-loop)). If a machine is still in `third-party` safe mode, write why.
+2. **Alerts.** List the alert rules that should have fired and did not, from the audit events in the table above, and fix or add each rule. Write the time between the first audit record of the problem and the time you noticed it.
+3. **Permanence.** For each temporary entry in the actions list, decide whether it becomes permanent: a `plugins.deny_ids` or `packages.blocklist_file` entry, a `publishers.deny` entry, or a revoked key. Record the decision and the owner. An entry that is left temporary needs a date to remove it.
+4. **Report.** Send the publisher report to the plugin's `security_contact` (or the host report to the Ilium project contact) as the [escalation path](#escalation-path) requires, with the version, steps, expected and actual result, and the SHA-256 hash of the support bundle. Send the bundle itself only after you have read its `log.txt` and only to those recipients ([USR-960], [USR-962]). Record the date of the report. If there is no answer within 30 days, the release blocklist step in the escalation path applies.
+5. **Reproduction.** Where the fault can be shown without user data, record how it was turned into a test fixture, so the report can be reproduced and the fault does not return ([AUT-316]).
+6. **Follow-ups.** Record each follow-up with an owner and a date: policy changes, documentation gaps, changes to the Open decisions table below.
+
 ## Registry backup and disaster recovery
 
 This section is target behaviour for the public plugin system. This section is for the operator of a registry. It sets the backup and restore procedure for the registry index and how to rebuild it.

@@ -79,6 +79,41 @@ The guard has two more levels. They use the same crash marks as LIF-186, and a c
 
 If you reach `crash-loop.exhausted`, keep the state folder unchanged and report the crash to the Ilium project through the contact in [Security response](/pages/reference-security-response/). Do not delete the crash marks by hand.
 
+### When the Ilium server itself crashes after startup
+
+The crash-loop guard above covers only crashes during start. This section covers the server dying while a session is running, after startup completed. A helper crash is a different case: a helper exit never stops the server or any other plugin side (HST-010) and is recorded under USR-227.
+
+**What the host does.** The server installs a panic hook before it loads any plugin. On a panic the hook writes one **host crash record** to the crash folder, then exits with a non-zero status. The crash folder is the 0700 folder beside the audit directory, and the record has mode 0600 (SEC-447). A record holds only:
+
+- the Ilium version and build digest;
+- the operating system and architecture;
+- the name of the panicking thread;
+- the backtrace, as host frames only;
+- the last 50 host log lines.
+
+It holds the same kinds of fields as a plugin crash record (SEC-446): no plugin data, memory, argument values, secret values, granted data or file contents. The redaction test runs over the record before it is stored. A fatal signal or a kill that the hook cannot catch (out-of-memory kill, power loss) writes no record. The next start then finds a leftover crash mark and the missing record tells you the server did not get to report. Core dumps stay off (SEC-445), so no other forensic file exists. The write adds one `crash-report` audit record that names the file (SEC-447).
+
+**What an attached client shows.** When the connection to the server drops without a shutdown message, each attached client shows a notice: `Server stopped unexpectedly`. The notice gives the path of the host crash record, or says `no crash record was written` when none exists, and offers two actions: **Restart** and **Close**. Restart starts a new server for the same project session. Close leaves the client. The client never restarts the server on its own.
+
+**What is lost and what is kept.** Memory state and the server restore bytes are lost. Storage, settings, data and metadata are as of the last durable write or snapshot (LIF-157). Plugin helpers end with the server. After restart, plugins start again from stored state.
+
+**Restart and the guard.** A server that died after startup completed but before the 5 minutes of LIF-294 had passed leaves its crash mark in place. Restarting inside that window therefore counts as one crash mark toward LIF-186. Three such crashes within 5 minutes make the next start run in `third-party` safe mode, and the levels in [When safe mode also crashes](#when-safe-mode-also-crashes) follow. A crash after the mark was cleared starts a fresh count at one.
+
+**Finding the record.**
+
+- `ilium plugin doctor` prints the last host crash: its time in UTC (RFC 3339), the Ilium version, the panicking thread and the record path. It prints `none` when no record exists.
+- `ilium plugin crashes --host` lists every host crash record, newest first, one JSONL record per line with the time, version and path. Without `--host` the command lists plugin and helper records only.
+- Host crash records are deleted after 14 days (SEC-447). SEC-955 proposes 30 days and a limit of 200 records, and the owner is to align the two. Uninstalling a plugin never deletes host records, because they belong to no plugin.
+- Nothing is sent anywhere unless you run the explicit export command (SEC-447).
+
+**In a bug report.** Attach the host crash record file named in the notice or in `ilium plugin crashes --host`, together with the output of `ilium plugin doctor`. Read the record first: it holds log lines, so remove anything you do not want to share. Report through the contact in [Security response](/pages/reference-security-response/) if you think the crash is a security fault. See also [Troubleshooting](/pages/user-troubleshooting/).
+
+**Failure modes.**
+
+- The crash folder is not writable: the hook skips the record, the notice says `no crash record was written`, and the exit status is still non-zero.
+- A second panic inside the hook: the process aborts and no record is written.
+- The disk is full: the record may be cut short. A cut record is kept and is marked in `ilium plugin doctor` as `truncated`.
+
 ### Recovery steps
 
 1. Start with `ilium --safe-mode=third-party`.
