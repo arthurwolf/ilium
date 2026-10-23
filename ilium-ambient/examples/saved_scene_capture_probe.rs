@@ -116,7 +116,7 @@ fn parse_arguments_from(mut arguments: impl Iterator<Item = String>) -> Result<A
     if !(16..=240).contains(&width)
         || !(8..=120).contains(&height)
         || !(25..=400).contains(&zoom)
-        || !(10..=1800).contains(&deadline)
+        || !(10..=14400).contains(&deadline)
         || !(2..=12).contains(&frame_count)
         || !(1..=120).contains(&frame_interval)
     {
