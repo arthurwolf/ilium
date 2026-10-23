@@ -548,9 +548,16 @@ impl HostHarness {
 
     /// Builds the host and activates the plugin.
     pub fn build(self) -> Result<HarnessHandle, HostError> {
-        if self.wat_text.is_some() || self.wasm_bytes.is_some() {
-            return Err(HostError::EngineError("WebAssembly backend is not connected to this harness".into()));
+        let wasm_sources = usize::from(self.wat_text.is_some()) + usize::from(self.wasm_bytes.is_some());
+        if wasm_sources > 1 || (wasm_sources != 0 && self.native_guest.is_some()) {
+            return Err(HostError::EngineError("select exactly one native, WAT, or Wasm guest source".into()));
         }
+        let wasm_bytes = match (self.wat_text, self.wasm_bytes) {
+            (Some(text), None) => Some(wat::parse_str(&text)
+                .map_err(|error| HostError::EngineError(format!("invalid component text: {error}")))?),
+            (None, bytes) => bytes,
+            _ => unreachable!("multiple guest sources were rejected above"),
+        };
         // Fail closed for builder options whose adapters have not landed yet.
         if self.both_sides || self.two_plugins || self.activate_error.is_some()
             || self.session_memory_mib.is_some() || self.session_helpers.is_some()
@@ -566,7 +573,7 @@ impl HostHarness {
             .map_err(HostError::Diagnostic)?;
         let mut grants = Vec::new();
         for text in &self.grants {
-            let grant = text.parse::<Grant>().map_err(|error| HostError::EngineError(error.to_string()))?;
+            let grant = Grant::parse(text).map_err(HostError::Diagnostic)?;
             check_grant(&grant, self.tier, self.side).map_err(HostError::Diagnostic)?;
             if !self.declined.contains(text) { grants.push(grant); }
         }
@@ -575,7 +582,7 @@ impl HostHarness {
         } else { ilium_plugin_api::platform::ProcessKind::Client };
         let kernel = self.kernel.unwrap_or_else(|| Arc::new(FakeKernel::new(process)));
         let plugin = PluginId("test.plugin".into());
-        let admission = Arc::new(HarnessAdmission { grants: Mutex::new(grants) });
+        let admission = Arc::new(HarnessAdmission { grants: Arc::new(Mutex::new(grants)) });
         let dispatcher = Dispatcher::with_admission(kernel.clone(), DispatchConfig {
             max_pending_per_plugin: resolved[&LimitKey::PendingRequests] as usize,
             max_submissions_per_call: 256, dedup_window_ms: 600_000,
@@ -587,9 +594,28 @@ impl HostHarness {
         let scheduler = Scheduler::try_with_config(process, 1, crate::calls::ResolvedLimits(resolved.clone()), &quota)
             .map_err(|error| HostError::EngineError(error.to_string()))?;
         scheduler.register_side_with_limits(&plugin, crate::calls::ResolvedLimits(resolved.clone()));
-        let instance = PluginInstance::from_guest(Box::new(super::native_guest::NativeGuestAdapter::new(
-            self.native_guest.unwrap_or_else(|| Box::new(NullGuest))
-        )));
+        let guest: Box<dyn crate::instance::GuestExports> = if let Some(bytes) = wasm_bytes {
+            // These are direct test fixtures, not admitted packages. Full world validation
+            // remains a separate package gate; WasmGuest rejects all unlinked imports.
+            let engine = Arc::new(crate::engine::PluginEngine::with_quota(crate::engine::EngineConfig {
+                epoch_tick_ms: 10, cache_dir: None, process,
+            }, &quota)?);
+            let compiled = engine.compile(&bytes)?;
+            let limits = crate::calls::ResolvedLimits(resolved.clone());
+            let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+            let now = Instant::now();
+            scheduler.enqueue(&plugin, CallKind::Activate, now, Box::new(move || {
+                let result = crate::wasm_guest::WasmGuest::instantiate(engine, &compiled, limits)
+                    .map(|guest| Box::new(guest) as Box<dyn crate::instance::GuestExports>);
+                let _ = sender.send(result);
+            }));
+            scheduler.tick(now);
+            receiver.recv().map_err(|_| HostError::EngineError("component instantiation worker ended without a result".into()))??
+        } else {
+            Box::new(super::native_guest::NativeGuestAdapter::new(
+                self.native_guest.unwrap_or_else(|| Box::new(NullGuest))))
+        };
+        let instance = PluginInstance::from_guest(guest);
         let clamp_logs = self.limits.0.iter().filter_map(|(name, requested)| {
             let key = name.parse::<LimitKey>().ok()?;
             let effective = resolved.get(&key)?;
@@ -606,7 +632,7 @@ impl HostHarness {
             side: self.side.as_str().into(), settings_json: serde_json::to_string(
                 &self.settings.into_iter().collect::<serde_json::Map<String, Value>>()
             ).map_err(|error| HostError::EngineError(error.to_string()))?,
-            granted: harness_lock(&handle.admission.grants).iter().map(ToString::to_string).collect(),
+            granted: harness_lock(&handle.admission.grants).iter().map(|grant| grant.as_str().to_owned()).collect(),
             restored: None };
         handle.scheduler.begin_activation(&handle.plugin);
         let result = handle.execute(CallKind::Activate, move |instance| instance.activate(activation));
@@ -661,10 +687,10 @@ fn harness_lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 fn harness_trap(code: &'static str, function: &str) -> Trap {
     Trap { code: ilium_plugin_api::Code::from_static(code), interface: "harness".into(), function: function.into() }
 }
-struct HarnessAdmission { grants: Mutex<Vec<Grant>> }
+struct HarnessAdmission { grants: Arc<Mutex<Vec<Grant>>> }
 impl HarnessAdmission {
     fn permits(&self, name: &str) -> bool {
-        name.parse::<Grant>().is_ok_and(|needed| harness_lock(&self.grants).iter().any(|grant| grant.covers(&needed)))
+        Grant::parse(name).is_ok_and(|needed| harness_lock(&self.grants).iter().any(|grant| grant.covers(&needed)))
     }
 }
 impl SubmissionAdmission for HarnessAdmission {
@@ -819,7 +845,7 @@ impl HarnessHandle {
             total.traps += report.traps;
             // Keep completed requests with their dispatcher owner until older
             // completion handoffs have drained; never accumulate retry buffers.
-            let results = if completion_blocked { Vec::new() } else { self.dispatcher.outcomes_for(&self.origin()) };
+            let results = if completion_blocked { Vec::new() } else { self.dispatcher.take_outcomes_for(&self.origin(), 256) };
             if !results.is_empty() {
                 harness_lock(&self.observations).outcomes.extend(results.iter().cloned());
                 if let Err(remaining) = self.try_deliver(results.into_iter().map(Event::RequestCompleted).collect()) {
@@ -929,8 +955,12 @@ impl HarnessHandle {
     }
 
     /// The `ilium:primitives/basic` interface as the plugin sees it.
-    pub fn basic(&self) -> impl HostBasic {
-        BasicImport
+    pub fn basic(&self) -> impl HostBasic + '_ {
+        BasicImport::new(self.kernel.clone(), self.plugin.0.clone(),
+            self.admission.grants.clone(),
+            |message| harness_lock(&self.observations).logs.push(LogLine {
+                plugin: self.plugin.0.clone(), level: "warn".into(), message: message.into(),
+            }))
     }
 
     /// The `ilium:host/audio` interface as the plugin sees it.
@@ -1300,8 +1330,10 @@ impl HarnessHandle {
     }
 
     /// Revokes a grant without re-activating (HST-069).
-    pub fn revoke_without_reactivation(&self, _grant: &str) {
-        unimplemented!("host::testing::HarnessHandle::revoke_without_reactivation")
+    pub fn revoke_without_reactivation(&self, grant: &str) {
+        if let Ok(removed) = Grant::parse(grant) {
+            harness_lock(&self.admission.grants).retain(|existing| existing != &removed);
+        }
     }
 
     /// Grants a capability now (CAP-0xx, HST-069).

@@ -77,6 +77,8 @@ pub struct CardData {
     pub source: AttentionSource,
     pub age_ms: u64,
     pub is_looked: bool,
+    pub is_snoozed: bool,
+    pub snooze_icon: String,
 }
 
 /// Accent colour of a kind. Named ANSI colours, like the status icons, so they
@@ -613,6 +615,7 @@ pub enum DialogAction {
     Close,
     /// Jump to this agent and close.
     Open(NodeId),
+    Snooze(NodeId),
 }
 
 /// UI state of the open dialog. The queue itself lives in `AttentionState`;
@@ -624,6 +627,8 @@ pub struct DialogState {
     selected_hint: usize,
     pub scroll: u32,
     pub hover: Option<usize>,
+    pub snooze_hover: Option<usize>,
+    pub show_snoozed: bool,
     pub is_close_hovered: bool,
     pub is_scrollbar_dragging: bool,
     /// Unix second of the last age redraw, so ages tick once a second.
@@ -669,6 +674,12 @@ impl DialogState {
         self.scroll = layout.clamp_scroll(self.scroll);
         let selected = self.selected_index(cards);
         let direction = match code {
+            KeyCode::Char('s' | 'S') => {
+                self.show_snoozed = !self.show_snoozed;
+                self.scroll = 0;
+                self.snooze_hover = None;
+                return DialogAction::None;
+            }
             KeyCode::Esc | KeyCode::Char('q') => return DialogAction::Close,
             KeyCode::Enter => {
                 return cards
@@ -735,6 +746,28 @@ impl DialogState {
         let layout = compute(screen, cards);
         self.scroll = layout.clamp_scroll(self.scroll);
         let hit = layout.hit(self.scroll, position);
+        let snooze_hit = layout.visible(self.scroll).iter().find_map(|visible| {
+            let SlotTarget::Card { index } = visible.slot.target else {
+                return None;
+            };
+            let card = cards.get(index)?;
+            snooze_rect(visible, card)
+                .filter(|rect| rect.contains(position))
+                .map(|_| index)
+        });
+        self.snooze_hover = snooze_hit;
+        if matches!(kind, MouseEventKind::Down(MouseButton::Left)) {
+            if layout.legend.contains(position)
+                && position.x >= layout.legend.right().saturating_sub(17)
+            {
+                self.show_snoozed = !self.show_snoozed;
+                self.scroll = 0;
+                return DialogAction::None;
+            }
+            if let Some(index) = snooze_hit {
+                return DialogAction::Snooze(cards[index].pane_id);
+            }
+        }
         match kind {
             MouseEventKind::Moved => {
                 self.update_hover(hit);
@@ -795,10 +828,16 @@ pub fn split_button(area: Rect) -> (Rect, Option<Rect>) {
     if area.width < MINIMUM_BUTTON_WIDTH_FOR_PLUS || area.height == 0 {
         return (area, None);
     }
-    let main_width = area.width - PLUS_WIDTH;
+    let plus_width = if area.height > 1 { 5 } else { PLUS_WIDTH };
+    let main_width = area.width.saturating_sub(plus_width);
     (
         Rect::new(area.x, area.y, main_width, area.height),
-        Some(Rect::new(area.x + main_width, area.y, PLUS_WIDTH, 1)),
+        Some(Rect::new(
+            area.x + main_width,
+            area.y,
+            plus_width,
+            area.height,
+        )),
     )
 }
 
@@ -817,9 +856,16 @@ pub fn render_plus(frame: &mut Frame, area: Rect, is_hovered: bool) {
     } else {
         theme::selected_style().add_modifier(Modifier::BOLD | Modifier::DIM)
     };
-    frame
-        .buffer_mut()
-        .set_stringn(area.x, area.y, "[+]", usize::from(area.width), style);
+    frame.render_widget(ratatui::widgets::Paragraph::default().style(style), area);
+    let label = if area.height > 1 { "+" } else { "[+]" };
+    let x = area.x + area.width.saturating_sub(label.len() as u16) / 2;
+    frame.buffer_mut().set_stringn(
+        x,
+        area.y + area.height / 2,
+        label,
+        usize::from(area.width),
+        style,
+    );
 }
 
 // ---------------------------------------------------------------- drawing
@@ -1226,7 +1272,89 @@ pub fn render(
     }
     paint_scrollbar(frame.buffer_mut(), &layout, scroll);
     paint_legend(frame.buffer_mut(), &layout);
+    let toggle = if state.show_snoozed {
+        "S hide snoozed"
+    } else {
+        "S show snoozed"
+    };
+    if layout.legend.width >= 17 {
+        put(
+            frame.buffer_mut(),
+            layout.legend.right() - 17,
+            layout.legend.y,
+            toggle,
+            17,
+            dim(),
+        );
+    }
+    for visible in layout.visible(scroll) {
+        let SlotTarget::Card { index } = visible.slot.target else {
+            continue;
+        };
+        let Some(card) = cards.get(index) else {
+            continue;
+        };
+        if let Some(rect) = snooze_rect(&visible, card) {
+            put(
+                frame.buffer_mut(),
+                rect.x,
+                rect.y,
+                &card.snooze_icon,
+                rect.width,
+                Style::new().fg(if card.is_snoozed {
+                    Color::Yellow
+                } else {
+                    Color::Cyan
+                }),
+            );
+            if card.is_snoozed && rect.x >= visible.rect.x + 10 {
+                put(frame.buffer_mut(), rect.x - 9, rect.y, "snoozed", 8, dim());
+            }
+            if state.snooze_hover == Some(index) {
+                let text = " Snooze until attention category changes ";
+                let width = u16::try_from(text.width())
+                    .unwrap_or(u16::MAX)
+                    .min(screen.width);
+                let popup = Rect::new(
+                    rect.x.min(screen.right().saturating_sub(width)),
+                    (rect.y + 1).min(screen.bottom().saturating_sub(1)),
+                    width,
+                    1,
+                );
+                frame
+                    .buffer_mut()
+                    .set_style(popup, Style::new().fg(Color::Black).bg(Color::Yellow));
+                put(
+                    frame.buffer_mut(),
+                    popup.x,
+                    popup.y,
+                    text,
+                    width,
+                    Style::new().fg(Color::Black).bg(Color::Yellow),
+                );
+            }
+        }
+    }
     paint_close(frame.buffer_mut(), &layout, state.is_close_hovered);
+}
+
+fn snooze_rect(visible: &VisibleSlot, card: &CardData) -> Option<Rect> {
+    if visible.skipped_rows != 0 || visible.rect.height == 0 {
+        return None;
+    }
+    let width = u16::try_from(card.snooze_icon.width())
+        .unwrap_or(u16::MAX)
+        .max(2)
+        .min(visible.rect.width.saturating_sub(2));
+    if width == 0 {
+        return None;
+    }
+    Some(Rect::new(
+        visible.rect.right().saturating_sub(width + 1),
+        visible.rect.y,
+        width,
+        1,
+    ))
 }
 
 fn paint_title(buffer: &mut Buffer, layout: &DialogLayout, cards: &[CardData]) {
@@ -1363,7 +1491,10 @@ const LEGEND: [(&str, &str); 6] = [
 ];
 
 fn paint_legend(buffer: &mut Buffer, layout: &DialogLayout) {
-    let legend = layout.legend;
+    let mut legend = layout.legend;
+    if legend.width >= 17 {
+        legend.width = legend.width.saturating_sub(18);
+    }
     if legend.height == 0 || legend.width == 0 {
         return;
     }
@@ -1485,6 +1616,8 @@ mod tests {
             source: AttentionSource::Instant,
             age_ms: 125_000,
             is_looked: false,
+            is_snoozed: false,
+            snooze_icon: "💤".into(),
         }
     }
 
@@ -1535,6 +1668,66 @@ mod tests {
             .find(|visible| visible.slot.target == SlotTarget::Card { index: card })
             .expect("card is visible");
         Position::new(visible.rect.x + 2, visible.rect.y + visible.rect.height / 2)
+    }
+
+    #[test]
+    fn snooze_icon_has_its_own_click_and_hover_target() {
+        let cards = vec![card(1, AttentionKind::Changed)];
+        let screen = Rect::new(0, 0, 120, 40);
+        let layout = compute(screen, &cards);
+        let visible = layout
+            .visible(0)
+            .into_iter()
+            .find(|slot| matches!(slot.slot.target, SlotTarget::Card { .. }))
+            .unwrap();
+        let rect = snooze_rect(&visible, &cards[0]).unwrap();
+        let position = Position::new(rect.x, rect.y);
+        let mut state = DialogState::default();
+        state.handle_mouse(MouseEventKind::Moved, position, screen, &cards);
+        assert_eq!(state.snooze_hover, Some(0));
+        assert_eq!(
+            state.handle_mouse(
+                MouseEventKind::Down(crossterm::event::MouseButton::Left),
+                position,
+                screen,
+                &cards
+            ),
+            DialogAction::Snooze(cards[0].pane_id)
+        );
+        let toggle = Position::new(layout.legend.right() - 17, layout.legend.y);
+        state.handle_mouse(
+            MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            toggle,
+            screen,
+            &cards,
+        );
+        assert!(state.show_snoozed);
+    }
+
+    #[test]
+    fn snoozed_visibility_toggles_with_s_even_when_empty() {
+        let mut state = DialogState::default();
+        state.handle_key(
+            KeyCode::Char('s'),
+            KeyModifiers::NONE,
+            Rect::new(0, 0, 100, 40),
+            &[],
+        );
+        assert!(state.show_snoozed);
+        state.handle_key(
+            KeyCode::Char('S'),
+            KeyModifiers::SHIFT,
+            Rect::new(0, 0, 100, 40),
+            &[],
+        );
+        assert!(!state.show_snoozed);
+    }
+
+    #[test]
+    fn large_footer_plus_uses_the_whole_three_by_five_hit_target() {
+        let (main, plus) = split_button(Rect::new(2, 20, 30, 3));
+        assert_eq!(main, Rect::new(2, 20, 25, 3));
+        assert_eq!(plus, Some(Rect::new(27, 20, 5, 3)));
     }
 
     #[test]
@@ -2071,6 +2264,7 @@ mod tests {
             (9, 5),
             (10, 5),
             (12, 6),
+            (19, 8),
             (20, 8),
             (39, 11),
             (40, 12),

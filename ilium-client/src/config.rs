@@ -4355,6 +4355,7 @@ mod tests {
         let settings = AttentionSettings {
             mode: AttentionMode::Turbo,
             press_sorts: false,
+            large_buttons: true,
             show_briefing: false,
             turbo_concurrency: 4,
             expiry_seconds: 900,

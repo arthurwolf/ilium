@@ -56,6 +56,7 @@ pub mod file_lock;
 pub mod flatpak_host;
 #[cfg(unix)]
 pub mod interruptible_reader;
+pub mod local_time;
 pub mod minecraft;
 #[cfg(windows)]
 mod nofollow_windows;

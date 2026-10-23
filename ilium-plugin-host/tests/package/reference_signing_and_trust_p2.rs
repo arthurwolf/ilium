@@ -378,7 +378,7 @@ fn pkg_207_second_object_valid_and_untrusted_still_accepted() {
             obj(7, "example", &vector_manifest()),
         ],
     );
-    assert_eq!(refusal(&with_sig(&text), &good_trust()), "accepted");
+    assert_eq!(refusal_with_keys(&with_sig(&text), &good_trust(), &trust_of(7, "example").keys), "accepted");
 }
 
 /// REQ: PKG-207 MAY
@@ -397,7 +397,7 @@ fn pkg_207_every_object_is_verified_so_one_bad_object_refuses() {
         &[obj(0, "example", &vector_manifest()), second],
     );
     assert_eq!(
-        refusal(&with_sig(&text), &good_trust()),
+        refusal_with_keys(&with_sig(&text), &good_trust(), &trust_of(7, "example").keys),
         "manifest.signature-invalid"
     );
 }
@@ -425,7 +425,7 @@ fn pkg_207_trusted_key_may_be_the_second_object() {
             obj(0, "example", &vector_manifest()),
         ],
     );
-    assert_eq!(refusal(&with_sig(&text), &good_trust()), "accepted");
+    assert_eq!(refusal_with_keys(&with_sig(&text), &good_trust(), &trust_of(7, "example").keys), "accepted");
 }
 
 // ---- PKG-208: size and codes ----

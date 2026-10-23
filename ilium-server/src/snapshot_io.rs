@@ -710,6 +710,12 @@ fn estimated_bytes(snapshot: &SessionSnapshot) -> usize {
         add(optional(&preference.workspace_id));
         add(path_size(&preference.worktree_root));
     }
+    add(snapshot.recaps.capacity() * std::mem::size_of::<persistence::PersistedRecap>());
+    for recap in &snapshot.recaps {
+        add(recap.session_id.capacity());
+        add(recap.short.capacity());
+        add(optional(&recap.long));
+    }
     bytes
 }
 
@@ -985,6 +991,7 @@ mod tests {
             agent_debug_logs: Vec::new(),
             progress_monitors: Vec::new(),
             workspace_close_preferences: Vec::new(),
+            recaps: Vec::new(),
         }
     }
     fn parked(

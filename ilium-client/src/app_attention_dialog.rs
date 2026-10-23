@@ -23,8 +23,17 @@ impl App {
     pub fn attention_overview_cards(&self) -> Vec<CardData> {
         let now_ms = unix_millis_now();
         let queue = &self.attention.queue;
-        queue
-            .ordered_for_display(now_ms)
+        let show_snoozed = self
+            .attention
+            .dialog
+            .as_ref()
+            .is_some_and(|state| state.show_snoozed);
+        let items = if show_snoozed {
+            queue.ordered_including_snoozed(now_ms)
+        } else {
+            queue.ordered_for_display(now_ms)
+        };
+        items
             .into_iter()
             .map(|item| CardData {
                 pane_id: item.pane_id,
@@ -49,6 +58,12 @@ impl App {
                 source: item.source,
                 age_ms: now_ms.saturating_sub(item.created_ms),
                 is_looked: queue.last_looked_ms(item.pane_id).unwrap_or(0) >= item.created_ms,
+                is_snoozed: queue.is_snoozed(item.pane_id),
+                snooze_icon: self
+                    .ui_settings
+                    .icons
+                    .glyph(crate::icon_settings::IconTarget::AttentionSnooze)
+                    .to_string(),
             })
             .collect()
     }
@@ -130,6 +145,16 @@ impl App {
     fn apply_attention_overview_action(&mut self, action: DialogAction) {
         match action {
             DialogAction::None => {}
+            DialogAction::Snooze(pane_id) => {
+                self.attention.queue.snooze(pane_id);
+                self.attention
+                    .dirty_since_ms
+                    .get_or_insert(unix_millis_now());
+                if let Some(state) = self.attention.dialog.as_mut() {
+                    state.snooze_hover = None;
+                    state.hover = None;
+                }
+            }
             DialogAction::Close => self.close_attention_overview(),
             DialogAction::Open(pane_id) => {
                 self.close_attention_overview();

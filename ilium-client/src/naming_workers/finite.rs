@@ -14,6 +14,7 @@ pub(crate) enum Kind {
     InferenceTest,
     Models(ilium_inference::InferenceProviderKind),
     Restructure(Box<crate::app::PendingRestructureRequest>, PathBuf),
+    Recap(Box<crate::recap_worker::RecapWorkerRequest>),
     #[cfg(test)]
     LastPrompt(Box<LastPromptTranscriptWorkerRequest>),
 }
@@ -292,6 +293,21 @@ fn run_request(
                 result,
             }
         }
+        Kind::Recap(request) => NamingWorkerEvent::Recap(crate::recap_worker::RecapWorkerResult {
+            pane_id: request.pane_id,
+            session_id: request.session_id.clone(),
+            recap_generation: request.recap_generation,
+            result: provider_allowed(cancelled, decision, word)
+                .map_err(|error| error.to_string())
+                .and_then(|()| {
+                    catch_worker_panic("recap", || {
+                        crate::recap_worker::run_manual_recap(settings, &request, cancelled)
+                            .map_err(|message| anyhow::anyhow!(message))
+                    })
+                    .map_err(|error| error.to_string())
+                }),
+            automatic_ai_decision: decision,
+        }),
         Kind::Restructure(request, home) => {
             let crate::app::PendingRestructureRequest {
                 animation_home,
@@ -302,6 +318,7 @@ fn run_request(
                 protected_split_views,
                 current_structure,
                 inference_activity_revisions,
+                recap_stamps,
                 include_attention,
                 ..
             } = *request;
@@ -325,9 +342,9 @@ fn run_request(
                     }),
                 )
             });
-            let (result, attention) = match outcome {
-                Ok((plan, attention)) => (Ok(plan), attention),
-                Err(error) => (Err(error), None),
+            let (result, recaps, attention) = match outcome {
+                Ok(inference) => (Ok(inference.plan), inference.recaps, inference.attention),
+                Err(error) => (Err(error), Vec::new(), None),
             };
             NamingWorkerEvent::Restructure(RestructureWorkerResult {
                 project_id,
@@ -335,6 +352,8 @@ fn run_request(
                 inference_activity_revisions,
                 automatic_ai_decision: decision,
                 result,
+                recaps,
+                recap_stamps,
                 attention,
             })
         }
@@ -417,6 +436,7 @@ impl Kind {
                 | Self::SessionTitle(_)
                 | Self::TerminalTitle(_, _)
                 | Self::Restructure(_, _)
+                | Self::Recap(_)
         )
     }
     pub(super) fn uses_provider(&self) -> bool {
@@ -432,6 +452,12 @@ impl Kind {
         let payload = match self {
             Self::ProjectName(path) => path.capacity(),
             Self::InferenceTest | Self::Models(_) => 0,
+            Self::Recap(request) => std::mem::size_of::<crate::recap_worker::RecapWorkerRequest>()
+                .saturating_add(request.session_id.capacity())
+                .saturating_add(agent_bytes(&request.class))
+                .saturating_add(request.project_dir.capacity())
+                .saturating_add(request.home.capacity())
+                .saturating_add(request.activity.capacity()),
             Self::SessionTitle(request) => {
                 let input = &request.input;
                 std::mem::size_of::<SessionTitleWorkerRequest>()
@@ -583,6 +609,15 @@ impl Kind {
                 elapsed: Duration::ZERO,
                 result: Err(error),
             },
+            Self::Recap(request) => {
+                NamingWorkerEvent::Recap(crate::recap_worker::RecapWorkerResult {
+                    pane_id: request.pane_id,
+                    session_id: request.session_id.clone(),
+                    recap_generation: request.recap_generation,
+                    result: Err(error.to_string()),
+                    automatic_ai_decision: decision,
+                })
+            }
             Self::Restructure(request, _) => {
                 NamingWorkerEvent::Restructure(RestructureWorkerResult {
                     project_id: request.project_id,
@@ -590,6 +625,8 @@ impl Kind {
                     inference_activity_revisions: request.inference_activity_revisions.clone(),
                     automatic_ai_decision: decision,
                     result: Err(error),
+                    recaps: Vec::new(),
+                    recap_stamps: Default::default(),
                     attention: None,
                 })
             }
@@ -868,6 +905,7 @@ impl std::fmt::Debug for Kind {
             Self::InferenceTest => "InferenceTest",
             Self::Models(_) => "Models",
             Self::Restructure(_, _) => "Restructure",
+            Self::Recap(_) => "Recap",
             #[cfg(test)]
             Self::LastPrompt(_) => "LastPrompt",
         })

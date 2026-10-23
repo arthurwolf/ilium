@@ -354,6 +354,34 @@ fn hidden_below_zero_lines_draw_less_than_solid() {
 }
 
 #[test]
+fn moving_sea_hides_sea_floor_contours_that_would_stay_fixed() {
+    let drawn = |tide_range_m, zero_shift_m, style| {
+        lit(&render_loaded(
+            &mut scene(&TopographicMapsSettings {
+                tide_range_m,
+                zero_shift_m,
+                below_style: style,
+                pan: PanStyle::Still,
+                ..settings_for(WorldId::Earth)
+            }),
+            3.0,
+            120,
+            40,
+        )
+        .0)
+    };
+    // Still water keeps its depth lines.
+    assert!(drawn(0, 0, BelowStyle::Solid) > drawn(0, 0, BelowStyle::Hidden));
+    // A tide or a raised sea level hides them whatever the style says.
+    for (range, shift) in [(1650, 0), (0, 500)] {
+        assert_eq!(
+            drawn(range, shift, BelowStyle::Solid),
+            drawn(range, shift, BelowStyle::Hidden)
+        );
+    }
+}
+
+#[test]
 fn panning_moves_the_view_and_still_does_not() {
     let moving = TopographicMapsSettings {
         pan: PanStyle::East,
@@ -410,6 +438,82 @@ fn tides_move_the_zero_level() {
     assert!(scene.zero_level(0.0).abs() < 1e-3);
     assert!((scene.zero_level(25.0) - 500.0).abs() < 1.0);
     assert!((scene.zero_level(75.0) + 500.0).abs() < 1.0);
+}
+
+#[test]
+fn bulge_tides_differ_around_the_world_and_global_tides_do_not() {
+    let bulges = scene(&TopographicMapsSettings {
+        tide_range_m: 1000,
+        tide_seconds: 100,
+        tide_pattern: super::settings::TidePattern::Bulges,
+        ..settings_for(WorldId::Earth)
+    });
+    // At t=0 the bulge sits on longitude 0 and on its opposite side; the
+    // troughs are 90 degrees away.
+    assert!((bulges.zero_at(0.0, 0.0, 0.0) - 500.0).abs() < 1.0);
+    assert!((bulges.zero_at(0.0, 180.0, 0.0) - 500.0).abs() < 1.0);
+    assert!((bulges.zero_at(0.0, 90.0, 0.0) + 500.0).abs() < 1.0);
+    assert!(bulges.zero_at(0.0, 0.0, 90.0).abs() < 1.0);
+    let global = scene(&TopographicMapsSettings {
+        tide_range_m: 1000,
+        tide_seconds: 100,
+        ..settings_for(WorldId::Earth)
+    });
+    assert_eq!(
+        global.zero_at(25.0, 0.0, 0.0),
+        global.zero_at(25.0, 90.0, 40.0)
+    );
+}
+
+#[test]
+fn flooded_land_is_coloured_like_sea_not_by_sea_floor_depth() {
+    // 300 m under the water surface looks the same over flooded land as over
+    // the deep ocean, so no old coastline shows through.
+    let flooded = super::palette::tint(
+        PaletteChoice::Hypsometric,
+        WorldId::Earth,
+        -700.0,
+        -9000.0,
+        5000.0,
+    );
+    let deep = super::palette::tint(
+        PaletteChoice::Hypsometric,
+        WorldId::Earth,
+        -7000.0,
+        -9000.0,
+        5000.0,
+    );
+    assert_eq!(flooded, deep);
+}
+
+#[test]
+fn rendered_sea_floods_and_drains_without_a_fixed_dark_edge() {
+    let water_cells = |seconds: f64, pattern| {
+        let mut scene = scene(&TopographicMapsSettings {
+            tide_range_m: 4000,
+            tide_seconds: 100,
+            tide_pattern: pattern,
+            pan: super::settings::PanStyle::Still,
+            palette: PaletteChoice::Hypsometric,
+            ..settings_for(WorldId::Earth)
+        });
+        let (_, colors) = render_loaded(&mut scene, seconds, 120, 40);
+        let water = colors.iter().filter(|c| c[2] > c[0] && c[2] > c[1]).count();
+        let near_black = colors.iter().filter(|c| c.iter().all(|v| *v < 60)).count();
+        (water, near_black)
+    };
+    use super::settings::TidePattern::{Bulges, Global};
+    let (flood, flood_dark) = water_cells(25.0, Global);
+    let (calm, _) = water_cells(0.0, Global);
+    let (ebb, ebb_dark) = water_cells(75.0, Global);
+    // Sea level +-2000 m: far more water at high tide than at low tide.
+    assert!(flood > calm && calm > ebb, "{flood} {calm} {ebb}");
+    assert!(flood as f64 > 1.15 * ebb as f64, "{flood} {ebb}");
+    // Deep water keeps a readable blue; no black band marks the old shelf.
+    assert_eq!((flood_dark, ebb_dark), (0, 0));
+    // Bulges: some of the world is high while another part is low.
+    let (bulge, _) = water_cells(0.0, Bulges);
+    assert_ne!(bulge, calm);
 }
 
 #[test]

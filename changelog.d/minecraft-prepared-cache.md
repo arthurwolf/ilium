@@ -1,0 +1,2 @@
+### Added
+- The Minecraft/voxel saved-world animation now caches its preprocessed data on disk (`~/.ilium/cache/minecraft`): the block requirement scan and the built viewport tiles of each route are stored as compact deflate-compressed files keyed by the world, resource pack, settings and a format version. Later starts load them instead of recomputing; on the test world a start dropped from 105 s to 17 s. Changed inputs, a new format version or a corrupted file simply cause a rebuild. Isolated runs with a non-default cache folder keep their cache inside it.

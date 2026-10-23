@@ -1,5 +1,5 @@
 //! Boundary coverage for the requestable limit contract (PKG-070 through PKG-074).
-use ilium_plugin_api::limits::{LimitKey, Limits, ceiling, clamp, default_of};
+use ilium_plugin_api::limits::{ceiling, clamp, default_of, LimitKey, Limits};
 use ilium_plugin_api::tier::Tier;
 
 #[test]

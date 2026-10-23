@@ -709,12 +709,12 @@ fn storage_write_batch_257_entries_invalid_argument_and_nothing_written() {
 #[test]
 fn storage_write_batch_of_exactly_4_mib_of_key_and_value_bytes_accepted() {
     let mut fixture = storage_fixture();
-    // Three entries of 1 + MIB bytes and one of 1 + (MIB - 3) bytes: exactly 4 MiB.
+    // Three entries of 1 + MIB bytes and one of 1 + (MIB - 4) bytes: exactly 4 MiB.
     let entries = vec![
         put_entry("a", &bytes(MIB)),
         put_entry("b", &bytes(MIB)),
         put_entry("c", &bytes(MIB)),
-        put_entry("d", &bytes(MIB - 3)),
+        put_entry("d", &bytes(MIB - 4)),
     ];
     expect_ok(fixture.storage().write_batch(Bucket::Global, entries));
 }
@@ -727,7 +727,7 @@ fn storage_write_batch_one_byte_over_4_mib_invalid_argument_and_nothing_written(
         put_entry("a", &bytes(MIB)),
         put_entry("b", &bytes(MIB)),
         put_entry("c", &bytes(MIB)),
-        put_entry("d", &bytes(MIB - 2)),
+        put_entry("d", &bytes(MIB - 3)),
     ];
     let code = expect_code(fixture.storage().write_batch(Bucket::Global, entries));
     assert_eq!(code, ErrorCode::InvalidArgument);

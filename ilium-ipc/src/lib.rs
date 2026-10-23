@@ -40,11 +40,12 @@ pub use protocol::{
     MouseEventKind, MouseModifiers, NewPaneKind, NewPaneWorkingDirectory, PaneDetectionEvidence,
     PaneTitleObservation, ProgressMonitorAccepted, ProgressMonitorPreflight,
     ProgressMonitorRejection, ProgressMonitorRejectionCode, ProgressMonitorStatus, ProgressWaitEnd,
-    ProgressWaitOutcome, PromptSubmissionSource, RepoFacts, ServerEvent, WorkspaceClosePolicy,
-    WorkspaceCreateSpec, WorkspaceCreateStage, WorkspaceDisposition, WorkspaceGitStatus,
-    WorkspaceGitVersion, WorkspaceInventory, WorkspaceInventoryEntry, WorkspaceInventoryOwner,
-    WorkspacePruneBranchOutcome, WorkspacePruneBranchPolicy, WorkspacePruneMode,
-    WorkspacePruneOutcome, WorkspacePruneResult, WorkspacePruneTarget, WorkspaceWorktreeFact,
+    ProgressWaitOutcome, PromptSubmissionSource, RecapTrigger, RepoFacts, ServerEvent,
+    WorkspaceClosePolicy, WorkspaceCreateSpec, WorkspaceCreateStage, WorkspaceDisposition,
+    WorkspaceGitStatus, WorkspaceGitVersion, WorkspaceInventory, WorkspaceInventoryEntry,
+    WorkspaceInventoryOwner, WorkspacePruneBranchOutcome, WorkspacePruneBranchPolicy,
+    WorkspacePruneMode, WorkspacePruneOutcome, WorkspacePruneResult, WorkspacePruneTarget,
+    WorkspaceWorktreeFact,
 };
 pub use startup::{
     clear_startup_progress, publish_startup_progress, read_startup_progress, startup_progress_path,
@@ -521,6 +522,22 @@ mod tests {
                 monitor_id: 7,
             },
             ClientRequest::GetPaneRecapScreen { pane_id: NodeId(2) },
+            ClientRequest::ApplyRecap {
+                pane_id: NodeId(2),
+                session_id: "95fd0645".to_string(),
+                recap_generation: 7,
+                trigger: RecapTrigger::Manual,
+                short: "Fixing the login test.".to_string(),
+                long: Some("Long recap".to_string()),
+            },
+            ClientRequest::ApplyRecap {
+                pane_id: NodeId(2),
+                session_id: String::new(),
+                recap_generation: 8,
+                trigger: RecapTrigger::Batch,
+                short: "Short only".to_string(),
+                long: None,
+            },
             ClientRequest::TerminalHistory {
                 pane_id: NodeId(2),
                 before_sequence: 42,
@@ -833,6 +850,14 @@ mod tests {
             ServerEvent::PaneSessionTitleCleared {
                 pane_id: NodeId(2),
                 title_generation: 2,
+            },
+            ServerEvent::RecapUpdated {
+                pane_id: NodeId(2),
+                session_id: "95fd0645".to_string(),
+                recap_generation: 7,
+                trigger: RecapTrigger::Batch,
+                short: "Fixing the login test.".to_string(),
+                long: None,
             },
             ServerEvent::PaneEditorPathResolved {
                 pane_id: NodeId(2),

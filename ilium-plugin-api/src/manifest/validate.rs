@@ -80,8 +80,11 @@ pub fn validate(manifest: &Manifest, context: &ValidationContext) -> Vec<Diagnos
         Err(error) => return vec![finding("manifest.schema", "", error.to_string(), 3)],
     };
     let mut errors = schema_errors(&value);
-    if errors.is_empty() {
-        errors = semantics(manifest, context);
+    if !errors
+        .iter()
+        .any(|error| error.stage.is_none_or(|stage| stage.0 <= 3))
+    {
+        errors.extend(semantics(manifest, context));
     }
     errors.retain(|error| {
         context.mode != CheckMode::Check || error.stage.is_none_or(|stage| stage.0 <= 4)
@@ -104,9 +107,12 @@ pub fn validate_json(json: &str, context: &ValidationContext) -> Vec<Diagnostic>
             3,
         ));
     }
-    if errors.is_empty() {
+    if !errors
+        .iter()
+        .any(|error| error.stage.is_none_or(|stage| stage.0 <= 3))
+    {
         match serde_json::from_value::<Manifest>(value) {
-            Ok(manifest) => errors = semantics(&manifest, context),
+            Ok(manifest) => errors.extend(semantics(&manifest, context)),
             Err(error) => errors.push(finding("manifest.schema", "", error.to_string(), 3)),
         }
     }
@@ -131,6 +137,8 @@ fn first_stage(mut errors: Vec<Diagnostic>) -> Vec<Diagnostic> {
     if let Some(stage) = errors.iter().filter_map(|error| error.stage).min() {
         errors.retain(|error| error.stage == Some(stage));
     }
+    let mut seen = BTreeSet::new();
+    errors.retain(|error| seen.insert((error.pointer.clone(), error.code.as_str().to_owned())));
     errors.sort_by(|left, right| left.pointer.as_bytes().cmp(right.pointer.as_bytes()));
     if errors.len() > 100 {
         let stage = errors[0].stage.map_or(3, |stage| stage.0);
@@ -299,11 +307,13 @@ fn schema_errors(value: &Value) -> Vec<Diagnostic> {
         .pointer("/contributes/settings")
         .and_then(Value::as_array)
     {
+        let mut keys = BTreeSet::new();
         for (index, entry) in settings.iter().enumerate() {
             check_settings_rows(
                 entry,
                 &format!("/contributes/settings/{index}"),
                 false,
+                &mut keys,
                 &mut errors,
             );
         }
@@ -317,7 +327,6 @@ fn schema_code(path: &str) -> &'static str {
         "/version" => "manifest.version-invalid",
         "/name" | "/publisher" | "/description" => "manifest.display-name",
         "/data_version" => "manifest.data-version",
-        path if path.starts_with("/requires/") => "manifest.requires-invalid",
         _ => "manifest.schema",
     }
 }
@@ -355,12 +364,16 @@ fn check_schema(
     let wrong = |errors: &mut Vec<Diagnostic>, reason: &str| {
         errors.push(finding(
             if path == "/data_version" {
-                "manifest.data-version"
+                schema_code(path)
             } else {
                 "manifest.schema"
             },
             path,
-            format!("{path}: {reason}."),
+            if path == "/data_version" {
+                format!("data_version must be an integer from 1 to 4294967295. Found {value}.")
+            } else {
+                format!("{path}: {reason}.")
+            },
             3,
         ))
     };
@@ -388,6 +401,16 @@ fn check_schema(
             Err(_) => wrong(errors, "limits must be unsigned integer values"),
         }
         return;
+    }
+    if path.starts_with("/capabilities/") && path.split('/').count() == 4 {
+        if let Some(text) = value.as_str() {
+            if let Err(mut error) = crate::grants::Grant::parse(text) {
+                error.pointer = path.into();
+                error.stage = Some(Stage(4));
+                errors.push(error);
+            }
+            return;
+        }
     }
     if let Some(name) = schema.get("type").and_then(Value::as_str) {
         if !matches_type(name) {
@@ -428,7 +451,12 @@ fn check_schema(
                 .and_then(Value::as_u64)
                 .is_some_and(|max| length > max)
         {
-            wrong(errors, "string length is outside its bounds");
+            errors.push(finding(
+                "manifest.schema",
+                path,
+                format!("{path}: string length is outside its bounds."),
+                3,
+            ));
         }
         if let Some(pattern) = schema.get("pattern").and_then(Value::as_str) {
             if !pattern_matches(text, pattern) {
@@ -440,7 +468,11 @@ fn check_schema(
                 errors.push(finding(
                     code,
                     path,
-                    format!("{path}: {text:?} does not match the required grammar."),
+                    if code == "manifest.version-invalid" {
+                        format!("The version {text:?} is not a valid semantic version.")
+                    } else {
+                        format!("{path}: {text:?} does not match the required grammar.")
+                    },
                     3,
                 ));
             }
@@ -473,7 +505,7 @@ fn check_schema(
             let code = if path.starts_with("/contributes/") {
                 "manifest.contribution-limit"
             } else {
-                schema_code(path)
+                "manifest.schema"
             };
             errors.push(finding(
                 code,
@@ -524,7 +556,11 @@ fn check_schema(
             for key in required.iter().filter_map(Value::as_str) {
                 if !object.contains_key(key) {
                     errors.push(finding(
-                        "manifest.key-missing",
+                        if schema.get("properties").is_some() {
+                            "manifest.key-missing"
+                        } else {
+                            "manifest.schema"
+                        },
                         pointer(path, key),
                         format!("{path}: the required key {key:?} is missing."),
                         3,
@@ -543,7 +579,7 @@ fn check_schema(
                     {
                         if !object.contains_key(name) {
                             errors.push(finding(
-                                "manifest.key-missing",
+                                "manifest.schema",
                                 pointer(path, name),
                                 format!("{name} is required with {key}."),
                                 3,
@@ -580,9 +616,13 @@ fn check_schema(
 }
 
 fn valid_id(text: &str) -> bool {
+    text.len() <= 128 && id_pattern_matches(text)
+}
+
+// maxLength is an independent schema constraint, not part of the id regex.
+fn id_pattern_matches(text: &str) -> bool {
     let parts: Vec<_> = text.split('.').collect();
-    text.len() <= 128
-        && (2..=8).contains(&parts.len())
+    (2..=8).contains(&parts.len())
         && parts
             .iter()
             .all(|part| (1..=32).contains(&part.len()) && local_id(part))
@@ -619,15 +659,14 @@ fn api_version(text: &str) -> Option<semver::Version> {
 // not a general regular-expression evaluator. Unrecognized schema patterns fail closed.
 fn pattern_matches(text: &str, pattern: &str) -> bool {
     if pattern.starts_with("^(0|[1-9]") {
-        return text.len() <= 64
-            && semver::Version::parse(text).is_ok_and(|version| {
-                [version.major, version.minor, version.patch]
-                    .into_iter()
-                    .all(|part| part <= i32::MAX as u64)
-            });
+        return semver::Version::parse(text).is_ok_and(|version| {
+            [version.major, version.minor, version.patch]
+                .into_iter()
+                .all(|part| part <= i32::MAX as u64)
+        });
     }
     if pattern.contains("{1,7}") {
-        return valid_id(text);
+        return id_pattern_matches(text);
     }
     if pattern.starts_with("^[^\\u0000") {
         return if pattern.contains("\\u0009\\u000b") {
@@ -739,14 +778,14 @@ const MANIFEST_SCHEMA: &str = r###"{
       "maxLength": 128,
       "pattern": "^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?){1,7}$"
     },
-    "name": {"type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029\\u202a-\\u202e\\u2066-\\u2069]+$"},
+    "name": {"type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]+$"},
     "version": {
       "type": "string",
       "maxLength": 64,
       "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?(\\+[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?$"
     },
-    "publisher": {"type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029\\u202a-\\u202e\\u2066-\\u2069]+$"},
-    "description": {"type": "string", "maxLength": 500, "pattern": "^[^\\u0000-\\u0009\\u000b-\\u001f\\u007f-\\u009f\\u2028\\u2029\\u202a-\\u202e\\u2066-\\u2069]*$"},
+    "publisher": {"type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]+$"},
+    "description": {"type": "string", "maxLength": 500, "pattern": "^[^\\u0000-\\u0009\\u000b-\\u001f\\u007f-\\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]*$"},
     "license": {"type": "string", "minLength": 1, "maxLength": 128},
     "icon": {"type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"},
     "categories": {
@@ -1748,6 +1787,15 @@ fn semantics(manifest: &Manifest, context: &ValidationContext) -> Vec<Diagnostic
         }
         for (index, grant) in grants.iter().enumerate() {
             let path = format!("/capabilities/{side_name}/{index}");
+            // Side validity is stage 4, independent of the later tier admission.
+            if crate::grants::info(grant.family()).is_some_and(|info| !info.sides.contains(&side)) {
+                errors.push(finding(
+                    "manifest.grant-side",
+                    &path,
+                    "Grant is not available on this component side.",
+                    4,
+                ));
+            }
             let checked = crate::grants::Grant::parse(grant.as_str())
                 .and_then(|_| crate::grants::check_grant(grant, context.tier, side));
             if let Err(mut error) = checked {
@@ -1762,6 +1810,11 @@ fn semantics(manifest: &Manifest, context: &ValidationContext) -> Vec<Diagnostic
             let has = |text: &str| grants.iter().any(|grant| grant.as_str() == text);
             if grant.as_str() == "fs.pick" && !has("fs.read:picked") && !has("fs.write:picked")
                 || grant.as_str() == "settings.write-all" && !has("settings.read-all")
+                || grant.family() == "panes.create-command" && !has("panes.create")
+                || grant.family() == "process.long-lived"
+                    && !grants
+                        .iter()
+                        .any(|candidate| candidate.family() == "process.run")
             {
                 errors.push(finding(
                     "manifest.grant-dependency",
@@ -1975,6 +2028,28 @@ fn provided_surface(manifest: &Manifest) -> BTreeSet<String> {
 }
 
 fn contribution_checks(manifest: &Manifest, errors: &mut Vec<Diagnostic>) {
+    if let Some(publishes) = manifest
+        .contributes
+        .0
+        .get("topics")
+        .and_then(|topics| topics.get("publishes"))
+        .and_then(Value::as_array)
+    {
+        let prefix = format!("{}/", manifest.id);
+        for (index, topic) in publishes.iter().enumerate() {
+            if topic
+                .as_str()
+                .is_some_and(|topic| !topic.starts_with(&prefix))
+            {
+                errors.push(finding(
+                    "manifest.contribution-target",
+                    format!("/contributes/topics/publishes/{index}"),
+                    "Published topics must use the plugin's own id prefix.",
+                    4,
+                ));
+            }
+        }
+    }
     let owns = |key: &str, target: &str| {
         let local = target
             .strip_prefix(&format!("{}/", manifest.id))
@@ -2029,9 +2104,9 @@ fn contribution_checks(manifest: &Manifest, errors: &mut Vec<Diagnostic>) {
                 .filter(|_| kind == "keybindings")
             {
                 if !["global", "prefix"].contains(&mode)
-                    && !mode
+                    && mode
                         .strip_prefix("pane:")
-                        .is_some_and(|kind| !kind.is_empty())
+                        .is_none_or(|kind| kind.is_empty())
                 {
                     errors.push(finding(
                         "manifest.schema",
@@ -2178,13 +2253,62 @@ fn contribution_checks(manifest: &Manifest, errors: &mut Vec<Diagnostic>) {
         ("status_segments", "ui.chrome"),
         ("header_widgets", "ui.chrome"),
     ] {
-        if entries(manifest, kind).next().is_some()
-            && !all_grants.iter().any(|grant| *grant == family)
-        {
+        if entries(manifest, kind).next().is_some() && !all_grants.contains(&family) {
             errors.push(finding(
                 "manifest.grant-dependency",
                 format!("/contributes/{kind}"),
                 format!("{kind} requires {family}."),
+                4,
+            ));
+        }
+    }
+    for (index, entry) in entries(manifest, "cli").enumerate() {
+        if let Some(name) = entry.get("name").and_then(Value::as_str) {
+            if ["plugin", "session", "kill-session", "help", "version"].contains(&name) {
+                errors.push(finding(
+                    "manifest.cli-name-reserved",
+                    format!("/contributes/cli/{index}/name"),
+                    format!("The command line name {name:?} is a kernel subcommand."),
+                    4,
+                ));
+            }
+        }
+    }
+    for (index, point) in entries(manifest, "extension_points").enumerate() {
+        let path = format!("/contributes/extension_points/{index}");
+        let kind = point.get("kind").and_then(Value::as_str);
+        let mode = point.get("mode").and_then(Value::as_str);
+        let high = point.get("risk").and_then(Value::as_str) == Some("high");
+        let invalid = if kind == Some("collect") {
+            point.get("entry_schema").is_none()
+                || [
+                    "mode",
+                    "payload_schema",
+                    "reply_schema",
+                    "on_failure",
+                    "final_check",
+                    "deadline_ms",
+                    "max_handlers",
+                ]
+                .iter()
+                .any(|key| point.get(*key).is_some())
+        } else {
+            mode.is_none()
+                || point.get("payload_schema").is_none()
+                || (matches!(mode, Some("transform" | "first"))
+                    != point.get("reply_schema").is_some())
+                || point.get("entry_schema").is_some()
+                || point.get("max_entries").is_some()
+                || point.get("dynamic").is_some()
+                || (point.get("on_failure").is_some()
+                    && !(high && matches!(mode, Some("veto" | "transform"))))
+                || (point.get("final_check").is_some() && mode != Some("transform"))
+        };
+        if invalid {
+            errors.push(finding(
+                "manifest.extension-point-invalid",
+                path,
+                "The extension point fields do not match its kind, mode and risk.",
                 4,
             ));
         }
@@ -2367,7 +2491,7 @@ fn check_data_schema(value: &Value, path: &str, errors: &mut Vec<Diagnostic>) {
                 3,
             ));
         }
-        if key == "maxItems" && !value.as_u64().is_some_and(|max| max <= 64) {
+        if key == "maxItems" && value.as_u64().is_none_or(|max| max > 64) {
             errors.push(finding(
                 "manifest.schema",
                 &path,
@@ -2384,6 +2508,7 @@ fn check_settings_rows(
     value: &Value,
     path: &str,
     inside_group: bool,
+    keys: &mut BTreeSet<String>,
     errors: &mut Vec<Diagnostic>,
 ) {
     if let Some(rows) = value.get("rows").and_then(Value::as_array) {
@@ -2471,6 +2596,31 @@ fn check_settings_rows(
                 ));
             }
             if has_value {
+                if let Some(key) = row.get("key").and_then(Value::as_str) {
+                    let mut characters = key.bytes();
+                    let valid = key.len() <= 64
+                        && characters
+                            .next()
+                            .is_some_and(|byte| byte.is_ascii_lowercase())
+                        && characters.all(|byte| {
+                            byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_'
+                        });
+                    if !valid {
+                        errors.push(finding(
+                            "manifest.settings-key",
+                            format!("{path}/key"),
+                            "Invalid settings key.",
+                            3,
+                        ));
+                    } else if !keys.insert(key.into()) {
+                        errors.push(finding(
+                            "manifest.settings-key-clash",
+                            format!("{path}/key"),
+                            format!("The settings key {key:?} is used twice."),
+                            4,
+                        ));
+                    }
+                }
                 if row.get("key").and_then(Value::as_str).is_none() {
                     errors.push(finding(
                         "manifest.key-missing",
@@ -2532,7 +2682,7 @@ fn check_settings_rows(
                     3,
                 ));
             }
-            check_settings_rows(row, &path, kind == "group", errors);
+            check_settings_rows(row, &path, kind == "group", keys, errors);
         }
     }
     if let Some(sections) = value.get("sections").and_then(Value::as_array) {
@@ -2550,7 +2700,7 @@ fn check_settings_rows(
                     ));
                 }
             }
-            check_settings_rows(section, &path, false, errors);
+            check_settings_rows(section, &path, false, keys, errors);
         }
     }
 }

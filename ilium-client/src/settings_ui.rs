@@ -828,7 +828,7 @@ pub fn settings_help_anchors(
             }
         }
         SettingsTab::Attention => {
-            for (i, id) in simple_rows("ATT-", 6) {
+            for (i, id) in simple_rows("ATT-", 7) {
                 push_help_anchor(
                     &mut anchors,
                     layout,
@@ -5581,6 +5581,11 @@ fn attention_lines(
                 "Show briefing on arrival",
                 on_off(settings.show_briefing),
                 "Reaching an agent from the attention queue shows a box at its top saying why you were brought there.",
+            ),
+            (
+                "Large attention buttons",
+                on_off(settings.large_buttons),
+                "Use three centered rows for Next: needs you and a five-column overview button.",
             ),
         ],
         selected,

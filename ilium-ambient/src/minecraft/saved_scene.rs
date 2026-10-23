@@ -2061,10 +2061,7 @@ fn prepare_bundle(
         root,
         jar,
         warnings,
-        // History storage sits directly under the scene cache directory.
-        prepared_cache: storage
-            .parent()
-            .map(crate::prepared_cache::PreparedCache::for_scene_cache_dir),
+        prepared_cache: crate::prepared_cache::PreparedCache::for_user(),
         budget,
         _catalog_reservation: Arc::new(catalog_reservation),
     };

@@ -609,6 +609,9 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
     if app.handle_stats_popover_mouse(mouse, position) {
         return;
     }
+    if app.handle_recap_popover_mouse(mouse, position) {
+        return;
+    }
 
     if app.layout.tree_area.contains(position) {
         handle_tree_mouse(app, mouse, position);
@@ -1118,6 +1121,12 @@ fn handle_tree_mouse(app: &mut App, mouse: MouseEvent, position: Position) {
         app.leave_pane_focus();
     }
     update_tree_hover(app, position);
+    app.hovered_recap_refresh = match app.emitted_tree_action_at(position) {
+        Some((hit, TreeRowAction::Retitle)) if app.is_known_agent_pane(hit.id) => {
+            Some((hit.id, position))
+        }
+        _ => None,
+    };
 
     if let Some(popover) = &app.agent_popover {
         if popover.is_visible(Instant::now()) {
@@ -1400,7 +1409,10 @@ fn handle_tree_row_action(app: &mut App, id: ilium_core::NodeId, action: TreeRow
             app.request_move(id, ilium_core::TreeMoveDirection::Down);
         }
         TreeRowAction::Close => app.action_close_selected(),
-        TreeRowAction::Retitle => app.action_request_retitle(id),
+        TreeRowAction::Retitle => {
+            app.action_request_retitle(id);
+            app.action_request_recap(id);
+        }
         TreeRowAction::ProjectRestructure => app.action_request_project_restructure(id),
         TreeRowAction::AskForUpdate => app.action_ask_for_update(id),
     }
