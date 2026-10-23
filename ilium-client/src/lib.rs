@@ -4638,8 +4638,28 @@ fn advance_pending_key_paste(
         return false;
     };
 
+    // Pasted text is data, not commands. A replayed key may open a dialog or
+    // enter the leader state (Enter/Tab can be the leader on some bases); the
+    // remaining characters would then drive shortcut handlers such as Quit or
+    // Detach. Stop the replay the moment the mode changes.
+    let starting_mode = std::mem::discriminant(&app.mode);
+    let mut mode_changed = false;
     for key in replay.next_keys(MAX_PASTE_KEYS_PER_TURN) {
+        if std::mem::discriminant(&app.mode) != starting_mode {
+            mode_changed = true;
+            break;
+        }
         app.handle_event(Event::Key(key));
+    }
+    if !mode_changed && std::mem::discriminant(&app.mode) != starting_mode {
+        mode_changed = true;
+    }
+    if mode_changed {
+        app.status_message =
+            Some("Paste stopped: it changed the interface mode, remaining text discarded".into());
+        replay.retire_original();
+        dispatch_pending_app_work(app, naming_workers, icon_search_workers, home_dir);
+        return true;
     }
     if replay.path_rejected() {
         app.status_message = Some("The instruction-file path must be one line".into());
@@ -5557,6 +5577,34 @@ mod responsiveness_tests {
                 ..
             }))
         ));
+    }
+
+    #[test]
+    fn key_paste_stops_when_a_pasted_key_changes_the_mode() {
+        let project_directory = tempfile::tempdir().unwrap();
+        let mut app = App::new(
+            "paste-mode-change-test".to_owned(),
+            project_directory.path().to_path_buf(),
+        );
+        // With Ctrl+M as leader, a pasted Enter enters the leader state and a
+        // following `q` would otherwise kill the whole session.
+        app.keyboard_settings.shortcut_base = crate::keymap::ShortcutBase::parse("m").unwrap();
+        let (original, _quota) = terminal_input_owner::paste_fixture("\nqqq".to_owned());
+        let client = crate::execution::test_client();
+        let mut replay = crate::paste_cursor::PasteReplay::new(original);
+        replay.reserve_retirement(&client.retirement()).unwrap();
+        app.pending_key_paste = Some(replay);
+        let (naming_tx, _naming_rx) = mpsc::channel(8);
+        let mut naming =
+            NamingWorkers::new(naming_tx, &ilium_inference::InferenceSettings::default()).unwrap();
+        let mut icons = IconSearchWorkers::new();
+
+        while app.pending_key_paste.is_some() {
+            advance_pending_key_paste(&mut app, &mut naming, &mut icons, None);
+        }
+
+        assert!(app.exit_reason.is_none());
+        assert!(app.pending_key_paste.is_none());
     }
 
     #[test]
