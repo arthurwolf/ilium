@@ -2,14 +2,29 @@
 //! that drives `migrator.migrate`, the data-version stamps, backups and rollback (test plan lane
 //! data-migration, LIF-100..121, WIT migrator.migrate). Test support only.
 
+use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
+use std::fs;
 use std::path::PathBuf;
+use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::Arc;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use ilium_plugin_api::PluginError;
+use ilium_plugin_api::ids::parse_plugin_id;
+use ilium_plugin_api::{PluginError, Tier};
 
-use crate::cli::CliOutput;
+use crate::cli::{self, CliEnv, CliOutput};
+use crate::registry_client::{FetchError, Fetcher};
+use crate::storage::{PluginStorage, StorageContext, BUCKET_MAX_BYTES};
 
 pub use ilium_plugin_api::generated::host::Bucket;
+
+/// Shared-cache size the rig opens storage with (the host default for T3 plugins).
+const SHARED_BUCKET_BYTES: usize = 64 * 1024 * 1024;
+
+/// Distinguishes the scratch roots of rigs created by one process.
+static RIG_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 /// One scripted step of a plugin's `migrate` export (LIF-105, 108, 110, 116).
 #[derive(Debug, Clone)]
@@ -87,75 +102,121 @@ pub struct ActivateReport {
 /// A plugin spec with a data version and a scripted migrator (LIF-100, 103, 105).
 #[derive(Debug, Clone)]
 pub struct PluginSpec {
-    _private: (),
+    id: String,
+    version: String,
+    data_version: DataVersionField,
+    migrator: Option<Vec<Step>>,
+    migrate_deadline_ms: Option<u64>,
+    restore_bytes: Option<Vec<u8>>,
+}
+
+/// How the manifest states `data_version`: left out, a number, or raw JSON (LIF-100).
+#[derive(Debug, Clone)]
+enum DataVersionField {
+    Absent,
+    Number(u32),
+    Json(String),
 }
 
 impl PluginSpec {
     /// A plugin with the given id and version.
-    pub fn new(_id: &str, _version: &str) -> PluginSpec {
-        unimplemented!("host::testing::migration::PluginSpec::new")
+    pub fn new(id: &str, version: &str) -> PluginSpec {
+        PluginSpec {
+            id: id.to_owned(),
+            version: version.to_owned(),
+            data_version: DataVersionField::Absent,
+            migrator: None,
+            migrate_deadline_ms: None,
+            restore_bytes: None,
+        }
     }
 
     /// The manifest `data_version`.
-    pub fn data_version(self, _version: u32) -> PluginSpec {
-        unimplemented!("host::testing::migration::PluginSpec::data_version")
+    pub fn data_version(mut self, version: u32) -> PluginSpec {
+        self.data_version = DataVersionField::Number(version);
+        self
     }
 
     /// The manifest `data_version` as raw JSON.
-    pub fn data_version_json(self, _json: &str) -> PluginSpec {
-        unimplemented!("host::testing::migration::PluginSpec::data_version_json")
+    pub fn data_version_json(mut self, json: &str) -> PluginSpec {
+        self.data_version = DataVersionField::Json(json.to_owned());
+        self
     }
 
     /// The scripted `migrate` export.
-    pub fn migrator(self, _steps: Vec<Step>) -> PluginSpec {
-        unimplemented!("host::testing::migration::PluginSpec::migrator")
+    pub fn migrator(mut self, steps: Vec<Step>) -> PluginSpec {
+        self.migrator = Some(steps);
+        self
     }
 
     /// The manifest migrate deadline.
-    pub fn migrate_deadline_ms(self, _ms: u64) -> PluginSpec {
-        unimplemented!("host::testing::migration::PluginSpec::migrate_deadline_ms")
+    pub fn migrate_deadline_ms(mut self, ms: u64) -> PluginSpec {
+        self.migrate_deadline_ms = Some(ms);
+        self
     }
 
     /// The restore blob `deactivate` returns.
-    pub fn restore_bytes(self, _bytes: Vec<u8>) -> PluginSpec {
-        unimplemented!("host::testing::migration::PluginSpec::restore_bytes")
+    pub fn restore_bytes(mut self, bytes: Vec<u8>) -> PluginSpec {
+        self.restore_bytes = Some(bytes);
+        self
     }
 }
 
 /// The storage of one plugin as the plugin sees it (LIF-115, 117, 119, 120).
 #[derive(Debug)]
 pub struct StorageHandle {
-    _private: (),
+    storage: Rc<RefCell<PluginStorage>>,
+}
+
+/// The wire name of a bucket, as the storage layer keys it.
+fn bucket_name(bucket: Bucket) -> &'static str {
+    match bucket {
+        Bucket::Global => "global",
+        Bucket::Project => "project",
+        Bucket::Session => "session",
+        Bucket::Shared => "shared",
+    }
 }
 
 impl StorageHandle {
     /// `storage.put`.
-    pub fn put(&self, _bucket: Bucket, _key: &str, _value: &[u8]) -> Result<(), PluginError> {
-        unimplemented!("host::testing::migration::StorageHandle::put")
+    pub fn put(&self, bucket: Bucket, key: &str, value: &[u8]) -> Result<(), PluginError> {
+        self.storage
+            .borrow_mut()
+            .put(bucket_name(bucket), key, value.to_vec())
     }
 
     /// `storage.get`.
-    pub fn get(&self, _bucket: Bucket, _key: &str) -> Option<Vec<u8>> {
-        unimplemented!("host::testing::migration::StorageHandle::get")
+    pub fn get(&self, bucket: Bucket, key: &str) -> Option<Vec<u8>> {
+        self.storage
+            .borrow()
+            .get(bucket_name(bucket), key)
+            .ok()
+            .flatten()
     }
 
     /// `storage.remove`.
-    pub fn remove(&self, _bucket: Bucket, _key: &str) -> Result<(), PluginError> {
-        unimplemented!("host::testing::migration::StorageHandle::remove")
+    pub fn remove(&self, bucket: Bucket, key: &str) -> Result<(), PluginError> {
+        self.storage.borrow_mut().remove(bucket_name(bucket), key)
     }
 
     /// `storage.keys` with a prefix.
-    pub fn keys(&self, _bucket: Bucket, _prefix: &str) -> Vec<String> {
-        unimplemented!("host::testing::migration::StorageHandle::keys")
+    pub fn keys(&self, bucket: Bucket, prefix: &str) -> Vec<String> {
+        self.storage
+            .borrow()
+            .keys(bucket_name(bucket), prefix)
+            .unwrap_or_default()
     }
 
     /// `storage.write-batch`; `None` removes a key.
     pub fn write_batch(
         &self,
-        _bucket: Bucket,
-        _entries: &[(String, Option<Vec<u8>>)],
+        bucket: Bucket,
+        entries: &[(String, Option<Vec<u8>>)],
     ) -> Result<(), PluginError> {
-        unimplemented!("host::testing::migration::StorageHandle::write_batch")
+        self.storage
+            .borrow_mut()
+            .write_batch(bucket_name(bucket), entries)
     }
 
     /// Whether the storage offers compare-and-set.
@@ -164,21 +225,38 @@ impl StorageHandle {
     }
 
     /// Every key of a bucket with its value.
-    pub fn dump(&self, _bucket: Bucket) -> BTreeMap<String, Vec<u8>> {
-        unimplemented!("host::testing::migration::StorageHandle::dump")
+    pub fn dump(&self, bucket: Bucket) -> BTreeMap<String, Vec<u8>> {
+        let storage = self.storage.borrow();
+        let name = bucket_name(bucket);
+        let entries: BTreeMap<String, Vec<u8>> = storage
+            .keys(name, "")
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|key| {
+                let value = storage.get(name, &key).ok().flatten()?;
+                Some((key, value))
+            })
+            .collect();
+        entries
     }
 }
 
 /// One in-process server of the migration rig (LIF-101..121).
 #[derive(Debug)]
 pub struct MigServer {
-    _private: (),
+    storage_root: PathBuf,
+    project: String,
+    session: String,
+    running: AtomicBool,
+    /// The data version this server's storage checks against. Stays at 1 until `activate`
+    /// records the running version.
+    data_version: AtomicU32,
 }
 
 impl MigServer {
     /// Whether the server still runs (COR-090: it boots with defaults after a parse error).
     pub fn is_running(&self) -> bool {
-        unimplemented!("host::testing::migration::MigServer::is_running")
+        self.running.load(Ordering::SeqCst)
     }
 
     /// Writes one setting through the host's settings write path (COR-090).
@@ -197,8 +275,28 @@ impl MigServer {
     }
 
     /// The storage of a plugin.
-    pub fn storage(&self, _id: &str) -> StorageHandle {
-        unimplemented!("host::testing::migration::MigServer::storage")
+    pub fn storage(&self, id: &str) -> StorageHandle {
+        let plugin = match parse_plugin_id(id) {
+            Ok(plugin) => plugin,
+            Err(_) => panic!("test plugin id is not valid: {id}"),
+        };
+        let context = StorageContext {
+            project: Some(PathBuf::from(self.project.as_str())),
+            session: Some(self.session.clone()),
+            data_version: self.data_version.load(Ordering::SeqCst),
+        };
+        let storage = PluginStorage::open_with_context(
+            &self.storage_root,
+            plugin,
+            context,
+            Tier::T3,
+            BUCKET_MAX_BYTES,
+            SHARED_BUCKET_BYTES,
+        )
+        .expect("storage opens for a test plugin");
+        StorageHandle {
+            storage: Rc::new(RefCell::new(storage)),
+        }
     }
 
     /// The data-version stamp of a bucket.
@@ -213,30 +311,129 @@ impl MigServer {
 
     /// Kills the server.
     pub fn kill(&self) {
-        unimplemented!("host::testing::migration::MigServer::kill")
+        self.running.store(false, Ordering::SeqCst);
     }
 }
 
 /// The migration rig (LIF-100..121).
 #[derive(Debug)]
 pub struct MigrationRig {
-    _private: (),
+    root: PathBuf,
+    clock: Cell<SystemTime>,
+}
+
+/// Fetches nothing: the migration rig never reaches a registry (the CLI must work offline).
+struct OfflineFetcher;
+
+impl Fetcher for OfflineFetcher {
+    fn get(&self, _url: &str) -> Result<Vec<u8>, FetchError> {
+        Err(FetchError::Unreachable)
+    }
+}
+
+/// Parses `YYYY-MM-DDTHH:MM:SSZ` into whole seconds since the Unix epoch.
+fn utc_seconds(text: &str) -> Option<u64> {
+    let bytes = text.as_bytes();
+    let separators_match = bytes.len() == 20
+        && bytes[4] == b'-'
+        && bytes[7] == b'-'
+        && bytes[10] == b'T'
+        && bytes[13] == b':'
+        && bytes[16] == b':'
+        && bytes[19] == b'Z';
+    if !separators_match {
+        return None;
+    }
+    let year: i64 = text.get(0..4)?.parse().ok()?;
+    let month: i64 = text.get(5..7)?.parse().ok()?;
+    let day: i64 = text.get(8..10)?.parse().ok()?;
+    let hour: u64 = text.get(11..13)?.parse().ok()?;
+    let minute: u64 = text.get(14..16)?.parse().ok()?;
+    let second: u64 = text.get(17..19)?.parse().ok()?;
+    let days = days_from_civil(year, month, day);
+    let day_seconds = u64::try_from(days).ok()?.checked_mul(86_400)?;
+    day_seconds.checked_add(hour * 3_600 + minute * 60 + second)
+}
+
+/// Days since 1970-01-01 of a proleptic Gregorian date (Hinnant's civil-from-days inverse).
+fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
+    let year = if month <= 2 { year - 1 } else { year };
+    let era = year.div_euclid(400);
+    let year_of_era = year - era * 400;
+    let shifted_month = if month > 2 { month - 3 } else { month + 9 };
+    let day_of_year = (153 * shifted_month + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    era * 146_097 + day_of_era - 719_468
 }
 
 impl MigrationRig {
     /// A fresh rig.
     pub fn new() -> MigrationRig {
-        unimplemented!("host::testing::migration::MigrationRig::new")
+        let sequence = RIG_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let root = std::env::temp_dir().join(format!(
+            "ilium-migration-{}-{sequence}",
+            std::process::id()
+        ));
+        for directory in [
+            root.join("storage"),
+            root.join("config"),
+            root.join("state"),
+            root.join("data"),
+        ] {
+            if let Err(failure) = fs::create_dir_all(&directory) {
+                panic!("creating {}: {failure}", directory.display());
+            }
+        }
+        let rig = MigrationRig {
+            root,
+            clock: Cell::new(UNIX_EPOCH),
+        };
+        rig.set_clock_utc("2026-10-23T00:00:00Z");
+        rig
+    }
+
+    fn storage_root(&self) -> PathBuf {
+        self.root.join("storage")
+    }
+
+    fn config_path(&self) -> PathBuf {
+        self.root.join("config").join("config.toml")
+    }
+
+    /// The environment every CLI command of the rig runs in.
+    fn cli_env(&self) -> CliEnv {
+        CliEnv::new(
+            self.root.join("data"),
+            self.root.join("state"),
+            self.root.join("config"),
+            self.root.clone(),
+            self.clock.get(),
+            true,
+            Arc::new(OfflineFetcher),
+        )
     }
 
     /// Starts a server for a project session.
-    pub fn server(&self, _name: &str, _project: &str, _session: &str) -> MigServer {
-        unimplemented!("host::testing::migration::MigrationRig::server")
+    pub fn server(&self, _name: &str, project: &str, session: &str) -> MigServer {
+        MigServer {
+            storage_root: self.storage_root(),
+            project: project.to_owned(),
+            session: session.to_owned(),
+            running: AtomicBool::new(true),
+            data_version: AtomicU32::new(1),
+        }
     }
 
     /// Restarts a server.
-    pub fn restart_server(&self, _server: &MigServer) -> MigServer {
-        unimplemented!("host::testing::migration::MigrationRig::restart_server")
+    pub fn restart_server(&self, server: &MigServer) -> MigServer {
+        server.kill();
+        MigServer {
+            storage_root: server.storage_root.clone(),
+            project: server.project.clone(),
+            session: server.session.clone(),
+            running: AtomicBool::new(true),
+            data_version: AtomicU32::new(server.data_version.load(Ordering::SeqCst)),
+        }
     }
 
     /// Installs a plugin.
@@ -255,8 +452,9 @@ impl MigrationRig {
     }
 
     /// Runs a CLI command.
-    pub fn cli(&self, _args: &[&str]) -> CliOutput {
-        unimplemented!("host::testing::migration::MigrationRig::cli")
+    pub fn cli(&self, args: &[&str]) -> CliOutput {
+        let owned: Vec<String> = args.iter().map(|arg| (*arg).to_owned()).collect();
+        cli::run(&owned, &self.cli_env())
     }
 
     /// Installs a package file with flags.
@@ -351,22 +549,27 @@ impl MigrationRig {
 
     /// The current bytes of the config file as text (COR-090).
     pub fn config_text(&self) -> String {
-        unimplemented!("host::testing::migration::MigrationRig::config_text")
+        fs::read_to_string(self.config_path()).unwrap_or_default()
     }
 
     /// Writes the config file.
-    pub fn config(&self, _toml: &str) {
-        unimplemented!("host::testing::migration::MigrationRig::config")
+    pub fn config(&self, toml: &str) {
+        if let Err(failure) = fs::write(self.config_path(), toml) {
+            panic!("writing the test config file: {failure}");
+        }
     }
 
     /// Sets the wall clock.
-    pub fn set_clock_utc(&self, _rfc3339: &str) {
-        unimplemented!("host::testing::migration::MigrationRig::set_clock_utc")
+    pub fn set_clock_utc(&self, rfc3339: &str) {
+        let Some(seconds) = utc_seconds(rfc3339) else {
+            panic!("clock must be YYYY-MM-DDTHH:MM:SSZ, got {rfc3339}");
+        };
+        self.clock.set(UNIX_EPOCH + Duration::from_secs(seconds));
     }
 
     /// Moves the clock.
-    pub fn advance_clock(&self, _ms: u64) {
-        unimplemented!("host::testing::migration::MigrationRig::advance_clock")
+    pub fn advance_clock(&self, ms: u64) {
+        self.clock.set(self.clock.get() + Duration::from_millis(ms));
     }
 
     /// Sets the free disk space.
@@ -413,6 +616,13 @@ impl MigrationRig {
 impl Default for MigrationRig {
     fn default() -> MigrationRig {
         MigrationRig::new()
+    }
+}
+
+impl Drop for MigrationRig {
+    fn drop(&mut self) {
+        // Scratch root of this rig only; servers hold copies of paths, never the rig.
+        let _ = fs::remove_dir_all(&self.root);
     }
 }
 

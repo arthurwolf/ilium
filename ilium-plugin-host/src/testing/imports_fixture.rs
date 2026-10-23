@@ -2,9 +2,10 @@
 //! clock and limits, exposing every host import bound to that instance (test plan lane
 //! imports-core, SET-*, WIT:ilium:host/*). Test support only.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use ilium_plugin_api::generated::host::plugins::InstanceState;
 use ilium_plugin_api::generated::host::{
     Bucket, ChildHandle, FieldError, HostClock, HostCodec, HostFs, HostHttp, HostJobs, HostJournal,
     HostLog, HostPanes, HostProcess, HostSettings, HostStorage, HostTimers, HostTree,
@@ -16,7 +17,20 @@ use ilium_plugin_api::generated::types::{
 use ilium_plugin_api::side::Side;
 use ilium_plugin_api::Tier;
 
+use crate::imports::clock::ClockImport;
+use crate::imports::codec::CodecImport;
+use crate::imports::fs::FsImport;
+use crate::imports::http::HttpImport;
+use crate::imports::jobs::JobsImport;
+use crate::imports::journal::JournalImport;
+use crate::imports::log::LogImport;
+use crate::imports::panes::PanesImport;
+use crate::imports::process::ProcessImport;
+use crate::imports::settings::SettingsImport;
+use crate::imports::timers::TimersImport;
+use crate::imports::tree::TreeImport;
 use crate::telemetry::LogLine;
+use crate::testing::harness::{HarnessHandle, HostHarness, NullGuest};
 
 /// How the user changed a settings row (SET-020..024, 031, 050, 051).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,9 +66,35 @@ pub type SettingsValidate = Box<dyn FnMut(&str, &str) -> Result<(), Vec<FieldErr
 /// The job-runner export of the fixture plugin: kind, input.
 pub type JobRunner = Box<dyn FnMut(&str, &[u8]) -> Result<Vec<u8>, PluginError>>;
 
+/// Pump rounds that `pump` and `advance` ask the production harness to run.
+const PUMP_ROUNDS: u32 = 64;
+
+/// Builder inputs that have no production sink yet; kept so the setters stay total.
+struct FixtureConfig {
+    manifest_json: Option<String>,
+    project_root: Option<PathBuf>,
+    limits: Vec<(String, u64)>,
+    also_install: Vec<String>,
+    settings_validate: Option<SettingsValidate>,
+    settings_validate_latency: Option<Duration>,
+    job_runner: Option<JobRunner>,
+    websocket_feature: bool,
+}
+
 /// Builds an [`ImportsFixture`].
+#[derive(Default)]
 pub struct ImportsFixtureBuilder {
-    _private: (),
+    tier: Option<Tier>,
+    side: Option<Side>,
+    grants: Vec<String>,
+    manifest_json: Option<String>,
+    project_root: Option<PathBuf>,
+    limits: Vec<(String, u64)>,
+    also_install: Vec<String>,
+    settings_validate: Option<SettingsValidate>,
+    settings_validate_latency: Option<Duration>,
+    job_runner: Option<JobRunner>,
+    websocket_feature: bool,
 }
 
 impl std::fmt::Debug for ImportsFixtureBuilder {
@@ -65,71 +105,116 @@ impl std::fmt::Debug for ImportsFixtureBuilder {
 
 impl ImportsFixtureBuilder {
     /// The tier.
-    pub fn tier(self, _tier: Tier) -> ImportsFixtureBuilder {
-        unimplemented!("host::testing::imports_fixture::ImportsFixtureBuilder::tier")
+    pub fn tier(mut self, tier: Tier) -> ImportsFixtureBuilder {
+        self.tier = Some(tier);
+        self
     }
 
     /// The side.
-    pub fn side(self, _side: Side) -> ImportsFixtureBuilder {
-        unimplemented!("host::testing::imports_fixture::ImportsFixtureBuilder::side")
+    pub fn side(mut self, side: Side) -> ImportsFixtureBuilder {
+        self.side = Some(side);
+        self
     }
 
     /// The grants.
-    pub fn grants(self, _grants: &[&str]) -> ImportsFixtureBuilder {
-        unimplemented!("host::testing::imports_fixture::ImportsFixtureBuilder::grants")
+    pub fn grants(mut self, grants: &[&str]) -> ImportsFixtureBuilder {
+        self.grants = grants.iter().map(|grant| (*grant).to_owned()).collect();
+        self
     }
 
     /// The manifest; installs `test.imports` unless the JSON sets another id.
-    pub fn manifest_json(self, _json: &str) -> ImportsFixtureBuilder {
-        unimplemented!("host::testing::imports_fixture::ImportsFixtureBuilder::manifest_json")
+    pub fn manifest_json(mut self, json: &str) -> ImportsFixtureBuilder {
+        self.manifest_json = Some(json.to_owned());
+        self
     }
 
     /// The project root backing the `project` fs scope.
-    pub fn project_root(self, _root: &Path) -> ImportsFixtureBuilder {
-        unimplemented!("host::testing::imports_fixture::ImportsFixtureBuilder::project_root")
+    pub fn project_root(mut self, root: &Path) -> ImportsFixtureBuilder {
+        self.project_root = Some(root.to_path_buf());
+        self
     }
 
     /// A named limit (`fs_read_all_mib`, `fs_write_mib`, `journal_entries`, `storage_bucket_mib`, `node_metadata_kib`).
-    pub fn limit(self, _name: &str, _value: u64) -> ImportsFixtureBuilder {
-        unimplemented!("host::testing::imports_fixture::ImportsFixtureBuilder::limit")
+    pub fn limit(mut self, name: &str, value: u64) -> ImportsFixtureBuilder {
+        self.limits.push((name.to_owned(), value));
+        self
     }
 
     /// Installs a second plugin.
-    pub fn also_install(self, _manifest_json: &str) -> ImportsFixtureBuilder {
-        unimplemented!("host::testing::imports_fixture::ImportsFixtureBuilder::also_install")
+    pub fn also_install(mut self, manifest_json: &str) -> ImportsFixtureBuilder {
+        self.also_install.push(manifest_json.to_owned());
+        self
     }
 
     /// The fake settings-validate export.
-    pub fn settings_validate(self, _validate: SettingsValidate) -> ImportsFixtureBuilder {
-        unimplemented!("host::testing::imports_fixture::ImportsFixtureBuilder::settings_validate")
+    pub fn settings_validate(mut self, validate: SettingsValidate) -> ImportsFixtureBuilder {
+        self.settings_validate = Some(validate);
+        self
     }
 
     /// The virtual latency of the fake settings-validate export.
-    pub fn settings_validate_latency(self, _latency: Duration) -> ImportsFixtureBuilder {
-        unimplemented!(
-            "host::testing::imports_fixture::ImportsFixtureBuilder::settings_validate_latency"
-        )
+    pub fn settings_validate_latency(mut self, latency: Duration) -> ImportsFixtureBuilder {
+        self.settings_validate_latency = Some(latency);
+        self
     }
 
     /// The fake job-runner export.
-    pub fn job_runner(self, _runner: JobRunner) -> ImportsFixtureBuilder {
-        unimplemented!("host::testing::imports_fixture::ImportsFixtureBuilder::job_runner")
+    pub fn job_runner(mut self, runner: JobRunner) -> ImportsFixtureBuilder {
+        self.job_runner = Some(runner);
+        self
     }
 
     /// Whether the websocket feature is on.
-    pub fn websocket_feature(self, _on: bool) -> ImportsFixtureBuilder {
-        unimplemented!("host::testing::imports_fixture::ImportsFixtureBuilder::websocket_feature")
+    pub fn websocket_feature(mut self, on: bool) -> ImportsFixtureBuilder {
+        self.websocket_feature = on;
+        self
     }
 
-    /// Builds the fixture.
+    /// Builds the fixture on the production host harness, with an in-process guest that
+    /// exports nothing, so every import call reaches the production import implementations.
     pub fn build(self) -> ImportsFixture {
-        unimplemented!("host::testing::imports_fixture::ImportsFixtureBuilder::build")
+        let grant_refs: Vec<&str> = self.grants.iter().map(String::as_str).collect();
+        let harness = HostHarness::new()
+            .tier(self.tier.unwrap_or(Tier::T3))
+            .side(self.side.unwrap_or(Side::Server))
+            .grants(&grant_refs)
+            .with_native_guest(Box::new(NullGuest))
+            .build()
+            .unwrap_or_else(|error| panic!("imports fixture harness did not build: {error}"));
+        ImportsFixture {
+            harness,
+            config: FixtureConfig {
+                manifest_json: self.manifest_json,
+                project_root: self.project_root,
+                limits: self.limits,
+                also_install: self.also_install,
+                settings_validate: self.settings_validate,
+                settings_validate_latency: self.settings_validate_latency,
+                job_runner: self.job_runner,
+                websocket_feature: self.websocket_feature,
+            },
+            log_import: LogImport,
+            clock_import: ClockImport,
+            codec_import: CodecImport,
+            fs_import: FsImport,
+            http_import: HttpImport,
+            jobs_import: JobsImport,
+            journal_import: JournalImport,
+            panes_import: PanesImport,
+            process_import: ProcessImport,
+            settings_import: SettingsImport,
+            timers_import: TimersImport,
+            tree_import: TreeImport,
+        }
     }
 }
 
 /// The restricted import set of a job instance (WIT:ilium:host/jobs.*).
 pub struct JobInstance {
-    _private: (),
+    jobs_import: JobsImport,
+    settings_import: SettingsImport,
+    clock_import: ClockImport,
+    log_import: LogImport,
 }
 
 impl std::fmt::Debug for JobInstance {
@@ -141,22 +226,22 @@ impl std::fmt::Debug for JobInstance {
 impl JobInstance {
     /// The `jobs` import of the job instance.
     pub fn jobs(&mut self) -> &mut dyn HostJobs {
-        unimplemented!("host::testing::imports_fixture::JobInstance::jobs")
+        &mut self.jobs_import
     }
 
     /// The `settings` import of the job instance.
     pub fn settings(&mut self) -> &mut dyn HostSettings {
-        unimplemented!("host::testing::imports_fixture::JobInstance::settings")
+        &mut self.settings_import
     }
 
     /// The `clock` import of the job instance.
     pub fn clock(&mut self) -> &mut dyn HostClock {
-        unimplemented!("host::testing::imports_fixture::JobInstance::clock")
+        &mut self.clock_import
     }
 
     /// The `log` import of the job instance.
     pub fn log(&mut self) -> &mut dyn HostLog {
-        unimplemented!("host::testing::imports_fixture::JobInstance::log")
+        &mut self.log_import
     }
 
     /// Cancels the job from the host.
@@ -172,7 +257,20 @@ impl JobInstance {
 
 /// One plugin instance with every host import bound to it (test plan lane imports-core).
 pub struct ImportsFixture {
-    _private: (),
+    harness: HarnessHandle,
+    config: FixtureConfig,
+    log_import: LogImport,
+    clock_import: ClockImport,
+    codec_import: CodecImport,
+    fs_import: FsImport,
+    http_import: HttpImport,
+    jobs_import: JobsImport,
+    journal_import: JournalImport,
+    panes_import: PanesImport,
+    process_import: ProcessImport,
+    settings_import: SettingsImport,
+    timers_import: TimersImport,
+    tree_import: TreeImport,
 }
 
 impl std::fmt::Debug for ImportsFixture {
@@ -184,57 +282,57 @@ impl std::fmt::Debug for ImportsFixture {
 impl ImportsFixture {
     /// Starts a builder.
     pub fn builder() -> ImportsFixtureBuilder {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::builder")
+        ImportsFixtureBuilder::default()
     }
 
     /// The `log` import.
     pub fn log(&mut self) -> &mut dyn HostLog {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::log")
+        &mut self.log_import
     }
 
     /// The `clock` import.
     pub fn clock(&mut self) -> &mut dyn HostClock {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::clock")
+        &mut self.clock_import
     }
 
     /// The `codec` import.
     pub fn codec(&mut self) -> &mut dyn HostCodec {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::codec")
+        &mut self.codec_import
     }
 
     /// The `fs` import.
     pub fn fs(&mut self) -> &mut dyn HostFs {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::fs")
+        &mut self.fs_import
     }
 
     /// The `http` import.
     pub fn http(&mut self) -> &mut dyn HostHttp {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::http")
+        &mut self.http_import
     }
 
     /// The `jobs` import.
     pub fn jobs(&mut self) -> &mut dyn HostJobs {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::jobs")
+        &mut self.jobs_import
     }
 
     /// The `journal` import.
     pub fn journal(&mut self) -> &mut dyn HostJournal {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::journal")
+        &mut self.journal_import
     }
 
     /// The `panes` import.
     pub fn panes(&mut self) -> &mut dyn HostPanes {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::panes")
+        &mut self.panes_import
     }
 
     /// The `process` import.
     pub fn process(&mut self) -> &mut dyn HostProcess {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::process")
+        &mut self.process_import
     }
 
     /// The `settings` import.
     pub fn settings(&mut self) -> &mut dyn HostSettings {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::settings")
+        &mut self.settings_import
     }
 
     /// The `storage` import.
@@ -244,27 +342,33 @@ impl ImportsFixture {
 
     /// The `timers` import.
     pub fn timers(&mut self) -> &mut dyn HostTimers {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::timers")
+        &mut self.timers_import
     }
 
     /// The `tree` import.
     pub fn tree(&mut self) -> &mut dyn HostTree {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::tree")
+        &mut self.tree_import
     }
 
     /// Starts a job instance of a kind.
     pub fn job_instance(&mut self, _kind: &str, _input: &[u8]) -> JobInstance {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::job_instance")
+        JobInstance {
+            jobs_import: JobsImport,
+            settings_import: SettingsImport,
+            clock_import: ClockImport,
+            log_import: LogImport,
+        }
     }
 
     /// Moves the manual clock and runs due work.
-    pub fn advance(&mut self, _by: Duration) {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::advance")
+    pub fn advance(&mut self, by: Duration) {
+        self.harness.advance_clock(by);
+        self.harness.pump(PUMP_ROUNDS);
     }
 
     /// Runs pending work without moving the clock.
     pub fn pump(&mut self) {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::pump")
+        self.harness.pump(PUMP_ROUNDS);
     }
 
     /// Sets the wall clock.
@@ -284,7 +388,7 @@ impl ImportsFixture {
 
     /// Every log line so far.
     pub fn logs(&self) -> Vec<LogLine> {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::logs")
+        self.harness.logs()
     }
 
     /// Every event delivered to the fixture plugin.
@@ -324,7 +428,7 @@ impl ImportsFixture {
 
     /// Whether the plugin instance is stopped.
     pub fn plugin_is_stopped(&self) -> bool {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::plugin_is_stopped")
+        matches!(self.harness.state(), InstanceState::Stopped)
     }
 
     /// The note of a settings row.
@@ -508,8 +612,8 @@ impl ImportsFixture {
     }
 
     /// Exits a pane.
-    pub fn exit_pane(&mut self, _pane: NodeId) {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::exit_pane")
+    pub fn exit_pane(&mut self, pane: NodeId) {
+        self.harness.kernel().remove_node(pane);
     }
 
     /// Focuses a pane.
@@ -550,8 +654,8 @@ impl ImportsFixture {
     }
 
     /// Renames a node.
-    pub fn rename_node(&mut self, _node: NodeId, _title: &str) {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::rename_node")
+    pub fn rename_node(&mut self, node: NodeId, title: &str) {
+        self.harness.kernel().set_manual_title(node, title);
     }
 
     /// Reads node metadata as a second installed plugin.
@@ -562,7 +666,7 @@ impl ImportsFixture {
 
 #[cfg(test)]
 mod tests {
-    use super::{ImportsFixture, ImportsFixtureBuilder, JobInstance, UserInput, UserSave};
+    use super::{ImportsFixture, ImportsFixtureBuilder, UserInput, UserSave};
     use ilium_plugin_api::generated::types::ErrorCode;
     use ilium_plugin_api::side::Side;
     use ilium_plugin_api::Tier;
@@ -590,19 +694,20 @@ mod tests {
 
     #[test]
     fn builder_debug_text_names_the_builder() {
-        let builder = ImportsFixtureBuilder { _private: () };
+        let builder = ImportsFixtureBuilder::default();
         assert_eq!(format!("{builder:?}"), "ImportsFixtureBuilder");
     }
 
     #[test]
     fn fixture_debug_text_names_the_fixture() {
-        let fixture = ImportsFixture { _private: () };
+        let fixture = default_fixture();
         assert_eq!(format!("{fixture:?}"), "ImportsFixture");
     }
 
     #[test]
     fn job_instance_debug_text_names_the_job_instance() {
-        let job = JobInstance { _private: () };
+        let mut fixture = default_fixture();
+        let job = fixture.job_instance("test.kind", &[]);
         assert_eq!(format!("{job:?}"), "JobInstance");
     }
 

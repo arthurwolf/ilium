@@ -1,45 +1,135 @@
 //! A harness over the view and popup lifecycle of plugin UI trees (reference-host-rendering.md).
 
-use ilium_plugin_api::PluginError;
+use std::cell::RefCell;
+
+use ilium_plugin_api::{ErrorCode, PluginError};
 
 /// Opens views, their popups and commits trees, recording the close events the host emits.
 #[derive(Debug, Default)]
 pub struct ViewHarness;
 
+/// Popup bookkeeping. `ViewHarness` is a unit struct, so the state lives per test thread;
+/// each test thread runs one test, which keeps parallel tests isolated.
+#[derive(Default)]
+struct HarnessState {
+    /// Declared popup ids per view, in declaration order.
+    views: Vec<(String, Vec<String>)>,
+    /// Open popups as (owning view, popup id), in opening order.
+    open: Vec<(String, String)>,
+    /// Popup ids closed by the host (the `closed` event), in emission order.
+    closed: Vec<String>,
+}
+
+thread_local! {
+    static STATE: RefCell<HarnessState> = RefCell::new(HarnessState::default());
+}
+
+fn with_state<Output>(action: impl FnOnce(&mut HarnessState) -> Output) -> Output {
+    STATE.with(|state| action(&mut state.borrow_mut()))
+}
+
 impl ViewHarness {
     /// An empty harness.
     pub fn new() -> ViewHarness {
-        unimplemented!("host::testing::views::ViewHarness::new")
+        with_state(|state| *state = HarnessState::default());
+        ViewHarness
     }
 
     /// Opens a view declaring `popups`.
-    pub fn open_view(&mut self, _view: &str, _popups: &[String]) {
-        unimplemented!("host::testing::views::ViewHarness::open_view")
+    pub fn open_view(&mut self, view: &str, popups: &[String]) {
+        with_state(|state| declare(state, view, popups));
     }
 
     /// Opens a declared popup; `not-found` for an unknown id.
-    pub fn open_popup(&mut self, _popup: &str) -> Result<(), PluginError> {
-        unimplemented!("host::testing::views::ViewHarness::open_popup")
+    pub fn open_popup(&mut self, popup: &str) -> Result<(), PluginError> {
+        with_state(|state| -> Result<(), PluginError> {
+            let owner = find_owner(state, popup)?;
+            if state.open.iter().any(|(open_view, open_popup)| {
+                open_view == &owner && open_popup == popup
+            }) {
+                return Ok(());
+            }
+            let open_in_owner = state
+                .open
+                .iter()
+                .filter(|(open_view, _)| open_view == &owner)
+                .count();
+            if open_in_owner >= POPUPS_PER_VIEW {
+                return Err(PluginError::new(
+                    ErrorCode::QuotaExceeded,
+                    format!("view {owner} already has {POPUPS_PER_VIEW} open popups"),
+                ));
+            }
+            state.open.push((owner, popup.to_owned()));
+            Ok(())
+        })
     }
 
-    /// Closes an open popup.
-    pub fn close_popup(&mut self, _popup: &str) -> Result<(), PluginError> {
-        unimplemented!("host::testing::views::ViewHarness::close_popup")
+    /// Closes an open popup. Closing an id that is not open is a no-op that returns `ok`.
+    pub fn close_popup(&mut self, popup: &str) -> Result<(), PluginError> {
+        with_state(|state| state.open.retain(|(_, open_popup)| open_popup != popup));
+        Ok(())
     }
 
     /// Commits a new tree of a view declaring `popups`; popups no longer declared are closed.
-    pub fn commit_tree(&mut self, _view: &str, _popups: &[String]) {
-        unimplemented!("host::testing::views::ViewHarness::commit_tree")
+    pub fn commit_tree(&mut self, view: &str, popups: &[String]) {
+        with_state(|state| {
+            declare(state, view, popups);
+            let mut dropped = Vec::new();
+            state.open.retain(|(open_view, open_popup)| {
+                let is_dropped = open_view == view && !popups.contains(open_popup);
+                if is_dropped {
+                    dropped.push(open_popup.clone());
+                }
+                !is_dropped
+            });
+            state.closed.extend(dropped);
+        });
     }
 
     /// Whether a popup is open.
-    pub fn is_open(&self, _popup: &str) -> bool {
-        unimplemented!("host::testing::views::ViewHarness::is_open")
+    pub fn is_open(&self, popup: &str) -> bool {
+        with_state(|state| state.open.iter().any(|(_, open_popup)| open_popup == popup))
     }
 
     /// The popup-closed events emitted so far, in order.
     pub fn closed_events(&self) -> Vec<String> {
-        unimplemented!("host::testing::views::ViewHarness::closed_events")
+        with_state(|state| state.closed.clone())
+    }
+}
+
+/// Maximum simultaneously open popups per view (HST-495).
+const POPUPS_PER_VIEW: usize = 4;
+
+/// Records or replaces the declared popup list of `view`.
+fn declare(state: &mut HarnessState, view: &str, popups: &[String]) {
+    match state.views.iter_mut().find(|(name, _)| name == view) {
+        Some((_, declared)) => *declared = popups.to_vec(),
+        None => state.views.push((view.to_owned(), popups.to_vec())),
+    }
+}
+
+/// The single view declaring `popup`: `not-found` for none, `invalid-argument` for several.
+fn find_owner(state: &HarnessState, popup: &str) -> Result<String, PluginError> {
+    if popup.is_empty() {
+        return Err(PluginError::new(ErrorCode::NotFound, "popup id is empty"));
+    }
+    let owners: Vec<&String> = state
+        .views
+        .iter()
+        .filter(|(_, declared)| declared.iter().any(|id| id == popup))
+        .map(|(view, _)| view)
+        .collect();
+    match owners.as_slice() {
+        [] => Err(PluginError::new(
+            ErrorCode::NotFound,
+            format!("no open view declares popup {popup}"),
+        )),
+        [owner] => Ok((*owner).clone()),
+        _ => Err(PluginError::new(
+            ErrorCode::InvalidArgument,
+            format!("popup id {popup} is declared by more than one view"),
+        )),
     }
 }
 

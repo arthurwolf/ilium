@@ -15,11 +15,14 @@ use crate::cli::CliOutput;
 
 /// The compiled-code cache key of one component: hash, wasmtime version and CPU features (LIF-176).
 pub fn compile_cache_key(
-    _component_hash: &str,
-    _wasmtime_version: &str,
-    _cpu_features: &str,
+    component_hash: &str,
+    wasmtime_version: &str,
+    cpu_features: &str,
 ) -> String {
-    unimplemented!("host::testing::ops::compile_cache_key")
+    crate::engine::compile_cache_key(
+        component_hash,
+        &format!("wasmtime={wasmtime_version};cpu={cpu_features}"),
+    )
 }
 
 /// A step of the atomic registry write at which a fault can be injected (LIF-064).
@@ -138,270 +141,377 @@ impl LockHold {
 }
 
 /// Builder for a signed or unsigned `.ilpkg` backed by the native test guest (LIF-060..199).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct PackageSpec {
-    _private: (),
+    id: String,
+    version: String,
+    grants: Vec<String>,
+    high_risk_grants: Vec<String>,
+    first_use_prompts: Vec<String>,
+    signing_key: Option<String>,
+    resign_note: Option<String>,
+    same_publisher_as: Option<String>,
+    bad_manifest: bool,
+    bad_signature: bool,
+    content_markers: Vec<String>,
+    padding_bytes: u64,
+    declared_size: Option<u64>,
+    client_side: bool,
+    activate_error: bool,
+    activate_traps: bool,
+    activate_misses_deadline: bool,
+    activate_wait_ms: u32,
+    deactivate_hangs: bool,
+    start_writes_files: Vec<PathBuf>,
+    restore_len: Option<usize>,
+    data_version: Option<u32>,
+    raw_data_version: Option<String>,
+    migrator_both: bool,
+    migrator_server_only: bool,
+    migrator_listed_only: bool,
+    provided_services: Vec<String>,
+    required_services: Vec<String>,
+    extension_points: Vec<String>,
+    extension_contributions: Vec<String>,
+    activation_triggers: Vec<String>,
+    component_proposal: Option<String>,
+    component_function_count: Option<u32>,
+    guest_message: Option<String>,
+    clock_probe: bool,
+    spins_forever: bool,
+    write_over_quota: bool,
+    startup: bool,
+    replaces_core: Option<String>,
+    declared_clis: Vec<String>,
+    omitted_clis: Vec<String>,
+    parity_fails: bool,
+    extra_files: Vec<String>,
+    api_version: Option<String>,
+    tier: Option<u8>,
+    contact: Option<String>,
+    security_contact: Option<String>,
+    privacy_table: Option<(Vec<String>, u32, String)>,
+    view_clipping_tag: Option<String>,
+    catalogues: Vec<(String, Vec<(String, String)>)>,
 }
 
 impl PackageSpec {
     /// A package with the given id and version.
-    pub fn new(_id: &str, _version: &str) -> PackageSpec {
-        unimplemented!("host::testing::ops::PackageSpec::new")
+    pub fn new(id: &str, version: &str) -> PackageSpec {
+        PackageSpec {
+            id: id.to_owned(),
+            version: version.to_owned(),
+            ..PackageSpec::default()
+        }
     }
 
     /// Adds a requested grant.
-    pub fn grant(self, _grant: &str) -> PackageSpec {
-        unimplemented!("host::testing::ops::PackageSpec::grant")
+    pub fn grant(mut self, grant: &str) -> PackageSpec {
+        self.grants.push(grant.to_owned());
+        self
     }
 
     /// Adds a high-risk grant.
-    pub fn high_risk_grant(self, _grant: &str) -> PackageSpec {
-        unimplemented!("host::testing::ops::PackageSpec::high_risk_grant")
+    pub fn high_risk_grant(mut self, grant: &str) -> PackageSpec {
+        self.high_risk_grants.push(grant.to_owned());
+        self
     }
 
     /// Adds a first-use-prompted grant.
-    pub fn first_use_prompt(self, _grant: &str) -> PackageSpec {
-        unimplemented!("host::testing::ops::PackageSpec::first_use_prompt")
+    pub fn first_use_prompt(mut self, grant: &str) -> PackageSpec {
+        self.first_use_prompts.push(grant.to_owned());
+        self
     }
 
     /// Signs the package with the named key.
-    pub fn signed(self, _key: &str) -> PackageSpec {
-        unimplemented!("host::testing::ops::PackageSpec::signed")
+    pub fn signed(mut self, key: &str) -> PackageSpec {
+        self.signing_key = Some(key.to_owned());
+        self
     }
 
     /// Re-signs the package with a note.
-    pub fn resigned(self, _note: &str) -> PackageSpec {
-        unimplemented!("host::testing::ops::PackageSpec::resigned")
+    pub fn resigned(mut self, note: &str) -> PackageSpec {
+        self.resign_note = Some(note.to_owned());
+        self
     }
 
     /// Signs with the same publisher key as another package.
-    pub fn same_publisher_as(self, _key: &str) -> PackageSpec {
-        unimplemented!("host::testing::ops::PackageSpec::same_publisher_as")
+    pub fn same_publisher_as(mut self, key: &str) -> PackageSpec {
+        self.same_publisher_as = Some(key.to_owned());
+        self
     }
 
     /// Writes an invalid manifest.
-    pub fn bad_manifest(self) -> PackageSpec {
-        unimplemented!("host::testing::ops::PackageSpec::bad_manifest")
+    pub fn bad_manifest(mut self) -> PackageSpec {
+        self.bad_manifest = true;
+        self
     }
 
     /// Writes an invalid signature.
-    pub fn bad_signature(self) -> PackageSpec {
-        unimplemented!("host::testing::ops::PackageSpec::bad_signature")
+    pub fn bad_signature(mut self) -> PackageSpec {
+        self.bad_signature = true;
+        self
     }
 
     /// Embeds a marker in the component so two versions differ in content.
-    pub fn content_marker(self, _marker: &str) -> PackageSpec {
-        unimplemented!("host::testing::ops::PackageSpec::content_marker")
+    pub fn content_marker(mut self, marker: &str) -> PackageSpec {
+        self.content_markers.push(marker.to_owned());
+        self
     }
 
     /// Pads the package to the given size in bytes.
-    pub fn padding(self, _bytes: u64) -> PackageSpec {
-        unimplemented!("host::testing::ops::PackageSpec::padding")
+    pub fn padding(mut self, bytes: u64) -> PackageSpec {
+        self.padding_bytes = bytes;
+        self
     }
 
     /// Adds a client side.
-    pub fn client_side(self) -> PackageSpec {
-        unimplemented!("host::testing::ops::PackageSpec::client_side")
+    pub fn client_side(mut self) -> PackageSpec {
+        self.client_side = true;
+        self
     }
 
     /// `activate` returns an error.
-    pub fn activate_error(self) -> PackageSpec {
-        unimplemented!("host::testing::ops::PackageSpec::activate_error")
+    pub fn activate_error(mut self) -> PackageSpec {
+        self.activate_error = true;
+        self
     }
 
     /// `activate` traps.
-    pub fn activate_traps(self) -> PackageSpec {
-        unimplemented!("host::testing::ops::PackageSpec::activate_traps")
+    pub fn activate_traps(mut self) -> PackageSpec {
+        self.activate_traps = true;
+        self
     }
 
     /// `activate` misses its deadline.
-    pub fn activate_misses_deadline(self) -> PackageSpec {
-        unimplemented!("host::testing::ops::PackageSpec::activate_misses_deadline")
+    pub fn activate_misses_deadline(mut self) -> PackageSpec {
+        self.activate_misses_deadline = true;
+        self
     }
 
     /// `activate` writes the given file.
-    pub fn start_writes_file(self, _path: &Path) -> PackageSpec {
-        unimplemented!("host::testing::ops::PackageSpec::start_writes_file")
+    pub fn start_writes_file(mut self, path: &Path) -> PackageSpec {
+        self.start_writes_files.push(path.to_path_buf());
+        self
     }
 
     /// `deactivate` returns a restore blob of the given length.
-    pub fn restore_bytes(self, _len: usize) -> PackageSpec {
-        unimplemented!("host::testing::ops::PackageSpec::restore_bytes")
+    pub fn restore_bytes(mut self, len: usize) -> PackageSpec {
+        self.restore_len = Some(len);
+        self
     }
 
     /// The manifest `data_version`.
-    pub fn data_version(self, _version: u32) -> PackageSpec {
-        unimplemented!("host::testing::ops::PackageSpec::data_version")
+    pub fn data_version(mut self, version: u32) -> PackageSpec {
+        self.data_version = Some(version);
+        self
     }
 
     /// The manifest `data_version` as raw JSON text.
-    pub fn raw_data_version(self, _json: &str) -> PackageSpec {
-        unimplemented!("host::testing::ops::PackageSpec::raw_data_version")
+    pub fn raw_data_version(mut self, json: &str) -> PackageSpec {
+        self.raw_data_version = Some(json.to_owned());
+        self
     }
 
     /// Exports `migrator` on both sides.
-    pub fn migrator_both(self) -> PackageSpec {
-        unimplemented!("host::testing::ops::PackageSpec::migrator_both")
+    pub fn migrator_both(mut self) -> PackageSpec {
+        self.migrator_both = true;
+        self
     }
 
     /// Exports `migrator` on the server side only.
-    pub fn migrator_server_only(self) -> PackageSpec {
-        unimplemented!("host::testing::ops::PackageSpec::migrator_server_only")
+    pub fn migrator_server_only(mut self) -> PackageSpec {
+        self.migrator_server_only = true;
+        self
     }
 
     /// Lists `migrator` in the manifest without exporting it.
-    pub fn migrator_listed_but_not_exported(self) -> PackageSpec {
-        unimplemented!("host::testing::ops::PackageSpec::migrator_listed_but_not_exported")
+    pub fn migrator_listed_but_not_exported(mut self) -> PackageSpec {
+        self.migrator_listed_only = true;
+        self
     }
 
     /// Provides a service.
-    pub fn provides_service(self, _service: &str) -> PackageSpec {
-        unimplemented!("host::testing::ops::PackageSpec::provides_service")
+    pub fn provides_service(mut self, service: &str) -> PackageSpec {
+        self.provided_services.push(service.to_owned());
+        self
     }
 
     /// Requires a service.
-    pub fn requires_service(self, _service: &str) -> PackageSpec {
-        unimplemented!("host::testing::ops::PackageSpec::requires_service")
+    pub fn requires_service(mut self, service: &str) -> PackageSpec {
+        self.required_services.push(service.to_owned());
+        self
     }
 
     /// `activate` waits for the given virtual time.
-    pub fn wait_ms(self, _ms: u32) -> PackageSpec {
-        unimplemented!("host::testing::ops::PackageSpec::wait_ms")
+    pub fn wait_ms(mut self, ms: u32) -> PackageSpec {
+        self.activate_wait_ms = ms;
+        self
     }
 
     /// Owns an extension point.
-    pub fn extension_point(self, _point: &str) -> PackageSpec {
-        unimplemented!("host::testing::ops::PackageSpec::extension_point")
+    pub fn extension_point(mut self, point: &str) -> PackageSpec {
+        self.extension_points.push(point.to_owned());
+        self
     }
 
     /// Contributes to an extension point.
-    pub fn extension_contribution(self, _point: &str) -> PackageSpec {
-        unimplemented!("host::testing::ops::PackageSpec::extension_contribution")
+    pub fn extension_contribution(mut self, point: &str) -> PackageSpec {
+        self.extension_contributions.push(point.to_owned());
+        self
     }
 
     /// Declares an activation trigger.
-    pub fn activation_trigger(self, _trigger: &str) -> PackageSpec {
-        unimplemented!("host::testing::ops::PackageSpec::activation_trigger")
+    pub fn activation_trigger(mut self, trigger: &str) -> PackageSpec {
+        self.activation_triggers.push(trigger.to_owned());
+        self
     }
 
     /// Test hook `PackageSpec::component_with_proposal` used by the gap tests.
-    pub fn component_with_proposal(self, _proposal: &str) -> PackageSpec {
-        unimplemented!("PackageSpec::component_with_proposal")
+    pub fn component_with_proposal(mut self, proposal: &str) -> PackageSpec {
+        self.component_proposal = Some(proposal.to_owned());
+        self
     }
 
     /// Test hook `PackageSpec::component_functions` used by the gap tests.
-    pub fn component_functions(self, _count: u32) -> PackageSpec {
-        unimplemented!("PackageSpec::component_functions")
+    pub fn component_functions(mut self, count: u32) -> PackageSpec {
+        self.component_function_count = Some(count);
+        self
     }
 
     /// Test hook `PackageSpec::guest_message` used by the gap tests.
-    pub fn guest_message(self, _text: &str) -> PackageSpec {
-        unimplemented!("PackageSpec::guest_message")
+    pub fn guest_message(mut self, text: &str) -> PackageSpec {
+        self.guest_message = Some(text.to_owned());
+        self
     }
 
     /// Test hook `PackageSpec::clock_probe` used by the gap tests.
-    pub fn clock_probe(self) -> PackageSpec {
-        unimplemented!("PackageSpec::clock_probe")
+    pub fn clock_probe(mut self) -> PackageSpec {
+        self.clock_probe = true;
+        self
     }
 
     /// Test hook `PackageSpec::spins_forever` used by the gap tests.
-    pub fn spins_forever(self) -> PackageSpec {
-        unimplemented!("PackageSpec::spins_forever")
+    pub fn spins_forever(mut self) -> PackageSpec {
+        self.spins_forever = true;
+        self
     }
 
     /// Test hook `PackageSpec::write_over_quota` used by the gap tests.
-    pub fn write_over_quota(self) -> PackageSpec {
-        unimplemented!("PackageSpec::write_over_quota")
+    pub fn write_over_quota(mut self) -> PackageSpec {
+        self.write_over_quota = true;
+        self
     }
 
     /// Test hook `PackageSpec::startup` used by the gap tests.
-    pub fn startup(self) -> PackageSpec {
-        unimplemented!("PackageSpec::startup")
+    pub fn startup(mut self) -> PackageSpec {
+        self.startup = true;
+        self
     }
 
     /// Test hook `PackageSpec::replaces_core` used by the gap tests.
-    pub fn replaces_core(self, _core_id: &str) -> PackageSpec {
-        unimplemented!("PackageSpec::replaces_core")
+    pub fn replaces_core(mut self, core_id: &str) -> PackageSpec {
+        self.replaces_core = Some(core_id.to_owned());
+        self
     }
 
     /// Test hook `PackageSpec::declares_cli` used by the gap tests.
-    pub fn declares_cli(self, _name: &str) -> PackageSpec {
-        unimplemented!("PackageSpec::declares_cli")
+    pub fn declares_cli(mut self, name: &str) -> PackageSpec {
+        self.declared_clis.push(name.to_owned());
+        self
     }
 
     /// Test hook `PackageSpec::omits_cli` used by the gap tests.
-    pub fn omits_cli(self, _name: &str) -> PackageSpec {
-        unimplemented!("PackageSpec::omits_cli")
+    pub fn omits_cli(mut self, name: &str) -> PackageSpec {
+        self.omitted_clis.push(name.to_owned());
+        self
     }
 
     /// Test hook `PackageSpec::parity_fails` used by the gap tests.
-    pub fn parity_fails(self) -> PackageSpec {
-        unimplemented!("PackageSpec::parity_fails")
+    pub fn parity_fails(mut self) -> PackageSpec {
+        self.parity_fails = true;
+        self
     }
 
     /// Test hook `PackageSpec::with_file` used by the gap tests.
-    pub fn with_file(self, _path: &str) -> PackageSpec {
-        unimplemented!("PackageSpec::with_file")
+    pub fn with_file(mut self, path: &str) -> PackageSpec {
+        self.extra_files.push(path.to_owned());
+        self
     }
 
     /// Test hook `PackageSpec::id` used by the gap tests.
     pub fn id(&self) -> &str {
-        unimplemented!("PackageSpec::id")
+        &self.id
     }
 
     /// Test hook `PackageSpec::deactivate_hangs` used by the gap tests.
-    pub fn deactivate_hangs(self) -> PackageSpec {
-        unimplemented!("PackageSpec::deactivate_hangs")
+    pub fn deactivate_hangs(mut self) -> PackageSpec {
+        self.deactivate_hangs = true;
+        self
     }
 
     /// Test hook `PackageSpec::declared_size` used by the gap tests.
-    pub fn declared_size(self, _bytes: u64) -> PackageSpec {
-        unimplemented!("PackageSpec::declared_size")
+    pub fn declared_size(mut self, bytes: u64) -> PackageSpec {
+        self.declared_size = Some(bytes);
+        self
     }
 
     /// Test hook `PackageSpec::actual_size` used by the gap tests.
+    /// The padding is the only part of the package whose size the spec controls.
     pub fn actual_size(&self) -> u64 {
-        unimplemented!("PackageSpec::actual_size")
+        self.padding_bytes
     }
 
     /// Test hook `PackageSpec::api_version` used by the gap tests.
-    pub fn api_version(self, _version: &str) -> PackageSpec {
-        unimplemented!("PackageSpec::api_version")
+    pub fn api_version(mut self, version: &str) -> PackageSpec {
+        self.api_version = Some(version.to_owned());
+        self
     }
 
     /// Test hook `PackageSpec::tier` used by the gap tests.
-    pub fn tier(self, _tier: u8) -> PackageSpec {
-        unimplemented!("PackageSpec::tier")
+    pub fn tier(mut self, tier: u8) -> PackageSpec {
+        self.tier = Some(tier);
+        self
     }
 
     /// Test hook `PackageSpec::contact` used by the gap tests.
-    pub fn contact(self, _value: &str) -> PackageSpec {
-        unimplemented!("PackageSpec::contact")
+    pub fn contact(mut self, value: &str) -> PackageSpec {
+        self.contact = Some(value.to_owned());
+        self
     }
 
     /// Test hook `PackageSpec::security_contact` used by the gap tests.
-    pub fn security_contact(self, _value: &str) -> PackageSpec {
-        unimplemented!("PackageSpec::security_contact")
+    pub fn security_contact(mut self, value: &str) -> PackageSpec {
+        self.security_contact = Some(value.to_owned());
+        self
     }
 
     /// Test hook `PackageSpec::privacy_table` used by the gap tests.
     pub fn privacy_table(
-        self,
-        _collects: &[&str],
-        _retention_days: u32,
-        _contact: &str,
+        mut self,
+        collects: &[&str],
+        retention_days: u32,
+        contact: &str,
     ) -> PackageSpec {
-        unimplemented!("PackageSpec::privacy_table")
+        let collected: Vec<String> = collects.iter().map(|item| (*item).to_owned()).collect();
+        self.privacy_table = Some((collected, retention_days, contact.to_owned()));
+        self
     }
 
     /// Test hook `PackageSpec::view_clipping_at` used by the gap tests.
-    pub fn view_clipping_at(self, _tag: &str) -> PackageSpec {
-        unimplemented!("PackageSpec::view_clipping_at")
+    pub fn view_clipping_at(mut self, tag: &str) -> PackageSpec {
+        self.view_clipping_tag = Some(tag.to_owned());
+        self
     }
 
     /// Test hook `PackageSpec::catalogue` used by the gap tests.
-    pub fn catalogue(self, _tag: &str, _entries: &[(&str, &str)]) -> PackageSpec {
-        unimplemented!("PackageSpec::catalogue")
+    pub fn catalogue(mut self, tag: &str, entries: &[(&str, &str)]) -> PackageSpec {
+        let owned_entries: Vec<(String, String)> = entries
+            .iter()
+            .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
+            .collect();
+        self.catalogues.push((tag.to_owned(), owned_entries));
+        self
     }
 }
 

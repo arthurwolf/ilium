@@ -10,11 +10,19 @@ use ilium_plugin_api::lifecycle::DeactivationReason;
 use ilium_plugin_api::limits::LimitKey;
 use ilium_plugin_api::{Diagnostic, PluginError, Side, Tier};
 
+use std::time::Duration;
+
 use crate::cli::CliOutput;
-use crate::lifecycle::{LifecycleManager, StartMode, StartReport};
+use crate::lifecycle::{resolve_safe_mode, LifecycleManager, StartMode, StartReport};
 
 /// The safe mode of a start is the host's own (LIF-180, 181).
 pub use crate::lifecycle::SafeMode;
+
+/// The wall clock at the start of every host (a fixed epoch keeps runs repeatable).
+const TEST_EPOCH_UNIX_MS: u64 = 1_700_000_000_000;
+
+/// The time a shutdown is given before the host stops plugins by force.
+const SHUTDOWN_BUDGET: Duration = Duration::from_secs(5);
 
 /// A failure injected into one side instance (LIF-033, 035).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -156,101 +164,156 @@ impl PendingTransition {
 /// Declares one test plugin without building a package (LIF-045..047, 055).
 #[derive(Debug, Clone)]
 pub struct PluginSpec {
-    _private: (),
+    id: String,
+    tier: Tier,
+    sides: Vec<Side>,
+    startup: bool,
+    requires_plugins: Vec<String>,
+    requires_optional_plugins: Vec<String>,
+    requires_host: Option<String>,
+    requires_services: Vec<String>,
+    provides_services: Vec<String>,
+    owned_points: Vec<String>,
+    contributed_points: Vec<String>,
+    memory_mib: Option<u64>,
+    activate_delay_ms: u64,
+    deactivate_delay_ms: u64,
+    grants: Vec<String>,
+    replaces: Option<String>,
 }
 
 impl PluginSpec {
     /// A plugin with the given id.
-    pub fn new(_id: &str) -> PluginSpec {
-        unimplemented!("host::testing::life::PluginSpec::new")
+    pub fn new(id: &str) -> PluginSpec {
+        PluginSpec {
+            id: id.to_string(),
+            tier: Tier::T3,
+            sides: Vec::new(),
+            startup: false,
+            requires_plugins: Vec::new(),
+            requires_optional_plugins: Vec::new(),
+            requires_host: None,
+            requires_services: Vec::new(),
+            provides_services: Vec::new(),
+            owned_points: Vec::new(),
+            contributed_points: Vec::new(),
+            memory_mib: None,
+            activate_delay_ms: 0,
+            deactivate_delay_ms: 0,
+            grants: Vec::new(),
+            replaces: None,
+        }
     }
 
     /// The tier.
-    pub fn tier(self, _tier: Tier) -> PluginSpec {
-        unimplemented!("host::testing::life::PluginSpec::tier")
+    pub fn tier(mut self, tier: Tier) -> PluginSpec {
+        self.tier = tier;
+        self
     }
 
     /// The sides.
-    pub fn sides(self, _sides: &[Side]) -> PluginSpec {
-        unimplemented!("host::testing::life::PluginSpec::sides")
+    pub fn sides(mut self, sides: &[Side]) -> PluginSpec {
+        self.sides = sides.to_vec();
+        self
     }
 
     /// Activates at startup.
-    pub fn startup(self) -> PluginSpec {
-        unimplemented!("host::testing::life::PluginSpec::startup")
+    pub fn startup(mut self) -> PluginSpec {
+        self.startup = true;
+        self
     }
 
     /// Requires a plugin.
-    pub fn requires_plugin(self, _id: &str) -> PluginSpec {
-        unimplemented!("host::testing::life::PluginSpec::requires_plugin")
+    pub fn requires_plugin(mut self, id: &str) -> PluginSpec {
+        self.requires_plugins.push(id.to_string());
+        self
     }
 
     /// Requires an optional plugin.
-    pub fn requires_optional_plugin(self, _id: &str) -> PluginSpec {
-        unimplemented!("host::testing::life::PluginSpec::requires_optional_plugin")
+    pub fn requires_optional_plugin(mut self, id: &str) -> PluginSpec {
+        self.requires_optional_plugins.push(id.to_string());
+        self
     }
 
     /// Requires a host release.
-    pub fn requires_host(self, _range: &str) -> PluginSpec {
-        unimplemented!("host::testing::life::PluginSpec::requires_host")
+    pub fn requires_host(mut self, range: &str) -> PluginSpec {
+        self.requires_host = Some(range.to_string());
+        self
     }
 
     /// Requires a service.
-    pub fn requires_service(self, _service: &str) -> PluginSpec {
-        unimplemented!("host::testing::life::PluginSpec::requires_service")
+    pub fn requires_service(mut self, service: &str) -> PluginSpec {
+        self.requires_services.push(service.to_string());
+        self
     }
 
     /// Provides a service.
-    pub fn provides_service(self, _service: &str) -> PluginSpec {
-        unimplemented!("host::testing::life::PluginSpec::provides_service")
+    pub fn provides_service(mut self, service: &str) -> PluginSpec {
+        self.provides_services.push(service.to_string());
+        self
     }
 
     /// Owns an extension point.
-    pub fn owns_point(self, _point: &str) -> PluginSpec {
-        unimplemented!("host::testing::life::PluginSpec::owns_point")
+    pub fn owns_point(mut self, point: &str) -> PluginSpec {
+        self.owned_points.push(point.to_string());
+        self
     }
 
     /// Contributes to an extension point.
-    pub fn contributes_to(self, _point: &str) -> PluginSpec {
-        unimplemented!("host::testing::life::PluginSpec::contributes_to")
+    pub fn contributes_to(mut self, point: &str) -> PluginSpec {
+        self.contributed_points.push(point.to_string());
+        self
     }
 
     /// The memory limit.
-    pub fn memory_mib(self, _mib: u64) -> PluginSpec {
-        unimplemented!("host::testing::life::PluginSpec::memory_mib")
+    pub fn memory_mib(mut self, mib: u64) -> PluginSpec {
+        self.memory_mib = Some(mib);
+        self
     }
 
     /// `activate` takes this long.
-    pub fn activate_delay_ms(self, _ms: u64) -> PluginSpec {
-        unimplemented!("host::testing::life::PluginSpec::activate_delay_ms")
+    pub fn activate_delay_ms(mut self, ms: u64) -> PluginSpec {
+        self.activate_delay_ms = ms;
+        self
     }
 
     /// `deactivate` takes this long.
-    pub fn deactivate_delay_ms(self, _ms: u64) -> PluginSpec {
-        unimplemented!("host::testing::life::PluginSpec::deactivate_delay_ms")
+    pub fn deactivate_delay_ms(mut self, ms: u64) -> PluginSpec {
+        self.deactivate_delay_ms = ms;
+        self
     }
 
     /// Requested grants.
-    pub fn grants(self, _grants: &[&str]) -> PluginSpec {
-        unimplemented!("host::testing::life::PluginSpec::grants")
+    pub fn grants(mut self, grants: &[&str]) -> PluginSpec {
+        self.grants = grants.iter().map(|grant| grant.to_string()).collect();
+        self
     }
 
     /// Replaces a core plugin.
-    pub fn replaces(self, _core: &str) -> PluginSpec {
-        unimplemented!("host::testing::life::PluginSpec::replaces")
+    pub fn replaces(mut self, core: &str) -> PluginSpec {
+        self.replaces = Some(core.to_string());
+        self
     }
 }
 
 /// The lifecycle host (LIF-001..059, 122..145, 180..186).
 #[derive(Debug)]
 pub struct LifeHost {
-    _private: (),
+    manager: LifecycleManager,
+    safe_mode: SafeMode,
+    unix_ms: u64,
+    clients: Vec<String>,
 }
 
 impl LifeHost {
     /// A fresh host.
     pub fn new() -> LifeHost {
-        unimplemented!("host::testing::life::LifeHost::new")
+        LifeHost {
+            manager: LifecycleManager,
+            safe_mode: SafeMode::Off,
+            unix_ms: TEST_EPOCH_UNIX_MS,
+            clients: Vec::new(),
+        }
     }
 
     /// Sets the session memory pool.
@@ -289,18 +352,29 @@ impl LifeHost {
     }
 
     /// Starts the host.
-    pub fn start(&mut self, _mode: StartMode) -> StartReport {
-        unimplemented!("host::testing::life::LifeHost::start")
+    pub fn start(&mut self, mode: StartMode) -> StartReport {
+        self.manager.start(mode)
     }
 
     /// Starts the host in a safe mode chosen by flag or environment.
-    pub fn start_safe(&mut self, _mode: SafeMode, _flag: Option<&str>, _env: Option<&str>) {
-        unimplemented!("host::testing::life::LifeHost::start_safe")
+    pub fn start_safe(&mut self, mode: SafeMode, flag: Option<&str>, env: Option<&str>) {
+        let args: Vec<String> = flag.map(|value| vec![value.to_string()]).unwrap_or_default();
+        self.safe_mode = if flag.is_none() && env.is_none() {
+            mode
+        } else {
+            resolve_safe_mode(&args, env).unwrap_or(mode)
+        };
+        let start_mode = match self.safe_mode {
+            SafeMode::Off => StartMode::Normal,
+            SafeMode::ThirdParty | SafeMode::AllOptional => StartMode::SafePlugins,
+            SafeMode::NoPlugins => StartMode::NoPlugins,
+        };
+        self.manager.start(start_mode);
     }
 
     /// The active safe mode.
     pub fn safe_mode(&self) -> SafeMode {
-        unimplemented!("host::testing::life::LifeHost::safe_mode")
+        self.safe_mode
     }
 
     /// Records one crash during start at the current time.
@@ -315,7 +389,7 @@ impl LifeHost {
 
     /// Shuts the host down.
     pub fn shutdown(&mut self) {
-        unimplemented!("host::testing::life::LifeHost::shutdown")
+        self.manager.shutdown(SHUTDOWN_BUDGET);
     }
 
     /// Begins a shutdown without finishing it.
@@ -334,13 +408,14 @@ impl LifeHost {
     }
 
     /// Attaches a client; returns its scope.
-    pub fn attach_client(&mut self, _name: &str) -> String {
-        unimplemented!("host::testing::life::LifeHost::attach_client")
+    pub fn attach_client(&mut self, name: &str) -> String {
+        self.clients.push(name.to_string());
+        format!("client:{name}")
     }
 
     /// Detaches a client.
-    pub fn detach_client(&mut self, _name: &str) {
-        unimplemented!("host::testing::life::LifeHost::detach_client")
+    pub fn detach_client(&mut self, name: &str) {
+        self.clients.retain(|client| client.as_str() != name);
     }
 
     /// Kills a client.
@@ -358,13 +433,13 @@ impl LifeHost {
     }
 
     /// Moves the manual clock.
-    pub fn advance_ms(&mut self, _ms: u64) {
-        unimplemented!("host::testing::life::LifeHost::advance_ms")
+    pub fn advance_ms(&mut self, ms: u64) {
+        self.unix_ms = self.unix_ms.saturating_add(ms);
     }
 
     /// The wall clock.
     pub fn unix_ms(&self) -> u64 {
-        unimplemented!("host::testing::life::LifeHost::unix_ms")
+        self.unix_ms
     }
 
     /// Injects a failure into one side instance.
@@ -444,7 +519,7 @@ impl LifeHost {
 
     /// The lifecycle manager.
     pub fn manager(&mut self) -> &mut LifecycleManager {
-        unimplemented!("host::testing::life::LifeHost::manager")
+        &mut self.manager
     }
 
     /// Resets the failure window of a plugin.

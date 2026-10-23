@@ -1,7 +1,10 @@
 //! A fake network every egress of a host under test goes through (NET-* egress tests). The
-//! manual does not document this fake; bodies are `unimplemented!()` placeholders.
+//! manual does not document this fake; it stores the configured DNS, HTTP, TLS and port rules
+//! and the traffic the egress path records.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::net::IpAddr;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 /// A canned HTTP response the fake network serves for one URL.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -57,80 +60,131 @@ pub struct SeenRequest {
     pub tls_version: Option<String>,
 }
 
+/// Configuration and recorded traffic of the fake network.
+#[derive(Debug, Default)]
+struct NetState {
+    /// Host name to the addresses it resolves to.
+    dns: BTreeMap<String, Vec<String>>,
+    /// Host name to (first answer, answer from the second resolution on).
+    dns_rebinding: BTreeMap<String, (Vec<String>, Vec<String>)>,
+    /// Exact URL to the response served for it.
+    responses: BTreeMap<String, FakeResponse>,
+    /// Exact URL to (status, location).
+    redirects: BTreeMap<String, (u16, String)>,
+    tls_failures: BTreeSet<String>,
+    /// Host name to the TLS version it negotiates.
+    tls_versions: BTreeMap<String, String>,
+    /// Host name to the root name its certificate must chain to.
+    required_roots: BTreeMap<String, String>,
+    /// Trust bundle path to the root name it holds.
+    trust_bundles: BTreeMap<String, String>,
+    reserved_ports: BTreeSet<u16>,
+    other_session_ports: BTreeSet<u16>,
+    seen: Vec<SeenRequest>,
+    resolutions: Vec<String>,
+}
+
 /// The fake network; clones share one state so a harness and its test see the same traffic.
 #[derive(Debug, Clone, Default)]
-pub struct FakeNet;
+pub struct FakeNet {
+    state: Arc<Mutex<NetState>>,
+}
 
 impl FakeNet {
     /// An empty network that resolves nothing and serves nothing.
     pub fn new() -> FakeNet {
-        FakeNet
+        FakeNet::default()
+    }
+
+    /// Locks the shared state; a poisoned lock still holds consistent maps, so it is reused.
+    fn state(&self) -> MutexGuard<'_, NetState> {
+        self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     /// Resolves a host name to these addresses.
-    pub fn dns(&self, _host: &str, _addresses: &[&str]) {
-        unimplemented!("host::testing::FakeNet::dns")
+    pub fn dns(&self, host: &str, addresses: &[&str]) {
+        self.state().dns.insert(host.to_owned(), owned_list(addresses));
     }
 
     /// Resolves a host name to the first addresses once, then to the second (NET DNS rebinding).
-    pub fn dns_then(&self, _host: &str, _first: &[&str], _then: &[&str]) {
-        unimplemented!("host::testing::FakeNet::dns_then")
+    pub fn dns_then(&self, host: &str, first: &[&str], then: &[&str]) {
+        self.state()
+            .dns_rebinding
+            .insert(host.to_owned(), (owned_list(first), owned_list(then)));
     }
 
     /// Serves this response for a URL.
-    pub fn serve(&self, _url: &str, _response: FakeResponse) {
-        unimplemented!("host::testing::FakeNet::serve")
+    pub fn serve(&self, url: &str, response: FakeResponse) {
+        self.state().responses.insert(url.to_owned(), response);
     }
 
     /// Redirects a URL with this status to another URL.
-    pub fn redirect(&self, _from: &str, _status: u16, _to: &str) {
-        unimplemented!("host::testing::FakeNet::redirect")
+    pub fn redirect(&self, from: &str, status: u16, to: &str) {
+        self.state()
+            .redirects
+            .insert(from.to_owned(), (status, to.to_owned()));
     }
 
     /// Makes the TLS handshake with a host fail.
-    pub fn fail_tls(&self, _host: &str) {
-        unimplemented!("host::testing::FakeNet::fail_tls")
+    pub fn fail_tls(&self, host: &str) {
+        self.state().tls_failures.insert(host.to_owned());
     }
 
     /// The TLS version a host negotiates.
-    pub fn set_tls_version(&self, _host: &str, _version: &str) {
-        unimplemented!("host::testing::FakeNet::set_tls_version")
+    pub fn set_tls_version(&self, host: &str, version: &str) {
+        self.state()
+            .tls_versions
+            .insert(host.to_owned(), version.to_owned());
     }
 
     /// A host's certificate chains to this root name.
-    pub fn require_root(&self, _host: &str, _root: &str) {
-        unimplemented!("host::testing::FakeNet::require_root")
+    pub fn require_root(&self, host: &str, root: &str) {
+        self.state()
+            .required_roots
+            .insert(host.to_owned(), root.to_owned());
     }
 
     /// A trust bundle file at this path holds this root name.
-    pub fn trust_bundle(&self, _path: &str, _root: &str) {
-        unimplemented!("host::testing::FakeNet::trust_bundle")
+    pub fn trust_bundle(&self, path: &str, root: &str) {
+        self.state()
+            .trust_bundles
+            .insert(path.to_owned(), root.to_owned());
     }
 
     /// Marks a loopback port as this Ilium session's own (NET reserved ports).
-    pub fn reserve_ilium_port(&self, _port: u16) {
-        unimplemented!("host::testing::FakeNet::reserve_ilium_port")
+    pub fn reserve_ilium_port(&self, port: u16) {
+        self.state().reserved_ports.insert(port);
     }
 
     /// Marks a loopback port as another Ilium session's (NET reserved ports).
-    pub fn reserve_ilium_port_of_other_session(&self, _port: u16) {
-        unimplemented!("host::testing::FakeNet::reserve_ilium_port_of_other_session")
+    pub fn reserve_ilium_port_of_other_session(&self, port: u16) {
+        self.state().other_session_ports.insert(port);
     }
 
     /// Every request seen, in order.
     pub fn seen(&self) -> Vec<SeenRequest> {
-        unimplemented!("host::testing::FakeNet::seen")
+        self.state().seen.clone()
     }
 
     /// Host names resolved so far, in order.
     pub fn resolutions(&self) -> Vec<String> {
-        unimplemented!("host::testing::FakeNet::resolutions")
+        self.state().resolutions.clone()
     }
 
     /// How often a host name was resolved.
-    pub fn resolve_count(&self, _host: &str) -> u64 {
-        unimplemented!("host::testing::FakeNet::resolve_count")
+    pub fn resolve_count(&self, host: &str) -> u64 {
+        let count = self
+            .state()
+            .resolutions
+            .iter()
+            .filter(|resolved| resolved.as_str() == host)
+            .count();
+        u64::try_from(count).unwrap_or(u64::MAX)
     }
+}
+
+fn owned_list(values: &[&str]) -> Vec<String> {
+    values.iter().map(|value| (*value).to_owned()).collect()
 }
 
 #[cfg(test)]

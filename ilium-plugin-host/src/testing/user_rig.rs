@@ -2,12 +2,29 @@
 //! network and dialogs, driven the way the user-facing manual pages describe
 //! (user-plugins-*.md USR-001..USR-220, reference-plugin-policy.md, reference-plugin-files.md).
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+use std::time::{Duration, SystemTime};
 
-use crate::cli::CliOutput;
+use sha2::{Digest, Sha256};
+
+use crate::cli::{CliEnv, CliOutput};
 use crate::lifecycle::StartMode;
+use crate::registry_client::{FetchError, Fetcher};
+use crate::signing::{SignedAt, SigningKey};
 
 pub use ilium_plugin_api::platform::Platform;
+
+/// Fetcher for a rig with no network interface: every request fails as unreachable.
+struct UnreachableFetcher;
+
+impl Fetcher for UnreachableFetcher {
+    fn get(&self, _url: &str) -> Result<Vec<u8>, FetchError> {
+        Err(FetchError::Unreachable)
+    }
+}
 
 /// A pane the rig opened.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -157,54 +174,100 @@ pub struct KeyPair {
 
 impl KeyPair {
     /// Generates a key pair for `publisher`.
-    pub fn generate(_publisher: &str) -> KeyPair {
-        unimplemented!("host::testing::user_rig::KeyPair::generate")
+    pub fn generate(publisher: &str) -> KeyPair {
+        // Distinct per call: a process-wide counter plus the clock and process id.
+        static GENERATION: AtomicU64 = AtomicU64::new(0);
+        let generation = GENERATION.fetch_add(1, Ordering::Relaxed);
+        let nanos = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.as_nanos());
+        let mut hasher = Sha256::new();
+        hasher.update(publisher.as_bytes());
+        hasher.update(generation.to_le_bytes());
+        hasher.update(nanos.to_le_bytes());
+        hasher.update(std::process::id().to_le_bytes());
+        let seed: [u8; 32] = hasher.finalize().into();
+        let mut pair = KeyPair {
+            publisher: publisher.to_owned(),
+            public_key_path: PathBuf::new(),
+            private_key: SigningKey::from_seed(seed).0,
+        };
+        pair.public_key_path =
+            PathBuf::from(format!("{publisher}-{}.pub", pair.short_fingerprint()));
+        pair
     }
 
     /// The full fingerprint (64 lowercase hex characters, DEV-112).
     pub fn fingerprint(&self) -> String {
-        unimplemented!("host::testing::user_rig::KeyPair::fingerprint")
+        SigningKey(self.private_key.clone()).key_id()
     }
 
     /// The short fingerprint (the first 8 digits of the fingerprint).
     pub fn short_fingerprint(&self) -> String {
-        unimplemented!("host::testing::user_rig::KeyPair::short_fingerprint")
+        self.fingerprint().chars().take(8).collect()
     }
 
     /// The public key file path as a string.
     pub fn public_key_path_string(&self) -> String {
-        unimplemented!("host::testing::user_rig::KeyPair::public_key_path_string")
+        self.public_key_path.display().to_string()
     }
 
     /// The private key bytes.
     pub fn private_key_bytes(&self) -> Vec<u8> {
-        unimplemented!("host::testing::user_rig::KeyPair::private_key_bytes")
+        self.private_key.clone()
     }
 }
 
 /// A plugin package to install, built in memory.
 #[derive(Debug, Clone)]
-pub struct PackageSpec;
+pub struct PackageSpec {
+    id: String,
+    version: String,
+    display_name: Option<String>,
+    /// Manifest capabilities per side (`server`, `client`).
+    grants: BTreeMap<String, Vec<String>>,
+    signed_with: Option<KeyPair>,
+    api_version: String,
+    replaces: Vec<String>,
+    corrupt_archive: bool,
+    corrupt_signature: bool,
+}
 
 impl PackageSpec {
     /// A package of `id` at `version`.
-    pub fn new(_id: &str, _version: &str) -> PackageSpec {
-        unimplemented!("host::testing::user_rig::PackageSpec::new")
+    pub fn new(id: &str, version: &str) -> PackageSpec {
+        PackageSpec {
+            id: id.to_owned(),
+            version: version.to_owned(),
+            display_name: None,
+            grants: BTreeMap::new(),
+            signed_with: None,
+            api_version: "0.1.0".to_owned(),
+            replaces: Vec::new(),
+            corrupt_archive: false,
+            corrupt_signature: false,
+        }
     }
 
     /// Grants the manifest declares for one side.
-    pub fn grants(self, _side: &str, _grants: &[&str]) -> PackageSpec {
-        unimplemented!("host::testing::user_rig::PackageSpec::grants")
+    pub fn grants(mut self, side: &str, grants: &[&str]) -> PackageSpec {
+        self.grants.insert(
+            side.to_owned(),
+            grants.iter().map(|grant| (*grant).to_owned()).collect(),
+        );
+        self
     }
 
     /// The display name.
-    pub fn display_name(self, _name: &str) -> PackageSpec {
-        unimplemented!("host::testing::user_rig::PackageSpec::display_name")
+    pub fn display_name(mut self, name: &str) -> PackageSpec {
+        self.display_name = Some(name.to_owned());
+        self
     }
 
     /// Signs the package.
-    pub fn signed_with(self, _key: &KeyPair) -> PackageSpec {
-        unimplemented!("host::testing::user_rig::PackageSpec::signed_with")
+    pub fn signed_with(mut self, key: &KeyPair) -> PackageSpec {
+        self.signed_with = Some(key.clone());
+        self
     }
 
     /// The plugin writes a data file on start.
@@ -233,23 +296,27 @@ impl PackageSpec {
     }
 
     /// Corrupts the archive bytes.
-    pub fn corrupt_archive(self) -> PackageSpec {
-        unimplemented!("host::testing::user_rig::PackageSpec::corrupt_archive")
+    pub fn corrupt_archive(mut self) -> PackageSpec {
+        self.corrupt_archive = true;
+        self
     }
 
     /// Corrupts the signature.
-    pub fn corrupt_signature(self) -> PackageSpec {
-        unimplemented!("host::testing::user_rig::PackageSpec::corrupt_signature")
+    pub fn corrupt_signature(mut self) -> PackageSpec {
+        self.corrupt_signature = true;
+        self
     }
 
     /// The API version the manifest declares.
-    pub fn api_version(self, _version: &str) -> PackageSpec {
-        unimplemented!("host::testing::user_rig::PackageSpec::api_version")
+    pub fn api_version(mut self, version: &str) -> PackageSpec {
+        self.api_version = version.to_owned();
+        self
     }
 
     /// The plugins this package replaces.
-    pub fn replaces(self, _ids: &[&str]) -> PackageSpec {
-        unimplemented!("host::testing::user_rig::PackageSpec::replaces")
+    pub fn replaces(mut self, ids: &[&str]) -> PackageSpec {
+        self.replaces = ids.iter().map(|id| (*id).to_owned()).collect();
+        self
     }
 
     /// A pane kind the plugin provides.
@@ -309,7 +376,51 @@ impl PackageSpec {
 
     /// The package bytes.
     pub fn build_bytes(&self) -> Vec<u8> {
-        unimplemented!("host::testing::user_rig::PackageSpec::build_bytes")
+        let publisher = self
+            .signed_with
+            .as_ref()
+            .map_or("Example Developer", |key| key.publisher.as_str());
+        let mut manifest = serde_json::json!({
+            "api": format!("ilium:plugin@{}", self.api_version),
+            "id": self.id,
+            "name": self.display_name.clone().unwrap_or_else(|| self.id.clone()),
+            "version": self.version,
+            "publisher": publisher,
+            "replaces": self.replaces,
+            "server": {"entry": "server.wasm", "world": "ilium:server/base@0.1.0", "exports": []},
+        });
+        if !self.grants.is_empty() {
+            manifest["capabilities"] = serde_json::json!(self.grants);
+        }
+        // Serializing a JSON value cannot fail.
+        let manifest_text = serde_json::to_string_pretty(&manifest).expect("manifest serializes");
+        let files = vec![
+            ("manifest.json".to_owned(), manifest_text.into_bytes()),
+            (
+                "server.wasm".to_owned(),
+                crate::testing::wat::wat_component("(component)"),
+            ),
+        ];
+        let mut bytes = crate::package::write_package(&files)
+            .unwrap_or_else(|diagnostic| panic!("rig package failed: {diagnostic:?}"));
+        if let Some(key) = &self.signed_with {
+            bytes = crate::signing::sign(
+                &bytes,
+                &SigningKey(key.private_key.clone()),
+                SignedAt("2026-10-23T00:00:00Z".to_owned()),
+            )
+            .unwrap_or_else(|diagnostic| panic!("rig signing failed: {diagnostic:?}"));
+        }
+        if self.corrupt_archive {
+            let middle = bytes.len() / 2;
+            bytes[middle] ^= 0xff;
+        }
+        if self.corrupt_signature {
+            if let Some(last) = bytes.last_mut() {
+                *last ^= 0xff;
+            }
+        }
+        bytes
     }
 }
 
@@ -352,7 +463,19 @@ pub struct CallHandle;
 
 /// The user rig.
 #[derive(Debug)]
-pub struct UserRig;
+pub struct UserRig {
+    /// Temporary root holding the XDG roots, scratch and working directories of this rig.
+    root: PathBuf,
+    platform: Platform,
+    is_ci: bool,
+}
+
+impl Drop for UserRig {
+    fn drop(&mut self) {
+        // The root was created by this rig; removing it is best effort.
+        let _ = std::fs::remove_dir_all(&self.root);
+    }
+}
 
 impl UserRig {
     /// Replacements the install recorded, as `(replaced id, replacing id)` (USR-043).
@@ -362,24 +485,63 @@ impl UserRig {
 
     /// A rig on Linux.
     pub fn new() -> UserRig {
-        unimplemented!("host::testing::user_rig::UserRig::new")
+        UserRig::create(Platform::Linux)
     }
 
     /// A rig on `platform`.
-    pub fn new_on(_platform: Platform) -> UserRig {
-        unimplemented!("host::testing::user_rig::UserRig::new_on")
+    pub fn new_on(platform: Platform) -> UserRig {
+        UserRig::create(platform)
     }
 
     /// A rig whose XDG roots are isolated and recorded (USR-200).
     pub fn new_with_xdg_isolation() -> UserRig {
-        unimplemented!("host::testing::user_rig::UserRig::new_with_xdg_isolation")
+        UserRig::create(Platform::Linux)
+    }
+
+    /// Creates a fresh, empty rig root with its XDG roots and scratch folder.
+    fn create(platform: Platform) -> UserRig {
+        static NEXT_RIG: AtomicU64 = AtomicU64::new(0);
+        let index = NEXT_RIG.fetch_add(1, Ordering::Relaxed);
+        let root =
+            std::env::temp_dir().join(format!("ilium-user-rig-{}-{index}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        for directory in ["data", "config", "cache", "state", "scratch", "home"] {
+            let path = root.join(directory);
+            std::fs::create_dir_all(&path)
+                .unwrap_or_else(|error| panic!("rig directory {}: {error}", path.display()));
+        }
+        UserRig {
+            root,
+            platform,
+            is_ci: false,
+        }
+    }
+
+    /// The environment every `ilium plugin` run of this rig uses.
+    fn cli_env(&self) -> CliEnv {
+        let mut env = CliEnv::new(
+            self.data_dir(),
+            self.state_dir(),
+            self.config_dir(),
+            self.root.join("home"),
+            SystemTime::now(),
+            self.is_ci,
+            Arc::new(UnreachableFetcher),
+        );
+        env.cache_dir = self.cache_dir();
+        env.platform = self.platform;
+        env
     }
 
     // ---- CLI and install ------------------------------------------------------------------
 
     /// Runs `ilium plugin <args>`.
-    pub fn cli(&mut self, _args: &[&str]) -> CliOutput {
-        unimplemented!("host::testing::user_rig::UserRig::cli")
+    pub fn cli(&mut self, args: &[&str]) -> CliOutput {
+        let mut owned: Vec<String> = args.iter().map(|argument| (*argument).to_owned()).collect();
+        if owned.first().map(String::as_str) == Some("plugin") {
+            owned.remove(0);
+        }
+        crate::cli::run(&owned, &self.cli_env())
     }
 
     /// Installs a package file with extra arguments.
@@ -407,8 +569,8 @@ impl UserRig {
     }
 
     /// Sets the CI environment flag.
-    pub fn set_ci(&mut self, _is_ci: bool) {
-        unimplemented!("host::testing::user_rig::UserRig::set_ci")
+    pub fn set_ci(&mut self, is_ci: bool) {
+        self.is_ci = is_ci;
     }
 
     /// Points the rig at a registry URL.
@@ -425,27 +587,27 @@ impl UserRig {
 
     /// The data directory.
     pub fn data_dir(&self) -> PathBuf {
-        unimplemented!("host::testing::user_rig::UserRig::data_dir")
+        self.root.join("data")
     }
 
     /// The config directory.
     pub fn config_dir(&self) -> PathBuf {
-        unimplemented!("host::testing::user_rig::UserRig::config_dir")
+        self.root.join("config")
     }
 
     /// The cache directory.
     pub fn cache_dir(&self) -> PathBuf {
-        unimplemented!("host::testing::user_rig::UserRig::cache_dir")
+        self.root.join("cache")
     }
 
     /// The state directory.
     pub fn state_dir(&self) -> PathBuf {
-        unimplemented!("host::testing::user_rig::UserRig::state_dir")
+        self.root.join("state")
     }
 
     /// The scratch directory of the rig itself.
     pub fn scratch_dir(&self) -> PathBuf {
-        unimplemented!("host::testing::user_rig::UserRig::scratch_dir")
+        self.root.join("scratch")
     }
 
     /// The grant store file.
@@ -484,8 +646,14 @@ impl UserRig {
     }
 
     /// Ages a file by `days`.
-    pub fn age_file(&mut self, _path: &Path, _days: u32) {
-        unimplemented!("host::testing::user_rig::UserRig::age_file")
+    pub fn age_file(&mut self, path: &Path, days: u32) {
+        let aged = SystemTime::now()
+            .checked_sub(Duration::from_secs(u64::from(days) * 86_400))
+            .unwrap_or(SystemTime::UNIX_EPOCH);
+        let file = std::fs::File::open(path)
+            .unwrap_or_else(|error| panic!("age_file {}: {error}", path.display()));
+        file.set_modified(aged)
+            .unwrap_or_else(|error| panic!("age_file {}: {error}", path.display()));
     }
 
     /// Opens (creates) a project and returns its path.
@@ -1034,7 +1202,7 @@ mod tests {
 
     #[test]
     fn default_rig_matches_new_rig_with_no_trusted_keys() {
-        let rig = UserRig;
+        let rig = UserRig::default();
         assert!(rig.trusted_keys().is_empty());
     }
 

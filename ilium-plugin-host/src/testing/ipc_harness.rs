@@ -2,7 +2,14 @@
 //! IPC rules of reference-host-ipc.md (HST-100..125). The grant `panes.create` gates the intent
 //! `create-pane` (outcome `ok-node`).
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
+
+use crate::ipc::{
+    DedupVerdict, DetachedQueue, ForwardedDedup, OutcomeStore, PluginRecord, PushOutcome,
+    QueueVerdict, ReceiverConnection, WriterQueues, Written, EXIT_CODE_PROTOCOL_MISMATCH,
+    OUTCOME_GRACE_MS,
+};
 
 /// A connection handle of the harness.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -117,183 +124,840 @@ pub struct ClientHalf {
 
 /// The in-process IPC harness (HST-100..125).
 #[derive(Debug, Default)]
-pub struct IpcHarness;
+pub struct IpcHarness {
+    clock_ms: u64,
+    apply_paused: bool,
+    plugins: BTreeMap<String, ServerPlugin>,
+    /// Contribution id to encoded size.
+    contributions: BTreeMap<String, usize>,
+    tree: Vec<String>,
+    connections: Vec<Connection>,
+    clients: BTreeMap<String, ClientState>,
+    /// Submissions the server has received but not yet admitted.
+    inbox: Vec<Submission>,
+    /// Admitted submissions waiting for the apply step.
+    unapplied: Vec<Submission>,
+    dedup: ForwardedDedup,
+    outcomes: OutcomeStore,
+    /// (client id, outcome seq) to (plugin, dedup key), for replay.
+    outcome_details: BTreeMap<(String, u64), (String, String)>,
+    /// (client id, plugin, dedup key) to (outcome seq, outcome word).
+    completed: BTreeMap<(String, String, String), (u64, String)>,
+}
+
+#[derive(Debug, Default)]
+struct ServerPlugin {
+    version: String,
+    content_hash: [u8; 32],
+    grants: BTreeSet<String>,
+}
+
+#[derive(Debug, Default)]
+struct ClientState {
+    conn: Option<ConnId>,
+    disconnected_at: Option<u64>,
+    outcome_seq: u64,
+    detached: DetachedQueue,
+    queued: Vec<Submission>,
+}
+
+#[derive(Debug)]
+struct Submission {
+    client_id: String,
+    plugin: String,
+    dedup_key: String,
+    intent: String,
+}
+
+/// One encoded slice of a contribution, waiting in the writer queue.
+#[derive(Debug)]
+struct Delta {
+    sequence: u64,
+    contribution: String,
+    bytes: usize,
+    /// Lost on the wire: the sequence is used up, nothing reaches the client.
+    lost: bool,
+}
+
+#[derive(Debug, Default)]
+struct Connection {
+    client_id: String,
+    open: bool,
+    close_code: Option<String>,
+    exit: Option<ClientExit>,
+    halves: BTreeMap<String, ClientHalf>,
+    wire: Vec<WireItem>,
+    deliveries: Vec<ClientDelivery>,
+    mirror: BTreeSet<String>,
+    receiver: ReceiverConnection,
+    writer: WriterQueues,
+    /// Contribution deltas by writer record id; plugin records without an entry are data only.
+    outbound: BTreeMap<u32, Delta>,
+    next_record_id: u32,
+    next_pty_id: u32,
+    /// The sequence the server gives the next contribution delta.
+    next_out_seq: u64,
+    /// The sequence the client half expects next.
+    expected_in_seq: u64,
+    drop_next: bool,
+    overflow_resync: bool,
+    resync_requests: usize,
+    submits_sent: usize,
+    pty_written: usize,
+    pty_dropped: usize,
+}
+
+impl Connection {
+    fn new_delta(&mut self, contribution: &str, bytes: usize) -> Delta {
+        let sequence = self.next_out_seq;
+        self.next_out_seq += 1;
+        Delta {
+            sequence,
+            contribution: contribution.to_owned(),
+            bytes,
+            lost: std::mem::take(&mut self.drop_next),
+        }
+    }
+
+    /// The mirror takes the node before the client half sees the tree event (HST-111).
+    fn tree_changed(&mut self, node: &str) {
+        self.wire.push(WireItem::TreeChange {
+            node: node.to_owned(),
+        });
+        self.mirror.insert(node.to_owned());
+        self.deliveries.push(ClientDelivery::MirrorUpdated {
+            node: node.to_owned(),
+        });
+        self.deliveries.push(ClientDelivery::TreeChangedEvent {
+            node: node.to_owned(),
+        });
+    }
+
+    fn deliver(&mut self, delta: Delta, server_ids: &[String], snapshot_bytes: usize) {
+        if delta.lost {
+            return;
+        }
+        if delta.sequence != self.expected_in_seq {
+            self.resync(server_ids, snapshot_bytes);
+            return;
+        }
+        self.expected_in_seq += 1;
+        self.wire.push(WireItem::Increment {
+            sequence: delta.sequence,
+            bytes: delta.bytes,
+        });
+        self.mirror.insert(delta.contribution);
+    }
+
+    /// The client discards its mirror; the server answers with a full snapshot (HST-108).
+    fn resync(&mut self, server_ids: &[String], snapshot_bytes: usize) {
+        self.resync_requests += 1;
+        self.mirror = server_ids.iter().cloned().collect();
+        self.wire.push(WireItem::Snapshot {
+            sequence: 1,
+            bytes: snapshot_bytes,
+        });
+        self.expected_in_seq = 2;
+        self.next_out_seq = 2;
+        self.outbound.clear();
+    }
+}
+
+const PLUGIN_PROTOCOL: u16 = 1;
+const CONTRACT: &str = "0.1.0";
+const PROTOCOL_MISMATCH: &str = "ipc.protocol-mismatch";
+const PROTOCOL_MISMATCH_MESSAGE: &str =
+    "client and server speak different plugin protocols; start the matching client";
+const VERSION_SKEW: &str = "plugin.version-skew";
+const SERVER_MISSING: &str = "plugin.server-missing";
+const PANE_GRANT: &str = "panes.create";
+const CREATE_PANE_INTENT: &str = "create-pane";
+const OK_OUTCOME: &str = "ok-node";
+const REVOKED_OUTCOME: &str = "revoked";
+const CANCELLED_OUTCOME: &str = "cancelled";
+const REFUSED_BUSY_OUTCOME: &str = "refused(busy)";
+const UNKNOWN_INTENT_OUTCOME: &str = "refused(unknown-intent)";
+const CONTRIBUTION_DELTA_MAX_BYTES: usize = 4 * 1024 * 1024;
+/// Envelope sizes are not modelled; the receiver only checks sequence numbers here.
+const ENVELOPE_LEN: usize = 0;
+const NO_HALF: ClientHalf = ClientHalf {
+    running: false,
+    disabled_code: None,
+};
+
+fn conn_index(conn: ConnId) -> usize {
+    conn.0 as usize
+}
+
+/// Removes the submissions of one client from a list, keeping the others in order.
+fn split_off_client(items: &mut Vec<Submission>, client_id: &str) -> Vec<Submission> {
+    let (matching, kept): (Vec<Submission>, Vec<Submission>) = std::mem::take(items)
+        .into_iter()
+        .partition(|submission| submission.client_id == client_id);
+    *items = kept;
+    matching
+}
 
 impl IpcHarness {
     /// An empty server with no plugins and no connections.
     pub fn new() -> IpcHarness {
-        unimplemented!("host::testing::ipc_harness::IpcHarness::new")
+        IpcHarness::default()
     }
 
     /// Installs a plugin on the server.
-    pub fn install_server_plugin(&mut self, _id: &str, _version: &str, _content_hash: [u8; 32]) {
-        unimplemented!("host::testing::ipc_harness::IpcHarness::install_server_plugin")
+    pub fn install_server_plugin(&mut self, id: &str, version: &str, content_hash: [u8; 32]) {
+        let server_plugin = self.plugins.entry(id.to_owned()).or_default();
+        server_plugin.version = version.to_owned();
+        server_plugin.content_hash = content_hash;
     }
 
     /// Grants a plugin a grant.
-    pub fn grant(&mut self, _plugin: &str, _grant: &str) {
-        unimplemented!("host::testing::ipc_harness::IpcHarness::grant")
+    pub fn grant(&mut self, plugin: &str, grant: &str) {
+        if let Some(server_plugin) = self.plugins.get_mut(plugin) {
+            server_plugin.grants.insert(grant.to_owned());
+        }
     }
 
     /// Revokes a grant of a plugin.
-    pub fn revoke(&mut self, _plugin: &str, _grant: &str) {
-        unimplemented!("host::testing::ipc_harness::IpcHarness::revoke")
+    pub fn revoke(&mut self, plugin: &str, grant: &str) {
+        if let Some(server_plugin) = self.plugins.get_mut(plugin) {
+            server_plugin.grants.remove(grant);
+        }
     }
 
     /// The hello of a client that matches the server: protocol 1, contract `0.1.0`, the
     /// server's plugin set (HST-103).
     pub fn matching_hello(&self) -> HelloSpec {
-        unimplemented!("host::testing::ipc_harness::IpcHarness::matching_hello")
+        HelloSpec {
+            plugin_protocol: PLUGIN_PROTOCOL,
+            contract: CONTRACT.to_owned(),
+            installed: self
+                .plugins
+                .iter()
+                .map(|(id, server_plugin)| InstalledSpec {
+                    id: id.clone(),
+                    version: server_plugin.version.clone(),
+                    content_hash: server_plugin.content_hash,
+                })
+                .collect(),
+        }
     }
 
     /// Connects a client.
-    pub fn connect(&mut self, _client_id: &str, _interactive: bool, _hello: HelloSpec) -> ConnId {
-        unimplemented!("host::testing::ipc_harness::IpcHarness::connect")
+    pub fn connect(&mut self, client_id: &str, _interactive: bool, hello: HelloSpec) -> ConnId {
+        self.open_connection(client_id, hello, None)
     }
 
     /// Reattaches a client that last saw outcome `last_seen_seq` (HST-116).
-    pub fn reattach(&mut self, _client_id: &str, _last_seen_seq: u64, _hello: HelloSpec) -> ConnId {
-        unimplemented!("host::testing::ipc_harness::IpcHarness::reattach")
+    pub fn reattach(&mut self, client_id: &str, last_seen_seq: u64, hello: HelloSpec) -> ConnId {
+        self.expire_grace();
+        self.open_connection(client_id, hello, Some(last_seen_seq))
     }
 
     /// Drops a connection.
-    pub fn disconnect(&mut self, _conn: ConnId) {
-        unimplemented!("host::testing::ipc_harness::IpcHarness::disconnect")
+    pub fn disconnect(&mut self, conn: ConnId) {
+        let index = conn_index(conn);
+        if !self.connections[index].open {
+            return;
+        }
+        self.connections[index].open = false;
+        self.detach_client(index);
     }
 
     /// Moves the clock.
-    pub fn advance(&mut self, _by: Duration) {
-        unimplemented!("host::testing::ipc_harness::IpcHarness::advance")
+    pub fn advance(&mut self, by: Duration) {
+        let millis = u64::try_from(by.as_millis()).unwrap_or(u64::MAX);
+        self.clock_ms = self.clock_ms.saturating_add(millis);
     }
 
     /// Runs server and client halves until idle or `max_rounds`.
-    pub fn pump(&mut self, _max_rounds: u32) {
-        unimplemented!("host::testing::ipc_harness::IpcHarness::pump")
+    pub fn pump(&mut self, max_rounds: u32) {
+        for _ in 0..max_rounds {
+            if !self.run_round() {
+                break;
+            }
+        }
     }
 
     /// Everything the server sent to the connection, in order.
-    pub fn wire(&self, _conn: ConnId) -> Vec<WireItem> {
-        unimplemented!("host::testing::ipc_harness::IpcHarness::wire")
+    pub fn wire(&self, conn: ConnId) -> Vec<WireItem> {
+        self.connections[conn_index(conn)].wire.clone()
     }
 
     /// What the client half did, in order.
-    pub fn deliveries(&self, _conn: ConnId) -> Vec<ClientDelivery> {
-        unimplemented!("host::testing::ipc_harness::IpcHarness::deliveries")
+    pub fn deliveries(&self, conn: ConnId) -> Vec<ClientDelivery> {
+        self.connections[conn_index(conn)].deliveries.clone()
     }
 
     /// Whether the connection is open.
-    pub fn is_open(&self, _conn: ConnId) -> bool {
-        unimplemented!("host::testing::ipc_harness::IpcHarness::is_open")
+    pub fn is_open(&self, conn: ConnId) -> bool {
+        self.connections[conn_index(conn)].open
     }
 
     /// The error id the connection was closed with.
-    pub fn close_code(&self, _conn: ConnId) -> Option<String> {
-        unimplemented!("host::testing::ipc_harness::IpcHarness::close_code")
+    pub fn close_code(&self, conn: ConnId) -> Option<String> {
+        self.connections[conn_index(conn)].close_code.clone()
     }
 
     /// How the client process exited, when it did (HST-104).
-    pub fn client_exit(&self, _conn: ConnId) -> Option<ClientExit> {
-        unimplemented!("host::testing::ipc_harness::IpcHarness::client_exit")
+    pub fn client_exit(&self, conn: ConnId) -> Option<ClientExit> {
+        self.connections[conn_index(conn)].exit.clone()
     }
 
     /// The client half of a plugin on a connection (HST-105).
-    pub fn client_half(&self, _conn: ConnId, _plugin: &str) -> ClientHalf {
-        unimplemented!("host::testing::ipc_harness::IpcHarness::client_half")
+    pub fn client_half(&self, conn: ConnId, plugin: &str) -> ClientHalf {
+        self.connections[conn_index(conn)]
+            .halves
+            .get(plugin)
+            .cloned()
+            .unwrap_or(NO_HALF)
     }
 
     /// Whether the server half of a plugin runs.
-    pub fn server_half_running(&self, _plugin: &str) -> bool {
-        unimplemented!("host::testing::ipc_harness::IpcHarness::server_half_running")
+    pub fn server_half_running(&self, plugin: &str) -> bool {
+        self.plugins.contains_key(plugin)
     }
 
     /// Open connections.
     pub fn connection_count(&self) -> usize {
-        unimplemented!("host::testing::ipc_harness::IpcHarness::connection_count")
+        self.connections.iter().filter(|conn| conn.open).count()
     }
 
     /// Nodes in the server tree.
     pub fn server_tree_len(&self) -> usize {
-        unimplemented!("host::testing::ipc_harness::IpcHarness::server_tree_len")
+        self.tree.len()
     }
 
-    /// Local effects the client applied before the server confirmed (HST-112).
+    /// Local effects the client applied before the server confirmed (HST-112). The client
+    /// forwards every submission and never applies its effects itself.
     pub fn client_local_effects(&self, _conn: ConnId) -> usize {
-        unimplemented!("host::testing::ipc_harness::IpcHarness::client_local_effects")
+        0
     }
 
     /// Submits the client sent.
-    pub fn submits_sent(&self, _conn: ConnId) -> usize {
-        unimplemented!("host::testing::ipc_harness::IpcHarness::submits_sent")
+    pub fn submits_sent(&self, conn: ConnId) -> usize {
+        self.connections[conn_index(conn)].submits_sent
     }
 
     /// Resync requests the client sent (HST-108).
-    pub fn resync_requests(&self, _conn: ConnId) -> usize {
-        unimplemented!("host::testing::ipc_harness::IpcHarness::resync_requests")
+    pub fn resync_requests(&self, conn: ConnId) -> usize {
+        self.connections[conn_index(conn)].resync_requests
     }
 
     /// The contribution ids in the client's mirror.
-    pub fn client_mirror(&self, _conn: ConnId) -> Vec<String> {
-        unimplemented!("host::testing::ipc_harness::IpcHarness::client_mirror")
+    pub fn client_mirror(&self, conn: ConnId) -> Vec<String> {
+        self.connections[conn_index(conn)]
+            .mirror
+            .iter()
+            .cloned()
+            .collect()
     }
 
     /// The contribution ids on the server.
     pub fn server_contributions(&self) -> Vec<String> {
-        unimplemented!("host::testing::ipc_harness::IpcHarness::server_contributions")
+        self.contributions.keys().cloned().collect()
     }
 
     /// The final outcome of a submission, when it completed.
-    pub fn final_outcome(
-        &self,
-        _client_id: &str,
-        _plugin: &str,
-        _dedup_key: &str,
-    ) -> Option<String> {
-        unimplemented!("host::testing::ipc_harness::IpcHarness::final_outcome")
+    pub fn final_outcome(&self, client_id: &str, plugin: &str, dedup_key: &str) -> Option<String> {
+        self.completed
+            .get(&(
+                client_id.to_owned(),
+                plugin.to_owned(),
+                dedup_key.to_owned(),
+            ))
+            .map(|(_, outcome)| outcome.clone())
     }
 
     /// PTY frames written to the connection.
-    pub fn pty_frames_written(&self, _conn: ConnId) -> usize {
-        unimplemented!("host::testing::ipc_harness::IpcHarness::pty_frames_written")
+    pub fn pty_frames_written(&self, conn: ConnId) -> usize {
+        self.connections[conn_index(conn)].pty_written
     }
 
     /// PTY frames dropped on the connection.
-    pub fn pty_frames_dropped(&self, _conn: ConnId) -> usize {
-        unimplemented!("host::testing::ipc_harness::IpcHarness::pty_frames_dropped")
+    pub fn pty_frames_dropped(&self, conn: ConnId) -> usize {
+        self.connections[conn_index(conn)].pty_dropped
     }
 
     /// The client submits an intent of a plugin.
-    pub fn submit(&mut self, _conn: ConnId, _plugin: &str, _dedup_key: &str, _intent: &str) {
-        unimplemented!("host::testing::ipc_harness::IpcHarness::submit")
+    pub fn submit(&mut self, conn: ConnId, plugin: &str, dedup_key: &str, intent: &str) {
+        let index = conn_index(conn);
+        let connection = &mut self.connections[index];
+        connection.submits_sent += 1;
+        let submission = Submission {
+            client_id: connection.client_id.clone(),
+            plugin: plugin.to_owned(),
+            dedup_key: dedup_key.to_owned(),
+            intent: intent.to_owned(),
+        };
+        if connection.open {
+            self.inbox.push(submission);
+            return;
+        }
+        self.queue_detached(submission);
     }
 
     /// Pauses or resumes the server's apply step.
-    pub fn pause_apply(&mut self, _paused: bool) {
-        unimplemented!("host::testing::ipc_harness::IpcHarness::pause_apply")
+    pub fn pause_apply(&mut self, paused: bool) {
+        self.apply_paused = paused;
     }
 
     /// The server-side plugin puts a contribution of the given encoded size.
-    pub fn put_contribution(&mut self, _plugin: &str, _id: &str, _entry_bytes: usize) {
-        unimplemented!("host::testing::ipc_harness::IpcHarness::put_contribution")
+    pub fn put_contribution(&mut self, _plugin: &str, id: &str, entry_bytes: usize) {
+        self.contributions.insert(id.to_owned(), entry_bytes);
+        for index in 0..self.connections.len() {
+            if !self.connections[index].open {
+                continue;
+            }
+            let mut remaining = entry_bytes;
+            loop {
+                let chunk = remaining.min(CONTRIBUTION_DELTA_MAX_BYTES);
+                let delta = self.connections[index].new_delta(id, chunk);
+                self.queue_plugin_record(index, chunk, Some(delta));
+                remaining -= chunk;
+                if remaining == 0 {
+                    break;
+                }
+            }
+        }
     }
 
     /// Loses the next increment sent to the connection (HST-108).
-    pub fn drop_next_increment(&mut self, _conn: ConnId) {
-        unimplemented!("host::testing::ipc_harness::IpcHarness::drop_next_increment")
+    pub fn drop_next_increment(&mut self, conn: ConnId) {
+        self.connections[conn_index(conn)].drop_next = true;
     }
 
     /// The client sends an envelope with an explicit sequence number (HST-102).
-    pub fn send_client_envelope(&mut self, _conn: ConnId, _seq: u64) {
-        unimplemented!("host::testing::ipc_harness::IpcHarness::send_client_envelope")
+    pub fn send_client_envelope(&mut self, conn: ConnId, seq: u64) {
+        let index = conn_index(conn);
+        if !self.connections[index].open {
+            return;
+        }
+        let result = self.connections[index]
+            .receiver
+            .on_envelope(seq, ENVELOPE_LEN);
+        if let Err(fault) = result {
+            self.close_connection(index, fault.code());
+        }
     }
 
     /// Floods plugin data toward a connection whose client reader is stalled (HST-121..123).
-    pub fn flood_plugin_data(&mut self, _conn: ConnId, _record_bytes: usize, _records: usize) {
-        unimplemented!("host::testing::ipc_harness::IpcHarness::flood_plugin_data")
+    pub fn flood_plugin_data(&mut self, conn: ConnId, record_bytes: usize, records: usize) {
+        let index = conn_index(conn);
+        for _ in 0..records {
+            if !self.connections[index].open {
+                break;
+            }
+            self.queue_plugin_record(index, record_bytes, None);
+        }
     }
 
     /// Queues PTY frames toward a connection (HST-120).
-    pub fn push_pty_frames(&mut self, _conn: ConnId, _count: usize) {
-        unimplemented!("host::testing::ipc_harness::IpcHarness::push_pty_frames")
+    pub fn push_pty_frames(&mut self, conn: ConnId, count: usize) {
+        let connection = &mut self.connections[conn_index(conn)];
+        if !connection.open {
+            connection.pty_dropped += count;
+            return;
+        }
+        for _ in 0..count {
+            let frame_id = connection.next_pty_id;
+            connection.next_pty_id = connection.next_pty_id.wrapping_add(1);
+            connection.writer.push_pty_frame(frame_id);
+        }
+    }
+}
+
+impl IpcHarness {
+    fn run_round(&mut self) -> bool {
+        self.expire_grace();
+        let received = self.receive_submissions();
+        let applied = self.apply_submissions();
+        let written = self.drain_writers();
+        received || applied || written
+    }
+
+    fn open_connection(
+        &mut self,
+        client_id: &str,
+        hello: HelloSpec,
+        last_seen_seq: Option<u64>,
+    ) -> ConnId {
+        let conn = ConnId(self.connections.len() as u32);
+        let mut connection = Connection {
+            client_id: client_id.to_owned(),
+            ..Connection::default()
+        };
+        if hello.plugin_protocol != PLUGIN_PROTOCOL || hello.contract != CONTRACT {
+            connection.close_code = Some(PROTOCOL_MISMATCH.to_owned());
+            connection.wire.push(WireItem::Rejected {
+                code: PROTOCOL_MISMATCH.to_owned(),
+            });
+            connection.exit = Some(ClientExit {
+                code: EXIT_CODE_PROTOCOL_MISMATCH,
+                message: PROTOCOL_MISMATCH_MESSAGE.to_owned(),
+                interface_drawn: false,
+            });
+            self.connections.push(connection);
+            return conn;
+        }
+        let replay = match last_seen_seq {
+            Some(last_seen) => self.replay_outcomes(client_id, last_seen),
+            None => Vec::new(),
+        };
+        let queued = self.resume_client(client_id, conn);
+        connection.open = true;
+        connection.halves = self.client_halves(&hello);
+        connection.next_out_seq = 2;
+        connection.expected_in_seq = 2;
+        connection.wire.push(WireItem::Attached {
+            plugin_set: self.plugins.keys().cloned().collect(),
+        });
+        connection.wire.extend(replay);
+        let (server_ids, snapshot_bytes) = self.snapshot();
+        connection.wire.push(WireItem::Snapshot {
+            sequence: 1,
+            bytes: snapshot_bytes,
+        });
+        connection.mirror = server_ids.into_iter().collect();
+        self.connections.push(connection);
+        self.inbox.extend(queued);
+        conn
+    }
+
+    /// Points the client at its new connection and takes back its queued submissions.
+    fn resume_client(&mut self, client_id: &str, conn: ConnId) -> Vec<Submission> {
+        let client = self.clients.entry(client_id.to_owned()).or_default();
+        client.conn = Some(conn);
+        client.disconnected_at = None;
+        client.detached = DetachedQueue::new();
+        std::mem::take(&mut client.queued)
+    }
+
+    fn replay_outcomes(&mut self, client_id: &str, last_seen_seq: u64) -> Vec<WireItem> {
+        let stored = self
+            .outcomes
+            .replay(client_id, last_seen_seq, self.clock_ms);
+        stored
+            .into_iter()
+            .filter_map(|record| {
+                let (plugin, dedup_key) = self
+                    .outcome_details
+                    .get(&(client_id.to_owned(), record.seq))?
+                    .clone();
+                Some(WireItem::Outcome {
+                    seq: record.seq,
+                    plugin,
+                    dedup_key,
+                    outcome: record.outcome,
+                })
+            })
+            .collect()
+    }
+
+    /// Plugin set skew disables only the client half of the affected plugin (HST-105).
+    fn client_halves(&self, hello: &HelloSpec) -> BTreeMap<String, ClientHalf> {
+        let mut halves = BTreeMap::new();
+        for (plugin_id, server_plugin) in &self.plugins {
+            let half = match hello.installed.iter().find(|item| item.id == *plugin_id) {
+                None => NO_HALF,
+                Some(installed)
+                    if installed.version != server_plugin.version
+                        || installed.content_hash != server_plugin.content_hash =>
+                {
+                    ClientHalf {
+                        running: false,
+                        disabled_code: Some(VERSION_SKEW.to_owned()),
+                    }
+                }
+                Some(_) => ClientHalf {
+                    running: true,
+                    disabled_code: None,
+                },
+            };
+            halves.insert(plugin_id.clone(), half);
+        }
+        for installed in &hello.installed {
+            if !self.plugins.contains_key(&installed.id) {
+                halves.insert(
+                    installed.id.clone(),
+                    ClientHalf {
+                        running: false,
+                        disabled_code: Some(SERVER_MISSING.to_owned()),
+                    },
+                );
+            }
+        }
+        halves
+    }
+
+    fn snapshot(&self) -> (Vec<String>, usize) {
+        (
+            self.contributions.keys().cloned().collect(),
+            self.contributions.values().sum(),
+        )
+    }
+
+    fn detach_client(&mut self, index: usize) {
+        let client_id = self.connections[index].client_id.clone();
+        let conn = ConnId(index as u32);
+        let now = self.clock_ms;
+        let Some(client) = self.clients.get_mut(&client_id) else {
+            return;
+        };
+        if client.conn != Some(conn) {
+            return;
+        }
+        client.conn = None;
+        client.disconnected_at = Some(now);
+        self.outcomes.on_disconnect(&client_id, now);
+    }
+
+    fn close_connection(&mut self, index: usize, code: &str) {
+        let connection = &mut self.connections[index];
+        connection.open = false;
+        connection.close_code = Some(code.to_owned());
+        connection.wire.push(WireItem::Rejected {
+            code: code.to_owned(),
+        });
+        self.detach_client(index);
+    }
+
+    /// Frees the clients whose grace period has run out: their unanswered submissions are
+    /// cancelled (HST-118, HST-119).
+    fn expire_grace(&mut self) {
+        let now = self.clock_ms;
+        let expired: Vec<String> = self
+            .clients
+            .iter()
+            .filter(|(_, client)| {
+                client.conn.is_none()
+                    && client
+                        .disconnected_at
+                        .is_some_and(|at| now >= at.saturating_add(OUTCOME_GRACE_MS))
+            })
+            .map(|(client_id, _)| client_id.clone())
+            .collect();
+        for client_id in expired {
+            let queued = match self.clients.get_mut(&client_id) {
+                Some(client) => {
+                    client.disconnected_at = None;
+                    client.detached.on_client_exit();
+                    std::mem::take(&mut client.queued)
+                }
+                None => continue,
+            };
+            let mut stranded = split_off_client(&mut self.inbox, &client_id);
+            stranded.extend(split_off_client(&mut self.unapplied, &client_id));
+            for submission in stranded.into_iter().chain(queued) {
+                self.complete(
+                    &submission.client_id,
+                    &submission.plugin,
+                    &submission.dedup_key,
+                    CANCELLED_OUTCOME,
+                );
+            }
+        }
+    }
+
+    fn queue_detached(&mut self, submission: Submission) {
+        let client = self
+            .clients
+            .entry(submission.client_id.clone())
+            .or_default();
+        match client.detached.push(&submission.dedup_key) {
+            QueueVerdict::Queued => client.queued.push(submission),
+            QueueVerdict::RefusedBusy => {
+                self.complete(
+                    &submission.client_id,
+                    &submission.plugin,
+                    &submission.dedup_key,
+                    REFUSED_BUSY_OUTCOME,
+                );
+            }
+        }
+    }
+
+    /// Admits the received submissions; a repeat within the window is answered from the table.
+    fn receive_submissions(&mut self) -> bool {
+        let received = std::mem::take(&mut self.inbox);
+        let progressed = !received.is_empty();
+        for submission in received {
+            let verdict = self.dedup.admit(
+                &submission.plugin,
+                &submission.client_id,
+                &submission.dedup_key,
+                self.clock_ms,
+            );
+            match verdict {
+                DedupVerdict::Fresh => self.unapplied.push(submission),
+                DedupVerdict::Duplicate => self.replay_known_outcome(&submission),
+            }
+        }
+        progressed
+    }
+
+    fn replay_known_outcome(&mut self, submission: &Submission) {
+        let key = (
+            submission.client_id.clone(),
+            submission.plugin.clone(),
+            submission.dedup_key.clone(),
+        );
+        let Some((seq, outcome)) = self.completed.get(&key).cloned() else {
+            return;
+        };
+        let item = WireItem::Outcome {
+            seq,
+            plugin: submission.plugin.clone(),
+            dedup_key: submission.dedup_key.clone(),
+            outcome,
+        };
+        self.send_to_client(&submission.client_id, item);
+    }
+
+    fn send_to_client(&mut self, client_id: &str, item: WireItem) {
+        let Some(conn) = self.clients.get(client_id).and_then(|client| client.conn) else {
+            return;
+        };
+        self.connections[conn_index(conn)].wire.push(item);
+    }
+
+    fn apply_submissions(&mut self) -> bool {
+        if self.apply_paused {
+            return false;
+        }
+        let pending = std::mem::take(&mut self.unapplied);
+        let progressed = !pending.is_empty();
+        for submission in pending {
+            self.apply(submission);
+        }
+        progressed
+    }
+
+    /// Applies one submission. The grant is checked now, not when it was sent (HST-114).
+    fn apply(&mut self, submission: Submission) {
+        if submission.intent != CREATE_PANE_INTENT {
+            self.complete(
+                &submission.client_id,
+                &submission.plugin,
+                &submission.dedup_key,
+                UNKNOWN_INTENT_OUTCOME,
+            );
+            return;
+        }
+        let granted = self
+            .plugins
+            .get(&submission.plugin)
+            .is_some_and(|server_plugin| server_plugin.grants.contains(PANE_GRANT));
+        if !granted {
+            self.complete(
+                &submission.client_id,
+                &submission.plugin,
+                &submission.dedup_key,
+                REVOKED_OUTCOME,
+            );
+            return;
+        }
+        let node = format!("pane-{}", self.tree.len() + 1);
+        self.tree.push(node.clone());
+        for connection in self.connections.iter_mut().filter(|conn| conn.open) {
+            connection.tree_changed(&node);
+        }
+        self.complete(
+            &submission.client_id,
+            &submission.plugin,
+            &submission.dedup_key,
+            OK_OUTCOME,
+        );
+    }
+
+    /// Records the outcome, then sends it and the request-completed event to the client if
+    /// it is attached (HST-115).
+    fn complete(&mut self, client_id: &str, plugin: &str, dedup_key: &str, outcome: &str) {
+        let client = self.clients.entry(client_id.to_owned()).or_default();
+        client.outcome_seq += 1;
+        let seq = client.outcome_seq;
+        let conn = client.conn;
+        self.outcomes.record(client_id, seq, outcome, self.clock_ms);
+        self.outcome_details.insert(
+            (client_id.to_owned(), seq),
+            (plugin.to_owned(), dedup_key.to_owned()),
+        );
+        self.completed.insert(
+            (
+                client_id.to_owned(),
+                plugin.to_owned(),
+                dedup_key.to_owned(),
+            ),
+            (seq, outcome.to_owned()),
+        );
+        let Some(conn) = conn else {
+            return;
+        };
+        let connection = &mut self.connections[conn_index(conn)];
+        connection.wire.push(WireItem::Outcome {
+            seq,
+            plugin: plugin.to_owned(),
+            dedup_key: dedup_key.to_owned(),
+            outcome: outcome.to_owned(),
+        });
+        connection
+            .deliveries
+            .push(ClientDelivery::RequestCompleted {
+                dedup_key: dedup_key.to_owned(),
+            });
+    }
+
+    /// Queues a plugin record on one connection and applies the back-pressure outcome
+    /// (HST-121, HST-122).
+    fn queue_plugin_record(&mut self, index: usize, bytes: usize, delta: Option<Delta>) {
+        let (server_ids, snapshot_bytes) = self.snapshot();
+        let connection = &mut self.connections[index];
+        let record_id = connection.next_record_id;
+        connection.next_record_id = connection.next_record_id.wrapping_add(1);
+        if let Some(delta) = delta {
+            connection.outbound.insert(record_id, delta);
+        }
+        let outcome = connection.writer.push_plugin(PluginRecord {
+            id: record_id,
+            bytes,
+            coalesce_key: None,
+        });
+        match outcome {
+            PushOutcome::Queued | PushOutcome::Merged => {}
+            PushOutcome::ResyncFlagged => {
+                if !connection.overflow_resync {
+                    connection.overflow_resync = true;
+                    connection.resync(&server_ids, snapshot_bytes);
+                }
+            }
+            PushOutcome::Disconnect(fault) => self.close_connection(index, fault.code()),
+        }
+    }
+
+    /// Writes PTY frames before plugin records, then delivers the contribution deltas.
+    fn drain_writers(&mut self) -> bool {
+        let (server_ids, snapshot_bytes) = self.snapshot();
+        let mut progressed = false;
+        for connection in self.connections.iter_mut() {
+            if !connection.open {
+                continue;
+            }
+            while let Some(written) = connection.writer.next() {
+                progressed = true;
+                match written {
+                    Written::Pty(_) => connection.pty_written += 1,
+                    Written::Plugin(record_id) => {
+                        if let Some(delta) = connection.outbound.remove(&record_id) {
+                            connection.deliver(delta, &server_ids, snapshot_bytes);
+                        }
+                    }
+                }
+            }
+            if connection.writer.plugin_queued_records() == 0 {
+                connection.overflow_resync = false;
+            }
+        }
+        progressed
     }
 }
 

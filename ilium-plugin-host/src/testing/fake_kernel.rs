@@ -178,6 +178,15 @@ pub struct FakeKernelState {
     pub attention: BTreeMap<NodeId, Option<String>>,
     pub icons: BTreeMap<NodeId, Option<String>>,
     pub frozen_panes: BTreeSet<NodeId>,
+    pub interrupt_next_pane_write: bool,
+    pub proposal_dialog: Option<ProposalDialog>,
+    pub pending_proposal: Option<PendingProposal>,
+    pub proposal_completion: Option<Result<ProposalCompletion, PluginError>>,
+    pub fail_next_rename: bool,
+    pub consents_json: Option<Vec<u8>>,
+    pub consents_at_start: Option<Vec<u8>>,
+    /// Audit records as (event kind, record), in write order.
+    pub audit: Vec<(String, serde_json::Value)>,
 }
 
 /// A CLI invocation and its actual collected output, owned by the harness CLI adapter.
@@ -331,7 +340,7 @@ impl FakeKernel {
 
     /// Interrupts the next pane write part-way (API fs interruption).
     pub fn interrupt_next_write(&self) {
-        unimplemented!("FakeKernel::interrupt_next_write")
+        self.state().interrupt_next_pane_write = true;
     }
 
     /// Vetoes the next hook with this reason.
@@ -1242,6 +1251,177 @@ impl KernelFacade for FakeKernel {
     }
 }
 
+/// One whole-file change of a proposal, as the plugin sent it (CAP-886).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentConfigChange {
+    /// Path relative to the agent's configuration folder.
+    pub path: String,
+    /// The whole new file; `None` removes it.
+    pub content: Option<Vec<u8>>,
+    /// The revision the plugin read; `None` means the file must not exist yet.
+    pub revision: Option<String>,
+    /// One line shown beside the file in the dialog.
+    pub summary: String,
+}
+
+/// A proposal waiting for the user's answer in its dialog (one per plugin, CAP-890).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingProposal {
+    /// Plugin id, the audit actor.
+    pub plugin: String,
+    pub agent: String,
+    /// Request id; names the history entry.
+    pub request: u64,
+    /// One entry per dialog row, in row order.
+    pub changes: Vec<AgentConfigChange>,
+}
+
+/// The completed result of a proposal: the applied and rejected paths and the history path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProposalCompletion {
+    pub applied: Vec<String>,
+    pub rejected: Vec<String>,
+    pub history: String,
+}
+
+fn agent_config_key(agent: &str, path: &str) -> (String, String) {
+    (format!("agent-config:{agent}"), path.into())
+}
+
+/// Equal tokens mean equal content; the token of a missing file is `absent`.
+fn revision_token(content: Option<&[u8]>) -> String {
+    match content {
+        None => "absent".into(),
+        Some(bytes) => format!("bytes:{}", to_hex(bytes)),
+    }
+}
+
+fn revision_matches(expected: Option<&str>, current: Option<&[u8]>) -> bool {
+    match (expected, current) {
+        (None, None) => true,
+        (Some(token), Some(bytes)) => token == revision_token(Some(bytes)),
+        _ => false,
+    }
+}
+
+fn to_hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+/// The dialog text: each change as a header plus its removed and added lines.
+fn proposal_full_diff(state: &FakeKernelState, agent: &str, changes: &[AgentConfigChange]) -> String {
+    let mut diff = String::new();
+    for change in changes {
+        let previous = state.files.get(&agent_config_key(agent, &change.path));
+        let previous_text = previous.map_or_else(String::new, |b| String::from_utf8_lossy(b).into_owned());
+        let next_text = change
+            .content
+            .as_deref()
+            .map_or_else(String::new, |b| String::from_utf8_lossy(b).into_owned());
+        diff.push_str(&format!("--- {agent}/{}\n+++ {agent}/{}\n", change.path, change.path));
+        for line in previous_text.lines() {
+            diff.push_str(&format!("-{line}\n"));
+        }
+        for line in next_text.lines() {
+            diff.push_str(&format!("+{line}\n"));
+        }
+    }
+    diff
+}
+
+/// Completes the open proposal. Checked rows are applied all or none (CAP-887); with
+/// `reject_all` every row counts as unchecked and the proposal is declined (CAP-890).
+fn resolve_agent_config_proposal(state: &mut FakeKernelState, reject_all: bool) {
+    let Some(pending) = state.pending_proposal.take() else {
+        return;
+    };
+    let dialog = state.proposal_dialog.take();
+    let checked: Vec<bool> = dialog
+        .map(|dialog| dialog.rows.iter().map(|row| row.checked && !reject_all).collect())
+        .unwrap_or_else(|| vec![false; pending.changes.len()]);
+    let agent = pending.agent.clone();
+    let revisions_hold = pending.changes.iter().all(|change| {
+        let current = state.files.get(&agent_config_key(&agent, &change.path));
+        revision_matches(change.revision.as_deref(), current.map(Vec::as_slice))
+    });
+    if !revisions_hold {
+        state.proposal_completion = Some(Err(PluginError::new(
+            ErrorCode::Conflict,
+            "a file changed since the plugin read it",
+        )));
+        return;
+    }
+    if !checked.iter().any(|&is_checked| is_checked) {
+        state.proposal_completion = Some(Err(PluginError::new(
+            ErrorCode::NotPermitted,
+            "declined: the user checked no file",
+        )));
+        return;
+    }
+    let history = format!("agent-config-history/{agent}/{}.json", pending.request);
+    let entries: Vec<serde_json::Value> = pending
+        .changes
+        .iter()
+        .zip(&checked)
+        .filter(|(_, is_checked)| **is_checked)
+        .map(|(change, _)| {
+            let previous = state.files.get(&agent_config_key(&agent, &change.path));
+            serde_json::json!({
+                "path": change.path,
+                "previous": previous.map(|bytes| to_hex(bytes)),
+            })
+        })
+        .collect();
+    state.files.insert(
+        ("data".into(), history.clone()),
+        serde_json::to_vec(&entries).unwrap_or_default(),
+    );
+    let mut replaced: Vec<((String, String), Option<Vec<u8>>)> = Vec::new();
+    for (change, _) in pending.changes.iter().zip(&checked).filter(|(_, is_checked)| **is_checked) {
+        let key = agent_config_key(&agent, &change.path);
+        if std::mem::take(&mut state.fail_next_rename) {
+            for (restored_key, previous) in replaced.into_iter().rev() {
+                match previous {
+                    Some(bytes) => state.files.insert(restored_key, bytes),
+                    None => state.files.remove(&restored_key),
+                };
+            }
+            state.proposal_completion = Some(Err(PluginError::new(
+                ErrorCode::Io,
+                "rename failed; replaced files were restored",
+            )));
+            return;
+        }
+        replaced.push((key.clone(), state.files.get(&key).cloned()));
+        match &change.content {
+            Some(bytes) => state.files.insert(key, bytes.clone()),
+            None => state.files.remove(&key),
+        };
+    }
+    let mut applied = Vec::new();
+    let mut rejected = Vec::new();
+    for (change, is_checked) in pending.changes.iter().zip(&checked) {
+        if !is_checked {
+            rejected.push(change.path.clone());
+            continue;
+        }
+        applied.push(change.path.clone());
+        state.audit.push((
+            "write-outside-data".into(),
+            serde_json::json!({
+                "actor": pending.plugin,
+                "grant": format!("agent-config.propose:{agent}"),
+                "target": format!("{agent}/{}", change.path),
+            }),
+        ));
+    }
+    state.proposal_completion = Some(Ok(ProposalCompletion {
+        applied,
+        rejected,
+        history,
+    }));
+}
+
 /// One file row of an open agent-config proposal dialog (CAP-887).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProposalRow {
@@ -1261,58 +1441,128 @@ pub struct ProposalDialog {
 /// Agent-config proposal hooks (CAP-887..891).
 impl FakeKernel {
     /// Whether the agent's config file exists.
-    pub fn agent_config_file_exists(&self, _agent: &str, _path: &str) -> bool {
-        unimplemented!("host::testing::FakeKernel::agent_config_file_exists")
+    pub fn agent_config_file_exists(&self, agent: &str, path: &str) -> bool {
+        self.state()
+            .files
+            .contains_key(&agent_config_key(agent, path))
     }
 
     /// The open proposal dialog, if any.
     pub fn open_proposal_dialog(&self) -> Option<ProposalDialog> {
-        unimplemented!("host::testing::FakeKernel::open_proposal_dialog")
+        self.state().proposal_dialog.clone()
     }
 
     /// Makes the next atomic rename fail with an I/O error.
     pub fn fail_next_rename(&self) {
-        unimplemented!("host::testing::FakeKernel::fail_next_rename")
+        self.state().fail_next_rename = true;
     }
 
     /// Checks one dialog row and presses Apply.
-    pub fn check_row_and_apply(&self, _row: usize) {
-        unimplemented!("host::testing::FakeKernel::check_row_and_apply")
+    pub fn check_row_and_apply(&self, row: usize) {
+        let mut state = self.state();
+        if let Some(entry) = state
+            .proposal_dialog
+            .as_mut()
+            .and_then(|dialog| dialog.rows.get_mut(row))
+        {
+            entry.checked = true;
+        }
+        resolve_agent_config_proposal(&mut state, false);
     }
 
     /// Presses Reject all.
     pub fn reject_all(&self) {
-        unimplemented!("host::testing::FakeKernel::reject_all")
+        resolve_agent_config_proposal(&mut self.state(), true);
     }
 
     /// Writes an agent config file directly, as the user editing it.
-    pub fn write_agent_config_file(&self, _agent: &str, _path: &str, _content: &[u8]) {
-        unimplemented!("host::testing::FakeKernel::write_agent_config_file")
+    pub fn write_agent_config_file(&self, agent: &str, path: &str, content: &[u8]) {
+        self.state()
+            .files
+            .insert(agent_config_key(agent, path), content.to_vec());
     }
 
     /// The current revision token of an agent config file.
-    pub fn agent_config_revision(&self, _agent: &str, _path: &str) -> String {
-        unimplemented!("host::testing::FakeKernel::agent_config_revision")
+    pub fn agent_config_revision(&self, agent: &str, path: &str) -> String {
+        let state = self.state();
+        revision_token(
+            state
+                .files
+                .get(&agent_config_key(agent, path))
+                .map(Vec::as_slice),
+        )
     }
 
     /// The bytes of an agent config file.
-    pub fn read_agent_config_file(&self, _agent: &str, _path: &str) -> Vec<u8> {
-        unimplemented!("host::testing::FakeKernel::read_agent_config_file")
+    pub fn read_agent_config_file(&self, agent: &str, path: &str) -> Vec<u8> {
+        self.state()
+            .files
+            .get(&agent_config_key(agent, path))
+            .cloned()
+            .unwrap_or_default()
     }
 
     /// Whether `consents.json` is byte-identical to its state at rig start.
     pub fn consents_json_is_unchanged(&self) -> bool {
-        unimplemented!("host::testing::FakeKernel::consents_json_is_unchanged")
+        let state = self.state();
+        state.consents_json == state.consents_at_start
     }
 
     /// The bytes of a file under the plugin's data directory.
-    pub fn plugin_data_file(&self, _path: &str) -> Vec<u8> {
-        unimplemented!("host::testing::FakeKernel::plugin_data_file")
+    pub fn plugin_data_file(&self, path: &str) -> Vec<u8> {
+        self.file("data", path).unwrap_or_default()
     }
 
     /// The audit records of one event kind.
-    pub fn audit_records(&self, _event: &str) -> Vec<serde_json::Value> {
-        unimplemented!("host::testing::FakeKernel::audit_records")
+    pub fn audit_records(&self, event: &str) -> Vec<serde_json::Value> {
+        self.state()
+            .audit
+            .iter()
+            .filter(|(kind, _)| kind == event)
+            .map(|(_, record)| record.clone())
+            .collect()
+    }
+
+    /// Opens the kernel's dialog for a plugin's `propose-agent-config` call (CAP-887). A changed
+    /// revision completes the proposal as conflict before any dialog opens (CAP-889), and a second
+    /// proposal while one is pending leaves the first dialog open (CAP-890).
+    pub fn open_agent_config_proposal(
+        &self,
+        plugin: &str,
+        agent: &str,
+        changes: Vec<AgentConfigChange>,
+    ) {
+        let mut state = self.state();
+        if state.pending_proposal.is_some() {
+            return;
+        }
+        state.proposal_completion = None;
+        let revisions_hold = changes.iter().all(|change| {
+            let current = state.files.get(&agent_config_key(agent, &change.path));
+            revision_matches(change.revision.as_deref(), current.map(Vec::as_slice))
+        });
+        if !revisions_hold {
+            state.proposal_completion = Some(Err(PluginError::new(
+                ErrorCode::Conflict,
+                "a file changed since the plugin read it",
+            )));
+            return;
+        }
+        let request = state.next_id;
+        state.next_id = state.next_id.saturating_add(1);
+        state.proposal_dialog = Some(ProposalDialog {
+            rows: changes
+                .iter()
+                .map(|_| ProposalRow { checked: false })
+                .collect(),
+            full_diff: proposal_full_diff(&state, agent, &changes),
+        });
+        state.pending_proposal = Some(PendingProposal {
+            plugin: plugin.into(),
+            agent: agent.into(),
+            request,
+            changes,
+        });
     }
 }
 
@@ -1703,6 +1953,14 @@ fn apply(state: &mut FakeKernelState, intent: Intent) -> Outcome {
                         submitted += u64::from(stage.delivery == Delivery::Submitted);
                     }
                 }
+            }
+            if std::mem::take(&mut state.interrupt_next_pane_write) {
+                // The interrupted write keeps the bytes that reached the pane before the cut.
+                bytes.truncate(bytes.len() / 2);
+                state.pane_writes.push((spec.pane, bytes.clone()));
+                state.raw_bytes = state.raw_bytes.saturating_add(bytes.len() as u64);
+                state.uncertain_composers.insert(spec.pane);
+                return failed(ErrorCode::Io, "pane write interrupted part-way");
             }
             state.steps.push(format!("pane-write:{}", spec.pane.0));
             state.pane_writes.push((spec.pane, bytes.clone()));

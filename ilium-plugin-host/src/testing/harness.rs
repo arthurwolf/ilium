@@ -128,7 +128,10 @@ pub enum ImportResult {
 impl ImportResult {
     /// The error code string of the returned error, if any (API error tables).
     pub fn error_code(&self) -> Option<String> {
-        unimplemented!("ImportResult::error_code")
+        match self {
+            ImportResult::Err(error) => Some(error.code.as_str().to_owned()),
+            ImportResult::Ok | ImportResult::Trap(_) => None,
+        }
     }
 
     /// The reason attached to a refusal, such as `rate-limited` (API-073).
@@ -138,7 +141,10 @@ impl ImportResult {
 
     /// `retry-after-ms` of a rate-limited refusal.
     pub fn retry_after_ms(&self) -> Option<u32> {
-        unimplemented!("ImportResult::retry_after_ms")
+        match self {
+            ImportResult::Err(error) => error.retry_after_ms,
+            ImportResult::Ok | ImportResult::Trap(_) => None,
+        }
     }
 
     /// The JSON pointer of an invalid-argument error (API settings).
@@ -1275,8 +1281,8 @@ impl HarnessHandle {
     }
 
     /// The error code of the last failed completion for this request (PRI editor completions).
-    pub fn last_completion_failure(&self, _request: RequestId) -> Option<ErrorCode> {
-        unimplemented!("host::testing::HarnessHandle::last_completion_failure")
+    pub fn last_completion_failure(&self, request: RequestId) -> Option<ErrorCode> {
+        self.request_error(request)
     }
 
     // ---- requests and completions (API-*, HST-*)
@@ -1627,13 +1633,19 @@ impl HarnessHandle {
     }
 
     /// Counted failures on the given side (HST-411).
-    pub fn failure_count_of(&self, _side: Side) -> u32 {
-        unimplemented!("host::testing::HarnessHandle::failure_count_of")
+    pub fn failure_count_of(&self, side: Side) -> u32 {
+        // The builder never activates a second side, so only this handle's side counts.
+        if side == self.side {
+            self.failure_count()
+        } else {
+            0
+        }
     }
 
     /// Counted failures of the second plugin (HST-4xx).
     pub fn second_plugin_failure_count(&self) -> u32 {
-        unimplemented!("host::testing::HarnessHandle::second_plugin_failure_count")
+        // The builder rejects `two_plugins`, so no second plugin can fail.
+        0
     }
 
     /// Records one failure on the given side (HST-411).
@@ -1681,8 +1693,12 @@ impl HarnessHandle {
     }
 
     /// Grants a capability now (CAP-0xx, HST-069).
-    pub fn grant_now(&self, _grant: &str) {
-        unimplemented!("host::testing::HarnessHandle::grant_now")
+    pub fn grant_now(&self, grant: &str) {
+        let parsed = Grant::parse(grant).expect("test grant must parse");
+        let mut grants = harness_lock(&self.admission.grants);
+        if !grants.contains(&parsed) {
+            grants.push(parsed);
+        }
     }
 
     /// Declines a capability (HST-069).
@@ -1840,22 +1856,26 @@ impl HarnessHandle {
 
     /// Where the guest runs.
     pub fn isolation(&self) -> Isolation {
-        unimplemented!("host::testing::HarnessHandle::isolation")
+        // The builder only loads guests in-process; helper processes are not wired.
+        Isolation::InProcess
     }
 
     /// The isolation the host tried before failing to load, if any.
     pub fn isolation_attempted(&self) -> Option<Isolation> {
-        unimplemented!("host::testing::HarnessHandle::isolation_attempted")
+        // `build` reports load failures as `Err`, so a live handle never has a failed attempt.
+        None
     }
 
     /// The load error code, if the plugin did not load.
     pub fn load_error(&self) -> Option<String> {
-        unimplemented!("host::testing::HarnessHandle::load_error")
+        // A handle exists only after a successful load; failures surface from `build`.
+        None
     }
 
     /// The human-readable load error message, if any.
     pub fn load_error_message(&self) -> Option<String> {
-        unimplemented!("host::testing::HarnessHandle::load_error_message")
+        // Same as `load_error`: a live handle carries no load failure.
+        None
     }
 
     /// The guest's monotonic clock reading in nanoseconds (SEC coarse clocks).
@@ -1870,7 +1890,8 @@ impl HarnessHandle {
 
     /// The operating-system process id the guest runs in.
     pub fn guest_process_id(&self) -> u32 {
-        unimplemented!("host::testing::HarnessHandle::guest_process_id")
+        // The guest runs in this process (in-process isolation only).
+        std::process::id()
     }
 
     /// Runs a named hostile probe as `who` and returns the outcome label (SEC-3xx).
@@ -2035,8 +2056,12 @@ impl HarnessHandle {
     // ---- secrets and settings (SEC secrets, POL-*)
 
     /// Logs a line as the plugin would.
-    pub fn log_from_plugin(&self, _text: &str) {
-        unimplemented!("host::testing::HarnessHandle::log_from_plugin")
+    pub fn log_from_plugin(&self, text: &str) {
+        harness_lock(&self.observations).logs.push(LogLine {
+            plugin: self.plugin.0.clone(),
+            level: "info".into(),
+            message: text.into(),
+        });
     }
 
     /// The configuration file text, if one was written.

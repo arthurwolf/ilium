@@ -17,45 +17,97 @@ pub struct MenuOpening {
 }
 
 /// The menu harness (HST-476..478).
+/// Wait of one opening before the menu opens without late providers (HST-476).
+const OPENING_DEADLINE_MS: u64 = 20;
+
+/// Most entries one menu holds (api-menu-provider: at most 64).
+const MENU_ENTRY_CAPACITY: usize = 64;
+
+#[derive(Debug)]
+struct RunningProvider {
+    plugin: String,
+    answer_after_ms: u32,
+    entries: Vec<MenuEntry>,
+}
+
 #[derive(Debug)]
 pub struct MenuHarness {
-    _private: (),
+    clock_ms: u64,
+    static_entries: Vec<MenuEntry>,
+    running_providers: Vec<RunningProvider>,
 }
 
 impl MenuHarness {
     /// A fresh harness.
     pub fn new() -> MenuHarness {
-        unimplemented!("host::testing::menu::MenuHarness::new")
+        MenuHarness {
+            clock_ms: 0,
+            static_entries: Vec::new(),
+            running_providers: Vec::new(),
+        }
     }
 
     /// A running provider that answers after a delay.
-    pub fn add_provider(&mut self, _plugin: &str, _answer_after_ms: u32, _entries: Vec<MenuEntry>) {
-        unimplemented!("host::testing::menu::MenuHarness::add_provider")
+    pub fn add_provider(&mut self, plugin: &str, answer_after_ms: u32, entries: Vec<MenuEntry>) {
+        self.running_providers.push(RunningProvider {
+            plugin: plugin.to_string(),
+            answer_after_ms,
+            entries,
+        });
     }
 
     /// A stopped provider that needs activation first.
+    // Not called by an opening: the menu never waits for activation (HST-478).
     pub fn add_stopped_provider(
         &mut self,
         _plugin: &str,
         _activation_ms: u32,
         _entries: Vec<MenuEntry>,
     ) {
-        unimplemented!("host::testing::menu::MenuHarness::add_stopped_provider")
     }
 
     /// The static entries of the menu.
-    pub fn static_entries(&mut self, _entries: Vec<MenuEntry>) {
-        unimplemented!("host::testing::menu::MenuHarness::static_entries")
+    pub fn static_entries(&mut self, entries: Vec<MenuEntry>) {
+        self.static_entries = entries;
     }
 
     /// Opens the menu.
     pub fn open(&mut self, _context: MenuContext) -> MenuOpening {
-        unimplemented!("host::testing::menu::MenuHarness::open")
+        let mut frame: Vec<String> = self
+            .static_entries
+            .iter()
+            .map(|entry| entry.id.clone())
+            .collect();
+        let mut provider_calls = Vec::new();
+        let mut latest_answer_ms: u64 = 0;
+        let mut every_provider_answered = true;
+        for provider in &self.running_providers {
+            provider_calls.push((provider.plugin.clone(), self.clock_ms));
+            let answer_ms = u64::from(provider.answer_after_ms);
+            if answer_ms > OPENING_DEADLINE_MS {
+                every_provider_answered = false;
+                continue;
+            }
+            latest_answer_ms = latest_answer_ms.max(answer_ms);
+            frame.extend(provider.entries.iter().map(|entry| entry.id.clone()));
+        }
+        frame.truncate(MENU_ENTRY_CAPACITY);
+        let wait_ms = if every_provider_answered {
+            latest_answer_ms
+        } else {
+            OPENING_DEADLINE_MS
+        };
+        MenuOpening {
+            frames: vec![frame],
+            opened_at_ms: self.clock_ms.saturating_add(wait_ms),
+            provider_calls,
+            activations_waited_for: Vec::new(),
+        }
     }
 
     /// Moves the manual clock.
-    pub fn advance_ms(&mut self, _ms: u64) {
-        unimplemented!("host::testing::menu::MenuHarness::advance_ms")
+    pub fn advance_ms(&mut self, ms: u64) {
+        self.clock_ms = self.clock_ms.saturating_add(ms);
     }
 }
 
