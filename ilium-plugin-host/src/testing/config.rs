@@ -179,7 +179,12 @@ fn edit_toml(source: &str, path: &str, replacement: &str) -> Result<String, &'st
         let trimmed = line.trim();
         if trimmed.starts_with('[') && trimmed.ends_with(']') { table = trimmed[1..trimmed.len()-1].to_owned(); }
         let expected = if table.is_empty() { keys.last().copied().unwrap_or("").to_owned() } else { format!("{table}.{}", keys.last().copied().unwrap_or("")) };
-        if expected == path && let Some((left, _)) = line.split_once('=') && left.trim() == keys.last().copied().unwrap_or("") {
+        let assignment = if expected == path {
+            line.split_once('=').filter(|(left, _)| left.trim() == keys.last().copied().unwrap_or(""))
+        } else {
+            None
+        };
+        if let Some((left, _)) = assignment {
             if found || line.contains('#') { return Err("config.edit-context-required"); }
             let suffix = if line.ends_with('\n') { "\n" } else { "" };
             output.push_str(&format!("{left}= {replacement}{suffix}")); found = true;
