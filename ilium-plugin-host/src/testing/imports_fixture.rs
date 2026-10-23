@@ -91,7 +91,8 @@ const SETTINGS_PATCH_LIMIT_BYTES: usize = 256 * 1024;
 const SETTINGS_TEXT_LIMIT_CHARS: usize = 4096;
 
 /// Bucket quota of the fixture's storage engine, in bytes.
-const FIXTURE_BUCKET_LIMIT_BYTES: usize = 64 * 1024 * 1024;
+/// The default bucket quota of api-storage.md (16 MiB), the ceiling for tiers 2 and 3.
+const FIXTURE_BUCKET_LIMIT_BYTES: usize = 16 * 1024 * 1024;
 
 /// Shared quota of the fixture's storage engine, in bytes.
 const FIXTURE_SHARED_LIMIT_BYTES: usize = 128 * 1024 * 1024;
