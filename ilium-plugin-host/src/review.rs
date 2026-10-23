@@ -328,7 +328,10 @@ mod tests {
     /// REQ: SEC-108
     #[test]
     fn update_review_program_becoming_absolute_path_is_new_not_widened() {
-        let review = update_review(&[grant("process.run:git")], &[grant("process.run:/usr/bin/git")]);
+        let review = update_review(
+            &[grant("process.run:git")],
+            &[grant("process.run:/usr/bin/git")],
+        );
         assert!(review.wider.is_empty());
         assert_eq!(review.removed, vec![grant("process.run:git")]);
         assert_eq!(
@@ -343,7 +346,10 @@ mod tests {
     /// REQ: SEC-108
     #[test]
     fn update_review_held_grant_kept_in_both_lists_is_unchanged() {
-        let review = update_review(&[grant("tree.read")], &[grant("tree.read"), grant("tree.write")]);
+        let review = update_review(
+            &[grant("tree.read")],
+            &[grant("tree.read"), grant("tree.write")],
+        );
         assert_eq!(review.unchanged, vec![grant("tree.read")]);
         assert_eq!(
             review.new,
@@ -370,14 +376,14 @@ mod tests {
     /// REQ: SEC-110
     #[test]
     fn decline_counter_does_not_silence_a_fresh_target() {
-        let counter = DeclineCounter::default();
+        let counter = DeclineCounter;
         assert!(!counter.is_silenced("com.example.plugin", "fs.read:project"));
     }
 
     /// REQ: SEC-110
     #[test]
     fn decline_counter_silences_after_three_declines() {
-        let mut counter = DeclineCounter::default();
+        let mut counter = DeclineCounter;
         counter.record_decline("com.example.plugin", "http:api.example.com");
         counter.record_decline("com.example.plugin", "http:api.example.com");
         assert!(!counter.is_silenced("com.example.plugin", "http:api.example.com"));
@@ -388,7 +394,7 @@ mod tests {
     /// REQ: SEC-110
     #[test]
     fn decline_counter_stays_silenced_after_more_than_three_declines() {
-        let mut counter = DeclineCounter::default();
+        let mut counter = DeclineCounter;
         for _ in 0..4 {
             counter.record_decline("com.example.plugin", "http:api.example.com");
         }
@@ -398,7 +404,7 @@ mod tests {
     /// REQ: SEC-110
     #[test]
     fn decline_counter_keys_by_plugin_and_grant() {
-        let mut counter = DeclineCounter::default();
+        let mut counter = DeclineCounter;
         for _ in 0..3 {
             counter.record_decline("com.example.plugin", "http:api.example.com");
         }

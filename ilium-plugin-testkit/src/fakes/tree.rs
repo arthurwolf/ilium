@@ -154,7 +154,10 @@ mod spec_tests {
     #[test]
     fn dev_471_ids_ignore_supplied_value_and_are_not_reused_after_remove() {
         let mut host = FakeHost::new();
-        let first_id = host.tree().add(TreeNode { id: 99, ..pane_node("a", None) });
+        let first_id = host.tree().add(TreeNode {
+            id: 99,
+            ..pane_node("a", None)
+        });
         host.tree().remove(first_id);
         let next_id = host.tree().add(pane_node("b", None));
         assert_eq!(first_id, 1);
@@ -185,7 +188,10 @@ mod spec_tests {
         let mut host = FakeHost::new();
         let pane_id = host.tree().add(pane_node("shell", None));
         host.tree().rename(pane_id, "build");
-        assert_eq!(host.tree().get(pane_id).map(|node| node.name), Some("build".to_string()));
+        assert_eq!(
+            host.tree().get(pane_id).map(|node| node.name),
+            Some("build".to_string())
+        );
     }
 
     /// REQ: DEV-470
@@ -240,6 +246,9 @@ mod spec_tests {
         });
         let pane_id = host.tree().add(pane_node("shell", None));
         host.tree().move_node(pane_id, target_id);
-        assert_eq!(host.tree().get(pane_id).map(|node| node.parent), Some(Some(target_id)));
+        assert_eq!(
+            host.tree().get(pane_id).map(|node| node.parent),
+            Some(Some(target_id))
+        );
     }
 }

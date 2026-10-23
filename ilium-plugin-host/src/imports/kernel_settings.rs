@@ -77,7 +77,10 @@ mod tests {
         let text = expect_ok(import.read("terminal".to_string()));
         let values: serde_json::Value =
             serde_json::from_str(&text).expect("read result must be valid JSON");
-        assert!(values.is_object(), "read result must be a JSON object, got {text}");
+        assert!(
+            values.is_object(),
+            "read result must be a JSON object, got {text}"
+        );
     }
 
     #[test]
@@ -98,7 +101,9 @@ mod tests {
         let text = expect_ok(import.read("api".to_string()));
         let values: serde_json::Value =
             serde_json::from_str(&text).expect("api tab read must be valid JSON");
-        let object = values.as_object().expect("api tab read must be a JSON object");
+        let object = values
+            .as_object()
+            .expect("api tab read must be a JSON object");
         let has_redacted_value = object
             .values()
             .any(|value| value.as_str() == Some("<redacted>"));
@@ -172,11 +177,8 @@ mod tests {
     #[test]
     fn write_empty_key_is_not_found() {
         let mut import = KernelSettingsImport;
-        let code = error_code_of(import.write(
-            "terminal".to_string(),
-            String::new(),
-            "32".to_string(),
-        ));
+        let code =
+            error_code_of(import.write("terminal".to_string(), String::new(), "32".to_string()));
         assert_eq!(code, ErrorCode::NotFound);
     }
 

@@ -4,6 +4,7 @@
 use serde_json::json;
 
 use crate::common::*;
+use crate::lint_support::*;
 
 const MIB_KIB: usize = 1024;
 

@@ -153,7 +153,10 @@ mod tests {
         let values = settings.get_json();
         let parsed: serde_json::Value =
             serde_json::from_str(&values).expect("get_json must return valid JSON text");
-        assert!(parsed.is_object(), "get_json must return one JSON object, got: {values}");
+        assert!(
+            parsed.is_object(),
+            "get_json must return one JSON object, got: {values}"
+        );
     }
 
     /// Manual: api-settings, "Writing values" (an empty merge patch changes nothing and succeeds).
@@ -162,7 +165,10 @@ mod tests {
     fn set_json_empty_object_patch_is_accepted() {
         let mut settings = SettingsImport;
         let result = settings.set_json("{}".to_string());
-        assert!(result.is_ok(), "an empty merge patch must succeed, got {result:?}");
+        assert!(
+            result.is_ok(),
+            "an empty merge patch must succeed, got {result:?}"
+        );
     }
 
     #[test]
@@ -197,7 +203,10 @@ mod tests {
     #[test]
     fn set_json_rejects_a_patch_over_256_kib_with_a_short_message() {
         let patch = oversized_patch();
-        assert!(patch.len() > PATCH_LIMIT_BYTES, "fixture must exceed the cap");
+        assert!(
+            patch.len() > PATCH_LIMIT_BYTES,
+            "fixture must exceed the cap"
+        );
         let mut settings = SettingsImport;
         let result = settings.set_json(patch);
         match result {
@@ -231,7 +240,10 @@ mod tests {
     #[test]
     fn set_row_state_for_an_undeclared_row_key_returns_not_found() {
         let mut settings = SettingsImport;
-        let state = RowState { kind: RowStateKind::Idle, message: None };
+        let state = RowState {
+            kind: RowStateKind::Idle,
+            message: None,
+        };
         let result = settings.set_row_state(UNDECLARED_ROW_KEY.to_string(), state);
         assert_error_code(result, ErrorCode::NotFound);
     }

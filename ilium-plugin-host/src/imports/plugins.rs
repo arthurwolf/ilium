@@ -49,7 +49,11 @@ mod tests {
     fn list_without_installed_plugins_returns_empty_vec() {
         let mut host = PluginsImport;
         let records = host.list();
-        assert!(records.is_empty(), "expected no records, got {}", records.len());
+        assert!(
+            records.is_empty(),
+            "expected no records, got {}",
+            records.len()
+        );
     }
 
     /// REQ: CAP-018
@@ -57,7 +61,10 @@ mod tests {
     fn list_returns_empty_when_plugins_manage_is_declined() {
         let mut host = PluginsImport;
         let records = host.list();
-        assert!(records.is_empty(), "declined grant must yield an empty list");
+        assert!(
+            records.is_empty(),
+            "declined grant must yield an empty list"
+        );
     }
 
     /// REQ: LIF-019

@@ -77,7 +77,9 @@ mod spec_tests {
     fn path_line_regex() -> regex::Regex {
         let manifest = manifest();
         let detector = &manifest["contributes"]["link_detectors"][0];
-        let pattern = detector["regex"].as_str().expect("path-line regex is a string");
+        let pattern = detector["regex"]
+            .as_str()
+            .expect("path-line regex is a string");
         regex::Regex::new(pattern).expect("path-line regex compiles")
     }
 
@@ -118,7 +120,9 @@ mod spec_tests {
     fn client_side_holds_the_write_grant_for_the_terminal_settings_tab() {
         let manifest = manifest();
         let client_caps = string_list(&manifest["capabilities"]["client"]);
-        assert!(client_caps.iter().any(|cap| cap == "settings.write-kernel:terminal"));
+        assert!(client_caps
+            .iter()
+            .any(|cap| cap == "settings.write-kernel:terminal"));
     }
 
     /// REQ: COR-050
@@ -135,7 +139,10 @@ mod spec_tests {
             "panes.signal",
             "tree.write",
         ] {
-            assert!(server_caps.iter().any(|cap| cap == expected), "missing {expected}");
+            assert!(
+                server_caps.iter().any(|cap| cap == expected),
+                "missing {expected}"
+            );
         }
     }
 
@@ -157,9 +164,15 @@ mod spec_tests {
     #[test]
     fn extension_point_risk_marks_follow_the_corrected_table() {
         let manifest = manifest();
-        assert_eq!(extension_point(&manifest, "before-send-input")["risk"], "high");
+        assert_eq!(
+            extension_point(&manifest, "before-send-input")["risk"],
+            "high"
+        );
         assert_eq!(extension_point(&manifest, "open-link")["risk"], "high");
-        assert_eq!(extension_point(&manifest, "link-actions")["risk"], "standard");
+        assert_eq!(
+            extension_point(&manifest, "link-actions")["risk"],
+            "standard"
+        );
     }
 
     /// REQ: EXT-052

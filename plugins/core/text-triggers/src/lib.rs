@@ -57,7 +57,12 @@ mod spec_tests {
     fn string_list(value: &Value) -> Vec<String> {
         value
             .as_array()
-            .map(|items| items.iter().filter_map(|item| item.as_str().map(str::to_string)).collect())
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|item| item.as_str().map(str::to_string))
+                    .collect()
+            })
             .unwrap_or_default()
     }
 
@@ -93,9 +98,15 @@ mod spec_tests {
     fn manifest_declares_both_sides_with_their_worlds() {
         let manifest = manifest();
         assert_eq!(manifest["server"]["entry"].as_str(), Some("server.wasm"));
-        assert_eq!(manifest["server"]["world"].as_str(), Some("ilium:server/base@0.1.0"));
+        assert_eq!(
+            manifest["server"]["world"].as_str(),
+            Some("ilium:server/base@0.1.0")
+        );
         assert_eq!(manifest["client"]["entry"].as_str(), Some("client.wasm"));
-        assert_eq!(manifest["client"]["world"].as_str(), Some("ilium:client/base@0.1.0"));
+        assert_eq!(
+            manifest["client"]["world"].as_str(),
+            Some("ilium:client/base@0.1.0")
+        );
     }
 
     /// REQ: COR-050
@@ -112,8 +123,12 @@ mod spec_tests {
     #[test]
     fn server_side_holds_output_filter_and_write_capabilities() {
         let server = capability_list(&manifest(), "server");
-        assert!(server.iter().any(|capability| capability == "terminal.output-filter"));
-        assert!(server.iter().any(|capability| capability == "terminal.write"));
+        assert!(server
+            .iter()
+            .any(|capability| capability == "terminal.output-filter"));
+        assert!(server
+            .iter()
+            .any(|capability| capability == "terminal.write"));
     }
 
     /// REQ: COR-050

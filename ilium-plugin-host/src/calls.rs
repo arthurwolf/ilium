@@ -316,8 +316,14 @@ mod tests {
     /// REQ: HST-188
     #[test]
     fn hst_188_activate_and_deactivate_default_to_2000_and_500_ms() {
-        assert_eq!(deadline_for(CallClass::Activate, &default_limits()), ms(2_000));
-        assert_eq!(deadline_for(CallClass::Deactivate, &default_limits()), ms(500));
+        assert_eq!(
+            deadline_for(CallClass::Activate, &default_limits()),
+            ms(2_000)
+        );
+        assert_eq!(
+            deadline_for(CallClass::Deactivate, &default_limits()),
+            ms(500)
+        );
     }
 
     /// REQ: HST-188
@@ -325,7 +331,10 @@ mod tests {
     fn hst_188_detector_frame_and_migrate_defaults() {
         assert_eq!(deadline_for(CallClass::Detector, &default_limits()), ms(20));
         assert_eq!(deadline_for(CallClass::Frame, &default_limits()), ms(50));
-        assert_eq!(deadline_for(CallClass::Migrate, &default_limits()), ms(30_000));
+        assert_eq!(
+            deadline_for(CallClass::Migrate, &default_limits()),
+            ms(30_000)
+        );
     }
 
     /// REQ: HST-188
@@ -333,9 +342,15 @@ mod tests {
     fn hst_188_fixed_provider_classes_have_their_table_defaults() {
         assert_eq!(deadline_for(CallClass::MenuItems, &no_limits()), ms(20));
         assert_eq!(deadline_for(CallClass::QueryCatalog, &no_limits()), ms(20));
-        assert_eq!(deadline_for(CallClass::ListVirtualChildren, &no_limits()), ms(20));
+        assert_eq!(
+            deadline_for(CallClass::ListVirtualChildren, &no_limits()),
+            ms(20)
+        );
         assert_eq!(deadline_for(CallClass::Tokens, &no_limits()), ms(10));
-        assert_eq!(deadline_for(CallClass::SettingsValidate, &no_limits()), ms(100));
+        assert_eq!(
+            deadline_for(CallClass::SettingsValidate, &no_limits()),
+            ms(100)
+        );
     }
 
     /// REQ: HST-188
@@ -381,7 +396,10 @@ mod tests {
     /// REQ: HST-192
     #[test]
     fn hst_192_batch_with_a_command_invoked_event_is_a_command_batch() {
-        assert_eq!(batch_call_class(&[command_invoked_event()]), CallClass::Command);
+        assert_eq!(
+            batch_call_class(&[command_invoked_event()]),
+            CallClass::Command
+        );
     }
 
     /// REQ: HST-192
@@ -448,7 +466,11 @@ mod tests {
         for class in hard_classes {
             let deadline = deadline_for(class, &limits);
             let past = deadline + ms(1);
-            assert_eq!(evaluate_breach(class, past, &limits), BreachVerdict::HardTrap, "{class:?}");
+            assert_eq!(
+                evaluate_breach(class, past, &limits),
+                BreachVerdict::HardTrap,
+                "{class:?}"
+            );
         }
     }
 

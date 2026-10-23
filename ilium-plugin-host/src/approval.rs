@@ -177,6 +177,9 @@ mod tests {
         let outcome = channel.ask(PLUGIN_ID, &grants);
 
         assert_eq!(outcome, Err(ApprovalError::ReviewRequired));
-        assert_eq!(ApprovalError::ReviewRequired.clone(), ApprovalError::ReviewRequired);
+        assert_eq!(
+            ApprovalError::ReviewRequired.clone(),
+            ApprovalError::ReviewRequired
+        );
     }
 }

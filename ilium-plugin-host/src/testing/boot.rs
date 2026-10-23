@@ -7,9 +7,9 @@ use std::time::Duration;
 use ilium_plugin_api::error::Code;
 use ilium_plugin_api::{PluginError, ProcessKind, Side, Tier};
 
+use crate::crash_records::CrashRecord;
 use crate::lifecycle::{ShutdownReport, StartMode, StartReport};
 use crate::telemetry::LogLine;
-use crate::crash_records::CrashRecord;
 
 pub use ilium_plugin_api::generated::types::ClientId;
 
@@ -968,7 +968,9 @@ mod tests {
     /// REQ: HST-030
     #[test]
     fn instant_deactivate_is_not_forced_and_called_once() {
-        let mut run = server_run(vec![startup_plugin("ilium.core.tree").deactivate_takes_ms(0)]);
+        let mut run = server_run(vec![
+            startup_plugin("ilium.core.tree").deactivate_takes_ms(0)
+        ]);
         run.start();
         let report = run.shutdown();
         assert!(report.forced.is_empty());
@@ -978,7 +980,9 @@ mod tests {
     /// REQ: HST-030
     #[test]
     fn slow_deactivate_is_forced_past_the_five_second_budget() {
-        let mut run = server_run(vec![startup_plugin("slow.plugin").deactivate_takes_ms(10_000)]);
+        let mut run = server_run(vec![
+            startup_plugin("slow.plugin").deactivate_takes_ms(10_000)
+        ]);
         run.start();
         let report = run.shutdown();
         assert!(report.forced.contains(&"slow.plugin".to_string()));
@@ -1036,7 +1040,10 @@ mod tests {
         let client = attached_client(&mut run);
         run.client_exit(client);
         assert!(run.server_alive());
-        assert_eq!(run.side_state("ilium.core.tree", Side::Server).state, "active");
+        assert_eq!(
+            run.side_state("ilium.core.tree", Side::Server).state,
+            "active"
+        );
     }
 
     /// REQ: HST-007
@@ -1096,7 +1103,9 @@ mod tests {
     /// REQ: HST-021
     #[test]
     fn one_engine_serves_every_store_of_the_process() {
-        let mut run = server_run(vec![startup_plugin("ilium.core.tree").limit("concurrent_jobs", 4)]);
+        let mut run = server_run(vec![
+            startup_plugin("ilium.core.tree").limit("concurrent_jobs", 4)
+        ]);
         run.start();
         run.start_jobs("ilium.core.tree", 2);
         assert_eq!(run.engine_count(), 1);
@@ -1110,7 +1119,9 @@ mod tests {
     /// REQ: HST-022
     #[test]
     fn each_job_instance_has_its_own_store() {
-        let mut run = server_run(vec![startup_plugin("ilium.core.tree").limit("concurrent_jobs", 8)]);
+        let mut run = server_run(vec![
+            startup_plugin("ilium.core.tree").limit("concurrent_jobs", 8)
+        ]);
         run.start();
         run.start_jobs("ilium.core.tree", 3);
         let mut job_store_ids = run.job_store_ids("ilium.core.tree");
@@ -1123,7 +1134,9 @@ mod tests {
     /// REQ: HST-017
     #[test]
     fn job_memory_is_separate_from_main_instance_memory() {
-        let mut run = server_run(vec![startup_plugin("ilium.core.tree").limit("concurrent_jobs", 2)]);
+        let mut run = server_run(vec![
+            startup_plugin("ilium.core.tree").limit("concurrent_jobs", 2)
+        ]);
         run.start();
         run.start_jobs("ilium.core.tree", 1);
         assert_ne!(
@@ -1135,7 +1148,9 @@ mod tests {
     /// REQ: HST-018
     #[test]
     fn jobs_beyond_concurrent_limit_wait_in_queue() {
-        let mut run = server_run(vec![startup_plugin("ilium.core.search").limit("concurrent_jobs", 2)]);
+        let mut run = server_run(vec![
+            startup_plugin("ilium.core.search").limit("concurrent_jobs", 2)
+        ]);
         run.start();
         run.start_jobs("ilium.core.search", 5);
         assert_eq!(
@@ -1151,7 +1166,9 @@ mod tests {
     /// REQ: HST-018
     #[test]
     fn jobs_exactly_at_concurrent_limit_do_not_queue() {
-        let mut run = server_run(vec![startup_plugin("ilium.core.search").limit("concurrent_jobs", 2)]);
+        let mut run = server_run(vec![
+            startup_plugin("ilium.core.search").limit("concurrent_jobs", 2)
+        ]);
         run.start();
         run.start_jobs("ilium.core.search", 2);
         assert_eq!(
@@ -1167,7 +1184,9 @@ mod tests {
     /// REQ: HST-018
     #[test]
     fn zero_started_jobs_leave_stats_at_default() {
-        let mut run = server_run(vec![startup_plugin("ilium.core.search").limit("concurrent_jobs", 2)]);
+        let mut run = server_run(vec![
+            startup_plugin("ilium.core.search").limit("concurrent_jobs", 2)
+        ]);
         run.start();
         run.start_jobs("ilium.core.search", 0);
         assert_eq!(run.job_stats("ilium.core.search"), JobStats::default());
@@ -1221,7 +1240,11 @@ mod tests {
         let first = attached_client(&mut run);
         let second = attached_client(&mut run);
         run.trap_in_client(first, "ilium.core.tree");
-        assert!(run.client_side_state(first, "ilium.core.tree").failures_in_window >= 1);
+        assert!(
+            run.client_side_state(first, "ilium.core.tree")
+                .failures_in_window
+                >= 1
+        );
         let other = run.client_side_state(second, "ilium.core.tree");
         assert_eq!(other.state, "active");
         assert_eq!(other.failures_in_window, 0);
@@ -1236,8 +1259,14 @@ mod tests {
         ]);
         run.start();
         run.trap_in("ilium.core.tree", Side::Server);
-        assert_ne!(run.side_state("ilium.core.tree", Side::Server).state, "active");
-        assert_eq!(run.side_state("ilium.core.search", Side::Server).state, "active");
+        assert_ne!(
+            run.side_state("ilium.core.tree", Side::Server).state,
+            "active"
+        );
+        assert_eq!(
+            run.side_state("ilium.core.search", Side::Server).state,
+            "active"
+        );
     }
 
     /// REQ: HST-038
@@ -1357,7 +1386,10 @@ mod tests {
         run.start();
         assert!(!run.host_started());
         assert!(run.kernel_alive());
-        assert!(run.logs().iter().any(|line| line.contains("host.engine-failed")));
+        assert!(run
+            .logs()
+            .iter()
+            .any(|line| line.contains("host.engine-failed")));
     }
 
     /// REQ: HST-044
@@ -1372,7 +1404,9 @@ mod tests {
             .corrupt_grant_store()
             .build();
         run.start();
-        assert!(!run.granted("ilium.core.tree").contains(&"net.http".to_string()));
+        assert!(!run
+            .granted("ilium.core.tree")
+            .contains(&"net.http".to_string()));
     }
 
     /// REQ: HST-044

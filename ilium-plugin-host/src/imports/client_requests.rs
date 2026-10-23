@@ -73,7 +73,12 @@ mod tests {
     #[test]
     fn request_accepts_lower_timeout_bound_of_one_millisecond() {
         let mut import = ClientRequestsImport;
-        let result = import.request(ClientId(1), "terminal-size".to_string(), "{}".to_string(), 1);
+        let result = import.request(
+            ClientId(1),
+            "terminal-size".to_string(),
+            "{}".to_string(),
+            1,
+        );
         assert!(
             result.is_ok(),
             "timeout 1 ms is the documented lower bound and must be accepted, got {result:?}"
@@ -86,8 +91,12 @@ mod tests {
     #[test]
     fn request_accepts_upper_timeout_bound_of_30000_milliseconds() {
         let mut import = ClientRequestsImport;
-        let result =
-            import.request(ClientId(1), "terminal-size".to_string(), "{}".to_string(), 30_000);
+        let result = import.request(
+            ClientId(1),
+            "terminal-size".to_string(),
+            "{}".to_string(),
+            30_000,
+        );
         assert!(
             result.is_ok(),
             "timeout 30000 ms is the documented upper bound and must be accepted, got {result:?}"

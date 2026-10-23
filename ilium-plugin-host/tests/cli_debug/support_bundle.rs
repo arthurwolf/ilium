@@ -91,7 +91,10 @@ fn dev_832_an_existing_target_is_never_overwritten() {
     std::fs::write(&out, b"keep").expect("write existing file");
     let output = bundle_run(&env, &out);
     assert_eq!(output.exit_code, 2);
-    assert_eq!(error_code(&output).as_deref(), Some("support-bundle.exists"));
+    assert_eq!(
+        error_code(&output).as_deref(),
+        Some("support-bundle.exists")
+    );
     assert_eq!(std::fs::read(&out).expect("read target"), b"keep");
 }
 
@@ -116,7 +119,10 @@ fn usr_221_the_archive_holds_exactly_the_four_named_files() {
     let out = scratch.path().join("bundle.zip");
     bundle_run(&env, &out);
     let names: Vec<String> = bundle_entries(&out).into_keys().collect();
-    assert_eq!(names, ["crashes.txt", "log.txt", "stats.txt", "summary.txt"]);
+    assert_eq!(
+        names,
+        ["crashes.txt", "log.txt", "stats.txt", "summary.txt"]
+    );
 }
 
 /// REQ: USR-222
@@ -130,10 +136,34 @@ fn usr_222_credentials_url_parameters_home_paths_and_payloads_are_redacted() {
         ID,
         "",
         &[
-            log_line("2030-01-01T12:00:00Z", "INFO", "server", ID, "Authorization: Bearer SECRET_TOKEN_ABC"),
-            log_line("2030-01-01T12:00:01Z", "INFO", "server", ID, "GET https://api.example.test/v1?api_key=SECRET_KEY_XYZ&q=1"),
-            log_line("2030-01-01T12:00:02Z", "INFO", "server", ID, &format!("opened {home}/dev/notes.md")),
-            log_line("2030-01-01T12:00:03Z", "INFO", "server", ID, "payload {\"body\":\"PAYLOAD_SENTINEL\"} 1024 bytes"),
+            log_line(
+                "2030-01-01T12:00:00Z",
+                "INFO",
+                "server",
+                ID,
+                "Authorization: Bearer SECRET_TOKEN_ABC",
+            ),
+            log_line(
+                "2030-01-01T12:00:01Z",
+                "INFO",
+                "server",
+                ID,
+                "GET https://api.example.test/v1?api_key=SECRET_KEY_XYZ&q=1",
+            ),
+            log_line(
+                "2030-01-01T12:00:02Z",
+                "INFO",
+                "server",
+                ID,
+                &format!("opened {home}/dev/notes.md"),
+            ),
+            log_line(
+                "2030-01-01T12:00:03Z",
+                "INFO",
+                "server",
+                ID,
+                "payload {\"body\":\"PAYLOAD_SENTINEL\"} 1024 bytes",
+            ),
         ],
     );
     let out = scratch.path().join("bundle.zip");
@@ -218,8 +248,11 @@ fn usr_229_crash_records_are_listed_in_the_bundle_crashes_file() {
         export_name: Some("on-events".to_owned()),
     };
     std::fs::create_dir_all(&env.state_dir).expect("create state folder");
-    std::fs::write(records_path(&env.state_dir), format!("{}\n", format_record(&record)))
-        .expect("seed crash records");
+    std::fs::write(
+        records_path(&env.state_dir),
+        format!("{}\n", format_record(&record)),
+    )
+    .expect("seed crash records");
     let out = scratch.path().join("bundle.zip");
     bundle_run(&env, &out);
     let entries = bundle_entries(&out);

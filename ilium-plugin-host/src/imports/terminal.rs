@@ -151,12 +151,22 @@ mod tests {
 
     /// Builds an output filter with the given id, regex and rate.
     fn filter(id: &str, regex: &str, rate_per_second: u16) -> OutputFilter {
-        OutputFilter { id: id.to_string(), regex: regex.to_string(), rate_per_second }
+        OutputFilter {
+            id: id.to_string(),
+            regex: regex.to_string(),
+            rate_per_second,
+        }
     }
 
     /// Builds a highlight region spanning the given rows, with default style and no label.
     fn region(first_row: u32, last_row: u32) -> CellRegion {
-        CellRegion { first_row, first_column: 0, last_row, last_column: 0, ..Default::default() }
+        CellRegion {
+            first_row,
+            first_column: 0,
+            last_row,
+            last_column: 0,
+            ..Default::default()
+        }
     }
 
     /// Returns the error code of a failed call; fails the test when the call succeeded.
@@ -171,14 +181,18 @@ mod tests {
     #[test]
     fn read_screen_of_unknown_pane_returns_none() {
         let mut terminal = TerminalImport;
-        assert!(terminal.read_screen(missing_pane(), ScreenPart::Visible, 24).is_none());
+        assert!(terminal
+            .read_screen(missing_pane(), ScreenPart::Visible, 24)
+            .is_none());
     }
 
     /// REQ: PRI-001
     #[test]
     fn read_screen_scrollback_of_unknown_pane_returns_none() {
         let mut terminal = TerminalImport;
-        assert!(terminal.read_screen(missing_pane(), ScreenPart::Scrollback, 10_000).is_none());
+        assert!(terminal
+            .read_screen(missing_pane(), ScreenPart::Scrollback, 10_000)
+            .is_none());
     }
 
     /// REQ: PRI-001
@@ -192,14 +206,18 @@ mod tests {
     #[test]
     fn read_cells_above_1000_rows_returns_none() {
         let mut terminal = TerminalImport;
-        assert!(terminal.read_cells(pane(), ScreenPart::Visible, 0, 1_001).is_none());
+        assert!(terminal
+            .read_cells(pane(), ScreenPart::Visible, 0, 1_001)
+            .is_none());
     }
 
     /// REQ: PRI-001
     #[test]
     fn read_cells_of_scrollback_above_1000_rows_returns_none() {
         let mut terminal = TerminalImport;
-        assert!(terminal.read_cells(pane(), ScreenPart::Scrollback, 0, u32::MAX).is_none());
+        assert!(terminal
+            .read_cells(pane(), ScreenPart::Scrollback, 0, u32::MAX)
+            .is_none());
     }
 
     /// REQ: PRI-001
@@ -213,7 +231,10 @@ mod tests {
     #[test]
     fn freeze_snapshot_of_missing_pane_is_not_found() {
         let mut terminal = TerminalImport;
-        assert_eq!(error_code_of(terminal.freeze_snapshot(missing_pane())), ErrorCode::NotFound);
+        assert_eq!(
+            error_code_of(terminal.freeze_snapshot(missing_pane())),
+            ErrorCode::NotFound
+        );
     }
 
     /// REQ: PRI-001
@@ -275,7 +296,8 @@ mod tests {
     #[test]
     fn add_output_filter_on_missing_pane_is_not_found() {
         let mut terminal = TerminalImport;
-        let result = terminal.add_output_filter(missing_pane(), filter("rate-limit", "rate limit", 1));
+        let result =
+            terminal.add_output_filter(missing_pane(), filter("rate-limit", "rate limit", 1));
         assert_eq!(error_code_of(result), ErrorCode::NotFound);
     }
 
@@ -290,7 +312,10 @@ mod tests {
     #[test]
     fn claim_pointer_on_missing_pane_is_not_found() {
         let mut terminal = TerminalImport;
-        assert_eq!(error_code_of(terminal.claim_pointer(missing_pane())), ErrorCode::NotFound);
+        assert_eq!(
+            error_code_of(terminal.claim_pointer(missing_pane())),
+            ErrorCode::NotFound
+        );
     }
 
     /// REQ: PRI-007
@@ -354,7 +379,8 @@ mod tests {
     #[test]
     fn set_highlights_on_missing_pane_is_not_found() {
         let mut terminal = TerminalImport;
-        let result = terminal.set_highlights(missing_pane(), "search".to_string(), vec![region(0, 0)]);
+        let result =
+            terminal.set_highlights(missing_pane(), "search".to_string(), vec![region(0, 0)]);
         assert_eq!(error_code_of(result), ErrorCode::NotFound);
     }
 
@@ -373,7 +399,10 @@ mod tests {
     fn second_input_lock_on_the_same_pane_is_conflict() {
         let mut terminal = TerminalImport;
         let _first = terminal.lock_input(pane(), 500);
-        assert_eq!(error_code_of(terminal.lock_input(pane(), 500)), ErrorCode::Conflict);
+        assert_eq!(
+            error_code_of(terminal.lock_input(pane(), 500)),
+            ErrorCode::Conflict
+        );
     }
 
     /// REQ: PRI-005

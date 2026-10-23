@@ -15,7 +15,7 @@ mod api_messages_and_topics;
 mod api_services;
 mod extending_core_plugins;
 mod reference_core_extension_points;
+mod reference_core_replacement_matrix;
 mod reference_extension_security;
 mod reference_wit_exports;
 mod wit_extensions_register;
-mod reference_core_replacement_matrix;

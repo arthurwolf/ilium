@@ -133,9 +133,8 @@ impl ReplyWaiter {
 
     /// The error to report once the deadline passed, else `None`.
     pub fn result(&self) -> Option<PluginError> {
-        (self.elapsed_ms >= reply_deadline_ms(self.kind)).then(|| {
-            PluginError::new(ErrorCode::TimedOut, "Plugin reply deadline reached")
-        })
+        (self.elapsed_ms >= reply_deadline_ms(self.kind))
+            .then(|| PluginError::new(ErrorCode::TimedOut, "Plugin reply deadline reached"))
     }
 }
 
@@ -234,8 +233,12 @@ mod tests {
     #[test]
     fn process_quota_refuses_a_third_spawn_with_quota_exceeded() {
         let mut quota = ProcessQuota::new();
-        quota.spawn().expect("first spawn is within the default limit of two");
-        quota.spawn().expect("second spawn is within the default limit of two");
+        quota
+            .spawn()
+            .expect("first spawn is within the default limit of two");
+        quota
+            .spawn()
+            .expect("second spawn is within the default limit of two");
         assert_eq!(refusal_code(quota.spawn()), ErrorCode::QuotaExceeded);
         assert_eq!(quota.live(), 2);
     }
@@ -264,9 +267,13 @@ mod tests {
     #[test]
     fn process_quota_hold_run_stays_counted_until_exit_one() {
         let mut quota = ProcessQuota::new();
-        quota.hold_run().expect("first held run is within the limit");
+        quota
+            .hold_run()
+            .expect("first held run is within the limit");
         assert_eq!(quota.live(), 1);
-        quota.hold_run().expect("second held run is within the limit");
+        quota
+            .hold_run()
+            .expect("second held run is within the limit");
         assert_eq!(quota.live(), 2);
         assert_eq!(refusal_code(quota.hold_run()), ErrorCode::QuotaExceeded);
         assert_eq!(quota.live(), 2);
@@ -281,7 +288,9 @@ mod tests {
     fn process_quota_held_runs_and_spawns_share_one_limit() {
         let mut quota = ProcessQuota::new();
         quota.hold_run().expect("held run is within the limit");
-        quota.spawn().expect("spawn is the second child within the limit");
+        quota
+            .spawn()
+            .expect("spawn is the second child within the limit");
         assert_eq!(quota.live(), 2);
         assert_eq!(refusal_code(quota.spawn()), ErrorCode::QuotaExceeded);
     }
@@ -388,7 +397,10 @@ mod tests {
         waiter.advance_ms(119_999);
         assert_eq!(waiter.result(), None);
         waiter.advance_ms(2);
-        assert_eq!(waiter.result().map(|error| error.code), Some(ErrorCode::TimedOut));
+        assert_eq!(
+            waiter.result().map(|error| error.code),
+            Some(ErrorCode::TimedOut)
+        );
     }
 
     /// REQ: HST-499
@@ -398,59 +410,107 @@ mod tests {
         waiter.advance_ms(999);
         assert_eq!(waiter.result(), None);
         waiter.advance_ms(2);
-        assert_eq!(waiter.result().map(|error| error.code), Some(ErrorCode::TimedOut));
+        assert_eq!(
+            waiter.result().map(|error| error.code),
+            Some(ErrorCode::TimedOut)
+        );
     }
 
     /// REQ: HST-190
     #[test]
     fn soft_breach_is_tolerated_below_the_annotate_streak_limit() {
-        assert_eq!(soft_breach_verdict(CallClass::Annotate, 1, 5), SoftVerdict::Tolerated);
-        assert_eq!(soft_breach_verdict(CallClass::Annotate, 2, 5), SoftVerdict::Tolerated);
+        assert_eq!(
+            soft_breach_verdict(CallClass::Annotate, 1, 5),
+            SoftVerdict::Tolerated
+        );
+        assert_eq!(
+            soft_breach_verdict(CallClass::Annotate, 2, 5),
+            SoftVerdict::Tolerated
+        );
     }
 
     /// REQ: HST-190
     #[test]
     fn soft_breach_traps_at_the_streak_limit_of_three_for_annotate_and_detector() {
-        assert_eq!(soft_breach_verdict(CallClass::Annotate, 3, 5), SoftVerdict::TrapCounted);
-        assert_eq!(soft_breach_verdict(CallClass::Detector, 3, 5), SoftVerdict::TrapCounted);
-        assert_eq!(soft_breach_verdict(CallClass::Detector, 2, 5), SoftVerdict::Tolerated);
+        assert_eq!(
+            soft_breach_verdict(CallClass::Annotate, 3, 5),
+            SoftVerdict::TrapCounted
+        );
+        assert_eq!(
+            soft_breach_verdict(CallClass::Detector, 3, 5),
+            SoftVerdict::TrapCounted
+        );
+        assert_eq!(
+            soft_breach_verdict(CallClass::Detector, 2, 5),
+            SoftVerdict::Tolerated
+        );
     }
 
     /// REQ: HST-190
     #[test]
     fn soft_breach_scene_frames_trap_only_at_thirty_in_a_row() {
-        assert_eq!(soft_breach_verdict(CallClass::Frame, 1, 1), SoftVerdict::Tolerated);
-        assert_eq!(soft_breach_verdict(CallClass::Frame, 29, 1), SoftVerdict::Tolerated);
-        assert_eq!(soft_breach_verdict(CallClass::Frame, 30, 1), SoftVerdict::TrapCounted);
+        assert_eq!(
+            soft_breach_verdict(CallClass::Frame, 1, 1),
+            SoftVerdict::Tolerated
+        );
+        assert_eq!(
+            soft_breach_verdict(CallClass::Frame, 29, 1),
+            SoftVerdict::Tolerated
+        );
+        assert_eq!(
+            soft_breach_verdict(CallClass::Frame, 30, 1),
+            SoftVerdict::TrapCounted
+        );
     }
 
     /// REQ: HST-189
     #[test]
     fn soft_breach_past_the_hundred_millisecond_grace_traps_at_once() {
         // Annotate has a 10 ms soft deadline, so the grace ends at 110 ms.
-        assert_eq!(soft_breach_verdict(CallClass::Annotate, 1, 109), SoftVerdict::Tolerated);
-        assert_eq!(soft_breach_verdict(CallClass::Annotate, 1, 111), SoftVerdict::TrapCounted);
+        assert_eq!(
+            soft_breach_verdict(CallClass::Annotate, 1, 109),
+            SoftVerdict::Tolerated
+        );
+        assert_eq!(
+            soft_breach_verdict(CallClass::Annotate, 1, 111),
+            SoftVerdict::TrapCounted
+        );
     }
 
     /// REQ: HST-189
     #[test]
     fn soft_breach_grace_follows_the_class_deadline_for_settings_validate() {
         // Settings validation has a 100 ms soft deadline, so the grace ends at 200 ms.
-        assert_eq!(soft_breach_verdict(CallClass::SettingsValidate, 1, 150), SoftVerdict::Tolerated);
-        assert_eq!(soft_breach_verdict(CallClass::SettingsValidate, 1, 201), SoftVerdict::TrapCounted);
+        assert_eq!(
+            soft_breach_verdict(CallClass::SettingsValidate, 1, 150),
+            SoftVerdict::Tolerated
+        );
+        assert_eq!(
+            soft_breach_verdict(CallClass::SettingsValidate, 1, 201),
+            SoftVerdict::TrapCounted
+        );
     }
 
     /// REQ: HST-190
     #[test]
     fn soft_breach_settings_validate_streak_limit_is_three() {
-        assert_eq!(soft_breach_verdict(CallClass::SettingsValidate, 2, 5), SoftVerdict::Tolerated);
-        assert_eq!(soft_breach_verdict(CallClass::SettingsValidate, 3, 5), SoftVerdict::TrapCounted);
+        assert_eq!(
+            soft_breach_verdict(CallClass::SettingsValidate, 2, 5),
+            SoftVerdict::Tolerated
+        );
+        assert_eq!(
+            soft_breach_verdict(CallClass::SettingsValidate, 3, 5),
+            SoftVerdict::TrapCounted
+        );
     }
 
     /// REQ: HST-190
     #[test]
     fn soft_breach_with_no_prior_breach_and_no_elapsed_time_is_tolerated() {
-        assert_eq!(soft_breach_verdict(CallClass::Annotate, 0, 0), SoftVerdict::Tolerated);
+        assert_eq!(
+            soft_breach_verdict(CallClass::Annotate, 0, 0),
+            SoftVerdict::Tolerated
+        );
     }
 
     /// REQ: HST-498
@@ -463,15 +523,24 @@ mod tests {
     /// REQ: HST-498
     #[test]
     fn hook_handler_third_breach_disables_the_handler_without_a_failure() {
-        assert_eq!(hook_handler_breach_verdict(3), SoftVerdict::DisableHandlerNoFailure);
-        assert_eq!(hook_handler_breach_verdict(4), SoftVerdict::DisableHandlerNoFailure);
+        assert_eq!(
+            hook_handler_breach_verdict(3),
+            SoftVerdict::DisableHandlerNoFailure
+        );
+        assert_eq!(
+            hook_handler_breach_verdict(4),
+            SoftVerdict::DisableHandlerNoFailure
+        );
     }
 
     /// REQ: HST-498
     #[test]
     fn hook_handler_breach_never_counts_as_a_trap() {
         for breaches in 1..=10 {
-            assert_ne!(hook_handler_breach_verdict(breaches), SoftVerdict::TrapCounted);
+            assert_ne!(
+                hook_handler_breach_verdict(breaches),
+                SoftVerdict::TrapCounted
+            );
         }
     }
 }

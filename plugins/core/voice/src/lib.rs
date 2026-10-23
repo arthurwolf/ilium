@@ -67,8 +67,8 @@ mod spec_tests {
     ];
 
     fn parse_manifest(text: &str) -> Result<serde_json::Value, String> {
-        let value: serde_json::Value =
-            serde_json::from_str(text).map_err(|error| format!("manifest is not valid JSON: {error}"))?;
+        let value: serde_json::Value = serde_json::from_str(text)
+            .map_err(|error| format!("manifest is not valid JSON: {error}"))?;
         if value.is_object() {
             Ok(value)
         } else {
@@ -97,7 +97,10 @@ mod spec_tests {
             .collect()
     }
 
-    fn extension_point<'a>(manifest: &'a serde_json::Value, point_id: &str) -> &'a serde_json::Value {
+    fn extension_point<'a>(
+        manifest: &'a serde_json::Value,
+        point_id: &str,
+    ) -> &'a serde_json::Value {
         manifest["contributes"]["extension_points"]
             .as_array()
             .expect("contributes.extension_points is an array")
@@ -118,7 +121,10 @@ mod spec_tests {
     #[test]
     fn empty_or_non_object_manifest_text_is_rejected() {
         assert!(parse_manifest("").is_err(), "empty input must not parse");
-        assert!(parse_manifest("[]").is_err(), "a JSON array is not a manifest");
+        assert!(
+            parse_manifest("[]").is_err(),
+            "a JSON array is not a manifest"
+        );
     }
 
     /// REQ: COR-050
@@ -146,8 +152,14 @@ mod spec_tests {
     #[test]
     fn each_side_names_its_wasm_world_and_has_a_plugin_struct() {
         let manifest = load_manifest();
-        assert_eq!(manifest["server"]["world"].as_str(), Some("ilium:server/base@0.1.0"));
-        assert_eq!(manifest["client"]["world"].as_str(), Some("ilium:client/base@0.1.0"));
+        assert_eq!(
+            manifest["server"]["world"].as_str(),
+            Some("ilium:server/base@0.1.0")
+        );
+        assert_eq!(
+            manifest["client"]["world"].as_str(),
+            Some("ilium:client/base@0.1.0")
+        );
         let _server = VoiceServer::default();
         let _client = VoiceClient::default();
     }
@@ -159,9 +171,17 @@ mod spec_tests {
         let client = string_list(&manifest["capabilities"]["client"]);
         let server = string_list(&manifest["capabilities"]["server"]);
         let tab_grant = "settings.write-kernel:voice-control";
-        assert_eq!(client.iter().filter(|grant| grant.as_str() == tab_grant).count(), 1);
+        assert_eq!(
+            client
+                .iter()
+                .filter(|grant| grant.as_str() == tab_grant)
+                .count(),
+            1
+        );
         assert!(
-            !server.iter().any(|grant| grant.starts_with("settings.write-kernel:")),
+            !server
+                .iter()
+                .any(|grant| grant.starts_with("settings.write-kernel:")),
             "the server side must not hold a kernel settings tab"
         );
     }
@@ -200,7 +220,13 @@ mod spec_tests {
     #[test]
     fn extension_point_risk_marks_follow_the_corrected_table() {
         let manifest = load_manifest();
-        assert_eq!(extension_point(&manifest, "transcript")["risk"].as_str(), Some("high"));
-        assert_eq!(extension_point(&manifest, "voice-intents")["risk"].as_str(), Some("standard"));
+        assert_eq!(
+            extension_point(&manifest, "transcript")["risk"].as_str(),
+            Some("high")
+        );
+        assert_eq!(
+            extension_point(&manifest, "voice-intents")["risk"].as_str(),
+            Some("standard")
+        );
     }
 }

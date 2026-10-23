@@ -70,7 +70,10 @@ mod spec_tests {
         assert_eq!(manifest["publisher"], "Ilium");
         assert_eq!(manifest["client"]["entry"], "client.wasm");
         assert_eq!(manifest["client"]["world"], "ilium:client/base@0.1.0");
-        assert_eq!(manifest["activation"], serde_json::json!(["pane-kind:board"]));
+        assert_eq!(
+            manifest["activation"],
+            serde_json::json!(["pane-kind:board"])
+        );
         let _client = KanbanClient::default();
     }
 
@@ -132,7 +135,13 @@ mod spec_tests {
             "the client part must never hold the kernel tab grant"
         );
         let server_grants = capability_list(&manifest, "server");
-        assert_eq!(server_grants.iter().filter(|held| held.as_str() == grant).count(), 1);
+        assert_eq!(
+            server_grants
+                .iter()
+                .filter(|held| held.as_str() == grant)
+                .count(),
+            1
+        );
     }
 
     /// REQ: COR-050

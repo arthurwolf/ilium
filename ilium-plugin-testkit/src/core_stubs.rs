@@ -32,7 +32,10 @@ mod spec_tests {
         let stubs = table();
         assert_eq!(stubs.len(), 30);
         assert_eq!(stubs.first().expect("first row").name, "ilium.core.tree");
-        assert_eq!(stubs.last().expect("last row").name, "ilium.core.diagnostics");
+        assert_eq!(
+            stubs.last().expect("last row").name,
+            "ilium.core.diagnostics"
+        );
     }
 
     /// REQ: DEV-483
@@ -41,14 +44,19 @@ mod spec_tests {
         let stubs = table();
         let names: HashSet<&str> = stubs.iter().map(|stub| stub.name.as_str()).collect();
         assert_eq!(names.len(), stubs.len());
-        assert!(stubs.iter().all(|stub| stub.name.starts_with("ilium.core.")));
+        assert!(stubs
+            .iter()
+            .all(|stub| stub.name.starts_with("ilium.core.")));
     }
 
     /// REQ: DEV-483
     #[test]
     fn dev_483_tree_stub_exposes_its_points_and_bookmarks_service() {
         let stub = find("ilium.core.tree").expect("tree stub is in the table");
-        assert_eq!(stub.extension_points, vec!["before-move", "before-close", "node-sorts"]);
+        assert_eq!(
+            stub.extension_points,
+            vec!["before-move", "before-close", "node-sorts"]
+        );
         assert_eq!(stub.services, vec!["bookmarks"]);
     }
 
@@ -64,7 +72,10 @@ mod spec_tests {
     #[test]
     fn dev_483_cost_stub_exposes_usage_service() {
         let stub = find("ilium.core.cost").expect("cost stub is in the table");
-        assert_eq!(stub.extension_points, vec!["price-sources", "quota-sources"]);
+        assert_eq!(
+            stub.extension_points,
+            vec!["price-sources", "quota-sources"]
+        );
         assert_eq!(stub.services, vec!["usage"]);
     }
 
@@ -73,7 +84,12 @@ mod spec_tests {
     fn dev_483_find_returns_the_same_row_as_table_for_every_stub() {
         for stub in table() {
             assert!(!stub.extension_points.is_empty(), "points of {}", stub.name);
-            assert_eq!(find(&stub.name), Some(stub.clone()), "find of {}", stub.name);
+            assert_eq!(
+                find(&stub.name),
+                Some(stub.clone()),
+                "find of {}",
+                stub.name
+            );
         }
     }
 

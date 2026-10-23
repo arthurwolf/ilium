@@ -386,7 +386,9 @@ mod spec_tests {
         let mut tree = Tree::new();
         tree.node(widgets::clear()).child(1).done();
         tree.node(widgets::key_hints(Vec::new())).done();
-        let built = tree.finish(0).expect("a root-zero tree with a forward child is valid");
+        let built = tree
+            .finish(0)
+            .expect("a root-zero tree with a forward child is valid");
         assert_eq!(built.root, 0);
         assert_eq!(built.nodes[0].widget, Widget::Clear);
         assert_eq!(built.nodes[0].children, vec![1]);
@@ -448,7 +450,9 @@ mod spec_tests {
     #[test]
     fn disabled_reason_over_40_characters_is_rejected() {
         let mut tree = Tree::new();
-        tree.node(widgets::clear()).disabled_reason("r".repeat(41)).done();
+        tree.node(widgets::clear())
+            .disabled_reason("r".repeat(41))
+            .done();
         assert!(tree.finish(0).is_err());
     }
 }

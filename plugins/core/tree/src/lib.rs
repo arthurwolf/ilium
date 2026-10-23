@@ -66,7 +66,12 @@ mod spec_tests {
     fn string_list(value: &Value) -> Vec<String> {
         value
             .as_array()
-            .map(|items| items.iter().filter_map(|item| item.as_str().map(str::to_owned)).collect())
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|item| item.as_str().map(str::to_owned))
+                    .collect()
+            })
             .unwrap_or_default()
     }
 
@@ -128,7 +133,10 @@ mod spec_tests {
     #[test]
     fn activation_is_startup() {
         let manifest = manifest();
-        assert_eq!(string_list(&manifest["activation"]), vec!["startup".to_owned()]);
+        assert_eq!(
+            string_list(&manifest["activation"]),
+            vec!["startup".to_owned()]
+        );
     }
 
     /// REQ: EXT-052

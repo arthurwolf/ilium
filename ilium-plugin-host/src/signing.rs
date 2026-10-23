@@ -126,10 +126,13 @@ mod tests {
         "jv5zcDEiiDljfN-iy3nZLtCgScmbTMJoOv0M3X9r0D9Tm4dvdqE43gpEEAW_cqVod6iYQAjeIR8E0-vFwEplBw";
     const SIGNED_AT: &str = "2026-10-12 10:00:00";
     const SIGNATURE_PREFIX: &[u8] = b"ilium-plugin-signature-v1";
-    const MANIFEST_SHA256: &str = "350b5e47c5781e72a9bb7b3d6630335fca0390402d0f625a48857a234f99c99d";
-    const SIGNED_PACKAGE_SHA256: &str = "d2238076eea48c58ceb4416dbb50438c6ffee23028051d7e9a0cb1f9ae7fc408";
+    const MANIFEST_SHA256: &str =
+        "350b5e47c5781e72a9bb7b3d6630335fca0390402d0f625a48857a234f99c99d";
+    const SIGNED_PACKAGE_SHA256: &str =
+        "d2238076eea48c58ceb4416dbb50438c6ffee23028051d7e9a0cb1f9ae7fc408";
     const SIGNED_PACKAGE_LENGTH: usize = 1114;
-    const COMPONENT_HEX: &str = "0061736d0d000100001811696c69756d3a6170692d76657273696f6e000000010000";
+    const COMPONENT_HEX: &str =
+        "0061736d0d000100001811696c69756d3a6170692d76657273696f6e000000010000";
     /// The 658-byte unsigned package of reference-package-format.md, "Test vector: a minimal package".
     const UNSIGNED_HEX: &str = "
 504b03041400000800000000210072c5884392010000920100000d0000006d61
@@ -160,7 +163,10 @@ mod tests {
     // ---------------------------------------------------------------------------------------------
 
     fn hex_bytes(text: &str) -> Vec<u8> {
-        let digits: Vec<u8> = text.bytes().filter(|byte| !byte.is_ascii_whitespace()).collect();
+        let digits: Vec<u8> = text
+            .bytes()
+            .filter(|byte| !byte.is_ascii_whitespace())
+            .collect();
         digits
             .chunks(2)
             .map(|pair| {
@@ -224,7 +230,12 @@ mod tests {
 
     /// Base64url Ed25519 signature over `M` = prefix, 0x00, publisher id, 0x00, SHA-256 of the manifest
     /// bytes (PKG-201), made with the given seed. Built independently of the code under test.
-    fn signature_over(manifest: &[u8], seed: [u8; 32], prefix: &[u8], publisher_id: &str) -> String {
+    fn signature_over(
+        manifest: &[u8],
+        seed: [u8; 32],
+        prefix: &[u8],
+        publisher_id: &str,
+    ) -> String {
         let mut message = prefix.to_vec();
         message.push(0);
         message.extend_from_slice(publisher_id.as_bytes());
@@ -397,7 +408,8 @@ mod tests {
     /// REQ: PKG-200
     #[test]
     fn sign_reproduces_the_known_answer_signature_of_the_manual_vector() {
-        let archive = read_package(&signed_package()).expect("the signed package is structurally valid");
+        let archive =
+            read_package(&signed_package()).expect("the signed package is structurally valid");
         let signature = archive
             .signature
             .expect("the signed package has a signature entry");
@@ -500,8 +512,10 @@ mod tests {
     /// REQ: PKG-228
     #[test]
     fn verify_a_valid_signature_from_a_trusted_key_gives_tier_t2() {
-        let archive = read_package(&signed_package()).expect("the signed package is structurally valid");
-        let verified = verify(&archive, &example_trust(), now()).expect("a trusted signature verifies");
+        let archive =
+            read_package(&signed_package()).expect("the signed package is structurally valid");
+        let verified =
+            verify(&archive, &example_trust(), now()).expect("a trusted signature verifies");
         assert_eq!(
             verified,
             Verified {
@@ -515,7 +529,8 @@ mod tests {
     /// REQ: PKG-206
     #[test]
     fn verify_does_not_depend_on_the_clock() {
-        let archive = read_package(&signed_package()).expect("the signed package is structurally valid");
+        let archive =
+            read_package(&signed_package()).expect("the signed package is structurally valid");
         let at_epoch = verify(&archive, &example_trust(), SystemTime::UNIX_EPOCH)
             .expect("the epoch is not a decision input");
         let far_future = verify(
@@ -550,7 +565,11 @@ mod tests {
     /// REQ: PKG-255
     #[test]
     fn verify_refuses_a_key_missing_from_the_empty_trust_store_with_key_unknown() {
-        assert_refused_with(&signed_package(), &TrustStore::default(), "trust.key-unknown");
+        assert_refused_with(
+            &signed_package(),
+            &TrustStore::default(),
+            "trust.key-unknown",
+        );
     }
 
     /// REQ: PKG-248
@@ -573,7 +592,8 @@ mod tests {
     fn verify_refuses_a_signature_with_one_changed_byte() {
         let mut raw = raw_signature();
         raw[0] ^= 0x01;
-        let document = signature_document(&[entry(KEY_ID, "example", &URL_SAFE_NO_PAD.encode(&raw))]);
+        let document =
+            signature_document(&[entry(KEY_ID, "example", &URL_SAFE_NO_PAD.encode(&raw))]);
         assert_refused_with(
             &package_with_document(&document),
             &example_trust(),
@@ -586,7 +606,8 @@ mod tests {
     fn verify_refuses_a_non_canonical_scalar_with_signature_invalid() {
         let mut raw = raw_signature();
         raw[63] = 0xff;
-        let document = signature_document(&[entry(KEY_ID, "example", &URL_SAFE_NO_PAD.encode(&raw))]);
+        let document =
+            signature_document(&[entry(KEY_ID, "example", &URL_SAFE_NO_PAD.encode(&raw))]);
         assert_refused_with(
             &package_with_document(&document),
             &example_trust(),
@@ -677,8 +698,9 @@ mod tests {
     /// REQ: PKG-204
     #[test]
     fn read_refuses_a_document_with_an_extra_top_level_key() {
-        let mut value: serde_json::Value = serde_json::from_slice(&signature_document(&[valid_entry("example")]))
-            .expect("the document is JSON");
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&signature_document(&[valid_entry("example")]))
+                .expect("the document is JSON");
         value["note"] = serde_json::json!("extra");
         let document = serde_json::to_vec(&value).expect("the document serialises");
         assert_refused_with(
@@ -691,8 +713,9 @@ mod tests {
     /// REQ: PKG-204
     #[test]
     fn read_refuses_a_document_without_format() {
-        let mut value: serde_json::Value = serde_json::from_slice(&signature_document(&[valid_entry("example")]))
-            .expect("the document is JSON");
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&signature_document(&[valid_entry("example")]))
+                .expect("the document is JSON");
         value
             .as_object_mut()
             .expect("the document is an object")
@@ -759,7 +782,8 @@ mod tests {
     /// REQ: PKG-206
     #[test]
     fn read_refuses_an_uppercase_key_id() {
-        let document = signature_document(&[entry(&KEY_ID.to_uppercase(), "example", SIGNATURE_BASE64)]);
+        let document =
+            signature_document(&[entry(&KEY_ID.to_uppercase(), "example", SIGNATURE_BASE64)]);
         assert_refused_with(
             &package_with_document(&document),
             &example_trust(),
@@ -850,10 +874,9 @@ mod tests {
         example_trust()
             .save_atomic(&path)
             .expect("the store is written");
-        let value: serde_json::Value = serde_json::from_str(
-            &std::fs::read_to_string(&path).expect("the store file exists"),
-        )
-        .expect("the store is JSON");
+        let value: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).expect("the store file exists"))
+                .expect("the store is JSON");
         assert_eq!(value["format"], "ilium-trust/1");
         assert_eq!(value["keys"][0]["key_id"], KEY_ID);
         assert_eq!(value["keys"][0]["publisher_id"], "example");
@@ -874,10 +897,9 @@ mod tests {
         TrustStore::default()
             .save_atomic(&path)
             .expect("the empty store is written");
-        let value: serde_json::Value = serde_json::from_str(
-            &std::fs::read_to_string(&path).expect("the store file exists"),
-        )
-        .expect("the store is JSON");
+        let value: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).expect("the store file exists"))
+                .expect("the store is JSON");
         assert_eq!(value["keys"].as_array().expect("keys is an array").len(), 0);
     }
 
@@ -903,10 +925,9 @@ mod tests {
             })
             .collect();
         assert_eq!(names, vec!["trust.json".to_string()]);
-        let value: serde_json::Value = serde_json::from_str(
-            &std::fs::read_to_string(&path).expect("the store file exists"),
-        )
-        .expect("the store is JSON");
+        let value: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).expect("the store file exists"))
+                .expect("the store is JSON");
         assert_eq!(value["keys"].as_array().expect("keys is an array").len(), 1);
     }
 

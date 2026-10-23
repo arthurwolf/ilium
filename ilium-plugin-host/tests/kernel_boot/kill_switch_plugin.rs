@@ -66,7 +66,10 @@ fn hst_517_the_kill_cancels_every_pending_request_as_cancelled() {
     let mut switch = KillSwitch::open(dir.path());
     switch.start_requests("acme.notes", 2);
     switch.kill("acme.notes", "bad build", "admin");
-    assert_eq!(switch.request_outcomes("acme.notes"), vec!["cancelled", "cancelled"]);
+    assert_eq!(
+        switch.request_outcomes("acme.notes"),
+        vec!["cancelled", "cancelled"]
+    );
 }
 
 /// REQ: HST-517
@@ -75,7 +78,9 @@ fn hst_517_the_kill_writes_a_plugin_killed_audit_event_with_admin_and_reason() {
     let dir = tempfile::tempdir().expect("temp dir");
     let mut switch = KillSwitch::open(dir.path());
     switch.kill("acme.notes", "bad build", "admin");
-    let event = switch.last_audit_event().expect("an audit event is written");
+    let event = switch
+        .last_audit_event()
+        .expect("an audit event is written");
     assert_eq!(event.kind, "plugin.killed");
     assert_eq!(event.administrator, "admin");
     assert_eq!(event.reason, "bad build");

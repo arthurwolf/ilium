@@ -138,7 +138,12 @@ mod tests {
     #[test]
     fn register_signature_refuses_ids_outside_lowercase_digits_and_hyphen() {
         let mut import = AgentImport;
-        for bad_id in ["Example-Agent", "example_agent", "example agent", "example/agent"] {
+        for bad_id in [
+            "Example-Agent",
+            "example_agent",
+            "example agent",
+            "example/agent",
+        ] {
             let spec = spec_with(|spec| spec.id = bad_id.to_string());
             assert_refused_with(import.register_signature(spec), ErrorCode::InvalidArgument);
         }

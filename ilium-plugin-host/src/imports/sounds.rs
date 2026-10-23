@@ -33,7 +33,9 @@ mod tests {
     fn catalog_lists_the_bundled_chirping_sound() {
         let listing = catalog_listing();
         assert!(
-            listing.iter().any(|sound_id| sound_id.as_str() == BUNDLED_SOUND_ID),
+            listing
+                .iter()
+                .any(|sound_id| sound_id.as_str() == BUNDLED_SOUND_ID),
             "catalog must hold the bundled id `{BUNDLED_SOUND_ID}`, got {listing:?}"
         );
     }
@@ -75,6 +77,9 @@ mod tests {
     fn catalog_returns_the_same_listing_on_repeated_calls() {
         let first_listing = catalog_listing();
         let second_listing = catalog_listing();
-        assert_eq!(first_listing, second_listing, "catalog is synchronous and stateless");
+        assert_eq!(
+            first_listing, second_listing,
+            "catalog is synchronous and stateless"
+        );
     }
 }

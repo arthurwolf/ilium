@@ -802,7 +802,12 @@ mod tests {
     }
 
     /// A plugin manifest whose contributor entries sit on the given points (contributes.extensions).
-    fn contributor_manifest(plugin_id: &str, point: &str, extension_id: &str, priority: u8) -> Value {
+    fn contributor_manifest(
+        plugin_id: &str,
+        point: &str,
+        extension_id: &str,
+        priority: u8,
+    ) -> Value {
         json!({
             "id": plugin_id,
             "version": "1.0.0",
@@ -819,22 +824,29 @@ mod tests {
     }
 
     /// A host with the bundled core plugins, plus two contributors on the terminal veto point.
-    fn host_with_two_veto_contributors(
-        first_priority: u8,
-        second_priority: u8,
-    ) -> ExtWorld {
+    fn host_with_two_veto_contributors(first_priority: u8, second_priority: u8) -> ExtWorld {
         let mut world = ExtWorld::with_core_plugins();
         world
             .install(
                 Tier::T2,
-                contributor_manifest("demo.alpha", TERMINAL_VETO_POINT, "demo.alpha", first_priority),
+                contributor_manifest(
+                    "demo.alpha",
+                    TERMINAL_VETO_POINT,
+                    "demo.alpha",
+                    first_priority,
+                ),
                 vec![("demo.alpha".to_string(), pass_script())],
             )
             .expect("demo.alpha installs");
         world
             .install(
                 Tier::T2,
-                contributor_manifest("demo.beta", TERMINAL_VETO_POINT, "demo.beta", second_priority),
+                contributor_manifest(
+                    "demo.beta",
+                    TERMINAL_VETO_POINT,
+                    "demo.beta",
+                    second_priority,
+                ),
                 vec![("demo.beta".to_string(), pass_script())],
             )
             .expect("demo.beta installs");
@@ -894,7 +906,10 @@ mod tests {
     fn unknown_extension_has_no_breaches_and_no_outcome() {
         let mut world = ExtWorld::new();
 
-        assert_eq!(world.breach_count("demo.alpha", STATIC_POINT, "demo.alpha"), 0);
+        assert_eq!(
+            world.breach_count("demo.alpha", STATIC_POINT, "demo.alpha"),
+            0
+        );
         assert!(world.outcome("demo.alpha", RequestId(999)).is_none());
         assert!(world.take_reply("demo.alpha", RequestId(999)).is_none());
     }
@@ -983,8 +998,7 @@ mod tests {
 
         let error = world
             .run_hook("demo.alpha", "demo.alpha/nothing-here", "{}")
-            .err()
-            .expect("an undeclared point must be refused");
+            .expect_err("an undeclared point must be refused");
 
         assert_eq!(error.code, ErrorCode::NotFound);
         assert!(error.message.starts_with("extension.unknown-point"));
@@ -997,8 +1011,7 @@ mod tests {
 
         let error = world
             .list("demo.alpha", "demo.alpha/nothing-here")
-            .err()
-            .expect("an undeclared point must be refused");
+            .expect_err("an undeclared point must be refused");
 
         assert_eq!(error.code, ErrorCode::NotFound);
     }
@@ -1010,8 +1023,7 @@ mod tests {
 
         let error = world
             .register("ilium.core.terminal", STATIC_POINT, "demo.alpha", 10, "{}")
-            .err()
-            .expect("a static point cannot take runtime entries");
+            .expect_err("a static point cannot take runtime entries");
 
         assert_eq!(error.code, ErrorCode::Unsupported);
         assert!(error.message.starts_with("extension.not-dynamic"));
@@ -1037,8 +1049,7 @@ mod tests {
                 101,
                 "{}",
             )
-            .err()
-            .expect("priority 101 must be refused");
+            .expect_err("priority 101 must be refused");
 
         assert!(at_limit.is_ok());
         assert_eq!(above_limit.code, ErrorCode::InvalidArgument);
@@ -1053,8 +1064,7 @@ mod tests {
 
         let error = world
             .run_hook("demo.alpha", TERMINAL_VETO_POINT, &oversized_payload)
-            .err()
-            .expect("a payload over 64 KiB must be refused");
+            .expect_err("a payload over 64 KiB must be refused");
 
         assert_eq!(error.code, ErrorCode::InvalidArgument);
         assert!(error.message.starts_with("extension.cap-exceeded"));
@@ -1072,8 +1082,7 @@ mod tests {
         }
         let refused = world
             .run_hook("demo.alpha", TERMINAL_VETO_POINT, "{}")
-            .err()
-            .expect("the 201st call in one second must be rate-limited");
+            .expect_err("the 201st call in one second must be rate-limited");
         assert_eq!(refused.code, ErrorCode::RateLimited);
         assert!(refused.retry_after_ms.is_some());
 
@@ -1101,7 +1110,10 @@ mod tests {
             .into_iter()
             .map(|run| run.plugin)
             .collect();
-        assert_eq!(order, vec!["demo.alpha".to_string(), "demo.beta".to_string()]);
+        assert_eq!(
+            order,
+            vec!["demo.alpha".to_string(), "demo.beta".to_string()]
+        );
     }
 
     /// REQ: EXT-008
@@ -1119,7 +1131,10 @@ mod tests {
             .into_iter()
             .map(|run| run.plugin)
             .collect();
-        assert_eq!(order, vec!["demo.beta".to_string(), "demo.alpha".to_string()]);
+        assert_eq!(
+            order,
+            vec!["demo.beta".to_string(), "demo.alpha".to_string()]
+        );
     }
 
     /// REQ: EXT-008
@@ -1144,7 +1159,10 @@ mod tests {
             .into_iter()
             .map(|run| run.plugin)
             .collect();
-        assert_eq!(order, vec!["demo.beta".to_string(), "demo.alpha".to_string()]);
+        assert_eq!(
+            order,
+            vec!["demo.beta".to_string(), "demo.alpha".to_string()]
+        );
     }
 
     /// REQ: EXT-012
@@ -1154,24 +1172,14 @@ mod tests {
         world
             .install(
                 Tier::T2,
-                contributor_manifest(
-                    "demo.alpha",
-                    TERMINAL_VETO_POINT,
-                    "demo.alpha",
-                    1,
-                ),
+                contributor_manifest("demo.alpha", TERMINAL_VETO_POINT, "demo.alpha", 1),
                 vec![("demo.alpha".to_string(), refuse_script("no thanks"))],
             )
             .expect("demo.alpha installs");
         world
             .install(
                 Tier::T2,
-                contributor_manifest(
-                    "demo.beta",
-                    TERMINAL_VETO_POINT,
-                    "demo.beta",
-                    2,
-                ),
+                contributor_manifest("demo.beta", TERMINAL_VETO_POINT, "demo.beta", 2),
                 vec![("demo.beta".to_string(), pass_script())],
             )
             .expect("demo.beta installs");

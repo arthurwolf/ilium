@@ -1356,11 +1356,13 @@ mod tests {
     fn rig_sanitises_view_text_and_warns_once_per_view() {
         let mut rig = Rig::new("T2");
         let view = rig.open_view("status");
-        rig.deliver_tree(view, tree_with_text("a\u{1b}[31mb")).unwrap();
+        rig.deliver_tree(view, tree_with_text("a\u{1b}[31mb"))
+            .unwrap();
         let shown = rig.screen_text();
         assert!(shown.contains("ab"));
         assert!(!shown.contains('\u{1b}'));
-        rig.deliver_tree(view, tree_with_text("c\u{1b}[0m d")).unwrap();
+        rig.deliver_tree(view, tree_with_text("c\u{1b}[0m d"))
+            .unwrap();
         let warnings = rig
             .log_lines()
             .iter()

@@ -74,7 +74,10 @@ fn offline_flag_fails_network_install_before_any_connection() {
     );
     assert_eq!(output.exit_code, 1, "{:?}", output.stdout_jsonl);
     assert_eq!(error_code(&output).as_deref(), Some("net.offline"));
-    assert!(requested(&recorder).is_empty(), "no connection is attempted");
+    assert!(
+        requested(&recorder).is_empty(),
+        "no connection is attempted"
+    );
 }
 
 /// REQ: DEV-895
@@ -86,5 +89,8 @@ fn offline_environment_variable_fails_network_install_before_any_connection() {
     let output = run(&env, &["install", "example.agent-tools", "--json"]);
     assert_eq!(output.exit_code, 1, "{:?}", output.stdout_jsonl);
     assert_eq!(error_code(&output).as_deref(), Some("net.offline"));
-    assert!(requested(&recorder).is_empty(), "no connection is attempted");
+    assert!(
+        requested(&recorder).is_empty(),
+        "no connection is attempted"
+    );
 }

@@ -41,7 +41,10 @@ mod tests {
     #[test]
     fn check_grant_without_restricting_policy_allows_normal_grant() {
         let engine = PolicyEngine;
-        assert_eq!(engine.check_grant("com.example.plugin", &grant("tree.read")), PolicyVerdict::Allow);
+        assert_eq!(
+            engine.check_grant("com.example.plugin", &grant("tree.read")),
+            PolicyVerdict::Allow
+        );
     }
 
     /// REQ: SEC-184
@@ -68,7 +71,10 @@ mod tests {
     #[test]
     fn check_egress_without_restricting_policy_allows_public_host() {
         let engine = PolicyEngine;
-        assert_eq!(engine.check_egress("com.example.plugin", "api.example.com"), PolicyVerdict::Allow);
+        assert_eq!(
+            engine.check_egress("com.example.plugin", "api.example.com"),
+            PolicyVerdict::Allow
+        );
     }
 
     /// REQ: SEC-085
@@ -86,7 +92,10 @@ mod tests {
     fn policy_verdict_deny_carries_policy_code_and_differs_from_allow() {
         let verdict = PolicyVerdict::Deny(String::from("policy.grant-forbidden"));
         assert_ne!(verdict, PolicyVerdict::Allow);
-        assert_eq!(verdict, PolicyVerdict::Deny(String::from("policy.grant-forbidden")));
+        assert_eq!(
+            verdict,
+            PolicyVerdict::Deny(String::from("policy.grant-forbidden"))
+        );
     }
 
     /// REQ: SEC-184

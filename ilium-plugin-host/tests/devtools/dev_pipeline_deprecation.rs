@@ -19,7 +19,10 @@ fn set_deprecation(manifest: &mut Value, since: &str, remove_in: &str) {
 fn mentions(output: &CliOutput, text: &str) -> bool {
     output.stdout_text.contains(text)
         || output.stderr.contains(text)
-        || output.stdout_jsonl.iter().any(|record| record.to_string().contains(text))
+        || output
+            .stdout_jsonl
+            .iter()
+            .any(|record| record.to_string().contains(text))
 }
 
 /// REQ: DEV-885

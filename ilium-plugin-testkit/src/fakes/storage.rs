@@ -37,7 +37,8 @@ mod spec_tests {
     #[test]
     fn dev_465_put_is_visible_to_get_at_once() {
         let mut host = FakeHost::new();
-        host.storage_mut().put(Bucket::Global, "last_suggestion", b"hello");
+        host.storage_mut()
+            .put(Bucket::Global, "last_suggestion", b"hello");
         assert_eq!(
             host.storage().get(Bucket::Global, "last_suggestion"),
             Some(b"hello".to_vec())
@@ -50,7 +51,10 @@ mod spec_tests {
         let mut host = FakeHost::new();
         host.storage_mut().put(Bucket::Project, "k", b"first");
         host.storage_mut().put(Bucket::Project, "k", b"second");
-        assert_eq!(host.storage().get(Bucket::Project, "k"), Some(b"second".to_vec()));
+        assert_eq!(
+            host.storage().get(Bucket::Project, "k"),
+            Some(b"second".to_vec())
+        );
     }
 
     /// REQ: DEV-465
@@ -89,7 +93,10 @@ mod spec_tests {
     fn dev_465_empty_value_round_trips_as_present() {
         let mut host = FakeHost::new();
         host.storage_mut().put(Bucket::Shared, "empty", &[]);
-        assert_eq!(host.storage().get(Bucket::Shared, "empty"), Some(Vec::new()));
+        assert_eq!(
+            host.storage().get(Bucket::Shared, "empty"),
+            Some(Vec::new())
+        );
         assert_eq!(host.storage().get(Bucket::Shared, "absent"), None);
     }
 

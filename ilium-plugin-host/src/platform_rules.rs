@@ -165,9 +165,8 @@ mod tests {
     /// Asserts that a T2 or T3 load on `platform` is refused with `sandbox.unavailable`
     /// and returns the diagnostic for further checks.
     fn refused_sandbox(platform: Platform, tier: Tier) -> Diagnostic {
-        let diagnostic = check_sandbox(platform, tier).expect_err(
-            "T2 and T3 must be refused on macOS and Windows",
-        );
+        let diagnostic = check_sandbox(platform, tier)
+            .expect_err("T2 and T3 must be refused on macOS and Windows");
         assert_eq!(diagnostic.code.as_str(), SANDBOX_UNAVAILABLE_CODE);
         assert_eq!(diagnostic.severity, Severity::Error);
         diagnostic
@@ -304,7 +303,9 @@ mod tests {
     /// REQ: HST-386
     #[test]
     fn tick_gap_ignored_is_true_just_above_one_second() {
-        assert!(tick_gap_ignored(Duration::from_secs(1) + Duration::from_nanos(1)));
+        assert!(tick_gap_ignored(
+            Duration::from_secs(1) + Duration::from_nanos(1)
+        ));
     }
 
     /// REQ: HST-386
@@ -435,10 +436,7 @@ mod tests {
     /// REQ: HST-383
     #[test]
     fn select_precompiled_does_not_match_an_empty_host_triple() {
-        let artifacts = vec![
-            WasmArtifact::Wasm,
-            WasmArtifact::cwasm(LINUX_X86_64_TRIPLE),
-        ];
+        let artifacts = vec![WasmArtifact::Wasm, WasmArtifact::cwasm(LINUX_X86_64_TRIPLE)];
         let selected = select_precompiled("", &artifacts)
             .expect("the artifact list holds a portable component, so selection succeeds");
         assert_eq!(selected.artifact, WasmArtifact::Wasm);
@@ -452,6 +450,9 @@ mod tests {
         // A package that contains no portable component cannot fall back to one (see the
         // doc comment on ArtifactSelectionError), so selection fails with that error.
         let selected = select_precompiled(LINUX_X86_64_TRIPLE, &[]);
-        assert_eq!(selected.err(), Some(ArtifactSelectionError::MissingPortableComponent));
+        assert_eq!(
+            selected.err(),
+            Some(ArtifactSelectionError::MissingPortableComponent)
+        );
     }
 }

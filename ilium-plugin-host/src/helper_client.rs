@@ -80,7 +80,10 @@ mod tests {
 
         let outcome = client.request(&[0x01, 0x02, 0x03]);
 
-        assert!(outcome.is_err(), "request to a helper that is not running must not return a reply");
+        assert!(
+            outcome.is_err(),
+            "request to a helper that is not running must not return a reply"
+        );
     }
 
     /// REQ: HST-169
@@ -90,6 +93,9 @@ mod tests {
 
         let outcome = client.request(&[]);
 
-        assert!(outcome.is_err(), "empty request to a helper that is not running must not return a reply");
+        assert!(
+            outcome.is_err(),
+            "empty request to a helper that is not running must not return a reply"
+        );
     }
 }

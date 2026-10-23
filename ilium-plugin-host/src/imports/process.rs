@@ -53,13 +53,13 @@ impl HostProcess for ProcessImport {
 #[cfg(test)]
 mod tests {
     use super::ProcessImport;
+    use crate::testing::imports_fixture::ImportsFixture;
     use ilium_plugin_api::generated::host::process::{
         ChildHandle, HostProcess, ProcessSpec, SpawnSpec,
     };
     use ilium_plugin_api::generated::types::errors::PluginError;
     use ilium_plugin_api::generated::types::ids::RequestId;
     use ilium_plugin_api::Tier;
-    use crate::testing::imports_fixture::ImportsFixture;
 
     /// 4 MiB, the stdin and output cap of `process.run` (api-process-control.md, Limits).
     const FOUR_MIB: usize = 4 * 1024 * 1024;
@@ -147,7 +147,9 @@ mod tests {
     fn assert_signal_accepted(signal_name: &str) {
         let mut fixture = fixture_with_grants(&["process.long-lived", "process.run:tail"]);
         let handle = spawn_one_child(&mut fixture);
-        let result = fixture.process().child_signal(handle, signal_name.to_owned());
+        let result = fixture
+            .process()
+            .child_signal(handle, signal_name.to_owned());
         assert!(
             result.is_ok(),
             "signal {signal_name} must be accepted for a live child"
@@ -173,7 +175,10 @@ mod tests {
         let mut spec = process_spec("echo");
         spec.timeout_millis = 1;
         let result = HostProcess::run(&mut import, spec);
-        assert!(result.is_ok(), "a 1 ms timeout is the lower bound and is valid");
+        assert!(
+            result.is_ok(),
+            "a 1 ms timeout is the lower bound and is valid"
+        );
     }
 
     /// REQ: WIT:ilium:host/process.run
@@ -225,7 +230,10 @@ mod tests {
         let mut spec = process_spec("cat");
         spec.stdin = Some(vec![0u8; FOUR_MIB]);
         let result = HostProcess::run(&mut import, spec);
-        assert!(result.is_ok(), "stdin of exactly 4 MiB is the upper bound and is valid");
+        assert!(
+            result.is_ok(),
+            "stdin of exactly 4 MiB is the upper bound and is valid"
+        );
     }
 
     /// REQ: WIT:ilium:host/process.run
@@ -245,7 +253,10 @@ mod tests {
         let mut spec = process_spec("echo");
         spec.arguments = vec!["x".to_owned(); MAX_ARGUMENTS];
         let result = HostProcess::run(&mut import, spec);
-        assert!(result.is_ok(), "1,024 arguments is the upper bound and is valid");
+        assert!(
+            result.is_ok(),
+            "1,024 arguments is the upper bound and is valid"
+        );
     }
 
     /// REQ: WIT:ilium:host/process.run
@@ -368,7 +379,10 @@ mod tests {
             Err(error) => panic!("run must start: {}", error.message),
         };
         let exit = fixture.process().take_exit(request);
-        assert!(exit.is_none(), "no exit is held while the program still runs");
+        assert!(
+            exit.is_none(),
+            "no exit is held while the program still runs"
+        );
     }
 
     // ---- spawn -----------------------------------------------------------------------------

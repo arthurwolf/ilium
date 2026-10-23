@@ -18,13 +18,12 @@ impl HostHelp for HelpImport {
 mod tests {
     use std::sync::Arc;
 
+    use crate::calls::Trap;
+    use crate::testing::{FakeKernel, HarnessHandle, HostHarness, NativeGuest};
     use ilium_plugin_api::generated::host::help::HostHelp;
     use ilium_plugin_api::generated::types::events::Event;
     use ilium_plugin_api::generated::types::intents::Submission;
     use ilium_plugin_api::{ProcessKind, Side, Tier};
-    use crate::calls::Trap;
-    use crate::testing::{FakeKernel, HarnessHandle, HostHarness, NativeGuest};
-
 
     /// Global id of the notes plugin's search topic, as the manual writes it.
     const SEARCH_TOPIC_ID: &str = "com.example.notes/notes.search";

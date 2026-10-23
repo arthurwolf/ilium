@@ -5,6 +5,7 @@ use ilium_plugin_host::cli::CliOutput;
 use serde_json::json;
 
 use crate::common::*;
+use crate::lint_support::*;
 
 const DESCRIPTION_KEY: &str = "/description";
 

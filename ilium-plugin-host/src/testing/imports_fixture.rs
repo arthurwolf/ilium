@@ -562,9 +562,7 @@ impl ImportsFixture {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        ImportsFixture, ImportsFixtureBuilder, JobInstance, UserInput, UserSave,
-    };
+    use super::{ImportsFixture, ImportsFixtureBuilder, JobInstance, UserInput, UserSave};
     use ilium_plugin_api::generated::types::ErrorCode;
     use ilium_plugin_api::side::Side;
     use ilium_plugin_api::Tier;
@@ -691,7 +689,10 @@ mod tests {
             .settings_validate_latency(Duration::from_millis(150))
             .build();
         let old_value = fixture.settings_value("a");
-        assert!(matches!(fixture.user_save("{\"a\":2}"), UserSave::Refused(_)));
+        assert!(matches!(
+            fixture.user_save("{\"a\":2}"),
+            UserSave::Refused(_)
+        ));
         assert_eq!(fixture.settings_value("a"), old_value);
     }
 
@@ -861,7 +862,10 @@ mod tests {
             info_refusal_code(&mut fixture, "row-10", "x"),
             Some(ErrorCode::RateLimited)
         );
-        assert_eq!(fixture.last_import_error_code(), Some(ErrorCode::RateLimited));
+        assert_eq!(
+            fixture.last_import_error_code(),
+            Some(ErrorCode::RateLimited)
+        );
     }
 
     /// REQ: SET-051

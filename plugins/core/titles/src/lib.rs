@@ -73,7 +73,12 @@ mod spec_tests {
     fn grant_strings(side_grants: &Value) -> Vec<String> {
         side_grants
             .as_array()
-            .map(|grants| grants.iter().filter_map(|grant| grant.as_str().map(str::to_owned)).collect())
+            .map(|grants| {
+                grants
+                    .iter()
+                    .filter_map(|grant| grant.as_str().map(str::to_owned))
+                    .collect()
+            })
             .unwrap_or_default()
     }
 
@@ -147,7 +152,10 @@ mod spec_tests {
             "tree.decorate",
             "tree.restructure",
         ] {
-            assert!(grants.iter().any(|grant| grant == required), "missing server grant {required}");
+            assert!(
+                grants.iter().any(|grant| grant == required),
+                "missing server grant {required}"
+            );
         }
     }
 
@@ -156,14 +164,18 @@ mod spec_tests {
         let grants = server_capabilities(&shipped_manifest());
         for tab in OWNED_KERNEL_TABS {
             let grant = format!("settings.write-kernel:{tab}");
-            assert!(grants.iter().any(|held| *held == grant), "missing server grant {grant}");
+            assert!(
+                grants.iter().any(|held| *held == grant),
+                "missing server grant {grant}"
+            );
         }
     }
 
     #[test]
     fn extension_points_carry_the_manual_limits() {
         let manifest = shipped_manifest();
-        let before = extension_point(&manifest, "before-apply-title").expect("before-apply-title is declared");
+        let before = extension_point(&manifest, "before-apply-title")
+            .expect("before-apply-title is declared");
         assert_eq!(before["deadline_ms"], 20);
         assert_eq!(before["max_handlers"], 8);
         let styles = extension_point(&manifest, "title-styles").expect("title-styles is declared");
@@ -193,6 +205,9 @@ mod spec_tests {
             .expect("server grants are an array");
         server_grants.push(json!("settings.write-kernel:titles"));
         let violations = kernel_tab_holder_violations(&manifest);
-        assert_eq!(violations, vec!["settings.write-kernel:titles held 2 times".to_owned()]);
+        assert_eq!(
+            violations,
+            vec!["settings.write-kernel:titles held 2 times".to_owned()]
+        );
     }
 }

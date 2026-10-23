@@ -410,7 +410,7 @@ fn storage_remove_deletes_the_key() {
             .storage()
             .put(Bucket::Session, "k".to_owned(), vec![1]),
     );
-    fixture.storage().remove(Bucket::Session, "k".to_owned());
+    expect_ok(fixture.storage().remove(Bucket::Session, "k".to_owned()));
     assert_eq!(fixture.storage().get(Bucket::Session, "k".to_owned()), None);
     assert!(all_keys(&mut fixture, Bucket::Session).is_empty());
 }
@@ -424,9 +424,11 @@ fn storage_remove_of_a_missing_key_does_nothing() {
             .storage()
             .put(Bucket::Session, "keep".to_owned(), vec![1]),
     );
-    fixture
-        .storage()
-        .remove(Bucket::Session, "missing".to_owned());
+    expect_ok(
+        fixture
+            .storage()
+            .remove(Bucket::Session, "missing".to_owned()),
+    );
     assert_eq!(
         all_keys(&mut fixture, Bucket::Session),
         vec!["keep".to_owned()]
@@ -447,7 +449,7 @@ fn storage_remove_touches_only_the_named_bucket() {
             .storage()
             .put(Bucket::Project, "k".to_owned(), vec![2]),
     );
-    fixture.storage().remove(Bucket::Global, "k".to_owned());
+    expect_ok(fixture.storage().remove(Bucket::Global, "k".to_owned()));
     assert_eq!(
         fixture.storage().get(Bucket::Project, "k".to_owned()),
         Some(vec![2])
@@ -471,7 +473,7 @@ fn storage_remove_frees_the_quota_it_used() {
         ),
         ErrorCode::QuotaExceeded
     );
-    fixture.storage().remove(Bucket::Global, "a".to_owned());
+    expect_ok(fixture.storage().remove(Bucket::Global, "a".to_owned()));
     expect_ok(
         fixture
             .storage()
@@ -488,8 +490,8 @@ fn storage_remove_of_an_empty_or_over_long_key_does_nothing() {
             .storage()
             .put(Bucket::Global, "keep".to_owned(), vec![1]),
     );
-    fixture.storage().remove(Bucket::Global, String::new());
-    fixture.storage().remove(Bucket::Global, "k".repeat(300));
+    expect_ok(fixture.storage().remove(Bucket::Global, String::new()));
+    expect_ok(fixture.storage().remove(Bucket::Global, "k".repeat(300)));
     assert_eq!(
         all_keys(&mut fixture, Bucket::Global),
         vec!["keep".to_owned()]

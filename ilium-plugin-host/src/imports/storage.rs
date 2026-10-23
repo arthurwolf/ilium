@@ -112,7 +112,10 @@ mod tests {
     fn put_then_get_returns_the_value_without_any_grant() {
         let mut storage = StorageImport;
         let key = unique_key("put_get", "counter");
-        assert_eq!(storage.put(Bucket::Global, key.clone(), vec![1, 2, 3]), Ok(()));
+        assert_eq!(
+            storage.put(Bucket::Global, key.clone(), vec![1, 2, 3]),
+            Ok(())
+        );
         assert_eq!(storage.get(Bucket::Global, key), Some(vec![1, 2, 3]));
     }
 
@@ -121,8 +124,14 @@ mod tests {
     fn put_is_readable_as_soon_as_it_returns() {
         let mut storage = StorageImport;
         let key = unique_key("put_readback", "cursor");
-        assert_eq!(storage.put(Bucket::Session, key.clone(), 7u32.to_le_bytes().to_vec()), Ok(()));
-        assert_eq!(storage.get(Bucket::Session, key), Some(7u32.to_le_bytes().to_vec()));
+        assert_eq!(
+            storage.put(Bucket::Session, key.clone(), 7u32.to_le_bytes().to_vec()),
+            Ok(())
+        );
+        assert_eq!(
+            storage.get(Bucket::Session, key),
+            Some(7u32.to_le_bytes().to_vec())
+        );
     }
 
     /// REQ: LIF-118
@@ -130,7 +139,10 @@ mod tests {
     fn second_put_replaces_the_whole_previous_value() {
         let mut storage = StorageImport;
         let key = unique_key("put_replace", "value");
-        assert_eq!(storage.put(Bucket::Global, key.clone(), vec![9; 100]), Ok(()));
+        assert_eq!(
+            storage.put(Bucket::Global, key.clone(), vec![9; 100]),
+            Ok(())
+        );
         assert_eq!(storage.put(Bucket::Global, key.clone(), vec![4]), Ok(()));
         assert_eq!(storage.get(Bucket::Global, key), Some(vec![4]));
     }
@@ -188,7 +200,10 @@ mod tests {
         let mut storage = StorageImport;
         let short_key = unique_key("key_limit", "previous");
         let long_key = "k".repeat(MAX_KEY_BYTES + 1);
-        assert_eq!(storage.put(Bucket::Global, short_key.clone(), vec![8]), Ok(()));
+        assert_eq!(
+            storage.put(Bucket::Global, short_key.clone(), vec![8]),
+            Ok(())
+        );
         let result = storage.put(Bucket::Global, long_key.clone(), vec![1]);
         assert_eq!(error_code_of(result), ErrorCode::InvalidArgument);
         assert_eq!(storage.get(Bucket::Global, long_key), None);
@@ -201,7 +216,10 @@ mod tests {
         let mut storage = StorageImport;
         let key = unique_key("value_limit", "full");
         let value = vec![0xAB; MAX_VALUE_BYTES];
-        assert_eq!(storage.put(Bucket::Global, key.clone(), value.clone()), Ok(()));
+        assert_eq!(
+            storage.put(Bucket::Global, key.clone(), value.clone()),
+            Ok(())
+        );
         assert_eq!(storage.get(Bucket::Global, key), Some(value));
     }
 
@@ -230,13 +248,22 @@ mod tests {
 
         let full_value_len = MAX_VALUE_BYTES - QUOTA_KEY_BYTES;
         for key in &quota_keys[..16] {
-            assert_eq!(storage.put(Bucket::Session, key.clone(), vec![1; full_value_len]), Ok(()));
+            assert_eq!(
+                storage.put(Bucket::Session, key.clone(), vec![1; full_value_len]),
+                Ok(())
+            );
         }
         assert_eq!(BUCKET_QUOTA_BYTES, 16 * MAX_VALUE_BYTES);
 
         let replacement = vec![2; full_value_len];
-        assert_eq!(storage.put(Bucket::Session, quota_keys[0].clone(), replacement.clone()), Ok(()));
-        assert_eq!(storage.get(Bucket::Session, quota_keys[0].clone()), Some(replacement));
+        assert_eq!(
+            storage.put(Bucket::Session, quota_keys[0].clone(), replacement.clone()),
+            Ok(())
+        );
+        assert_eq!(
+            storage.get(Bucket::Session, quota_keys[0].clone()),
+            Some(replacement)
+        );
 
         let refused = storage.put(Bucket::Session, quota_keys[16].clone(), vec![1]);
         assert_eq!(error_code_of(refused), ErrorCode::QuotaExceeded);
@@ -250,11 +277,19 @@ mod tests {
         let nonce = run_nonce();
         let prefix = format!("test/{nonce}/keys/");
         let outside = format!("test/{nonce}/keyz");
-        let keys = vec![format!("{prefix}b"), format!("{prefix}B"), format!("{prefix}a")];
+        let keys = [
+            format!("{prefix}b"),
+            format!("{prefix}B"),
+            format!("{prefix}a"),
+        ];
         for key in keys.iter().chain(std::iter::once(&outside)) {
             assert_eq!(storage.put(Bucket::Global, key.clone(), vec![1]), Ok(()));
         }
-        let expected = vec![format!("{prefix}B"), format!("{prefix}a"), format!("{prefix}b")];
+        let expected = vec![
+            format!("{prefix}B"),
+            format!("{prefix}a"),
+            format!("{prefix}b"),
+        ];
         assert_eq!(storage.keys(Bucket::Global, prefix), expected);
     }
 
@@ -289,7 +324,10 @@ mod tests {
         let project_key = unique_key("batch_all", "a");
         let removed_key = unique_key("batch_all", "b");
         let added_key = unique_key("batch_all", "c");
-        assert_eq!(storage.put(Bucket::Project, removed_key.clone(), vec![9]), Ok(()));
+        assert_eq!(
+            storage.put(Bucket::Project, removed_key.clone(), vec![9]),
+            Ok(())
+        );
         let entries = vec![
             entry(&project_key, Some(vec![1])),
             entry(&removed_key, None),
@@ -313,7 +351,10 @@ mod tests {
     fn write_batch_with_a_bad_last_entry_applies_nothing_and_keeps_previous_values() {
         let mut storage = StorageImport;
         let first_key = unique_key("batch_atomic", "first");
-        assert_eq!(storage.put(Bucket::Project, first_key.clone(), vec![5]), Ok(()));
+        assert_eq!(
+            storage.put(Bucket::Project, first_key.clone(), vec![5]),
+            Ok(())
+        );
         let entries = vec![entry(&first_key, Some(vec![6])), entry("", Some(vec![7]))];
         let result = storage.write_batch(Bucket::Project, entries);
         assert_eq!(error_code_of(result), ErrorCode::InvalidArgument);
@@ -360,7 +401,10 @@ mod tests {
             .collect();
         assert_eq!(entries.len() * (keys[0].len() + value_len), MAX_BATCH_BYTES);
         assert_eq!(storage.write_batch(Bucket::Project, entries), Ok(()));
-        assert_eq!(storage.get(Bucket::Project, keys[3].clone()), Some(vec![2; value_len]));
+        assert_eq!(
+            storage.get(Bucket::Project, keys[3].clone()),
+            Some(vec![2; value_len])
+        );
     }
 
     /// REQ: LIF-117

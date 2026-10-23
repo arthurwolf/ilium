@@ -24,7 +24,11 @@ fn usr_245_export_data_writes_one_file_per_data_kind_into_one_folder() {
         .expect("export folder")
         .flatten()
         .collect();
-    assert_eq!(files.len(), 6, "settings, storage, grants, logs, audit, crash");
+    assert_eq!(
+        files.len(),
+        6,
+        "settings, storage, grants, logs, audit, crash"
+    );
     assert!(files.iter().all(|file| file.path().is_file()));
 }
 

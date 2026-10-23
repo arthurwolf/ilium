@@ -8,6 +8,7 @@ use ilium_plugin_host::registry::PackageStore;
 use serde_json::{json, Value};
 
 use crate::common::*;
+use crate::lint_support::*;
 
 const MIB: usize = 1024 * 1024;
 

@@ -274,5 +274,8 @@ fn dev_845_each_cell_job_runs_five_steps_in_order_with_json_and_fails_the_pipeli
         }
     }
     let run = matrix::run_job_with_failing_cell();
-    assert!(run.pipeline_failed, "a failing cell left the pipeline green");
+    assert!(
+        run.pipeline_failed,
+        "a failing cell left the pipeline green"
+    );
 }

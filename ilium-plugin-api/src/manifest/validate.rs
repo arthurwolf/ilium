@@ -2028,11 +2028,10 @@ fn contribution_checks(manifest: &Manifest, errors: &mut Vec<Diagnostic>) {
                 .and_then(Value::as_str)
                 .filter(|_| kind == "keybindings")
             {
-                if !["global", "prefix"].contains(&mode)
-                    && !mode
-                        .strip_prefix("pane:")
-                        .is_some_and(|kind| !kind.is_empty())
-                {
+                let is_named_pane = mode
+                    .strip_prefix("pane:")
+                    .is_some_and(|kind| !kind.is_empty());
+                if !(["global", "prefix"].contains(&mode) || is_named_pane) {
                     errors.push(finding(
                         "manifest.schema",
                         format!("{path}/mode"),
@@ -2178,9 +2177,7 @@ fn contribution_checks(manifest: &Manifest, errors: &mut Vec<Diagnostic>) {
         ("status_segments", "ui.chrome"),
         ("header_widgets", "ui.chrome"),
     ] {
-        if entries(manifest, kind).next().is_some()
-            && !all_grants.iter().any(|grant| *grant == family)
-        {
+        if entries(manifest, kind).next().is_some() && !all_grants.contains(&family) {
             errors.push(finding(
                 "manifest.grant-dependency",
                 format!("/contributes/{kind}"),
@@ -2367,7 +2364,7 @@ fn check_data_schema(value: &Value, path: &str, errors: &mut Vec<Diagnostic>) {
                 3,
             ));
         }
-        if key == "maxItems" && !value.as_u64().is_some_and(|max| max <= 64) {
+        if key == "maxItems" && value.as_u64().is_none_or(|max| max > 64) {
             errors.push(finding(
                 "manifest.schema",
                 &path,
@@ -2557,7 +2554,9 @@ fn check_settings_rows(
 
 #[cfg(test)]
 mod tests {
-    use super::{json_schema, parse_manifest, validate, validate_json, CheckMode, ValidationContext};
+    use super::{
+        json_schema, parse_manifest, validate, validate_json, CheckMode, ValidationContext,
+    };
     use crate::error::Severity;
     use crate::manifest::{Diagnostic, Manifest, Stage};
     use crate::platform::Platform;
@@ -2565,7 +2564,8 @@ mod tests {
     use serde_json::{json, Value};
 
     /// The four unstable features of version 0.1.0 (reference-abi-evolution.md, ABI-022).
-    const UNSTABLE_FEATURES: [&str; 4] = ["ui-calendar", "plugin-services", "gpu-kernels", "websocket"];
+    const UNSTABLE_FEATURES: [&str; 4] =
+        ["ui-calendar", "plugin-services", "gpu-kernels", "websocket"];
 
     fn context(tier: Tier, mode: CheckMode) -> ValidationContext {
         ValidationContext {
@@ -2574,7 +2574,10 @@ mod tests {
             platform: Platform::Linux,
             installed: Vec::new(),
             core_plugins: Vec::new(),
-            unstable_features: UNSTABLE_FEATURES.iter().map(|name| (*name).to_owned()).collect(),
+            unstable_features: UNSTABLE_FEATURES
+                .iter()
+                .map(|name| (*name).to_owned())
+                .collect(),
         }
     }
 
@@ -2609,7 +2612,10 @@ mod tests {
     }
 
     fn codes(found: &[Diagnostic]) -> Vec<String> {
-        found.iter().map(|diagnostic| diagnostic.code.as_str().to_owned()).collect()
+        found
+            .iter()
+            .map(|diagnostic| diagnostic.code.as_str().to_owned())
+            .collect()
     }
 
     fn assert_has_code(found: &[Diagnostic], expected_code: &str) {
@@ -2629,11 +2635,16 @@ mod tests {
     }
 
     fn assert_no_errors(found: &[Diagnostic]) {
-        assert!(found.is_empty(), "a valid manifest must have no diagnostics, got {:?}", codes(found));
+        assert!(
+            found.is_empty(),
+            "a valid manifest must have no diagnostics, got {:?}",
+            codes(found)
+        );
     }
 
     fn decode(value: &Value) -> Manifest {
-        serde_json::from_value(value.clone()).expect("a manifest with all required keys must deserialize")
+        serde_json::from_value(value.clone())
+            .expect("a manifest with all required keys must deserialize")
     }
 
     /// REQ: PKG-561
@@ -2699,8 +2710,10 @@ mod tests {
         for key in ["api", "id", "name", "version", "publisher"] {
             let expected_message_part = format!("\"{key}\"");
             assert!(
-                found.iter().any(|diagnostic| diagnostic.code.as_str() == "manifest.key-missing"
-                    && diagnostic.message.contains(&expected_message_part)),
+                found.iter().any(
+                    |diagnostic| diagnostic.code.as_str() == "manifest.key-missing"
+                        && diagnostic.message.contains(&expected_message_part)
+                ),
                 "expected manifest.key-missing for {key}, got {:?}",
                 codes(&found)
             );
@@ -2721,7 +2734,8 @@ mod tests {
         assert!(
             found
                 .iter()
-                .any(|diagnostic| diagnostic.code.as_str() == "manifest.schema" && diagnostic.pointer.is_empty()),
+                .any(|diagnostic| diagnostic.code.as_str() == "manifest.schema"
+                    && diagnostic.pointer.is_empty()),
             "a JSON array must be refused by manifest.schema at pointer \"\", got {:?}",
             codes(&found)
         );
@@ -2733,9 +2747,10 @@ mod tests {
         let manifest = with_key(valid_server_manifest(), "bogus", json!(true));
         let found = check_value(&manifest);
         assert!(
-            found
-                .iter()
-                .any(|diagnostic| diagnostic.code.as_str() == "manifest.unknown-key" && diagnostic.pointer == "/bogus"),
+            found.iter().any(
+                |diagnostic| diagnostic.code.as_str() == "manifest.unknown-key"
+                    && diagnostic.pointer == "/bogus"
+            ),
             "expected manifest.unknown-key at /bogus, got {:?}",
             codes(&found)
         );
@@ -2766,36 +2781,56 @@ mod tests {
     /// REQ: PKG-014
     #[test]
     fn id_with_uppercase_letters_is_invalid() {
-        let found = check_value(&with_key(valid_server_manifest(), "id", json!("Example.Demo")));
+        let found = check_value(&with_key(
+            valid_server_manifest(),
+            "id",
+            json!("Example.Demo"),
+        ));
         assert_has_code(&found, "manifest.id-invalid");
     }
 
     /// REQ: PKG-014
     #[test]
     fn id_with_empty_segment_is_invalid() {
-        let found = check_value(&with_key(valid_server_manifest(), "id", json!("example..demo")));
+        let found = check_value(&with_key(
+            valid_server_manifest(),
+            "id",
+            json!("example..demo"),
+        ));
         assert_has_code(&found, "manifest.id-invalid");
     }
 
     /// REQ: PKG-014
     #[test]
     fn id_segment_starting_with_hyphen_is_invalid() {
-        let found = check_value(&with_key(valid_server_manifest(), "id", json!("example.-demo")));
+        let found = check_value(&with_key(
+            valid_server_manifest(),
+            "id",
+            json!("example.-demo"),
+        ));
         assert_has_code(&found, "manifest.id-invalid");
     }
 
     /// REQ: PKG-014
     #[test]
     fn id_with_ilium_prefix_is_reserved() {
-        let found = check_value(&with_key(valid_server_manifest(), "id", json!("ilium.demo")));
+        let found = check_value(&with_key(
+            valid_server_manifest(),
+            "id",
+            json!("ilium.demo"),
+        ));
         assert_has_code(&found, "manifest.id-reserved");
     }
 
     /// REQ: PKG-014
     #[test]
     fn id_with_eight_segments_of_fifteen_characters_is_the_accepted_maximum() {
-        let id = vec!["abcdefghijklmno"; 8].join(".");
-        assert_eq!(id.len(), 127, "fixture must stay within the 128 character limit");
+        let id = ["abcdefghijklmno"; 8].join(".");
+        assert_eq!(
+            id.len(),
+            127,
+            "fixture must stay within the 128 character limit"
+        );
         let found = check_value(&with_key(valid_server_manifest(), "id", json!(id)));
         assert_lacks_code(&found, "manifest.id-invalid");
     }
@@ -2803,7 +2838,7 @@ mod tests {
     /// REQ: PKG-014
     #[test]
     fn id_with_nine_segments_is_invalid() {
-        let id = vec!["a"; 9].join(".");
+        let id = ["a"; 9].join(".");
         let found = check_value(&with_key(valid_server_manifest(), "id", json!(id)));
         assert_has_code(&found, "manifest.id-invalid");
     }
@@ -2826,7 +2861,11 @@ mod tests {
     /// REQ: PKG-016
     #[test]
     fn version_with_leading_v_is_invalid() {
-        let found = check_value(&with_key(valid_server_manifest(), "version", json!("v1.0.0")));
+        let found = check_value(&with_key(
+            valid_server_manifest(),
+            "version",
+            json!("v1.0.0"),
+        ));
         assert_has_code(&found, "manifest.version-invalid");
     }
 
@@ -2840,21 +2879,33 @@ mod tests {
     /// REQ: PKG-016
     #[test]
     fn version_with_prerelease_and_build_metadata_is_valid() {
-        let found = check_value(&with_key(valid_server_manifest(), "version", json!("1.0.0-rc.1+build.5")));
+        let found = check_value(&with_key(
+            valid_server_manifest(),
+            "version",
+            json!("1.0.0-rc.1+build.5"),
+        ));
         assert_lacks_code(&found, "manifest.version-invalid");
     }
 
     /// REQ: PKG-013
     #[test]
     fn api_outside_the_window_is_api_unsupported() {
-        let found = check_value(&with_key(valid_server_manifest(), "api", json!("ilium:plugin@9.0.0")));
+        let found = check_value(&with_key(
+            valid_server_manifest(),
+            "api",
+            json!("ilium:plugin@9.0.0"),
+        ));
         assert_has_code(&found, "package.api-unsupported");
     }
 
     /// REQ: PKG-013
     #[test]
     fn api_that_is_not_well_formed_is_schema_error() {
-        let found = check_value(&with_key(valid_server_manifest(), "api", json!("ilium:plugin")));
+        let found = check_value(&with_key(
+            valid_server_manifest(),
+            "api",
+            json!("ilium:plugin"),
+        ));
         assert_has_code(&found, "manifest.schema");
         assert_lacks_code(&found, "package.api-unsupported");
     }
@@ -2862,7 +2913,11 @@ mod tests {
     /// REQ: PKG-009
     #[test]
     fn name_with_control_character_is_display_name_error_at_its_pointer() {
-        let found = check_value(&with_key(valid_server_manifest(), "name", json!("Demo\u{7}")));
+        let found = check_value(&with_key(
+            valid_server_manifest(),
+            "name",
+            json!("Demo\u{7}"),
+        ));
         let display = found
             .iter()
             .find(|diagnostic| diagnostic.code.as_str() == "manifest.display-name")
@@ -2874,7 +2929,11 @@ mod tests {
     /// REQ: PKG-009
     #[test]
     fn publisher_with_bidirectional_override_is_display_name_error() {
-        let found = check_value(&with_key(valid_server_manifest(), "publisher", json!("Ex\u{202E}ample")));
+        let found = check_value(&with_key(
+            valid_server_manifest(),
+            "publisher",
+            json!("Ex\u{202E}ample"),
+        ));
         assert_has_code(&found, "manifest.display-name");
     }
 
@@ -2892,7 +2951,10 @@ mod tests {
     fn absent_data_version_defaults_to_one() {
         let manifest = decode(&valid_server_manifest());
         assert_eq!(manifest.data_version, 1);
-        assert_lacks_code(&check_value(&valid_server_manifest()), "manifest.data-version");
+        assert_lacks_code(
+            &check_value(&valid_server_manifest()),
+            "manifest.data-version",
+        );
     }
 
     /// REQ: LIF-100
@@ -2905,21 +2967,33 @@ mod tests {
     /// REQ: LIF-100
     #[test]
     fn data_version_as_string_is_refused() {
-        let found = check_value(&with_key(valid_server_manifest(), "data_version", json!("2")));
+        let found = check_value(&with_key(
+            valid_server_manifest(),
+            "data_version",
+            json!("2"),
+        ));
         assert_has_code(&found, "manifest.data-version");
     }
 
     /// REQ: LIF-100
     #[test]
     fn data_version_at_the_u32_maximum_is_accepted() {
-        let found = check_value(&with_key(valid_server_manifest(), "data_version", json!(4_294_967_295_u64)));
+        let found = check_value(&with_key(
+            valid_server_manifest(),
+            "data_version",
+            json!(4_294_967_295_u64),
+        ));
         assert_lacks_code(&found, "manifest.data-version");
     }
 
     /// REQ: LIF-100
     #[test]
     fn data_version_above_the_u32_maximum_is_refused() {
-        let found = check_value(&with_key(valid_server_manifest(), "data_version", json!(4_294_967_296_u64)));
+        let found = check_value(&with_key(
+            valid_server_manifest(),
+            "data_version",
+            json!(4_294_967_296_u64),
+        ));
         assert_has_code(&found, "manifest.data-version");
     }
 
@@ -2942,7 +3016,11 @@ mod tests {
     /// REQ: PKG-034
     #[test]
     fn unstable_name_not_known_to_host_is_unstable_unknown() {
-        let found = check_value(&with_key(valid_server_manifest(), "unstable", json!(["nope"])));
+        let found = check_value(&with_key(
+            valid_server_manifest(),
+            "unstable",
+            json!(["nope"]),
+        ));
         assert_has_code(&found, "manifest.unstable-unknown");
     }
 
@@ -2989,26 +3067,38 @@ mod tests {
     /// REQ: PKG-571
     #[test]
     fn every_diagnostic_is_an_error_with_a_stage_and_pointer_where_a_place_exists() {
-        let found = check_value(&with_key(valid_server_manifest(), "name", json!("Demo\u{7}")));
+        let found = check_value(&with_key(
+            valid_server_manifest(),
+            "name",
+            json!("Demo\u{7}"),
+        ));
         assert!(!found.is_empty());
         for diagnostic in &found {
             assert_eq!(diagnostic.severity, Severity::Error, "{diagnostic}");
-            assert!(diagnostic.stage.is_some(), "every catalogue error has a stage: {diagnostic}");
+            assert!(
+                diagnostic.stage.is_some(),
+                "every catalogue error has a stage: {diagnostic}"
+            );
         }
     }
 
     /// REQ: PKG-560
     #[test]
     fn json_schema_declares_draft_2020_12_and_its_urn_id() {
-        let schema: Value = serde_json::from_str(json_schema()).expect("the embedded schema is JSON");
-        assert_eq!(schema["$schema"], "https://json-schema.org/draft/2020-12/schema");
+        let schema: Value =
+            serde_json::from_str(json_schema()).expect("the embedded schema is JSON");
+        assert_eq!(
+            schema["$schema"],
+            "https://json-schema.org/draft/2020-12/schema"
+        );
         assert_eq!(schema["$id"], "urn:ilium:schema:plugin-manifest:0.1.0");
     }
 
     /// REQ: PKG-561
     #[test]
     fn json_schema_requires_the_five_identity_keys() {
-        let schema: Value = serde_json::from_str(json_schema()).expect("the embedded schema is JSON");
+        let schema: Value =
+            serde_json::from_str(json_schema()).expect("the embedded schema is JSON");
         let required: Vec<&str> = schema["required"]
             .as_array()
             .expect("required is an array")
@@ -3016,7 +3106,10 @@ mod tests {
             .filter_map(Value::as_str)
             .collect();
         for key in ["api", "id", "name", "version", "publisher"] {
-            assert!(required.contains(&key), "schema must require {key}, got {required:?}");
+            assert!(
+                required.contains(&key),
+                "schema must require {key}, got {required:?}"
+            );
         }
     }
 

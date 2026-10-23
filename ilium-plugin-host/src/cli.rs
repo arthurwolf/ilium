@@ -721,8 +721,7 @@ mod tests {
     /// An environment whose working directory holds a Cargo project (so the doctor's Rust checks apply).
     fn rust_project_env(root: &Path) -> CliEnv {
         let env = make_env(root);
-        fs::write(env.cwd.join("Cargo.toml"), "[package]\nname = \"tools\"\n")
-            .expect("Cargo.toml");
+        fs::write(env.cwd.join("Cargo.toml"), "[package]\nname = \"tools\"\n").expect("Cargo.toml");
         env
     }
 
@@ -757,10 +756,16 @@ mod tests {
     /// `result.exit_code` equal to the process exit code (DEV-007, DEV-017).
     fn assert_envelope(out: &CliOutput) {
         let count = out.stdout_jsonl.len();
-        assert!(count >= 2, "a JSONL command ends with summary and result, got {count} records");
+        assert!(
+            count >= 2,
+            "a JSONL command ends with summary and result, got {count} records"
+        );
         assert_eq!(out.stdout_jsonl[count - 2]["type"], "summary");
         assert_eq!(out.stdout_jsonl[count - 1]["type"], "result");
-        assert_eq!(out.stdout_jsonl[count - 1]["exit_code"], i64::from(out.exit_code));
+        assert_eq!(
+            out.stdout_jsonl[count - 1]["exit_code"],
+            i64::from(out.exit_code)
+        );
     }
 
     fn any_stdout(out: &CliOutput) -> String {
@@ -799,12 +804,18 @@ mod tests {
 
     fn write_project(dir: &Path) {
         fs::create_dir_all(dir.join("src")).expect("source folder");
-        fs::write(dir.join("manifest.json"), "{\"id\":\"example.tools\",\"version\":\"0.1.0\"}")
-            .expect("manifest");
+        fs::write(
+            dir.join("manifest.json"),
+            "{\"id\":\"example.tools\",\"version\":\"0.1.0\"}",
+        )
+        .expect("manifest");
         fs::write(dir.join("Cargo.toml"), "[package]\nname = \"tools\"\n").expect("Cargo.toml");
         fs::write(dir.join("Cargo.lock"), "version = 4\n").expect("lockfile");
-        fs::write(dir.join("src").join("lib.rs"), "pub fn answer() -> u32 { 42 }\n")
-            .expect("source file");
+        fs::write(
+            dir.join("src").join("lib.rs"),
+            "pub fn answer() -> u32 { 42 }\n",
+        )
+        .expect("source file");
     }
 
     // -----------------------------------------------------------------------------------------
@@ -832,7 +843,10 @@ mod tests {
         let env = make_env(scratch.path())
             .with_var("ILIUM_PLUGIN_OFFLINE", "1")
             .with_var("ILIUM_PLUGIN_OFFLINE", "0");
-        assert_eq!(env.env.get("ILIUM_PLUGIN_OFFLINE").map(String::as_str), Some("0"));
+        assert_eq!(
+            env.env.get("ILIUM_PLUGIN_OFFLINE").map(String::as_str),
+            Some("0")
+        );
     }
 
     // -----------------------------------------------------------------------------------------
@@ -871,7 +885,11 @@ mod tests {
         debouncer.change(0);
         debouncer.change(100);
         debouncer.change(250);
-        assert_eq!(debouncer.due(549), 0, "the quiet window restarts at the last change");
+        assert_eq!(
+            debouncer.due(549),
+            0,
+            "the quiet window restarts at the last change"
+        );
         assert_eq!(debouncer.due(550), 1);
         assert_eq!(debouncer.due(900), 0);
     }
@@ -948,21 +966,34 @@ mod tests {
     /// REQ: DEV-303, DEV-715
     #[test]
     fn source_map_path_is_dist_side_wasm_map() {
-        assert_eq!(source_map_path(Side::Server), PathBuf::from("dist/server.wasm.map"));
-        assert_eq!(source_map_path(Side::Client), PathBuf::from("dist/client.wasm.map"));
-        assert_eq!(source_map_path(Side::Scene), PathBuf::from("dist/scene.wasm.map"));
+        assert_eq!(
+            source_map_path(Side::Server),
+            PathBuf::from("dist/server.wasm.map")
+        );
+        assert_eq!(
+            source_map_path(Side::Client),
+            PathBuf::from("dist/client.wasm.map")
+        );
+        assert_eq!(
+            source_map_path(Side::Scene),
+            PathBuf::from("dist/scene.wasm.map")
+        );
     }
 
     /// REQ: DEV-303
     #[test]
     fn component_with_name_section_is_detected() {
-        assert!(component_has_name_section(&module_with_custom_section("name")));
+        assert!(component_has_name_section(&module_with_custom_section(
+            "name"
+        )));
     }
 
     /// REQ: DEV-303
     #[test]
     fn component_with_only_other_custom_sections_has_no_name_section() {
-        assert!(!component_has_name_section(&module_with_custom_section("producers")));
+        assert!(!component_has_name_section(&module_with_custom_section(
+            "producers"
+        )));
     }
 
     /// REQ: DEV-303
@@ -988,7 +1019,9 @@ mod tests {
         write_project(scratch.path());
         let hash = project_input_hash(scratch.path()).expect("hash of a complete project");
         assert_eq!(hash.len(), 64);
-        assert!(hash.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)));
+        assert!(hash
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)));
     }
 
     /// REQ: DEV-305
@@ -1007,8 +1040,11 @@ mod tests {
         let scratch = scratch_root();
         write_project(scratch.path());
         let before = project_input_hash(scratch.path()).expect("hash before the edit");
-        fs::write(scratch.path().join("src").join("lib.rs"), "pub fn answer() -> u32 { 43 }\n")
-            .expect("edit source");
+        fs::write(
+            scratch.path().join("src").join("lib.rs"),
+            "pub fn answer() -> u32 { 43 }\n",
+        )
+        .expect("edit source");
         let after = project_input_hash(scratch.path()).expect("hash after the edit");
         assert_ne!(before, after);
     }
@@ -1019,8 +1055,11 @@ mod tests {
         let scratch = scratch_root();
         write_project(scratch.path());
         let before = project_input_hash(scratch.path()).expect("hash before the edit");
-        fs::write(scratch.path().join("manifest.json"), "{\"id\":\"example.tools\",\"version\":\"0.1.1\"}")
-            .expect("edit manifest");
+        fs::write(
+            scratch.path().join("manifest.json"),
+            "{\"id\":\"example.tools\",\"version\":\"0.1.1\"}",
+        )
+        .expect("edit manifest");
         let after = project_input_hash(scratch.path()).expect("hash after the edit");
         assert_ne!(before, after);
     }
@@ -1038,12 +1077,25 @@ mod tests {
         let target_arg = path_arg(&target);
         let out = run_words(
             &env,
-            &["new", target_arg.as_str(), "--id", "example.tools", "--lang", "rust", "--template", "server", "--bogus"],
+            &[
+                "new",
+                target_arg.as_str(),
+                "--id",
+                "example.tools",
+                "--lang",
+                "rust",
+                "--template",
+                "server",
+                "--bogus",
+            ],
         );
         assert_eq!(out.exit_code, 2);
         assert!(has_error_code(&out, "usage.unknown-flag"));
         assert_envelope(&out);
-        assert!(!target.exists(), "a usage error returns before any file is written");
+        assert!(
+            !target.exists(),
+            "a usage error returns before any file is written"
+        );
     }
 
     /// REQ: DEV-026
@@ -1088,11 +1140,30 @@ mod tests {
         let loud_target = path_arg(&scratch.path().join("loud"));
         let quiet = run_words(
             &env,
-            &["new", quiet_target.as_str(), "--id", "example.tools", "--lang", "rust", "--template", "server", "--quiet"],
+            &[
+                "new",
+                quiet_target.as_str(),
+                "--id",
+                "example.tools",
+                "--lang",
+                "rust",
+                "--template",
+                "server",
+                "--quiet",
+            ],
         );
         let loud = run_words(
             &env,
-            &["new", loud_target.as_str(), "--id", "example.tools", "--lang", "rust", "--template", "server"],
+            &[
+                "new",
+                loud_target.as_str(),
+                "--id",
+                "example.tools",
+                "--lang",
+                "rust",
+                "--template",
+                "server",
+            ],
         );
         assert!(records(&quiet, "progress").is_empty());
         assert!(!records(&loud, "progress").is_empty());
@@ -1111,7 +1182,8 @@ mod tests {
         let lines: Vec<&str> = raw.stdout.lines().collect();
         assert_eq!(lines.len(), parsed.stdout_jsonl.len());
         for (index, line) in lines.iter().enumerate() {
-            let value: Value = serde_json::from_str(line).expect("each stdout line is one JSON object");
+            let value: Value =
+                serde_json::from_str(line).expect("each stdout line is one JSON object");
             assert_eq!(value, parsed.stdout_jsonl[index]);
         }
     }
@@ -1122,9 +1194,14 @@ mod tests {
         let scratch = scratch_root();
         let out = run_check_dir(scratch.path());
         assert_eq!(out.exit_code, 1);
-        let mentions_manifest = error_codes(&out).iter().any(|code| code.starts_with("manifest."))
+        let mentions_manifest = error_codes(&out)
+            .iter()
+            .any(|code| code.starts_with("manifest."))
             || out.stderr.contains("manifest.");
-        assert!(mentions_manifest, "a missing manifest is reported with a manifest.* code");
+        assert!(
+            mentions_manifest,
+            "a missing manifest is reported with a manifest.* code"
+        );
     }
 
     // -----------------------------------------------------------------------------------------
@@ -1138,7 +1215,17 @@ mod tests {
         let env = make_env(scratch.path());
         let target = scratch.path().join("no-id");
         let target_arg = path_arg(&target);
-        let out = run_words(&env, &["new", target_arg.as_str(), "--lang", "rust", "--template", "server"]);
+        let out = run_words(
+            &env,
+            &[
+                "new",
+                target_arg.as_str(),
+                "--lang",
+                "rust",
+                "--template",
+                "server",
+            ],
+        );
         assert_eq!(out.exit_code, 2);
         assert!(has_error_code(&out, "usage.missing-argument"));
         assert!(!target.exists());
@@ -1153,7 +1240,19 @@ mod tests {
         let target_arg = path_arg(&target);
         let out = run_words(
             &env,
-            &["new", target_arg.as_str(), "--id", "example.tools", "--lang", "rust", "--template", "server", "--side", "client", "--json"],
+            &[
+                "new",
+                target_arg.as_str(),
+                "--id",
+                "example.tools",
+                "--lang",
+                "rust",
+                "--template",
+                "server",
+                "--side",
+                "client",
+                "--json",
+            ],
         );
         assert_eq!(out.exit_code, 2);
         assert!(has_error_code(&out, "usage.conflict"));
@@ -1168,7 +1267,18 @@ mod tests {
         let target_arg = path_arg(&scratch.path().join("matching"));
         let out = run_words(
             &env,
-            &["new", target_arg.as_str(), "--id", "example.tools", "--lang", "rust", "--template", "server", "--side", "server"],
+            &[
+                "new",
+                target_arg.as_str(),
+                "--id",
+                "example.tools",
+                "--lang",
+                "rust",
+                "--template",
+                "server",
+                "--side",
+                "server",
+            ],
         );
         assert_eq!(out.exit_code, 0);
         assert_envelope(&out);
@@ -1182,7 +1292,17 @@ mod tests {
         let target_arg = path_arg(&scratch.path().join("reserved"));
         let out = run_words(
             &env,
-            &["new", target_arg.as_str(), "--id", "ilium.tools", "--lang", "rust", "--template", "server", "--json"],
+            &[
+                "new",
+                target_arg.as_str(),
+                "--id",
+                "ilium.tools",
+                "--lang",
+                "rust",
+                "--template",
+                "server",
+                "--json",
+            ],
         );
         assert_eq!(out.exit_code, 1);
         assert!(has_error_code(&out, "new.id-reserved"));
@@ -1193,15 +1313,33 @@ mod tests {
     fn new_rejects_ids_outside_the_pattern() {
         let scratch = scratch_root();
         let env = make_env(scratch.path());
-        let ids = ["example", "Example.Tools", "example..tools", "example.tools."];
+        let ids = [
+            "example",
+            "Example.Tools",
+            "example..tools",
+            "example.tools.",
+        ];
         for (index, id) in ids.iter().enumerate() {
             let target_arg = path_arg(&scratch.path().join(format!("bad-id-{index}")));
             let out = run_words(
                 &env,
-                &["new", target_arg.as_str(), "--id", *id, "--lang", "rust", "--template", "server", "--json"],
+                &[
+                    "new",
+                    target_arg.as_str(),
+                    "--id",
+                    *id,
+                    "--lang",
+                    "rust",
+                    "--template",
+                    "server",
+                    "--json",
+                ],
             );
             assert_eq!(out.exit_code, 1, "id {id} must fail");
-            assert!(has_error_code(&out, "new.id-invalid"), "id {id} gives new.id-invalid");
+            assert!(
+                has_error_code(&out, "new.id-invalid"),
+                "id {id} gives new.id-invalid"
+            );
         }
     }
 
@@ -1214,7 +1352,17 @@ mod tests {
         let target_arg = path_arg(&target);
         let out = run_words(
             &env,
-            &["new", target_arg.as_str(), "--id", "example.tools", "--lang", "rust", "--template", "nope", "--json"],
+            &[
+                "new",
+                target_arg.as_str(),
+                "--id",
+                "example.tools",
+                "--lang",
+                "rust",
+                "--template",
+                "nope",
+                "--json",
+            ],
         );
         assert_eq!(out.exit_code, 2);
         assert!(has_error_code(&out, "new.template-unknown"));
@@ -1230,7 +1378,16 @@ mod tests {
         let target_arg = path_arg(&target);
         let out = run_words(
             &env,
-            &["new", target_arg.as_str(), "--id", "example.tools", "--lang", "rust", "--template", "server"],
+            &[
+                "new",
+                target_arg.as_str(),
+                "--id",
+                "example.tools",
+                "--lang",
+                "rust",
+                "--template",
+                "server",
+            ],
         );
         assert_eq!(out.exit_code, 0);
         assert_envelope(&out);
@@ -1239,11 +1396,19 @@ mod tests {
             .into_iter()
             .filter(|record| record["step"] == "inventory")
             .collect();
-        assert!(!inventory.is_empty(), "new writes files, so it reports each one");
+        assert!(
+            !inventory.is_empty(),
+            "new writes files, so it reports each one"
+        );
         for record in inventory {
-            let relative = record["message"].as_str().expect("inventory message is a path");
+            let relative = record["message"]
+                .as_str()
+                .expect("inventory message is a path");
             assert!(!Path::new(relative).is_absolute());
-            assert!(target.join(relative).is_file(), "{relative} is a file of the new project");
+            assert!(
+                target.join(relative).is_file(),
+                "{relative} is a file of the new project"
+            );
         }
         assert!(records(&out, "artifact").is_empty());
     }
@@ -1259,11 +1424,24 @@ mod tests {
         let target_arg = path_arg(&target);
         let out = run_words(
             &env,
-            &["new", target_arg.as_str(), "--id", "example.tools", "--lang", "rust", "--template", "server", "--json"],
+            &[
+                "new",
+                target_arg.as_str(),
+                "--id",
+                "example.tools",
+                "--lang",
+                "rust",
+                "--template",
+                "server",
+                "--json",
+            ],
         );
         assert_eq!(out.exit_code, 1);
         assert!(has_error_code(&out, "new.dir-not-empty"));
-        assert_eq!(fs::read_to_string(target.join("keep.txt")).expect("kept file"), "keep");
+        assert_eq!(
+            fs::read_to_string(target.join("keep.txt")).expect("kept file"),
+            "keep"
+        );
     }
 
     /// REQ: DEV-041
@@ -1276,7 +1454,16 @@ mod tests {
         let target_arg = path_arg(&target);
         let out = run_words(
             &env,
-            &["new", target_arg.as_str(), "--id", "example.tools", "--lang", "rust", "--template", "server"],
+            &[
+                "new",
+                target_arg.as_str(),
+                "--id",
+                "example.tools",
+                "--lang",
+                "rust",
+                "--template",
+                "server",
+            ],
         );
         assert_eq!(out.exit_code, 0);
         assert_envelope(&out);
@@ -1293,10 +1480,23 @@ mod tests {
         let target_arg = path_arg(&target);
         let out = run_words(
             &env,
-            &["new", target_arg.as_str(), "--id", "example.tools", "--lang", "rust", "--template", "server", "--force"],
+            &[
+                "new",
+                target_arg.as_str(),
+                "--id",
+                "example.tools",
+                "--lang",
+                "rust",
+                "--template",
+                "server",
+                "--force",
+            ],
         );
         assert_eq!(out.exit_code, 0);
-        assert_eq!(fs::read_to_string(target.join("notes.md")).expect("unrelated file"), "mine");
+        assert_eq!(
+            fs::read_to_string(target.join("notes.md")).expect("unrelated file"),
+            "mine"
+        );
     }
 
     // -----------------------------------------------------------------------------------------
@@ -1342,7 +1542,14 @@ mod tests {
     fn list_prints_each_installed_plugin_with_id_version_and_tier() {
         let scratch = scratch_root();
         let session = MemorySession::new();
-        session.add_plugin("example.tools", "0.1.0", "T1", "running", false, &[("fs.read", "low", "granted")]);
+        session.add_plugin(
+            "example.tools",
+            "0.1.0",
+            "T1",
+            "running",
+            false,
+            &[("fs.read", "low", "granted")],
+        );
         let env = make_env(scratch.path()).with_session(session.clone());
         let out = run_words(&env, &["list"]);
         assert_eq!(out.exit_code, 0);
@@ -1387,10 +1594,22 @@ mod tests {
         let session = MemorySession::new();
         session.add_plugin("example.tools", "0.1.0", "T1", "running", false, &[]);
         let env = make_env(scratch.path()).with_session(session.clone());
-        let out = run_words(&env, &["uninstall", "example.tools", "--keep-data", "--purge", "--json"]);
+        let out = run_words(
+            &env,
+            &[
+                "uninstall",
+                "example.tools",
+                "--keep-data",
+                "--purge",
+                "--json",
+            ],
+        );
         assert_eq!(out.exit_code, 2);
         assert!(has_error_code(&out, "usage.conflict"));
-        assert!(session.journal().is_empty(), "a usage error changes nothing");
+        assert!(
+            session.journal().is_empty(),
+            "a usage error changes nothing"
+        );
         assert!(session.package_installed("example.tools"));
     }
 
@@ -1438,7 +1657,14 @@ mod tests {
     fn grants_lists_each_requested_grant_with_its_state() {
         let scratch = scratch_root();
         let session = MemorySession::new();
-        session.add_plugin("example.tools", "0.1.0", "T1", "running", false, &[("fs.read", "low", "granted")]);
+        session.add_plugin(
+            "example.tools",
+            "0.1.0",
+            "T1",
+            "running",
+            false,
+            &[("fs.read", "low", "granted")],
+        );
         let env = make_env(scratch.path()).with_session(session.clone());
         let out = run_words(&env, &["grants", "example.tools"]);
         assert_eq!(out.exit_code, 0);
@@ -1451,9 +1677,19 @@ mod tests {
     fn grant_not_requested_by_the_manifest_is_refused() {
         let scratch = scratch_root();
         let session = MemorySession::new();
-        session.add_plugin("example.tools", "0.1.0", "T1", "running", false, &[("fs.read", "low", "granted")]);
+        session.add_plugin(
+            "example.tools",
+            "0.1.0",
+            "T1",
+            "running",
+            false,
+            &[("fs.read", "low", "granted")],
+        );
         let env = make_env(scratch.path()).with_session(session.clone());
-        let out = run_words(&env, &["grants", "example.tools", "--grant", "net.egress", "--json"]);
+        let out = run_words(
+            &env,
+            &["grants", "example.tools", "--grant", "net.egress", "--json"],
+        );
         assert_eq!(out.exit_code, 1);
         assert!(has_error_code(&out, "grants.not-requested"));
     }
@@ -1463,11 +1699,24 @@ mod tests {
     fn revoke_withdraws_the_grant_and_restarts_the_plugin() {
         let scratch = scratch_root();
         let session = MemorySession::new();
-        session.add_plugin("example.tools", "0.1.0", "T1", "running", false, &[("fs.read", "low", "granted")]);
+        session.add_plugin(
+            "example.tools",
+            "0.1.0",
+            "T1",
+            "running",
+            false,
+            &[("fs.read", "low", "granted")],
+        );
         let env = make_env(scratch.path()).with_session(session.clone());
-        let out = run_words(&env, &["grants", "example.tools", "--revoke", "fs.read", "--json"]);
+        let out = run_words(
+            &env,
+            &["grants", "example.tools", "--revoke", "fs.read", "--json"],
+        );
         assert_eq!(out.exit_code, 0);
-        assert_eq!(session.grant_state("example.tools", "fs.read"), Some("revoked".to_owned()));
+        assert_eq!(
+            session.grant_state("example.tools", "fs.read"),
+            Some("revoked".to_owned())
+        );
         assert_eq!(session.restarts("example.tools"), 1);
     }
 
@@ -1511,7 +1760,8 @@ mod tests {
         let out = run_words(&env, &["sign", package_arg.as_str(), "--json"]);
         assert_eq!(out.exit_code, 1);
         assert!(
-            has_error_code(&out, "sign.key-unreadable") || has_error_code(&out, "sign.key-permissions"),
+            has_error_code(&out, "sign.key-unreadable")
+                || has_error_code(&out, "sign.key-permissions"),
             "an unparseable key is refused with a sign.key code"
         );
     }
@@ -1584,12 +1834,18 @@ mod tests {
         session.add_plugin("example.tools", "0.1.0", "T1", "running", false, &[]);
         let env = make_env(scratch.path()).with_session(session.clone());
         for rejected in ["0", "601"] {
-            let out = run_words(&env, &["profile", "example.tools", "--duration", rejected, "--json"]);
+            let out = run_words(
+                &env,
+                &["profile", "example.tools", "--duration", rejected, "--json"],
+            );
             assert_eq!(out.exit_code, 2, "duration {rejected} is outside 1 to 600");
             assert!(has_error_code(&out, "usage.invalid-value"));
         }
         for accepted in ["1", "600"] {
-            let out = run_words(&env, &["profile", "example.tools", "--duration", accepted, "--json"]);
+            let out = run_words(
+                &env,
+                &["profile", "example.tools", "--duration", accepted, "--json"],
+            );
             assert_eq!(out.exit_code, 0, "duration {accepted} is inside 1 to 600");
         }
     }
@@ -1661,7 +1917,10 @@ mod tests {
     #[test]
     fn doctor_exits_four_exactly_when_an_item_fails() {
         let scratch = scratch_root();
-        let probe = FixedProbe { rust_target_installed: false, ..healthy_probe() };
+        let probe = FixedProbe {
+            rust_target_installed: false,
+            ..healthy_probe()
+        };
         let env = doctor_env(scratch.path(), probe);
         let out = run_words(&env, &["doctor", "--json"]);
         let expected_code = if doctor_any_fail(&out) { 4 } else { 0 };
@@ -1673,10 +1932,16 @@ mod tests {
     #[test]
     fn doctor_missing_rust_target_fails_with_its_fix_text() {
         let scratch = scratch_root();
-        let probe = FixedProbe { rust_target_installed: false, ..healthy_probe() };
+        let probe = FixedProbe {
+            rust_target_installed: false,
+            ..healthy_probe()
+        };
         let env = doctor_env(scratch.path(), probe);
         let out = run_words(&env, &["doctor", "--json"]);
-        assert_eq!(doctor_field(&out, "rust-target", "status"), Some("fail".to_owned()));
+        assert_eq!(
+            doctor_field(&out, "rust-target", "status"),
+            Some("fail".to_owned())
+        );
         assert_eq!(
             doctor_field(&out, "rust-target", "fix"),
             Some("rustup target add wasm32-wasip2".to_owned())
@@ -1687,12 +1952,24 @@ mod tests {
     #[test]
     fn doctor_rustc_older_than_1_90_fails_and_1_90_passes() {
         let scratch = scratch_root();
-        let old = FixedProbe { rustc_version: Some("1.89.0".to_owned()), ..healthy_probe() };
+        let old = FixedProbe {
+            rustc_version: Some("1.89.0".to_owned()),
+            ..healthy_probe()
+        };
         let old_out = run_words(&doctor_env(scratch.path(), old), &["doctor", "--json"]);
-        assert_eq!(doctor_field(&old_out, "rustc", "status"), Some("fail".to_owned()));
-        let exact = FixedProbe { rustc_version: Some("1.90.0".to_owned()), ..healthy_probe() };
+        assert_eq!(
+            doctor_field(&old_out, "rustc", "status"),
+            Some("fail".to_owned())
+        );
+        let exact = FixedProbe {
+            rustc_version: Some("1.90.0".to_owned()),
+            ..healthy_probe()
+        };
         let exact_out = run_words(&doctor_env(scratch.path(), exact), &["doctor", "--json"]);
-        assert_eq!(doctor_field(&exact_out, "rustc", "status"), Some("ok".to_owned()));
+        assert_eq!(
+            doctor_field(&exact_out, "rustc", "status"),
+            Some("ok".to_owned())
+        );
     }
 
     /// REQ: DEV-810
@@ -1707,7 +1984,10 @@ mod tests {
         ];
         for (free_bytes, expected) in cases {
             let scratch = scratch_root();
-            let probe = FixedProbe { free_bytes, ..healthy_probe() };
+            let probe = FixedProbe {
+                free_bytes,
+                ..healthy_probe()
+            };
             let out = run_words(&doctor_env(scratch.path(), probe), &["doctor", "--json"]);
             assert_eq!(
                 doctor_field(&out, "disk", "status"),
@@ -1722,9 +2002,13 @@ mod tests {
     fn doctor_trust_store_that_is_absent_is_ok() {
         let scratch = scratch_root();
         let store = scratch.path().join("trust.json");
-        let env = doctor_env(scratch.path(), healthy_probe()).with_var("ILIUM_TRUST_STORE", &path_arg(&store));
+        let env = doctor_env(scratch.path(), healthy_probe())
+            .with_var("ILIUM_TRUST_STORE", &path_arg(&store));
         let out = run_words(&env, &["doctor", "--json"]);
-        assert_eq!(doctor_field(&out, "trust-store", "status"), Some("ok".to_owned()));
+        assert_eq!(
+            doctor_field(&out, "trust-store", "status"),
+            Some("ok".to_owned())
+        );
     }
 
     /// REQ: DEV-810
@@ -1733,7 +2017,10 @@ mod tests {
         let scratch = scratch_root();
         let env = doctor_env(scratch.path(), healthy_probe());
         let out = run_words(&env, &["doctor", "--json"]);
-        assert_eq!(doctor_field(&out, "session", "status"), Some("warn".to_owned()));
+        assert_eq!(
+            doctor_field(&out, "session", "status"),
+            Some("warn".to_owned())
+        );
     }
 
     /// REQ: PKG-563
@@ -1754,7 +2041,16 @@ mod tests {
         let scratch = scratch_root();
         let env = make_env(scratch.path());
         let project_arg = path_arg(&scratch.path().join("project"));
-        let out = run_words(&env, &["lint", project_arg.as_str(), "--rule", "lint.no-such-rule", "--json"]);
+        let out = run_words(
+            &env,
+            &[
+                "lint",
+                project_arg.as_str(),
+                "--rule",
+                "lint.no-such-rule",
+                "--json",
+            ],
+        );
         assert_eq!(out.exit_code, 2);
         assert!(has_error_code(&out, "usage.invalid-value"));
     }
@@ -1798,7 +2094,10 @@ mod tests {
         let project = scratch.path().join("conflict-project");
         fs::create_dir_all(&project).expect("project folder");
         let target_arg = path_arg(&project);
-        let out = run_words(&env, &["build", target_arg.as_str(), "--debug", "--release"]);
+        let out = run_words(
+            &env,
+            &["build", target_arg.as_str(), "--debug", "--release"],
+        );
         assert_eq!(out.exit_code, 2);
         assert!(has_error_code(&out, "usage.conflict"));
         assert!(!project.join("dist").exists());
@@ -1825,11 +2124,17 @@ mod tests {
         session.add_plugin("example.disabled", "0.1.0", "T1", "disabled", true, &[]);
         assert_eq!(
             session.plugin("example.running"),
-            Some(SessionPlugin { dev: false, running: true })
+            Some(SessionPlugin {
+                dev: false,
+                running: true
+            })
         );
         assert_eq!(
             session.plugin("example.disabled"),
-            Some(SessionPlugin { dev: true, running: false })
+            Some(SessionPlugin {
+                dev: true,
+                running: false
+            })
         );
     }
 

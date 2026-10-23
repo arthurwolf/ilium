@@ -976,7 +976,11 @@ mod tests {
     #[test]
     fn package_with_hook_behaviour_of_zero_delay_still_builds() {
         let bytes = PackageSpec::new("hooky", "1.0.0")
-            .hook("owner-plugin", "some.point", HookBehaviour::AppendAfterMs(0, ""))
+            .hook(
+                "owner-plugin",
+                "some.point",
+                HookBehaviour::AppendAfterMs(0, ""),
+            )
             .build_bytes();
         assert!(!bytes.is_empty());
     }
@@ -1030,7 +1034,7 @@ mod tests {
 
     #[test]
     fn default_rig_matches_new_rig_with_no_trusted_keys() {
-        let rig = UserRig::default();
+        let rig = UserRig;
         assert!(rig.trusted_keys().is_empty());
     }
 
@@ -1080,7 +1084,10 @@ mod tests {
         rig.attach_client(vec![DialogAnswer::ReviewAcceptDefaults]);
         rig.install_file(&PackageSpec::new("old-a", "1.0.0"), &[]);
         rig.attach_client(vec![DialogAnswer::ReplaceYes]);
-        rig.install_file(&PackageSpec::new("new-a", "2.0.0").replaces(&["old-a"]), &[]);
+        rig.install_file(
+            &PackageSpec::new("new-a", "2.0.0").replaces(&["old-a"]),
+            &[],
+        );
         assert_eq!(
             rig.replacements(),
             vec![("old-a".to_string(), "new-a".to_string())]
@@ -1095,7 +1102,10 @@ mod tests {
         rig.attach_client(vec![DialogAnswer::ReviewAcceptDefaults]);
         rig.install_file(&PackageSpec::new("old-b", "1.0.0"), &[]);
         rig.attach_client(vec![DialogAnswer::ReplaceInstallWithout]);
-        rig.install_file(&PackageSpec::new("new-b", "2.0.0").replaces(&["old-b"]), &[]);
+        rig.install_file(
+            &PackageSpec::new("new-b", "2.0.0").replaces(&["old-b"]),
+            &[],
+        );
         assert!(rig.replacements().is_empty());
     }
 
@@ -1126,7 +1136,10 @@ mod tests {
     #[test]
     fn empty_replaces_list_shows_no_replace_prompt() {
         let mut rig = UserRig::new();
-        rig.install_file(&PackageSpec::new("replacer-none", "1.0.0").replaces(&[]), &[]);
+        rig.install_file(
+            &PackageSpec::new("replacer-none", "1.0.0").replaces(&[]),
+            &[],
+        );
         assert!(rig.replace_prompts().is_empty());
         assert!(rig.replacements().is_empty());
     }
@@ -1153,7 +1166,10 @@ mod tests {
     fn plugin_toast_is_visible_until_cleared() {
         let mut rig = UserRig::new();
         rig.plugin_toast("toast-plugin", "Export finished");
-        assert!(rig.visible_toasts().iter().any(|text| text == "Export finished"));
+        assert!(rig
+            .visible_toasts()
+            .iter()
+            .any(|text| text == "Export finished"));
         rig.clear_toasts();
         assert!(rig.visible_toasts().is_empty());
     }

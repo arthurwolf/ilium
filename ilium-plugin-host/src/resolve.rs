@@ -222,7 +222,9 @@ mod tests {
     }
 
     fn has_code(diagnostics: &[Diagnostic], expected_code: &str) -> bool {
-        diagnostics.iter().any(|diagnostic| diagnostic.code == expected_code)
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == expected_code)
     }
 
     fn assert_refused_with(diagnostics: &[Diagnostic], expected_code: &str) {
@@ -365,7 +367,10 @@ mod tests {
     /// REQ: PKG-310
     #[test]
     fn version_refuses_a_major_above_the_boundary() {
-        assert_eq!(version_refusal("2147483648.0.0"), "manifest.version-invalid");
+        assert_eq!(
+            version_refusal("2147483648.0.0"),
+            "manifest.version-invalid"
+        );
     }
 
     /// REQ: PKG-310
@@ -439,7 +444,7 @@ mod tests {
     #[test]
     fn build_metadata_does_not_change_ordering() {
         assert!(version("1.0.0+exp.sha.5114f85") == version("1.0.0"));
-        assert!(!(version("1.0.0+build.2") < version("1.0.0")));
+        assert!(version("1.0.0+build.2") >= version("1.0.0"));
     }
 
     /// REQ: PKG-314
@@ -818,12 +823,38 @@ mod tests {
     #[test]
     fn new_dependency_installs_the_highest_satisfying_version_before_its_dependant() {
         let input = request(
-            vec![plan_package("com.example.reviews", "0.4.0", &[("com.example.git", "^1.2", false)], None)],
+            vec![plan_package(
+                "com.example.reviews",
+                "0.4.0",
+                &[("com.example.git", "^1.2", false)],
+                None,
+            )],
             Vec::new(),
             vec![
-                source("com.example.git", "1.2.0", "sha-git-1.2.0", "stable", 0, &[]),
-                source("com.example.git", "1.3.1", "sha-git-1.3.1", "stable", 0, &[]),
-                source("com.example.git", "2.0.0", "sha-git-2.0.0", "stable", 0, &[]),
+                source(
+                    "com.example.git",
+                    "1.2.0",
+                    "sha-git-1.2.0",
+                    "stable",
+                    0,
+                    &[],
+                ),
+                source(
+                    "com.example.git",
+                    "1.3.1",
+                    "sha-git-1.3.1",
+                    "stable",
+                    0,
+                    &[],
+                ),
+                source(
+                    "com.example.git",
+                    "2.0.0",
+                    "sha-git-2.0.0",
+                    "stable",
+                    0,
+                    &[],
+                ),
             ],
         );
         let plan = expect_plan(&input);
@@ -844,7 +875,12 @@ mod tests {
     #[test]
     fn satisfied_installed_dependency_is_kept_without_change() {
         let input = request(
-            vec![plan_package("com.example.reviews", "0.4.0", &[("com.example.git", "^1.0", false)], None)],
+            vec![plan_package(
+                "com.example.reviews",
+                "0.4.0",
+                &[("com.example.git", "^1.0", false)],
+                None,
+            )],
             vec![plan_package("com.example.git", "1.0.0", &[], None)],
             Vec::new(),
         );
@@ -862,9 +898,21 @@ mod tests {
     #[test]
     fn installed_version_is_preferred_over_a_higher_source_when_not_updating() {
         let input = request(
-            vec![plan_package("com.example.reviews", "0.4.0", &[("com.example.git", "^1.0", false)], None)],
+            vec![plan_package(
+                "com.example.reviews",
+                "0.4.0",
+                &[("com.example.git", "^1.0", false)],
+                None,
+            )],
             vec![plan_package("com.example.git", "1.0.0", &[], None)],
-            vec![source("com.example.git", "1.2.0", "sha-git-1.2.0", "stable", 0, &[])],
+            vec![source(
+                "com.example.git",
+                "1.2.0",
+                "sha-git-1.2.0",
+                "stable",
+                0,
+                &[],
+            )],
         );
         let plan = expect_plan(&input);
         assert_eq!(
@@ -880,9 +928,21 @@ mod tests {
     #[test]
     fn installed_dependency_is_updated_when_a_range_forces_it() {
         let input = request(
-            vec![plan_package("com.example.reviews", "0.4.0", &[("com.example.git", "^1.1", false)], None)],
+            vec![plan_package(
+                "com.example.reviews",
+                "0.4.0",
+                &[("com.example.git", "^1.1", false)],
+                None,
+            )],
             vec![plan_package("com.example.git", "1.0.0", &[], None)],
-            vec![source("com.example.git", "1.2.0", "sha-git-1.2.0", "stable", 0, &[])],
+            vec![source(
+                "com.example.git",
+                "1.2.0",
+                "sha-git-1.2.0",
+                "stable",
+                0,
+                &[],
+            )],
         );
         let plan = expect_plan(&input);
         assert_eq!(
@@ -902,7 +962,12 @@ mod tests {
     #[test]
     fn highest_version_satisfying_all_ranges_is_chosen() {
         let input = request(
-            vec![plan_package("com.example.reviews", "0.4.0", &[("com.example.git", "^1.0", false)], None)],
+            vec![plan_package(
+                "com.example.reviews",
+                "0.4.0",
+                &[("com.example.git", "^1.0", false)],
+                None,
+            )],
             Vec::new(),
             vec![
                 source("com.example.git", "1.0.0", "sha-1.0.0", "stable", 0, &[]),
@@ -911,7 +976,9 @@ mod tests {
             ],
         );
         let plan = expect_plan(&input);
-        assert!(plan.steps.contains(&step(PlanAction::Install, "com.example.git", "1.9.0")));
+        assert!(plan
+            .steps
+            .contains(&step(PlanAction::Install, "com.example.git", "1.9.0")));
     }
 
     /// REQ: PKG-331
@@ -920,20 +987,38 @@ mod tests {
         let mut yanked = source("com.example.git", "1.9.0", "sha-1.9.0", "stable", 0, &[]);
         yanked.yanked = true;
         let input = request(
-            vec![plan_package("com.example.reviews", "0.4.0", &[("com.example.git", "^1.0", false)], None)],
+            vec![plan_package(
+                "com.example.reviews",
+                "0.4.0",
+                &[("com.example.git", "^1.0", false)],
+                None,
+            )],
             Vec::new(),
-            vec![source("com.example.git", "1.0.0", "sha-1.0.0", "stable", 0, &[]), yanked],
+            vec![
+                source("com.example.git", "1.0.0", "sha-1.0.0", "stable", 0, &[]),
+                yanked,
+            ],
         );
         let plan = expect_plan(&input);
-        assert!(plan.steps.contains(&step(PlanAction::Install, "com.example.git", "1.0.0")));
-        assert!(!plan.steps.iter().any(|plan_step| plan_step.version == "1.9.0"));
+        assert!(plan
+            .steps
+            .contains(&step(PlanAction::Install, "com.example.git", "1.0.0")));
+        assert!(!plan
+            .steps
+            .iter()
+            .any(|plan_step| plan_step.version == "1.9.0"));
     }
 
     /// REQ: PKG-336
     #[test]
     fn equal_candidates_prefer_the_lower_source_rank() {
         let input = request(
-            vec![plan_package("com.example.reviews", "0.4.0", &[("com.example.git", "^1.0", false)], None)],
+            vec![plan_package(
+                "com.example.reviews",
+                "0.4.0",
+                &[("com.example.git", "^1.0", false)],
+                None,
+            )],
             Vec::new(),
             vec![
                 source("com.example.git", "1.2.0", "sha-zzz", "stable", 1, &[]),
@@ -951,7 +1036,12 @@ mod tests {
     #[test]
     fn equal_candidates_with_equal_rank_prefer_the_lowest_sha256() {
         let input = request(
-            vec![plan_package("com.example.reviews", "0.4.0", &[("com.example.git", "^1.0", false)], None)],
+            vec![plan_package(
+                "com.example.reviews",
+                "0.4.0",
+                &[("com.example.git", "^1.0", false)],
+                None,
+            )],
             Vec::new(),
             vec![
                 source("com.example.git", "1.2.0", "sha-bbb", "stable", 0, &[]),
@@ -969,8 +1059,18 @@ mod tests {
     #[test]
     fn conflicting_ranges_are_refused_and_list_each_constraint() {
         let input = request(
-            vec![plan_package("com.example.reviews", "0.4.0", &[("com.example.git", "^2.0", false)], None)],
-            vec![plan_package("com.example.lint", "1.0.0", &[("com.example.git", "^1.0", false)], None)],
+            vec![plan_package(
+                "com.example.reviews",
+                "0.4.0",
+                &[("com.example.git", "^2.0", false)],
+                None,
+            )],
+            vec![plan_package(
+                "com.example.lint",
+                "1.0.0",
+                &[("com.example.git", "^1.0", false)],
+                None,
+            )],
             vec![
                 source("com.example.git", "1.0.0", "sha-1.0.0", "stable", 0, &[]),
                 source("com.example.git", "2.0.0", "sha-2.0.0", "stable", 0, &[]),
@@ -979,16 +1079,32 @@ mod tests {
         let diagnostics = expect_refusal(&input);
         assert_refused_with(&diagnostics, "dependency.conflict");
         let messages = all_messages(&diagnostics);
-        assert!(messages.contains("^1.0"), "message should list ^1.0: {messages}");
-        assert!(messages.contains("^2.0"), "message should list ^2.0: {messages}");
+        assert!(
+            messages.contains("^1.0"),
+            "message should list ^1.0: {messages}"
+        );
+        assert!(
+            messages.contains("^2.0"),
+            "message should list ^2.0: {messages}"
+        );
     }
 
     /// REQ: PKG-341
     #[test]
     fn conflicting_ranges_name_both_source_plugins() {
         let input = request(
-            vec![plan_package("com.example.reviews", "0.4.0", &[("com.example.git", "^2.0", false)], None)],
-            vec![plan_package("com.example.lint", "1.0.0", &[("com.example.git", "^1.0", false)], None)],
+            vec![plan_package(
+                "com.example.reviews",
+                "0.4.0",
+                &[("com.example.git", "^2.0", false)],
+                None,
+            )],
+            vec![plan_package(
+                "com.example.lint",
+                "1.0.0",
+                &[("com.example.git", "^1.0", false)],
+                None,
+            )],
             vec![
                 source("com.example.git", "1.0.0", "sha-1.0.0", "stable", 0, &[]),
                 source("com.example.git", "2.0.0", "sha-2.0.0", "stable", 0, &[]),
@@ -1004,7 +1120,12 @@ mod tests {
     #[test]
     fn required_plugin_with_no_copy_and_no_source_is_unresolved() {
         let input = request(
-            vec![plan_package("com.example.reviews", "0.4.0", &[("com.example.git", "^1.0", false)], None)],
+            vec![plan_package(
+                "com.example.reviews",
+                "0.4.0",
+                &[("com.example.git", "^1.0", false)],
+                None,
+            )],
             Vec::new(),
             Vec::new(),
         );
@@ -1039,7 +1160,12 @@ mod tests {
     #[test]
     fn missing_optional_dependency_does_not_block_or_install() {
         let input = request(
-            vec![plan_package("com.example.reviews", "0.4.0", &[("com.example.theme-pack", "*", true)], None)],
+            vec![plan_package(
+                "com.example.reviews",
+                "0.4.0",
+                &[("com.example.theme-pack", "*", true)],
+                None,
+            )],
             Vec::new(),
             Vec::new(),
         );
@@ -1054,7 +1180,12 @@ mod tests {
     #[test]
     fn hard_cycle_between_packages_is_refused() {
         let input = request(
-            vec![plan_package("com.example.reviews", "0.4.0", &[("com.example.git", "*", false)], None)],
+            vec![plan_package(
+                "com.example.reviews",
+                "0.4.0",
+                &[("com.example.git", "*", false)],
+                None,
+            )],
             Vec::new(),
             vec![source(
                 "com.example.git",
@@ -1073,7 +1204,12 @@ mod tests {
     #[test]
     fn cycle_through_an_optional_edge_does_not_block_install() {
         let input = request(
-            vec![plan_package("com.example.reviews", "0.4.0", &[("com.example.git", "*", true)], None)],
+            vec![plan_package(
+                "com.example.reviews",
+                "0.4.0",
+                &[("com.example.git", "*", true)],
+                None,
+            )],
             Vec::new(),
             vec![source(
                 "com.example.git",
@@ -1091,7 +1227,12 @@ mod tests {
     #[test]
     fn host_range_not_satisfied_by_the_running_release_is_refused() {
         let input = request(
-            vec![plan_package("com.example.reviews", "0.4.0", &[], Some(">=9.0.0"))],
+            vec![plan_package(
+                "com.example.reviews",
+                "0.4.0",
+                &[],
+                Some(">=9.0.0"),
+            )],
             Vec::new(),
             Vec::new(),
         );
@@ -1103,7 +1244,12 @@ mod tests {
     #[test]
     fn host_range_satisfied_by_the_running_release_is_accepted() {
         let input = request(
-            vec![plan_package("com.example.reviews", "0.4.0", &[], Some(">=0.1.0"))],
+            vec![plan_package(
+                "com.example.reviews",
+                "0.4.0",
+                &[],
+                Some(">=0.1.0"),
+            )],
             Vec::new(),
             Vec::new(),
         );
@@ -1118,9 +1264,21 @@ mod tests {
     #[test]
     fn prerelease_only_source_is_unresolved_on_the_stable_channel() {
         let input = request(
-            vec![plan_package("com.example.reviews", "0.4.0", &[("com.example.git", "^1.0", false)], None)],
+            vec![plan_package(
+                "com.example.reviews",
+                "0.4.0",
+                &[("com.example.git", "^1.0", false)],
+                None,
+            )],
             Vec::new(),
-            vec![source("com.example.git", "1.3.0-beta.1", "sha-beta", "beta", 0, &[])],
+            vec![source(
+                "com.example.git",
+                "1.3.0-beta.1",
+                "sha-beta",
+                "beta",
+                0,
+                &[],
+            )],
         );
         let diagnostics = expect_refusal(&input);
         assert_refused_with(&diagnostics, "dependency.unresolved");
@@ -1130,13 +1288,29 @@ mod tests {
     #[test]
     fn prerelease_source_is_offered_on_the_beta_channel() {
         let mut input = request(
-            vec![plan_package("com.example.reviews", "0.4.0", &[("com.example.git", "^1.0", false)], None)],
+            vec![plan_package(
+                "com.example.reviews",
+                "0.4.0",
+                &[("com.example.git", "^1.0", false)],
+                None,
+            )],
             Vec::new(),
-            vec![source("com.example.git", "1.3.0-beta.1", "sha-beta", "beta", 0, &[])],
+            vec![source(
+                "com.example.git",
+                "1.3.0-beta.1",
+                "sha-beta",
+                "beta",
+                0,
+                &[],
+            )],
         );
         input.channel = "beta".to_string();
         let plan = expect_plan(&input);
-        assert!(plan.steps.contains(&step(PlanAction::Install, "com.example.git", "1.3.0-beta.1")));
+        assert!(plan.steps.contains(&step(
+            PlanAction::Install,
+            "com.example.git",
+            "1.3.0-beta.1"
+        )));
     }
 
     /// REQ: PKG-348
@@ -1144,8 +1318,20 @@ mod tests {
     fn updating_a_dependency_out_of_an_installed_dependants_range_is_refused() {
         let mut input = request(
             vec![plan_package("com.example.git", "2.0.0", &[], None)],
-            vec![plan_package("com.example.reviews", "1.0.0", &[("com.example.git", "^1.0", false)], None)],
-            vec![source("com.example.git", "2.0.0", "sha-git-2.0.0", "stable", 0, &[])],
+            vec![plan_package(
+                "com.example.reviews",
+                "1.0.0",
+                &[("com.example.git", "^1.0", false)],
+                None,
+            )],
+            vec![source(
+                "com.example.git",
+                "2.0.0",
+                "sha-git-2.0.0",
+                "stable",
+                0,
+                &[],
+            )],
         );
         input.is_update = true;
         let diagnostics = expect_refusal(&input);
@@ -1177,9 +1363,21 @@ mod tests {
     #[test]
     fn dependency_activates_before_its_dependant() {
         let input = request(
-            vec![plan_package("com.example.app", "1.0.0", &[("com.example.lib", "^1.0", false)], None)],
+            vec![plan_package(
+                "com.example.app",
+                "1.0.0",
+                &[("com.example.lib", "^1.0", false)],
+                None,
+            )],
             Vec::new(),
-            vec![source("com.example.lib", "1.0.0", "sha-lib", "stable", 0, &[])],
+            vec![source(
+                "com.example.lib",
+                "1.0.0",
+                "sha-lib",
+                "stable",
+                0,
+                &[],
+            )],
         );
         let plan = expect_plan(&input);
         let lib_index = plan
@@ -1216,10 +1414,14 @@ mod tests {
             manifest_requiring("com.example.zeta", &[]),
             manifest_requiring("com.example.alpha", &[]),
         ];
-        let plan = resolve(&packages, &[], api_version()).expect("independent plugins should resolve");
+        let plan =
+            resolve(&packages, &[], api_version()).expect("independent plugins should resolve");
         assert_eq!(
             plan.activation_order,
-            vec!["com.example.alpha".to_string(), "com.example.zeta".to_string()]
+            vec![
+                "com.example.alpha".to_string(),
+                "com.example.zeta".to_string()
+            ]
         );
     }
 
@@ -1237,8 +1439,8 @@ mod tests {
             manifest_requiring("com.example.app", &[("com.example.lib", false)]),
             manifest_requiring("com.example.lib", &[("com.example.app", false)]),
         ];
-        let diagnostics = resolve(&packages, &[], api_version())
-            .expect_err("hard cycle should be refused");
+        let diagnostics =
+            resolve(&packages, &[], api_version()).expect_err("hard cycle should be refused");
         assert_refused_with(&diagnostics, "dependency.cycle");
         let messages = all_messages(&diagnostics);
         assert!(messages.contains("com.example.app"), "{messages}");
@@ -1258,7 +1460,10 @@ mod tests {
     /// REQ: PKG-334
     #[test]
     fn hard_requirement_missing_everywhere_is_unresolved_in_resolve() {
-        let packages = vec![manifest_requiring("com.example.app", &[("com.example.lib", false)])];
+        let packages = vec![manifest_requiring(
+            "com.example.app",
+            &[("com.example.lib", false)],
+        )];
         let diagnostics = resolve(&packages, &[], api_version())
             .expect_err("missing hard requirement should be refused");
         assert_refused_with(&diagnostics, "dependency.unresolved");
@@ -1268,7 +1473,10 @@ mod tests {
     /// REQ: PKG-334
     #[test]
     fn hard_requirement_satisfied_by_an_installed_copy_resolves() {
-        let packages = vec![manifest_requiring("com.example.app", &[("com.example.lib", false)])];
+        let packages = vec![manifest_requiring(
+            "com.example.app",
+            &[("com.example.lib", false)],
+        )];
         let installed = vec![InstalledSummary {
             id: "com.example.lib".to_string(),
             version: "1.0.0".to_string(),

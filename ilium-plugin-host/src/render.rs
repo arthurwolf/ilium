@@ -50,15 +50,25 @@ mod tests {
     /// Keeps only the alphabetic characters, so tests can check that visible letters survive
     /// whichever way the host removes or replaces a control character.
     fn letters_only(text: &str) -> String {
-        text.chars().filter(|character| character.is_alphabetic()).collect()
+        text.chars()
+            .filter(|character| character.is_alphabetic())
+            .collect()
     }
 
     /// REQ: HST-269
     #[test]
     fn diff_of_identical_trees_reports_no_changed_paths() {
-        let previous = make_tree(vec![make_node(Some("root"), vec![1]), make_node(Some("save"), vec![])]);
+        let previous = make_tree(vec![
+            make_node(Some("root"), vec![1]),
+            make_node(Some("save"), vec![]),
+        ]);
         let next = previous.clone();
-        assert_eq!(diff(&previous, &next), UiDelta { changed_paths: vec![] });
+        assert_eq!(
+            diff(&previous, &next),
+            UiDelta {
+                changed_paths: vec![]
+            }
+        );
     }
 
     /// REQ: HST-269
@@ -66,13 +76,21 @@ mod tests {
     fn diff_of_two_empty_trees_reports_no_changed_paths() {
         let previous = UiTree::default();
         let next = UiTree::default();
-        assert_eq!(diff(&previous, &next), UiDelta { changed_paths: vec![] });
+        assert_eq!(
+            diff(&previous, &next),
+            UiDelta {
+                changed_paths: vec![]
+            }
+        );
     }
 
     /// REQ: HST-269
     #[test]
     fn diff_reports_a_changed_leaf_as_a_json_pointer() {
-        let previous = make_tree(vec![make_node(Some("root"), vec![1]), make_node(Some("save"), vec![])]);
+        let previous = make_tree(vec![
+            make_node(Some("root"), vec![1]),
+            make_node(Some("save"), vec![]),
+        ]);
         let mut changed_leaf = make_node(Some("save"), vec![]);
         changed_leaf.disabled_reason = Some("busy".to_owned());
         let next = make_tree(vec![make_node(Some("root"), vec![1]), changed_leaf]);
@@ -88,7 +106,10 @@ mod tests {
     #[test]
     fn diff_reports_an_added_node_and_its_changed_parent() {
         let previous = make_tree(vec![make_node(Some("root"), vec![])]);
-        let next = make_tree(vec![make_node(Some("root"), vec![1]), make_node(Some("new"), vec![])]);
+        let next = make_tree(vec![
+            make_node(Some("root"), vec![1]),
+            make_node(Some("new"), vec![]),
+        ]);
         let delta = diff(&previous, &next);
         assert!(
             delta.changed_paths.contains(&"/nodes/1".to_owned()),
@@ -106,7 +127,10 @@ mod tests {
     #[test]
     fn diff_from_an_empty_tree_to_a_populated_tree_reports_every_node() {
         let previous = UiTree::default();
-        let next = make_tree(vec![make_node(Some("root"), vec![1]), make_node(Some("child"), vec![])]);
+        let next = make_tree(vec![
+            make_node(Some("root"), vec![1]),
+            make_node(Some("child"), vec![]),
+        ]);
         let delta = diff(&previous, &next);
         assert!(
             delta.changed_paths.contains(&"/nodes/0".to_owned()),

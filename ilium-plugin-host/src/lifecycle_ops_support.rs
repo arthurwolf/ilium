@@ -17,7 +17,9 @@ pub trait PackageSpecLifecycleExt: Sized {
 
 impl PackageSpecLifecycleExt for PackageSpec {
     fn deprecated(self, _reason: &str, _end_of_life: &str) -> Self {
-        unimplemented!("ilium_plugin_host::lifecycle_ops_support::PackageSpecLifecycleExt::deprecated")
+        unimplemented!(
+            "ilium_plugin_host::lifecycle_ops_support::PackageSpecLifecycleExt::deprecated"
+        )
     }
 
     fn with_setting_schema(self, _schema_json: &str) -> Self {

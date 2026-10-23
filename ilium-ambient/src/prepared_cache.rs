@@ -130,7 +130,12 @@ impl PreparedCache {
     pub fn for_scene_cache_dir(scene_cache_dir: &Path) -> Self {
         if scene_cache_dir == crate::source::default_cache_dir() {
             if let Some(dirs) = directories::BaseDirs::new() {
-                return Self::at(dirs.home_dir().join(".ilium").join("cache").join("minecraft"));
+                return Self::at(
+                    dirs.home_dir()
+                        .join(".ilium")
+                        .join("cache")
+                        .join("minecraft"),
+                );
             }
         }
         Self::at(scene_cache_dir.join("prepared"))
@@ -185,11 +190,7 @@ impl PreparedCache {
         let path = self.entry_path(kind, key);
         let directory = path.parent().unwrap_or(&self.root);
         fs::create_dir_all(directory)?;
-        let temporary = directory.join(format!(
-            ".{}.{}.tmp",
-            key.hex(),
-            std::process::id()
-        ));
+        let temporary = directory.join(format!(".{}.{}.tmp", key.hex(), std::process::id()));
         let result = (|| -> io::Result<()> {
             let mut file = fs::File::create(&temporary)?;
             file.write_all(&file_bytes)?;
@@ -246,7 +247,10 @@ mod tests {
         let value: BTreeSet<String> = (0..500).map(|n| format!("minecraft:block/{n}")).collect();
         assert!(cache.load::<BTreeSet<String>>("ids", &key("a")).is_none());
         cache.store("ids", &key("a"), &value).unwrap();
-        assert_eq!(cache.load::<BTreeSet<String>>("ids", &key("a")), Some(value));
+        assert_eq!(
+            cache.load::<BTreeSet<String>>("ids", &key("a")),
+            Some(value)
+        );
         assert!(cache.load::<BTreeSet<String>>("ids", &key("b")).is_none());
     }
 
@@ -256,7 +260,9 @@ mod tests {
         let cache = PreparedCache::at(directory.path());
         let value = vec!["minecraft:block/stone".to_owned(); 2000];
         cache.store("ids", &key("a"), &value).unwrap();
-        let size = fs::metadata(cache.entry_path("ids", &key("a"))).unwrap().len();
+        let size = fs::metadata(cache.entry_path("ids", &key("a")))
+            .unwrap()
+            .len();
         assert!(size < 2000, "entry was {size} bytes");
     }
 
@@ -295,11 +301,17 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let file = directory.path().join("r.0.0.mca");
         fs::write(&file, b"one").unwrap();
-        let before = KeyBuilder::new("k").path_fingerprint(directory.path()).finish();
+        let before = KeyBuilder::new("k")
+            .path_fingerprint(directory.path())
+            .finish();
         fs::write(&file, b"three").unwrap();
-        let after = KeyBuilder::new("k").path_fingerprint(directory.path()).finish();
+        let after = KeyBuilder::new("k")
+            .path_fingerprint(directory.path())
+            .finish();
         assert_ne!(before, after);
-        let missing = KeyBuilder::new("k").path_fingerprint(&directory.path().join("x")).finish();
+        let missing = KeyBuilder::new("k")
+            .path_fingerprint(&directory.path().join("x"))
+            .finish();
         assert_ne!(missing, after);
     }
 

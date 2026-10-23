@@ -179,7 +179,9 @@ fn requirement_key(input: &Inputs<'_>, render_chunks: &[[i32; 2]]) -> crate::pre
         .number(u64::from(input.fancy_leaves))
         .number(render_chunks.len() as u64);
     for chunk in render_chunks {
-        builder.part(&chunk[0].to_le_bytes()).part(&chunk[1].to_le_bytes());
+        builder
+            .part(&chunk[0].to_le_bytes())
+            .part(&chunk[1].to_le_bytes());
     }
     if let Some(selected) = input.selected {
         builder

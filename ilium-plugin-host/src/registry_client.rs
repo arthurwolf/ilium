@@ -116,7 +116,9 @@ mod tests {
     }
 
     impl ScriptedFetcher {
-        fn new(reply: impl Fn(&str) -> Result<Vec<u8>, FetchError> + Send + Sync + 'static) -> ScriptedFetcher {
+        fn new(
+            reply: impl Fn(&str) -> Result<Vec<u8>, FetchError> + Send + Sync + 'static,
+        ) -> ScriptedFetcher {
             ScriptedFetcher {
                 reply: Box::new(reply),
                 requested_urls: Mutex::new(Vec::new()),
@@ -132,7 +134,10 @@ mod tests {
         }
 
         fn requests(&self) -> Vec<String> {
-            self.requested_urls.lock().expect("request log lock").clone()
+            self.requested_urls
+                .lock()
+                .expect("request log lock")
+                .clone()
         }
     }
 
@@ -174,7 +179,10 @@ mod tests {
 
     /// Pads a JSON document with trailing spaces to exactly `length` bytes (JSON allows trailing whitespace).
     fn pad_to_length(mut document: Vec<u8>, length: usize) -> Vec<u8> {
-        assert!(document.len() <= length, "document longer than the requested length");
+        assert!(
+            document.len() <= length,
+            "document longer than the requested length"
+        );
         document.resize(length, b' ');
         document
     }
@@ -218,7 +226,9 @@ mod tests {
         let client = RegistryClient::new(&fetcher, HTTPS_BASE_URL.to_string());
         let entry = entry_with_url(&format!("blobs/{ABC_SHA256}.iliumpkg"));
 
-        let error = client.download(&entry).expect_err("one changed byte must be refused");
+        let error = client
+            .download(&entry)
+            .expect_err("one changed byte must be refused");
 
         assert_eq!(error_code_text(&error), registry_codes::HASH_MISMATCH);
     }
@@ -233,7 +243,11 @@ mod tests {
         let error = client.download(&entry).expect_err("mismatch must fail");
 
         assert_eq!(error_code_text(&error), registry_codes::HASH_MISMATCH);
-        assert_eq!(fetcher.requests().len(), 1, "a hash mismatch is not a transport retry");
+        assert_eq!(
+            fetcher.requests().len(),
+            1,
+            "a hash mismatch is not a transport retry"
+        );
     }
 
     /// REQ: PKG-363
@@ -243,7 +257,9 @@ mod tests {
         let client = RegistryClient::new(&fetcher, HTTPS_BASE_URL.to_string());
         let entry = entry_with_url(&format!("blobs/{EMPTY_SHA256}.iliumpkg"));
 
-        let bytes = client.download(&entry).expect("empty body matches the empty digest");
+        let bytes = client
+            .download(&entry)
+            .expect("empty body matches the empty digest");
 
         assert!(bytes.is_empty());
     }
@@ -255,7 +271,9 @@ mod tests {
         let client = RegistryClient::new(&fetcher, HTTPS_BASE_URL.to_string());
         let entry = entry_with_url(&format!("blobs/{ABC_SHA256}.iliumpkg"));
 
-        let error = client.download(&entry).expect_err("empty body must not match a non-empty digest");
+        let error = client
+            .download(&entry)
+            .expect_err("empty body must not match a non-empty digest");
 
         assert_eq!(error_code_text(&error), registry_codes::HASH_MISMATCH);
     }
@@ -279,7 +297,9 @@ mod tests {
         let client = RegistryClient::new(&fetcher, HTTPS_BASE_URL.to_string());
         let entry = entry_with_url(&format!("blobs/{ABC_SHA256}.iliumpkg"));
 
-        let error = client.download(&entry).expect_err("a missing blob must fail");
+        let error = client
+            .download(&entry)
+            .expect_err("a missing blob must fail");
 
         assert_eq!(error_code_text(&error), registry_codes::NOT_FOUND);
         assert_eq!(fetcher.requests().len(), 1, "a 4xx response is not retried");
@@ -292,10 +312,15 @@ mod tests {
         let client = RegistryClient::new(&fetcher, HTTP_BASE_URL.to_string());
         let entry = entry_with_url(&format!("blobs/{ABC_SHA256}.iliumpkg"));
 
-        let error = client.download(&entry).expect_err("plain http must be refused");
+        let error = client
+            .download(&entry)
+            .expect_err("plain http must be refused");
 
         assert_eq!(error_code_text(&error), registry_codes::INSECURE_URL);
-        assert!(fetcher.requests().is_empty(), "a refused URL is never requested");
+        assert!(
+            fetcher.requests().is_empty(),
+            "a refused URL is never requested"
+        );
     }
 
     /// REQ: PKG-371
@@ -307,7 +332,10 @@ mod tests {
         let error = client.index().expect_err("plain http must be refused");
 
         assert_eq!(error_code_text(&error), registry_codes::INSECURE_URL);
-        assert!(fetcher.requests().is_empty(), "a refused URL is never requested");
+        assert!(
+            fetcher.requests().is_empty(),
+            "a refused URL is never requested"
+        );
     }
 
     /// REQ: PKG-415
@@ -333,7 +361,9 @@ mod tests {
         });
         let client = RegistryClient::new(&fetcher, HTTPS_BASE_URL.to_string());
 
-        let error = client.index().expect_err("an unsigned timestamp must not be used");
+        let error = client
+            .index()
+            .expect_err("an unsigned timestamp must not be used");
 
         assert_eq!(error_code_text(&error), registry_codes::SIGNATURE_INVALID);
     }
@@ -351,7 +381,9 @@ mod tests {
         });
         let client = RegistryClient::new(&fetcher, HTTPS_BASE_URL.to_string());
 
-        let error = client.index().expect_err("a 16 KiB + 1 byte timestamp is refused");
+        let error = client
+            .index()
+            .expect_err("a 16 KiB + 1 byte timestamp is refused");
 
         assert_eq!(error_code_text(&error), registry_codes::SIZE);
     }
@@ -369,7 +401,9 @@ mod tests {
         });
         let client = RegistryClient::new(&fetcher, HTTPS_BASE_URL.to_string());
 
-        let error = client.index().expect_err("the unsigned document still fails");
+        let error = client
+            .index()
+            .expect_err("the unsigned document still fails");
 
         assert_eq!(error_code_text(&error), registry_codes::SIGNATURE_INVALID);
     }
@@ -388,7 +422,10 @@ mod tests {
 
         let result = client.index();
 
-        assert!(result.is_err(), "an empty document cannot be verified and must not yield an index");
+        assert!(
+            result.is_err(),
+            "an empty document cannot be verified and must not yield an index"
+        );
     }
 
     /// REQ: PKG-653
@@ -397,7 +434,9 @@ mod tests {
         let fetcher = ScriptedFetcher::new(|_url| Ok(unsigned_revocations_document()));
         let client = RegistryClient::new(&fetcher, HTTPS_BASE_URL.to_string());
 
-        let error = client.revocations().expect_err("an unsigned revocation document is refused");
+        let error = client
+            .revocations()
+            .expect_err("an unsigned revocation document is refused");
 
         assert_eq!(error_code_text(&error), registry_codes::SIGNATURE_INVALID);
     }
@@ -409,7 +448,9 @@ mod tests {
         let fetcher = ScriptedFetcher::new(move |_url| Ok(oversized.clone()));
         let client = RegistryClient::new(&fetcher, HTTPS_BASE_URL.to_string());
 
-        let error = client.revocations().expect_err("a 4 MiB + 1 byte document is refused");
+        let error = client
+            .revocations()
+            .expect_err("a 4 MiB + 1 byte document is refused");
 
         assert_eq!(error_code_text(&error), registry_codes::SIZE);
     }
@@ -421,7 +462,9 @@ mod tests {
         let fetcher = ScriptedFetcher::new(move |_url| Ok(at_cap.clone()));
         let client = RegistryClient::new(&fetcher, HTTPS_BASE_URL.to_string());
 
-        let error = client.revocations().expect_err("the unsigned document still fails");
+        let error = client
+            .revocations()
+            .expect_err("the unsigned document still fails");
 
         assert_eq!(error_code_text(&error), registry_codes::SIGNATURE_INVALID);
     }
@@ -443,9 +486,14 @@ mod tests {
         let fetcher = ScriptedFetcher::new(|_url| Ok(unsigned_revocations_document()));
         let client = RegistryClient::new(&fetcher, HTTP_BASE_URL.to_string());
 
-        let error = client.revocations().expect_err("plain http must be refused");
+        let error = client
+            .revocations()
+            .expect_err("plain http must be refused");
 
         assert_eq!(error_code_text(&error), registry_codes::INSECURE_URL);
-        assert!(fetcher.requests().is_empty(), "a refused URL is never requested");
+        assert!(
+            fetcher.requests().is_empty(),
+            "a refused URL is never requested"
+        );
     }
 }

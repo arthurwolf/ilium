@@ -57,7 +57,12 @@ mod spec_tests {
     fn string_list(value: &Value) -> Vec<String> {
         value
             .as_array()
-            .map(|items| items.iter().filter_map(|item| item.as_str().map(str::to_owned)).collect())
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|item| item.as_str().map(str::to_owned))
+                    .collect()
+            })
             .unwrap_or_default()
     }
 
@@ -143,13 +148,14 @@ mod spec_tests {
     #[test]
     fn extension_points_declare_manual_limits() {
         let manifest = manifest();
-        let selectors = extension_point(&manifest, "selectors").expect("selectors point is declared");
+        let selectors =
+            extension_point(&manifest, "selectors").expect("selectors point is declared");
         assert_eq!(selectors["kind"], "collect");
         assert_eq!(selectors["max_entries"], json!(64));
         assert_eq!(selectors["dynamic"], json!(false));
 
-        let before_broadcast =
-            extension_point(&manifest, "before-broadcast").expect("before-broadcast point is declared");
+        let before_broadcast = extension_point(&manifest, "before-broadcast")
+            .expect("before-broadcast point is declared");
         assert_eq!(before_broadcast["kind"], "hook");
         assert_eq!(before_broadcast["risk"], "high");
         assert_eq!(before_broadcast["deadline_ms"], json!(20));
@@ -177,7 +183,8 @@ mod spec_tests {
         assert_eq!(routes.len(), 1);
         assert_eq!(routes[0]["method"], "POST");
         assert_eq!(routes[0]["path"], "/create_agent");
-        assert!(capability_list(&manifest, "server").contains(&"http-api.route:/create_agent".to_owned()));
+        assert!(capability_list(&manifest, "server")
+            .contains(&"http-api.route:/create_agent".to_owned()));
     }
 
     /// REQ: COR-050

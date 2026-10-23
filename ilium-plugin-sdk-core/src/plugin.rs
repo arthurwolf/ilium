@@ -193,7 +193,10 @@ mod spec_tests {
 
     impl Lifecycle for RefusingPlugin {
         fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
-            Err(plugin_error(ErrorCode::InvalidArgument, "settings do not parse"))
+            Err(plugin_error(
+                ErrorCode::InvalidArgument,
+                "settings do not parse",
+            ))
         }
     }
 
@@ -204,7 +207,10 @@ mod spec_tests {
         let outcome = ExportLifecycle::activate(&mut plugin, activation_for_test());
         assert_eq!(
             outcome,
-            Err(plugin_error(ErrorCode::InvalidArgument, "settings do not parse"))
+            Err(plugin_error(
+                ErrorCode::InvalidArgument,
+                "settings do not parse"
+            ))
         );
     }
 

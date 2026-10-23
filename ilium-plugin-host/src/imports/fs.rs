@@ -188,9 +188,18 @@ mod tests {
         let mut fs_import = FsImport;
         let roots = fs_import.roots();
         let scope_names: Vec<&str> = roots.iter().map(|root| root.scope.as_str()).collect();
-        assert!(scope_names.contains(&"package"), "package scope missing: {scope_names:?}");
-        assert!(scope_names.contains(&"data"), "data scope missing: {scope_names:?}");
-        assert!(scope_names.contains(&"cache"), "cache scope missing: {scope_names:?}");
+        assert!(
+            scope_names.contains(&"package"),
+            "package scope missing: {scope_names:?}"
+        );
+        assert!(
+            scope_names.contains(&"data"),
+            "data scope missing: {scope_names:?}"
+        );
+        assert!(
+            scope_names.contains(&"cache"),
+            "cache scope missing: {scope_names:?}"
+        );
     }
 
     /// REQ: CAP-011
@@ -200,8 +209,14 @@ mod tests {
         let roots = fs_import.roots();
         let package = roots.iter().find(|root| root.scope == "package");
         let data = roots.iter().find(|root| root.scope == "data");
-        assert!(matches!(package, Some(root) if !root.writable), "package must be read only");
-        assert!(matches!(data, Some(root) if root.writable), "data must be writable");
+        assert!(
+            matches!(package, Some(root) if !root.writable),
+            "package must be read only"
+        );
+        assert!(
+            matches!(data, Some(root) if root.writable),
+            "data must be writable"
+        );
     }
 
     /// REQ: API-002
@@ -221,7 +236,10 @@ mod tests {
             Ok(_) => panic!("metadata of an absent entry must fail"),
             Err(error) => {
                 assert!(!error.message.is_empty(), "error message must not be empty");
-                assert!(error.message.chars().count() <= 256, "message over 256 characters");
+                assert!(
+                    error.message.chars().count() <= 256,
+                    "message over 256 characters"
+                );
             }
         }
     }
@@ -465,7 +483,8 @@ mod tests {
     #[test]
     fn write_atomic_to_the_read_only_package_scope_is_not_permitted() {
         let mut fs_import = FsImport;
-        let result = fs_import.write_atomic(fs_path("package", "assets/file.txt"), b"x".to_vec(), None);
+        let result =
+            fs_import.write_atomic(fs_path("package", "assets/file.txt"), b"x".to_vec(), None);
         assert_eq!(error_code_of(result), Some(ErrorCode::NotPermitted));
     }
 

@@ -65,7 +65,7 @@ mod tests {
 
     #[test]
     fn a_default_harness_matches_a_new_one() {
-        let harness = ViewHarness::default();
+        let harness = ViewHarness;
         assert!(!harness.is_open("pop0"));
         assert!(harness.closed_events().is_empty());
     }

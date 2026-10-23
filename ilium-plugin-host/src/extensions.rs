@@ -58,7 +58,10 @@ mod tests {
 
     /// A JSON string literal of exactly `total_bytes` bytes, so that size is the only variable.
     fn json_string_of_bytes(total_bytes: usize) -> String {
-        assert!(total_bytes >= 2, "a JSON string literal needs two quote bytes");
+        assert!(
+            total_bytes >= 2,
+            "a JSON string literal needs two quote bytes"
+        );
         format!("\"{}\"", "a".repeat(total_bytes - 2))
     }
 
@@ -72,8 +75,16 @@ mod tests {
     }
 
     /// Checks the mapped base code and the extension code prefix (`<code>: `) of a plugin error.
-    fn assert_extension_error(error: &PluginError, expected_code: ErrorCode, expected_prefix: &str) {
-        assert_eq!(error.code, expected_code, "base error code for message {:?}", error.message);
+    fn assert_extension_error(
+        error: &PluginError,
+        expected_code: ErrorCode,
+        expected_prefix: &str,
+    ) {
+        assert_eq!(
+            error.code, expected_code,
+            "base error code for message {:?}",
+            error.message
+        );
         assert!(
             error.message.starts_with(expected_prefix),
             "message {:?} should start with {:?}",
@@ -98,8 +109,15 @@ mod tests {
         let oversized_entry = json_string_of_bytes(ENTRY_CAP_BYTES + 1);
         let result = registry.contribute(contribution_with_payload(oversized_entry));
         let error = result.expect_err("an entry over 16 KiB must be rejected");
-        assert_extension_error(&error, ErrorCode::InvalidArgument, "extension.cap-exceeded: ");
-        assert_eq!(error.retry_after_ms, None, "a size rejection is not retryable");
+        assert_extension_error(
+            &error,
+            ErrorCode::InvalidArgument,
+            "extension.cap-exceeded: ",
+        );
+        assert_eq!(
+            error.retry_after_ms, None,
+            "a size rejection is not retryable"
+        );
     }
 
     /// REQ: EXT-023
@@ -155,8 +173,15 @@ mod tests {
         let oversized_payload = json_string_of_bytes(PAYLOAD_CAP_BYTES + 1);
         let result = registry.run_chain("x/y", ChainMode::Transform, oversized_payload);
         let error = result.expect_err("a payload over 64 KiB must be rejected");
-        assert_extension_error(&error, ErrorCode::InvalidArgument, "extension.cap-exceeded: ");
-        assert_eq!(error.retry_after_ms, None, "a size rejection is not retryable");
+        assert_extension_error(
+            &error,
+            ErrorCode::InvalidArgument,
+            "extension.cap-exceeded: ",
+        );
+        assert_eq!(
+            error.retry_after_ms, None,
+            "a size rejection is not retryable"
+        );
     }
 
     /// REQ: EXT-004

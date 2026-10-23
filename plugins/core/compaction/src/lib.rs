@@ -76,9 +76,14 @@ mod spec_tests {
         ["server", "client"]
             .iter()
             .map(|side| {
-                manifest["capabilities"][*side].as_array().map_or(0, |grants| {
-                    grants.iter().filter(|entry| entry.as_str() == Some(grant)).count()
-                })
+                manifest["capabilities"][*side]
+                    .as_array()
+                    .map_or(0, |grants| {
+                        grants
+                            .iter()
+                            .filter(|entry| entry.as_str() == Some(grant))
+                            .count()
+                    })
             })
             .sum()
     }
@@ -88,14 +93,18 @@ mod spec_tests {
         ["server", "client"]
             .iter()
             .map(|side| {
-                manifest["capabilities"][*side].as_array().map_or(0, |grants| {
-                    grants
-                        .iter()
-                        .filter(|entry| {
-                            entry.as_str().map_or(false, |grant| grant.starts_with("settings.write-kernel:"))
-                        })
-                        .count()
-                })
+                manifest["capabilities"][*side]
+                    .as_array()
+                    .map_or(0, |grants| {
+                        grants
+                            .iter()
+                            .filter(|entry| {
+                                entry.as_str().map_or(false, |grant| {
+                                    grant.starts_with("settings.write-kernel:")
+                                })
+                            })
+                            .count()
+                    })
             })
             .sum()
     }
@@ -125,7 +134,11 @@ mod spec_tests {
         let manifest = load_manifest();
         assert_eq!(
             manifest["activation"],
-            json!(["event:agent-activity-changed", "service:compact", "view:compaction.optimizer"])
+            json!([
+                "event:agent-activity-changed",
+                "service:compact",
+                "view:compaction.optimizer"
+            ])
         );
     }
 
@@ -155,7 +168,10 @@ mod spec_tests {
             .expect("the techniques extension point must be declared");
         assert_eq!(techniques["kind"], "collect");
         assert_eq!(techniques["max_entries"], 64);
-        assert_eq!(techniques["entry_schema"]["required"], json!(["id", "title", "service"]));
+        assert_eq!(
+            techniques["entry_schema"]["required"],
+            json!(["id", "title", "service"])
+        );
         let before_compact = points
             .iter()
             .find(|point| point["id"] == "before-compact")
@@ -170,7 +186,10 @@ mod spec_tests {
     fn each_kernel_tab_it_owns_has_exactly_one_holder() {
         let manifest = load_manifest();
         assert_eq!(grant_holder_count(&manifest, OPTIMIZATION_TAB_GRANT), 1);
-        assert_eq!(grant_holder_count(&manifest, REMOTE_COMPACTION_TAB_GRANT), 1);
+        assert_eq!(
+            grant_holder_count(&manifest, REMOTE_COMPACTION_TAB_GRANT),
+            1
+        );
     }
 
     /// REQ: COR-030
@@ -189,14 +208,20 @@ mod spec_tests {
                 "client": [OPTIMIZATION_TAB_GRANT]
             }
         });
-        assert_eq!(grant_holder_count(&duplicate_owner, OPTIMIZATION_TAB_GRANT), 2);
+        assert_eq!(
+            grant_holder_count(&duplicate_owner, OPTIMIZATION_TAB_GRANT),
+            2
+        );
     }
 
     /// REQ: COR-030
     #[test]
     fn manifest_without_capabilities_holds_no_kernel_tab() {
         let empty_manifest = json!({});
-        assert_eq!(grant_holder_count(&empty_manifest, OPTIMIZATION_TAB_GRANT), 0);
+        assert_eq!(
+            grant_holder_count(&empty_manifest, OPTIMIZATION_TAB_GRANT),
+            0
+        );
         assert_eq!(kernel_tab_grant_count(&empty_manifest), 0);
     }
 }

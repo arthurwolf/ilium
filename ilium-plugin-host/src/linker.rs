@@ -71,7 +71,11 @@ mod tests {
     /// REQ: PKG-041
     #[test]
     fn wit_names_of_the_three_worlds_are_distinct() {
-        let names = [World::Server.wit_name(), World::Client.wit_name(), World::Anim.wit_name()];
+        let names = [
+            World::Server.wit_name(),
+            World::Client.wit_name(),
+            World::Anim.wit_name(),
+        ];
         assert_ne!(names[0], names[1]);
         assert_ne!(names[1], names[2]);
         assert_ne!(names[0], names[2]);
@@ -80,7 +84,8 @@ mod tests {
     /// REQ: HST-071
     #[test]
     fn build_linker_with_empty_grants_succeeds_and_keeps_world() {
-        let linker = build_linker(World::Server, &[]).expect("an empty grant set is a valid linker input");
+        let linker =
+            build_linker(World::Server, &[]).expect("an empty grant set is a valid linker input");
         assert_eq!(linker.world, World::Server);
     }
 
@@ -167,17 +172,29 @@ mod tests {
         let first = linker_cache_key(Side::Server, Tier::T1, &[]);
         let second = linker_cache_key(Side::Server, Tier::T1, &[]);
         assert_eq!(first, second);
-        assert_eq!(first.len(), 64, "an empty grant set still yields a SHA-256 digest, got {first:?}");
-        assert_ne!(first, linker_cache_key(Side::Server, Tier::T1, &[grant("tree.read")]));
+        assert_eq!(
+            first.len(),
+            64,
+            "an empty grant set still yields a SHA-256 digest, got {first:?}"
+        );
+        assert_ne!(
+            first,
+            linker_cache_key(Side::Server, Tier::T1, &[grant("tree.read")])
+        );
     }
 
     /// REQ: HST-070
     #[test]
     fn cache_key_is_a_sha256_hex_digest() {
         let key = linker_cache_key(Side::Server, Tier::T1, &[grant("tree.read")]);
-        assert_eq!(key.len(), 64, "a SHA-256 digest is 64 hexadecimal characters, got {key:?}");
+        assert_eq!(
+            key.len(),
+            64,
+            "a SHA-256 digest is 64 hexadecimal characters, got {key:?}"
+        );
         assert!(
-            key.chars().all(|character| character.is_ascii_hexdigit() && !character.is_ascii_uppercase()),
+            key.chars()
+                .all(|character| character.is_ascii_hexdigit() && !character.is_ascii_uppercase()),
             "the key must be lowercase hexadecimal, got {key:?}"
         );
     }

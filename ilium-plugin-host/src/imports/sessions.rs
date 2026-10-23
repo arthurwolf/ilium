@@ -42,7 +42,9 @@ mod tests {
     /// Returns the error code of a `send` that must fail; a success is a test failure.
     fn expect_send_error(result: Result<RequestId, PluginError>) -> ErrorCode {
         match result {
-            Ok(request_id) => panic!("send accepted the request as {request_id:?}, expected an error"),
+            Ok(request_id) => {
+                panic!("send accepted the request as {request_id:?}, expected an error")
+            }
             Err(error) => error.code,
         }
     }
@@ -53,7 +55,10 @@ mod tests {
         let mut sessions = SessionsImport;
         let live: Vec<LiveSession> = sessions.list_live();
         let self_count = live.iter().filter(|session| session.is_self).count();
-        assert_eq!(self_count, 1, "the calling session always runs, so exactly one entry is_self; got {live:?}");
+        assert_eq!(
+            self_count, 1,
+            "the calling session always runs, so exactly one entry is_self; got {live:?}"
+        );
     }
 
     /// REQ: CAP-018
@@ -61,9 +66,18 @@ mod tests {
     fn list_live_entries_have_non_empty_name_project_and_socket_id() {
         let mut sessions = SessionsImport;
         for session in sessions.list_live() {
-            assert!(!session.name.is_empty(), "a live session has a name, bare ilium is \"default\"; got {session:?}");
-            assert!(!session.project.is_empty(), "a live session names its project directory; got {session:?}");
-            assert!(!session.socket_id.is_empty(), "a live session names its socket; got {session:?}");
+            assert!(
+                !session.name.is_empty(),
+                "a live session has a name, bare ilium is \"default\"; got {session:?}"
+            );
+            assert!(
+                !session.project.is_empty(),
+                "a live session names its project directory; got {session:?}"
+            );
+            assert!(
+                !session.socket_id.is_empty(),
+                "a live session names its socket; got {session:?}"
+            );
         }
     }
 
@@ -72,7 +86,10 @@ mod tests {
     fn send_refuses_an_unknown_session_name_with_not_found() {
         let mut sessions = SessionsImport;
         let request = cross_request("no-such-session-name", "pane-count", "{}");
-        assert_eq!(expect_send_error(sessions.send(request)), ErrorCode::NotFound);
+        assert_eq!(
+            expect_send_error(sessions.send(request)),
+            ErrorCode::NotFound
+        );
     }
 
     /// REQ: EVT-013
@@ -80,7 +97,10 @@ mod tests {
     fn send_refuses_an_empty_session_name_with_not_found() {
         let mut sessions = SessionsImport;
         let request = cross_request("", "pane-count", "{}");
-        assert_eq!(expect_send_error(sessions.send(request)), ErrorCode::NotFound);
+        assert_eq!(
+            expect_send_error(sessions.send(request)),
+            ErrorCode::NotFound
+        );
     }
 
     /// REQ: ABI-009
@@ -88,7 +108,10 @@ mod tests {
     fn send_refuses_a_command_the_plugin_did_not_declare_with_not_permitted() {
         let mut sessions = SessionsImport;
         let request = cross_request("default", "no-such-declared-command", "{}");
-        assert_eq!(expect_send_error(sessions.send(request)), ErrorCode::NotPermitted);
+        assert_eq!(
+            expect_send_error(sessions.send(request)),
+            ErrorCode::NotPermitted
+        );
     }
 
     /// REQ: ABI-009
@@ -96,7 +119,10 @@ mod tests {
     fn send_refuses_an_empty_command_id_with_not_permitted() {
         let mut sessions = SessionsImport;
         let request = cross_request("default", "", "{}");
-        assert_eq!(expect_send_error(sessions.send(request)), ErrorCode::NotPermitted);
+        assert_eq!(
+            expect_send_error(sessions.send(request)),
+            ErrorCode::NotPermitted
+        );
     }
 
     /// REQ: ABI-009
@@ -104,7 +130,10 @@ mod tests {
     fn send_refuses_arguments_that_are_not_json_with_invalid_argument() {
         let mut sessions = SessionsImport;
         let request = cross_request("default", "pane-count", "{not json");
-        assert_eq!(expect_send_error(sessions.send(request)), ErrorCode::InvalidArgument);
+        assert_eq!(
+            expect_send_error(sessions.send(request)),
+            ErrorCode::InvalidArgument
+        );
     }
 
     /// REQ: ABI-009
@@ -112,7 +141,10 @@ mod tests {
     fn send_refuses_empty_arguments_text_with_invalid_argument() {
         let mut sessions = SessionsImport;
         let request = cross_request("default", "pane-count", "");
-        assert_eq!(expect_send_error(sessions.send(request)), ErrorCode::InvalidArgument);
+        assert_eq!(
+            expect_send_error(sessions.send(request)),
+            ErrorCode::InvalidArgument
+        );
     }
 
     /// REQ: RQO-002
@@ -122,7 +154,9 @@ mod tests {
         let request = cross_request("default", "pane-count", "{}");
         let request_id = match sessions.send(request) {
             Ok(request_id) => request_id,
-            Err(error) => panic!("a valid request to a live session must be accepted; got {error:?}"),
+            Err(error) => {
+                panic!("a valid request to a live session must be accepted; got {error:?}")
+            }
         };
         assert_eq!(
             sessions.take_reply(request_id),
@@ -139,9 +173,14 @@ mod tests {
         let second = sessions.send(cross_request("default", "pane-count", "{}"));
         match (first, second) {
             (Ok(first_id), Ok(second_id)) => {
-                assert_ne!(first_id, second_id, "two sends in one batch must get two request ids");
+                assert_ne!(
+                    first_id, second_id,
+                    "two sends in one batch must get two request ids"
+                );
             }
-            (first, second) => panic!("both valid sends must be accepted; got {first:?} and {second:?}"),
+            (first, second) => {
+                panic!("both valid sends must be accepted; got {first:?} and {second:?}")
+            }
         }
     }
 
@@ -165,7 +204,13 @@ mod tests {
         let mut sessions = SessionsImport;
         let first = sessions.take_reply(RequestId(7));
         let second = sessions.take_reply(RequestId(7));
-        assert_eq!(first, None, "the first take of a request with no reply returns none");
-        assert_eq!(second, None, "a second take must not return a reply that was never there");
+        assert_eq!(
+            first, None,
+            "the first take of a request with no reply returns none"
+        );
+        assert_eq!(
+            second, None,
+            "a second take must not return a reply that was never there"
+        );
     }
 }

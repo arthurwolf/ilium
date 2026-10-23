@@ -4,7 +4,11 @@
 use crate::common::*;
 
 /// A Rust server project made by `ilium plugin new`, with its environment and project folder.
-fn new_rust_project() -> (tempfile::TempDir, ilium_plugin_host::cli::CliEnv, std::path::PathBuf) {
+fn new_rust_project() -> (
+    tempfile::TempDir,
+    ilium_plugin_host::cli::CliEnv,
+    std::path::PathBuf,
+) {
     let root = scratch();
     let env = env(root.path());
     let dir = root.path().join("out");

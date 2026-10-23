@@ -76,7 +76,6 @@ mod tests {
         );
     }
 
-
     /// REQ: SEC-376
     #[test]
     fn identical_non_empty_slices_compare_equal() {

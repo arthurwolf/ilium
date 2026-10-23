@@ -218,10 +218,7 @@ fn abi_055_frozen_copy_and_adapter_across_major() {
 #[test]
 fn abi_056_unsupported_api_error_names_version() {
     let page = manual_page("reference-abi-major-versions");
-    for phrase in [
-        "package.api-unsupported",
-        "the message MUST name the",
-    ] {
+    for phrase in ["package.api-unsupported", "the message MUST name the"] {
         assert!(page.contains(phrase), "missing: {phrase}");
     }
 }
@@ -230,10 +227,7 @@ fn abi_056_unsupported_api_error_names_version() {
 #[test]
 fn abi_057_deprecated_record_then_stops_loading() {
     let page = manual_page("reference-abi-major-versions");
-    for phrase in [
-        "log one `deprecated` record per plugin",
-        "stops loading",
-    ] {
+    for phrase in ["log one `deprecated` record per plugin", "stops loading"] {
         assert!(page.contains(phrase), "missing: {phrase}");
     }
 }
@@ -499,11 +493,7 @@ fn dev_861_exit_codes_stable_and_listed() {
 #[test]
 fn usr_236_crash_records_and_backups_listed() {
     let page = manual_page("user-privacy");
-    for phrase in [
-        "30 days",
-        "200 records",
-        "server state folder",
-    ] {
+    for phrase in ["30 days", "200 records", "server state folder"] {
         assert!(page.contains(phrase), "missing: {phrase}");
     }
 }
@@ -575,10 +565,7 @@ fn lif_295_new_binary_applies_at_next_start() {
 #[test]
 fn lif_296_clean_stop_runs_deactivate() {
     let page = manual_page("guide-operator-upgrades");
-    for phrase in [
-        "clean stop, not with a kill signal",
-        "skips `deactivate`",
-    ] {
+    for phrase in ["clean stop, not with a kill signal", "skips `deactivate`"] {
         assert!(page.contains(phrase), "missing: {phrase}");
     }
 }
@@ -587,10 +574,7 @@ fn lif_296_clean_stop_runs_deactivate() {
 #[test]
 fn lif_297_host_rollback_not_plugin_rollback() {
     let page = manual_page("guide-operator-upgrades");
-    for phrase in [
-        "MUST NOT change the Ilium binary",
-        "ilium plugin rollback",
-    ] {
+    for phrase in ["MUST NOT change the Ilium binary", "ilium plugin rollback"] {
         assert!(page.contains(phrase), "missing: {phrase}");
     }
 }
@@ -599,10 +583,7 @@ fn lif_297_host_rollback_not_plugin_rollback() {
 #[test]
 fn lif_298_upgrade_checks_then_restart() {
     let page = manual_page("guide-operator-upgrades");
-    for phrase in [
-        "ilium plugin list --json",
-        "only after its cause is fixed",
-    ] {
+    for phrase in ["ilium plugin list --json", "only after its cause is fixed"] {
         assert!(page.contains(phrase), "missing: {phrase}");
     }
 }

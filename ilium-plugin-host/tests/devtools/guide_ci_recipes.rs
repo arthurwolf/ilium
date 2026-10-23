@@ -4,6 +4,7 @@
 use ilium_plugin_host::cli::CliEnv;
 
 use crate::common::*;
+use crate::lint_support::*;
 
 fn ci_project(ci: &str) -> (tempfile::TempDir, CliEnv, std::path::PathBuf) {
     let root = scratch();

@@ -43,6 +43,50 @@ pub fn event_deliverable(_event_case: &str, _plugin_api: ApiVersion) -> bool {
     unimplemented!("api::compat::event_deliverable")
 }
 
+/// What a host minor gives a plugin built against an SDK minor (ABI-065).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExpectedResult {
+    /// The plugin loads.
+    Loads,
+    /// The plugin loads and a deprecation notice is shown.
+    LoadsDeprecated,
+    /// The plugin is refused with this code.
+    Refused(String),
+}
+
+/// One cell of the host minor against SDK minor matrix (ABI-064, ABI-065).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MatrixCell {
+    /// The minor of the host.
+    pub host_minor: u16,
+    /// The minor of the SDK the plugin was built with.
+    pub sdk_minor: u16,
+    /// The result the reference states for this pair.
+    pub expected: ExpectedResult,
+    /// The name of the CI job that runs this cell.
+    pub job_name: String,
+}
+
+/// ABI-064: every cell of the matrix.
+pub fn matrix_cells() -> Vec<MatrixCell> {
+    unimplemented!("api::compat::matrix_cells")
+}
+
+/// ABI-065: what a host of `host_minor` really does with a plugin built with `sdk_minor`.
+pub fn observed_result(_host_minor: u16, _sdk_minor: u16) -> ExpectedResult {
+    unimplemented!("api::compat::observed_result")
+}
+
+/// ABI-064: the names of the CI jobs that run the matrix.
+pub fn ci_matrix_jobs() -> Vec<String> {
+    unimplemented!("api::compat::ci_matrix_jobs")
+}
+
+/// ABI-066: the cells inside the window whose observed result differs from the stated one.
+pub fn matrix_mismatches() -> Vec<MatrixCell> {
+    unimplemented!("api::compat::matrix_mismatches")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -135,10 +179,7 @@ mod tests {
     /// REQ: ABI-029
     #[test]
     fn map_outcome_for_keeps_ok_for_current_api() {
-        assert_eq!(
-            map_outcome_for(&Outcome::Ok, host_version()),
-            Outcome::Ok
-        );
+        assert_eq!(map_outcome_for(&Outcome::Ok, host_version()), Outcome::Ok);
     }
 
     /// REQ: ABI-029

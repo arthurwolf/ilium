@@ -616,13 +616,15 @@ fn cap_888_a_credential_path_is_refused_with_scope_and_opens_no_dialog() {
 #[test]
 fn cap_889_an_edited_file_completes_failed_conflict_and_stays_unchanged() {
     let rig = rig(Tier::T2, Side::Server, &PROPOSE_GRANTS);
-    rig.kernel.write_agent_config_file("claude", "CLAUDE.md", b"old");
+    rig.kernel
+        .write_agent_config_file("claude", "CLAUDE.md", b"old");
     let revision = rig.kernel.agent_config_revision("claude", "CLAUDE.md");
     let mut request = proposal("CLAUDE.md");
     request["changes"][0]["revision"] = json!(revision);
     let pending = rig.host.call_import(PROPOSE_IMPORT, request);
     assert!(is_ok(&pending), "{pending:?}");
-    rig.kernel.write_agent_config_file("claude", "CLAUDE.md", b"edited");
+    rig.kernel
+        .write_agent_config_file("claude", "CLAUDE.md", b"edited");
     rig.kernel.check_row_and_apply(0);
     rig.host.pump(8);
     assert_eq!(
@@ -649,7 +651,11 @@ fn cap_890_reject_all_declines_and_is_never_stored_in_consents() {
     rig.host.pump(8);
     let failure = rig.host.last_proposal_failure().expect("completed failed");
     assert_eq!(failure.code, ErrorCode::NotPermitted);
-    assert!(failure.message.starts_with("declined: "), "{}", failure.message);
+    assert!(
+        failure.message.starts_with("declined: "),
+        "{}",
+        failure.message
+    );
     assert!(rig.kernel.consents_json_is_unchanged());
 }
 
@@ -657,7 +663,8 @@ fn cap_890_reject_all_declines_and_is_never_stored_in_consents() {
 #[test]
 fn cap_891_an_applied_file_leaves_a_history_entry_an_audit_record_and_the_applied_list() {
     let rig = rig(Tier::T2, Side::Server, &PROPOSE_GRANTS);
-    rig.kernel.write_agent_config_file("claude", "CLAUDE.md", b"old");
+    rig.kernel
+        .write_agent_config_file("claude", "CLAUDE.md", b"old");
     let revision = rig.kernel.agent_config_revision("claude", "CLAUDE.md");
     let mut request = proposal("CLAUDE.md");
     request["changes"][0]["revision"] = json!(revision);

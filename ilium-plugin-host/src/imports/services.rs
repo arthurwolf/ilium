@@ -88,7 +88,8 @@ mod tests {
     #[test]
     fn call_with_empty_method_and_empty_payload_is_not_permitted_without_grant() {
         let mut services = ServicesImport;
-        let code = code_of(services.call(SUGGEST_SERVICE.to_string(), String::new(), String::new()));
+        let code =
+            code_of(services.call(SUGGEST_SERVICE.to_string(), String::new(), String::new()));
         assert_eq!(code, ErrorCode::NotPermitted);
     }
 

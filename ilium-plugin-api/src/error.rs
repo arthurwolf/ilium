@@ -89,6 +89,13 @@ impl std::fmt::Display for Code {
 /// Longest `plugin-error.message` the API produces, in characters (test plan 1.3, "API").
 pub const MESSAGE_MAX_CHARS: usize = 256;
 
+/// Renders as `<code>: <message>`, the line a user sees in a log or a terminal.
+impl std::fmt::Display for PluginError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{}: {}", self.code.as_str(), self.message)
+    }
+}
+
 impl PluginError {
     /// API: message capped at 256 characters (reference-errors-and-limits.md "The plugin error record").
     pub fn new(code: ErrorCode, message: impl Into<String>) -> PluginError {
@@ -103,6 +110,11 @@ impl PluginError {
     /// "Extension point codes").
     pub fn with_prefix(code: ErrorCode, extension_code: &Code, message: &str) -> PluginError {
         Self::new(code, format!("{extension_code}: {message}"))
+    }
+
+    /// The HTTP status that a registry answer with this error carries (PKG-810: `registry.size` is 413).
+    pub fn http_status(&self) -> u16 {
+        unimplemented!("api::error::PluginError::http_status")
     }
 
     /// The namespaced code at the start of the message, if any (reference-errors-and-limits.md).
@@ -288,7 +300,10 @@ mod tests {
     /// REQ: DEV-023
     #[test]
     fn severity_from_str_rejects_empty_and_wrong_case_text() {
-        assert_eq!("".parse::<Severity>(), Err(UnknownName::new("severity", "")));
+        assert_eq!(
+            "".parse::<Severity>(),
+            Err(UnknownName::new("severity", ""))
+        );
         assert_eq!(
             "Error".parse::<Severity>(),
             Err(UnknownName::new("severity", "Error"))
@@ -314,9 +329,15 @@ mod tests {
     /// REQ: API-081
     #[test]
     fn code_namespace_is_the_part_before_the_first_dot() {
-        assert_eq!(Code::from_static("manifest.grant-side").namespace(), "manifest");
+        assert_eq!(
+            Code::from_static("manifest.grant-side").namespace(),
+            "manifest"
+        );
         assert_eq!(Code::from_static("trap.deadline").namespace(), "trap");
-        assert_eq!(Code::from_static("extension.vetoed.sub").namespace(), "extension");
+        assert_eq!(
+            Code::from_static("extension.vetoed.sub").namespace(),
+            "extension"
+        );
     }
 
     /// REQ: API-081
@@ -329,16 +350,34 @@ mod tests {
     /// REQ: EXT-003
     #[test]
     fn code_base_maps_extension_codes_to_their_documented_base_codes() {
-        assert_eq!(Code::from_static("extension.vetoed").base(), ErrorCode::Conflict);
-        assert_eq!(Code::from_static("extension.not-granted").base(), ErrorCode::NotPermitted);
-        assert_eq!(Code::from_static("extension.unknown-point").base(), ErrorCode::NotFound);
+        assert_eq!(
+            Code::from_static("extension.vetoed").base(),
+            ErrorCode::Conflict
+        );
+        assert_eq!(
+            Code::from_static("extension.not-granted").base(),
+            ErrorCode::NotPermitted
+        );
+        assert_eq!(
+            Code::from_static("extension.unknown-point").base(),
+            ErrorCode::NotFound
+        );
         assert_eq!(
             Code::from_static("extension.schema-mismatch").base(),
             ErrorCode::InvalidArgument
         );
-        assert_eq!(Code::from_static("extension.not-dynamic").base(), ErrorCode::Unsupported);
-        assert_eq!(Code::from_static("extension.reentrant").base(), ErrorCode::Conflict);
-        assert_eq!(Code::from_static("extension.depth-exceeded").base(), ErrorCode::Conflict);
+        assert_eq!(
+            Code::from_static("extension.not-dynamic").base(),
+            ErrorCode::Unsupported
+        );
+        assert_eq!(
+            Code::from_static("extension.reentrant").base(),
+            ErrorCode::Conflict
+        );
+        assert_eq!(
+            Code::from_static("extension.depth-exceeded").base(),
+            ErrorCode::Conflict
+        );
         assert_eq!(
             Code::from_static("extension.entry-rejected").base(),
             ErrorCode::InvalidArgument
@@ -452,7 +491,10 @@ mod tests {
             &Code::from_static("extension.vetoed"),
             "quiet hours are on",
         );
-        assert_eq!(error.extension_code(), Some(Code::from_static("extension.vetoed")));
+        assert_eq!(
+            error.extension_code(),
+            Some(Code::from_static("extension.vetoed"))
+        );
     }
 
     /// REQ: EXT-003
@@ -462,7 +504,10 @@ mod tests {
             ErrorCode::Conflict,
             "extension.vetoed: com.example.quiet-hours: quiet hours are on",
         );
-        assert_eq!(error.extension_code(), Some(Code::from_static("extension.vetoed")));
+        assert_eq!(
+            error.extension_code(),
+            Some(Code::from_static("extension.vetoed"))
+        );
     }
 
     /// REQ: EXT-003
@@ -510,8 +555,14 @@ mod tests {
                 .map(|info| info.base)
         };
         assert_eq!(base_of("extension.vetoed"), Some(ErrorCode::Conflict));
-        assert_eq!(base_of("extension.schema-mismatch"), Some(ErrorCode::InvalidArgument));
-        assert_eq!(base_of("extension.unknown-point"), Some(ErrorCode::NotFound));
+        assert_eq!(
+            base_of("extension.schema-mismatch"),
+            Some(ErrorCode::InvalidArgument)
+        );
+        assert_eq!(
+            base_of("extension.unknown-point"),
+            Some(ErrorCode::NotFound)
+        );
     }
 
     /// REQ: API-002
@@ -519,8 +570,16 @@ mod tests {
     fn registry_codes_are_unique_namespaced_and_name_a_page() {
         let mut seen = std::collections::HashSet::new();
         for info in registry() {
-            assert!(seen.insert(info.code), "duplicate registry code {}", info.code);
-            assert!(info.code.contains('.'), "code {} is not namespaced", info.code);
+            assert!(
+                seen.insert(info.code),
+                "duplicate registry code {}",
+                info.code
+            );
+            assert!(
+                info.code.contains('.'),
+                "code {} is not namespaced",
+                info.code
+            );
             assert!(!info.page.is_empty(), "code {} names no page", info.code);
         }
         assert!(!seen.is_empty());
@@ -579,8 +638,14 @@ mod tests {
     /// REQ: API-002
     #[test]
     fn refusal_reason_code_maps_the_quota_and_network_reasons() {
-        assert_eq!(refusal_reason_code("response-size"), Some(ErrorCode::QuotaExceeded));
-        assert_eq!(refusal_reason_code("stream-size"), Some(ErrorCode::QuotaExceeded));
+        assert_eq!(
+            refusal_reason_code("response-size"),
+            Some(ErrorCode::QuotaExceeded)
+        );
+        assert_eq!(
+            refusal_reason_code("stream-size"),
+            Some(ErrorCode::QuotaExceeded)
+        );
         assert_eq!(refusal_reason_code("tls"), Some(ErrorCode::Network));
     }
 

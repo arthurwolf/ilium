@@ -47,7 +47,10 @@ fn api_094_limits_record_names_pending_requests_with_value_and_source() {
         .find(|entry| entry.name == "pending_requests")
         .expect("the limits record lists pending_requests");
     assert_eq!(pending.value, 64);
-    assert!(matches!(pending.source.as_str(), "default" | "manifest" | "user"));
+    assert!(matches!(
+        pending.source.as_str(),
+        "default" | "manifest" | "user"
+    ));
 }
 
 // ---------------------------------------------------------------- API-095

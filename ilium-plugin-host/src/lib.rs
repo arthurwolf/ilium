@@ -16,27 +16,36 @@
 // `unimplemented!` bodies, and private fields wait for the code that reads them; until then both
 // are unused by design (test plan 1.3).
 
+pub mod a11y;
 pub mod admission_queue;
 pub mod approval;
 pub mod audit;
 pub mod autoupdate;
 pub mod calls;
 pub mod cli;
-pub mod crash_records;
 pub mod conformance_hooks;
 pub mod consent;
+pub mod correlation_chain;
+pub mod crash_records;
 pub mod devtools;
 pub mod dispatch;
 pub mod engine;
+pub mod engine_recycle;
 pub mod error;
 pub mod error_code_decode;
+pub mod errors;
 pub mod extensions;
 pub mod helper_client;
+pub mod helper_forensics;
+pub mod host_capacity;
 pub mod host_info;
+pub mod i18n;
 pub mod imports;
 pub mod install;
 pub mod instance;
 pub mod ipc;
+pub mod ipc_traffic;
+pub mod kill_switch;
 pub mod lifecycle;
 pub mod lifecycle_ops_support;
 pub mod limits_rules;
@@ -48,6 +57,7 @@ pub mod registry;
 pub mod registry_client;
 pub mod render;
 pub mod resolve;
+pub mod retention;
 pub mod review;
 pub mod scheduler;
 pub mod secrets;
@@ -61,15 +71,12 @@ pub mod stores;
 pub mod sync;
 pub mod telemetry;
 pub mod telemetry_history;
-pub mod host_capacity;
-pub mod engine_recycle;
-pub mod kill_switch;
-pub mod helper_forensics;
-pub mod ipc_traffic;
-pub mod correlation_chain;
-pub mod wasm_guest;
 #[cfg(feature = "testing")]
 pub mod testing;
+pub mod text;
+pub mod theme;
+pub mod view;
+pub mod wasm_guest;
 
 pub use error::HostError;
 
@@ -103,7 +110,11 @@ mod tests {
     #[test]
     fn workspace_contains_the_three_plugin_crates() {
         let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
-        for crate_name in ["ilium-plugin-api", "ilium-plugin-host", "ilium-plugin-helper"] {
+        for crate_name in [
+            "ilium-plugin-api",
+            "ilium-plugin-host",
+            "ilium-plugin-helper",
+        ] {
             let manifest_path = crate_root.join(crate_name).join("Cargo.toml");
             assert!(
                 manifest_path.is_file(),
@@ -116,9 +127,8 @@ mod tests {
     /// REQ: HST-001
     #[test]
     fn api_crate_has_no_wasmtime_v8_tokio_or_io_dependency() {
-        let api_dependencies = normal_dependency_names(include_str!(
-            "../../ilium-plugin-api/Cargo.toml"
-        ));
+        let api_dependencies =
+            normal_dependency_names(include_str!("../../ilium-plugin-api/Cargo.toml"));
         for forbidden in ["wasmtime", "v8", "tokio", "mio", "reqwest", "hyper"] {
             assert!(
                 !api_dependencies.iter().any(|name| name == forbidden),

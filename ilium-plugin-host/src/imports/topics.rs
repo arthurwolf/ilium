@@ -53,7 +53,10 @@ mod tests {
     /// REQ: SVC-021
     #[test]
     fn publish_declared_topic_with_json_object_returns_ok() {
-        assert_eq!(publish(DECLARED_TOPIC, r#"{"path":"notes/plan.md"}"#), Ok(()));
+        assert_eq!(
+            publish(DECLARED_TOPIC, r#"{"path":"notes/plan.md"}"#),
+            Ok(())
+        );
     }
 
     /// REQ: SVC-022
@@ -77,19 +80,28 @@ mod tests {
     /// REQ: SVC-020
     #[test]
     fn publish_under_kernel_namespace_is_not_permitted() {
-        expect_error(publish("ilium.progress/finished", "{}"), ErrorCode::NotPermitted);
+        expect_error(
+            publish("ilium.progress/finished", "{}"),
+            ErrorCode::NotPermitted,
+        );
     }
 
     /// REQ: SVC-021
     #[test]
     fn publish_topic_not_declared_in_manifest_is_invalid_argument() {
-        expect_error(publish("example.notes/undeclared", "{}"), ErrorCode::InvalidArgument);
+        expect_error(
+            publish("example.notes/undeclared", "{}"),
+            ErrorCode::InvalidArgument,
+        );
     }
 
     /// REQ: SVC-022
     #[test]
     fn publish_topic_name_over_128_characters_is_invalid_argument() {
-        let topic = format!("example.notes/{}", "a".repeat(TOPIC_NAME_LIMIT_CHARS + 1 - "example.notes/".len()));
+        let topic = format!(
+            "example.notes/{}",
+            "a".repeat(TOPIC_NAME_LIMIT_CHARS + 1 - "example.notes/".len())
+        );
         assert_eq!(topic.chars().count(), TOPIC_NAME_LIMIT_CHARS + 1);
         expect_error(publish(&topic, "{}"), ErrorCode::InvalidArgument);
     }
@@ -97,7 +109,10 @@ mod tests {
     /// REQ: SVC-022
     #[test]
     fn publish_payload_that_is_not_json_is_invalid_argument() {
-        expect_error(publish(DECLARED_TOPIC, r#"{"path":"#), ErrorCode::InvalidArgument);
+        expect_error(
+            publish(DECLARED_TOPIC, r#"{"path":"#),
+            ErrorCode::InvalidArgument,
+        );
     }
 
     /// REQ: SVC-022
@@ -113,14 +128,21 @@ mod tests {
     fn publish_payload_one_byte_over_64_kib_is_invalid_argument() {
         let payload = format!("\"{}\"", "a".repeat(PAYLOAD_LIMIT_BYTES - 1));
         assert_eq!(payload.len(), PAYLOAD_LIMIT_BYTES + 1);
-        expect_error(publish(DECLARED_TOPIC, &payload), ErrorCode::InvalidArgument);
+        expect_error(
+            publish(DECLARED_TOPIC, &payload),
+            ErrorCode::InvalidArgument,
+        );
     }
 
     /// REQ: SVC-023
     #[test]
     fn publish_beyond_100_per_second_is_rate_limited() {
         for call in 0..PUBLISH_RATE_PER_SECOND {
-            assert_eq!(publish(DECLARED_TOPIC, "{}"), Ok(()), "call {call} inside the rate must succeed");
+            assert_eq!(
+                publish(DECLARED_TOPIC, "{}"),
+                Ok(()),
+                "call {call} inside the rate must succeed"
+            );
         }
         expect_error(publish(DECLARED_TOPIC, "{}"), ErrorCode::RateLimited);
     }
@@ -132,7 +154,9 @@ mod tests {
             assert_eq!(publish(DECLARED_TOPIC, "{}"), Ok(()));
         }
         let error = expect_error(publish(DECLARED_TOPIC, "{}"), ErrorCode::RateLimited);
-        let retry_after_ms = error.retry_after_ms.expect("rate-limited must set retry-after-ms");
+        let retry_after_ms = error
+            .retry_after_ms
+            .expect("rate-limited must set retry-after-ms");
         assert!(retry_after_ms > 0, "retry-after-ms must be positive");
     }
 }

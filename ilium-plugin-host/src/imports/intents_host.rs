@@ -60,7 +60,10 @@ mod tests {
     fn submit_accepts_dedup_key_of_one_character() {
         let mut import = IntentsHostImport;
         let result = import.submit(play_sound_submission(Some("a".to_string()), 1));
-        assert!(result.is_ok(), "a one-character dedup key is the minimum valid length");
+        assert!(
+            result.is_ok(),
+            "a one-character dedup key is the minimum valid length"
+        );
     }
 
     /// REQ: RQO-020
@@ -69,7 +72,10 @@ mod tests {
         let mut import = IntentsHostImport;
         let key = "k".repeat(DEDUP_KEY_MAX_CHARS);
         let result = import.submit(play_sound_submission(Some(key), 1));
-        assert!(result.is_ok(), "a 128-character dedup key is the maximum valid length");
+        assert!(
+            result.is_ok(),
+            "a 128-character dedup key is the maximum valid length"
+        );
     }
 
     /// REQ: RQO-020
@@ -99,7 +105,10 @@ mod tests {
             Some(DEDUP_KEY_ALLOWED_CHARS.to_string()),
             1,
         ));
-        assert!(result.is_ok(), "every documented dedup key character must be accepted");
+        assert!(
+            result.is_ok(),
+            "every documented dedup key character must be accepted"
+        );
     }
 
     /// REQ: RQO-020
@@ -125,7 +134,10 @@ mod tests {
     fn submit_accepts_correlation_zero() {
         let mut import = IntentsHostImport;
         let result = import.submit(play_sound_submission(None, 0));
-        assert!(result.is_ok(), "correlation 0 is a plugin-chosen number and must be accepted");
+        assert!(
+            result.is_ok(),
+            "correlation 0 is a plugin-chosen number and must be accepted"
+        );
     }
 
     /// REQ: ABI-011
@@ -133,7 +145,10 @@ mod tests {
     fn submit_accepts_largest_plugin_correlation_below_2_pow_63() {
         let mut import = IntentsHostImport;
         let result = import.submit(play_sound_submission(None, LARGEST_PLUGIN_CORRELATION));
-        assert!(result.is_ok(), "correlation 2^63 - 1 still belongs to the plugin");
+        assert!(
+            result.is_ok(),
+            "correlation 2^63 - 1 still belongs to the plugin"
+        );
     }
 
     /// REQ: ABI-040
@@ -159,7 +174,10 @@ mod tests {
             dedup_key: Some("close:node-7".to_string()),
         };
         let result = import.submit(submission);
-        assert!(result.is_ok(), "a well-formed intent with a valid dedup key must be accepted");
+        assert!(
+            result.is_ok(),
+            "a well-formed intent with a valid dedup key must be accepted"
+        );
     }
 
     /// REQ: API-003
@@ -180,7 +198,10 @@ mod tests {
         let mut import = IntentsHostImport;
         let result = import.submit(play_sound_submission(Some("k".repeat(129)), 1));
         let error = result.expect_err("a 129-character dedup key is malformed");
-        assert!(!error.message.is_empty(), "the plugin error record must carry a message");
+        assert!(
+            !error.message.is_empty(),
+            "the plugin error record must carry a message"
+        );
         assert!(
             error.message.chars().count() <= ERROR_MESSAGE_MAX_CHARS,
             "the message is capped at 256 characters"

@@ -70,7 +70,8 @@ mod spec_tests {
         record_to(&path);
         let contents = std::fs::read_to_string(&path).expect("replay file exists");
         let first_line = contents.lines().next().expect("first line");
-        let header: ReplayHeader = serde_json::from_str(first_line).expect("first line is a header");
+        let header: ReplayHeader =
+            serde_json::from_str(first_line).expect("first line is a header");
         assert_eq!(header.kind, "header");
         assert_eq!(header.version, 1);
     }
@@ -102,11 +103,14 @@ mod spec_tests {
     fn dev_541_divergence_reports_first_differing_line() {
         let path = replay_path("dev_541_diverged");
         let recorded_call = r#"{"type":"host-call","at":130,"import":"storage.get","key":"no-such-key-recorded","result":{"tag":"some","val":"3"}}"#;
-        std::fs::write(&path, format!("{}\n{recorded_call}\n", header_line(1))).expect("write replay");
+        std::fs::write(&path, format!("{}\n{recorded_call}\n", header_line(1)))
+            .expect("write replay");
         let mismatch = replay(&path).expect_err("recorded call cannot be reproduced");
         assert_eq!(mismatch.line, 2);
         assert_eq!(mismatch.expected, recorded_call);
-        assert!(mismatch.to_string().starts_with("replay.diverged at line 2"));
+        assert!(mismatch
+            .to_string()
+            .starts_with("replay.diverged at line 2"));
     }
 
     /// REQ: DEV-542

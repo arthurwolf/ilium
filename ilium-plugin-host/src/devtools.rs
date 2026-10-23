@@ -64,7 +64,8 @@ mod tests {
     ];
 
     const GOOD_README: &str = "# Agent tools\n\nMarks agent panes that are working with a badge in the tree.\n\n## Grants\n\n- `tree.read`: reads agent activity.\n- `tree.decorate`: sets the badge.\n";
-    const GOOD_CHANGELOG: &str = "# Changelog\n\n## [Unreleased]\n\n### Added\n\n- First version.\n";
+    const GOOD_CHANGELOG: &str =
+        "# Changelog\n\n## [Unreleased]\n\n### Added\n\n- First version.\n";
     const GOOD_HELP: &str = "# Agent tools\n\nMarks agent panes that are working.\n";
 
     fn files_of(template: &str, plugin_id: &str) -> Vec<(String, String)> {
@@ -341,9 +342,9 @@ mod tests {
                 .and_then(|contributes| contributes.get("help"))
                 .and_then(Value::as_array)
                 .is_some_and(|topics| {
-                    topics
-                        .iter()
-                        .any(|topic| topic.get("file").and_then(Value::as_str) == Some("help/overview.md"))
+                    topics.iter().any(|topic| {
+                        topic.get("file").and_then(Value::as_str) == Some("help/overview.md")
+                    })
                 });
             assert!(
                 help_topic_listed,
@@ -396,7 +397,11 @@ mod tests {
     #[test]
     fn build_plan_refuses_a_project_with_both_language_files() {
         let project = tempfile::tempdir().expect("create scratch project");
-        write_file(project.path(), "Cargo.toml", "[package]\nname = \"agent-tools\"\n");
+        write_file(
+            project.path(),
+            "Cargo.toml",
+            "[package]\nname = \"agent-tools\"\n",
+        );
         write_file(project.path(), "package.json", "{}\n");
         assert_eq!(
             build_refusal_code(project.path()),
@@ -418,11 +423,17 @@ mod tests {
     #[test]
     fn build_plan_runs_cargo_for_a_rust_project() {
         let project = tempfile::tempdir().expect("create scratch project");
-        write_file(project.path(), "Cargo.toml", "[package]\nname = \"agent-tools\"\n");
+        write_file(
+            project.path(),
+            "Cargo.toml",
+            "[package]\nname = \"agent-tools\"\n",
+        );
         let plan = plan_of(project.path());
         assert_eq!(plan.command.first().map(String::as_str), Some("cargo"));
         assert!(
-            plan.command.iter().any(|argument| argument.as_str() == "build"),
+            plan.command
+                .iter()
+                .any(|argument| argument.as_str() == "build"),
             "cargo plan has no build subcommand: {:?}",
             plan.command
         );
@@ -483,7 +494,10 @@ mod tests {
         write_all_docs(project.path());
         let findings = lint(project.path());
         let skipped = findings_named(&findings, "lint.skipped");
-        assert!(!skipped.is_empty(), "no dist folder but no lint.skipped finding");
+        assert!(
+            !skipped.is_empty(),
+            "no dist folder but no lint.skipped finding"
+        );
         for finding in &skipped {
             assert_eq!(finding.diagnostic.severity, Severity::Info);
         }
@@ -561,7 +575,11 @@ mod tests {
     fn lint_flags_a_help_topic_whose_heading_differs_from_its_title() {
         let project = project_with(&base_manifest());
         write_all_docs(project.path());
-        write_file(project.path(), "help/overview.md", "# Something else\n\nText.\n");
+        write_file(
+            project.path(),
+            "help/overview.md",
+            "# Something else\n\nText.\n",
+        );
         let findings = lint(project.path());
         let mismatch = findings_named(&findings, "lint.help-title-mismatch");
         assert!(!mismatch.is_empty(), "heading mismatch not flagged");

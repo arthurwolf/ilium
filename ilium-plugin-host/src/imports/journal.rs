@@ -52,7 +52,12 @@ mod tests {
     /// Asserts that the call returned an `invalid-argument` error.
     fn assert_invalid_argument(result: Result<(), PluginError>) {
         match result {
-            Err(error) => assert_eq!(error.code, ErrorCode::InvalidArgument, "message: {}", error.message),
+            Err(error) => assert_eq!(
+                error.code,
+                ErrorCode::InvalidArgument,
+                "message: {}",
+                error.message
+            ),
             Ok(()) => panic!("expected invalid-argument, got Ok"),
         }
     }
@@ -66,7 +71,10 @@ mod tests {
     /// REQ: CAP-011
     #[test]
     fn log_event_with_pane_returns_ok() {
-        assert_eq!(log_event(Some(NodeId(1)), &unique_kind("with-pane"), "{\"count\":2}"), Ok(()));
+        assert_eq!(
+            log_event(Some(NodeId(1)), &unique_kind("with-pane"), "{\"count\":2}"),
+            Ok(())
+        );
     }
 
     /// REQ: API-060
@@ -75,7 +83,10 @@ mod tests {
         let padding = "x".repeat(PAYLOAD_LIMIT_BYTES - "{\"v\":\"\"}".len());
         let payload = format!("{{\"v\":\"{padding}\"}}");
         assert_eq!(payload.len(), PAYLOAD_LIMIT_BYTES);
-        assert_eq!(log_event(None, &unique_kind("payload-boundary"), &payload), Ok(()));
+        assert_eq!(
+            log_event(None, &unique_kind("payload-boundary"), &payload),
+            Ok(())
+        );
     }
 
     /// REQ: API-060
@@ -91,7 +102,11 @@ mod tests {
     #[test]
     fn log_event_oversized_payload_is_not_silently_truncated() {
         let payload = "y".repeat(PAYLOAD_LIMIT_BYTES * 2);
-        assert_invalid_argument(log_event(Some(NodeId(2)), &unique_kind("payload-huge"), &payload));
+        assert_invalid_argument(log_event(
+            Some(NodeId(2)),
+            &unique_kind("payload-huge"),
+            &payload,
+        ));
     }
 
     /// REQ: API-071
@@ -106,15 +121,29 @@ mod tests {
             match journal.log_event(None, kind.clone(), "{}".to_string()) {
                 Ok(()) => accepted_count += 1,
                 Err(error) => {
-                    assert_eq!(error.code, ErrorCode::RateLimited, "message: {}", error.message);
+                    assert_eq!(
+                        error.code,
+                        ErrorCode::RateLimited,
+                        "message: {}",
+                        error.message
+                    );
                     saw_rate_limited = true;
                     rate_limited_retry_after = error.retry_after_ms;
                 }
             }
         }
-        assert!(saw_rate_limited, "25 calls in one burst must hit the 20-per-second rate");
-        assert!(accepted_count <= 20, "accepted {accepted_count} calls, the rate is 20 per second");
-        assert!(rate_limited_retry_after.is_some(), "rate-limited must carry retry-after-ms");
+        assert!(
+            saw_rate_limited,
+            "25 calls in one burst must hit the 20-per-second rate"
+        );
+        assert!(
+            accepted_count <= 20,
+            "accepted {accepted_count} calls, the rate is 20 per second"
+        );
+        assert!(
+            rate_limited_retry_after.is_some(),
+            "rate-limited must carry retry-after-ms"
+        );
     }
 
     /// REQ: CAP-011
@@ -125,8 +154,13 @@ mod tests {
         log_event(Some(pane), &kind, "{\"key\":\"abc\"}").expect("log-event must be accepted");
         let mut journal = JournalImport;
         let entries: Vec<JournalEntry> = journal.read(Some(pane), EpochMs(0), 1_000);
-        let matching: Vec<&JournalEntry> = entries.iter().filter(|entry| entry.kind == kind).collect();
-        assert_eq!(matching.len(), 1, "the written entry must be readable without any grant");
+        let matching: Vec<&JournalEntry> =
+            entries.iter().filter(|entry| entry.kind == kind).collect();
+        assert_eq!(
+            matching.len(),
+            1,
+            "the written entry must be readable without any grant"
+        );
         assert_eq!(matching[0].pane, Some(pane));
         assert_eq!(matching[0].payload_json, "{\"key\":\"abc\"}");
     }
@@ -153,7 +187,10 @@ mod tests {
     fn read_since_in_the_far_future_returns_no_entries() {
         let mut journal = JournalImport;
         let entries: Vec<JournalEntry> = journal.read(None, EpochMs(u64::MAX), 1_000);
-        assert!(entries.is_empty(), "no entry can be newer than the far-future since value");
+        assert!(
+            entries.is_empty(),
+            "no entry can be newer than the far-future since value"
+        );
     }
 
     /// REQ: API-060
@@ -172,7 +209,8 @@ mod tests {
     #[test]
     fn read_with_no_matching_pane_entries_returns_empty_list() {
         let mut journal = JournalImport;
-        let entries: Vec<JournalEntry> = journal.read(Some(NodeId(u64::MAX)), EpochMs(u64::MAX), 10);
+        let entries: Vec<JournalEntry> =
+            journal.read(Some(NodeId(u64::MAX)), EpochMs(u64::MAX), 10);
         assert!(entries.is_empty());
     }
 }

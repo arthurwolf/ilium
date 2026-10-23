@@ -153,7 +153,10 @@ mod spec_tests {
         required.extend((16..=20).map(|n| format!("B{n}")));
         required.push("B23".to_string());
         for id in &required {
-            assert!(RELEASE_GATE_IDS.contains(&id.as_str()), "release gate misses {id}");
+            assert!(
+                RELEASE_GATE_IDS.contains(&id.as_str()),
+                "release gate misses {id}"
+            );
         }
         assert_eq!(RELEASE_GATE_IDS.len(), required.len());
     }
@@ -161,18 +164,39 @@ mod spec_tests {
     /// REQ: HST-300
     #[test]
     fn run_with_refuses_iterations_below_minimum() {
-        let zero = RunSpec { warmup_iterations: 0, measured_iterations: 0 };
-        assert!(matches!(run_with("B1", &zero), Err(BenchError::BelowMinimum(_))));
-        let short_warmup = RunSpec { warmup_iterations: 99, measured_iterations: 1000 };
-        assert!(matches!(run_with("B1", &short_warmup), Err(BenchError::BelowMinimum(_))));
-        let short_measured = RunSpec { warmup_iterations: 100, measured_iterations: 999 };
-        assert!(matches!(run_with("B1", &short_measured), Err(BenchError::BelowMinimum(_))));
+        let zero = RunSpec {
+            warmup_iterations: 0,
+            measured_iterations: 0,
+        };
+        assert!(matches!(
+            run_with("B1", &zero),
+            Err(BenchError::BelowMinimum(_))
+        ));
+        let short_warmup = RunSpec {
+            warmup_iterations: 99,
+            measured_iterations: 1000,
+        };
+        assert!(matches!(
+            run_with("B1", &short_warmup),
+            Err(BenchError::BelowMinimum(_))
+        ));
+        let short_measured = RunSpec {
+            warmup_iterations: 100,
+            measured_iterations: 999,
+        };
+        assert!(matches!(
+            run_with("B1", &short_measured),
+            Err(BenchError::BelowMinimum(_))
+        ));
     }
 
     /// REQ: HST-305
     #[test]
     fn run_with_rejects_unknown_program_id() {
-        let spec = RunSpec { warmup_iterations: 100, measured_iterations: 1000 };
+        let spec = RunSpec {
+            warmup_iterations: 100,
+            measured_iterations: 1000,
+        };
         assert_eq!(
             run_with("B99", &spec),
             Err(BenchError::UnknownProgram("B99".to_string()))
@@ -210,10 +234,22 @@ mod spec_tests {
         let json = result.to_json();
         assert_eq!(json.get("median_ns").and_then(|v| v.as_u64()), Some(512));
         assert_eq!(json.get("p99_ns").and_then(|v| v.as_u64()), Some(900));
-        assert_eq!(json.get("warmup_iterations").and_then(|v| v.as_u64()), Some(100));
-        assert_eq!(json.get("measured_iterations").and_then(|v| v.as_u64()), Some(1000));
-        assert_eq!(json.get("wasmtime_version").and_then(|v| v.as_str()), Some("0.0.0-test"));
-        assert_eq!(json.get("cpu_model").and_then(|v| v.as_str()), Some("test cpu"));
+        assert_eq!(
+            json.get("warmup_iterations").and_then(|v| v.as_u64()),
+            Some(100)
+        );
+        assert_eq!(
+            json.get("measured_iterations").and_then(|v| v.as_u64()),
+            Some(1000)
+        );
+        assert_eq!(
+            json.get("wasmtime_version").and_then(|v| v.as_str()),
+            Some("0.0.0-test")
+        );
+        assert_eq!(
+            json.get("cpu_model").and_then(|v| v.as_str()),
+            Some("test cpu")
+        );
         assert_eq!(json.get("core_count").and_then(|v| v.as_u64()), Some(8));
         assert_eq!(json.get("os").and_then(|v| v.as_str()), Some("linux"));
         assert_eq!(json.get("commit").and_then(|v| v.as_str()), Some("abc1234"));
@@ -256,7 +292,10 @@ mod spec_tests {
         };
         assert!(pooling_allowed(&enabling));
 
-        let too_much_rss = PoolingEvidence { pooling_extra_rss_mib: 17.0, ..enabling };
+        let too_much_rss = PoolingEvidence {
+            pooling_extra_rss_mib: 17.0,
+            ..enabling
+        };
         assert!(!pooling_allowed(&too_much_rss));
 
         let on_demand_already_meets = PoolingEvidence {

@@ -731,6 +731,12 @@ fn dev_836_batch_over_its_20_ms_deadline_breaches_and_its_submissions_are_droppe
 #[test]
 fn soft_deadline_traps_at_the_full_hundred_millisecond_grace_boundary() {
     let limits = default_limits();
-    assert_eq!(evaluate_breach(CallClass::Annotate, ms(109), &limits), BreachVerdict::SoftLate);
-    assert_eq!(evaluate_breach(CallClass::Annotate, ms(110), &limits), BreachVerdict::SoftTrap);
+    assert_eq!(
+        evaluate_breach(CallClass::Annotate, ms(109), &limits),
+        BreachVerdict::SoftLate
+    );
+    assert_eq!(
+        evaluate_breach(CallClass::Annotate, ms(110), &limits),
+        BreachVerdict::SoftTrap
+    );
 }

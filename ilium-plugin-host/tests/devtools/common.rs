@@ -82,39 +82,6 @@ pub fn error_code(output: &CliOutput) -> Option<String> {
         .map(str::to_owned)
 }
 
-/// The `rule` of every record of `record_type` (`check` or `lint`) in output order.
-pub fn rules_of(output: &CliOutput, record_type: &str) -> Vec<String> {
-    records_of(output, record_type)
-        .iter()
-        .filter_map(|record| {
-            record
-                .get("rule")
-                .and_then(Value::as_str)
-                .map(str::to_owned)
-        })
-        .collect()
-}
-
-/// The first record of `record_type` whose `rule` equals `rule`.
-pub fn finding<'a>(output: &'a CliOutput, record_type: &str, rule: &str) -> Option<&'a Value> {
-    records_of(output, record_type)
-        .into_iter()
-        .find(|record| record.get("rule").and_then(Value::as_str) == Some(rule))
-}
-
-/// True when a record of `record_type` carries `rule`.
-pub fn has_rule(output: &CliOutput, record_type: &str, rule: &str) -> bool {
-    finding(output, record_type, rule).is_some()
-}
-
-/// The `severity` of the first finding with `rule`.
-pub fn severity_of(output: &CliOutput, record_type: &str, rule: &str) -> Option<String> {
-    finding(output, record_type, rule)
-        .and_then(|record| record.get("severity"))
-        .and_then(Value::as_str)
-        .map(str::to_owned)
-}
-
 /// Writes a text file below `dir`, creating folders.
 pub fn write_text(dir: &Path, relative: &str, text: &str) {
     write_bytes(dir, relative, text.as_bytes());
@@ -410,32 +377,6 @@ pub fn write_package_file(dir: &Path, name: &str, bytes: &[u8]) -> String {
     dir.join(name).to_str().expect("utf8").to_owned()
 }
 
-/// Runs `check <file> --json`.
-pub fn check_file(env: &CliEnv, file: &str) -> CliOutput {
-    run(env, &["check", file, "--json"])
-}
-
-/// Loads a built guest fixture component `plugins/fixtures/<name>/dist/<side>.wasm`. A fixture that
-/// the toolchain has not built yet fails the test with `fixture.missing` (red until it is built).
-pub fn fixture_component(name: &str, side: &str) -> Vec<u8> {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("plugins")
-        .join("fixtures")
-        .join(name)
-        .join("dist")
-        .join(format!("{side}.wasm"));
-    std::fs::read(&path).unwrap_or_else(|_| panic!("fixture.missing: {}", path.display()))
-}
-
-/// Writes a sparse file of exactly `size` bytes.
-pub fn write_sparse(dir: &Path, relative: &str, size: u64) {
-    let path = dir.join(relative);
-    std::fs::create_dir_all(path.parent().expect("parent")).expect("create folders");
-    let file = std::fs::File::create(path).expect("create sparse file");
-    file.set_len(size).expect("set length");
-}
-
 /// Writes a project that lints clean of everything except skipped-rule hints, with a built
 /// server component, and returns the environment.
 pub fn lint_env_with(edit: impl FnOnce(&mut Value)) -> (tempfile::TempDir, CliEnv) {
@@ -448,9 +389,4 @@ pub fn lint_env_with(edit: impl FnOnce(&mut Value)) -> (tempfile::TempDir, CliEn
 /// Runs `lint <project> --json` with extra arguments.
 pub fn lint(env: &CliEnv, extra: &[&str]) -> CliOutput {
     run_in_project(env, "lint", extra)
-}
-
-/// `Some(true)` when the lint record with `rule` is marked suppressed.
-pub fn is_suppressed(output: &CliOutput, rule: &str) -> Option<bool> {
-    finding(output, "lint", rule).and_then(|record| record["suppressed"].as_bool())
 }

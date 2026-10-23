@@ -96,8 +96,8 @@ mod tests {
         for id in kernel_tab_ids() {
             let mut characters = id.chars();
             let first_is_letter = characters.next().is_some_and(|c| c.is_ascii_lowercase());
-            let rest_is_valid = characters
-                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+            let rest_is_valid =
+                characters.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
             assert!(first_is_letter && rest_is_valid, "bad id {id}");
             assert!(id.len() <= 32, "id {id} is longer than 32 characters");
         }
@@ -133,10 +133,7 @@ mod tests {
     fn validate_rejects_number_one_below_minimum_with_invalid_value_code() {
         let diagnostics = expect_rejected(r#"{"max_entries":9}"#);
         assert_eq!(diagnostics.len(), 1);
-        assert_eq!(
-            diagnostics[0].code.as_str(),
-            settings_codes::INVALID_VALUE
-        );
+        assert_eq!(diagnostics[0].code.as_str(), settings_codes::INVALID_VALUE);
     }
 
     /// REQ: SET-020
@@ -144,10 +141,7 @@ mod tests {
     fn validate_rejects_number_one_above_maximum_with_invalid_value_code() {
         let diagnostics = expect_rejected(r#"{"max_entries":5001}"#);
         assert_eq!(diagnostics.len(), 1);
-        assert_eq!(
-            diagnostics[0].code.as_str(),
-            settings_codes::INVALID_VALUE
-        );
+        assert_eq!(diagnostics[0].code.as_str(), settings_codes::INVALID_VALUE);
     }
 
     /// REQ: SET-021

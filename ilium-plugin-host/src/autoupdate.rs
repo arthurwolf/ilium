@@ -345,7 +345,8 @@ mod tests {
     /// REQ: COR-090
     #[test]
     fn from_toml_unparseable_text_yields_config_parse_error() {
-        let diagnostic = expect_config_error(AutoUpdateConfig::from_toml("[plugins\nauto_update ="));
+        let diagnostic =
+            expect_config_error(AutoUpdateConfig::from_toml("[plugins\nauto_update ="));
         assert_eq!(
             diagnostic.code,
             Code::from_static(codes::config::PARSE_ERROR)
@@ -362,14 +363,16 @@ mod tests {
     /// REQ: PKG-305
     #[test]
     fn with_policy_overrides_the_user_mode() {
-        let config = config_with(AutoUpdateMode::Notify, false).with_policy(Some(AutoUpdateMode::Off));
+        let config =
+            config_with(AutoUpdateMode::Notify, false).with_policy(Some(AutoUpdateMode::Off));
         assert_eq!(config.mode, AutoUpdateMode::Off);
     }
 
     /// REQ: PKG-305
     #[test]
     fn with_policy_off_locks_an_install_mode_to_off() {
-        let config = config_with(AutoUpdateMode::Install, false).with_policy(Some(AutoUpdateMode::Off));
+        let config =
+            config_with(AutoUpdateMode::Install, false).with_policy(Some(AutoUpdateMode::Off));
         assert_eq!(config.mode, AutoUpdateMode::Off);
     }
 
@@ -396,27 +399,45 @@ mod tests {
     /// REQ: PKG-300
     #[test]
     fn off_mode_never_uses_the_network() {
-        assert!(!should_check_network(&config_with(AutoUpdateMode::Off, false)));
+        assert!(!should_check_network(&config_with(
+            AutoUpdateMode::Off,
+            false
+        )));
     }
 
     /// REQ: PKG-300
     #[test]
     fn notify_and_install_modes_may_use_the_network_on_an_unmetered_connection() {
-        assert!(should_check_network(&config_with(AutoUpdateMode::Notify, false)));
-        assert!(should_check_network(&config_with(AutoUpdateMode::Install, false)));
+        assert!(should_check_network(&config_with(
+            AutoUpdateMode::Notify,
+            false
+        )));
+        assert!(should_check_network(&config_with(
+            AutoUpdateMode::Install,
+            false
+        )));
     }
 
     /// REQ: PKG-303
     #[test]
     fn metered_connection_blocks_checks_in_both_active_modes() {
-        assert!(!should_check_network(&config_with(AutoUpdateMode::Notify, true)));
-        assert!(!should_check_network(&config_with(AutoUpdateMode::Install, true)));
+        assert!(!should_check_network(&config_with(
+            AutoUpdateMode::Notify,
+            true
+        )));
+        assert!(!should_check_network(&config_with(
+            AutoUpdateMode::Install,
+            true
+        )));
     }
 
     /// REQ: PKG-302
     #[test]
     fn clean_candidate_in_install_mode_installs_silently() {
-        let action = decide(&config_with(AutoUpdateMode::Install, false), &clean_candidate());
+        let action = decide(
+            &config_with(AutoUpdateMode::Install, false),
+            &clean_candidate(),
+        );
         assert_eq!(action, AutoAction::Install);
     }
 
@@ -459,7 +480,10 @@ mod tests {
     /// REQ: PKG-300
     #[test]
     fn notify_mode_shows_a_notice_even_for_a_clean_candidate() {
-        let action = decide(&config_with(AutoUpdateMode::Notify, false), &clean_candidate());
+        let action = decide(
+            &config_with(AutoUpdateMode::Notify, false),
+            &clean_candidate(),
+        );
         assert!(matches!(action, AutoAction::Notice(_)));
     }
 
@@ -490,7 +514,10 @@ mod tests {
     /// REQ: PKG-304
     #[test]
     fn notice_for_update_without_grants_has_an_empty_grant_list() {
-        let action = decide(&config_with(AutoUpdateMode::Notify, false), &clean_candidate());
+        let action = decide(
+            &config_with(AutoUpdateMode::Notify, false),
+            &clean_candidate(),
+        );
         let AutoAction::Notice(notice) = action else {
             panic!("expected a notice, got {action:?}");
         };

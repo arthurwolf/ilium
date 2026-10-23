@@ -17,7 +17,10 @@ mod spec_tests {
 
     #[test]
     fn joins_three_parts_in_order() {
-        assert_eq!(key_for(&["badge", "node-1", "changed"]), "badge:node-1:changed");
+        assert_eq!(
+            key_for(&["badge", "node-1", "changed"]),
+            "badge:node-1:changed"
+        );
     }
 
     /// Manual: a dedup key is 1 to 128 characters from `[A-Za-z0-9._:/-]`
@@ -27,12 +30,16 @@ mod spec_tests {
         assert!(!key.is_empty() && key.len() <= 128);
         assert!(key
             .chars()
-            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | ':' | '/' | '-')));
+            .all(|character| character.is_ascii_alphanumeric()
+                || matches!(character, '.' | '_' | ':' | '/' | '-')));
     }
 
     #[test]
     fn same_parts_give_same_key() {
-        assert_eq!(key_for(&["title", "node-2", "Hello"]), key_for(&["title", "node-2", "Hello"]));
+        assert_eq!(
+            key_for(&["title", "node-2", "Hello"]),
+            key_for(&["title", "node-2", "Hello"])
+        );
     }
 
     #[test]

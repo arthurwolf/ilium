@@ -115,7 +115,10 @@ mod spec_tests {
     fn manifest_declares_server_and_client_sides() {
         let manifest = manifest();
         assert_eq!(manifest["server"]["world"], "ilium:server/base@0.1.0");
-        assert_eq!(string_items(&manifest["server"]["exports"]), vec!["service-provider"]);
+        assert_eq!(
+            string_items(&manifest["server"]["exports"]),
+            vec!["service-provider"]
+        );
         assert_eq!(manifest["client"]["world"], "ilium:client/base@0.1.0");
         assert_eq!(string_items(&manifest["client"]["exports"]), vec!["views"]);
         let _server = AgentSetupServer::default();
@@ -168,9 +171,16 @@ mod spec_tests {
             .iter()
             .filter(|grant| grant.starts_with("fs.write:agent-config:"))
             .collect();
-        assert!(direct_writes.is_empty(), "direct agent-config writes: {direct_writes:?}");
-        assert!(server.iter().any(|grant| grant == "agent-config.propose:claude"));
-        assert!(server.iter().any(|grant| grant == "agent-config.propose:codex"));
+        assert!(
+            direct_writes.is_empty(),
+            "direct agent-config writes: {direct_writes:?}"
+        );
+        assert!(server
+            .iter()
+            .any(|grant| grant == "agent-config.propose:claude"));
+        assert!(server
+            .iter()
+            .any(|grant| grant == "agent-config.propose:codex"));
     }
 
     /// REQ: COR-033

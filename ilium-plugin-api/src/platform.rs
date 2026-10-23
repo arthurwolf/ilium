@@ -97,3 +97,24 @@ impl std::str::FromStr for ProcessKind {
             .ok_or_else(|| UnknownName::new("process kind", text))
     }
 }
+
+/// What `ilium plugin doctor` reports about the runtime (ABI-070).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DoctorReport {
+    /// The exact pinned Wasmtime version.
+    pub wasmtime_version: String,
+    /// The canonical ABI revision.
+    pub canonical_abi_revision: String,
+}
+
+impl DoctorReport {
+    /// The report as the text of the command (ABI-070).
+    pub fn render(&self) -> String {
+        unimplemented!("api::platform::DoctorReport::render")
+    }
+}
+
+/// ABI-070: the runtime facts that `ilium plugin doctor` shows.
+pub fn doctor_report() -> DoctorReport {
+    unimplemented!("api::platform::doctor_report")
+}

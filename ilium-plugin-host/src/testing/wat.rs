@@ -23,7 +23,11 @@ mod tests {
     #[test]
     fn output_starts_with_layer_one_component_magic() {
         let bytes = wat_component("(component)");
-        assert!(bytes.len() >= 8, "output shorter than the preamble: {} bytes", bytes.len());
+        assert!(
+            bytes.len() >= 8,
+            "output shorter than the preamble: {} bytes",
+            bytes.len()
+        );
         assert_eq!(&bytes[0..4], &[0x00, 0x61, 0x73, 0x6D]);
         assert_eq!(bytes[4], 0x0D, "layer field must mark a component");
     }

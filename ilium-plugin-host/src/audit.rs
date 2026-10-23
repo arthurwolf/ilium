@@ -164,7 +164,8 @@ mod tests {
         for name in EVENT_NAMES {
             assert!(!name.is_empty(), "an event name is empty");
             assert!(
-                name.bytes().all(|byte| byte.is_ascii_lowercase() || byte == b'-'),
+                name.bytes()
+                    .all(|byte| byte.is_ascii_lowercase() || byte == b'-'),
                 "event name {name} is not lowercase kebab-case"
             );
             assert!(
@@ -180,7 +181,10 @@ mod tests {
         let directory = tempfile::tempdir().expect("a temporary directory");
         let log_path = audit_file_path(directory.path());
         append_all(&log_path, &[sample_record("install")]);
-        assert!(log_path.is_file(), "audit.jsonl exists after the first append");
+        assert!(
+            log_path.is_file(),
+            "audit.jsonl exists after the first append"
+        );
     }
 
     /// REQ: SEC-221
@@ -244,7 +248,11 @@ mod tests {
         };
         append_all(&log_path, std::slice::from_ref(&record));
         let lines = read_lines(&log_path);
-        assert_eq!(lines.len(), 1, "an embedded newline is escaped inside the JSON line");
+        assert_eq!(
+            lines.len(),
+            1,
+            "an embedded newline is escaped inside the JSON line"
+        );
         let read_back: AuditRecord =
             serde_json::from_str(&lines[0]).expect("the line deserializes as an audit record");
         assert_eq!(read_back, record);
@@ -281,13 +289,21 @@ mod tests {
     fn sec_221_seq_starts_at_one_and_increases_by_one_across_reopen() {
         let directory = tempfile::tempdir().expect("a temporary directory");
         let log_path = audit_file_path(directory.path());
-        append_all(&log_path, &[sample_record("install"), sample_record("enable")]);
+        append_all(
+            &log_path,
+            &[sample_record("install"), sample_record("enable")],
+        );
         append_all(&log_path, &[sample_record("disable")]);
         let lines = read_lines(&log_path);
         assert_eq!(lines.len(), 3);
         for (index, line) in lines.iter().enumerate() {
             let value = parse_line_as_json(line);
-            assert_eq!(value["seq"].as_u64(), Some(index as u64 + 1), "line {}", index + 1);
+            assert_eq!(
+                value["seq"].as_u64(),
+                Some(index as u64 + 1),
+                "line {}",
+                index + 1
+            );
         }
     }
 
@@ -311,7 +327,10 @@ mod tests {
     fn sec_221_each_prev_hash_is_sha256_of_the_previous_line_without_newline() {
         let directory = tempfile::tempdir().expect("a temporary directory");
         let log_path = audit_file_path(directory.path());
-        append_all(&log_path, &[sample_record("install"), sample_record("enable")]);
+        append_all(
+            &log_path,
+            &[sample_record("install"), sample_record("enable")],
+        );
         append_all(&log_path, &[sample_record("disable")]);
         let lines = read_lines(&log_path);
         assert_eq!(lines.len(), 3);
@@ -333,9 +352,11 @@ mod tests {
         let directory = tempfile::tempdir().expect("a temporary directory");
         let log_path = audit_file_path(directory.path());
         let mut log = open_log(&log_path);
-        log.append(&sample_record("install")).expect("the first record is appended");
+        log.append(&sample_record("install"))
+            .expect("the first record is appended");
         std::fs::remove_file(&log_path).expect("the audit file is removed");
-        log.append(&sample_record("enable")).expect("the record after deletion is appended");
+        log.append(&sample_record("enable"))
+            .expect("the record after deletion is appended");
         let lines = read_lines(&log_path);
         assert!(
             lines.iter().any(|line| line.contains("audit-reset")),

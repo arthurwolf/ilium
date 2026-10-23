@@ -81,10 +81,9 @@ fn cor_095_section_from_a_newer_schema_is_kept_unmodified_and_reported_once() {
     let run = sandbox.ilium(&["ls"]);
 
     assert_eq!(run.code, 0, "{}", run.stderr);
-    let stored: serde_json::Value = serde_json::from_str(
-        &std::fs::read_to_string(&snapshot_path).expect("snapshot readable"),
-    )
-    .expect("snapshot must remain valid JSON");
+    let stored: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&snapshot_path).expect("snapshot readable"))
+            .expect("snapshot must remain valid JSON");
     let expected: serde_json::Value =
         serde_json::from_str(section_text).expect("expected section parses");
     assert_eq!(

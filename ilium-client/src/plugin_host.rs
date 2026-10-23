@@ -52,7 +52,10 @@ mod spec_tests {
             .started
             .iter()
             .all(|plugin_id| plugin_id.starts_with("ilium.core.")));
-        assert!(report.started.iter().any(|plugin_id| plugin_id == "ilium.core.tree"));
+        assert!(report
+            .started
+            .iter()
+            .any(|plugin_id| plugin_id == "ilium.core.tree"));
     }
 
     /// REQ: LIF-001

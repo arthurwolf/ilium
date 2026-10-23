@@ -95,9 +95,15 @@ mod spec_tests {
     fn each_side_names_its_entry_and_world() {
         let manifest = shipped_manifest();
         assert_eq!(manifest["server"]["entry"].as_str(), Some("server.wasm"));
-        assert_eq!(manifest["server"]["world"].as_str(), Some("ilium:server/base@0.1.0"));
+        assert_eq!(
+            manifest["server"]["world"].as_str(),
+            Some("ilium:server/base@0.1.0")
+        );
         assert_eq!(manifest["client"]["entry"].as_str(), Some("client.wasm"));
-        assert_eq!(manifest["client"]["world"].as_str(), Some("ilium:client/base@0.1.0"));
+        assert_eq!(
+            manifest["client"]["world"].as_str(),
+            Some("ilium:client/base@0.1.0")
+        );
     }
 
     /// command is served by the server and `ilium wait` works as an alias of `ilium progress wait`).
@@ -133,7 +139,10 @@ mod spec_tests {
         assert!(array_contains(grants, "process.run:sh"));
         assert!(array_contains(grants, "process.long-lived"));
         assert!(array_contains(grants, "http-api.route:/progress.json"));
-        assert!(array_contains(grants, "settings.read-kernel:agent-monitoring"));
+        assert!(array_contains(
+            grants,
+            "settings.read-kernel:agent-monitoring"
+        ));
     }
 
     /// and the read-only agent-monitoring settings kernel that the Agent Monitoring tab writes).
@@ -142,7 +151,10 @@ mod spec_tests {
         let manifest = shipped_manifest();
         let grants = &manifest["capabilities"]["client"];
         assert!(array_contains(grants, "ui.chrome"));
-        assert!(array_contains(grants, "settings.read-kernel:agent-monitoring"));
+        assert!(array_contains(
+            grants,
+            "settings.read-kernel:agent-monitoring"
+        ));
     }
 
     /// watchers; the client draws the footer). Each side must implement the lifecycle and the handler.
@@ -174,7 +186,10 @@ mod spec_tests {
         assert_eq!(exit_code_of("error"), Some(3));
         assert_eq!(exit_code_of("still-running"), Some(6));
         assert_eq!(exit_code_of("unknown-outcome"), None);
-        let success_outcomes = outcome_exit_codes.iter().filter(|(_, code)| *code == 0).count();
+        let success_outcomes = outcome_exit_codes
+            .iter()
+            .filter(|(_, code)| *code == 0)
+            .count();
         assert_eq!(success_outcomes, 1, "only `done` exits 0");
     }
 

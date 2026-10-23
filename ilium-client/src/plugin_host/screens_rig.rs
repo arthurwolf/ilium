@@ -521,9 +521,15 @@ mod spec_tests {
         rig.move_selection_to("ilium.test.b");
         rig.activate("Move up");
         let expected = vec!["ilium.test.b".to_string(), "ilium.test.a".to_string()];
-        assert_eq!(rig.run_order_of_point("ilium.test.owner", "greet"), expected);
+        assert_eq!(
+            rig.run_order_of_point("ilium.test.owner", "greet"),
+            expected
+        );
         rig.restart_client();
-        assert_eq!(rig.run_order_of_point("ilium.test.owner", "greet"), expected);
+        assert_eq!(
+            rig.run_order_of_point("ilium.test.owner", "greet"),
+            expected
+        );
     }
 
     /// REQ: USR-053

@@ -49,10 +49,17 @@ mod tests {
 
     /// Builds one JSON object of exactly `total_bytes` bytes, padded with a string value.
     fn object_of_length(total_bytes: usize) -> String {
-        assert!(total_bytes >= OBJECT_OVERHEAD_BYTES, "object must hold its own wrapper");
+        assert!(
+            total_bytes >= OBJECT_OVERHEAD_BYTES,
+            "object must hold its own wrapper"
+        );
         let padding = "a".repeat(total_bytes - OBJECT_OVERHEAD_BYTES);
         let object = format!(r#"{{"text":"{padding}"}}"#);
-        assert_eq!(object.len(), total_bytes, "test fixture has the requested length");
+        assert_eq!(
+            object.len(),
+            total_bytes,
+            "test fixture has the requested length"
+        );
         object
     }
 

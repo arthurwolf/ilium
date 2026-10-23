@@ -36,7 +36,12 @@ mod spec_tests {
     fn run_sandboxed_scenario(scenario: &str) -> (std::process::ExitStatus, String) {
         let test_binary = std::env::current_exe().expect("current test binary path");
         let output = std::process::Command::new(test_binary)
-            .args(["--exact", CHILD_TEST_NAME, "--nocapture", "--test-threads=1"])
+            .args([
+                "--exact",
+                CHILD_TEST_NAME,
+                "--nocapture",
+                "--test-threads=1",
+            ])
             .env(SCENARIO_ENV, scenario)
             .output()
             .expect("spawn sandboxed child test process");
@@ -139,7 +144,10 @@ mod spec_tests {
             .find(|line| line.starts_with("RESULT "))
             .expect("child must print a RESULT line");
         if let Some(message) = result_line.strip_prefix("RESULT sandbox-error ") {
-            assert!(!message.trim().is_empty(), "sandbox error must name the prerequisite");
+            assert!(
+                !message.trim().is_empty(),
+                "sandbox error must name the prerequisite"
+            );
         } else {
             assert_eq!(result_line, "RESULT ok");
         }

@@ -89,9 +89,15 @@ mod spec_tests {
     fn each_side_names_its_entry_and_world() {
         let manifest = shipped_manifest();
         assert_eq!(manifest["server"]["entry"].as_str(), Some("server.wasm"));
-        assert_eq!(manifest["server"]["world"].as_str(), Some("ilium:server/base@0.1.0"));
+        assert_eq!(
+            manifest["server"]["world"].as_str(),
+            Some("ilium:server/base@0.1.0")
+        );
         assert_eq!(manifest["client"]["entry"].as_str(), Some("client.wasm"));
-        assert_eq!(manifest["client"]["world"].as_str(), Some("ilium:client/base@0.1.0"));
+        assert_eq!(
+            manifest["client"]["world"].as_str(),
+            Some("ilium:client/base@0.1.0")
+        );
     }
 
     /// REQ: COR-050
@@ -99,14 +105,20 @@ mod spec_tests {
     fn activation_is_startup_and_the_sessions_view() {
         let manifest = shipped_manifest();
         assert!(array_contains(&manifest["activation"], "startup"));
-        assert!(array_contains(&manifest["activation"], "view:sessions.list"));
+        assert!(array_contains(
+            &manifest["activation"],
+            "view:sessions.list"
+        ));
     }
 
     /// the client side needs no grants of its own). Fails until the shipped manifest moves the grant to the server side.
     #[test]
     fn server_side_holds_the_session_settings_grant() {
         let manifest = shipped_manifest();
-        assert_eq!(grant_holders(&manifest, SESSION_GRANT), vec!["server".to_string()]);
+        assert_eq!(
+            grant_holders(&manifest, SESSION_GRANT),
+            vec!["server".to_string()]
+        );
     }
 
     /// `settings.write-kernel:session`). Empty input: a manifest without the grant has no owner, so the tab stays read-only.
@@ -134,7 +146,12 @@ mod spec_tests {
     #[test]
     fn server_capabilities_cover_pane_tree_and_agent_work() {
         let manifest = shipped_manifest();
-        for capability in ["panes.read", "panes.lifecycle", "tree.restructure", "agent.read"] {
+        for capability in [
+            "panes.read",
+            "panes.lifecycle",
+            "tree.restructure",
+            "agent.read",
+        ] {
             assert!(
                 array_contains(&manifest["capabilities"]["server"], capability),
                 "server capabilities are missing {capability}"
@@ -162,12 +179,14 @@ mod spec_tests {
     #[test]
     fn extension_points_declare_the_documented_limits() {
         let manifest = shipped_manifest();
-        let snapshot = extension_point(&manifest, "snapshot-sections").expect("snapshot-sections is declared");
+        let snapshot =
+            extension_point(&manifest, "snapshot-sections").expect("snapshot-sections is declared");
         assert_eq!(snapshot["version"].as_str(), Some("0.1.0"));
         assert_eq!(snapshot["max_entries"].as_u64(), Some(64));
         assert_eq!(snapshot["dynamic"].as_bool(), Some(false));
 
-        let before_restore = extension_point(&manifest, "before-restore").expect("before-restore is declared");
+        let before_restore =
+            extension_point(&manifest, "before-restore").expect("before-restore is declared");
         assert_eq!(before_restore["version"].as_str(), Some("0.1.0"));
         assert_eq!(before_restore["deadline_ms"].as_u64(), Some(20));
         assert_eq!(before_restore["max_handlers"].as_u64(), Some(8));

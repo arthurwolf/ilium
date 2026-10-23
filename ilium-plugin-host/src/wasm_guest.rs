@@ -148,7 +148,7 @@ impl WasmGuest {
             .ok_or_else(invalid)?;
         let export = self
             .instance
-            .get_func(&mut self.store, &function_index)
+            .get_func(&mut self.store, function_index)
             .ok_or_else(invalid)?;
         let signature = export.ty(&self.store);
         let parameters: Vec<_> = signature.params().collect();

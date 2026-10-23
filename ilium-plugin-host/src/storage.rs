@@ -111,7 +111,12 @@ mod tests {
     fn open_on_empty_root_gives_storage_with_no_values() {
         let root = storage_root();
         let storage = open_at(root.path());
-        assert_eq!(storage.get("global", "anything").expect("get on new storage"), None);
+        assert_eq!(
+            storage
+                .get("global", "anything")
+                .expect("get on new storage"),
+            None
+        );
     }
 
     /// REQ: API-002
@@ -233,7 +238,10 @@ mod tests {
             storage.put("global", "blob", value_of_len(VALUE_MAX_BYTES + 1)),
             ErrorCode::InvalidArgument,
         );
-        assert_eq!(storage.get("global", "blob").expect("get after refusal"), None);
+        assert_eq!(
+            storage.get("global", "blob").expect("get after refusal"),
+            None
+        );
     }
 
     /// REQ: LIF-118
@@ -331,7 +339,9 @@ mod tests {
             .put("global", "shared-name", b"first".to_vec())
             .expect("write from the first plugin");
         assert_eq!(
-            second.get("global", "shared-name").expect("read from the second plugin"),
+            second
+                .get("global", "shared-name")
+                .expect("read from the second plugin"),
             None
         );
     }
@@ -349,7 +359,9 @@ mod tests {
             .migrate(2)
             .expect("second migrate with the same target runs without changing data");
         assert_eq!(
-            storage.get("global", "cursor").expect("get after migration"),
+            storage
+                .get("global", "cursor")
+                .expect("get after migration"),
             Some(b"line-7".to_vec())
         );
     }
@@ -428,11 +440,19 @@ mod tests {
         std::fs::write(&database_path, b"this is not a storage database")
             .expect("write garbage over the database file");
         let storage = open_at(root.path());
-        assert_eq!(storage.get("global", "anything").expect("get on empty storage"), None);
+        assert_eq!(
+            storage
+                .get("global", "anything")
+                .expect("get on empty storage"),
+            None
+        );
         let moved_aside = std::fs::read_dir(root.path())
             .expect("list the storage root")
             .filter_map(Result::ok)
             .any(|entry| entry.file_name().to_string_lossy().contains(".db.corrupt-"));
-        assert!(moved_aside, "the corrupt file must be renamed to <id>.db.corrupt-<time>");
+        assert!(
+            moved_aside,
+            "the corrupt file must be renamed to <id>.db.corrupt-<time>"
+        );
     }
 }

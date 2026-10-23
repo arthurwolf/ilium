@@ -227,7 +227,10 @@ mod spec_tests {
         if let Some(text) = payload.downcast_ref::<&str>() {
             return text.to_string();
         }
-        payload.downcast_ref::<String>().cloned().unwrap_or_default()
+        payload
+            .downcast_ref::<String>()
+            .cloned()
+            .unwrap_or_default()
     }
 
     /// REQ: DEV-480

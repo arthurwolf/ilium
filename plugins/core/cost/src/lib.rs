@@ -75,7 +75,12 @@ mod spec_tests {
     fn string_list(value: &Value) -> Vec<String> {
         value
             .as_array()
-            .map(|items| items.iter().filter_map(|item| item.as_str().map(str::to_owned)).collect())
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|item| item.as_str().map(str::to_owned))
+                    .collect()
+            })
             .unwrap_or_default()
     }
 
@@ -96,7 +101,10 @@ mod spec_tests {
         assert_eq!(manifest["id"], "ilium.core.cost");
         assert_eq!(manifest["server"]["world"], "ilium:server/base@0.1.0");
         assert_eq!(manifest["client"]["world"], "ilium:client/base@0.1.0");
-        assert_eq!(string_list(&manifest["server"]["exports"]), vec!["service-provider"]);
+        assert_eq!(
+            string_list(&manifest["server"]["exports"]),
+            vec!["service-provider"]
+        );
         assert_eq!(string_list(&manifest["client"]["exports"]), vec!["views"]);
     }
 
@@ -132,7 +140,10 @@ mod spec_tests {
         let combined = all_capabilities(&manifest);
         for tab in ["agent-cost", "reset-planning"] {
             let grant = format!("settings.write-kernel:{tab}");
-            let holders = combined.iter().filter(|capability| **capability == grant).count();
+            let holders = combined
+                .iter()
+                .filter(|capability| **capability == grant)
+                .count();
             assert_eq!(holders, 1, "tab {tab} must have exactly one holder");
         }
     }
@@ -166,7 +177,8 @@ mod spec_tests {
     #[test]
     fn usage_reply_without_panes_violates_declared_result_schema() {
         let manifest = manifest();
-        let result_schema = &manifest["contributes"]["services"]["ilium.core.cost/usage"]["usage"]["result"];
+        let result_schema =
+            &manifest["contributes"]["services"]["ilium.core.cost/usage"]["usage"]["result"];
         let required = string_list(&result_schema["required"]);
         assert!(required.contains(&"panes".to_string()));
         let empty_reply = serde_json::json!({});
@@ -180,7 +192,10 @@ mod spec_tests {
     /// REQ: COR-050
     #[test]
     fn truncated_manifest_text_does_not_parse() {
-        let truncated: String = MANIFEST_TEXT.chars().take(MANIFEST_TEXT.chars().count() / 2).collect();
+        let truncated: String = MANIFEST_TEXT
+            .chars()
+            .take(MANIFEST_TEXT.chars().count() / 2)
+            .collect();
         assert!(serde_json::from_str::<Value>(&truncated).is_err());
     }
 

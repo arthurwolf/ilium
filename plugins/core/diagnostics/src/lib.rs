@@ -100,8 +100,16 @@ mod spec_tests {
         assert_eq!(manifest["id"], "ilium.core.diagnostics");
         assert_eq!(manifest["replaceable"], true);
         for required_key in [
-            "name", "version", "publisher", "capabilities", "activation", "surface", "contributes",
-            "limits_tier", "server", "client",
+            "name",
+            "version",
+            "publisher",
+            "capabilities",
+            "activation",
+            "surface",
+            "contributes",
+            "limits_tier",
+            "server",
+            "client",
         ] {
             assert!(
                 manifest.get(required_key).is_some(),
@@ -116,7 +124,10 @@ mod spec_tests {
         let manifest = manifest();
 
         assert_eq!(manifest["server"]["world"], "ilium:server/base@0.1.0");
-        assert_eq!(string_list(&manifest["server"]["exports"]), vec!["service-provider"]);
+        assert_eq!(
+            string_list(&manifest["server"]["exports"]),
+            vec!["service-provider"]
+        );
         assert_eq!(manifest["client"]["world"], "ilium:client/base@0.1.0");
         assert_eq!(string_list(&manifest["client"]["exports"]), vec!["views"]);
 
@@ -131,12 +142,19 @@ mod spec_tests {
         let activation = string_list(&manifest["activation"]);
 
         assert!(activation.iter().any(|trigger| trigger == "startup"));
-        assert!(activation.iter().any(|trigger| trigger == "view:diagnostics.warnings"));
+        assert!(activation
+            .iter()
+            .any(|trigger| trigger == "view:diagnostics.warnings"));
         let panel_ids: Vec<String> = manifest["contributes"]["panels"]
             .as_array()
             .expect("panels is an array")
             .iter()
-            .map(|panel| panel["id"].as_str().expect("panel id is a string").to_string())
+            .map(|panel| {
+                panel["id"]
+                    .as_str()
+                    .expect("panel id is a string")
+                    .to_string()
+            })
             .collect();
         assert_eq!(panel_ids, vec!["warnings"]);
     }
@@ -147,10 +165,18 @@ mod spec_tests {
         let manifest = manifest();
         let server_capabilities = string_list(&manifest["capabilities"]["server"]);
 
-        assert!(server_capabilities.iter().any(|grant| grant == "fs.read:path:/tmp/.ilium-1000/logs"));
-        assert!(server_capabilities.iter().any(|grant| grant == "settings.read-kernel:debug"));
-        assert!(!server_capabilities.iter().any(|grant| grant.starts_with("fs.write")));
-        assert!(!server_capabilities.iter().any(|grant| grant.starts_with("settings.write")));
+        assert!(server_capabilities
+            .iter()
+            .any(|grant| grant == "fs.read:path:/tmp/.ilium-1000/logs"));
+        assert!(server_capabilities
+            .iter()
+            .any(|grant| grant == "settings.read-kernel:debug"));
+        assert!(!server_capabilities
+            .iter()
+            .any(|grant| grant.starts_with("fs.write")));
+        assert!(!server_capabilities
+            .iter()
+            .any(|grant| grant.starts_with("settings.write")));
     }
 
     /// diagnostics holds no grant on the Settings plugin's extension points and contributes no settings rows).
@@ -160,7 +186,9 @@ mod spec_tests {
         let server_capabilities = string_list(&manifest["capabilities"]["server"]);
 
         assert!(manifest["contributes"].get("settings").is_none());
-        assert!(!server_capabilities.iter().any(|grant| grant.starts_with("extensions.contribute:")));
+        assert!(!server_capabilities
+            .iter()
+            .any(|grant| grant.starts_with("extensions.contribute:")));
     }
 
     /// level, plugin, target, message and time, so no raw headers or URL parameters travel).
@@ -175,7 +203,10 @@ mod spec_tests {
 
         let mut field_names: Vec<&str> = payload_properties.keys().map(String::as_str).collect();
         field_names.sort_unstable();
-        assert_eq!(field_names, vec!["level", "message", "plugin", "target", "time"]);
+        assert_eq!(
+            field_names,
+            vec!["level", "message", "plugin", "target", "time"]
+        );
     }
 
     /// log-sinks is an observe hook with a 20 ms deadline and at most 8 handlers).
@@ -188,7 +219,10 @@ mod spec_tests {
         assert_eq!(sinks["mode"], "observe");
         assert_eq!(sinks["deadline_ms"], 20);
         assert_eq!(sinks["max_handlers"], 8);
-        assert_eq!(string_list(&sinks["payload_schema"]["properties"]["level"]["enum"]), vec!["warn", "error"]);
+        assert_eq!(
+            string_list(&sinks["payload_schema"]["properties"]["level"]["enum"]),
+            vec!["warn", "error"]
+        );
     }
 
     /// asked for text, at most 32 sections, collect point not dynamic).
@@ -225,7 +259,8 @@ mod spec_tests {
     #[test]
     fn report_service_result_is_text_capped_at_256_kib() {
         let manifest = manifest();
-        let result_schema = &manifest["contributes"]["services"]["ilium.core.diagnostics/report"]["build"]["result"];
+        let result_schema = &manifest["contributes"]["services"]["ilium.core.diagnostics/report"]
+            ["build"]["result"];
         let limit = result_schema["properties"]["text"]["maxLength"]
             .as_u64()
             .expect("text has a maxLength") as usize;
@@ -241,7 +276,8 @@ mod spec_tests {
     #[test]
     fn report_build_params_are_optional_and_include_log_tail_is_boolean() {
         let manifest = manifest();
-        let params = &manifest["contributes"]["services"]["ilium.core.diagnostics/report"]["build"]["params"];
+        let params = &manifest["contributes"]["services"]["ilium.core.diagnostics/report"]["build"]
+            ["params"];
 
         assert!(params.get("required").is_none());
         assert_eq!(params["properties"]["include_log_tail"]["type"], "boolean");

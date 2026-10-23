@@ -29,7 +29,11 @@ fn usr_257_verify_names_the_record_whose_hash_no_longer_chains() {
     std::fs::write(&audit_file, lines.join("\n") + "\n").expect("write tampered audit");
     let output = rig.cli(&["audit", "verify"]);
     assert_ne!(result_exit_code(&output), 0);
-    assert!(report_text(&output).contains('2'), "{}", report_text(&output));
+    assert!(
+        report_text(&output).contains('2'),
+        "{}",
+        report_text(&output)
+    );
 }
 
 /// REQ: USR-257
@@ -52,8 +56,8 @@ fn usr_258_the_storage_ceiling_deletes_the_oldest_rotated_files_first_and_record
     let dir = rig.audit_dir();
     std::fs::create_dir_all(&dir).expect("audit folder");
     for index in 1..=3 {
-        let file = std::fs::File::create(dir.join(format!("audit-{index}.jsonl")))
-            .expect("rotated file");
+        let file =
+            std::fs::File::create(dir.join(format!("audit-{index}.jsonl"))).expect("rotated file");
         file.set_len(100 * 1024 * 1024).expect("set size");
     }
     rig.start_server();

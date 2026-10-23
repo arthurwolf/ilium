@@ -85,7 +85,9 @@ mod tests {
         let mut import = WorkspaceImport;
         let spec = spec_for_branch("", None);
 
-        let error = import.register(spec).expect_err("an empty branch name must be refused");
+        let error = import
+            .register(spec)
+            .expect_err("an empty branch name must be refused");
 
         assert_eq!(error.code, ErrorCode::InvalidArgument);
     }
@@ -96,7 +98,9 @@ mod tests {
         let mut import = WorkspaceImport;
         let spec = spec_for_branch("feature..bad name", None);
 
-        let error = import.register(spec).expect_err("a branch name with invalid Git syntax must be refused");
+        let error = import
+            .register(spec)
+            .expect_err("a branch name with invalid Git syntax must be refused");
 
         assert_eq!(error.code, ErrorCode::InvalidArgument);
     }
@@ -107,9 +111,14 @@ mod tests {
         let mut import = WorkspaceImport;
         let spec = spec_for_branch("", None);
 
-        let error = import.register(spec).expect_err("an empty branch name must be refused");
+        let error = import
+            .register(spec)
+            .expect_err("an empty branch name must be refused");
 
-        assert_eq!(error.retry_after_ms, None, "retry-after-ms is only set for rate-limited and CPU-budget quota errors");
+        assert_eq!(
+            error.retry_after_ms, None,
+            "retry-after-ms is only set for rate-limited and CPU-budget quota errors"
+        );
     }
 
     /// REQ: CAP-013
@@ -124,7 +133,9 @@ mod tests {
             ..spec_for_branch("feature/outside", None)
         };
 
-        let error = import.register(spec).expect_err("a worktree path outside fs.write:worktrees must be refused");
+        let error = import
+            .register(spec)
+            .expect_err("a worktree path outside fs.write:worktrees must be refused");
 
         assert_eq!(error.code, ErrorCode::NotPermitted);
     }
@@ -153,7 +164,9 @@ mod tests {
             ..spec_for_branch("feature/no-repo", None)
         };
 
-        let error = import.register(spec).expect_err("a repository folder without a .git entry must be refused");
+        let error = import
+            .register(spec)
+            .expect_err("a repository folder without a .git entry must be refused");
 
         assert_eq!(error.code, ErrorCode::NotFound);
     }
@@ -164,7 +177,9 @@ mod tests {
         let mut import = WorkspaceImport;
         let spec = spec_for_branch("feature/ghost-owner", Some(NodeId(UNKNOWN_WORKSPACE_ID)));
 
-        let error = import.register(spec).expect_err("an owner node that does not exist must be refused");
+        let error = import
+            .register(spec)
+            .expect_err("an owner node that does not exist must be refused");
 
         assert_eq!(error.code, ErrorCode::NotFound);
     }
@@ -175,9 +190,13 @@ mod tests {
         let mut import = WorkspaceImport;
         let first = spec_for_branch("feature/duplicate", Some(NodeId(OWNER_PANE)));
         let second = first.clone();
-        import.register(first).expect("the first registration must succeed");
+        import
+            .register(first)
+            .expect("the first registration must succeed");
 
-        let error = import.register(second).expect_err("a path that is already registered must be refused");
+        let error = import
+            .register(second)
+            .expect_err("a path that is already registered must be refused");
 
         assert_eq!(error.code, ErrorCode::Conflict);
     }
@@ -189,7 +208,10 @@ mod tests {
 
         let records = import.list();
 
-        assert!(records.is_empty(), "a fresh registry must hold no worktree records");
+        assert!(
+            records.is_empty(),
+            "a fresh registry must hold no worktree records"
+        );
     }
 
     /// REQ: API-001
@@ -198,13 +220,20 @@ mod tests {
         let mut import = WorkspaceImport;
         let first_spec = spec_for_branch("feature/first", Some(NodeId(OWNER_PANE)));
         let second_spec = spec_for_branch("feature/second", Some(NodeId(OWNER_PANE + 1)));
-        let first_id = import.register(first_spec.clone()).expect("first registration must succeed");
-        let second_id = import.register(second_spec.clone()).expect("second registration must succeed");
+        let first_id = import
+            .register(first_spec.clone())
+            .expect("first registration must succeed");
+        let second_id = import
+            .register(second_spec.clone())
+            .expect("second registration must succeed");
 
         let records = import.list();
 
         assert_eq!(records.len(), 2, "list must return every registered record");
-        assert!(first_id < second_id, "ids must increase with registration order");
+        assert!(
+            first_id < second_id,
+            "ids must increase with registration order"
+        );
         assert_eq!(records[0].id, first_id);
         assert_eq!(records[1].id, second_id);
         assert_eq!(records[0].path, first_spec.path);
@@ -220,7 +249,9 @@ mod tests {
     fn list_reports_absent_owner_as_none() {
         let mut import = WorkspaceImport;
         let spec = spec_for_branch("feature/unowned", None);
-        let id = import.register(spec).expect("registration without an owner must succeed");
+        let id = import
+            .register(spec)
+            .expect("registration without an owner must succeed");
 
         let record = import
             .list()
@@ -244,7 +275,10 @@ mod tests {
             .find(|candidate| candidate.id == id)
             .expect("the registered record must be listed");
 
-        assert!(!record.in_use, "a worktree whose owner pane runs no process is not in use");
+        assert!(
+            !record.in_use,
+            "a worktree whose owner pane runs no process is not in use"
+        );
     }
 
     /// REQ: API-001
@@ -254,7 +288,9 @@ mod tests {
         let spec = spec_for_branch("feature/release-me", Some(NodeId(OWNER_PANE)));
         let id = import.register(spec).expect("registration must succeed");
 
-        import.release(id).expect("releasing a registered, unused record must succeed");
+        import
+            .release(id)
+            .expect("releasing a registered, unused record must succeed");
 
         assert!(
             import.list().iter().all(|candidate| candidate.id != id),
@@ -282,7 +318,9 @@ mod tests {
         let id = import.register(spec).expect("registration must succeed");
         import.release(id).expect("the first release must succeed");
 
-        let error = import.release(id).expect_err("a second release of the same id must be refused");
+        let error = import
+            .release(id)
+            .expect_err("a second release of the same id must be refused");
 
         assert_eq!(error.code, ErrorCode::NotFound);
     }

@@ -32,7 +32,9 @@ mod spec_tests {
 
     impl GoldenEnv {
         fn set(update_mode: bool, ci: bool) -> Self {
-            let lock = ENV_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let lock = ENV_LOCK
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             let names: [&'static str; 2] = [UPDATE_GOLDEN_ENV, "CI"];
             let previous = names
                 .iter()
@@ -40,7 +42,10 @@ mod spec_tests {
                 .collect();
             set_flag(UPDATE_GOLDEN_ENV, update_mode);
             set_flag("CI", ci);
-            Self { _lock: lock, previous }
+            Self {
+                _lock: lock,
+                previous,
+            }
         }
     }
 
@@ -68,8 +73,10 @@ mod spec_tests {
 
     impl ScratchFile {
         fn new(label: &str) -> Self {
-            let path = std::env::temp_dir()
-                .join(format!("ilium-golden-spec-{}-{label}.txt", std::process::id()));
+            let path = std::env::temp_dir().join(format!(
+                "ilium-golden-spec-{}-{label}.txt",
+                std::process::id()
+            ));
             let _ = std::fs::remove_file(&path);
             Self(path)
         }
@@ -115,7 +122,11 @@ mod spec_tests {
         let message = payload
             .downcast_ref::<String>()
             .cloned()
-            .or_else(|| payload.downcast_ref::<&str>().map(|text| (*text).to_string()))
+            .or_else(|| {
+                payload
+                    .downcast_ref::<&str>()
+                    .map(|text| (*text).to_string())
+            })
             .unwrap_or_default();
         Some(message)
     }
@@ -143,7 +154,9 @@ mod spec_tests {
     fn dev_500_mismatch_diff_shows_at_most_forty_changed_lines() {
         let _env = GoldenEnv::set(false, false);
         let golden = ScratchFile::new("diff-limit");
-        let expected: String = (0..100).map(|row| format!("expected row {row}\n")).collect();
+        let expected: String = (0..100)
+            .map(|row| format!("expected row {row}\n"))
+            .collect();
         let actual: String = (0..100).map(|row| format!("actual row {row}\n")).collect();
         std::fs::write(&golden.0, &expected).expect("write golden");
         let message = panic_message(|| assert_golden(golden.path_str(), &actual))

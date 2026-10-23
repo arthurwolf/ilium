@@ -44,7 +44,10 @@ mod tests {
         let mut fonts = FontsImport;
         let handle = create_font_handle(&mut fonts);
         let result = fonts.font_rasterize(handle, "A".to_string(), 16);
-        assert!(result.is_ok(), "a handle from a valid asset must rasterize, got {result:?}");
+        assert!(
+            result.is_ok(),
+            "a handle from a valid asset must rasterize, got {result:?}"
+        );
     }
 
     /// REQ: WIT:ilium:anim/fonts.font.rasterize
@@ -55,8 +58,15 @@ mod tests {
         let (width, height, bitmap) = fonts
             .font_rasterize(handle, "Hello".to_string(), 16)
             .expect("valid text and size must rasterize");
-        assert!(width > 0 && height > 0, "rendered text must have a non-zero size, got {width}x{height}");
-        assert_eq!(bitmap.len(), width as usize * height as usize, "gray8 holds one byte per pixel");
+        assert!(
+            width > 0 && height > 0,
+            "rendered text must have a non-zero size, got {width}x{height}"
+        );
+        assert_eq!(
+            bitmap.len(),
+            width as usize * height as usize,
+            "gray8 holds one byte per pixel"
+        );
     }
 
     /// REQ: WIT:ilium:anim/fonts.font.rasterize
@@ -67,7 +77,10 @@ mod tests {
         let (_, _, bitmap) = fonts
             .font_rasterize(handle, "A".to_string(), 16)
             .expect("a visible glyph must rasterize");
-        assert!(bitmap.iter().any(|value| *value > 0), "a visible glyph must have at least one inked pixel");
+        assert!(
+            bitmap.iter().any(|value| *value > 0),
+            "a visible glyph must have at least one inked pixel"
+        );
     }
 
     /// REQ: WIT:ilium:anim/fonts.font.rasterize
@@ -78,8 +91,15 @@ mod tests {
         let (width, height, bitmap) = fonts
             .font_rasterize(handle, String::new(), 16)
             .expect("empty text is a valid list and must not fail");
-        assert_eq!(bitmap.len(), width as usize * height as usize, "gray8 holds one byte per pixel");
-        assert!(bitmap.iter().all(|value| *value == 0), "empty text has no ink");
+        assert_eq!(
+            bitmap.len(),
+            width as usize * height as usize,
+            "gray8 holds one byte per pixel"
+        );
+        assert!(
+            bitmap.iter().all(|value| *value == 0),
+            "empty text has no ink"
+        );
     }
 
     /// REQ: WIT:ilium:anim/fonts.font.rasterize
@@ -90,7 +110,11 @@ mod tests {
         let (width, height, bitmap) = fonts
             .font_rasterize(handle, "A".to_string(), 1)
             .expect("size 1 px is the lower boundary of a valid size");
-        assert_eq!(bitmap.len(), width as usize * height as usize, "gray8 holds one byte per pixel");
+        assert_eq!(
+            bitmap.len(),
+            width as usize * height as usize,
+            "gray8 holds one byte per pixel"
+        );
     }
 
     /// REQ: API-061
@@ -112,6 +136,10 @@ mod tests {
         let (width, height, bitmap) = fonts
             .font_rasterize(handle, "é日".to_string(), 16)
             .expect("UTF-8 text is a valid string and must rasterize");
-        assert_eq!(bitmap.len(), width as usize * height as usize, "gray8 holds one byte per pixel");
+        assert_eq!(
+            bitmap.len(),
+            width as usize * height as usize,
+            "gray8 holds one byte per pixel"
+        );
     }
 }

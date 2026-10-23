@@ -198,7 +198,8 @@ mod spec_tests {
 
     #[test]
     fn parent_segment_is_rejected_with_fs_path_invalid() {
-        let error = parse_shorthand("project:../secrets.txt").expect_err("parent segment must fail");
+        let error =
+            parse_shorthand("project:../secrets.txt").expect_err("parent segment must fail");
         assert_eq!(error.code, crate::errors::codes::FS_PATH_INVALID);
     }
 

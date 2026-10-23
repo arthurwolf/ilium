@@ -79,7 +79,8 @@ mod spec_tests {
 
     /// The crate's shipped manifest, the file the plugin build packages with the component.
     fn shipped_manifest() -> serde_json::Value {
-        serde_json::from_str(include_str!("../manifest.json")).expect("manifest.json must be valid JSON")
+        serde_json::from_str(include_str!("../manifest.json"))
+            .expect("manifest.json must be valid JSON")
     }
 
     /// Grant strings the manifest declares on one side ("server" or "client").
@@ -88,7 +89,12 @@ mod spec_tests {
             .as_array()
             .expect("capabilities must list each side as an array")
             .iter()
-            .map(|grant| grant.as_str().expect("each grant must be a string").to_string())
+            .map(|grant| {
+                grant
+                    .as_str()
+                    .expect("each grant must be a string")
+                    .to_string()
+            })
             .collect()
     }
 
@@ -159,7 +165,11 @@ mod spec_tests {
             let mut unique = grants.clone();
             unique.sort();
             unique.dedup();
-            assert_eq!(unique.len(), grants.len(), "duplicate grant on the {side} side");
+            assert_eq!(
+                unique.len(),
+                grants.len(),
+                "duplicate grant on the {side} side"
+            );
         }
     }
 
@@ -172,8 +182,12 @@ mod spec_tests {
             .filter(|grant| grant.starts_with("settings.write-kernel:"))
             .collect();
         assert_eq!(owned_tab_grants.len(), 2);
-        assert!(grants.iter().any(|grant| grant == "settings.write-kernel:inference"));
-        assert!(grants.iter().any(|grant| grant == "settings.write-kernel:llm-instructions"));
+        assert!(grants
+            .iter()
+            .any(|grant| grant == "settings.write-kernel:inference"));
+        assert!(grants
+            .iter()
+            .any(|grant| grant == "settings.write-kernel:llm-instructions"));
     }
 
     /// REQ: COR-050

@@ -63,11 +63,19 @@ mod spec_tests {
     fn string_list(value: &serde_json::Value) -> Vec<String> {
         value
             .as_array()
-            .map(|items| items.iter().filter_map(|item| item.as_str().map(str::to_owned)).collect())
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|item| item.as_str().map(str::to_owned))
+                    .collect()
+            })
             .unwrap_or_default()
     }
 
-    fn extension_point<'a>(manifest: &'a serde_json::Value, point_id: &str) -> &'a serde_json::Value {
+    fn extension_point<'a>(
+        manifest: &'a serde_json::Value,
+        point_id: &str,
+    ) -> &'a serde_json::Value {
         manifest["contributes"]["extension_points"]
             .as_array()
             .and_then(|points| points.iter().find(|point| point["id"] == point_id))
@@ -106,7 +114,10 @@ mod spec_tests {
             "fs.write:worktrees",
         ];
         for grant in required {
-            assert!(server.iter().any(|item| item == grant), "server side is missing {grant}");
+            assert!(
+                server.iter().any(|item| item == grant),
+                "server side is missing {grant}"
+            );
         }
     }
 
@@ -142,8 +153,14 @@ mod spec_tests {
     fn three_extension_points_are_declared_with_kind_and_mode() {
         let manifest = manifest();
         assert_eq!(extension_point(&manifest, "before-create")["kind"], "hook");
-        assert_eq!(extension_point(&manifest, "before-create")["mode"], "transform");
-        assert_eq!(extension_point(&manifest, "post-create-steps")["kind"], "collect");
+        assert_eq!(
+            extension_point(&manifest, "before-create")["mode"],
+            "transform"
+        );
+        assert_eq!(
+            extension_point(&manifest, "post-create-steps")["kind"],
+            "collect"
+        );
         assert_eq!(extension_point(&manifest, "before-remove")["kind"], "hook");
         assert_eq!(extension_point(&manifest, "before-remove")["mode"], "veto");
     }
@@ -152,28 +169,57 @@ mod spec_tests {
     #[test]
     fn extension_point_deadlines_and_limits_match_the_manual_table() {
         let manifest = manifest();
-        assert_eq!(extension_point(&manifest, "before-create")["deadline_ms"], 20);
-        assert_eq!(extension_point(&manifest, "before-create")["max_handlers"], 8);
-        assert_eq!(extension_point(&manifest, "post-create-steps")["max_entries"], 64);
-        assert_eq!(extension_point(&manifest, "post-create-steps")["dynamic"], false);
-        assert_eq!(extension_point(&manifest, "before-remove")["deadline_ms"], 20);
-        assert_eq!(extension_point(&manifest, "before-remove")["max_handlers"], 8);
+        assert_eq!(
+            extension_point(&manifest, "before-create")["deadline_ms"],
+            20
+        );
+        assert_eq!(
+            extension_point(&manifest, "before-create")["max_handlers"],
+            8
+        );
+        assert_eq!(
+            extension_point(&manifest, "post-create-steps")["max_entries"],
+            64
+        );
+        assert_eq!(
+            extension_point(&manifest, "post-create-steps")["dynamic"],
+            false
+        );
+        assert_eq!(
+            extension_point(&manifest, "before-remove")["deadline_ms"],
+            20
+        );
+        assert_eq!(
+            extension_point(&manifest, "before-remove")["max_handlers"],
+            8
+        );
     }
 
     /// REQ: SEC-293
     #[test]
     fn extension_point_risk_marks_follow_the_corrected_table() {
         let manifest = manifest();
-        assert_eq!(extension_point(&manifest, "before-create")["risk"], "standard");
-        assert_eq!(extension_point(&manifest, "post-create-steps")["risk"], "high");
-        assert_eq!(extension_point(&manifest, "before-remove")["risk"], "standard");
+        assert_eq!(
+            extension_point(&manifest, "before-create")["risk"],
+            "standard"
+        );
+        assert_eq!(
+            extension_point(&manifest, "post-create-steps")["risk"],
+            "high"
+        );
+        assert_eq!(
+            extension_point(&manifest, "before-remove")["risk"],
+            "standard"
+        );
     }
 
     /// REQ: EXT-052
     #[test]
     fn post_create_entry_schema_requires_id_title_command_and_working_directory() {
         let manifest = manifest();
-        let mut required = string_list(&extension_point(&manifest, "post-create-steps")["entry_schema"]["required"]);
+        let mut required = string_list(
+            &extension_point(&manifest, "post-create-steps")["entry_schema"]["required"],
+        );
         required.sort();
         assert_eq!(required, ["command", "id", "title", "working_directory"]);
     }
@@ -182,7 +228,8 @@ mod spec_tests {
     #[test]
     fn before_create_reply_must_carry_a_branch_name() {
         let manifest = manifest();
-        let required = string_list(&extension_point(&manifest, "before-create")["reply_schema"]["required"]);
+        let required =
+            string_list(&extension_point(&manifest, "before-create")["reply_schema"]["required"]);
         assert_eq!(required, ["branch"]);
     }
 }

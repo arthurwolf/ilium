@@ -75,7 +75,8 @@ mod spec_tests {
     #[test]
     fn dev_472_finish_with_error_leaves_job_list_unchanged() {
         let mut host = FakeHost::new();
-        host.jobs().finish(3, Err(PluginError::timed_out("deadline reached")));
+        host.jobs()
+            .finish(3, Err(PluginError::timed_out("deadline reached")));
         assert!(host.jobs().list().is_empty());
     }
 

@@ -80,7 +80,10 @@ mod tests {
     fn embed_returns_request_id_for_one_valid_text() {
         let mut import = VectorImport;
         let request = import.embed(vec!["hello".to_string()], "note search".to_string());
-        assert!(request.is_ok(), "embed of one text must return a request id");
+        assert!(
+            request.is_ok(),
+            "embed of one text must return a request id"
+        );
     }
 
     /// REQ: API-061
@@ -97,7 +100,10 @@ mod tests {
         let mut import = VectorImport;
         let texts = vec!["x".to_string(); EMBED_TEXT_LIMIT];
         let result = import.embed(texts, "note search".to_string());
-        assert!(result.is_ok(), "256 texts is the limit and must be accepted");
+        assert!(
+            result.is_ok(),
+            "256 texts is the limit and must be accepted"
+        );
     }
 
     /// REQ: API-060
@@ -115,7 +121,10 @@ mod tests {
         let mut import = VectorImport;
         let text = "a".repeat(EMBED_TEXT_BYTES);
         let result = import.embed(vec![text], "note search".to_string());
-        assert!(result.is_ok(), "an 8 KiB text is the limit and must be accepted");
+        assert!(
+            result.is_ok(),
+            "an 8 KiB text is the limit and must be accepted"
+        );
     }
 
     /// REQ: API-060
@@ -134,8 +143,16 @@ mod tests {
         let request = import
             .embed(vec!["hello".to_string()], "note search".to_string())
             .expect("embed of one text must return a request id");
-        assert_eq!(import.take_vectors(request), None, "take before completion must be none");
-        assert_eq!(import.take_vectors(request), None, "a second take must be none");
+        assert_eq!(
+            import.take_vectors(request),
+            None,
+            "take before completion must be none"
+        );
+        assert_eq!(
+            import.take_vectors(request),
+            None,
+            "a second take must be none"
+        );
     }
 
     /// REQ: ABI-014
@@ -167,7 +184,10 @@ mod tests {
         let mut import = VectorImport;
         for position in 0..INDEX_LIMIT {
             let result = import.create_index(format!("index-{position}"), 3);
-            assert!(result.is_ok(), "index {position} is within the default limit");
+            assert!(
+                result.is_ok(),
+                "index {position} is within the default limit"
+            );
         }
         let result = import.create_index("one-too-many".to_string(), 3);
         expect_code(result, ErrorCode::QuotaExceeded);
@@ -235,8 +255,14 @@ mod tests {
             .expect("upsert");
         let hits = import.top_k(index, vec![1.0, 0.0], 2).expect("top-k");
         assert_eq!(hits.len(), 2, "both entries fit within k = 2");
-        assert_eq!(hits[0].0, "a", "the entry in the same direction ranks first");
-        assert!((hits[0].1 - 1.0).abs() < 1e-6, "cosine of identical vectors is 1.0");
+        assert_eq!(
+            hits[0].0, "a",
+            "the entry in the same direction ranks first"
+        );
+        assert!(
+            (hits[0].1 - 1.0).abs() < 1e-6,
+            "cosine of identical vectors is 1.0"
+        );
         assert!(hits[0].1 >= hits[1].1, "scores are highest first");
     }
 
@@ -245,7 +271,10 @@ mod tests {
     fn top_k_with_zero_k_is_invalid_argument() {
         let mut import = VectorImport;
         let index = import.create_index("notes".to_string(), 2).expect("index");
-        expect_code(import.top_k(index, vec![1.0, 0.0], 0), ErrorCode::InvalidArgument);
+        expect_code(
+            import.top_k(index, vec![1.0, 0.0], 0),
+            ErrorCode::InvalidArgument,
+        );
     }
 
     /// REQ: API-061
@@ -273,7 +302,10 @@ mod tests {
     fn top_k_query_with_wrong_dimension_is_invalid_argument() {
         let mut import = VectorImport;
         let index = import.create_index("notes".to_string(), 2).expect("index");
-        expect_code(import.top_k(index, vec![1.0, 0.0, 0.0], 1), ErrorCode::InvalidArgument);
+        expect_code(
+            import.top_k(index, vec![1.0, 0.0, 0.0], 1),
+            ErrorCode::InvalidArgument,
+        );
     }
 
     /// REQ: API-061
@@ -281,7 +313,10 @@ mod tests {
     fn top_k_empty_query_is_invalid_argument() {
         let mut import = VectorImport;
         let index = import.create_index("notes".to_string(), 2).expect("index");
-        expect_code(import.top_k(index, Vec::new(), 1), ErrorCode::InvalidArgument);
+        expect_code(
+            import.top_k(index, Vec::new(), 1),
+            ErrorCode::InvalidArgument,
+        );
     }
 
     /// REQ: API-002

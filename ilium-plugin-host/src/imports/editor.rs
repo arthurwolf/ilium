@@ -134,7 +134,11 @@ mod tests {
         rejected: ErrorCode,
     ) {
         if let Err(error) = result {
-            assert_ne!(error.code, rejected, "limit rejected a call at the boundary: {}", error.message);
+            assert_ne!(
+                error.code, rejected,
+                "limit rejected a call at the boundary: {}",
+                error.message
+            );
         }
     }
 
@@ -181,7 +185,10 @@ mod tests {
     fn create_buffer_accepts_empty_initial_text() {
         let mut editor = EditorImport;
         let result = editor.create_buffer(String::new(), None);
-        assert!(result.is_ok(), "empty text is within the 16 MiB limit, got {result:?}");
+        assert!(
+            result.is_ok(),
+            "empty text is within the 16 MiB limit, got {result:?}"
+        );
     }
 
     /// REQ: PRI-021
@@ -190,7 +197,10 @@ mod tests {
         let mut editor = EditorImport;
         let text = "a".repeat(MAX_CREATE_TEXT_BYTES);
         let result = editor.create_buffer(text, Some("rust".to_string()));
-        assert!(result.is_ok(), "16 MiB is the accepted maximum, got {result:?}");
+        assert!(
+            result.is_ok(),
+            "16 MiB is the accepted maximum, got {result:?}"
+        );
     }
 
     /// REQ: PRI-021
@@ -208,7 +218,12 @@ mod tests {
         let mut editor = EditorImport;
         for index in 0..MAX_BUFFERS_PER_PLUGIN {
             let result = editor.create_buffer(String::new(), None);
-            assert!(result.is_ok(), "buffer {} of {} must be accepted, got {result:?}", index + 1, MAX_BUFFERS_PER_PLUGIN);
+            assert!(
+                result.is_ok(),
+                "buffer {} of {} must be accepted, got {result:?}",
+                index + 1,
+                MAX_BUFFERS_PER_PLUGIN
+            );
         }
         let result = editor.create_buffer(String::new(), None);
         assert_error_code(result, ErrorCode::QuotaExceeded);

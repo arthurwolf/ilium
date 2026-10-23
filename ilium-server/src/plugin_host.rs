@@ -572,7 +572,11 @@ mod spec_tests {
 
     #[test]
     fn host_reports_the_start_mode_it_was_created_with() {
-        for mode in [StartMode::Normal, StartMode::SafePlugins, StartMode::NoPlugins] {
+        for mode in [
+            StartMode::Normal,
+            StartMode::SafePlugins,
+            StartMode::NoPlugins,
+        ] {
             let host = ServerPluginHost::new(mode);
             assert_eq!(host.start_mode(), mode);
         }
@@ -582,8 +586,16 @@ mod spec_tests {
     fn no_plugins_start_activates_nothing() {
         let host = ServerPluginHost::new(StartMode::NoPlugins);
         let report = host.start();
-        assert!(report.started.is_empty(), "no plugin may start: {:?}", report.started);
-        assert!(report.failed.is_empty(), "no plugin may fail: {:?}", report.failed);
+        assert!(
+            report.started.is_empty(),
+            "no plugin may start: {:?}",
+            report.started
+        );
+        assert!(
+            report.failed.is_empty(),
+            "no plugin may fail: {:?}",
+            report.failed
+        );
     }
 
     #[test]
@@ -626,7 +638,10 @@ mod spec_tests {
         assert_eq!(kernel.read_project_file("notes/missing.txt"), None);
         assert!(!kernel.project_file_exists("notes/missing.txt"));
         kernel.write_project_file("notes/a.txt", "hello");
-        assert_eq!(kernel.read_project_file("notes/a.txt"), Some("hello".to_string()));
+        assert_eq!(
+            kernel.read_project_file("notes/a.txt"),
+            Some("hello".to_string())
+        );
         assert!(kernel.project_file_exists("notes/a.txt"));
     }
 

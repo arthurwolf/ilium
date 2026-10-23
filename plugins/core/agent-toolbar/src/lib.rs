@@ -159,7 +159,10 @@ mod spec_tests {
             .map(|slot| {
                 (
                     slot["id"].as_str().expect("slot id").to_string(),
-                    slot["placement"].as_str().expect("slot placement").to_string(),
+                    slot["placement"]
+                        .as_str()
+                        .expect("slot placement")
+                        .to_string(),
                 )
             })
             .collect();

@@ -153,13 +153,15 @@ fn dev_847_replacement_leaves_snapshot_section_and_config_table_of_its_row_uncha
     world.set_project_value(COST, "cost", json!({"daily_limit": 5}));
     let snapshot_before = world.stored_snapshot_section(SCHEDULER_SECTION);
     let cost_before = world.get_setting(COST, "cost");
-    assert!(snapshot_before.is_some(), "the snapshot section must be stored first");
+    assert!(
+        snapshot_before.is_some(),
+        "the snapshot section must be stored first"
+    );
 
     for core in [SCHEDULER, COST] {
         let replacement = replacement_id(core);
         world.set_enabled(core, false);
-        let manifest =
-            world.replacement_manifest(&replacement, core, ReplacementShape::default());
+        let manifest = world.replacement_manifest(&replacement, core, ReplacementShape::default());
         world
             .install(Tier::T1, manifest, Vec::new())
             .expect("a complete replacement installs");

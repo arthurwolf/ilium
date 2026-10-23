@@ -24,7 +24,13 @@ mod spec_tests {
     /// REQ: DEV-652
     #[test]
     fn log_accepts_every_level() {
-        for level in [Level::Trace, Level::Debug, Level::Info, Level::Warn, Level::Error] {
+        for level in [
+            Level::Trace,
+            Level::Debug,
+            Level::Info,
+            Level::Warn,
+            Level::Error,
+        ] {
             log(level, "level check");
         }
     }

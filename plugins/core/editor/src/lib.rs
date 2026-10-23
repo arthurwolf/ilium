@@ -145,7 +145,10 @@ mod spec_tests {
         let manifest = load_manifest();
         assert_eq!(manifest["server"]["entry"], "server.wasm");
         assert_eq!(manifest["server"]["world"], "ilium:server/base@0.1.0");
-        assert_eq!(strings_at(&manifest["server"]["exports"]), ["service-provider"]);
+        assert_eq!(
+            strings_at(&manifest["server"]["exports"]),
+            ["service-provider"]
+        );
     }
 
     /// REQ: COR-030
@@ -153,7 +156,9 @@ mod spec_tests {
     fn client_capabilities_never_hold_the_editor_kernel_grant() {
         let manifest = load_manifest();
         let client_capabilities = strings_at(&manifest["capabilities"]["client"]);
-        assert!(!client_capabilities.iter().any(|capability| capability == EDITOR_TAB_GRANT));
+        assert!(!client_capabilities
+            .iter()
+            .any(|capability| capability == EDITOR_TAB_GRANT));
     }
 
     /// REQ: COR-030
@@ -168,7 +173,9 @@ mod spec_tests {
             .filter(|capability| capability == &EDITOR_TAB_GRANT)
             .count();
         assert_eq!(holder_count, 1);
-        assert!(server_capabilities.iter().any(|capability| capability == EDITOR_TAB_GRANT));
+        assert!(server_capabilities
+            .iter()
+            .any(|capability| capability == EDITOR_TAB_GRANT));
     }
 
     /// REQ: COR-050
@@ -223,6 +230,9 @@ mod spec_tests {
         let mut manifest = load_manifest();
         manifest["client"]["exports"] = json!(["token-provider", "service-provider"]);
         assert!(!client_exports_match_manual(&manifest));
-        assert_eq!(client_exports(&manifest), ["token-provider", "service-provider"]);
+        assert_eq!(
+            client_exports(&manifest),
+            ["token-provider", "service-provider"]
+        );
     }
 }

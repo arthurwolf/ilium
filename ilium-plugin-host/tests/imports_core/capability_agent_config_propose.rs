@@ -41,7 +41,10 @@ fn take_proposal_returns_the_result_once_and_every_path_is_accounted_for() {
         vec![create_settings_change()],
     ));
     complete(&mut fixture, request);
-    let result = fixture.fs().take_proposal(request).expect("proposal result");
+    let result = fixture
+        .fs()
+        .take_proposal(request)
+        .expect("proposal result");
     assert_eq!(result.applied.len() + result.rejected.len(), 1);
     assert!(fixture.fs().take_proposal(request).is_none());
 }

@@ -347,11 +347,7 @@ fn intent_pane_and_node_constructors_wrap_payloads() {
         CreatePaneSpec::default(),
     );
     check_intent(intents::signal_pane, Intent::SignalPane, sample_signal());
-    check_intent(
-        intents::send_input,
-        Intent::SendInput,
-        sample_send_input(),
-    );
+    check_intent(intents::send_input, Intent::SendInput, sample_send_input());
     check_intent(
         intents::agent_action,
         Intent::AgentAction,

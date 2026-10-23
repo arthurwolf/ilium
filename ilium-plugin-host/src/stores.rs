@@ -301,12 +301,10 @@ mod tests {
             .set("other", "key-a", "T1", &[grant("tree.read")])
             .expect("other grants are recorded");
         store.forget("demo").expect("demo is forgotten");
-        assert!(
-            store
-                .load("demo", "key-a", "T1")
-                .expect("load succeeds")
-                .is_empty()
-        );
+        assert!(store
+            .load("demo", "key-a", "T1")
+            .expect("load succeeds")
+            .is_empty());
         assert_eq!(
             store.load("other", "key-a", "T1").expect("load succeeds"),
             vec![grant("tree.read")]
@@ -368,12 +366,10 @@ mod tests {
             .to_path_buf();
         write_raw(&path, "{ not json");
         let reopened = GrantStore::open(root.path()).expect("a corrupt store still opens");
-        assert!(
-            reopened
-                .load("demo", "key-a", "T1")
-                .expect("load succeeds")
-                .is_empty()
-        );
+        assert!(reopened
+            .load("demo", "key-a", "T1")
+            .expect("load succeeds")
+            .is_empty());
         let file_name = path
             .file_name()
             .expect("the store file has a name")

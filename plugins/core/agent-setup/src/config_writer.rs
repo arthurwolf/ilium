@@ -79,7 +79,10 @@ mod spec_tests {
     fn json_remove_drops_key_and_keeps_other_keys() {
         let text = "{\n  \"autoCompactWindow\": 100,\n  \"model\": \"opus\"\n}\n";
         let edited = edit_json_text(text, "autoCompactWindow", KeyChange::Remove).unwrap();
-        assert_eq!(parse_setting(ConfigTarget::ClaudeAutoCompactWindow, &edited).unwrap(), None);
+        assert_eq!(
+            parse_setting(ConfigTarget::ClaudeAutoCompactWindow, &edited).unwrap(),
+            None
+        );
         assert!(edited.contains("\"model\": \"opus\""));
     }
 
@@ -99,7 +102,10 @@ mod spec_tests {
     #[test]
     fn parse_setting_absent_key_is_none() {
         let text = "{\n  \"model\": \"opus\"\n}\n";
-        assert_eq!(parse_setting(ConfigTarget::ClaudeAutoCompactWindow, text).unwrap(), None);
+        assert_eq!(
+            parse_setting(ConfigTarget::ClaudeAutoCompactWindow, text).unwrap(),
+            None
+        );
     }
 
     /// settings object (no keys yet) accepts a `Set` and reads it back.
@@ -131,7 +137,10 @@ mod spec_tests {
     #[test]
     fn parse_toml_ignores_table_scoped_key() {
         let text = "[profiles.fast]\nauto_compact_token_limit = 1\n";
-        assert_eq!(parse_toml_setting(text, "auto_compact_token_limit").unwrap(), None);
+        assert_eq!(
+            parse_toml_setting(text, "auto_compact_token_limit").unwrap(),
+            None
+        );
     }
 
     /// `u64`, so the parse returns `Err` instead of a made-up number.

@@ -13,7 +13,15 @@ fn burst_of_fifty_writes_within_100_ms_owes_exactly_one_rebuild() {
     for write in 0..50u64 {
         debouncer.change(write * 2);
     }
-    assert_eq!(debouncer.due(397), 0, "no rebuild before 300 ms without a change");
-    assert_eq!(debouncer.due(398), 1, "one rebuild 300 ms after the last write");
+    assert_eq!(
+        debouncer.due(397),
+        0,
+        "no rebuild before 300 ms without a change"
+    );
+    assert_eq!(
+        debouncer.due(398),
+        1,
+        "one rebuild 300 ms after the last write"
+    );
     assert_eq!(debouncer.due(1_000), 0, "the burst owes no second rebuild");
 }

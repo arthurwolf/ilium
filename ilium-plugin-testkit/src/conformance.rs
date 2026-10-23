@@ -89,7 +89,12 @@ mod spec_tests {
     fn suite_contains_every_catalogue_case() {
         let results = run_suite::<ServerPlugin>().unwrap();
         assert!(results.len() >= CATALOGUE_MINIMUM);
-        for expected_name in ["CONF-LIFE-01", "CONF-EVT-06", "CONF-PKG-05", "CONF-RESTART-05"] {
+        for expected_name in [
+            "CONF-LIFE-01",
+            "CONF-EVT-06",
+            "CONF-PKG-05",
+            "CONF-RESTART-05",
+        ] {
             assert!(results.iter().any(|result| result.name == expected_name));
         }
     }
@@ -98,7 +103,10 @@ mod spec_tests {
     #[test]
     fn results_follow_catalogue_order() {
         let results = run_suite::<ServerPlugin>().unwrap();
-        assert_eq!(results.first().map(|result| result.name.as_str()), Some("CONF-LIFE-01"));
+        assert_eq!(
+            results.first().map(|result| result.name.as_str()),
+            Some("CONF-LIFE-01")
+        );
         let indices: Vec<usize> = results
             .iter()
             .map(|result| area_index(&result.name).expect("every case id names a catalogue area"))
@@ -132,9 +140,17 @@ mod spec_tests {
         let results = run_suite::<ServerPlugin>().unwrap();
         for result in &results {
             if result.passed {
-                assert!(result.reason.is_empty(), "{} passed with a reason", result.name);
+                assert!(
+                    result.reason.is_empty(),
+                    "{} passed with a reason",
+                    result.name
+                );
             } else {
-                assert!(!result.reason.is_empty(), "{} failed or skipped without a reason", result.name);
+                assert!(
+                    !result.reason.is_empty(),
+                    "{} failed or skipped without a reason",
+                    result.name
+                );
             }
         }
     }
@@ -155,6 +171,8 @@ mod spec_tests {
     #[test]
     fn server_plugin_never_skips_for_missing_side() {
         let results = run_suite::<ServerPlugin>().unwrap();
-        assert!(results.iter().all(|result| result.reason != "side-not-built"));
+        assert!(results
+            .iter()
+            .all(|result| result.reason != "side-not-built"));
     }
 }

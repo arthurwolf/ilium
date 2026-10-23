@@ -20,7 +20,12 @@ fn matrix_cli_rows() -> Vec<(String, Vec<String>)> {
         if !in_matrix || !line.starts_with('|') {
             continue;
         }
-        let cells: Vec<&str> = line.trim().trim_matches('|').split('|').map(str::trim).collect();
+        let cells: Vec<&str> = line
+            .trim()
+            .trim_matches('|')
+            .split('|')
+            .map(str::trim)
+            .collect();
         if cells.len() < 6 || cells[0] == "Plugin" || cells[0].starts_with("---") {
             continue;
         }
@@ -81,7 +86,10 @@ fn dev_848_every_cli_name_of_a_row_gives_the_same_output_and_exit_code_with_a_re
 
         for (name, (exit_code, stdout)) in names.iter().zip(baseline) {
             let output = rig.cli(&[name.as_str(), "--help"]);
-            assert_eq!(output.exit_code, exit_code, "{core}: `{name}` exit code changed");
+            assert_eq!(
+                output.exit_code, exit_code,
+                "{core}: `{name}` exit code changed"
+            );
             assert_eq!(output.stdout_raw, stdout, "{core}: `{name}` output changed");
         }
     }

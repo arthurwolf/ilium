@@ -39,14 +39,29 @@ impl SessionLimits {
 mod tests {
     use super::SessionLimits;
 
+    /// One session key: its name, the getter of its field and its documented default.
+    type SessionKeyRow = (&'static str, fn(&SessionLimits) -> u64, u64);
+
     /// The five session keys a user may set, with the getter of each field and its documented default.
-    fn session_key_table() -> [(&'static str, fn(&SessionLimits) -> u64, u64); 5] {
+    fn session_key_table() -> [SessionKeyRow; 5] {
         [
-            ("session_memory_mib", |limits| limits.session_memory_mib, 1_024),
+            (
+                "session_memory_mib",
+                |limits| limits.session_memory_mib,
+                1_024,
+            ),
             ("session_helpers", |limits| limits.session_helpers, 16),
             ("session_processes", |limits| limits.session_processes, 16),
-            ("session_http_streams", |limits| limits.session_http_streams, 64),
-            ("session_decorations", |limits| limits.session_decorations, 65_536),
+            (
+                "session_http_streams",
+                |limits| limits.session_http_streams,
+                64,
+            ),
+            (
+                "session_decorations",
+                |limits| limits.session_decorations,
+                65_536,
+            ),
         ]
     }
 
@@ -71,7 +86,10 @@ mod tests {
     fn api_070_fixed_caps_pending_requests_and_key_grabs_have_the_documented_defaults() {
         let defaults = SessionLimits::default();
         assert_eq!(
-            (defaults.session_pending_requests, defaults.session_key_grabs),
+            (
+                defaults.session_pending_requests,
+                defaults.session_key_grabs
+            ),
             (4_096, 32)
         );
     }
@@ -129,10 +147,8 @@ mod tests {
     /// REQ: HST-406
     #[test]
     fn hst_406_clamping_one_key_does_not_change_a_lower_value_for_another() {
-        let limits = SessionLimits::from_user(&[
-            ("session_memory_mib", 99_999),
-            ("session_helpers", 8),
-        ]);
+        let limits =
+            SessionLimits::from_user(&[("session_memory_mib", 99_999), ("session_helpers", 8)]);
         assert_eq!(limits.session_memory_mib, 1_024);
         assert_eq!(limits.session_helpers, 8);
     }
@@ -180,10 +196,8 @@ mod tests {
     /// REQ: API-070
     #[test]
     fn api_070_fixed_caps_are_not_user_settable() {
-        let limits = SessionLimits::from_user(&[
-            ("session_pending_requests", 1),
-            ("session_key_grabs", 1),
-        ]);
+        let limits =
+            SessionLimits::from_user(&[("session_pending_requests", 1), ("session_key_grabs", 1)]);
         assert_eq!(limits.session_pending_requests, 4_096);
         assert_eq!(limits.session_key_grabs, 32);
     }

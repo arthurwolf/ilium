@@ -22,7 +22,8 @@ fn cancel_args(request: u64) -> String {
 
 fn completed_as_cancelled(host: &HarnessHandle, request: u64) -> bool {
     host.outcomes(&plugin_id()).iter().any(|result| {
-        result.request == RequestRef::Call(RequestId(request)) && result.outcome == Outcome::Cancelled
+        result.request == RequestRef::Call(RequestId(request))
+            && result.outcome == Outcome::Cancelled
     })
 }
 
@@ -81,7 +82,7 @@ fn api_091_expired_slot_is_free_so_the_next_call_is_not_busy() {
 /// REQ: API-096
 #[test]
 fn api_096_cancel_of_a_pending_request_completes_it_as_cancelled() {
-    let mut host = host_with(QuietGuest);
+    let host = host_with(QuietGuest);
     let request = started_request(&host);
     let reply = host.call_import_json(JOBS_INTERFACE, CANCEL_FUNCTION, &cancel_args(request));
     assert!(reply.error_code().is_none());
@@ -93,7 +94,7 @@ fn api_096_cancel_of_a_pending_request_completes_it_as_cancelled() {
 /// REQ: API-096
 #[test]
 fn api_096_cancel_of_an_unknown_id_returns_not_found_without_effect() {
-    let mut host = host_with(QuietGuest);
+    let host = host_with(QuietGuest);
     started_request(&host);
     let reply = host.call_import_json(JOBS_INTERFACE, CANCEL_FUNCTION, &cancel_args(987_654));
     assert_eq!(reply.error_code(), Some("not-found"));
@@ -103,7 +104,7 @@ fn api_096_cancel_of_an_unknown_id_returns_not_found_without_effect() {
 /// REQ: API-096
 #[test]
 fn api_096_repeated_cancel_has_no_further_effect() {
-    let mut host = host_with(QuietGuest);
+    let host = host_with(QuietGuest);
     let request = started_request(&host);
     let args = cancel_args(request);
     host.call_import_json(JOBS_INTERFACE, CANCEL_FUNCTION, &args);

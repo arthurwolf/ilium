@@ -167,7 +167,10 @@ mod tests {
     fn open_loopback_valid_rate_and_channels_returns_capture_id() {
         let mut audio = AudioImport;
         let capture = expect_ok(audio.open_loopback(48_000, 2));
-        assert_ne!(capture, 0, "a loopback capture id must identify the opened stream");
+        assert_ne!(
+            capture, 0,
+            "a loopback capture id must identify the opened stream"
+        );
     }
 
     /// Source: api-audio.md "Edge cases" table: rate outside 8,000 to 192,000 Hz gives invalid-argument (lower boundary).

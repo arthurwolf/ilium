@@ -107,7 +107,10 @@ mod tests {
 
     fn expect_ok(result: Result<(), PluginError>) {
         if let Err(error) = result {
-            panic!("expected Ok, got plugin error {:?}: {}", error.code, error.message);
+            panic!(
+                "expected Ok, got plugin error {:?}: {}",
+                error.code, error.message
+            );
         }
     }
 
@@ -173,11 +176,8 @@ mod tests {
     fn set_owner_ids_rejects_a_first_row_past_the_height() {
         let mut surface = SurfaceImport;
         let (_width, height) = surface.frame_surface_size(SURFACE_HANDLE);
-        let code = error_code_of(surface.frame_surface_set_owner_ids(
-            SURFACE_HANDLE,
-            height,
-            vec![1u16],
-        ));
+        let code =
+            error_code_of(surface.frame_surface_set_owner_ids(SURFACE_HANDLE, height, vec![1u16]));
         assert_eq!(code, ErrorCode::InvalidArgument);
     }
 

@@ -181,7 +181,10 @@ mod spec_tests {
         let points = manifest["contributes"]["extension_points"]
             .as_array()
             .expect("extension points are declared as an array");
-        let point_ids: Vec<&str> = points.iter().filter_map(|point| point["id"].as_str()).collect();
+        let point_ids: Vec<&str> = points
+            .iter()
+            .filter_map(|point| point["id"].as_str())
+            .collect();
         assert_eq!(point_ids, vec!["key-hints", "help-sources"]);
         for point in points {
             assert_eq!(point["max_entries"], 64);

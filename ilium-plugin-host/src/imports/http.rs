@@ -81,7 +81,8 @@ mod tests {
     const COMPLETION_WAIT: Duration = Duration::from_secs(5);
 
     /// A minimal well-formed HTTP/1.1 response served by the loopback test server.
-    const OK_RESPONSE: &[u8] = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok";
+    const OK_RESPONSE: &[u8] =
+        b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok";
 
     /// Binds a loopback listener on a free port. The caller keeps it alive while requests run.
     fn bind_loopback() -> (TcpListener, u16) {
@@ -157,7 +158,10 @@ mod tests {
         let (_listener, port) = bind_loopback();
         let mut fixture = fixture_granting(port, &[]);
         let id = expect_ok(fixture.http().fetch(get(loopback_url(port, "/"))));
-        assert!(id.0 > 0, "request id should be a fresh non-zero id, got {id:?}");
+        assert!(
+            id.0 > 0,
+            "request id should be a fresh non-zero id, got {id:?}"
+        );
     }
 
     /// REQ: API-062
@@ -218,7 +222,10 @@ mod tests {
     fn fetch_empty_url_is_invalid_argument() {
         let (_listener, port) = bind_loopback();
         let mut fixture = fixture_granting(port, &[]);
-        expect_code(fixture.http().fetch(get(String::new())), ErrorCode::InvalidArgument);
+        expect_code(
+            fixture.http().fetch(get(String::new())),
+            ErrorCode::InvalidArgument,
+        );
     }
 
     /// REQ: API-062
@@ -238,7 +245,9 @@ mod tests {
         let (_listener, port) = bind_loopback();
         let mut fixture = fixture_granting(port, &["http:api.example.com"]);
         expect_code(
-            fixture.http().fetch(get("http://api.example.com/v1/status".to_owned())),
+            fixture
+                .http()
+                .fetch(get("http://api.example.com/v1/status".to_owned())),
             ErrorCode::InvalidArgument,
         );
     }
@@ -332,7 +341,9 @@ mod tests {
         let (_listener, port) = bind_loopback();
         let mut fixture = fixture_granting(port, &[]);
         expect_code(
-            fixture.http().fetch(get("https://api.example.com/v1/status".to_owned())),
+            fixture
+                .http()
+                .fetch(get("https://api.example.com/v1/status".to_owned())),
             ErrorCode::NotPermitted,
         );
     }
@@ -442,7 +453,10 @@ mod tests {
             framing: StreamFraming::Lines,
             max_chunk_bytes: MAX_CHUNK_BYTES + 1,
         };
-        expect_code(fixture.http().open_stream(stream), ErrorCode::InvalidArgument);
+        expect_code(
+            fixture.http().open_stream(stream),
+            ErrorCode::InvalidArgument,
+        );
     }
 
     /// REQ: SEC-013

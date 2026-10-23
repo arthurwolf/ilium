@@ -317,7 +317,10 @@ mod tests {
             ..ComponentSummary::default()
         };
 
-        assert_eq!(codes(&run(&manifest, &component)), vec!["manifest.api-version"]);
+        assert_eq!(
+            codes(&run(&manifest, &component)),
+            vec!["manifest.api-version"]
+        );
     }
 
     /// REQ: ABI-004
@@ -329,7 +332,10 @@ mod tests {
             ..ComponentSummary::default()
         };
 
-        assert_eq!(codes(&run(&manifest, &component)), vec!["manifest.api-version"]);
+        assert_eq!(
+            codes(&run(&manifest, &component)),
+            vec!["manifest.api-version"]
+        );
     }
 
     /// REQ: HST-085

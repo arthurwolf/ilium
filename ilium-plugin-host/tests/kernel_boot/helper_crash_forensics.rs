@@ -3,8 +3,8 @@
 use std::path::PathBuf;
 
 use ilium_plugin_host::helper_forensics::{
-    core_dump_expired, core_dump_setting, may_attach_core_dump, record_helper_death, CoreDumpPolicy,
-    HelperDeath, HelperExit,
+    core_dump_expired, core_dump_setting, may_attach_core_dump, record_helper_death,
+    CoreDumpPolicy, HelperDeath, HelperExit,
 };
 
 const PAYLOAD_MARKER: &str = "PAYLOAD-MARKER-7f3a";
@@ -57,7 +57,10 @@ fn hst_518_a_sigkill_is_recorded_as_its_terminating_signal() {
 fn hst_518_only_the_last_20_helper_log_lines_are_retained() {
     let record = record_helper_death(&death_with(HelperExit::Code(1), numbered_lines(25)));
     assert_eq!(record.retained_log_lines.len(), 20);
-    assert_eq!(record.retained_log_lines.first().map(String::as_str), Some("line 6"));
+    assert_eq!(
+        record.retained_log_lines.first().map(String::as_str),
+        Some("line 6")
+    );
 }
 
 /// REQ: HST-518

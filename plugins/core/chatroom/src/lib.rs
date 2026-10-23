@@ -82,7 +82,10 @@ mod spec_tests {
             .unwrap_or(false)
     }
 
-    fn extension_point<'a>(manifest: &'a serde_json::Value, point_id: &str) -> Option<&'a serde_json::Value> {
+    fn extension_point<'a>(
+        manifest: &'a serde_json::Value,
+        point_id: &str,
+    ) -> Option<&'a serde_json::Value> {
         manifest["contributes"]["extension_points"]
             .as_array()?
             .iter()
@@ -109,9 +112,15 @@ mod spec_tests {
     fn each_side_names_its_entry_and_world() {
         let manifest = shipped_manifest();
         assert_eq!(manifest["server"]["entry"].as_str(), Some("server.wasm"));
-        assert_eq!(manifest["server"]["world"].as_str(), Some("ilium:server/base@0.1.0"));
+        assert_eq!(
+            manifest["server"]["world"].as_str(),
+            Some("ilium:server/base@0.1.0")
+        );
         assert_eq!(manifest["client"]["entry"].as_str(), Some("client.wasm"));
-        assert_eq!(manifest["client"]["world"].as_str(), Some("ilium:client/base@0.1.0"));
+        assert_eq!(
+            manifest["client"]["world"].as_str(),
+            Some("ilium:client/base@0.1.0")
+        );
     }
 
     /// and the server grants agent-setup services and the project file scope).
@@ -121,9 +130,15 @@ mod spec_tests {
         let server_grants = &manifest["capabilities"]["server"];
         assert!(array_contains(server_grants, "fs.write:project"));
         assert!(array_contains(server_grants, "topics.subscribe:chatroom"));
-        assert!(array_contains(server_grants, "services.use:ilium.core.agent-setup"));
+        assert!(array_contains(
+            server_grants,
+            "services.use:ilium.core.agent-setup"
+        ));
         assert!(!array_contains(server_grants, "agent-config"));
-        assert!(!array_contains(&manifest["capabilities"]["client"], "agent-config"));
+        assert!(!array_contains(
+            &manifest["capabilities"]["client"],
+            "agent-config"
+        ));
     }
 
     /// Compile-time check: the struct for each side implements the trait its manifest export names.
@@ -160,13 +175,15 @@ mod spec_tests {
     fn owned_extension_points_declare_their_limits() {
         let manifest = shipped_manifest();
 
-        let before_post = extension_point(&manifest, "before-post").expect("before-post is declared");
+        let before_post =
+            extension_point(&manifest, "before-post").expect("before-post is declared");
         assert_eq!(before_post["kind"].as_str(), Some("hook"));
         assert_eq!(before_post["mode"].as_str(), Some("transform"));
         assert_eq!(before_post["deadline_ms"].as_u64(), Some(20));
         assert_eq!(before_post["max_handlers"].as_u64(), Some(8));
 
-        let message_renderers = extension_point(&manifest, "message-renderers").expect("message-renderers is declared");
+        let message_renderers =
+            extension_point(&manifest, "message-renderers").expect("message-renderers is declared");
         assert_eq!(message_renderers["kind"].as_str(), Some("collect"));
         assert_eq!(message_renderers["max_entries"].as_u64(), Some(64));
     }
@@ -175,8 +192,10 @@ mod spec_tests {
     #[test]
     fn extension_point_risk_marks_follow_the_security_table() {
         let manifest = shipped_manifest();
-        let before_post = extension_point(&manifest, "before-post").expect("before-post is declared");
-        let message_renderers = extension_point(&manifest, "message-renderers").expect("message-renderers is declared");
+        let before_post =
+            extension_point(&manifest, "before-post").expect("before-post is declared");
+        let message_renderers =
+            extension_point(&manifest, "message-renderers").expect("message-renderers is declared");
         assert_eq!(before_post["risk"].as_str(), Some("high"));
         assert_eq!(message_renderers["risk"].as_str(), Some("standard"));
     }

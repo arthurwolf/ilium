@@ -197,7 +197,9 @@ mod tests {
     #[test]
     fn read_package_parses_the_signature_document_of_the_signed_vector() {
         let archive = read_package(&vector_signed()).expect("the signed vector is accepted");
-        let signature = archive.signature.expect("the signed vector carries a signature");
+        let signature = archive
+            .signature
+            .expect("the signed vector carries a signature");
         assert_eq!(
             signature.key_id,
             "56475aa75463474c0285df5dbf2bcab73da651358839e9b77481b2eab107708c"

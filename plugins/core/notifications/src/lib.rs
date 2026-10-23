@@ -68,13 +68,21 @@ mod spec_tests {
 
     /// Returns the grant strings a manifest lists for one side ("server" or "client").
     fn grants_of(manifest: &Value, side: &str) -> Vec<String> {
-        manifest["capabilities"][side].as_array().map_or_else(Vec::new, |grants| {
-            grants.iter().filter_map(|grant| grant.as_str().map(str::to_owned)).collect()
-        })
+        manifest["capabilities"][side]
+            .as_array()
+            .map_or_else(Vec::new, |grants| {
+                grants
+                    .iter()
+                    .filter_map(|grant| grant.as_str().map(str::to_owned))
+                    .collect()
+            })
     }
 
     /// Returns the manifest's extension point declaration with the given id, if any.
-    fn extension_point<'manifest>(manifest: &'manifest Value, point_id: &str) -> Option<&'manifest Value> {
+    fn extension_point<'manifest>(
+        manifest: &'manifest Value,
+        point_id: &str,
+    ) -> Option<&'manifest Value> {
         manifest["contributes"]["extension_points"]
             .as_array()?
             .iter()
@@ -82,8 +90,18 @@ mod spec_tests {
     }
 
     /// Builds one agent activity transition as the server receives it.
-    fn agent_activity_event(node: u64, previous: AgentActivity, current: AgentActivity, revision: u64) -> Event {
-        Event::AgentActivityChanged(AgentActivityEvent { node: NodeId(node), previous, current, revision })
+    fn agent_activity_event(
+        node: u64,
+        previous: AgentActivity,
+        current: AgentActivity,
+        revision: u64,
+    ) -> Event {
+        Event::AgentActivityChanged(AgentActivityEvent {
+            node: NodeId(node),
+            previous,
+            current,
+            revision,
+        })
     }
 
     /// REQ: COR-050
@@ -105,14 +123,23 @@ mod spec_tests {
         assert_eq!(manifest["activation"], json!(["startup"]));
 
         let server_grants = grants_of(&manifest, "server");
-        for documented_grant in ["sound.play", "notify.desktop", "agent.read", "tree.read", "tree.attention"] {
+        for documented_grant in [
+            "sound.play",
+            "notify.desktop",
+            "agent.read",
+            "tree.read",
+            "tree.attention",
+        ] {
             assert!(
                 server_grants.iter().any(|held| held == documented_grant),
                 "server side must hold {documented_grant}"
             );
         }
         let client_grants = grants_of(&manifest, "client");
-        assert!(client_grants.iter().any(|held| held == "notify.toast"), "client side must hold notify.toast");
+        assert!(
+            client_grants.iter().any(|held| held == "notify.toast"),
+            "client side must hold notify.toast"
+        );
     }
 
     /// REQ: COR-030, COR-033
@@ -122,16 +149,25 @@ mod spec_tests {
         let sound_tab_grant = "settings.write-kernel:sound";
         let holding_sides: Vec<&str> = ["server", "client"]
             .into_iter()
-            .filter(|side| grants_of(&manifest, side).iter().any(|held| held == sound_tab_grant))
+            .filter(|side| {
+                grants_of(&manifest, side)
+                    .iter()
+                    .any(|held| held == sound_tab_grant)
+            })
             .collect();
-        assert_eq!(holding_sides, vec!["server"], "exactly one holder, on the server side");
+        assert_eq!(
+            holding_sides,
+            vec!["server"],
+            "exactly one holder, on the server side"
+        );
     }
 
     /// REQ: EXT-052, SEC-293
     #[test]
     fn before_notify_is_a_standard_risk_veto_hook_with_a_20_ms_deadline() {
         let manifest = load_manifest();
-        let before_notify = extension_point(&manifest, "before-notify").expect("before-notify must be declared");
+        let before_notify =
+            extension_point(&manifest, "before-notify").expect("before-notify must be declared");
         assert_eq!(before_notify["kind"], "hook");
         assert_eq!(before_notify["mode"], "veto");
         assert_eq!(before_notify["deadline_ms"], 20);
@@ -154,7 +190,12 @@ mod spec_tests {
     #[test]
     fn approval_prompt_submits_one_sound_keyed_to_the_prompt() {
         let mut server = NotificationsServer::default();
-        let batch = vec![agent_activity_event(7, AgentActivity::Working, AgentActivity::AwaitingApproval, 3)];
+        let batch = vec![agent_activity_event(
+            7,
+            AgentActivity::Working,
+            AgentActivity::AwaitingApproval,
+            3,
+        )];
 
         let submissions = server.on_events(batch);
 
@@ -170,8 +211,18 @@ mod spec_tests {
     fn a_new_revision_of_the_same_node_is_sounded_again() {
         let mut server = NotificationsServer::default();
         let batch = vec![
-            agent_activity_event(7, AgentActivity::Working, AgentActivity::AwaitingApproval, 3),
-            agent_activity_event(7, AgentActivity::Working, AgentActivity::AwaitingApproval, 4),
+            agent_activity_event(
+                7,
+                AgentActivity::Working,
+                AgentActivity::AwaitingApproval,
+                3,
+            ),
+            agent_activity_event(
+                7,
+                AgentActivity::Working,
+                AgentActivity::AwaitingApproval,
+                4,
+            ),
         ];
 
         let submissions = server.on_events(batch);
@@ -190,7 +241,12 @@ mod spec_tests {
     #[test]
     fn transition_to_idle_does_not_sound_an_approval_prompt() {
         let mut server = NotificationsServer::default();
-        let batch = vec![agent_activity_event(7, AgentActivity::Working, AgentActivity::Idle, 5)];
+        let batch = vec![agent_activity_event(
+            7,
+            AgentActivity::Working,
+            AgentActivity::Idle,
+            5,
+        )];
         assert!(server.on_events(batch).is_empty());
     }
 }

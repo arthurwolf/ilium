@@ -34,11 +34,21 @@ mod tests {
     use ilium_plugin_api::generated::types::ids::RequestId;
 
     fn text_query(text: &str, limit: u8) -> GeocodeQuery {
-        GeocodeQuery { text: text.to_string(), near: None, limit, language: None }
+        GeocodeQuery {
+            text: text.to_string(),
+            near: None,
+            limit,
+            language: None,
+        }
     }
 
     fn near_query(near: GeoPoint) -> GeocodeQuery {
-        GeocodeQuery { text: "Lisbon".to_string(), near: Some(near), limit: 5, language: None }
+        GeocodeQuery {
+            text: "Lisbon".to_string(),
+            near: Some(near),
+            limit: 5,
+            language: None,
+        }
     }
 
     fn point(lat: f64, lon: f64) -> GeoPoint {
@@ -59,7 +69,12 @@ mod tests {
     fn assert_invalid_argument(result: Result<RequestId, PluginError>, case: &str) {
         match result {
             Ok(_) => panic!("{case}: expected invalid-argument, got a request id"),
-            Err(error) => assert_eq!(error.code, ErrorCode::InvalidArgument, "{case}: {}", error.message),
+            Err(error) => assert_eq!(
+                error.code,
+                ErrorCode::InvalidArgument,
+                "{case}: {}",
+                error.message
+            ),
         }
     }
 
@@ -83,13 +98,19 @@ mod tests {
             Ok(_) => panic!("empty text must be refused"),
             Err(error) => {
                 assert_eq!(error.code, ErrorCode::InvalidArgument);
-                assert!(!error.message.is_empty(), "the error record must carry a message");
+                assert!(
+                    !error.message.is_empty(),
+                    "the error record must carry a message"
+                );
                 assert!(
                     error.message.chars().count() <= 256,
                     "the message is at most 256 characters, got {}",
                     error.message.chars().count()
                 );
-                assert_eq!(error.retry_after_ms, None, "only rate-limited carries retry-after-ms");
+                assert_eq!(
+                    error.retry_after_ms, None,
+                    "only rate-limited carries retry-after-ms"
+                );
             }
         }
     }
@@ -131,9 +152,15 @@ mod tests {
     fn search_counts_text_length_in_characters_not_bytes() {
         // Each "é" is two bytes in UTF-8: 200 of them are 400 bytes but still 200 characters.
         let accepted = "é".repeat(200);
-        assert_not_invalid_argument(run_search(text_query(&accepted, 5)), "200 two-byte characters");
+        assert_not_invalid_argument(
+            run_search(text_query(&accepted, 5)),
+            "200 two-byte characters",
+        );
         let refused = "é".repeat(201);
-        assert_invalid_argument(run_search(text_query(&refused, 5)), "201 two-byte characters");
+        assert_invalid_argument(
+            run_search(text_query(&refused, 5)),
+            "201 two-byte characters",
+        );
     }
 
     /// REQ: API-005
@@ -164,20 +191,29 @@ mod tests {
     /// REQ: API-005
     #[test]
     fn search_rejects_near_latitude_above_90() {
-        assert_invalid_argument(run_search(near_query(point(90.5, 0.0))), "near latitude 90.5");
+        assert_invalid_argument(
+            run_search(near_query(point(90.5, 0.0))),
+            "near latitude 90.5",
+        );
     }
 
     /// REQ: API-005
     #[test]
     fn search_rejects_near_longitude_below_minus_180() {
-        assert_invalid_argument(run_search(near_query(point(0.0, -180.5))), "near longitude -180.5");
+        assert_invalid_argument(
+            run_search(near_query(point(0.0, -180.5))),
+            "near longitude -180.5",
+        );
     }
 
     /// REQ: API-005
     #[test]
     fn search_accepts_near_at_range_corners() {
         assert_not_invalid_argument(run_search(near_query(point(90.0, 180.0))), "near 90, 180");
-        assert_not_invalid_argument(run_search(near_query(point(-90.0, -180.0))), "near -90, -180");
+        assert_not_invalid_argument(
+            run_search(near_query(point(-90.0, -180.0))),
+            "near -90, -180",
+        );
     }
 
     /// REQ: API-005

@@ -112,7 +112,10 @@ mod spec_tests {
         let tabs = manifest["contributes"]["settings"]
             .as_array()
             .expect("settings is a list");
-        let animation_tabs: Vec<_> = tabs.iter().filter(|tab| tab["id"] == "animations").collect();
+        let animation_tabs: Vec<_> = tabs
+            .iter()
+            .filter(|tab| tab["id"] == "animations")
+            .collect();
         assert_eq!(animation_tabs.len(), 1);
         assert_eq!(animation_tabs[0]["kind"], "tab");
         assert_eq!(animation_tabs[0]["title"], "Animations");

@@ -57,7 +57,11 @@ mod tests {
     fn unset_position_is_never_replaced_by_a_fabricated_fallback() {
         let mut location = fresh_import();
         let result = location.current();
-        assert_ne!(result, Some((0.0, 0.0)), "null island must not stand in for an unset position");
+        assert_ne!(
+            result,
+            Some((0.0, 0.0)),
+            "null island must not stand in for an unset position"
+        );
         assert!(
             result.is_none(),
             "a fabricated position would reveal a location the user never set, got {result:?}"
@@ -69,7 +73,10 @@ mod tests {
         let mut location = fresh_import();
         if let Some((latitude, longitude)) = location.current() {
             assert!(latitude.is_finite(), "latitude is not finite: {latitude}");
-            assert!(longitude.is_finite(), "longitude is not finite: {longitude}");
+            assert!(
+                longitude.is_finite(),
+                "longitude is not finite: {longitude}"
+            );
             assert!(
                 (-MAX_LATITUDE_DEGREES..=MAX_LATITUDE_DEGREES).contains(&latitude),
                 "latitude {latitude} is outside -90..=90"

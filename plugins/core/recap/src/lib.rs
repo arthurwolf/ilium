@@ -71,7 +71,12 @@ mod spec_tests {
     fn string_list(value: &Value) -> Vec<String> {
         value
             .as_array()
-            .map(|items| items.iter().filter_map(|item| item.as_str().map(str::to_owned)).collect())
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|item| item.as_str().map(str::to_owned))
+                    .collect()
+            })
             .unwrap_or_default()
     }
 
@@ -82,7 +87,9 @@ mod spec_tests {
 
     fn has_cli_activation(manifest: &Value, command_name: &str) -> bool {
         let trigger = format!("cli:{command_name}");
-        string_list(&manifest["activation"]).iter().any(|item| *item == trigger)
+        string_list(&manifest["activation"])
+            .iter()
+            .any(|item| *item == trigger)
     }
 
     /// REQ: COR-050
@@ -133,7 +140,9 @@ mod spec_tests {
     #[test]
     fn manifest_description_states_both_length_limits() {
         let manifest = manifest();
-        let description = manifest["description"].as_str().expect("description is text");
+        let description = manifest["description"]
+            .as_str()
+            .expect("description is text");
         assert!(description.contains("at most 40 words"));
         assert!(description.contains("at most 250 words"));
     }
@@ -142,7 +151,12 @@ mod spec_tests {
     #[test]
     fn onboarding_state_client_request_is_declared() {
         let manifest = manifest();
-        assert!(named_entry(&manifest["contributes"]["client_requests"], "kind", "onboarding-state").is_some());
+        assert!(named_entry(
+            &manifest["contributes"]["client_requests"],
+            "kind",
+            "onboarding-state"
+        )
+        .is_some());
     }
 
     /// REQ: COR-050
@@ -156,7 +170,10 @@ mod spec_tests {
             "agent.transcript",
             "terminal.read-screen",
         ] {
-            assert!(server.iter().any(|held| held == grant), "missing grant {grant}");
+            assert!(
+                server.iter().any(|held| held == grant),
+                "missing grant {grant}"
+            );
         }
     }
 
@@ -165,9 +182,11 @@ mod spec_tests {
     fn extension_points_are_declared_with_their_kinds() {
         let manifest = manifest();
         let points = &manifest["contributes"]["extension_points"];
-        let fact_sources = named_entry(points, "id", "fact-sources").expect("fact-sources declared");
+        let fact_sources =
+            named_entry(points, "id", "fact-sources").expect("fact-sources declared");
         assert_eq!(fact_sources["kind"], "collect");
-        let before_recap = named_entry(points, "id", "before-recap").expect("before-recap declared");
+        let before_recap =
+            named_entry(points, "id", "before-recap").expect("before-recap declared");
         assert_eq!(before_recap["kind"], "transform");
     }
 
@@ -177,7 +196,12 @@ mod spec_tests {
         let manifest = manifest();
         assert!(named_entry(&manifest["contributes"]["cli"], "name", "").is_none());
         assert!(named_entry(&manifest["contributes"]["cli"], "name", "recaps").is_none());
-        assert!(named_entry(&manifest["contributes"]["jobs"], "kind", "recap-pane-unknown").is_none());
+        assert!(named_entry(
+            &manifest["contributes"]["jobs"],
+            "kind",
+            "recap-pane-unknown"
+        )
+        .is_none());
         assert!(named_entry(&manifest["contributes"]["extension_points"], "id", "").is_none());
     }
 
@@ -191,6 +215,8 @@ mod spec_tests {
             .expect("activation is a list");
         activation.retain(|item| item.as_str() != Some("cli:recap"));
         assert!(!has_cli_activation(&manifest, "recap"));
-        assert!(string_list(&manifest["activation"]).iter().any(|item| item == "command:recap"));
+        assert!(string_list(&manifest["activation"])
+            .iter()
+            .any(|item| item == "command:recap"));
     }
 }

@@ -28,8 +28,22 @@ mod tests {
 
     /// Named keys from the chord grammar; `f1` to `f24` are checked separately.
     const CHORD_NAMED_KEYS: [&str; 16] = [
-        "enter", "escape", "tab", "backspace", "delete", "insert", "home", "end", "page-up",
-        "page-down", "up", "down", "left", "right", "space", "plus",
+        "enter",
+        "escape",
+        "tab",
+        "backspace",
+        "delete",
+        "insert",
+        "home",
+        "end",
+        "page-up",
+        "page-down",
+        "up",
+        "down",
+        "left",
+        "right",
+        "space",
+        "plus",
     ];
 
     /// Returns true when `chord` matches the chord syntax of the keys page: lower case,
@@ -39,7 +53,9 @@ mod tests {
         let Some((key, modifiers)) = parts.split_last() else {
             return false;
         };
-        let all_modifiers_known = modifiers.iter().all(|modifier| CHORD_MODIFIERS.contains(modifier));
+        let all_modifiers_known = modifiers
+            .iter()
+            .all(|modifier| CHORD_MODIFIERS.contains(modifier));
         all_modifiers_known && is_valid_key(key)
     }
 
@@ -49,7 +65,8 @@ mod tests {
         }
         if let Some(number) = key.strip_prefix('f') {
             if let Ok(function_number) = number.parse::<u32>() {
-                return (1..=24).contains(&function_number) && number == function_number.to_string();
+                return (1..=24).contains(&function_number)
+                    && number == function_number.to_string();
             }
         }
         let mut characters = key.chars();
@@ -69,8 +86,14 @@ mod tests {
         let mut import = KeymapImport;
         let bindings: Vec<Binding> = import.bindings();
         for binding in &bindings {
-            assert!(!binding.command.is_empty(), "binding with empty command: {binding:?}");
-            assert!(!binding.chords.is_empty(), "binding without chords: {binding:?}");
+            assert!(
+                !binding.command.is_empty(),
+                "binding with empty command: {binding:?}"
+            );
+            assert!(
+                !binding.chords.is_empty(),
+                "binding without chords: {binding:?}"
+            );
         }
     }
 
@@ -82,7 +105,11 @@ mod tests {
         let bindings: Vec<Binding> = import.bindings();
         for binding in &bindings {
             for chord in &binding.chords {
-                assert!(is_valid_chord(chord), "chord {chord:?} of {} breaks the chord grammar", binding.command);
+                assert!(
+                    is_valid_chord(chord),
+                    "chord {chord:?} of {} breaks the chord grammar",
+                    binding.command
+                );
             }
         }
     }
@@ -93,7 +120,10 @@ mod tests {
     #[test]
     fn chord_label_formats_modifiers_and_key_with_capitals() {
         let mut import = KeymapImport;
-        assert_eq!(import.chord_label("ctrl+shift+k".to_string()), "Ctrl+Shift+K");
+        assert_eq!(
+            import.chord_label("ctrl+shift+k".to_string()),
+            "Ctrl+Shift+K"
+        );
     }
 
     /// Arrow keys show as the arrow glyphs in the client's help (api-keys, "Chord syntax").
@@ -103,7 +133,11 @@ mod tests {
         let mut import = KeymapImport;
         let cases = [("up", "↑"), ("down", "↓"), ("left", "←"), ("right", "→")];
         for (chord, expected_label) in cases {
-            assert_eq!(import.chord_label(chord.to_string()), expected_label, "chord {chord}");
+            assert_eq!(
+                import.chord_label(chord.to_string()),
+                expected_label,
+                "chord {chord}"
+            );
         }
     }
 

@@ -30,7 +30,10 @@ fn abi_083_graduated_unstable_name_is_not_refused_as_unknown() {
         r#"{{"id":"{PLUGIN}","version":"1.0.0","api":"0.1.0","tier":"T3","unstable":["{GRADUATED}"]}}"#
     );
     let found = validate_json(&manifest, &host_after_graduation());
-    let codes: Vec<&str> = found.iter().map(|diagnostic| diagnostic.code.as_str()).collect();
+    let codes: Vec<&str> = found
+        .iter()
+        .map(|diagnostic| diagnostic.code.as_str())
+        .collect();
     assert!(!codes.contains(&"manifest.unstable-unknown"), "{codes:?}");
 }
 

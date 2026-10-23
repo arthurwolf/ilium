@@ -35,7 +35,9 @@ fn doc_abi_067_size_table_has_a_row_for_every_string_list_or_blob_field() {
             let name = name.trim();
             let ty = ty.trim().trim_end_matches(',').trim_end_matches(';').trim();
             let is_field = !name.is_empty()
-                && name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+                && name
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
             if !is_field || !is_sized_type(ty) {
                 continue;
             }
@@ -45,5 +47,8 @@ fn doc_abi_067_size_table_has_a_row_for_every_string_list_or_blob_field() {
             }
         }
     }
-    assert!(missing.is_empty(), "fields without a size row: {missing:#?}");
+    assert!(
+        missing.is_empty(),
+        "fields without a size row: {missing:#?}"
+    );
 }

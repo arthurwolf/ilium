@@ -226,7 +226,8 @@ mod tests {
     #[test]
     fn single_t1_plugin_with_kernel_tab_write_grant_installs() {
         let mut rig = ConfigRig::new();
-        let result = rig.install(&PluginSpec::new("fixture.writer", "T1").grants(&[KERNEL_TAB_WRITE_GRANT]));
+        let result =
+            rig.install(&PluginSpec::new("fixture.writer", "T1").grants(&[KERNEL_TAB_WRITE_GRANT]));
         assert!(result.is_ok());
         assert!(result.codes.is_empty());
         assert!(rig.is_installed("fixture.writer"));
@@ -236,11 +237,16 @@ mod tests {
     #[test]
     fn second_plugin_declaring_same_kernel_tab_write_grant_is_refused() {
         let mut rig = ConfigRig::new();
-        let first = rig.install(&PluginSpec::new("fixture.first", "T1").grants(&[KERNEL_TAB_WRITE_GRANT]));
+        let first =
+            rig.install(&PluginSpec::new("fixture.first", "T1").grants(&[KERNEL_TAB_WRITE_GRANT]));
         assert!(first.is_ok());
-        let second = rig.install(&PluginSpec::new("fixture.second", "T1").grants(&[KERNEL_TAB_WRITE_GRANT]));
+        let second =
+            rig.install(&PluginSpec::new("fixture.second", "T1").grants(&[KERNEL_TAB_WRITE_GRANT]));
         assert!(!second.is_ok());
-        assert!(second.codes.iter().any(|code| code == "manifest.settings-owner"));
+        assert!(second
+            .codes
+            .iter()
+            .any(|code| code == "manifest.settings-owner"));
         assert!(rig.is_installed("fixture.first"));
         assert!(!rig.is_installed("fixture.second"));
     }
@@ -250,7 +256,10 @@ mod tests {
     fn kernel_tab_write_owner_is_the_only_installed_holder() {
         let mut rig = ConfigRig::new();
         rig.install(&PluginSpec::new("fixture.writer", "T1").grants(&[KERNEL_TAB_WRITE_GRANT]));
-        assert_eq!(rig.write_owners("terminal"), vec!["fixture.writer".to_string()]);
+        assert_eq!(
+            rig.write_owners("terminal"),
+            vec!["fixture.writer".to_string()]
+        );
     }
 
     /// REQ: COR-030
@@ -268,7 +277,8 @@ mod tests {
         rig.install(&PluginSpec::new("fixture.first", "T1").grants(&[KERNEL_TAB_WRITE_GRANT]));
         assert!(rig.uninstall("fixture.first"));
         assert!(rig.write_owners("terminal").is_empty());
-        let replacement = rig.install(&PluginSpec::new("fixture.second", "T1").grants(&[KERNEL_TAB_WRITE_GRANT]));
+        let replacement =
+            rig.install(&PluginSpec::new("fixture.second", "T1").grants(&[KERNEL_TAB_WRITE_GRANT]));
         assert!(replacement.is_ok());
     }
 
@@ -283,9 +293,13 @@ mod tests {
     #[test]
     fn t2_package_with_kernel_tab_write_grant_fails_with_grant_tier() {
         let mut rig = ConfigRig::new();
-        let result = rig.install(&PluginSpec::new("fixture.t2-writer", "T2").grants(&[KERNEL_TAB_WRITE_GRANT]));
+        let result = rig
+            .install(&PluginSpec::new("fixture.t2-writer", "T2").grants(&[KERNEL_TAB_WRITE_GRANT]));
         assert!(!result.is_ok());
-        assert!(result.codes.iter().any(|code| code == "manifest.grant-tier"));
+        assert!(result
+            .codes
+            .iter()
+            .any(|code| code == "manifest.grant-tier"));
         assert!(!rig.is_installed("fixture.t2-writer"));
     }
 
@@ -293,8 +307,12 @@ mod tests {
     #[test]
     fn t3_package_with_kernel_tab_write_grant_fails_with_grant_tier() {
         let mut rig = ConfigRig::new();
-        let result = rig.install(&PluginSpec::new("fixture.t3-writer", "T3").grants(&[KERNEL_TAB_WRITE_GRANT]));
-        assert!(result.codes.iter().any(|code| code == "manifest.grant-tier"));
+        let result = rig
+            .install(&PluginSpec::new("fixture.t3-writer", "T3").grants(&[KERNEL_TAB_WRITE_GRANT]));
+        assert!(result
+            .codes
+            .iter()
+            .any(|code| code == "manifest.grant-tier"));
         assert!(!rig.is_installed("fixture.t3-writer"));
     }
 
@@ -302,7 +320,8 @@ mod tests {
     #[test]
     fn t3_package_with_kernel_tab_read_grant_installs() {
         let mut rig = ConfigRig::new();
-        let result = rig.install(&PluginSpec::new("fixture.t3-reader", "T3").grants(&[KERNEL_TAB_READ_GRANT]));
+        let result = rig
+            .install(&PluginSpec::new("fixture.t3-reader", "T3").grants(&[KERNEL_TAB_READ_GRANT]));
         assert!(result.is_ok());
         assert!(rig.is_installed("fixture.t3-reader"));
     }
@@ -311,7 +330,8 @@ mod tests {
     #[test]
     fn t2_package_with_kernel_tab_read_grant_installs() {
         let mut rig = ConfigRig::new();
-        let result = rig.install(&PluginSpec::new("fixture.t2-reader", "T2").grants(&[KERNEL_TAB_READ_GRANT]));
+        let result = rig
+            .install(&PluginSpec::new("fixture.t2-reader", "T2").grants(&[KERNEL_TAB_READ_GRANT]));
         assert!(result.is_ok());
     }
 
@@ -333,11 +353,19 @@ mod tests {
     #[test]
     fn section_written_and_snapshotted_keeps_its_schema_version() {
         let mut rig = ConfigRig::with_core_plugins();
-        let handle = rig.section("fixture.state", SNAPSHOT_SECTION_NAME, 3, SNAPSHOT_SECTION_MAX_BYTES);
+        let handle = rig.section(
+            "fixture.state",
+            SNAPSHOT_SECTION_NAME,
+            3,
+            SNAPSHOT_SECTION_MAX_BYTES,
+        );
         assert!(rig.write_section(&handle, b"{\"monitors\":1}").is_ok());
         assert!(rig.write_snapshot().is_ok());
         let snapshot = rig.snapshot();
-        assert_eq!(snapshot.section(SNAPSHOT_SECTION_NAME), Some(b"{\"monitors\":1}".to_vec()));
+        assert_eq!(
+            snapshot.section(SNAPSHOT_SECTION_NAME),
+            Some(b"{\"monitors\":1}".to_vec())
+        );
         assert_eq!(snapshot.schema_version(SNAPSHOT_SECTION_NAME), Some(3));
     }
 
@@ -356,26 +384,42 @@ mod tests {
     #[test]
     fn oversized_section_is_dropped_and_previous_value_is_kept() {
         let mut rig = ConfigRig::new();
-        let handle = rig.section("fixture.big", SNAPSHOT_SECTION_NAME, 1, SNAPSHOT_SECTION_MAX_BYTES);
+        let handle = rig.section(
+            "fixture.big",
+            SNAPSHOT_SECTION_NAME,
+            1,
+            SNAPSHOT_SECTION_MAX_BYTES,
+        );
         let previous = b"previous value".to_vec();
         assert!(rig.write_section(&handle, &previous).is_ok());
         assert!(rig.write_snapshot().is_ok());
         let oversized = vec![b'x'; 300 * KIB];
         let _oversize_result = rig.write_section(&handle, &oversized);
         assert!(rig.write_snapshot().is_ok());
-        assert_eq!(rig.snapshot().section(SNAPSHOT_SECTION_NAME), Some(previous));
+        assert_eq!(
+            rig.snapshot().section(SNAPSHOT_SECTION_NAME),
+            Some(previous)
+        );
     }
 
     /// REQ: COR-032
     #[test]
     fn crashed_plugin_does_not_block_snapshot_and_keeps_last_value() {
         let mut rig = ConfigRig::new();
-        let handle = rig.section("fixture.crashy", SNAPSHOT_SECTION_NAME, 1, SNAPSHOT_SECTION_MAX_BYTES);
+        let handle = rig.section(
+            "fixture.crashy",
+            SNAPSHOT_SECTION_NAME,
+            1,
+            SNAPSHOT_SECTION_MAX_BYTES,
+        );
         assert!(rig.write_section(&handle, b"last good").is_ok());
         assert!(rig.write_snapshot().is_ok());
         rig.crash_plugin("fixture.crashy");
         assert!(rig.write_snapshot().is_ok());
-        assert_eq!(rig.snapshot().section(SNAPSHOT_SECTION_NAME), Some(b"last good".to_vec()));
+        assert_eq!(
+            rig.snapshot().section(SNAPSHOT_SECTION_NAME),
+            Some(b"last good".to_vec())
+        );
     }
 
     /// REQ: COR-032
@@ -385,7 +429,10 @@ mod tests {
         let handle = rig.section("fixture.empty", SNAPSHOT_SECTION_NAME, 1, KIB);
         assert!(rig.write_section(&handle, &[]).is_ok());
         assert!(rig.write_snapshot().is_ok());
-        assert_eq!(rig.snapshot().section(SNAPSHOT_SECTION_NAME), Some(Vec::new()));
+        assert_eq!(
+            rig.snapshot().section(SNAPSHOT_SECTION_NAME),
+            Some(Vec::new())
+        );
     }
 
     /// REQ: COR-032
@@ -453,7 +500,9 @@ mod tests {
         let mut rig = ConfigRig::new();
         rig.write_project_config("unknown_project_key: keep\n");
         rig.set_project_setting("animation.speed", "2");
-        assert!(rig.read_project_config().contains("unknown_project_key: keep"));
+        assert!(rig
+            .read_project_config()
+            .contains("unknown_project_key: keep"));
     }
 
     /// REQ: COR-030
@@ -470,7 +519,10 @@ mod tests {
     fn with_core_plugins_installs_the_core_terminal_owner() {
         let rig = ConfigRig::with_core_plugins();
         assert!(rig.is_installed("ilium.core.terminal"));
-        assert_eq!(rig.write_owners("terminal"), vec!["ilium.core.terminal".to_string()]);
+        assert_eq!(
+            rig.write_owners("terminal"),
+            vec!["ilium.core.terminal".to_string()]
+        );
     }
 
     #[test]
@@ -481,8 +533,15 @@ mod tests {
 
     #[test]
     fn plugin_spec_builder_stores_grants_as_given() {
-        let spec = PluginSpec::new("fixture.grants", "T1").grants(&[KERNEL_TAB_READ_GRANT, KERNEL_TAB_WRITE_GRANT]);
-        assert_eq!(spec.grants, vec![KERNEL_TAB_READ_GRANT.to_string(), KERNEL_TAB_WRITE_GRANT.to_string()]);
+        let spec = PluginSpec::new("fixture.grants", "T1")
+            .grants(&[KERNEL_TAB_READ_GRANT, KERNEL_TAB_WRITE_GRANT]);
+        assert_eq!(
+            spec.grants,
+            vec![
+                KERNEL_TAB_READ_GRANT.to_string(),
+                KERNEL_TAB_WRITE_GRANT.to_string()
+            ]
+        );
     }
 
     #[test]
@@ -494,7 +553,10 @@ mod tests {
 
     #[test]
     fn install_result_is_ok_follows_ok_field() {
-        let result = InstallResult { ok: true, codes: Vec::new() };
+        let result = InstallResult {
+            ok: true,
+            codes: Vec::new(),
+        };
         assert!(result.is_ok());
     }
 }

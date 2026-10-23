@@ -13,21 +13,30 @@
 //! reference-manifest.md, reference-manifest-schema.md, reference-runtime-model.md.
 
 pub mod abi;
+pub mod cli;
+pub mod client;
 pub mod codes;
 pub mod compat;
+pub mod conformance;
 pub mod dedup;
 pub mod deprecation;
 pub mod error;
 pub mod generated;
 pub mod grants;
+pub mod http;
 pub mod ids;
 pub mod kernel;
 pub mod lifecycle;
 pub mod limits;
+pub mod lock;
 pub mod manifest;
+pub mod mirror;
 pub mod naming;
 pub mod nesting;
+pub mod package;
 pub mod platform;
+pub mod registry;
+pub mod resolve;
 pub mod side;
 pub mod tier;
 pub mod uitree;

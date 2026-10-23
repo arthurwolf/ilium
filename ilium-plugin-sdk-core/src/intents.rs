@@ -331,9 +331,15 @@ mod spec_tests {
     #[test]
     fn named_error_constructors_map_to_their_codes() {
         assert_eq!(PluginError::timed_out("slow").code, ErrorCode::TimedOut);
-        assert_eq!(PluginError::invalid_argument("bad").code, ErrorCode::InvalidArgument);
+        assert_eq!(
+            PluginError::invalid_argument("bad").code,
+            ErrorCode::InvalidArgument
+        );
         assert_eq!(PluginError::not_found("gone").code, ErrorCode::NotFound);
-        assert_eq!(PluginError::not_permitted("no").code, ErrorCode::NotPermitted);
+        assert_eq!(
+            PluginError::not_permitted("no").code,
+            ErrorCode::NotPermitted
+        );
         assert_eq!(PluginError::timed_out("slow").retry_after_ms, None);
     }
 

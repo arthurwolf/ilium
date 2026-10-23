@@ -35,10 +35,7 @@ fn pkg_697_root_rotation_verified_with_both_thresholds() {
 #[test]
 fn pkg_698_retired_key_id_never_reused() {
     let page = manual_page("reference-registry-key-compromise");
-    for phrase in [
-        "The registry operator MUST NOT",
-        "reuse a retired key id",
-    ] {
+    for phrase in ["The registry operator MUST NOT", "reuse a retired key id"] {
         assert!(page.contains(phrase), "missing: {phrase}");
     }
 }

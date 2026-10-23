@@ -415,7 +415,10 @@ mod tests {
         let hello = harness.matching_hello();
         assert_eq!(hello.plugin_protocol, 1);
         assert_eq!(hello.contract, "0.1.0");
-        assert_eq!(hello.installed, vec![installed_spec(PLUGIN, "1.0.0", [7; 32])]);
+        assert_eq!(
+            hello.installed,
+            vec![installed_spec(PLUGIN, "1.0.0", [7; 32])]
+        );
     }
 
     /// REQ: HST-103
@@ -490,7 +493,9 @@ mod tests {
         hello.plugin_protocol = 2;
         let conn = harness.connect(CLIENT_ID, true, hello);
         harness.pump(8);
-        let exit = harness.client_exit(conn).expect("a mismatched client exits");
+        let exit = harness
+            .client_exit(conn)
+            .expect("a mismatched client exits");
         assert_eq!(exit.code, 76);
         assert!(!exit.interface_drawn);
         assert!(!exit.message.is_empty());
@@ -531,10 +536,7 @@ mod tests {
     #[test]
     fn hash_skew_with_equal_version_also_disables_client_half() {
         let mut harness = harness_with_plugin();
-        let hello = hello_with_installed(
-            &harness,
-            vec![installed_spec(PLUGIN, "1.0.0", [8; 32])],
-        );
+        let hello = hello_with_installed(&harness, vec![installed_spec(PLUGIN, "1.0.0", [8; 32])]);
         let conn = harness.connect(CLIENT_ID, true, hello);
         harness.pump(8);
         let half = harness.client_half(conn, PLUGIN);
@@ -566,10 +568,7 @@ mod tests {
     fn server_only_plugin_keeps_running_without_client_half() {
         let mut harness = harness_with_plugin();
         harness.install_server_plugin("tray", "1.0.0", [4; 32]);
-        let hello = hello_with_installed(
-            &harness,
-            vec![installed_spec(PLUGIN, "1.0.0", [7; 32])],
-        );
+        let hello = hello_with_installed(&harness, vec![installed_spec(PLUGIN, "1.0.0", [7; 32])]);
         let conn = harness.connect(CLIENT_ID, true, hello);
         harness.pump(8);
         assert!(harness.is_open(conn));
@@ -750,7 +749,9 @@ mod tests {
         harness.submit(conn, PLUGIN, "key-1", CREATE_PANE_INTENT);
         harness.pump(8);
         let nodes = tree_node_ids(&harness.wire(conn));
-        let node = nodes.first().expect("the created pane is sent as a tree change");
+        let node = nodes
+            .first()
+            .expect("the created pane is sent as a tree change");
         assert!(harness.client_mirror(conn).contains(node));
     }
 
@@ -822,11 +823,15 @@ mod tests {
         harness.pump(8);
         assert_eq!(harness.server_tree_len(), 2);
         assert_eq!(
-            harness.final_outcome("client-a", PLUGIN, "key-1").as_deref(),
+            harness
+                .final_outcome("client-a", PLUGIN, "key-1")
+                .as_deref(),
             Some(OK_OUTCOME)
         );
         assert_eq!(
-            harness.final_outcome("client-b", PLUGIN, "key-1").as_deref(),
+            harness
+                .final_outcome("client-b", PLUGIN, "key-1")
+                .as_deref(),
             Some(OK_OUTCOME)
         );
     }
@@ -913,7 +918,10 @@ mod tests {
         let hello = harness.matching_hello();
         let reattached = harness.reattach(CLIENT_ID, 0, hello);
         harness.pump(8);
-        assert_eq!(outcome_count(&harness.wire(reattached)), OUTCOME_RECORD_LIMIT);
+        assert_eq!(
+            outcome_count(&harness.wire(reattached)),
+            OUTCOME_RECORD_LIMIT
+        );
     }
 
     /// REQ: HST-118
@@ -952,10 +960,7 @@ mod tests {
                 .as_deref(),
             Some("refused(busy)")
         );
-        assert_eq!(
-            harness.final_outcome(CLIENT_ID, PLUGIN, "key-0"),
-            None
-        );
+        assert_eq!(harness.final_outcome(CLIENT_ID, PLUGIN, "key-0"), None);
     }
 
     /// REQ: HST-120

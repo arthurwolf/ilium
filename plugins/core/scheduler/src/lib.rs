@@ -83,8 +83,14 @@ mod spec_tests {
     #[test]
     fn manifest_declares_a_server_side_and_a_client_side_with_their_worlds() {
         let manifest = manifest();
-        assert_eq!(text_at(&manifest, "/server/world"), Some("ilium:server/base@0.1.0"));
-        assert_eq!(text_at(&manifest, "/client/world"), Some("ilium:client/base@0.1.0"));
+        assert_eq!(
+            text_at(&manifest, "/server/world"),
+            Some("ilium:server/base@0.1.0")
+        );
+        assert_eq!(
+            text_at(&manifest, "/client/world"),
+            Some("ilium:client/base@0.1.0")
+        );
     }
 
     /// REQ: COR-050
@@ -103,7 +109,9 @@ mod spec_tests {
         let manifest = manifest();
         let server_grants = string_list_at(&manifest, "/capabilities/server");
         assert!(server_grants.iter().any(|grant| grant == "terminal.write"));
-        assert!(server_grants.iter().any(|grant| grant == "terminal.input-lock"));
+        assert!(server_grants
+            .iter()
+            .any(|grant| grant == "terminal.input-lock"));
     }
 
     /// REQ: scheduler-B16
@@ -120,7 +128,9 @@ mod spec_tests {
     fn terminal_raw_input_is_declared_on_the_server_side() {
         let manifest = manifest();
         let server_grants = string_list_at(&manifest, "/capabilities/server");
-        assert!(server_grants.iter().any(|grant| grant == "terminal.raw-input"));
+        assert!(server_grants
+            .iter()
+            .any(|grant| grant == "terminal.raw-input"));
     }
 
     /// Manual: the page carries no bracket ID here
@@ -156,8 +166,10 @@ mod spec_tests {
                 .find(|point| text_at(point, "/id") == Some(point_id))
                 .cloned()
         };
-        let schedule_sources = point_with_id("schedule-sources").expect("schedule-sources is declared");
-        let before_send = point_with_id("before-send-scheduled").expect("before-send-scheduled is declared");
+        let schedule_sources =
+            point_with_id("schedule-sources").expect("schedule-sources is declared");
+        let before_send =
+            point_with_id("before-send-scheduled").expect("before-send-scheduled is declared");
         assert_eq!(text_at(&schedule_sources, "/kind"), Some("collect"));
         assert_eq!(text_at(&before_send, "/kind"), Some("hook"));
         assert_eq!(text_at(&before_send, "/mode"), Some("veto"));

@@ -155,7 +155,10 @@ mod tests {
         StartNode {
             id: id.to_string(),
             tier,
-            requires_plugins: requires_plugins.iter().map(|text| text.to_string()).collect(),
+            requires_plugins: requires_plugins
+                .iter()
+                .map(|text| text.to_string())
+                .collect(),
             requires_service_providers: requires_service_providers
                 .iter()
                 .map(|text| text.to_string())
@@ -169,7 +172,10 @@ mod tests {
 
     fn order_or_panic(result: Result<Vec<String>, Vec<Diagnostic>>) -> Vec<String> {
         result.unwrap_or_else(|diagnostics| {
-            panic!("expected an activation order, got {} diagnostics", diagnostics.len())
+            panic!(
+                "expected an activation order, got {} diagnostics",
+                diagnostics.len()
+            )
         })
     }
 
@@ -181,7 +187,7 @@ mod tests {
     }
 
     fn code_text(diagnostic: &Diagnostic) -> &str {
-        &*diagnostic.code.0
+        &diagnostic.code.0
     }
 
     fn usage_error(exit_code: i32, code: &str) -> UsageError {
@@ -343,7 +349,10 @@ mod tests {
     #[test]
     fn start_order_of_single_node_is_that_node() {
         let nodes = [node("solo", 1, &[], &[])];
-        assert_eq!(order_or_panic(start_order(&nodes)), vec!["solo".to_string()]);
+        assert_eq!(
+            order_or_panic(start_order(&nodes)),
+            vec!["solo".to_string()]
+        );
     }
 
     /// REQ: LIF-045
@@ -391,10 +400,7 @@ mod tests {
     /// REQ: PKG-350
     #[test]
     fn service_provider_starts_before_consumer_despite_higher_tier() {
-        let nodes = [
-            node("app", 1, &[], &["svc"]),
-            node("svc", 2, &[], &[]),
-        ];
+        let nodes = [node("app", 1, &[], &["svc"]), node("svc", 2, &[], &[])];
         assert_eq!(
             order_or_panic(start_order(&nodes)),
             vec!["svc".to_string(), "app".to_string()]
@@ -404,10 +410,7 @@ mod tests {
     /// REQ: LIF-048
     #[test]
     fn plugin_requirement_cycle_is_reported_as_dependency_cycle() {
-        let nodes = [
-            node("a", 1, &["b"], &[]),
-            node("b", 1, &["a"], &[]),
-        ];
+        let nodes = [node("a", 1, &["b"], &[]), node("b", 1, &["a"], &[])];
         let diagnostics = cycle_diagnostics(start_order(&nodes));
         assert!(!diagnostics.is_empty());
         assert!(diagnostics
@@ -428,10 +431,7 @@ mod tests {
     /// REQ: LIF-048
     #[test]
     fn service_provider_cycle_is_reported_as_service_cycle() {
-        let nodes = [
-            node("a", 1, &[], &["b"]),
-            node("b", 1, &[], &["a"]),
-        ];
+        let nodes = [node("a", 1, &[], &["b"]), node("b", 1, &[], &["a"])];
         let diagnostics = cycle_diagnostics(start_order(&nodes));
         assert!(diagnostics
             .iter()
@@ -441,7 +441,9 @@ mod tests {
     /// REQ: LIF-047
     #[test]
     fn independent_plugins_start_in_key_order() {
-        let ids: Vec<String> = (0..12usize).map(|index| format!("plugin-{index:02}")).collect();
+        let ids: Vec<String> = (0..12usize)
+            .map(|index| format!("plugin-{index:02}"))
+            .collect();
         let nodes: Vec<StartNode> = (0..12usize)
             .map(|index| {
                 let tier = if index % 2 == 0 { 1 } else { 2 };
@@ -449,12 +451,25 @@ mod tests {
             })
             .collect();
         let expected = vec![
-            "plugin-00", "plugin-02", "plugin-04", "plugin-06", "plugin-08", "plugin-10",
-            "plugin-01", "plugin-03", "plugin-05", "plugin-07", "plugin-09", "plugin-11",
+            "plugin-00",
+            "plugin-02",
+            "plugin-04",
+            "plugin-06",
+            "plugin-08",
+            "plugin-10",
+            "plugin-01",
+            "plugin-03",
+            "plugin-05",
+            "plugin-07",
+            "plugin-09",
+            "plugin-11",
         ];
         assert_eq!(
             order_or_panic(start_order(&nodes)),
-            expected.into_iter().map(str::to_string).collect::<Vec<String>>()
+            expected
+                .into_iter()
+                .map(str::to_string)
+                .collect::<Vec<String>>()
         );
     }
 
@@ -476,7 +491,10 @@ mod tests {
     #[test]
     fn shutdown_order_of_single_node_is_that_node() {
         let nodes = [node("solo", 1, &[], &[])];
-        assert_eq!(order_or_panic(shutdown_order(&nodes)), vec!["solo".to_string()]);
+        assert_eq!(
+            order_or_panic(shutdown_order(&nodes)),
+            vec!["solo".to_string()]
+        );
     }
 
     /// REQ: PKG-351
@@ -510,10 +528,7 @@ mod tests {
     /// REQ: LIF-048
     #[test]
     fn shutdown_order_reports_the_same_cycle_as_start_order() {
-        let nodes = [
-            node("a", 1, &["b"], &[]),
-            node("b", 1, &["a"], &[]),
-        ];
+        let nodes = [node("a", 1, &["b"], &[]), node("b", 1, &["a"], &[])];
         let diagnostics = cycle_diagnostics(shutdown_order(&nodes));
         assert!(diagnostics
             .iter()

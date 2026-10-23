@@ -806,14 +806,18 @@ impl Scheduler {
     /// The caller owns the drained events; queue policies have already been applied.
     pub fn take_events(&self, plugin: &PluginId, maximum: usize) -> Vec<Event> {
         let mut state = lock(&self.state);
-        let Some(side) = state.sides.get_mut(plugin) else { return Vec::new(); };
+        let Some(side) = state.sides.get_mut(plugin) else {
+            return Vec::new();
+        };
         let count = maximum.min(side.events.len());
         side.events.drain(..count).collect()
     }
 
     /// Observes pending delivery order without consuming events or changing policy state.
     pub fn snapshot_events(&self, plugin: &PluginId) -> Vec<Event> {
-        lock(&self.state).sides.get(plugin)
+        lock(&self.state)
+            .sides
+            .get(plugin)
             .map_or_else(Vec::new, |side| side.events.iter().cloned().collect())
     }
 
@@ -1486,7 +1490,7 @@ mod tests {
 
     use super::{
         cancellation_outcome, child_signal_schedule, event_queue_policy, executor_threads,
-        job_bank_threads, job_cancel_verdict, run_hook, retry_after_ms, teardown_bound,
+        job_bank_threads, job_cancel_verdict, retry_after_ms, run_hook, teardown_bound,
         BatchBuilder, CallKind, CancelCause, CancelledWork, ChildSignal, EventPush,
         ExecutionBucket, HandlerSpec, JobCancelVerdict, QueuePolicy, QueueStats, RequestLedger,
         Scheduler, StreamCredit, UiWorkChannel, BATCH_FLUSH_MS, BATCH_MAX_EVENTS,
@@ -1582,7 +1586,11 @@ mod tests {
         // clamp(cores / 2, 2, 4), with integer division; includes zero cores and the upper bound.
         let expected = [(0, 2), (1, 2), (2, 2), (4, 2), (6, 3), (8, 4), (16, 4)];
         for (cores, threads) in expected {
-            assert_eq!(executor_threads(ProcessKind::Server, cores), threads, "cores={cores}");
+            assert_eq!(
+                executor_threads(ProcessKind::Server, cores),
+                threads,
+                "cores={cores}"
+            );
         }
     }
 
@@ -1592,7 +1600,11 @@ mod tests {
         // clamp(cores / 4, 1, 2), with integer division.
         let expected = [(0, 1), (1, 1), (4, 1), (7, 1), (8, 2), (16, 2)];
         for (cores, threads) in expected {
-            assert_eq!(executor_threads(ProcessKind::Client, cores), threads, "cores={cores}");
+            assert_eq!(
+                executor_threads(ProcessKind::Client, cores),
+                threads,
+                "cores={cores}"
+            );
         }
     }
 
@@ -1600,7 +1612,11 @@ mod tests {
     #[test]
     fn cli_executor_is_a_single_thread_pool() {
         for cores in [1, 4, 16] {
-            assert_eq!(executor_threads(ProcessKind::Cli, cores), 1, "cores={cores}");
+            assert_eq!(
+                executor_threads(ProcessKind::Cli, cores),
+                1,
+                "cores={cores}"
+            );
         }
     }
 
@@ -1743,7 +1759,10 @@ mod tests {
         scheduler.enqueue(&alpha, CallKind::Activate, now, noop());
         scheduler.tick(now);
         let kinds: Vec<CallKind> = scheduler.executed().iter().map(|call| call.kind).collect();
-        assert_eq!(kinds, vec![CallKind::Activate, CallKind::OnEvents, CallKind::Render]);
+        assert_eq!(
+            kinds,
+            vec![CallKind::Activate, CallKind::OnEvents, CallKind::Render]
+        );
     }
 
     /// REQ: HST-184
@@ -1756,7 +1775,11 @@ mod tests {
         let first = scheduler.enqueue(&alpha, CallKind::HookHandler, now, noop());
         let second = scheduler.enqueue(&alpha, CallKind::HookHandler, now, noop());
         scheduler.tick(now);
-        let tickets: Vec<u64> = scheduler.executed().iter().map(|call| call.ticket).collect();
+        let tickets: Vec<u64> = scheduler
+            .executed()
+            .iter()
+            .map(|call| call.ticket)
+            .collect();
         assert_eq!(tickets, vec![first, second]);
     }
 
@@ -1789,11 +1812,20 @@ mod tests {
         }
         scheduler.tick(now);
         let executed = scheduler.executed();
-        let alpha_count = executed.iter().filter(|call| call.plugin.0 == alpha.0).count();
-        let beta_count = executed.iter().filter(|call| call.plugin.0 == beta.0).count();
+        let alpha_count = executed
+            .iter()
+            .filter(|call| call.plugin.0 == alpha.0)
+            .count();
+        let beta_count = executed
+            .iter()
+            .filter(|call| call.plugin.0 == beta.0)
+            .count();
         assert_eq!(alpha_count, SIDE_CALLS_PER_TICK);
         assert_eq!(beta_count, SIDE_CALLS_PER_TICK);
-        assert_ne!(executed[0].plugin.0, executed[1].plugin.0, "round robin must interleave");
+        assert_ne!(
+            executed[0].plugin.0, executed[1].plugin.0,
+            "round robin must interleave"
+        );
     }
 
     /// REQ: HST-187
@@ -1860,7 +1892,10 @@ mod tests {
         let now = Instant::now();
         scheduler.enqueue(&alpha, CallKind::OnEvents, now, noop());
         scheduler.tick(now);
-        assert!(scheduler.executed().is_empty(), "no call may enter an activating instance");
+        assert!(
+            scheduler.executed().is_empty(),
+            "no call may enter an activating instance"
+        );
         scheduler.finish_activation(&alpha, true);
         scheduler.tick(now);
         let kinds: Vec<CallKind> = scheduler.executed().iter().map(|call| call.kind).collect();
@@ -1873,7 +1908,10 @@ mod tests {
     #[test]
     fn queue_policies_follow_the_event_table() {
         assert_eq!(event_queue_policy(&tree_changed()), QueuePolicy::Coalesce);
-        assert_eq!(event_queue_policy(&output_matched()), QueuePolicy::DropOldest);
+        assert_eq!(
+            event_queue_policy(&output_matched()),
+            QueuePolicy::DropOldest
+        );
         assert_eq!(event_queue_policy(&key_pressed()), QueuePolicy::NeverDrop);
         assert_eq!(
             event_queue_policy(&Event::Message(
@@ -1895,8 +1933,14 @@ mod tests {
         let scheduler = Scheduler::new(TICK_MS);
         let alpha = plugin("example.alpha");
         scheduler.register_side(&alpha, 1024);
-        assert_eq!(scheduler.push_event(&alpha, tree_changed()), EventPush::Queued);
-        assert_eq!(scheduler.push_event(&alpha, tree_changed()), EventPush::Coalesced);
+        assert_eq!(
+            scheduler.push_event(&alpha, tree_changed()),
+            EventPush::Queued
+        );
+        assert_eq!(
+            scheduler.push_event(&alpha, tree_changed()),
+            EventPush::Coalesced
+        );
         assert_eq!(scheduler.queue_len(&alpha), 1);
     }
 
@@ -1906,10 +1950,19 @@ mod tests {
         let scheduler = Scheduler::new(TICK_MS);
         let alpha = plugin("example.alpha");
         scheduler.register_side(&alpha, 1);
-        assert_eq!(scheduler.push_event(&alpha, output_matched()), EventPush::Queued);
-        assert_eq!(scheduler.push_event(&alpha, output_matched()), EventPush::DroppedOldest);
+        assert_eq!(
+            scheduler.push_event(&alpha, output_matched()),
+            EventPush::Queued
+        );
+        assert_eq!(
+            scheduler.push_event(&alpha, output_matched()),
+            EventPush::DroppedOldest
+        );
         assert_eq!(scheduler.queue_len(&alpha), 1);
-        assert_eq!(scheduler.stats(&alpha).map(|stats| stats.dropped_events), Some(1));
+        assert_eq!(
+            scheduler.stats(&alpha).map(|stats| stats.dropped_events),
+            Some(1)
+        );
     }
 
     /// REQ: HST-202
@@ -1918,12 +1971,18 @@ mod tests {
         let scheduler = Scheduler::new(TICK_MS);
         let alpha = plugin("example.alpha");
         scheduler.register_side(&alpha, 1);
-        assert_eq!(scheduler.push_event(&alpha, key_pressed()), EventPush::Queued);
+        assert_eq!(
+            scheduler.push_event(&alpha, key_pressed()),
+            EventPush::Queued
+        );
         assert_eq!(
             scheduler.push_event(&alpha, output_matched()),
             EventPush::DiscardedIncoming
         );
-        assert_eq!(scheduler.stats(&alpha).map(|stats| stats.dropped_events), Some(1));
+        assert_eq!(
+            scheduler.stats(&alpha).map(|stats| stats.dropped_events),
+            Some(1)
+        );
     }
 
     /// REQ: HST-203
@@ -1932,8 +1991,14 @@ mod tests {
         let scheduler = Scheduler::new(TICK_MS);
         let alpha = plugin("example.alpha");
         scheduler.register_side(&alpha, 1);
-        assert_eq!(scheduler.push_event(&alpha, key_pressed()), EventPush::Queued);
-        assert_eq!(scheduler.push_event(&alpha, key_pressed()), EventPush::Stuck);
+        assert_eq!(
+            scheduler.push_event(&alpha, key_pressed()),
+            EventPush::Queued
+        );
+        assert_eq!(
+            scheduler.push_event(&alpha, key_pressed()),
+            EventPush::Stuck
+        );
     }
 
     /// REQ: HST-206
@@ -1945,15 +2010,25 @@ mod tests {
         scheduler.set_source_rate(&alpha, 10);
         for index in 0..10 {
             let result = scheduler.push_event_from_source(&alpha, key_pressed());
-            assert!(result.is_ok(), "event {index} is within the rate and must be accepted");
+            assert!(
+                result.is_ok(),
+                "event {index} is within the rate and must be accepted"
+            );
         }
         let refused = match scheduler.push_event_from_source(&alpha, key_pressed()) {
             Ok(push) => panic!("the 11th event in one second must be refused, got {push:?}"),
             Err(error) => error,
         };
         assert_eq!(refused.code, ErrorCode::RateLimited);
-        assert!(refused.retry_after_ms.is_some(), "rate-limited must carry retry-after-ms");
-        assert_eq!(scheduler.queue_len(&alpha), 10, "a refused event never reaches the queue");
+        assert!(
+            refused.retry_after_ms.is_some(),
+            "rate-limited must carry retry-after-ms"
+        );
+        assert_eq!(
+            scheduler.queue_len(&alpha),
+            10,
+            "a refused event never reaches the queue"
+        );
     }
 
     // ---- Batches and stream credit ---------------------------------------------------------------
@@ -1977,7 +2052,10 @@ mod tests {
     fn single_event_waits_for_the_flush_window() {
         let mut builder = BatchBuilder::new();
         builder.push(tree_changed(), 0, false);
-        assert!(builder.take_ready(1).is_none(), "1 ms is inside the 2 ms window");
+        assert!(
+            builder.take_ready(1).is_none(),
+            "1 ms is inside the 2 ms window"
+        );
         assert_eq!(builder.take_ready(2).map(|batch| batch.len()), Some(1));
     }
 
@@ -2006,7 +2084,10 @@ mod tests {
         }
         assert_eq!(builder.take_ready(0).map(|batch| batch.len()), Some(256));
         builder.push(tree_changed(), 0, false);
-        assert!(builder.take_ready(0).is_none(), "one event is not a full batch");
+        assert!(
+            builder.take_ready(0).is_none(),
+            "one event is not a full batch"
+        );
         assert_eq!(builder.take_ready(2).map(|batch| batch.len()), Some(1));
     }
 
@@ -2062,10 +2143,16 @@ mod tests {
         credit.enqueued(CREDIT_WINDOW_BYTES);
         credit.consumed(CREDIT_WINDOW_BYTES / 2 - 1);
         assert_eq!(credit.in_flight(), CREDIT_WINDOW_BYTES / 2 + 1);
-        assert!(!credit.should_read(), "above half the window the reader stays paused");
+        assert!(
+            !credit.should_read(),
+            "above half the window the reader stays paused"
+        );
         credit.consumed(1);
         assert_eq!(credit.in_flight(), CREDIT_WINDOW_BYTES / 2);
-        assert!(credit.should_read(), "at exactly half the window the reader resumes");
+        assert!(
+            credit.should_read(),
+            "at exactly half the window the reader resumes"
+        );
     }
 
     /// REQ: HST-205
@@ -2075,7 +2162,10 @@ mod tests {
         assert_eq!(StreamCredit::split_chunks(1), vec![1]);
         assert_eq!(StreamCredit::split_chunks(65_536), vec![65_536]);
         assert_eq!(StreamCredit::split_chunks(65_537), vec![65_536, 1]);
-        assert_eq!(StreamCredit::split_chunks(CREDIT_WINDOW_BYTES), vec![65_536; 4]);
+        assert_eq!(
+            StreamCredit::split_chunks(CREDIT_WINDOW_BYTES),
+            vec![65_536; 4]
+        );
     }
 
     // ---- Execution budget ------------------------------------------------------------------------
@@ -2094,7 +2184,10 @@ mod tests {
         let mut bucket = ExecutionBucket::new();
         bucket.charge_cpu_ms(1_999);
         assert_eq!(bucket.balance_ms(), 1);
-        assert!(bucket.try_submit().is_ok(), "a positive balance still accepts");
+        assert!(
+            bucket.try_submit().is_ok(),
+            "a positive balance still accepts"
+        );
         bucket.charge_cpu_ms(1);
         assert_eq!(bucket.balance_ms(), 0);
         let error = expect_quota_refusal(bucket.try_submit());
@@ -2156,10 +2249,22 @@ mod tests {
         assert_eq!(HTTP_FILE_TEARDOWN_MS, 100);
         assert_eq!(CHILD_KILL_GRACE_MS, 2_000);
         assert_eq!(JOB_CANCEL_GRACE_MS, 1_000);
-        assert_eq!(teardown_bound(CancelledWork::Http), Duration::from_millis(100));
-        assert_eq!(teardown_bound(CancelledWork::FileRead), Duration::from_millis(100));
-        assert_eq!(teardown_bound(CancelledWork::Child), Duration::from_millis(2_000));
-        assert_eq!(teardown_bound(CancelledWork::Job), Duration::from_millis(1_000));
+        assert_eq!(
+            teardown_bound(CancelledWork::Http),
+            Duration::from_millis(100)
+        );
+        assert_eq!(
+            teardown_bound(CancelledWork::FileRead),
+            Duration::from_millis(100)
+        );
+        assert_eq!(
+            teardown_bound(CancelledWork::Child),
+            Duration::from_millis(2_000)
+        );
+        assert_eq!(
+            teardown_bound(CancelledWork::Job),
+            Duration::from_millis(1_000)
+        );
     }
 
     /// REQ: HST-210
@@ -2168,14 +2273,23 @@ mod tests {
         let schedule = child_signal_schedule();
         assert_eq!(schedule.len(), 2);
         assert_eq!(schedule[0].0, ChildSignal::Term);
-        assert_eq!(schedule[1], (ChildSignal::Kill, Duration::from_millis(2_000)));
+        assert_eq!(
+            schedule[1],
+            (ChildSignal::Kill, Duration::from_millis(2_000))
+        );
     }
 
     /// REQ: HST-210
     #[test]
     fn job_is_trapped_after_its_cancel_grace_period() {
-        assert_eq!(job_cancel_verdict(1_000, 1_999, false), JobCancelVerdict::Running);
-        assert_eq!(job_cancel_verdict(1_000, 2_500, false), JobCancelVerdict::Trap);
+        assert_eq!(
+            job_cancel_verdict(1_000, 1_999, false),
+            JobCancelVerdict::Running
+        );
+        assert_eq!(
+            job_cancel_verdict(1_000, 2_500, false),
+            JobCancelVerdict::Trap
+        );
         assert_eq!(
             job_cancel_verdict(1_000, 5_000, true),
             JobCancelVerdict::Running,
@@ -2186,28 +2300,61 @@ mod tests {
     /// REQ: HST-209
     #[test]
     fn each_cancellation_cause_produces_its_documented_outcome() {
-        assert_eq!(cancellation_outcome(CancelCause::SideStopped), Outcome::Cancelled);
-        assert_eq!(cancellation_outcome(CancelCause::PluginAsked), Outcome::Cancelled);
-        assert_eq!(cancellation_outcome(CancelCause::Shutdown), Outcome::Cancelled);
+        assert_eq!(
+            cancellation_outcome(CancelCause::SideStopped),
+            Outcome::Cancelled
+        );
+        assert_eq!(
+            cancellation_outcome(CancelCause::PluginAsked),
+            Outcome::Cancelled
+        );
+        assert_eq!(
+            cancellation_outcome(CancelCause::Shutdown),
+            Outcome::Cancelled
+        );
 
         let revoked = cancellation_outcome(CancelCause::GrantRevoked);
         assert!(
-            matches!(revoked, Outcome::Failed(PluginError { code: ErrorCode::Revoked, .. })),
+            matches!(
+                revoked,
+                Outcome::Failed(PluginError {
+                    code: ErrorCode::Revoked,
+                    ..
+                })
+            ),
             "got {revoked:?}"
         );
         let timed_out = cancellation_outcome(CancelCause::DeadlinePassed);
         assert!(
-            matches!(timed_out, Outcome::Failed(PluginError { code: ErrorCode::TimedOut, .. })),
+            matches!(
+                timed_out,
+                Outcome::Failed(PluginError {
+                    code: ErrorCode::TimedOut,
+                    ..
+                })
+            ),
             "got {timed_out:?}"
         );
         let trapped = cancellation_outcome(CancelCause::ProviderTrapped);
         assert!(
-            matches!(trapped, Outcome::Failed(PluginError { code: ErrorCode::Cancelled, .. })),
+            matches!(
+                trapped,
+                Outcome::Failed(PluginError {
+                    code: ErrorCode::Cancelled,
+                    ..
+                })
+            ),
             "got {trapped:?}"
         );
         let breach = cancellation_outcome(CancelCause::ProviderBreach);
         assert!(
-            matches!(breach, Outcome::Failed(PluginError { code: ErrorCode::Internal, .. })),
+            matches!(
+                breach,
+                Outcome::Failed(PluginError {
+                    code: ErrorCode::Internal,
+                    ..
+                })
+            ),
             "got {breach:?}"
         );
     }
@@ -2282,7 +2429,11 @@ mod tests {
         assert_eq!(run.runs[0].started_ms, None);
         assert!(run.runs[0].skipped_as_pass);
         assert!(run.runs[0].breach, "a skipped handler counts a breach");
-        assert_eq!(run.runs[1].started_ms, Some(0), "the next handler still runs");
+        assert_eq!(
+            run.runs[1].started_ms,
+            Some(0),
+            "the next handler still runs"
+        );
     }
 
     /// REQ: HST-212
@@ -2304,8 +2455,15 @@ mod tests {
             handler("example.three", ProcessKind::Server, 100, 0, 60),
         ];
         let run = run_hook(ProcessKind::Server, handlers, 0);
-        assert_eq!(run.runs[1].started_ms, Some(60), "started inside the 100 ms cap");
-        assert_eq!(run.runs[2].started_ms, None, "started at 120 ms, after the cap");
+        assert_eq!(
+            run.runs[1].started_ms,
+            Some(60),
+            "started inside the 100 ms cap"
+        );
+        assert_eq!(
+            run.runs[2].started_ms, None,
+            "started at 120 ms, after the cap"
+        );
         assert!(run.runs[2].skipped_by_chain_cap);
     }
 

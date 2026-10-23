@@ -20,7 +20,10 @@ fn doc_abi_076_runbook_gives_triage_pin_roll_back_and_bulk_report_in_order() {
         .to_lowercase();
     let positions: Vec<usize> = ["triage", "pin", "roll back", "bulk report"]
         .iter()
-        .map(|step| body.find(step).unwrap_or_else(|| panic!("runbook lacks step {step}")))
+        .map(|step| {
+            body.find(step)
+                .unwrap_or_else(|| panic!("runbook lacks step {step}"))
+        })
         .collect();
     assert!(
         positions.windows(2).all(|pair| pair[0] < pair[1]),

@@ -49,9 +49,8 @@ mod tests {
     }
 
     fn layout_node(constraint_count: usize, children: Vec<u32>) -> UiNode {
-        let constraints: Vec<Constraint> = (0..constraint_count)
-            .map(|_| Constraint::Fill(1))
-            .collect();
+        let constraints: Vec<Constraint> =
+            (0..constraint_count).map(|_| Constraint::Fill(1)).collect();
         UiNode {
             widget: Widget::Layout(LayoutSpec {
                 direction: Direction::Horizontal,
@@ -84,7 +83,16 @@ mod tests {
     fn chain_tree(depth: u32) -> UiTree {
         tree_of(
             (0..depth)
-                .map(|index| node(None, if index + 1 < depth { vec![index + 1] } else { vec![] }))
+                .map(|index| {
+                    node(
+                        None,
+                        if index + 1 < depth {
+                            vec![index + 1]
+                        } else {
+                            vec![]
+                        },
+                    )
+                })
                 .collect(),
         )
     }
@@ -97,7 +105,10 @@ mod tests {
     /// REQ: WID-002
     #[test]
     fn single_root_node_is_a_valid_empty_tree() {
-        assert_eq!(check_ui_tree(&tree_of(vec![node(None, vec![])]), DEFAULT_CAPS), Ok(()));
+        assert_eq!(
+            check_ui_tree(&tree_of(vec![node(None, vec![])]), DEFAULT_CAPS),
+            Ok(())
+        );
     }
 
     /// REQ: WID-002
@@ -239,7 +250,11 @@ mod tests {
     /// REQ: WID-005
     #[test]
     fn layout_with_one_constraint_per_child_is_accepted() {
-        let nodes = vec![layout_node(2, vec![1, 2]), node(None, vec![]), node(None, vec![])];
+        let nodes = vec![
+            layout_node(2, vec![1, 2]),
+            node(None, vec![]),
+            node(None, vec![]),
+        ];
         assert_eq!(check_ui_tree(&tree_of(nodes), DEFAULT_CAPS), Ok(()));
     }
 
@@ -261,7 +276,11 @@ mod tests {
     /// REQ: WID-005
     #[test]
     fn layout_with_no_constraints_and_children_is_refused_as_invalid_tree() {
-        let nodes = vec![layout_node(0, vec![1, 2]), node(None, vec![]), node(None, vec![])];
+        let nodes = vec![
+            layout_node(0, vec![1, 2]),
+            node(None, vec![]),
+            node(None, vec![]),
+        ];
         assert_eq!(
             refusal_of(&tree_of(nodes), DEFAULT_CAPS),
             Code::from_static("ui.invalid-tree")
@@ -292,7 +311,10 @@ mod tests {
             max_depth: 32,
         };
         assert_eq!(check_ui_tree(&flat_tree(10), caps), Ok(()));
-        assert_eq!(refusal_of(&flat_tree(11), caps), Code::from_static("ui.too-large"));
+        assert_eq!(
+            refusal_of(&flat_tree(11), caps),
+            Code::from_static("ui.too-large")
+        );
     }
 
     /// REQ: WID-004

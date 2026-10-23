@@ -77,7 +77,10 @@ mod spec_tests {
         let path = write_fixture("schema-only.json", r#"{"schema": 1}"#);
         let fixture = Fixture::load(&path).expect("a schema 1 fixture loads");
         assert_eq!(fixture.document["schema"], 1);
-        assert_eq!(fixture.document.as_object().map(|object| object.len()), Some(1));
+        assert_eq!(
+            fixture.document.as_object().map(|object| object.len()),
+            Some(1)
+        );
     }
 
     /// REQ: DEV-511
@@ -88,7 +91,11 @@ mod spec_tests {
         let path = write_fixture("unknown-key.json", body);
         let error = Fixture::load(&path).expect_err("an unknown key is refused");
         assert_eq!(error.code, codes::FIXTURE_UNKNOWN_KEY);
-        assert!(error.message.contains("$.events[2].foo"), "message was: {}", error.message);
+        assert!(
+            error.message.contains("$.events[2].foo"),
+            "message was: {}",
+            error.message
+        );
     }
 
     /// REQ: DEV-511
@@ -101,7 +108,11 @@ mod spec_tests {
         let path = write_fixture("bad-value.json", body);
         let error = Fixture::load(&path).expect_err("a non-integer parent is refused");
         assert_eq!(error.code, codes::FIXTURE_BAD_VALUE);
-        assert!(error.message.contains("$.tree[2].parent"), "message was: {}", error.message);
+        assert!(
+            error.message.contains("$.tree[2].parent"),
+            "message was: {}",
+            error.message
+        );
     }
 
     /// REQ: DEV-512
@@ -128,7 +139,10 @@ mod spec_tests {
     /// REQ: DEV-514
     #[test]
     fn dev_514_scene_fixture_refuses_a_server_only_key() {
-        let path = write_fixture("scene-tree.json", r#"{"schema": 1, "side": "scene", "tree": []}"#);
+        let path = write_fixture(
+            "scene-tree.json",
+            r#"{"schema": 1, "side": "scene", "tree": []}"#,
+        );
         let error = Fixture::load(&path).expect_err("tree is not a scene key");
         assert_eq!(error.code, codes::FIXTURE_UNKNOWN_KEY);
     }
@@ -151,7 +165,10 @@ mod spec_tests {
         )
         .expect("the test can write the expectation file");
         let status = run::<ServerPlugin>(&path).expect("the fixture runs");
-        assert!(matches!(status, FixtureStatus::Fail(_)), "status was: {status:?}");
+        assert!(
+            matches!(status, FixtureStatus::Fail(_)),
+            "status was: {status:?}"
+        );
     }
 
     /// REQ: DEV-516

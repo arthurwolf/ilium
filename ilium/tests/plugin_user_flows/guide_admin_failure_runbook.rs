@@ -303,7 +303,8 @@ fn usr_234_audit_path_jq_command_and_every_event_name_match_the_source_pages() {
         "the runbook does not name the Linux audit file"
     );
     assert!(
-        manual_page("reference-audit-log").contains("audit.jsonl") && manual_page("reference-audit-log").contains("ilium/audit/"),
+        manual_page("reference-audit-log").contains("audit.jsonl")
+            && manual_page("reference-audit-log").contains("ilium/audit/"),
         "the audit log reference gives no Linux audit path"
     );
 

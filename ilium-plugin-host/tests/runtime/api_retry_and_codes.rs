@@ -90,7 +90,7 @@ fn api_089_refused_early_retry_does_not_extend_the_window() {
 /// REQ: API-097
 #[test]
 fn api_097_retry_with_the_same_dedup_key_is_applied_once() {
-    let mut host = host_with(DedupGuest);
+    let host = host_with(DedupGuest);
     host.deliver(one_event());
     host.pump(8);
     host.deliver(one_event());
@@ -106,14 +106,16 @@ fn api_097_retry_with_the_same_dedup_key_is_applied_once() {
 /// REQ: API-097
 #[test]
 fn api_097_a_dedup_retry_is_refused_as_duplicate_for_the_same_request() {
-    let mut host = host_with(DedupGuest);
+    let host = host_with(DedupGuest);
     host.deliver(one_event());
     host.pump(8);
     host.deliver(one_event());
     host.pump(8);
-    assert!(host
-        .outcomes(&plugin_id())
-        .iter()
-        .any(|result| matches!(&result.request, RequestRef::Submission(1))
-            && matches!(result.outcome, Outcome::Duplicate(_))));
+    assert!(host.outcomes(&plugin_id()).iter().any(|result| matches!(
+        &result.request,
+        RequestRef::Submission(1)
+    ) && matches!(
+        result.outcome,
+        Outcome::Duplicate(_)
+    )));
 }

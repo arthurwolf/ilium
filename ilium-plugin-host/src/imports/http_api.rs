@@ -160,7 +160,12 @@ mod tests {
     #[test]
     fn respond_hop_by_hop_header_name_in_upper_case_is_invalid_argument() {
         let mut api = HttpApiImport;
-        let result = api.respond(UNKNOWN_CALL, 200, single_header("TRANSFER-ENCODING"), Vec::new());
+        let result = api.respond(
+            UNKNOWN_CALL,
+            200,
+            single_header("TRANSFER-ENCODING"),
+            Vec::new(),
+        );
         assert_eq!(error_code_of(result), Some(ErrorCode::InvalidArgument));
     }
 

@@ -330,9 +330,9 @@ mod tests {
         check_payload, encode_checked, DedupVerdict, DetachedQueue, ForwardedDedup, IpcFault,
         OutcomeStore, PayloadKind, PluginRecord, PushOutcome, QueueVerdict, ReceiverConnection,
         StoredOutcome, WriterQueues, Written, CLIENT_TOO_SLOW_BYTES, DEDUP_WINDOW_MS,
-        DETACHED_QUEUE_LIMIT, ENVELOPE_MAX_BYTES, EXIT_CODE_PROTOCOL_MISMATCH,
-        OUTCOME_GRACE_MS, OUTCOME_RECORD_LIMIT, PLUGIN_QUEUE_MAX_BYTES,
-        PLUGIN_QUEUE_MAX_RECORDS, PTY_FRAMES_PER_PLUGIN_ENVELOPE,
+        DETACHED_QUEUE_LIMIT, ENVELOPE_MAX_BYTES, EXIT_CODE_PROTOCOL_MISMATCH, OUTCOME_GRACE_MS,
+        OUTCOME_RECORD_LIMIT, PLUGIN_QUEUE_MAX_BYTES, PLUGIN_QUEUE_MAX_RECORDS,
+        PTY_FRAMES_PER_PLUGIN_ENVELOPE,
     };
 
     const MIB: usize = 1024 * 1024;
@@ -361,7 +361,7 @@ mod tests {
 
     fn drain_writer(queues: &mut WriterQueues) -> Vec<Written> {
         let mut written = Vec::new();
-        while let Some(item) = queues.next() {
+        for item in queues {
             written.push(item);
         }
         written
@@ -420,7 +420,10 @@ mod tests {
     // REQ: HST-102
     #[test]
     fn ipc_fault_keeps_its_error_id() {
-        assert_eq!(IpcFault::new("ipc.client-too-slow").code(), "ipc.client-too-slow");
+        assert_eq!(
+            IpcFault::new("ipc.client-too-slow").code(),
+            "ipc.client-too-slow"
+        );
         assert_eq!(IpcFault::new("ipc.sequence-gap").code(), "ipc.sequence-gap");
     }
 
@@ -530,7 +533,10 @@ mod tests {
             Err(IpcFault::new("ipc.sequence-gap"))
         );
         assert!(!connection.is_open());
-        assert_eq!(connection.closed_with(), Some("ipc.sequence-gap".to_owned()));
+        assert_eq!(
+            connection.closed_with(),
+            Some("ipc.sequence-gap".to_owned())
+        );
     }
 
     // REQ: HST-102
@@ -543,7 +549,10 @@ mod tests {
             Err(IpcFault::new("ipc.sequence-gap"))
         );
         assert!(!connection.is_open());
-        assert_eq!(connection.closed_with(), Some("ipc.sequence-gap".to_owned()));
+        assert_eq!(
+            connection.closed_with(),
+            Some("ipc.sequence-gap".to_owned())
+        );
     }
 
     // REQ: HST-125
@@ -581,14 +590,20 @@ mod tests {
     #[test]
     fn dedup_admits_first_request_as_fresh() {
         let mut dedup = ForwardedDedup::new();
-        assert_eq!(dedup.admit("plugin.a", "client-1", "key-1", 0), DedupVerdict::Fresh);
+        assert_eq!(
+            dedup.admit("plugin.a", "client-1", "key-1", 0),
+            DedupVerdict::Fresh
+        );
     }
 
     // REQ: HST-113
     #[test]
     fn dedup_refuses_repeat_within_window() {
         let mut dedup = ForwardedDedup::new();
-        assert_eq!(dedup.admit("plugin.a", "client-1", "key-1", 0), DedupVerdict::Fresh);
+        assert_eq!(
+            dedup.admit("plugin.a", "client-1", "key-1", 0),
+            DedupVerdict::Fresh
+        );
         assert_eq!(
             dedup.admit("plugin.a", "client-1", "key-1", 1),
             DedupVerdict::Duplicate
@@ -603,7 +618,10 @@ mod tests {
     #[test]
     fn dedup_key_is_free_again_at_exactly_the_window_end() {
         let mut dedup = ForwardedDedup::new();
-        assert_eq!(dedup.admit("plugin.a", "client-1", "key-1", 0), DedupVerdict::Fresh);
+        assert_eq!(
+            dedup.admit("plugin.a", "client-1", "key-1", 0),
+            DedupVerdict::Fresh
+        );
         assert_eq!(
             dedup.admit("plugin.a", "client-1", "key-1", 300_000),
             DedupVerdict::Duplicate
@@ -618,10 +636,22 @@ mod tests {
     #[test]
     fn dedup_scope_is_the_plugin_and_client_pair() {
         let mut dedup = ForwardedDedup::new();
-        assert_eq!(dedup.admit("plugin.a", "client-1", "key-1", 0), DedupVerdict::Fresh);
-        assert_eq!(dedup.admit("plugin.b", "client-1", "key-1", 0), DedupVerdict::Fresh);
-        assert_eq!(dedup.admit("plugin.a", "client-2", "key-1", 0), DedupVerdict::Fresh);
-        assert_eq!(dedup.admit("plugin.a", "client-1", "key-2", 0), DedupVerdict::Fresh);
+        assert_eq!(
+            dedup.admit("plugin.a", "client-1", "key-1", 0),
+            DedupVerdict::Fresh
+        );
+        assert_eq!(
+            dedup.admit("plugin.b", "client-1", "key-1", 0),
+            DedupVerdict::Fresh
+        );
+        assert_eq!(
+            dedup.admit("plugin.a", "client-2", "key-1", 0),
+            DedupVerdict::Fresh
+        );
+        assert_eq!(
+            dedup.admit("plugin.a", "client-1", "key-2", 0),
+            DedupVerdict::Fresh
+        );
         assert_eq!(
             dedup.admit("plugin.a", "client-1", "key-1", 0),
             DedupVerdict::Duplicate
@@ -805,7 +835,10 @@ mod tests {
     #[test]
     fn writer_sends_plugin_record_when_no_pty_frames_are_queued() {
         let mut queues = WriterQueues::new();
-        assert_eq!(queues.push_plugin(plugin_record(100, 10, None)), PushOutcome::Queued);
+        assert_eq!(
+            queues.push_plugin(plugin_record(100, 10, None)),
+            PushOutcome::Queued
+        );
         assert_eq!(queues.next(), Some(Written::Plugin(100)));
         assert_eq!(queues.next(), None);
     }

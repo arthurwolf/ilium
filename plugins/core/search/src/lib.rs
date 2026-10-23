@@ -133,11 +133,23 @@ mod spec_tests {
     #[test]
     fn cor_050_manifest_lists_the_exports_and_grants_per_side() {
         let document = manifest();
-        assert_eq!(string_list(&document["server"]["exports"]), vec!["job-runner"]);
+        assert_eq!(
+            string_list(&document["server"]["exports"]),
+            vec!["job-runner"]
+        );
         assert_eq!(string_list(&document["client"]["exports"]), vec!["views"]);
-        assert_eq!(string_list(&document["capabilities"]["client"]), vec!["ui.panels"]);
+        assert_eq!(
+            string_list(&document["capabilities"]["client"]),
+            vec!["ui.panels"]
+        );
         let server_grants = string_list(&document["capabilities"]["server"]);
-        for grant in ["inference.embed", "tree.read", "terminal.read-screen", "fs.read:project", "jobs.run"] {
+        for grant in [
+            "inference.embed",
+            "tree.read",
+            "terminal.read-screen",
+            "fs.read:project",
+            "jobs.run",
+        ] {
             assert!(
                 server_grants.iter().any(|declared| declared == grant),
                 "server grant {grant} is missing"
@@ -208,7 +220,10 @@ mod spec_tests {
     #[test]
     fn lif_276_search_is_not_essential_so_the_plugins_screen_offers_its_switch() {
         assert_eq!(ESSENTIAL_PLUGIN_IDS.len(), 4);
-        let plugin_id = manifest()["id"].as_str().expect("id is a string").to_string();
+        let plugin_id = manifest()["id"]
+            .as_str()
+            .expect("id is a string")
+            .to_string();
         assert!(!ESSENTIAL_PLUGIN_IDS.contains(&plugin_id.as_str()));
     }
 }

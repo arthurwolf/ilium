@@ -642,7 +642,10 @@ mod tests {
         let kernel = RecordingKernel::new();
         let dispatcher = dispatcher_over(&kernel);
 
-        let reference = dispatcher.submit(plugin_origin("com.example.alpha"), rename_submission(42, None));
+        let reference = dispatcher.submit(
+            plugin_origin("com.example.alpha"),
+            rename_submission(42, None),
+        );
 
         assert_eq!(reference, RequestRef::Submission(42));
     }
@@ -653,10 +656,15 @@ mod tests {
         let kernel = RecordingKernel::new();
         let dispatcher = dispatcher_over(&kernel);
 
-        dispatcher.submit(plugin_origin("com.example.alpha"), rename_submission(1, None));
+        dispatcher.submit(
+            plugin_origin("com.example.alpha"),
+            rename_submission(1, None),
+        );
 
         assert!(kernel.applied_intents().is_empty());
-        assert!(dispatcher.outcomes(&plugin_id("com.example.alpha")).is_empty());
+        assert!(dispatcher
+            .outcomes(&plugin_id("com.example.alpha"))
+            .is_empty());
     }
 
     /// REQ: RQO-003
@@ -665,7 +673,10 @@ mod tests {
         let kernel = RecordingKernel::new();
         let dispatcher = dispatcher_over(&kernel);
         for correlation in 1..=3 {
-            dispatcher.submit(plugin_origin("com.example.alpha"), rename_submission(correlation, None));
+            dispatcher.submit(
+                plugin_origin("com.example.alpha"),
+                rename_submission(correlation, None),
+            );
         }
 
         dispatcher.pump(8);
@@ -679,7 +690,10 @@ mod tests {
         let kernel = RecordingKernel::new();
         let dispatcher = dispatcher_over(&kernel);
         for correlation in 1..=10 {
-            dispatcher.submit(plugin_origin("com.example.alpha"), rename_submission(correlation, None));
+            dispatcher.submit(
+                plugin_origin("com.example.alpha"),
+                rename_submission(correlation, None),
+            );
         }
 
         dispatcher.pump(4);
@@ -691,7 +705,10 @@ mod tests {
                 .iter()
                 .filter(|result| result.request == RequestRef::Submission(correlation))
                 .count();
-            assert_eq!(completions, 1, "submission {correlation} completed {completions} times");
+            assert_eq!(
+                completions, 1,
+                "submission {correlation} completed {completions} times"
+            );
         }
     }
 
@@ -701,14 +718,21 @@ mod tests {
         let kernel = RecordingKernel::new();
         let dispatcher = dispatcher_over(&kernel);
         for correlation in 1..=3 {
-            dispatcher.submit(plugin_origin("com.example.alpha"), rename_submission(correlation, None));
+            dispatcher.submit(
+                plugin_origin("com.example.alpha"),
+                rename_submission(correlation, None),
+            );
         }
 
         let report = dispatcher.pump(8);
 
         assert_eq!(report.intents_applied, 3);
         assert_eq!(report.traps, 0);
-        assert!(report.rounds >= 1 && report.rounds <= 8, "rounds was {}", report.rounds);
+        assert!(
+            report.rounds >= 1 && report.rounds <= 8,
+            "rounds was {}",
+            report.rounds
+        );
     }
 
     /// REQ: RQO-001
@@ -731,7 +755,10 @@ mod tests {
     fn pump_with_zero_rounds_runs_nothing_and_a_later_pump_applies_the_queue() {
         let kernel = RecordingKernel::new();
         let dispatcher = dispatcher_over(&kernel);
-        dispatcher.submit(plugin_origin("com.example.alpha"), rename_submission(1, None));
+        dispatcher.submit(
+            plugin_origin("com.example.alpha"),
+            rename_submission(1, None),
+        );
 
         let idle_report = dispatcher.pump(0);
 
@@ -742,7 +769,10 @@ mod tests {
         let report = dispatcher.pump(1);
 
         assert_eq!(report.intents_applied, 1);
-        assert_eq!(dispatcher.outcomes(&plugin_id("com.example.alpha")).len(), 1);
+        assert_eq!(
+            dispatcher.outcomes(&plugin_id("com.example.alpha")).len(),
+            1
+        );
     }
 
     /// REQ: ABI-008
@@ -764,18 +794,27 @@ mod tests {
         let kernel = RecordingKernel::new();
         let dispatcher = dispatcher_over(&kernel);
         for correlation in 1..=64 {
-            dispatcher.submit(plugin_origin("com.example.alpha"), rename_submission(correlation, None));
+            dispatcher.submit(
+                plugin_origin("com.example.alpha"),
+                rename_submission(correlation, None),
+            );
         }
         dispatcher.pump(8);
 
         for correlation in 65..=128 {
-            dispatcher.submit(plugin_origin("com.example.alpha"), rename_submission(correlation, None));
+            dispatcher.submit(
+                plugin_origin("com.example.alpha"),
+                rename_submission(correlation, None),
+            );
         }
         let report = dispatcher.pump(8);
 
         assert_eq!(report.intents_applied, 64);
         assert_eq!(kernel.applied_intents().len(), 128);
-        assert_eq!(dispatcher.outcomes(&plugin_id("com.example.alpha")).len(), 128);
+        assert_eq!(
+            dispatcher.outcomes(&plugin_id("com.example.alpha")).len(),
+            128
+        );
     }
 
     /// REQ: ABI-011
@@ -783,8 +822,14 @@ mod tests {
     fn outcomes_are_handed_only_to_the_plugin_that_submitted_them() {
         let kernel = RecordingKernel::new();
         let dispatcher = dispatcher_over(&kernel);
-        dispatcher.submit(plugin_origin("com.example.alpha"), rename_submission(1, None));
-        dispatcher.submit(plugin_origin("com.example.beta"), rename_submission(2, None));
+        dispatcher.submit(
+            plugin_origin("com.example.alpha"),
+            rename_submission(1, None),
+        );
+        dispatcher.submit(
+            plugin_origin("com.example.beta"),
+            rename_submission(2, None),
+        );
 
         dispatcher.pump(8);
         let alpha = dispatcher.outcomes(&plugin_id("com.example.alpha"));
@@ -811,10 +856,15 @@ mod tests {
     fn outcomes_for_a_plugin_without_submissions_are_empty() {
         let kernel = RecordingKernel::new();
         let dispatcher = dispatcher_over(&kernel);
-        dispatcher.submit(plugin_origin("com.example.alpha"), rename_submission(1, None));
+        dispatcher.submit(
+            plugin_origin("com.example.alpha"),
+            rename_submission(1, None),
+        );
         dispatcher.pump(8);
 
-        assert!(dispatcher.outcomes(&plugin_id("com.example.unknown")).is_empty());
+        assert!(dispatcher
+            .outcomes(&plugin_id("com.example.unknown"))
+            .is_empty());
     }
 
     /// REQ: RQO-004
@@ -822,8 +872,14 @@ mod tests {
     fn repeated_dedup_key_completes_as_duplicate_naming_the_first_submission() {
         let kernel = RecordingKernel::new();
         let dispatcher = dispatcher_over(&kernel);
-        dispatcher.submit(plugin_origin("com.example.alpha"), rename_submission(1, Some("finish:node-12")));
-        dispatcher.submit(plugin_origin("com.example.alpha"), rename_submission(2, Some("finish:node-12")));
+        dispatcher.submit(
+            plugin_origin("com.example.alpha"),
+            rename_submission(1, Some("finish:node-12")),
+        );
+        dispatcher.submit(
+            plugin_origin("com.example.alpha"),
+            rename_submission(2, Some("finish:node-12")),
+        );
 
         dispatcher.pump(8);
         let results = dispatcher.outcomes(&plugin_id("com.example.alpha"));
@@ -841,8 +897,14 @@ mod tests {
     fn dedup_key_is_scoped_to_the_plugin_so_two_plugins_do_not_collide() {
         let kernel = RecordingKernel::new();
         let dispatcher = dispatcher_over(&kernel);
-        dispatcher.submit(plugin_origin("com.example.alpha"), rename_submission(1, Some("shared.key")));
-        dispatcher.submit(plugin_origin("com.example.beta"), rename_submission(2, Some("shared.key")));
+        dispatcher.submit(
+            plugin_origin("com.example.alpha"),
+            rename_submission(1, Some("shared.key")),
+        );
+        dispatcher.submit(
+            plugin_origin("com.example.beta"),
+            rename_submission(2, Some("shared.key")),
+        );
 
         dispatcher.pump(8);
 
@@ -863,7 +925,10 @@ mod tests {
         let kernel = RecordingKernel::new();
         let dispatcher = dispatcher_over(&kernel);
         let key = "k".repeat(128);
-        dispatcher.submit(plugin_origin("com.example.alpha"), rename_submission(1, Some(&key)));
+        dispatcher.submit(
+            plugin_origin("com.example.alpha"),
+            rename_submission(1, Some(&key)),
+        );
 
         dispatcher.pump(8);
 
@@ -879,12 +944,18 @@ mod tests {
         let kernel = RecordingKernel::new();
         let dispatcher = dispatcher_over(&kernel);
         let key = "k".repeat(129);
-        dispatcher.submit(plugin_origin("com.example.alpha"), rename_submission(1, Some(&key)));
+        dispatcher.submit(
+            plugin_origin("com.example.alpha"),
+            rename_submission(1, Some(&key)),
+        );
 
         dispatcher.pump(8);
         let results = dispatcher.outcomes(&plugin_id("com.example.alpha"));
 
-        assert_eq!(refused_code(&outcome_for(&results, 1)), ErrorCode::InvalidArgument);
+        assert_eq!(
+            refused_code(&outcome_for(&results, 1)),
+            ErrorCode::InvalidArgument
+        );
         assert!(kernel.applied_intents().is_empty());
     }
 
@@ -893,12 +964,18 @@ mod tests {
     fn empty_dedup_key_is_refused_as_invalid_argument() {
         let kernel = RecordingKernel::new();
         let dispatcher = dispatcher_over(&kernel);
-        dispatcher.submit(plugin_origin("com.example.alpha"), rename_submission(1, Some("")));
+        dispatcher.submit(
+            plugin_origin("com.example.alpha"),
+            rename_submission(1, Some("")),
+        );
 
         dispatcher.pump(8);
         let results = dispatcher.outcomes(&plugin_id("com.example.alpha"));
 
-        assert_eq!(refused_code(&outcome_for(&results, 1)), ErrorCode::InvalidArgument);
+        assert_eq!(
+            refused_code(&outcome_for(&results, 1)),
+            ErrorCode::InvalidArgument
+        );
         assert!(kernel.applied_intents().is_empty());
     }
 
@@ -907,14 +984,26 @@ mod tests {
     fn dedup_key_with_a_character_outside_the_allowed_set_is_refused() {
         let kernel = RecordingKernel::new();
         let dispatcher = dispatcher_over(&kernel);
-        dispatcher.submit(plugin_origin("com.example.alpha"), rename_submission(1, Some("finish node")));
-        dispatcher.submit(plugin_origin("com.example.alpha"), rename_submission(2, Some("a@b")));
+        dispatcher.submit(
+            plugin_origin("com.example.alpha"),
+            rename_submission(1, Some("finish node")),
+        );
+        dispatcher.submit(
+            plugin_origin("com.example.alpha"),
+            rename_submission(2, Some("a@b")),
+        );
 
         dispatcher.pump(8);
         let results = dispatcher.outcomes(&plugin_id("com.example.alpha"));
 
-        assert_eq!(refused_code(&outcome_for(&results, 1)), ErrorCode::InvalidArgument);
-        assert_eq!(refused_code(&outcome_for(&results, 2)), ErrorCode::InvalidArgument);
+        assert_eq!(
+            refused_code(&outcome_for(&results, 1)),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            refused_code(&outcome_for(&results, 2)),
+            ErrorCode::InvalidArgument
+        );
         assert!(kernel.applied_intents().is_empty());
     }
 
@@ -923,7 +1012,10 @@ mod tests {
     fn dedup_key_using_every_allowed_character_class_is_accepted() {
         let kernel = RecordingKernel::new();
         let dispatcher = dispatcher_over(&kernel);
-        dispatcher.submit(plugin_origin("com.example.alpha"), rename_submission(1, Some("Aa0.9_:/-")));
+        dispatcher.submit(
+            plugin_origin("com.example.alpha"),
+            rename_submission(1, Some("Aa0.9_:/-")),
+        );
 
         dispatcher.pump(8);
 
@@ -943,8 +1035,14 @@ mod tests {
             retry_after_ms: None,
         }));
         let dispatcher = dispatcher_over(&kernel);
-        dispatcher.submit(plugin_origin("com.example.alpha"), rename_submission(1, Some("k1")));
-        dispatcher.submit(plugin_origin("com.example.alpha"), rename_submission(2, Some("k1")));
+        dispatcher.submit(
+            plugin_origin("com.example.alpha"),
+            rename_submission(1, Some("k1")),
+        );
+        dispatcher.submit(
+            plugin_origin("com.example.alpha"),
+            rename_submission(2, Some("k1")),
+        );
 
         dispatcher.pump(8);
         let results = dispatcher.outcomes(&plugin_id("com.example.alpha"));
@@ -964,8 +1062,14 @@ mod tests {
             retry_after_ms: None,
         }));
         let dispatcher = dispatcher_over(&kernel);
-        dispatcher.submit(plugin_origin("com.example.alpha"), rename_submission(1, Some("k1")));
-        dispatcher.submit(plugin_origin("com.example.alpha"), rename_submission(2, Some("k1")));
+        dispatcher.submit(
+            plugin_origin("com.example.alpha"),
+            rename_submission(1, Some("k1")),
+        );
+        dispatcher.submit(
+            plugin_origin("com.example.alpha"),
+            rename_submission(2, Some("k1")),
+        );
 
         dispatcher.pump(8);
         let results = dispatcher.outcomes(&plugin_id("com.example.alpha"));
@@ -983,12 +1087,18 @@ mod tests {
     fn send_input_without_dedup_key_is_refused_and_never_applied() {
         let kernel = RecordingKernel::new();
         let dispatcher = dispatcher_over(&kernel);
-        dispatcher.submit(plugin_origin("com.example.alpha"), send_input_submission(1, None));
+        dispatcher.submit(
+            plugin_origin("com.example.alpha"),
+            send_input_submission(1, None),
+        );
 
         dispatcher.pump(8);
         let results = dispatcher.outcomes(&plugin_id("com.example.alpha"));
 
-        assert_eq!(refused_code(&outcome_for(&results, 1)), ErrorCode::InvalidArgument);
+        assert_eq!(
+            refused_code(&outcome_for(&results, 1)),
+            ErrorCode::InvalidArgument
+        );
         assert!(kernel.applied_intents().is_empty());
     }
 
@@ -997,12 +1107,18 @@ mod tests {
     fn agent_action_without_dedup_key_is_refused_and_never_applied() {
         let kernel = RecordingKernel::new();
         let dispatcher = dispatcher_over(&kernel);
-        dispatcher.submit(plugin_origin("com.example.alpha"), agent_action_submission(1, None));
+        dispatcher.submit(
+            plugin_origin("com.example.alpha"),
+            agent_action_submission(1, None),
+        );
 
         dispatcher.pump(8);
         let results = dispatcher.outcomes(&plugin_id("com.example.alpha"));
 
-        assert_eq!(refused_code(&outcome_for(&results, 1)), ErrorCode::InvalidArgument);
+        assert_eq!(
+            refused_code(&outcome_for(&results, 1)),
+            ErrorCode::InvalidArgument
+        );
         assert!(kernel.applied_intents().is_empty());
     }
 
@@ -1011,7 +1127,10 @@ mod tests {
     fn send_input_with_dedup_key_is_applied() {
         let kernel = RecordingKernel::new();
         let dispatcher = dispatcher_over(&kernel);
-        dispatcher.submit(plugin_origin("com.example.alpha"), send_input_submission(1, Some("input-1")));
+        dispatcher.submit(
+            plugin_origin("com.example.alpha"),
+            send_input_submission(1, Some("input-1")),
+        );
 
         dispatcher.pump(8);
 
@@ -1032,8 +1151,14 @@ mod tests {
             retry_after_ms: None,
         }));
         let dispatcher = dispatcher_over(&kernel);
-        dispatcher.submit(plugin_origin("com.example.alpha"), rename_submission(1, None));
-        dispatcher.submit(plugin_origin("com.example.alpha"), rename_submission(2, None));
+        dispatcher.submit(
+            plugin_origin("com.example.alpha"),
+            rename_submission(1, None),
+        );
+        dispatcher.submit(
+            plugin_origin("com.example.alpha"),
+            rename_submission(2, None),
+        );
 
         dispatcher.pump(8);
         let results = dispatcher.outcomes(&plugin_id("com.example.alpha"));
@@ -1047,7 +1172,9 @@ mod tests {
     fn deliver_with_no_subscribers_hands_nothing_to_any_plugin() {
         let kernel = RecordingKernel::new();
         let dispatcher = dispatcher_over(&kernel);
-        dispatcher.deliver(vec![Event::TreeChanged(vec![NodeId(1)])]);
+        dispatcher
+            .deliver(vec![Event::TreeChanged(vec![NodeId(1)])])
+            .expect("the tree change is accepted");
 
         let report = dispatcher.pump(4);
 
@@ -1059,7 +1186,9 @@ mod tests {
     fn deliver_of_an_empty_batch_is_a_no_op() {
         let kernel = RecordingKernel::new();
         let dispatcher = dispatcher_over(&kernel);
-        dispatcher.deliver(Vec::new());
+        dispatcher
+            .deliver(Vec::new())
+            .expect("an empty batch is accepted");
 
         let report = dispatcher.pump(2);
 

@@ -1,10 +1,10 @@
 //! Pure manifest boundaries; component bytes and package custody belong to the host.
 use ilium_plugin_api::manifest::{
-    CheckMode, ComponentSummary, ServiceRequirement, ValidationContext, check_component,
-    parse_activation, parse_chord, parse_manifest, parse_when, validate_json,
+    check_component, parse_activation, parse_chord, parse_manifest, parse_when, validate_json,
+    CheckMode, ComponentSummary, ServiceRequirement, ValidationContext,
 };
 use ilium_plugin_api::{Platform, Side, Tier};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 fn context(mode: CheckMode) -> ValidationContext {
     ValidationContext {
@@ -59,11 +59,9 @@ fn schema_errors_are_sorted_by_pointer_bytes() {
     value["z_unknown"] = json!(false);
     value["a_unknown"] = json!(false);
     let errors = validate_json(&value.to_string(), &context(CheckMode::Check));
-    assert!(
-        errors
-            .windows(2)
-            .all(|pair| pair[0].pointer.as_bytes() <= pair[1].pointer.as_bytes())
-    );
+    assert!(errors
+        .windows(2)
+        .all(|pair| pair[0].pointer.as_bytes() <= pair[1].pointer.as_bytes()));
 }
 #[test]
 fn service_minimum_is_a_full_stable_version() {
@@ -91,7 +89,13 @@ fn data_use_and_activation_wait_survive_parsing() {
     value["data_use"] = json!([{"what":"Name","where":"Local","purpose":"Display","opt_in":true}]);
     value["requires"] = json!({"wait_ms":5000});
     let manifest = parse_manifest(&value.to_string()).unwrap();
-    assert_eq!(manifest.requires.as_ref().and_then(|requires| requires.wait_ms), Some(5000));
+    assert_eq!(
+        manifest
+            .requires
+            .as_ref()
+            .and_then(|requires| requires.wait_ms),
+        Some(5000)
+    );
     assert_eq!(manifest.data_use[0].where_, "Local");
 }
 #[test]
@@ -117,15 +121,13 @@ fn scene_world_requires_lifecycle_and_renderer_without_handler() {
         imports: vec!["ilium:anim/surface@0.1.0".into()],
         ..Default::default()
     };
-    assert!(
-        check_component(
-            &manifest,
-            Side::Scene,
-            &summary,
-            &context(CheckMode::Install)
-        )
-        .is_empty()
-    );
+    assert!(check_component(
+        &manifest,
+        Side::Scene,
+        &summary,
+        &context(CheckMode::Install)
+    )
+    .is_empty());
 }
 #[test]
 fn small_manifest_languages_reject_ambiguous_or_unknown_forms() {

@@ -77,7 +77,10 @@ mod spec_tests {
     fn serve_returns_ok_when_host_closes_channel_without_requests() {
         let mut output: Vec<u8> = Vec::new();
         let result = serve(std::io::empty(), &mut output, helper_config());
-        assert!(result.is_ok(), "clean channel close must end serve with Ok, got {result:?}");
+        assert!(
+            result.is_ok(),
+            "clean channel close must end serve with Ok, got {result:?}"
+        );
     }
 
     /// before it waits for any Instantiate or CallExport).
@@ -86,7 +89,10 @@ mod spec_tests {
         let mut output: Vec<u8> = Vec::new();
         serve(std::io::empty(), &mut output, helper_config())
             .expect("serve must return after the host closes the channel");
-        assert!(!output.is_empty(), "the helper must announce itself with Hello");
+        assert!(
+            !output.is_empty(),
+            "the helper must announce itself with Hello"
+        );
     }
 
     /// prefix 0xFFFF_FFFF is far above the 4 MiB message cap.
@@ -109,7 +115,10 @@ mod spec_tests {
         let input = [0x10u8, 0x00];
         let mut output: Vec<u8> = Vec::new();
         let result = serve(&input[..], &mut output, helper_config());
-        assert!(result.is_err(), "a truncated frame must end serve with an error");
+        assert!(
+            result.is_err(),
+            "a truncated frame must end serve with an error"
+        );
     }
 
     /// reference-host-helper.md "Starting a helper" step 4 (the Hello write is the first channel write).
@@ -127,8 +136,17 @@ mod spec_tests {
     #[test]
     fn default_sandbox_policy_grants_no_network_and_no_paths() {
         let policy = SandboxPolicy::default();
-        assert!(!policy.allow_network, "the default policy must deny network access");
-        assert!(policy.read_paths.is_empty(), "the default policy must grant no read paths");
-        assert!(policy.write_paths.is_empty(), "the default policy must grant no write paths");
+        assert!(
+            !policy.allow_network,
+            "the default policy must deny network access"
+        );
+        assert!(
+            policy.read_paths.is_empty(),
+            "the default policy must grant no read paths"
+        );
+        assert!(
+            policy.write_paths.is_empty(),
+            "the default policy must grant no write paths"
+        );
     }
 }

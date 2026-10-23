@@ -8,8 +8,14 @@ use ilium_plugin_host::correlation_chain::run_input_chain;
 fn hst_526_every_log_entry_of_the_chain_carries_the_chain_correlation_id() {
     let trace = run_input_chain("key-press", &["acme.notes", "acme.sync"]);
     assert!(!trace.correlation_id.is_empty());
-    assert!(trace.log_entries.iter().any(|entry| entry.writer == "acme.notes"));
-    assert!(trace.log_entries.iter().any(|entry| entry.writer == "acme.sync"));
+    assert!(trace
+        .log_entries
+        .iter()
+        .any(|entry| entry.writer == "acme.notes"));
+    assert!(trace
+        .log_entries
+        .iter()
+        .any(|entry| entry.writer == "acme.sync"));
     for entry in &trace.log_entries {
         assert_eq!(entry.correlation_id, trace.correlation_id);
     }

@@ -89,7 +89,11 @@ mod spec_tests {
         let mut unique_grants = kernel_grants.clone();
         unique_grants.sort();
         unique_grants.dedup();
-        assert_eq!(unique_grants.len(), kernel_grants.len(), "a kernel-tab grant is declared twice");
+        assert_eq!(
+            unique_grants.len(),
+            kernel_grants.len(),
+            "a kernel-tab grant is declared twice"
+        );
     }
 
     /// world and exports only `views`.
@@ -140,7 +144,10 @@ mod spec_tests {
     fn density_change_produces_no_submission() {
         let mut client = SettingsClient::default();
         let submissions = client.on_events(vec![settings_changed(&["density"])]);
-        assert!(submissions.is_empty(), "the host saves the change; the plugin submits nothing");
+        assert!(
+            submissions.is_empty(),
+            "the host saves the change; the plugin submits nothing"
+        );
     }
 
     /// REQ: COR-011
@@ -166,7 +173,10 @@ mod spec_tests {
         let mut client = SettingsClient::default();
         let tree = client.render(
             ViewTarget::OnboardingStep("first-run".to_string()),
-            Area { columns: 80, rows: 24 },
+            Area {
+                columns: 80,
+                rows: 24,
+            },
         );
         let serialized = serde_json::to_string(&tree).expect("UiTree serializes");
         assert!(serialized.contains("schema-form"));
@@ -180,7 +190,10 @@ mod spec_tests {
         let mut client = SettingsClient::default();
         let tree = client.render(
             ViewTarget::Panel("overview".to_string()),
-            Area { columns: 80, rows: 24 },
+            Area {
+                columns: 80,
+                rows: 24,
+            },
         );
         let serialized = serde_json::to_string(&tree).expect("UiTree serializes");
         assert!(serialized.contains("schema-form"));

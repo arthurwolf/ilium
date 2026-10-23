@@ -95,7 +95,10 @@ mod spec_tests {
     #[test]
     fn identify_returns_none_when_only_a_plain_shell_runs() {
         let mut server = AgentDetectServer::default();
-        assert_eq!(server.identify(vec![process_named("bash"), process_named("vim")]), None);
+        assert_eq!(
+            server.identify(vec![process_named("bash"), process_named("vim")]),
+            None
+        );
     }
 
     /// Manual: approval prompt maps to `awaiting-approval`
@@ -158,7 +161,8 @@ mod spec_tests {
     #[test]
     fn classify_an_empty_screen_is_idle() {
         let mut server = AgentDetectServer::default();
-        let classification = server.classify("example-agent".to_string(), DetectorScreen::default());
+        let classification =
+            server.classify("example-agent".to_string(), DetectorScreen::default());
         assert_eq!(classification.activity, AgentActivity::Idle);
     }
 
@@ -167,7 +171,14 @@ mod spec_tests {
     fn activity_enum_case_names_match_the_manual_list() {
         assert_eq!(
             AgentActivity::CASE_NAMES,
-            &["none", "working", "idle", "awaiting-approval", "done", "menu"]
+            &[
+                "none",
+                "working",
+                "idle",
+                "awaiting-approval",
+                "done",
+                "menu"
+            ]
         );
     }
 }

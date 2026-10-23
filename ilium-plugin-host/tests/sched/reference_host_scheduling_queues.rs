@@ -87,10 +87,7 @@ fn hst_202_full_queue_refuses_to_drop_pointer_down() {
     let who = plugin("demo.queue");
     scheduler.register_side(&who, 1);
     scheduler.push_event(&who, message());
-    assert_eq!(
-        scheduler.push_event(&who, pointer()),
-        EventPush::Stuck
-    );
+    assert_eq!(scheduler.push_event(&who, pointer()), EventPush::Stuck);
 }
 
 /// REQ: HST-202

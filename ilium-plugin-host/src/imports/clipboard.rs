@@ -40,7 +40,12 @@ mod tests {
     /// Asserts that the call returned an `invalid-argument` error.
     fn assert_invalid_argument(result: Result<(), PluginError>) {
         match result {
-            Err(error) => assert_eq!(error.code, ErrorCode::InvalidArgument, "message: {}", error.message),
+            Err(error) => assert_eq!(
+                error.code,
+                ErrorCode::InvalidArgument,
+                "message: {}",
+                error.message
+            ),
             Ok(()) => panic!("expected invalid-argument, got Ok"),
         }
     }

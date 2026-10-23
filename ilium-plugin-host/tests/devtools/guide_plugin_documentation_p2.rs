@@ -1,6 +1,7 @@
 //! guide-plugin-documentation.md, part 2 (DEV-797): the newest changelog version comes first.
 
 use crate::common::*;
+use crate::lint_support::*;
 
 /// Version numbers of the `## [x.y.z]` headings, top to bottom (Unreleased skipped).
 fn versions(text: &str) -> Vec<(u32, u32, u32)> {

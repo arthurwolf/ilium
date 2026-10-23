@@ -4,6 +4,7 @@
 use serde_json::{json, Value};
 
 use crate::common::*;
+use crate::lint_support::*;
 
 const MIB: u64 = 1024 * 1024;
 

@@ -134,7 +134,11 @@ mod spec_tests {
         let manifest_value = manifest();
         assert_eq!(
             string_list(&manifest_value["activation"]),
-            vec!["command:convert", "service:convert", "view:session-convert.progress"]
+            vec![
+                "command:convert",
+                "service:convert",
+                "view:session-convert.progress"
+            ]
         );
         assert_eq!(
             string_list(&manifest_value["surface"]),
@@ -193,7 +197,10 @@ mod spec_tests {
             .iter()
             .filter(|grant| grant.starts_with("fs.write:"))
             .collect();
-        assert!(write_grants.is_empty(), "unexpected write grants: {write_grants:?}");
+        assert!(
+            write_grants.is_empty(),
+            "unexpected write grants: {write_grants:?}"
+        );
         assert!(grants.contains(&"agent-config.propose:claude".to_string()));
         assert!(grants.contains(&"fs.read:agent-sessions:claude".to_string()));
         assert!(grants.contains(&"fs.read:agent-sessions:codex".to_string()));
@@ -213,7 +220,10 @@ mod spec_tests {
         let target_values = string_list(&params["properties"]["target"]["enum"]);
         assert_eq!(target_values, vec!["codex", "claude"]);
         assert!(!target_values.contains(&"antigravity".to_string()));
-        assert_eq!(string_list(&start["result"]["required"]), vec!["conversion"]);
+        assert_eq!(
+            string_list(&start["result"]["required"]),
+            vec!["conversion"]
+        );
     }
 
     /// Manual: the codex-to-claude job runs under a 60 second deadline and a 256 MiB memory limit.
@@ -250,8 +260,14 @@ mod spec_tests {
         assert_eq!(hook["risk"], "standard");
         assert_eq!(hook["deadline_ms"], 20);
         assert_eq!(hook["max_handlers"], 8);
-        assert_eq!(hook["payload_schema"]["properties"]["messages"]["type"], "integer");
-        assert_eq!(hook["payload_schema"]["properties"]["path"]["type"], "string");
+        assert_eq!(
+            hook["payload_schema"]["properties"]["messages"]["type"],
+            "integer"
+        );
+        assert_eq!(
+            hook["payload_schema"]["properties"]["path"]["type"],
+            "string"
+        );
     }
 
     /// Manual: the Convert session command appears as the pane context menu entry and opens the

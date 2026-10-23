@@ -10,10 +10,17 @@ pub struct DedupKey(String);
 impl DedupKey {
     /// ABI-010: `[A-Za-z0-9._:/-]`, 1..=128 characters; anything else is `invalid-argument`.
     pub fn parse(text: &str) -> Result<DedupKey, PluginError> {
-        if text.is_empty() || text.len() > DEDUP_KEY_MAX_CHARS ||
-            !text.bytes().all(|byte| byte.is_ascii_alphanumeric() || b"._:/-".contains(&byte)) {
-            return Err(PluginError { code: crate::ErrorCode::InvalidArgument,
-                message: "dedup key must contain 1 to 128 ASCII letters, digits or ._:/-".into(), retry_after_ms: None });
+        if text.is_empty()
+            || text.len() > DEDUP_KEY_MAX_CHARS
+            || !text
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || b"._:/-".contains(&byte))
+        {
+            return Err(PluginError {
+                code: crate::ErrorCode::InvalidArgument,
+                message: "dedup key must contain 1 to 128 ASCII letters, digits or ._:/-".into(),
+                retry_after_ms: None,
+            });
         }
         Ok(DedupKey(text.to_owned()))
     }
@@ -93,7 +100,15 @@ mod tests {
     /// REQ: ABI-010
     #[test]
     fn parse_rejects_disallowed_ascii_punctuation_as_invalid_argument() {
-        for text in ["has space", "at@sign", "hash#", "plus+", "equal=", "comma,", "star*"] {
+        for text in [
+            "has space",
+            "at@sign",
+            "hash#",
+            "plus+",
+            "equal=",
+            "comma,",
+            "star*",
+        ] {
             let error = DedupKey::parse(text).expect_err("this character is outside the set");
             assert_eq!(error.code, ErrorCode::InvalidArgument, "input {text:?}");
         }
@@ -102,14 +117,16 @@ mod tests {
     /// REQ: ABI-010
     #[test]
     fn parse_rejects_non_ascii_letters_as_invalid_argument() {
-        let error = DedupKey::parse("caf\u{e9}").expect_err("accented letters are not ASCII letters");
+        let error =
+            DedupKey::parse("caf\u{e9}").expect_err("accented letters are not ASCII letters");
         assert_eq!(error.code, ErrorCode::InvalidArgument);
     }
 
     /// REQ: ABI-010
     #[test]
     fn parse_rejects_newline_as_invalid_argument() {
-        let error = DedupKey::parse("line\nbreak").expect_err("control characters are outside the set");
+        let error =
+            DedupKey::parse("line\nbreak").expect_err("control characters are outside the set");
         assert_eq!(error.code, ErrorCode::InvalidArgument);
     }
 

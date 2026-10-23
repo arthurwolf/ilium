@@ -150,7 +150,10 @@ mod spec_tests {
         assert!(failure.round < 5, "round was {}", failure.round);
         let text = failure.to_string();
         assert!(text.contains("31"), "message was {text}");
-        assert!(text.contains(&failure.round.to_string()), "message was {text}");
+        assert!(
+            text.contains(&failure.round.to_string()),
+            "message was {text}"
+        );
     }
 
     /// REQ: DEV-521

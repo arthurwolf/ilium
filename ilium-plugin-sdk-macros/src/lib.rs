@@ -191,7 +191,10 @@ mod spec_tests {
         let without_side = parse_error_message(r#"exports = ["views"]"#);
         let empty_input = parse_error_message("");
 
-        assert!(without_side.contains("requires side"), "got: {without_side}");
+        assert!(
+            without_side.contains("requires side"),
+            "got: {without_side}"
+        );
         assert!(empty_input.contains("requires side"), "got: {empty_input}");
     }
 

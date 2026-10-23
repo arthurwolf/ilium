@@ -12,6 +12,7 @@ mod guide_backwards_compatibility_test_matrix;
 mod guide_ci_recipes;
 mod guide_plugin_documentation;
 mod guide_plugin_documentation_p2;
+mod lint_support;
 mod performance;
 mod reference_check_and_lint_rules_check;
 mod reference_check_and_lint_rules_lint;

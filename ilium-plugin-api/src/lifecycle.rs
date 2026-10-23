@@ -47,18 +47,30 @@ pub fn next_instance_state(
     use InstanceInput as I;
     use InstanceState as S;
     let next = match (current, input) {
-        (S::Inactive, I::Activate) | (S::RestartScheduled, I::RestartTimerFired)
-            | (S::WaitingDependency, I::DependencyReady) => S::Activating,
+        (S::Inactive, I::Activate)
+        | (S::RestartScheduled, I::RestartTimerFired)
+        | (S::WaitingDependency, I::DependencyReady) => S::Activating,
         (S::Inactive, I::DependencyMissing) => S::WaitingDependency,
         (S::WaitingDependency, I::DependencyWaitExpired) => S::Inactive,
         (S::Activating, I::ActivateOk) => S::Active,
-        (S::Activating, I::ActivateErr(_)) | (S::Activating | S::Active, I::Trap(_)) => S::RestartScheduled,
+        (S::Activating, I::ActivateErr(_)) | (S::Activating | S::Active, I::Trap(_)) => {
+            S::RestartScheduled
+        }
         (S::RestartScheduled, I::FailureLimitReached) => S::StoppedByFailure,
-        (S::Active, I::Deactivate(reason)) if *reason != DeactivationReason::CrashRestart => S::Deactivating,
+        (S::Active, I::Deactivate(reason)) if *reason != DeactivationReason::CrashRestart => {
+            S::Deactivating
+        }
         (S::Active, I::Disable) => S::Deactivating,
         (S::Deactivating, I::DeactivateDone) => S::Inactive,
         (S::Deactivating, I::DeactivateDoneStopped) => S::Stopped,
-        (S::Inactive | S::WaitingDependency | S::RestartScheduled | S::StoppedByFailure | S::Stopped, I::Disable) => S::Stopped,
+        (
+            S::Inactive
+            | S::WaitingDependency
+            | S::RestartScheduled
+            | S::StoppedByFailure
+            | S::Stopped,
+            I::Disable,
+        ) => S::Stopped,
         (S::Stopped | S::StoppedByFailure | S::Inactive, I::Enable) => S::Inactive,
         _ => return Err(Code::from_static("host.invalid-state")),
     };
@@ -110,7 +122,9 @@ pub fn next_package_state(
         (S::UninstallPending, I::InstanceStopped) => S::NotInstalled,
         (state, I::Revoked) if state != S::NotInstalled => S::DisabledBlocked,
         (state, I::RefuseAtLoad(_)) if state != S::NotInstalled => S::RefusedAtLoad,
-        (state, I::RequestUninstall) if !matches!(state, S::NotInstalled | S::UninstallPending) => S::UninstallPending,
+        (state, I::RequestUninstall) if !matches!(state, S::NotInstalled | S::UninstallPending) => {
+            S::UninstallPending
+        }
         _ => return Err(Code::from_static("host.invalid-state")),
     };
     Ok(next)
@@ -145,7 +159,8 @@ impl RestartPolicy {
     /// Records a failure at `now_ms` and decides (reference-runtime-model.md "12. Failures and restart").
     pub fn on_failure(&mut self, now_ms: u64) -> RestartDecision {
         // The boundary is exclusive: a failure exactly ten minutes old expires.
-        self.failures_ms.retain(|time| *time <= now_ms && now_ms - *time < FAILURE_WINDOW_MS);
+        self.failures_ms
+            .retain(|time| *time <= now_ms && now_ms - *time < FAILURE_WINDOW_MS);
         self.failures_ms.push(now_ms);
         match self.failures_ms.len() {
             1 => RestartDecision::RestartAfterMs(FIRST_RESTART_DELAY_MS),
@@ -156,7 +171,10 @@ impl RestartPolicy {
 
     /// Failures inside the window ending at `now_ms` (reference-runtime-model.md "12. Failures and restart").
     pub fn failures_in_window(&self, now_ms: u64) -> u32 {
-        self.failures_ms.iter().filter(|time| **time <= now_ms && now_ms - **time < FAILURE_WINDOW_MS).count() as u32
+        self.failures_ms
+            .iter()
+            .filter(|time| **time <= now_ms && now_ms - **time < FAILURE_WINDOW_MS)
+            .count() as u32
     }
 
     /// Forgets every failure, after a manual enable (reference-runtime-model.md "12. Failures and restart").
@@ -338,13 +356,22 @@ mod tests {
     fn transitions_outside_the_tables_are_rejected() {
         let illegal_pairs = [
             (InstanceState::Inactive, InstanceInput::ActivateOk),
-            (InstanceState::Inactive, InstanceInput::Trap(code("trap.deadline"))),
+            (
+                InstanceState::Inactive,
+                InstanceInput::Trap(code("trap.deadline")),
+            ),
             (InstanceState::Inactive, InstanceInput::RestartTimerFired),
             (InstanceState::Active, InstanceInput::Activate),
             (InstanceState::Active, InstanceInput::ActivateOk),
             (InstanceState::Active, InstanceInput::DependencyReady),
-            (InstanceState::WaitingDependency, InstanceInput::Trap(code("trap.deadline"))),
-            (InstanceState::Stopped, InstanceInput::Trap(code("trap.deadline"))),
+            (
+                InstanceState::WaitingDependency,
+                InstanceInput::Trap(code("trap.deadline")),
+            ),
+            (
+                InstanceState::Stopped,
+                InstanceInput::Trap(code("trap.deadline")),
+            ),
             (InstanceState::Deactivating, InstanceInput::Activate),
         ];
         for (state, input) in illegal_pairs {
@@ -394,7 +421,10 @@ mod tests {
             "set-enabled(true) on an enabled plugin keeps installed-enabled"
         );
         assert_eq!(
-            next_package_state(PackageState::InstalledDisabledByUser, &PackageInput::Disable),
+            next_package_state(
+                PackageState::InstalledDisabledByUser,
+                &PackageInput::Disable
+            ),
             Ok(PackageState::InstalledDisabledByUser),
             "set-enabled(false) on a disabled plugin keeps installed-disabled-by-user"
         );
@@ -615,7 +645,10 @@ mod tests {
     fn failure_at_660_seconds_sees_only_the_one_at_300_seconds() {
         let mut policy = RestartPolicy::default();
         assert_eq!(policy.on_failure(0), RestartDecision::RestartAfterMs(1_000));
-        assert_eq!(policy.on_failure(300_000), RestartDecision::RestartAfterMs(5_000));
+        assert_eq!(
+            policy.on_failure(300_000),
+            RestartDecision::RestartAfterMs(5_000)
+        );
         assert_eq!(
             policy.on_failure(660_000),
             RestartDecision::RestartAfterMs(5_000),
@@ -629,10 +662,26 @@ mod tests {
     fn failure_age_boundary_is_strictly_below_600_seconds() {
         let mut policy = RestartPolicy::default();
         policy.on_failure(0);
-        assert_eq!(policy.failures_in_window(599_000), 1, "age 599 s still counts");
-        assert_eq!(policy.failures_in_window(599_999), 1, "age 599.999 s still counts");
-        assert_eq!(policy.failures_in_window(600_000), 0, "age exactly 600 s no longer counts");
-        assert_eq!(policy.failures_in_window(601_000), 0, "age 601 s does not count");
+        assert_eq!(
+            policy.failures_in_window(599_000),
+            1,
+            "age 599 s still counts"
+        );
+        assert_eq!(
+            policy.failures_in_window(599_999),
+            1,
+            "age 599.999 s still counts"
+        );
+        assert_eq!(
+            policy.failures_in_window(600_000),
+            0,
+            "age exactly 600 s no longer counts"
+        );
+        assert_eq!(
+            policy.failures_in_window(601_000),
+            0,
+            "age 601 s does not count"
+        );
     }
 
     /// A failure exactly 600 s old no longer counts, so the next failure is a first failure again.
@@ -653,8 +702,16 @@ mod tests {
     #[test]
     fn default_policy_has_empty_window() {
         let policy = RestartPolicy::default();
-        assert_eq!(policy.failures_in_window(0), 0, "empty input: no failures recorded");
-        assert_eq!(policy.failures_in_window(600_000), 0, "empty input at the window end");
+        assert_eq!(
+            policy.failures_in_window(0),
+            0,
+            "empty input: no failures recorded"
+        );
+        assert_eq!(
+            policy.failures_in_window(600_000),
+            0,
+            "empty input at the window end"
+        );
     }
 
     /// Recording a failure makes it count inside the window.
@@ -665,7 +722,11 @@ mod tests {
         policy.on_failure(0);
         assert_eq!(policy.failures_in_window(0), 1, "one failure at time 0");
         policy.on_failure(10_000);
-        assert_eq!(policy.failures_in_window(10_000), 2, "two failures inside the window");
+        assert_eq!(
+            policy.failures_in_window(10_000),
+            2,
+            "two failures inside the window"
+        );
     }
 
     /// Manual reset (enable, reset-failures) forgets every failure, so the next failure is a first failure.
@@ -676,7 +737,11 @@ mod tests {
         policy.on_failure(0);
         policy.on_failure(1_000);
         policy.reset();
-        assert_eq!(policy.failures_in_window(1_000), 0, "reset empties the window");
+        assert_eq!(
+            policy.failures_in_window(1_000),
+            0,
+            "reset empties the window"
+        );
         assert_eq!(
             policy.on_failure(2_000),
             RestartDecision::RestartAfterMs(1_000),
@@ -711,7 +776,15 @@ mod tests {
             RestartDecision::RestartAfterMs(1_000),
             "a failure on the other side is its first failure"
         );
-        assert_eq!(server_policy.failures_in_window(1_000), 1, "server side has one failure");
-        assert_eq!(client_policy.failures_in_window(1_000), 2, "client side has two failures");
+        assert_eq!(
+            server_policy.failures_in_window(1_000),
+            1,
+            "server side has one failure"
+        );
+        assert_eq!(
+            client_policy.failures_in_window(1_000),
+            2,
+            "client side has two failures"
+        );
     }
 }

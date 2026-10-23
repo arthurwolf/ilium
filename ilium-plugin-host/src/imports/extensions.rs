@@ -80,7 +80,10 @@ mod tests {
     #[test]
     fn list_empty_point_name_fails_with_unknown_point() {
         let mut import = ExtensionsImport;
-        assert_eq!(import.list(String::new()), Err(ExtensionError::UnknownPoint));
+        assert_eq!(
+            import.list(String::new()),
+            Err(ExtensionError::UnknownPoint)
+        );
     }
 
     /// REQ: EXT-024

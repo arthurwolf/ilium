@@ -342,6 +342,11 @@ pub fn clamp(requested: &Limits, tier: Tier) -> Result<BTreeMap<LimitKey, u64>, 
     Ok(effective)
 }
 
+/// ABI-068: the refusal code of the table row for `key`.
+pub fn row_refusal_code(_key: LimitKey) -> &'static str {
+    unimplemented!("api::limits::row_refusal_code")
+}
+
 #[cfg(test)]
 mod tests {
     use super::{ceiling, clamp, default_of, LimitKey, Limits};
@@ -625,14 +630,16 @@ mod tests {
     fn pkg_071_zero_means_the_default_not_zero() {
         let requested = limits_of(&[("memory_mib", 0)]);
         let effective = clamp(&requested, Tier::T3).expect("0 is a valid request");
-        assert_eq!(effective[&LimitKey::MemoryMib], default_of(LimitKey::MemoryMib));
+        assert_eq!(
+            effective[&LimitKey::MemoryMib],
+            default_of(LimitKey::MemoryMib)
+        );
     }
 
     /// REQ: PKG-071
     #[test]
     fn pkg_071_zero_is_the_default_for_every_key() {
-        let entries: Vec<(&str, u64)> =
-            LimitKey::ALL.iter().map(|key| (key.as_key(), 0)).collect();
+        let entries: Vec<(&str, u64)> = LimitKey::ALL.iter().map(|key| (key.as_key(), 0)).collect();
         let effective = clamp(&limits_of(&entries), Tier::T1).expect("zeros are valid requests");
         for key in LimitKey::ALL {
             if key == LimitKey::FrameDeadlineMs {
@@ -647,7 +654,10 @@ mod tests {
     fn pkg_070_largest_schema_value_is_clamped_to_the_ceiling() {
         let requested = limits_of(&[("job_wall_ms", 4_294_967_295)]);
         let effective = clamp(&requested, Tier::T2).expect("clamps, never refuses");
-        assert_eq!(effective[&LimitKey::JobWallMs], ceiling(LimitKey::JobWallMs, Tier::T2));
+        assert_eq!(
+            effective[&LimitKey::JobWallMs],
+            ceiling(LimitKey::JobWallMs, Tier::T2)
+        );
     }
 
     /// REQ: PKG-071
@@ -676,7 +686,8 @@ mod tests {
     #[test]
     fn pkg_072_session_key_in_manifest_is_refused_as_unknown() {
         let requested = limits_of(&[("session_memory_mib", 512)]);
-        let diagnostic = clamp(&requested, Tier::T1).expect_err("session keys are not manifest keys");
+        let diagnostic =
+            clamp(&requested, Tier::T1).expect_err("session keys are not manifest keys");
         assert_eq!(diagnostic.code.as_str(), "manifest.unknown-key");
     }
 

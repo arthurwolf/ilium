@@ -60,7 +60,9 @@ mod tests {
     /// Asserts that a call was refused with the expected error code.
     fn assert_refused<T: std::fmt::Debug>(result: Result<T, PluginError>, expected: ErrorCode) {
         match result {
-            Ok(value) => panic!("call must be refused with {expected:?}, but it returned {value:?}"),
+            Ok(value) => {
+                panic!("call must be refused with {expected:?}, but it returned {value:?}")
+            }
             Err(error) => assert_eq!(
                 error.code, expected,
                 "wrong error code, message: {}",
@@ -114,7 +116,10 @@ mod tests {
     fn set_accepts_a_repeat_interval_of_exactly_the_minimum() {
         let mut timers = TimersImport;
         let result = timers.set(MINIMUM_INTERVAL_MILLIS, Some(MINIMUM_INTERVAL_MILLIS));
-        assert!(result.is_ok(), "a 50 ms repeat must be accepted, got {result:?}");
+        assert!(
+            result.is_ok(),
+            "a 50 ms repeat must be accepted, got {result:?}"
+        );
     }
 
     /// REQ: API-061
@@ -123,7 +128,10 @@ mod tests {
         let mut timers = TimersImport;
         for index in 0..HELD_TIMER_LIMIT {
             let result = timers.set(MINIMUM_INTERVAL_MILLIS, None);
-            assert!(result.is_ok(), "timer {index} of {HELD_TIMER_LIMIT} must be accepted, got {result:?}");
+            assert!(
+                result.is_ok(),
+                "timer {index} of {HELD_TIMER_LIMIT} must be accepted, got {result:?}"
+            );
         }
         let result = timers.set(MINIMUM_INTERVAL_MILLIS, None);
         assert_refused(result, ErrorCode::QuotaExceeded);
@@ -170,7 +178,10 @@ mod tests {
         let mut timers = TimersImport;
         let epoch = now_unix_millis() - PAST_TOLERANCE_MILLIS / 2;
         let result = timers.at(EpochMs(epoch), "recent-job".to_string());
-        assert!(result.is_ok(), "an epoch 500 ms in the past must be accepted, got {result:?}");
+        assert!(
+            result.is_ok(),
+            "an epoch 500 ms in the past must be accepted, got {result:?}"
+        );
     }
 
     /// REQ: API-060
@@ -179,7 +190,10 @@ mod tests {
         let mut timers = TimersImport;
         let epoch = now_unix_millis() + 60_000;
         let result = timers.at(EpochMs(epoch), "future-job".to_string());
-        assert!(result.is_ok(), "an epoch one minute ahead must be accepted, got {result:?}");
+        assert!(
+            result.is_ok(),
+            "an epoch one minute ahead must be accepted, got {result:?}"
+        );
     }
 
     /// REQ: API-061
@@ -189,7 +203,10 @@ mod tests {
         let epoch = now_unix_millis() + 60_000;
         for index in 0..HELD_TIMER_LIMIT {
             let result = timers.at(EpochMs(epoch), format!("job-{index}"));
-            assert!(result.is_ok(), "durable timer {index} of {HELD_TIMER_LIMIT} must be accepted, got {result:?}");
+            assert!(
+                result.is_ok(),
+                "durable timer {index} of {HELD_TIMER_LIMIT} must be accepted, got {result:?}"
+            );
         }
         let result = timers.at(EpochMs(epoch), format!("job-{HELD_TIMER_LIMIT}"));
         assert_refused(result, ErrorCode::QuotaExceeded);
@@ -202,10 +219,16 @@ mod tests {
         let epoch = now_unix_millis() + 60_000;
         for index in 0..HELD_TIMER_LIMIT {
             let result = timers.at(EpochMs(epoch), format!("job-{index}"));
-            assert!(result.is_ok(), "durable timer {index} of {HELD_TIMER_LIMIT} must be accepted, got {result:?}");
+            assert!(
+                result.is_ok(),
+                "durable timer {index} of {HELD_TIMER_LIMIT} must be accepted, got {result:?}"
+            );
         }
         let result = timers.at(EpochMs(epoch + 1_000), "job-0".to_string());
-        assert!(result.is_ok(), "re-arming an existing name must not hit the quota, got {result:?}");
+        assert!(
+            result.is_ok(),
+            "re-arming an existing name must not hit the quota, got {result:?}"
+        );
     }
 
     /// REQ: API-074
@@ -222,10 +245,16 @@ mod tests {
         let epoch = now_unix_millis() + 60_000;
         for index in 0..HELD_TIMER_LIMIT {
             let result = timers.at(EpochMs(epoch), format!("job-{index}"));
-            assert!(result.is_ok(), "durable timer {index} of {HELD_TIMER_LIMIT} must be accepted, got {result:?}");
+            assert!(
+                result.is_ok(),
+                "durable timer {index} of {HELD_TIMER_LIMIT} must be accepted, got {result:?}"
+            );
         }
         timers.cancel_durable("job-0".to_string());
         let result = timers.at(EpochMs(epoch), "job-new".to_string());
-        assert!(result.is_ok(), "a cancelled durable timer must free its slot, got {result:?}");
+        assert!(
+            result.is_ok(),
+            "a cancelled durable timer must free its slot, got {result:?}"
+        );
     }
 }

@@ -85,7 +85,10 @@ mod tests {
     fn set_title_accepts_empty_title() {
         let mut import = BasicImport;
         let result = import.set_title(plugin_pane(), String::new());
-        assert!(result.is_ok(), "expected Ok for empty title, got {result:?}");
+        assert!(
+            result.is_ok(),
+            "expected Ok for empty title, got {result:?}"
+        );
     }
 
     /// Manual: primitives-basic.md, Interface. 256 characters is the inclusive upper bound.
@@ -93,7 +96,10 @@ mod tests {
     fn set_title_accepts_exactly_256_characters() {
         let mut import = BasicImport;
         let result = import.set_title(plugin_pane(), "t".repeat(256));
-        assert!(result.is_ok(), "expected Ok at 256 characters, got {result:?}");
+        assert!(
+            result.is_ok(),
+            "expected Ok at 256 characters, got {result:?}"
+        );
     }
 
     /// Manual: primitives-basic.md, Errors and edge cases (`invalid-argument` for a title over 256 characters).
@@ -110,7 +116,10 @@ mod tests {
     fn set_title_counts_characters_not_bytes() {
         let mut import = BasicImport;
         let result = import.set_title(plugin_pane(), "é".repeat(256));
-        assert!(result.is_ok(), "expected Ok for 256 multi-byte characters, got {result:?}");
+        assert!(
+            result.is_ok(),
+            "expected Ok for 256 multi-byte characters, got {result:?}"
+        );
     }
 
     /// Manual: primitives-basic.md, Errors and edge cases (`not-permitted` for a node that is not a pane of the plugin's kinds).
@@ -134,7 +143,10 @@ mod tests {
     fn set_status_accepts_empty_status() {
         let mut import = BasicImport;
         let result = import.set_status(plugin_pane(), StyledText::new());
-        assert!(result.is_ok(), "expected Ok for empty status, got {result:?}");
+        assert!(
+            result.is_ok(),
+            "expected Ok for empty status, got {result:?}"
+        );
     }
 
     /// Manual: primitives-basic.md, Interface. 256 characters is the inclusive upper bound.
@@ -142,7 +154,10 @@ mod tests {
     fn set_status_accepts_exactly_256_characters() {
         let mut import = BasicImport;
         let result = import.set_status(plugin_pane(), plain_status(&"s".repeat(256)));
-        assert!(result.is_ok(), "expected Ok at 256 characters, got {result:?}");
+        assert!(
+            result.is_ok(),
+            "expected Ok at 256 characters, got {result:?}"
+        );
     }
 
     /// Manual: primitives-basic.md, Errors and edge cases (`invalid-argument` for a status over 256 characters).
@@ -151,8 +166,14 @@ mod tests {
     fn set_status_rejects_257_characters_across_spans_with_invalid_argument() {
         let mut import = BasicImport;
         let status: StyledText = vec![
-            Span { text: "a".repeat(128), style: Style::default() },
-            Span { text: "b".repeat(129), style: Style::default() },
+            Span {
+                text: "a".repeat(128),
+                style: Style::default(),
+            },
+            Span {
+                text: "b".repeat(129),
+                style: Style::default(),
+            },
         ];
         let result = import.set_status(plugin_pane(), status);
         assert_eq!(error_code_of(result), Some(ErrorCode::InvalidArgument));
@@ -195,7 +216,10 @@ mod tests {
     fn size_of_own_pane_is_some() {
         let mut import = BasicImport;
         let size = import.size(plugin_pane());
-        assert!(size.is_some(), "expected Some((columns, rows)) for an own pane, got {size:?}");
+        assert!(
+            size.is_some(),
+            "expected Some((columns, rows)) for an own pane, got {size:?}"
+        );
     }
 
     /// Manual: primitives-basic.md, Interface and Errors and edge cases: `size` returns `None` with no

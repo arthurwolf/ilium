@@ -140,7 +140,10 @@ mod tests {
     /// REQ: SEC-243
     #[test]
     fn hex_lower_matches_reference_for_plain_secret() {
-        assert_eq!(hex_lower(SECRET_PLAIN.as_bytes()), "7333637233742d746f6b656e21");
+        assert_eq!(
+            hex_lower(SECRET_PLAIN.as_bytes()),
+            "7333637233742d746f6b656e21"
+        );
     }
 
     /// REQ: SEC-243
@@ -152,7 +155,10 @@ mod tests {
     /// REQ: SEC-243
     #[test]
     fn redact_text_without_secret_is_unchanged() {
-        assert_eq!(redact("nothing sensitive here", &secrets_of(&[SECRET_PLAIN])), "nothing sensitive here");
+        assert_eq!(
+            redact("nothing sensitive here", &secrets_of(&[SECRET_PLAIN])),
+            "nothing sensitive here"
+        );
     }
 
     /// REQ: SEC-243
@@ -168,7 +174,10 @@ mod tests {
     #[test]
     fn redact_replaces_every_occurrence() {
         assert_eq!(
-            redact("s3cr3t-token! and s3cr3t-token!", &secrets_of(&[SECRET_PLAIN])),
+            redact(
+                "s3cr3t-token! and s3cr3t-token!",
+                &secrets_of(&[SECRET_PLAIN])
+            ),
             "<redacted> and <redacted>"
         );
     }
@@ -177,7 +186,10 @@ mod tests {
     #[test]
     fn redact_replaces_standard_base64_with_padding() {
         assert_eq!(
-            redact("Authorization: czNjcjN0LXRva2VuIQ==", &secrets_of(&[SECRET_PLAIN])),
+            redact(
+                "Authorization: czNjcjN0LXRva2VuIQ==",
+                &secrets_of(&[SECRET_PLAIN])
+            ),
             "Authorization: <redacted>"
         );
     }
@@ -195,7 +207,10 @@ mod tests {
     #[test]
     fn redact_replaces_url_safe_base64_with_padding() {
         assert_eq!(
-            redact("https://host/?t=fj4_fj4_eA==", &secrets_of(&[SECRET_SYMBOLS])),
+            redact(
+                "https://host/?t=fj4_fj4_eA==",
+                &secrets_of(&[SECRET_SYMBOLS])
+            ),
             "https://host/?t=<redacted>"
         );
     }
@@ -266,22 +281,34 @@ mod tests {
     /// REQ: SEC-243
     #[test]
     fn redact_accepts_secret_of_exactly_six_characters() {
-        assert_eq!(redact("pw=abcdef.", &secrets_of(&["abcdef"])), "pw=<redacted>.");
+        assert_eq!(
+            redact("pw=abcdef.", &secrets_of(&["abcdef"])),
+            "pw=<redacted>."
+        );
     }
 
     /// REQ: SEC-243
     #[test]
     fn redact_replaces_longer_value_first_regardless_of_order() {
         let text = "x abcdefghijkl y";
-        assert_eq!(redact(text, &secrets_of(&["abcdef", "abcdefghijkl"])), "x <redacted> y");
-        assert_eq!(redact(text, &secrets_of(&["abcdefghijkl", "abcdef"])), "x <redacted> y");
+        assert_eq!(
+            redact(text, &secrets_of(&["abcdef", "abcdefghijkl"])),
+            "x <redacted> y"
+        );
+        assert_eq!(
+            redact(text, &secrets_of(&["abcdefghijkl", "abcdef"])),
+            "x <redacted> y"
+        );
     }
 
     /// REQ: SEC-243
     #[test]
     fn redact_replaces_each_of_several_secrets() {
         assert_eq!(
-            redact("one s3cr3t-token! two abcdef", &secrets_of(&[SECRET_PLAIN, "abcdef"])),
+            redact(
+                "one s3cr3t-token! two abcdef",
+                &secrets_of(&[SECRET_PLAIN, "abcdef"])
+            ),
             "one <redacted> two <redacted>"
         );
     }
@@ -289,13 +316,19 @@ mod tests {
     /// REQ: SEC-248
     #[test]
     fn masked_row_reveals_requested_trailing_characters() {
-        assert_eq!(masked_row("token-xyz-a1b2", 4), "\u{2022}\u{2022}\u{2022}\u{2022}a1b2");
+        assert_eq!(
+            masked_row("token-xyz-a1b2", 4),
+            "\u{2022}\u{2022}\u{2022}\u{2022}a1b2"
+        );
     }
 
     /// REQ: SEC-248
     #[test]
     fn masked_row_with_zero_visible_shows_dots_only() {
-        assert_eq!(masked_row("token-xyz-a1b2", 0), "\u{2022}\u{2022}\u{2022}\u{2022}");
+        assert_eq!(
+            masked_row("token-xyz-a1b2", 0),
+            "\u{2022}\u{2022}\u{2022}\u{2022}"
+        );
     }
 
     /// REQ: SEC-248
@@ -335,6 +368,9 @@ mod tests {
     /// REQ: SEC-248
     #[test]
     fn masked_row_counts_characters_not_bytes() {
-        assert_eq!(masked_row("p\u{e4}ssw\u{f6}rd", 3), "\u{2022}\u{2022}\u{2022}\u{2022}\u{f6}rd");
+        assert_eq!(
+            masked_row("p\u{e4}ssw\u{f6}rd", 3),
+            "\u{2022}\u{2022}\u{2022}\u{2022}\u{f6}rd"
+        );
     }
 }

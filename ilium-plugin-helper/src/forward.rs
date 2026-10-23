@@ -20,14 +20,20 @@ mod spec_tests {
     #[test]
     fn forwards_host_state_import_and_returns_host_reply() {
         let reply = forward_import("ilium:storage", "get", b"settings/theme");
-        assert!(reply.is_ok(), "a forwarded storage import must return the host's reply");
+        assert!(
+            reply.is_ok(),
+            "a forwarded storage import must return the host's reply"
+        );
     }
 
     /// REQ: HST-159
     #[test]
     fn forwards_import_with_empty_payload() {
         let reply = forward_import("ilium:clipboard", "clear", &[]);
-        assert!(reply.is_ok(), "an import with no argument bytes must still be forwarded");
+        assert!(
+            reply.is_ok(),
+            "an import with no argument bytes must still be forwarded"
+        );
     }
 
     /// REQ: HST-155

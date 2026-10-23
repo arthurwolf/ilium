@@ -22,7 +22,10 @@ use ilium_plugin_api::{Code, ProcessKind};
 use sha2::{Digest, Sha256};
 use wasmparser::{Parser, Payload, Validator, WasmFeatures};
 use wasmtime::component::Component;
-use wasmtime::{Cache, CacheConfig, Config, Engine, InstanceAllocationStrategy, OptLevel, Store, StoreLimits, StoreLimitsBuilder, UpdateDeadline, WasmBacktraceDetails};
+use wasmtime::{
+    Cache, CacheConfig, Config, Engine, InstanceAllocationStrategy, OptLevel, Store, StoreLimits,
+    StoreLimitsBuilder, UpdateDeadline, WasmBacktraceDetails,
+};
 
 use crate::calls::ResolvedLimits;
 use crate::error::HostError;
@@ -42,7 +45,10 @@ pub struct EngineConfig {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AllocatorKind { OnDemand, Pooling }
+pub enum AllocatorKind {
+    OnDemand,
+    Pooling,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeSettings {
@@ -103,9 +109,14 @@ pub fn runtime_config() -> Config {
 }
 
 /// Measurements are `(40-plugin startup ms, median instantiation ms)`.
-pub fn select_allocator(on_demand: (f64, f64), pooling: (f64, f64), added_rss_mib: f64) -> AllocatorKind {
+pub fn select_allocator(
+    on_demand: (f64, f64),
+    pooling: (f64, f64),
+    added_rss_mib: f64,
+) -> AllocatorKind {
     if (on_demand.0 > 150.0 || on_demand.1 > 5.0)
-        && pooling.0 <= 150.0 && pooling.1 <= 5.0
+        && pooling.0 <= 150.0
+        && pooling.1 <= 5.0
         && added_rss_mib <= 16.0
     {
         AllocatorKind::Pooling
@@ -120,50 +131,68 @@ impl Hasher for Sha256Hasher {
         let digest = self.0.clone().finalize();
         u64::from_le_bytes(digest[..8].try_into().unwrap_or([0; 8]))
     }
-    fn write(&mut self, bytes: &[u8]) { self.0.update(bytes); }
+    fn write(&mut self, bytes: &[u8]) {
+        self.0.update(bytes);
+    }
 }
 
 fn hex_sha256(hasher: Sha256) -> String {
-    hasher.finalize().iter().map(|byte| format!("{byte:02x}")).collect()
+    hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 /// Includes Wasmtime's own artifact-compatibility hash, not a guessed CPU feature list.
 pub fn config_fingerprint() -> String {
     static FINGERPRINT: OnceLock<String> = OnceLock::new();
-    FINGERPRINT.get_or_init(|| {
-        let mut hasher = Sha256Hasher(Sha256::new());
-        WASMTIME_VERSION.hash(&mut hasher);
-        match Engine::new(&runtime_config()) {
-            Ok(engine) => engine.precompile_compatibility_hash().hash(&mut hasher),
-            // The host cannot run with an invalid Config. This unique failure fingerprint
-            // must never authenticate an artifact; PluginEngine::new returns the actual error.
-            Err(error) => format!("engine-unavailable:{error}").hash(&mut hasher),
-        }
-        hex_sha256(hasher.0)
-    }).clone()
+    FINGERPRINT
+        .get_or_init(|| {
+            let mut hasher = Sha256Hasher(Sha256::new());
+            WASMTIME_VERSION.hash(&mut hasher);
+            match Engine::new(&runtime_config()) {
+                Ok(engine) => engine.precompile_compatibility_hash().hash(&mut hasher),
+                // The host cannot run with an invalid Config. This unique failure fingerprint
+                // must never authenticate an artifact; PluginEngine::new returns the actual error.
+                Err(error) => format!("engine-unavailable:{error}").hash(&mut hasher),
+            }
+            hex_sha256(hasher.0)
+        })
+        .clone()
 }
 
 pub fn compile_cache_dir(base: &Path) -> PathBuf {
-    base.join("ilium").join("plugin-compile")
+    base.join("ilium")
+        .join("plugin-compile")
         .join(format!("{WASMTIME_VERSION}-{}", config_fingerprint()))
 }
 
 fn cache_dir_name(name: &str) -> bool {
-    let Some((version, digest)) = name.split_once('-') else { return false; };
+    let Some((version, digest)) = name.split_once('-') else {
+        return false;
+    };
     version.split('.').count() == 3
-        && version.split('.').all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()))
-        && digest.len() >= 3 && digest.bytes().all(|b| b.is_ascii_hexdigit())
+        && version
+            .split('.')
+            .all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()))
+        && digest.len() >= 3
+        && digest.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
 /// Prune only versioned directories in the dedicated cache namespace; preserve unknown files.
 pub fn prune_stale_cache_dirs(base: &Path) -> std::io::Result<Vec<PathBuf>> {
     let ilium_dir = base.join("ilium");
     let root = ilium_dir.join("plugin-compile");
-    if !root.exists() { return Ok(Vec::new()); }
+    if !root.exists() {
+        return Ok(Vec::new());
+    }
     for directory in [&ilium_dir, &root] {
         if !std::fs::symlink_metadata(directory)?.file_type().is_dir() {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput,
-                "cache namespace must be a real directory"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "cache namespace must be a real directory",
+            ));
         }
     }
     let keep = format!("{WASMTIME_VERSION}-{}", config_fingerprint());
@@ -173,7 +202,9 @@ pub fn prune_stale_cache_dirs(base: &Path) -> std::io::Result<Vec<PathBuf>> {
         let path = entry.path();
         let name = entry.file_name();
         let name = name.to_string_lossy();
-        if name == keep || !cache_dir_name(&name) || !entry.file_type()?.is_dir() { continue; }
+        if name == keep || !cache_dir_name(&name) || !entry.file_type()?.is_dir() {
+            continue;
+        }
         std::fs::remove_dir_all(&path)?;
         removed.push(path);
     }
@@ -193,16 +224,28 @@ pub struct ValidationContext {
 }
 impl ValidationContext {
     pub fn new(world: World, api_version: (u16, u16, u16)) -> Self {
-        Self { world: Some(world), api_version, requested: Vec::new(), expected_world_text: None }
+        Self {
+            world: Some(world),
+            api_version,
+            requested: Vec::new(),
+            expected_world_text: None,
+        }
     }
     pub fn bare(api_version: (u16, u16, u16)) -> Self {
-        Self { world: None, api_version, requested: Vec::new(), expected_world_text: None }
+        Self {
+            world: None,
+            api_version,
+            requested: Vec::new(),
+            expected_world_text: None,
+        }
     }
     pub fn requesting(mut self, grants: &[&str]) -> Self {
-        self.requested = grants.iter().map(|grant| (*grant).to_owned()).collect(); self
+        self.requested = grants.iter().map(|grant| (*grant).to_owned()).collect();
+        self
     }
     pub fn expecting_world_text(mut self, text: &str) -> Self {
-        self.expected_world_text = Some(text.to_owned()); self
+        self.expected_world_text = Some(text.to_owned());
+        self
     }
 }
 
@@ -212,9 +255,14 @@ fn diagnostic(code: &'static str, message: impl Into<String>) -> Diagnostic {
 
 fn validator_features() -> WasmFeatures {
     let mut features = WasmFeatures::default();
-    for flag in [WasmFeatures::THREADS, WasmFeatures::RELAXED_SIMD,
-        WasmFeatures::MULTI_MEMORY, WasmFeatures::MEMORY64, WasmFeatures::GC,
-        WasmFeatures::CM_ASYNC] {
+    for flag in [
+        WasmFeatures::THREADS,
+        WasmFeatures::RELAXED_SIMD,
+        WasmFeatures::MULTI_MEMORY,
+        WasmFeatures::MEMORY64,
+        WasmFeatures::GC,
+        WasmFeatures::CM_ASYNC,
+    ] {
         features.set(flag, false);
     }
     features.set(WasmFeatures::COMPONENT_MODEL, true);
@@ -224,20 +272,60 @@ fn validator_features() -> WasmFeatures {
 /// Statically known host imports. This list is only structural validation;
 /// generated linker types and parsed grants must authorize instantiation.
 fn known_host_import(interface: &str) -> bool {
-    matches!(interface,
-        "audio" | "catalogs" | "cli" | "client-requests" | "clipboard" | "clock" |
-        "codec" | "commands" | "extensions" | "fs" | "geocode" | "gpu" | "help" |
-        "http" | "http-api" | "inference" | "intents" | "intents-host" | "jobs" |
-        "journal" | "kernel-settings" | "keymap" | "keys" | "location" | "log" |
-        "media" | "messages" | "panes" | "plugins" | "process" | "services" |
-        "sessions" | "settings" | "sounds" | "storage" | "timers" | "topics" |
-        "tree" | "ui" | "ui-host" | "vector" | "workspace")
+    matches!(
+        interface,
+        "audio"
+            | "catalogs"
+            | "cli"
+            | "client-requests"
+            | "clipboard"
+            | "clock"
+            | "codec"
+            | "commands"
+            | "extensions"
+            | "fs"
+            | "geocode"
+            | "gpu"
+            | "help"
+            | "http"
+            | "http-api"
+            | "inference"
+            | "intents"
+            | "intents-host"
+            | "jobs"
+            | "journal"
+            | "kernel-settings"
+            | "keymap"
+            | "keys"
+            | "location"
+            | "log"
+            | "media"
+            | "messages"
+            | "panes"
+            | "plugins"
+            | "process"
+            | "services"
+            | "sessions"
+            | "settings"
+            | "sounds"
+            | "storage"
+            | "timers"
+            | "topics"
+            | "tree"
+            | "ui"
+            | "ui-host"
+            | "vector"
+            | "workspace"
+    )
 }
 
 fn import_allowed(name: &str, requested: &[String]) -> Result<(), Diagnostic> {
     let base = name.split('@').next().unwrap_or(name);
     if base.starts_with("wasi:sockets/") || base.starts_with("wasi:http/") {
-        return Err(diagnostic("component.wasi-forbidden", format!("forbidden import {name}")));
+        return Err(diagnostic(
+            "component.wasi-forbidden",
+            format!("forbidden import {name}"),
+        ));
     }
     if base.starts_with("wasi:filesystem/") {
         // An import is syntactically supported even with zero filesystem grants.
@@ -245,36 +333,64 @@ fn import_allowed(name: &str, requested: &[String]) -> Result<(), Diagnostic> {
         // must derive those from parsed, effective fs scopes and fail closed.
         return Ok(());
     }
-    if base.starts_with("wasi:cli/") || base.starts_with("wasi:clocks/") ||
-        base.starts_with("wasi:random/") || base.starts_with("wasi:io/") ||
-        base.starts_with("ilium:primitives/") ||
-        base == "ilium:anim/surface" || base == "ilium:anim/fonts" ||
-        matches!(base, "ilium:host/log" | "ilium:host/clock" | "ilium:host/timers" |
-            "ilium:host/storage" | "ilium:host/settings" | "ilium:host/codec" | "ilium:host/messages") {
+    if base.starts_with("wasi:cli/")
+        || base.starts_with("wasi:clocks/")
+        || base.starts_with("wasi:random/")
+        || base.starts_with("wasi:io/")
+        || base.starts_with("ilium:primitives/")
+        || base == "ilium:anim/surface"
+        || base == "ilium:anim/fonts"
+        || matches!(
+            base,
+            "ilium:host/log"
+                | "ilium:host/clock"
+                | "ilium:host/timers"
+                | "ilium:host/storage"
+                | "ilium:host/settings"
+                | "ilium:host/codec"
+                | "ilium:host/messages"
+        )
+    {
         return Ok(());
     }
     let Some(interface) = base.strip_prefix("ilium:host/") else {
-        return Err(diagnostic("component.import-unknown", format!("unknown import {name}")));
+        return Err(diagnostic(
+            "component.import-unknown",
+            format!("unknown import {name}"),
+        ));
     };
     if !known_host_import(interface) {
-        return Err(diagnostic("component.import-unknown", format!("unknown import {name}")));
+        return Err(diagnostic(
+            "component.import-unknown",
+            format!("unknown import {name}"),
+        ));
     }
-    if requested.iter().any(|grant| grant == interface || grant.starts_with(&format!("{interface}."))) {
+    if requested
+        .iter()
+        .any(|grant| grant == interface || grant.starts_with(&format!("{interface}.")))
+    {
         Ok(())
     } else {
-        Err(diagnostic("manifest.import-not-requested", format!("import {name} needs a requested grant")))
+        Err(diagnostic(
+            "manifest.import-not-requested",
+            format!("import {name} needs a requested grant"),
+        ))
     }
 }
 
 /// Ordered static checks only; this does not authorize linking or instantiation.
 pub fn validate_component(bytes: &[u8], context: &ValidationContext) -> Result<(), Diagnostic> {
-    Validator::new_with_features(validator_features()).validate_all(bytes)
+    Validator::new_with_features(validator_features())
+        .validate_all(bytes)
         .map_err(|error| diagnostic("component.invalid", error.to_string()))?;
     if !Parser::is_component(bytes) {
         return Err(diagnostic("component.invalid", "module is not a component"));
     }
     if bytes.len() > COMPONENT_MAX_BYTES {
-        return Err(diagnostic("component.too-large", "component exceeds 32 MiB"));
+        return Err(diagnostic(
+            "component.too-large",
+            "component exceeds 32 MiB",
+        ));
     }
     let mut api_sections = Vec::new();
     let mut imports = Vec::new();
@@ -290,16 +406,30 @@ pub fn validate_component(bytes: &[u8], context: &ValidationContext) -> Result<(
                 let len = section.data().len();
                 custom_total = custom_total.saturating_add(len);
                 custom_too_large |= len > CUSTOM_MAX_BYTES;
-                if nested_depth == 0 && section.name() == "ilium:api-version" { api_sections.push(section.data().to_vec()); }
+                if nested_depth == 0 && section.name() == "ilium:api-version" {
+                    api_sections.push(section.data().to_vec());
+                }
             }
             Payload::ComponentImportSection(section) if nested_depth == 0 => {
                 for import in section {
-                    imports.push(import.map_err(|error| diagnostic("component.invalid", error.to_string()))?.name.name.to_owned());
+                    imports.push(
+                        import
+                            .map_err(|error| diagnostic("component.invalid", error.to_string()))?
+                            .name
+                            .name
+                            .to_owned(),
+                    );
                 }
             }
             Payload::ComponentExportSection(section) if nested_depth == 0 => {
                 for export in section {
-                    exports.push(export.map_err(|error| diagnostic("component.invalid", error.to_string()))?.name.name.to_owned());
+                    exports.push(
+                        export
+                            .map_err(|error| diagnostic("component.invalid", error.to_string()))?
+                            .name
+                            .name
+                            .to_owned(),
+                    );
                 }
             }
             _ => {}
@@ -313,20 +443,42 @@ pub fn validate_component(bytes: &[u8], context: &ValidationContext) -> Result<(
             World::Server | World::Client => "ilium:exports/handler",
             World::Anim => "ilium:exports/renderer",
         };
-        if context.expected_world_text.as_deref().is_some_and(|text| text != world.wit_name()) ||
-            !exports.iter().any(|name| name.starts_with("ilium:exports/lifecycle@")) ||
-            !exports.iter().any(|name| name.starts_with(required)) {
-            return Err(diagnostic("component.world-mismatch", format!("component does not export {} base world", world.wit_name())));
+        if context
+            .expected_world_text
+            .as_deref()
+            .is_some_and(|text| text != world.wit_name())
+            || !exports
+                .iter()
+                .any(|name| name.starts_with("ilium:exports/lifecycle@"))
+            || !exports.iter().any(|name| name.starts_with(required))
+        {
+            return Err(diagnostic(
+                "component.world-mismatch",
+                format!("component does not export {} base world", world.wit_name()),
+            ));
         }
     }
-    let expected = [context.api_version.0.to_be_bytes(), context.api_version.1.to_be_bytes(), context.api_version.2.to_be_bytes()].concat();
+    let expected = [
+        context.api_version.0.to_be_bytes(),
+        context.api_version.1.to_be_bytes(),
+        context.api_version.2.to_be_bytes(),
+    ]
+    .concat();
     if api_sections.len() != 1 || api_sections[0] != expected {
-        return Err(diagnostic("manifest.api-version", "missing or incompatible ilium:api-version"));
+        return Err(diagnostic(
+            "manifest.api-version",
+            "missing or incompatible ilium:api-version",
+        ));
     }
     if custom_too_large || custom_total > CUSTOM_TOTAL_MAX_BYTES {
-        return Err(diagnostic("component.custom-section-too-large", "custom-section budget exceeded"));
+        return Err(diagnostic(
+            "component.custom-section-too-large",
+            "custom-section budget exceeded",
+        ));
     }
-    for import in imports { import_allowed(&import, &context.requested)?; }
+    for import in imports {
+        import_allowed(&import, &context.requested)?;
+    }
     Ok(())
 }
 
@@ -341,9 +493,21 @@ pub struct StoreSettings {
 }
 pub fn store_settings(limits: &ResolvedLimits) -> StoreSettings {
     StoreSettings {
-        memory_bytes: limits.0.get(&LimitKey::MemoryMib).copied().unwrap_or(32).saturating_mul(1024 * 1024),
-        table_elements: limits.0.get(&LimitKey::TableElements).copied().unwrap_or(10_000),
-        trap_on_grow_failure: true, instances: 16, tables: 8, memories: 4,
+        memory_bytes: limits
+            .0
+            .get(&LimitKey::MemoryMib)
+            .copied()
+            .unwrap_or(32)
+            .saturating_mul(1024 * 1024),
+        table_elements: limits
+            .0
+            .get(&LimitKey::TableElements)
+            .copied()
+            .unwrap_or(10_000),
+        trap_on_grow_failure: true,
+        instances: 16,
+        tables: 8,
+        memories: 4,
     }
 }
 /// Put this value in Store data and install `store.limiter(|data| &mut data.limits)`.
@@ -352,8 +516,11 @@ pub fn store_limits(limits: &ResolvedLimits) -> StoreLimits {
     StoreLimitsBuilder::new()
         .memory_size(settings.memory_bytes.min(usize::MAX as u64) as usize)
         .table_elements(settings.table_elements.min(usize::MAX as u64) as usize)
-        .instances(settings.instances as usize).tables(settings.tables as usize)
-        .memories(settings.memories as usize).trap_on_grow_failure(true).build()
+        .instances(settings.instances as usize)
+        .tables(settings.tables as usize)
+        .memories(settings.memories as usize)
+        .trap_on_grow_failure(true)
+        .build()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -364,10 +531,15 @@ pub struct EmbeddedArtifact {
     /// A trusted release-time precompile, never bytes from a plugin package or disk cache.
     pub cwasm: Vec<u8>,
 }
-pub fn embedded_artifacts() -> Vec<EmbeddedArtifact> { embedded::bundled_artifacts() }
+pub fn embedded_artifacts() -> Vec<EmbeddedArtifact> {
+    embedded::bundled_artifacts()
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LoadPath { Deserialized, Compiled }
+pub enum LoadPath {
+    Deserialized,
+    Compiled,
+}
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct EngineStats {
     pub deserialize_calls: u64,
@@ -389,7 +561,11 @@ struct EpochClock {
 /// Charge only time when the host clock was advancing normally. A detected
 /// suspend gap is credited back to calls already in flight, not just to the
 /// callback on the first tick after resume.
-fn active_elapsed(elapsed: Duration, suspended_now: Duration, suspended_at_start: Duration) -> Duration {
+fn active_elapsed(
+    elapsed: Duration,
+    suspended_now: Duration,
+    suspended_at_start: Duration,
+) -> Duration {
     elapsed.saturating_sub(suspended_now.saturating_sub(suspended_at_start))
 }
 
@@ -407,7 +583,8 @@ pub struct PluginEngine {
 }
 impl std::fmt::Debug for PluginEngine {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.debug_struct("PluginEngine")
+        formatter
+            .debug_struct("PluginEngine")
             .field("config", &self.config)
             .field("fingerprint", &self.fingerprint)
             .finish_non_exhaustive()
@@ -418,43 +595,70 @@ impl PluginEngine {
     /// use `with_quota` to share the process execution budget.
     pub fn new(config: EngineConfig) -> Result<Self, HostError> {
         let quota = QuotaGroup::new(QuotaLimits {
-            clients: 0, jobs: 0, service_jobs: 0, input_bytes: 0, result_bytes: 0,
-            worker_threads: 1, worker_bytes: 3 * 1024 * 1024,
+            clients: 0,
+            jobs: 0,
+            service_jobs: 0,
+            input_bytes: 0,
+            result_bytes: 0,
+            worker_threads: 1,
+            worker_bytes: 3 * 1024 * 1024,
         });
         Self::with_quota(config, &quota)
     }
 
     /// Reserve the ticker against the same quota as other process workers.
     pub fn with_quota(config: EngineConfig, quota: &QuotaGroup) -> Result<Self, HostError> {
-        if config.epoch_tick_ms != 10 { return Err(HostError::EngineError("the pinned epoch tick is 10 ms".into())); }
+        if config.epoch_tick_ms != 10 {
+            return Err(HostError::EngineError(
+                "the pinned epoch tick is 10 ms".into(),
+            ));
+        }
         let mut runtime = runtime_config();
         let mut log = Vec::new();
         if let Some(cache_dir) = &config.cache_dir {
             let cache_result = (|| {
-                if let Some(base) = cache_dir.parent().and_then(Path::parent).and_then(Path::parent) {
-                    if *cache_dir == compile_cache_dir(base) { prune_stale_cache_dirs(base)?; }
+                if let Some(base) = cache_dir
+                    .parent()
+                    .and_then(Path::parent)
+                    .and_then(Path::parent)
+                {
+                    if *cache_dir == compile_cache_dir(base) {
+                        prune_stale_cache_dirs(base)?;
+                    }
                 }
                 if cache_dir.exists() && std::fs::metadata(cache_dir)?.permissions().readonly() {
-                    return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "cache directory is read-only"));
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::PermissionDenied,
+                        "cache directory is read-only",
+                    ));
                 }
                 ilium_platform::secure_fs::create_private_directory(cache_dir)?;
                 let mut cache_config = CacheConfig::new();
-                cache_config.with_directory(cache_dir)
+                cache_config
+                    .with_directory(cache_dir)
                     .with_file_count_soft_limit(4_096)
                     .with_files_total_size_soft_limit(1024 * 1024 * 1024);
-                let cache = Cache::new(cache_config).map_err(|error| std::io::Error::other(error.to_string()))?;
+                let cache = Cache::new(cache_config)
+                    .map_err(|error| std::io::Error::other(error.to_string()))?;
                 runtime.cache(Some(cache));
                 Ok::<(), std::io::Error>(())
             })();
             if let Err(error) = cache_result {
-                log.push(LogLine { plugin: "host".into(), level: "warn".into(),
-                    message: format!("host.cache-unavailable: {error}; compiling in memory") });
+                log.push(LogLine {
+                    plugin: "host".into(),
+                    level: "warn".into(),
+                    message: format!("host.cache-unavailable: {error}; compiling in memory"),
+                });
             }
         }
-        let engine = Engine::new(&runtime).map_err(|error| HostError::EngineError(error.to_string()))?;
+        let engine =
+            Engine::new(&runtime).map_err(|error| HostError::EngineError(error.to_string()))?;
         let epoch = Arc::new(AtomicU64::new(0));
         let jump_epoch = Arc::new(AtomicU64::new(u64::MAX));
-        let clock = Arc::new(Mutex::new(EpochClock { last_tick: Instant::now(), suspended: Duration::ZERO }));
+        let clock = Arc::new(Mutex::new(EpochClock {
+            last_tick: Instant::now(),
+            suspended: Duration::ZERO,
+        }));
         // The reservation owns the quota lease through physical thread retirement.
         // Account an explicit native stack plus bounded ticker-owned state.
         let reservation = reserve_admitted_worker(quota, 2 * 1024 * 1024, 64 * 1024)
@@ -464,37 +668,69 @@ impl PluginEngine {
         let tick_jump = Arc::clone(&jump_epoch);
         let tick_clock = Arc::clone(&clock);
         let tick = Duration::from_millis(config.epoch_tick_ms);
-        let ticker = reservation.spawn(
-            "ilium-plugin-epoch", WorkerKind::Cooperative, StopToken::default(), || {},
-            move |stop| {
-            while !stop.is_stopped() {
-                thread::sleep(tick);
-                if stop.is_stopped() { break; }
-                let now = Instant::now();
-                let jumped = {
-                    let mut clock = tick_clock.lock().unwrap_or_else(|poison| poison.into_inner());
-                    let gap = now.duration_since(clock.last_tick);
-                    clock.last_tick = now;
-                    if gap > Duration::from_secs(1) {
-                        clock.suspended = clock.suspended.saturating_add(gap.saturating_sub(tick));
-                        true
-                    } else { false }
-                };
-                let current = tick_epoch.fetch_add(1, Ordering::AcqRel) + 1;
-                if jumped { tick_jump.store(current, Ordering::Release); }
-                tick_engine.increment_epoch();
-            }
-        }).map_err(|error| HostError::EngineError(error.to_string()))?;
-        Ok(Self { config, engine, fingerprint: config_fingerprint(), stats: Mutex::new(EngineStats::default()),
-            log: Mutex::new(log), embedded: Mutex::new(HashMap::new()), epoch, jump_epoch,
-            clock, _ticker: ticker })
+        let ticker = reservation
+            .spawn(
+                "ilium-plugin-epoch",
+                WorkerKind::Cooperative,
+                StopToken::default(),
+                || {},
+                move |stop| {
+                    while !stop.is_stopped() {
+                        thread::sleep(tick);
+                        if stop.is_stopped() {
+                            break;
+                        }
+                        let now = Instant::now();
+                        let jumped = {
+                            let mut clock = tick_clock
+                                .lock()
+                                .unwrap_or_else(|poison| poison.into_inner());
+                            let gap = now.duration_since(clock.last_tick);
+                            clock.last_tick = now;
+                            if gap > Duration::from_secs(1) {
+                                clock.suspended =
+                                    clock.suspended.saturating_add(gap.saturating_sub(tick));
+                                true
+                            } else {
+                                false
+                            }
+                        };
+                        let current = tick_epoch.fetch_add(1, Ordering::AcqRel) + 1;
+                        if jumped {
+                            tick_jump.store(current, Ordering::Release);
+                        }
+                        tick_engine.increment_epoch();
+                    }
+                },
+            )
+            .map_err(|error| HostError::EngineError(error.to_string()))?;
+        Ok(Self {
+            config,
+            engine,
+            fingerprint: config_fingerprint(),
+            stats: Mutex::new(EngineStats::default()),
+            log: Mutex::new(log),
+            embedded: Mutex::new(HashMap::new()),
+            epoch,
+            jump_epoch,
+            clock,
+            _ticker: ticker,
+        })
     }
-    pub(crate) fn runtime_engine(&self) -> &Engine { &self.engine }
+    pub(crate) fn runtime_engine(&self) -> &Engine {
+        &self.engine
+    }
 
-    pub fn config(&self) -> &EngineConfig { &self.config }
+    pub fn config(&self) -> &EngineConfig {
+        &self.config
+    }
     /// Compile after static interface checks only. The result is opaque outside
     /// this crate; a generated, grant-scoped linker must still gate instantiation.
-    pub fn compile_interface_checked(&self, bytes: &[u8], context: &ValidationContext) -> Result<CompiledComponent, HostError> {
+    pub fn compile_interface_checked(
+        &self,
+        bytes: &[u8],
+        context: &ValidationContext,
+    ) -> Result<CompiledComponent, HostError> {
         validate_component(bytes, context).map_err(HostError::from)?;
         self.compile(bytes)
     }
@@ -502,53 +738,112 @@ impl PluginEngine {
     /// This opaque result alone cannot be instantiated outside the host crate.
     pub fn compile(&self, bytes: &[u8]) -> Result<CompiledComponent, HostError> {
         if bytes.len() > COMPONENT_MAX_BYTES {
-            return Err(HostError::Diagnostic(diagnostic("component.too-large", "component exceeds 32 MiB")));
+            return Err(HostError::Diagnostic(diagnostic(
+                "component.too-large",
+                "component exceeds 32 MiB",
+            )));
         }
         let component = Component::new(&self.engine, bytes)
             .map_err(|error| HostError::EngineError(error.to_string()))?;
-        self.stats.lock().unwrap_or_else(|poison| poison.into_inner()).component_new_calls += 1;
-        Ok(CompiledComponent { source_len: bytes.len(), component: Arc::new(component) })
+        self.stats
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .component_new_calls += 1;
+        Ok(CompiledComponent {
+            source_len: bytes.len(),
+            component: Arc::new(component),
+        })
     }
     pub fn load_embedded(&self, artifact: &EmbeddedArtifact) -> Result<LoadPath, HostError> {
         let verified = artifact.fingerprint == self.fingerprint && embedded::is_bundled(artifact);
         if verified {
             let component = embedded::deserialize_verified(&self.engine, artifact)?;
-            self.stats.lock().unwrap_or_else(|poison| poison.into_inner()).deserialize_calls += 1;
-            self.embedded.lock().unwrap_or_else(|poison| poison.into_inner()).insert(
-                artifact.name.clone(), CompiledComponent { source_len: artifact.wasm.len(), component: Arc::new(component) });
+            self.stats
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner())
+                .deserialize_calls += 1;
+            self.embedded
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner())
+                .insert(
+                    artifact.name.clone(),
+                    CompiledComponent {
+                        source_len: artifact.wasm.len(),
+                        component: Arc::new(component),
+                    },
+                );
             return Ok(LoadPath::Deserialized);
         }
-        self.log.lock().unwrap_or_else(|poison| poison.into_inner()).push(LogLine {
-            plugin: "host".into(), level: "warn".into(),
-            message: format!("host.cwasm-incompatible: {}", artifact.name),
-        });
-        if artifact.wasm.is_empty() { return Err(HostError::EmbeddedIncompatible); }
+        self.log
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .push(LogLine {
+                plugin: "host".into(),
+                level: "warn".into(),
+                message: format!("host.cwasm-incompatible: {}", artifact.name),
+            });
+        if artifact.wasm.is_empty() {
+            return Err(HostError::EmbeddedIncompatible);
+        }
         let compiled = self.compile(&artifact.wasm)?;
-        self.embedded.lock().unwrap_or_else(|poison| poison.into_inner()).insert(artifact.name.clone(), compiled);
+        self.embedded
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .insert(artifact.name.clone(), compiled);
         Ok(LoadPath::Compiled)
     }
     pub fn compiled_embedded(&self, name: &str) -> Option<CompiledComponent> {
-        self.embedded.lock().unwrap_or_else(|poison| poison.into_inner()).get(name).cloned()
+        self.embedded
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .get(name)
+            .cloned()
     }
-    pub(crate) fn record_instantiation(&self) { self.stats.lock().unwrap_or_else(|poison| poison.into_inner()).instantiations += 1; }
-    pub fn stats(&self) -> EngineStats { *self.stats.lock().unwrap_or_else(|poison| poison.into_inner()) }
-    pub fn log_lines(&self) -> Vec<LogLine> { self.log.lock().unwrap_or_else(|poison| poison.into_inner()).clone() }
-    pub fn current_epoch(&self) -> u64 { self.epoch.load(Ordering::Acquire) }
+    pub(crate) fn record_instantiation(&self) {
+        self.stats
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .instantiations += 1;
+    }
+    pub fn stats(&self) -> EngineStats {
+        *self
+            .stats
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+    }
+    pub fn log_lines(&self) -> Vec<LogLine> {
+        self.log
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .clone()
+    }
+    pub fn current_epoch(&self) -> u64 {
+        self.epoch.load(Ordering::Acquire)
+    }
     pub fn deadline_ticks(&self, deadline_ms: u64) -> u64 {
         deadline_ms.saturating_add(self.config.epoch_tick_ms - 1) / self.config.epoch_tick_ms + 1
     }
-    pub fn fuel_enabled(&self) -> bool { false }
+    pub fn fuel_enabled(&self) -> bool {
+        false
+    }
     /// Install immediately before each guest call. Soft calls yield until the 100 ms grace expires.
     /// Callers must invoke async Wasmtime functions for `Yield` to be valid.
     pub fn arm_deadline<T>(&self, store: &mut Store<T>, deadline_ms: u64, soft: bool) {
         let (started, suspended_at_start) = {
-            let clock = self.clock.lock().unwrap_or_else(|poison| poison.into_inner());
+            let clock = self
+                .clock
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner());
             let started = Instant::now();
             // A call may begin after resume but before the ticker records the
             // jump. Include that pending gap in its baseline, so it cannot
             // receive a second full pause credit when the ticker catches up.
             let pending = started.duration_since(clock.last_tick);
-            let pending = if pending > Duration::from_secs(1) { pending.saturating_sub(Duration::from_millis(self.config.epoch_tick_ms)) } else { Duration::ZERO };
+            let pending = if pending > Duration::from_secs(1) {
+                pending.saturating_sub(Duration::from_millis(self.config.epoch_tick_ms))
+            } else {
+                Duration::ZERO
+            };
             (started, clock.suspended.saturating_add(pending))
         };
         let deadline = Duration::from_millis(deadline_ms);
@@ -556,7 +851,10 @@ impl PluginEngine {
         let epoch = Arc::clone(&self.epoch);
         let clock = Arc::clone(&self.clock);
         store.epoch_deadline_callback(move |_| {
-            let suspended_now = clock.lock().unwrap_or_else(|poison| poison.into_inner()).suspended;
+            let suspended_now = clock
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner())
+                .suspended;
             let elapsed = active_elapsed(started.elapsed(), suspended_now, suspended_at_start);
             if jump.load(Ordering::Acquire) == epoch.load(Ordering::Acquire) || elapsed < deadline {
                 return Ok(UpdateDeadline::Continue(1));
@@ -590,9 +888,8 @@ mod tests {
     use super::{
         clock_jump_detected, compile_cache_dir, compile_cache_key, config_fingerprint,
         embedded_artifacts, prune_stale_cache_dirs, runtime_config, runtime_settings,
-        select_allocator, store_settings, validate_component, AllocatorKind,
-        EmbeddedArtifact, EngineConfig, EngineStats, LoadPath, PluginEngine, ValidationContext,
-        WASMTIME_VERSION,
+        select_allocator, store_settings, validate_component, AllocatorKind, EmbeddedArtifact,
+        EngineConfig, EngineStats, LoadPath, PluginEngine, ValidationContext, WASMTIME_VERSION,
     };
     use crate::calls::ResolvedLimits;
     use crate::linker::World;
@@ -896,7 +1193,10 @@ mod tests {
     #[test]
     fn validate_component_refuses_an_api_section_with_another_version() {
         let bytes = component_with_sections(&[api_version_section(&[0, 0, 0, 2, 0, 0])]);
-        assert_eq!(refusal_code(&bytes, &bare_context()), "manifest.api-version");
+        assert_eq!(
+            refusal_code(&bytes, &bare_context()),
+            "manifest.api-version"
+        );
     }
 
     /// REQ: HST-085
@@ -1000,7 +1300,11 @@ mod tests {
     fn embedded_artifacts_carry_the_current_config_fingerprint_and_bytes() {
         let fingerprint = config_fingerprint();
         for artifact in embedded_artifacts() {
-            assert_eq!(artifact.fingerprint, fingerprint, "artifact {}", artifact.name);
+            assert_eq!(
+                artifact.fingerprint, fingerprint,
+                "artifact {}",
+                artifact.name
+            );
             assert!(!artifact.wasm.is_empty(), "artifact {}", artifact.name);
         }
     }
@@ -1100,6 +1404,7 @@ mod tests {
     }
 }
 
+#[cfg(test)]
 mod epoch_clock_tests {
     use super::active_elapsed;
     use std::time::Duration;
@@ -1107,15 +1412,29 @@ mod epoch_clock_tests {
     #[test]
     fn suspend_credit_preserves_remaining_call_budget_after_the_first_resume_tick() {
         let deadline = Duration::from_millis(40);
-        let after_resume = active_elapsed(Duration::from_millis(5_030), Duration::from_millis(5_000), Duration::ZERO);
+        let after_resume = active_elapsed(
+            Duration::from_millis(5_030),
+            Duration::from_millis(5_000),
+            Duration::ZERO,
+        );
         assert!(after_resume < deadline);
-        let next_tick = active_elapsed(Duration::from_millis(5_040), Duration::from_millis(5_000), Duration::ZERO);
+        let next_tick = active_elapsed(
+            Duration::from_millis(5_040),
+            Duration::from_millis(5_000),
+            Duration::ZERO,
+        );
         assert_eq!(next_tick, deadline);
     }
 
     #[test]
     fn pause_credit_is_relative_to_the_call_start() {
-        assert_eq!(active_elapsed(Duration::from_millis(20), Duration::from_secs(5), Duration::from_secs(5)), Duration::from_millis(20));
+        assert_eq!(
+            active_elapsed(
+                Duration::from_millis(20),
+                Duration::from_secs(5),
+                Duration::from_secs(5)
+            ),
+            Duration::from_millis(20)
+        );
     }
 }
-

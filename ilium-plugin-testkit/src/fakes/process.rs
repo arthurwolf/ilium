@@ -132,7 +132,9 @@ mod spec_tests {
     #[test]
     fn expect_accepts_empty_program_and_arguments() {
         let mut host = FakeHost::new();
-        host.process().expect("", &[]).returns(exit_with_stdout(b""));
+        host.process()
+            .expect("", &[])
+            .returns(exit_with_stdout(b""));
         assert!(host.process().calls().is_empty());
     }
 
@@ -148,7 +150,8 @@ mod spec_tests {
     fn catch_all_rules_do_not_count_as_runs() {
         let mut host = FakeHost::new();
         host.process().default_exit(exit_with_stdout(b"ok"));
-        host.process().on_args(&["--version"], exit_with_stdout(b"1.0"));
+        host.process()
+            .on_args(&["--version"], exit_with_stdout(b"1.0"));
         host.process().on_program("ls", exit_with_stdout(b""));
         host.process().on_program_timeout("sleep");
         assert_eq!(host.process().max_concurrent(), 0);

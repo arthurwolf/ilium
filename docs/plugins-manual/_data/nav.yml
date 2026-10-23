@@ -115,6 +115,8 @@
   url: /pages/api-scenes/
 - title: services
   url: /pages/api-services/
+- title: plugin to plugin
+  url: /pages/api-plugin-to-plugin/
 - title: extension points
   url: /pages/api-extension-points/
 - title: settings

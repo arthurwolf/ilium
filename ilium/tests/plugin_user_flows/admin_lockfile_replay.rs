@@ -58,7 +58,10 @@ fn usr_242_a_corrupt_hash_fails_with_lock_mismatch_and_changes_nothing() {
 fn usr_244_a_replayed_grant_the_policy_forbids_is_left_off_and_reported() {
     let mut rig = UserRig::new();
     rig.open_project("lock-policy");
-    install_ok(&mut rig, &spec("com.example.clip", "1.0.0", &["clipboard.read"]));
+    install_ok(
+        &mut rig,
+        &spec("com.example.clip", "1.0.0", &["clipboard.read"]),
+    );
     assert_eq!(result_exit_code(&rig.cli(&["lock"])), 0);
     rig.write_system_policy("version = 1\n[grants]\ndeny = [\"clipboard.read\"]\n");
     assert_eq!(

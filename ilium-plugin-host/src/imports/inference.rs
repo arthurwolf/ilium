@@ -111,7 +111,10 @@ mod tests {
     fn complete_returns_request_id_for_valid_request() {
         let mut import = InferenceImport;
         let result = import.complete(simple_request(None));
-        assert!(result.is_ok(), "valid request must return a request id, got {result:?}");
+        assert!(
+            result.is_ok(),
+            "valid request must return a request id, got {result:?}"
+        );
     }
 
     /// REQ: API-061

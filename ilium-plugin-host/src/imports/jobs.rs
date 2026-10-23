@@ -154,7 +154,12 @@ mod tests {
         let mut jobs = JobsImport;
         match jobs.wait_request(RequestId(42), 0) {
             Ok(()) => panic!("an unfinished request must not complete within a zero timeout"),
-            Err(error) => assert_eq!(error.code, ErrorCode::TimedOut, "message: {}", error.message),
+            Err(error) => assert_eq!(
+                error.code,
+                ErrorCode::TimedOut,
+                "message: {}",
+                error.message
+            ),
         }
     }
 }

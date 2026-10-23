@@ -122,7 +122,10 @@ mod tests {
     #[test]
     fn write_line_rejects_empty_input() {
         let mut cli = CliImport;
-        expect_code(cli.write_line(INVOCATION, String::new()), ErrorCode::InvalidArgument);
+        expect_code(
+            cli.write_line(INVOCATION, String::new()),
+            ErrorCode::InvalidArgument,
+        );
     }
 
     /// REQ: API-005
@@ -154,7 +157,10 @@ mod tests {
     fn write_line_rejects_json_that_is_not_an_object() {
         let mut cli = CliImport;
         for text in ["[]", r#""text""#, "42", "null", "true"] {
-            expect_code(cli.write_line(INVOCATION, text.to_string()), ErrorCode::InvalidArgument);
+            expect_code(
+                cli.write_line(INVOCATION, text.to_string()),
+                ErrorCode::InvalidArgument,
+            );
         }
     }
 
@@ -176,7 +182,10 @@ mod tests {
     #[test]
     fn write_line_rejects_malformed_json() {
         let mut cli = CliImport;
-        expect_code(cli.write_line(INVOCATION, r#"{"type":"#.to_string()), ErrorCode::InvalidArgument);
+        expect_code(
+            cli.write_line(INVOCATION, r#"{"type":"#.to_string()),
+            ErrorCode::InvalidArgument,
+        );
     }
 
     /// REQ: API-005
@@ -205,7 +214,10 @@ mod tests {
     fn write_text_after_finish_returns_not_found() {
         let mut cli = CliImport;
         cli.finish(INVOCATION, 0);
-        expect_code(cli.write_text(INVOCATION, "hello".to_string()), ErrorCode::NotFound);
+        expect_code(
+            cli.write_text(INVOCATION, "hello".to_string()),
+            ErrorCode::NotFound,
+        );
     }
 
     /// REQ: API-062
@@ -237,7 +249,10 @@ mod tests {
     fn write_error_after_finish_returns_not_found() {
         let mut cli = CliImport;
         cli.finish(INVOCATION, 1);
-        expect_code(cli.write_error(INVOCATION, "late".to_string()), ErrorCode::NotFound);
+        expect_code(
+            cli.write_error(INVOCATION, "late".to_string()),
+            ErrorCode::NotFound,
+        );
     }
 
     /// REQ: API-005

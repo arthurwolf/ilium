@@ -105,7 +105,7 @@ mod tests {
     /// REQ: SEC-102
     #[test]
     fn sec_102_default_gate_refuses_plugin_drawn_dialogs() {
-        let gate = ConsentGate::default();
+        let gate = ConsentGate;
         assert!(!gate.accepts_plugin_drawn_dialogs());
     }
 
@@ -118,7 +118,10 @@ mod tests {
             DialogKind::Update,
             DialogKind::Trust,
         ] {
-            assert!(kind.is_kernel_drawn(), "{kind:?} must be drawn by the kernel");
+            assert!(
+                kind.is_kernel_drawn(),
+                "{kind:?} must be drawn by the kernel"
+            );
         }
     }
 

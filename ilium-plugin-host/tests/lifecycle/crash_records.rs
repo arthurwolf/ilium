@@ -56,7 +56,10 @@ fn usr_227_a_record_line_has_a_utc_time_and_no_payload_field() {
     let line = format_record(&record_at(now()));
     assert!(line.contains(ID));
     assert!(line.contains(VERSION));
-    assert!(line.ends_with('Z') || line.contains("Z "), "UTC time: {line}");
+    assert!(
+        line.ends_with('Z') || line.contains("Z "),
+        "UTC time: {line}"
+    );
     assert!(!line.to_lowercase().contains("payload"));
 }
 

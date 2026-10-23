@@ -834,7 +834,10 @@ mod tests {
     fn installed_plugin_has_exactly_one_package_state() {
         let mut host = LifeHost::new();
         host.install(server_plugin("core.alpha"));
-        assert_eq!(host.package_state("core.alpha"), PackageState::InstalledEnabled);
+        assert_eq!(
+            host.package_state("core.alpha"),
+            PackageState::InstalledEnabled
+        );
     }
 
     #[test]
@@ -842,7 +845,10 @@ mod tests {
         let mut host = LifeHost::new();
         host.install(server_plugin("core.alpha"));
         host.force_package_state("core.alpha", PackageState::DisabledByPolicy);
-        assert_eq!(host.package_state("core.alpha"), PackageState::DisabledByPolicy);
+        assert_eq!(
+            host.package_state("core.alpha"),
+            PackageState::DisabledByPolicy
+        );
     }
 
     #[test]
@@ -1025,7 +1031,8 @@ mod tests {
         host.fail("core.alpha", Side::Client, &scope, FailureKind::Trap);
         host.fail("core.alpha", Side::Client, &scope, FailureKind::Trap);
         assert_eq!(
-            host.side("core.alpha", Side::Client, &scope).failures_in_window,
+            host.side("core.alpha", Side::Client, &scope)
+                .failures_in_window,
             2
         );
     }
@@ -1039,7 +1046,10 @@ mod tests {
         for _ in 0..3 {
             host.fail("core.alpha", Side::Server, "server", FailureKind::Trap);
         }
-        assert!(host.installed_json().to_string().contains("failure_stopped"));
+        assert!(host
+            .installed_json()
+            .to_string()
+            .contains("failure_stopped"));
     }
 
     /// REQ: LIF-010

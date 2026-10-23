@@ -57,6 +57,11 @@ impl ApiVersion {
     }
 }
 
+/// The versions this host loads (ABI-021); the free-function form of [`ApiVersion::host_window`].
+pub fn host_window() -> std::ops::RangeInclusive<ApiVersion> {
+    ApiVersion::host_window()
+}
+
 impl std::fmt::Display for ApiVersion {
     /// `X.Y.Z` (reference-abi-evolution.md).
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -247,9 +252,18 @@ mod tests {
     #[test]
     fn host_window_excludes_the_next_minor_and_later_majors() {
         let window = ApiVersion::host_window();
-        assert!(!window.contains(&version(0, 2, 0)), "0.2.0 is outside the window");
-        assert!(!window.contains(&version(0, 3, 0)), "0.3.0 is outside the window");
-        assert!(!window.contains(&version(1, 0, 0)), "1.0.0 is outside the window");
+        assert!(
+            !window.contains(&version(0, 2, 0)),
+            "0.2.0 is outside the window"
+        );
+        assert!(
+            !window.contains(&version(0, 3, 0)),
+            "0.3.0 is outside the window"
+        );
+        assert!(
+            !window.contains(&version(1, 0, 0)),
+            "1.0.0 is outside the window"
+        );
     }
 
     /// REQ: ABI-021

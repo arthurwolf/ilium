@@ -48,7 +48,11 @@ fn hst_524_a_daily_summary_adds_at_most_4_kib_per_plugin_side() {
 fn hst_524_a_daily_summary_holds_the_call_count_and_percentiles() {
     let mut history = TelemetryHistory::new();
     record_days(&mut history, 2, 0);
-    let first = history.daily_summaries(SIDE).into_iter().next().expect("a folded day");
+    let first = history
+        .daily_summaries(SIDE)
+        .into_iter()
+        .next()
+        .expect("a folded day");
     assert_eq!(first.calls, 240);
     assert_eq!(first.p50_ms, 10);
     assert_eq!(first.p95_ms, 10);
@@ -62,7 +66,10 @@ fn hst_525_the_status_output_marks_the_upgrade_day() {
     record_days(&mut history, 10, 0);
     history.record_upgrade(PLUGIN, 5);
     let output = history.status_days_output(PLUGIN, 30);
-    let marked_lines = output.lines().filter(|line| line.contains("upgrade")).count();
+    let marked_lines = output
+        .lines()
+        .filter(|line| line.contains("upgrade"))
+        .count();
     assert_eq!(marked_lines, 1);
 }
 

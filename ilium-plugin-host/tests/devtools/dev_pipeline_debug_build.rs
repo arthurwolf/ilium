@@ -34,7 +34,9 @@ fn new_rust_project() -> (tempfile::TempDir, CliEnv, PathBuf) {
 
 /// True when `needle` occurs in `haystack` as a contiguous byte sequence.
 fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
-    haystack.windows(needle.len()).any(|window| window == needle)
+    haystack
+        .windows(needle.len())
+        .any(|window| window == needle)
 }
 
 /// REQ: DEV-876
@@ -54,18 +56,24 @@ fn debug_build_keeps_dwarf_and_writes_debug_record_with_input_hash() {
         .expect("dist/<name>.debug.json is written");
     let record: Value =
         serde_json::from_str(&read_text(&dir.join("dist"), &record_name)).expect("debug json");
-    assert!(record.get("input_hash").is_some(), "record names input_hash");
+    assert!(
+        record.get("input_hash").is_some(),
+        "record names input_hash"
+    );
 }
 
 /// REQ: DEV-876
 #[test]
 fn pack_refuses_debug_component_with_package_debug_build() {
-    let (_root, env, dir) = new_rust_project();
+    let (_root, env, _dir) = new_rust_project();
     let built = run_in_project(&env, "build", &[]);
     assert_eq!(built.exit_code, 0, "{:?}", built.stdout_jsonl);
     let packed = run_in_project(&env, "pack", &[]);
     assert_eq!(error_code(&packed).as_deref(), Some("package.debug-build"));
-    assert_ne!(packed.exit_code, 0, "pack must not accept a debug component");
+    assert_ne!(
+        packed.exit_code, 0,
+        "pack must not accept a debug component"
+    );
 }
 
 /// REQ: DEV-877
@@ -91,7 +99,10 @@ fn verify_reproducible_exits_zero_on_clean_fixture() {
     let (_root, env, _dir) = new_rust_project();
     let checked = run_in_project(&env, "verify-reproducible", &[]);
     assert_eq!(checked.exit_code, 0, "{:?}", checked.stdout_jsonl);
-    assert!(error_code(&checked).is_none(), "no error record on identical builds");
+    assert!(
+        error_code(&checked).is_none(),
+        "no error record on identical builds"
+    );
 }
 
 /// REQ: DEV-893

@@ -1048,13 +1048,13 @@ impl DevLoop {
 #[cfg(test)]
 mod tests {
     use super::{
-        cut_wasi_line, check_unredacted, disabled_log, format_binary, format_local_time,
-        format_log_line, host_line, render_inspector, render_memory_view, redact_detail,
-        restart_log, resolve_threshold, truncate_message, why_lines, BreachKind, DevBackend,
-        DevLoop, HealthInputs, HostLogLimiter, InspectNode, LogConfig, LogLevel, LogLine,
-        LogRing, LogSide, MemoryView, NearMissTracker, PluginLog, Profiler, Reader, RebuildOutcome,
-        SideTelemetry, SlowCallReporter, Span, SpanRecorder, Summary, TelemetryRegistry,
-        TraceKind, TraceRing, COUNTER_NAMES, DURATION_BUCKET_BOUNDS_MS, LOG_MESSAGE_MAX_BYTES,
+        check_unredacted, cut_wasi_line, disabled_log, format_binary, format_local_time,
+        format_log_line, host_line, redact_detail, render_inspector, render_memory_view,
+        resolve_threshold, restart_log, truncate_message, why_lines, BreachKind, DevBackend,
+        DevLoop, HealthInputs, HostLogLimiter, InspectNode, LogConfig, LogLevel, LogLine, LogRing,
+        LogSide, MemoryView, NearMissTracker, PluginLog, Profiler, Reader, RebuildOutcome,
+        SideTelemetry, SlowCallReporter, Span, SpanRecorder, Summary, TelemetryRegistry, TraceKind,
+        TraceRing, COUNTER_NAMES, DURATION_BUCKET_BOUNDS_MS, LOG_MESSAGE_MAX_BYTES,
         LOG_ROTATE_BYTES, TELEMETRY_MAX_BYTES_PER_SIDE, TRACE_RING_CAPACITY,
     };
     use crate::calls::CallClass;
@@ -1075,7 +1075,8 @@ mod tests {
     }
 
     fn test_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("ilium-telemetry-{}-{name}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("ilium-telemetry-{}-{name}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("test folder is created");
         dir
     }
@@ -1166,7 +1167,9 @@ mod tests {
         assert_eq!(DURATION_BUCKET_BOUNDS_MS.len(), 12);
         assert_eq!(DURATION_BUCKET_BOUNDS_MS[0], 0.1);
         assert_eq!(DURATION_BUCKET_BOUNDS_MS[11], 1000.0);
-        assert!(DURATION_BUCKET_BOUNDS_MS.windows(2).all(|pair| pair[0] < pair[1]));
+        assert!(DURATION_BUCKET_BOUNDS_MS
+            .windows(2)
+            .all(|pair| pair[0] < pair[1]));
     }
 
     /// REQ: HST-352
@@ -1179,9 +1182,24 @@ mod tests {
     #[test]
     fn record_call_counts_calls_per_class() {
         let side = SideTelemetry::new();
-        side.record_call(CallClass::Event, Duration::from_millis(1), Duration::from_millis(100), 1_000);
-        side.record_call(CallClass::Event, Duration::from_millis(1), Duration::from_millis(100), 1_000);
-        side.record_call(CallClass::Render, Duration::from_millis(1), Duration::from_millis(100), 1_000);
+        side.record_call(
+            CallClass::Event,
+            Duration::from_millis(1),
+            Duration::from_millis(100),
+            1_000,
+        );
+        side.record_call(
+            CallClass::Event,
+            Duration::from_millis(1),
+            Duration::from_millis(100),
+            1_000,
+        );
+        side.record_call(
+            CallClass::Render,
+            Duration::from_millis(1),
+            Duration::from_millis(100),
+            1_000,
+        );
         let buckets = side.snapshot(1_000);
         let bucket = buckets.last().expect("the current hour has a bucket");
         assert_eq!(bucket.calls(CallClass::Event), 2);
@@ -1193,11 +1211,29 @@ mod tests {
     #[test]
     fn duration_histogram_places_calls_in_bucket_bounds_and_overflow() {
         let side = SideTelemetry::new();
-        side.record_call(CallClass::Event, Duration::from_micros(50), Duration::from_secs(5), 1_000);
-        side.record_call(CallClass::Event, Duration::from_millis(150), Duration::from_secs(5), 1_000);
-        side.record_call(CallClass::Event, Duration::from_millis(2000), Duration::from_secs(5), 1_000);
+        side.record_call(
+            CallClass::Event,
+            Duration::from_micros(50),
+            Duration::from_secs(5),
+            1_000,
+        );
+        side.record_call(
+            CallClass::Event,
+            Duration::from_millis(150),
+            Duration::from_secs(5),
+            1_000,
+        );
+        side.record_call(
+            CallClass::Event,
+            Duration::from_millis(2000),
+            Duration::from_secs(5),
+            1_000,
+        );
         let buckets = side.snapshot(1_000);
-        let histogram = buckets.last().expect("bucket").duration_histogram(CallClass::Event);
+        let histogram = buckets
+            .last()
+            .expect("bucket")
+            .duration_histogram(CallClass::Event);
         assert_eq!(histogram.len(), 13);
         assert_eq!(histogram[0], 1);
         assert_eq!(histogram[10], 1);
@@ -1209,10 +1245,26 @@ mod tests {
     #[test]
     fn side_near_miss_counts_only_calls_at_eighty_percent_of_deadline() {
         let side = SideTelemetry::new();
-        side.record_call(CallClass::Event, Duration::from_millis(90), Duration::from_millis(100), 1_000);
-        side.record_call(CallClass::Event, Duration::from_millis(10), Duration::from_millis(100), 1_000);
+        side.record_call(
+            CallClass::Event,
+            Duration::from_millis(90),
+            Duration::from_millis(100),
+            1_000,
+        );
+        side.record_call(
+            CallClass::Event,
+            Duration::from_millis(10),
+            Duration::from_millis(100),
+            1_000,
+        );
         let buckets = side.snapshot(1_000);
-        assert_eq!(buckets.last().expect("bucket").near_misses(CallClass::Event), 1);
+        assert_eq!(
+            buckets
+                .last()
+                .expect("bucket")
+                .near_misses(CallClass::Event),
+            1
+        );
     }
 
     /// REQ: HST-354
@@ -1283,9 +1335,19 @@ mod tests {
     #[test]
     fn snapshot_keeps_twenty_four_hours_and_drops_older_buckets() {
         let side = SideTelemetry::new();
-        side.record_call(CallClass::Event, Duration::from_millis(1), Duration::from_millis(100), 0);
+        side.record_call(
+            CallClass::Event,
+            Duration::from_millis(1),
+            Duration::from_millis(100),
+            0,
+        );
         let now_ms = 25 * HOUR_MS;
-        side.record_call(CallClass::Event, Duration::from_millis(1), Duration::from_millis(100), now_ms);
+        side.record_call(
+            CallClass::Event,
+            Duration::from_millis(1),
+            Duration::from_millis(100),
+            now_ms,
+        );
         let buckets = side.snapshot(now_ms);
         assert_eq!(buckets.len(), 1);
         assert_eq!(buckets[0].hour_start_ms, now_ms);
@@ -1313,7 +1375,12 @@ mod tests {
         assert!(idle.end_instance(1_000).is_none());
 
         let busy = SideTelemetry::new();
-        busy.record_call(CallClass::Event, Duration::from_millis(1), Duration::from_millis(100), 1_000);
+        busy.record_call(
+            CallClass::Event,
+            Duration::from_millis(1),
+            Duration::from_millis(100),
+            1_000,
+        );
         assert!(busy.end_instance(2_000).is_some());
         assert!(busy.end_instance(2_000).is_none());
     }
@@ -1330,9 +1397,15 @@ mod tests {
     #[test]
     fn read_is_allowed_for_kernel_cli_and_ui_but_refused_for_other_plugins() {
         let registry = TelemetryRegistry::new();
-        assert!(registry.read(&Reader::Kernel, "example.notes", Side::Server, 1_000).is_ok());
-        assert!(registry.read(&Reader::Cli, "example.notes", Side::Server, 1_000).is_ok());
-        assert!(registry.read(&Reader::Ui, "example.notes", Side::Server, 1_000).is_ok());
+        assert!(registry
+            .read(&Reader::Kernel, "example.notes", Side::Server, 1_000)
+            .is_ok());
+        assert!(registry
+            .read(&Reader::Cli, "example.notes", Side::Server, 1_000)
+            .is_ok());
+        assert!(registry
+            .read(&Reader::Ui, "example.notes", Side::Server, 1_000)
+            .is_ok());
         assert!(registry
             .read(
                 &Reader::Plugin("example.other".to_string()),
@@ -1347,9 +1420,15 @@ mod tests {
     #[test]
     fn plugin_info_is_free_for_self_and_needs_manage_for_others() {
         let registry = TelemetryRegistry::new();
-        assert!(registry.plugin_info("example.notes", "example.notes", false, 1_000).is_ok());
-        assert!(registry.plugin_info("example.other", "example.notes", false, 1_000).is_err());
-        assert!(registry.plugin_info("example.other", "example.notes", true, 1_000).is_ok());
+        assert!(registry
+            .plugin_info("example.notes", "example.notes", false, 1_000)
+            .is_ok());
+        assert!(registry
+            .plugin_info("example.other", "example.notes", false, 1_000)
+            .is_err());
+        assert!(registry
+            .plugin_info("example.other", "example.notes", true, 1_000)
+            .is_ok());
     }
 
     #[test]
@@ -1366,8 +1445,13 @@ mod tests {
     /// REQ: HST-358
     #[test]
     fn host_line_builds_known_condition_and_refuses_unknown_or_empty_id() {
-        let line = host_line("example.notes", Side::Server, "trap.deadline", "soft breach")
-            .expect("trap.deadline is a known condition id");
+        let line = host_line(
+            "example.notes",
+            Side::Server,
+            "trap.deadline",
+            "soft breach",
+        )
+        .expect("trap.deadline is a known condition id");
         assert_eq!(line.plugin, "example.notes");
         assert_eq!(line.side, Side::Server);
         assert_eq!(line.id, "trap.deadline");
@@ -1658,7 +1742,10 @@ mod tests {
             resolve_threshold(Some(LogLevel::Error), Some("trace"), false),
             LogLevel::Error
         );
-        assert_eq!(resolve_threshold(Some(LogLevel::Trace), None, true), LogLevel::Trace);
+        assert_eq!(
+            resolve_threshold(Some(LogLevel::Trace), None, true),
+            LogLevel::Trace
+        );
         assert_eq!(resolve_threshold(None, Some("warn"), false), LogLevel::Warn);
         assert_eq!(resolve_threshold(None, None, true), LogLevel::Debug);
         assert_eq!(resolve_threshold(None, None, false), LogLevel::Info);
@@ -1683,10 +1770,7 @@ mod tests {
     /// REQ: DEV-655
     #[test]
     fn disabled_line_names_the_failure_count() {
-        assert_eq!(
-            disabled_log(3).1,
-            "disabled after 3 failures in 10 minutes"
-        );
+        assert_eq!(disabled_log(3).1, "disabled after 3 failures in 10 minutes");
     }
 
     /// REQ: DEV-653
@@ -1695,7 +1779,12 @@ mod tests {
         let dir = test_dir("threshold");
         let mut log = PluginLog::open(&dir, "example.notes", LogConfig::default())
             .expect("the log opens in a fresh folder");
-        assert!(log.write_host("2030-01-01 09:14:02", 1_000, LogLevel::Info, "instance started"));
+        assert!(log.write_host(
+            "2030-01-01 09:14:02",
+            1_000,
+            LogLevel::Info,
+            "instance started"
+        ));
         assert!(!log.write_host("2030-01-01 09:14:02", 1_000, LogLevel::Debug, "dropped"));
         assert!(!log.write_host("2030-01-01 09:14:02", 1_000, LogLevel::Trace, "dropped"));
         let _ = std::fs::remove_dir_all(&dir);
@@ -1710,9 +1799,27 @@ mod tests {
             rate_per_second: 2,
         };
         let mut log = PluginLog::open(&dir, "example.notes", config).expect("the log opens");
-        assert!(log.write_plugin("2030-01-01 09:14:02", 1_000, Side::Server, LogLevel::Info, "one"));
-        assert!(log.write_plugin("2030-01-01 09:14:02", 1_000, Side::Server, LogLevel::Info, "two"));
-        assert!(!log.write_plugin("2030-01-01 09:14:02", 1_000, Side::Server, LogLevel::Info, "three"));
+        assert!(log.write_plugin(
+            "2030-01-01 09:14:02",
+            1_000,
+            Side::Server,
+            LogLevel::Info,
+            "one"
+        ));
+        assert!(log.write_plugin(
+            "2030-01-01 09:14:02",
+            1_000,
+            Side::Server,
+            LogLevel::Info,
+            "two"
+        ));
+        assert!(!log.write_plugin(
+            "2030-01-01 09:14:02",
+            1_000,
+            Side::Server,
+            LogLevel::Info,
+            "three"
+        ));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -1729,7 +1836,9 @@ mod tests {
     #[test]
     fn empty_payload_redacts_to_zero_bytes() {
         let detail = serde_json::json!({ "payload": "" });
-        assert!(redact_detail(&detail).to_string().contains("<redacted 0 bytes>"));
+        assert!(redact_detail(&detail)
+            .to_string()
+            .contains("<redacted 0 bytes>"));
     }
 
     /// REQ: DEV-673
@@ -1778,8 +1887,12 @@ mod tests {
         ring.push(2, TraceKind::Render, serde_json::json!({}));
         assert_ne!(first_instance, second_instance);
         let records = ring.records();
-        assert!(records.iter().any(|record| record.instance == first_instance));
-        assert!(records.iter().any(|record| record.instance == second_instance));
+        assert!(records
+            .iter()
+            .any(|record| record.instance == first_instance));
+        assert!(records
+            .iter()
+            .any(|record| record.instance == second_instance));
     }
 
     /// REQ: DEV-681
@@ -1852,7 +1965,9 @@ mod tests {
         let timing = profiler.timing("on-events");
         assert_eq!(timing.calls, 100);
         assert!((timing.total_ms - 5050.0).abs() < 1e-6);
-        let median = timing.p50_ms.expect("median exists when calls were recorded");
+        let median = timing
+            .p50_ms
+            .expect("median exists when calls were recorded");
         assert!((49.0..=51.0).contains(&median));
         let slowest = timing.max_ms.expect("slowest call exists");
         assert!((slowest - 100.0).abs() < 1e-6);
