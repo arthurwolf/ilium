@@ -60,6 +60,7 @@ pub(crate) fn draw_at_with_cursor(
     // The attention button's row is part of the tree panel's geometry, so the
     // reservation must match the mode before anything is measured or drawn.
     tree_ui::set_attention_button_reserved(app.attention_enabled());
+    tree_ui::set_attention_button_large(app.attention_settings.large_buttons);
     app.reconcile_animation_presentation();
     app.composed_editor_sources.clear();
     let area = frame.area();

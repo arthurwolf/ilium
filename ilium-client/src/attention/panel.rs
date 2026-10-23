@@ -164,10 +164,25 @@ pub fn render_button(frame: &mut Frame, area: Rect, count: usize) {
     } else {
         theme::selected_style().add_modifier(Modifier::BOLD)
     };
-    let text = button_text(count, area.width);
+    let text = if area.height > 1 {
+        button_text(count, area.width)
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+    } else {
+        button_text(count, area.width)
+    };
+    frame.render_widget(Paragraph::default().style(style), area);
+    let text_area = Rect::new(area.x, area.y + area.height / 2, area.width, 1);
     frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(text, style))).style(style),
-        area,
+        Paragraph::new(Line::from(Span::styled(text, style)))
+            .style(style)
+            .alignment(if area.height > 1 {
+                ratatui::layout::Alignment::Center
+            } else {
+                ratatui::layout::Alignment::Left
+            }),
+        text_area,
     );
 }
 

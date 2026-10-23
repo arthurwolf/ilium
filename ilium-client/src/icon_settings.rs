@@ -84,10 +84,11 @@ pub enum IconTarget {
     AgentToolbarSelection,
     /// The small dot in a pane's header that opens the recap popover.
     ChromeRecap,
+    AttentionSnooze,
 }
 
 impl IconTarget {
-    pub const ALL: [Self; 68] = [
+    pub const ALL: [Self; 69] = [
         Self::Group,
         Self::TopLevel,
         Self::Project,
@@ -156,6 +157,7 @@ impl IconTarget {
         Self::AgentToolbarFast,
         Self::AgentToolbarSelection,
         Self::ChromeRecap,
+        Self::AttentionSnooze,
     ];
 
     pub const fn label(self) -> &'static str {
@@ -228,6 +230,7 @@ impl IconTarget {
             Self::AgentToolbarFast => "Agent toolbar: fast",
             Self::AgentToolbarSelection => "Agent toolbar: text selection toggle",
             Self::ChromeRecap => "Pane header: recap dot",
+            Self::AttentionSnooze => "Attention: snooze",
         }
     }
 
@@ -301,6 +304,7 @@ impl IconTarget {
             Self::AgentToolbarFast => "agent_toolbar_fast",
             Self::AgentToolbarSelection => "agent_toolbar_selection",
             Self::ChromeRecap => "chrome_recap",
+            Self::AttentionSnooze => "attention_snooze",
         }
     }
 
@@ -378,6 +382,7 @@ impl IconTarget {
             Self::AgentToolbarFast => "⚡",
             Self::AgentToolbarSelection => "🖱️",
             Self::ChromeRecap => "·",
+            Self::AttentionSnooze => "💤",
         }
     }
 
@@ -476,6 +481,7 @@ impl IconTarget {
             Self::AgentToolbarFast => &["⚡", "🚀", "💨", "🏃"],
             Self::AgentToolbarSelection => &["🖱️", "◫", "▧", "Ⓢ"],
             Self::ChromeRecap => &["·", "•", "◦", "∙"],
+            Self::AttentionSnooze => &["💤", "⏸", "☾"],
         }
     }
 }
@@ -555,6 +561,7 @@ pub struct IconSettings {
     pub agent_toolbar_fast: String,
     pub agent_toolbar_selection: String,
     pub chrome_recap: String,
+    pub attention_snooze: String,
 }
 
 impl Default for IconSettings {
@@ -635,6 +642,7 @@ impl IconSettings {
             agent_toolbar_fast: value(IconTarget::AgentToolbarFast),
             agent_toolbar_selection: value(IconTarget::AgentToolbarSelection),
             chrome_recap: value(IconTarget::ChromeRecap),
+            attention_snooze: value(IconTarget::AttentionSnooze),
         }
     }
 
@@ -708,6 +716,7 @@ impl IconSettings {
             IconTarget::AgentToolbarFast => &self.agent_toolbar_fast,
             IconTarget::AgentToolbarSelection => &self.agent_toolbar_selection,
             IconTarget::ChromeRecap => &self.chrome_recap,
+            IconTarget::AttentionSnooze => &self.attention_snooze,
         }
     }
 
@@ -790,6 +799,7 @@ impl IconSettings {
             IconTarget::AgentToolbarFast => &mut self.agent_toolbar_fast,
             IconTarget::AgentToolbarSelection => &mut self.agent_toolbar_selection,
             IconTarget::ChromeRecap => &mut self.chrome_recap,
+            IconTarget::AttentionSnooze => &mut self.attention_snooze,
         };
         *slot = glyph;
     }

@@ -2101,6 +2101,7 @@ thread_local! {
     /// Whether the attention queue's one-row button is reserved above the
     /// toolbar. Thread-local, not a process global: the UI is single-threaded
     /// and parallel tests must not see each other's setting.
+    static ATTENTION_BUTTON_LARGE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static ATTENTION_BUTTON_RESERVED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
@@ -2111,6 +2112,10 @@ thread_local! {
 /// out exactly as before.
 pub fn set_attention_button_reserved(reserved: bool) {
     ATTENTION_BUTTON_RESERVED.with(|cell| cell.set(reserved));
+}
+
+pub fn set_attention_button_large(large: bool) {
+    ATTENTION_BUTTON_LARGE.with(|cell| cell.set(large));
 }
 
 /// Splits the tree panel's interior into the list, the attention button row
@@ -2125,10 +2130,22 @@ fn vertical_sections_with_button(area: Rect) -> [Rect; 4] {
     let rule_rows = u16::from(
         theme::section_frames_enabled() && inner.height >= TOOLBAR_HEIGHT.saturating_add(3),
     );
-    let button_rows = u16::from(
-        ATTENTION_BUTTON_RESERVED.with(std::cell::Cell::get)
-            && inner.height >= TOOLBAR_HEIGHT.saturating_add(rule_rows).saturating_add(3),
-    );
+    let requested_button_rows = if ATTENTION_BUTTON_LARGE.with(std::cell::Cell::get) {
+        3
+    } else {
+        1
+    };
+    let button_rows = if ATTENTION_BUTTON_RESERVED.with(std::cell::Cell::get)
+        && inner.height >= TOOLBAR_HEIGHT.saturating_add(rule_rows).saturating_add(3)
+    {
+        if inner.height > TOOLBAR_HEIGHT + rule_rows + requested_button_rows {
+            requested_button_rows
+        } else {
+            1
+        }
+    } else {
+        0
+    };
     let [list, button, rule, toolbar] = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -7138,6 +7155,23 @@ mod attention_button_tests {
         assert_eq!(list_area(area).bottom(), button.y);
         assert!(button.bottom() <= toolbar_area(area).y);
         assert_eq!(button.width, list_area(area).width);
+        set_attention_button_reserved(false);
+    }
+
+    #[test]
+    fn large_attention_buttons_reserve_three_rows_without_moving_the_toolbar() {
+        set_attention_button_reserved(true);
+        set_attention_button_large(false);
+        let area = Rect::new(0, 0, 40, 20);
+        let toolbar = toolbar_area(area);
+        let compact_list = list_area(area);
+        set_attention_button_large(true);
+        let button = attention_button_area(area).unwrap();
+        assert_eq!(button.height, 3);
+        assert_eq!(list_area(area).height + 2, compact_list.height);
+        assert_eq!(toolbar_area(area), toolbar);
+        assert_eq!(list_area(area).bottom(), button.y);
+        set_attention_button_large(false);
         set_attention_button_reserved(false);
     }
 

@@ -995,15 +995,17 @@ pub enum AttentionRow {
     ExpirySeconds,
     Model,
     ShowBriefing,
+    LargeButtons,
 }
 impl AttentionRow {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::Mode,
         Self::PressSorts,
         Self::TurboConcurrency,
         Self::ExpirySeconds,
         Self::Model,
         Self::ShowBriefing,
+        Self::LargeButtons,
     ];
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
