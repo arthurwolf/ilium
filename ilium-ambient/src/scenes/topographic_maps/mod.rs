@@ -29,7 +29,7 @@ use crate::{
 };
 use data::Heightfield;
 use projection::Camera;
-use settings::{BelowStyle, PaletteChoice, PanStyle, Projection, WorldId};
+use settings::{BelowStyle, PaletteChoice, PanStyle, Projection, TidePattern, WorldId};
 use std::sync::mpsc::{Receiver, TryRecvError};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -73,7 +73,8 @@ pub struct TopographicMapsScene {
     heights: Vec<f32>,
     levels: Vec<i32>,
     from_previous: Vec<bool>,
-    last_zero_m: f32,
+    /// Sea level in metres at every dot of the last frame.
+    zeros: Vec<f32>,
     palette: ScenePalette,
 }
 
@@ -130,7 +131,7 @@ impl TopographicMapsScene {
             heights: Vec::new(),
             levels: Vec::new(),
             from_previous: Vec::new(),
-            last_zero_m: 0.0,
+            zeros: Vec::new(),
             palette: env.palette.clone(),
         }
     }
@@ -306,6 +307,30 @@ impl TopographicMapsScene {
         }
     }
 
+    /// Sea level at a place: the zero shift plus the tide. With the global
+    /// pattern the tide ignores the place; with bulges it is a cos(2 x
+    /// longitude) wave that travels around the world, strongest at the equator
+    /// and gone at the poles, like the equilibrium tide of a moon.
+    fn zero_at(&self, seconds: f64, longitude: f64, latitude: f64) -> f32 {
+        if self.settings.tide_pattern == TidePattern::Global {
+            return self.zero_level(seconds);
+        }
+        let range = f64::from(self.settings.tide_range_m);
+        let phase = std::f64::consts::TAU * seconds / f64::from(self.settings.tide_seconds);
+        let cos_latitude = latitude.to_radians().cos();
+        let tide = 0.5
+            * range
+            * (2.0 * longitude.to_radians() - phase).cos()
+            * cos_latitude
+            * cos_latitude;
+        self.settings.zero_shift_m as f32 + tide as f32
+    }
+
+    /// Whether the water surface is moved away from the body's datum.
+    fn sea_level_moves(&self) -> bool {
+        self.settings.tide_range_m > 0 || self.settings.zero_shift_m != 0
+    }
+
     fn zero_level(&self, seconds: f64) -> f32 {
         let tide = if self.settings.tide_range_m > 0 {
             0.5 * self.settings.tide_range_m as f64
@@ -317,7 +342,7 @@ impl TopographicMapsScene {
     }
 
     /// Fill `heights`, `levels` and `from_previous` for every dot.
-    fn sample_dots(&mut self, camera: &Camera, seconds: f64, zero: f32) {
+    fn sample_dots(&mut self, camera: &Camera, seconds: f64) {
         let (width, height) = (camera.width as usize, camera.height as usize);
         let count = width * height;
         self.heights.clear();
@@ -326,6 +351,8 @@ impl TopographicMapsScene {
         self.levels.resize(count, NO_LEVEL);
         self.from_previous.clear();
         self.from_previous.resize(count, false);
+        self.zeros.clear();
+        self.zeros.resize(count, 0.0);
         let Some(current) = &self.current else { return };
         let dissolve = self.previous.as_ref().map(|(old, started)| {
             let progress = ((seconds - started) / DISSOLVE_SECONDS).clamp(0.0, 1.0) as f32;
@@ -342,7 +369,9 @@ impl TopographicMapsScene {
                 };
                 let elevation = loaded.field.view().sample(longitude, latitude);
                 let index = y * width + x;
+                let zero = self.zero_at(seconds, longitude, latitude);
                 self.heights[index] = elevation;
+                self.zeros[index] = zero;
                 self.levels[index] = ((elevation - zero) / loaded.interval_m).floor() as i32;
                 self.from_previous[index] = old;
             }
@@ -353,6 +382,16 @@ impl TopographicMapsScene {
         let settings = &self.settings;
         let width = raster.width;
         let index_every = settings.index_every as i32;
+        // Contours under the water are sea-floor depth lines. The sea floor
+        // does not move with the tide, so on a moving sea they would bunch up
+        // on the continental slope and leave a fixed outline of the old
+        // coasts. Moving water hides the floor; only the shore and the land
+        // above the current water level keep their contours.
+        let below_style = if self.sea_level_moves() {
+            BelowStyle::Hidden
+        } else {
+            settings.below_style
+        };
         let put = |raster: &mut crate::raster::Raster, x: usize, y: usize, value: f32| {
             if x < raster.width && y < raster.height {
                 let slot = &mut raster.dots[y * raster.width + x];
@@ -387,7 +426,7 @@ impl TopographicMapsScene {
                         && high.div_euclid(index_every) > low.div_euclid(index_every);
                     let below = high <= 0;
                     if below && !is_zero {
-                        match settings.below_style {
+                        match below_style {
                             BelowStyle::Hidden => continue,
                             BelowStyle::Dotted if (x + y) % 2 == 1 => continue,
                             _ => {}
@@ -460,7 +499,7 @@ impl TopographicMapsScene {
                 frame.cell_colors[row * columns + column] = self.palette.recolor(palette::tint(
                     self.settings.palette,
                     loaded.id,
-                    elevation - self.last_zero_m,
+                    elevation - self.zeros[dot],
                     loaded.field.view().min_m,
                     loaded.field.view().max_m,
                 ));
@@ -478,9 +517,7 @@ impl Scene for TopographicMapsScene {
             return;
         }
         let camera = self.camera(seconds, frame.raster.width, frame.raster.height);
-        let zero = self.zero_level(seconds);
-        self.last_zero_m = zero;
-        self.sample_dots(&camera, seconds, zero);
+        self.sample_dots(&camera, seconds);
         self.draw_contours(frame.raster);
         if self.settings.shading_percent > 0 {
             self.shade(frame.raster);
