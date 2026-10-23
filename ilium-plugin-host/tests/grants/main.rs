@@ -5,6 +5,7 @@
 //! One module per manual page; `support` holds the shared helpers. Later parts of the lane add
 //! modules here.
 
+mod reference_admin_policy;
 mod reference_capabilities;
 mod reference_grant_review_and_consent;
 mod support;

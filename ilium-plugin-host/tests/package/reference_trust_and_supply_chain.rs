@@ -20,10 +20,43 @@ fn trusted_fixture() -> CliFixture {
     fixture
 }
 
+/// Explicit approval fixture: only this test authority may approve the actual
+/// requested set. Command flags never manufacture consent.
+#[derive(Default)]
+struct InstalledFixtureConsent(std::sync::atomic::AtomicUsize);
+impl ilium_plugin_host::install::Consent for InstalledFixtureConsent {
+    fn decide(&self, request: &ilium_plugin_host::install::ConsentRequest)
+        -> ilium_plugin_host::install::ConsentDecision {
+        assert_eq!(request.plugin, "example.minimal");
+        assert_eq!(request.version, "0.1.0");
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        ilium_plugin_host::install::ConsentDecision::Approve(request.requested.clone())
+    }
+}
+
 fn installed_fixture() -> CliFixture {
-    let fixture = trusted_fixture();
-    let out = install(&fixture, &vector_signed(), &[]);
+    use ilium_plugin_host::{audit::{AuditActor, AuditContext}, cli::local_install::factory,
+        signing::{SignedAt, SigningKey, sign}};
+    let mut fixture = trusted_fixture();
+    // Keep the immutable signing vectors intact. Actual installation requires
+    // callable lifecycle/handler exports and their matching real inventory.
+    let unsigned = package_with_optional_artifacts(&[]);
+    let seed: [u8; 32] = seed_of(0).try_into().expect("fixture signing seed");
+    assert_eq!(key_id_of(0), VECTOR_KEY_ID);
+    let at = ilium_plugin_host::trust::utc_timestamp(fixture.env.now).expect("fixture signing time");
+    let signed = sign(&unsigned, &SigningKey::from_seed(seed), SignedAt(at)).expect("sign actual component fixture");
+    let path = fixture.work().join("installed-fixture.iliumpkg");
+    write_file(&path, &signed);
+    let consent = std::sync::Arc::new(InstalledFixtureConsent::default());
+    let backend = factory(&fixture.env, consent.clone(), AuditContext {
+        session: "trust-supply-chain-install-fixture".into(),
+        actor: AuditActor { kind: "cli".into(), pane: None, plugin: None },
+    }).expect("explicit local installation service");
+    fixture.env = fixture.env.clone().with_installer(backend);
+    let out = run_cli(&fixture, &["install", path.to_str().expect("fixture package path"), "--json"]);
     assert_eq!(out.exit_code, 0, "{}", all_text(&out));
+    assert_eq!(consent.0.load(std::sync::atomic::Ordering::SeqCst), 1);
+    assert_eq!(std::fs::read(&path).expect("unchanged package source"), signed);
     fixture
 }
 
@@ -149,9 +182,14 @@ fn sec_141_every_flipped_manifest_byte_is_refused_signature_invalid() {
 fn sec_141_flipped_signature_bytes_are_refused() {
     let signed = vector_signed();
     let trust = trust_of(0, "example");
-    let length = data_of(&signed, "signature").len();
-    for index in (0..length).step_by(5) {
-        let original = data_of(&signed, "signature")[index];
+    let document = data_of(&signed, "signature");
+    let value: serde_json::Value = serde_json::from_slice(&document).expect("signature document");
+    let signature = value["signatures"][0]["signature"].as_str().expect("signature bytes");
+    let start = document.windows(signature.len()).position(|part| part == signature.as_bytes()).expect("stored signature");
+    // signed_at is informational and whitespace is not signed. Mutate the
+    // cryptographic signature itself, whose every byte must be checked.
+    for index in (start..start + signature.len()).step_by(5) {
+        let original = document[index];
         let bytes = patch_data(&signed, "signature", index, original ^ 0x01, true);
         assert_ne!(
             refusal(&bytes, &trust),
@@ -581,7 +619,7 @@ fn sec_150_duplicate_name_is_path_duplicate() {
 
 /// REQ: SEC-150
 #[test]
-fn sec_150_names_equal_after_nfc_are_path_duplicate() {
+fn sec_150_unicode_names_are_refused_by_the_ascii_path_contract() {
     let mut v = vec![
         Z::new("manifest.json", &vector_manifest()),
         Z::new("server.wasm", &vector_component()),
@@ -591,7 +629,7 @@ fn sec_150_names_equal_after_nfc_are_path_duplicate() {
     v.sort_by(|a, b| a.name.cmp(&b.name));
     let got = first_error(&build(&v, &Tail::default()));
     assert!(
-        got == "package.path-duplicate" || got == "package.path-case-collision",
+        got == "package.path-invalid",
         "{got}"
     );
 }
@@ -629,7 +667,7 @@ fn sec_150_encrypted_entry_is_zip_invalid() {
     file.flags = 0x0801;
     assert_eq!(
         first_error(&build(&entries_plus(file), &Tail::default())),
-        "package.zip-invalid"
+        "package.zip-encrypted"
     );
 }
 
@@ -640,7 +678,7 @@ fn sec_150_unsupported_compression_method_is_zip_invalid() {
     file.method = 12;
     assert_eq!(
         first_error(&build(&entries_plus(file), &Tail::default())),
-        "package.zip-invalid"
+        "package.zip-compressed"
     );
 }
 
@@ -654,7 +692,7 @@ fn sec_150_trailing_data_after_the_end_record_is_zip_invalid() {
             ..Tail::default()
         },
     );
-    assert_eq!(first_error(&bytes), "package.zip-invalid");
+    assert_eq!(first_error(&bytes), "package.zip-trailing");
 }
 
 /// REQ: SEC-150
@@ -716,11 +754,11 @@ fn sec_151_entry_count_4096_is_not_refused_for_count_and_4097_is() {
     let at_limit = stage1_codes(&build_with(4094));
     let over = stage1_codes(&build_with(4095));
     assert!(
-        !at_limit.contains(&"package.zip-invalid".to_string()),
+        !at_limit.contains(&"package.entry-limit".to_string()),
         "{at_limit:?}"
     );
     assert!(
-        over.contains(&"package.zip-invalid".to_string()),
+        over.contains(&"package.entry-limit".to_string()),
         "{over:?}"
     );
 }
@@ -770,7 +808,18 @@ fn sec_151_compression_ratio_above_200_to_1_is_refused() {
     let mut file = Z::new("assets/zeros", &[0xd7, 0x01]);
     file.size = Some(1_000_000);
     file.method = 8;
-    let got = stage1_codes(&build(&entries_plus(file), &Tail::default()));
+    let mut bytes = build(&entries_plus(file), &Tail::default());
+    let location = layout(&bytes)
+        .into_iter()
+        .find(|entry| entry.name == "assets/zeros")
+        .expect("ratio fixture entry");
+    // Z.size changes both central sizes. A ratio fixture must instead declare
+    // the actual two compressed bytes and the expanded length independently.
+    bytes[location.central_off + 20..location.central_off + 24]
+        .copy_from_slice(&2u32.to_le_bytes());
+    bytes[location.local_off + 22..location.local_off + 26]
+        .copy_from_slice(&1_000_000u32.to_le_bytes());
+    let got = stage1_codes(&bytes);
     assert!(got.contains(&"package.zip-invalid".to_string()), "{got:?}");
 }
 
@@ -852,10 +901,10 @@ fn inspect(bytes: &[u8]) -> ilium_plugin_host::cli::CliOutput {
 fn sec_154_inspect_prints_manifest_file_signature_and_summary_lines() {
     let out = inspect(&vector_signed());
     assert_eq!(out.exit_code, 0, "{}", all_text(&out));
-    assert_eq!(records(&out, "manifest").len(), 1);
-    assert_eq!(records(&out, "signature").len(), 1);
+    assert_eq!(records(&out, "inspect").iter().filter(|record| record["section"] == "manifest").count(), 1);
+    assert_eq!(records(&out, "inspect").iter().filter(|record| record["section"] == "signature").count(), 1);
     assert_eq!(records(&out, "summary").len(), 1);
-    assert!(!records(&out, "file").is_empty());
+    assert!(records(&out, "inspect").iter().any(|record| record["section"] == "file"));
 }
 
 /// REQ: SEC-154
@@ -890,8 +939,67 @@ fn sec_154_inspect_does_not_install() {
 #[test]
 fn sec_154_inspect_of_an_unsigned_package_still_prints_a_signature_line() {
     let out = inspect(&vector_unsigned());
-    assert_eq!(records(&out, "signature").len(), 1, "{}", all_text(&out));
+    assert_eq!(records(&out, "inspect").iter().filter(|record| record["section"] == "signature").count(), 1, "{}", all_text(&out));
     assert!(all_text(&out).contains("T3"));
+}
+
+// Structural admission needs actual callable handler and lifecycle exports.
+// This fixture does not claim full host-world linkage or alter signed vectors.
+const OPTIONAL_ARTIFACT_COMPONENT: &str = r#"(component
+
+  (core module $activation_m
+    (memory (export "memory") 1)
+    (global $heap (mut i32) (i32.const 1024))
+    (func (export "realloc") (param i32 i32 i32 i32) (result i32)
+      global.get $heap
+      global.get $heap local.get 3 i32.add i32.const 7 i32.add i32.const -8 i32.and global.set $heap)
+    (func (export "activate") (param i32 i32 i32 i32 i64 i32 i32 i32 i32 i32 i32 i32 i32 i32) (result i32)
+      local.get 4 i64.const 1 i64.ne if unreachable end
+      i32.const 0))
+  (core instance $activation_m (instantiate $activation_m))
+  (type $activation (record
+    (field "plugin" string) (field "api" string) (field "instance" u64)
+    (field "side" string) (field "settings-json" string)
+    (field "granted" (list string)) (field "restored" (option (list u8)))))
+  (type $code (enum "not-permitted" "not-found" "invalid-argument" "conflict" "quota-exceeded" "rate-limited" "busy" "timed-out" "cancelled" "unsupported" "pane-not-ready" "revoked" "io" "network" "internal"))
+  (type $error (record (field "code" $code) (field "message" string) (field "retry-after-ms" (option u32))))
+  (func $activate (param "context" $activation) (result (result (error $error)))
+    (canon lift (core func $activation_m "activate") (memory $activation_m "memory") (realloc (func $activation_m "realloc"))))
+  (instance $lifecycle
+    (export "activation" (type $activation)) (export "error-code" (type $code)) (export "plugin-error" (type $error))
+    (export "activate" (func $activate)))
+  (export "ilium:exports/lifecycle@0.1.0" (instance $lifecycle))
+  (core module $handler_m
+    (memory (export "memory") 1)
+    (global $heap (mut i32) (i32.const 1024))
+    (func (export "realloc") (param i32 i32 i32 i32) (result i32)
+      global.get $heap
+      global.get $heap local.get 3 i32.add i32.const 7 i32.add i32.const -8 i32.and global.set $heap)
+    (data (i32.const 0) "\20\00\00\00\01\00\00\00")
+    (data (i32.const 40) "\0d\00\00\00\00\00\00\00\2a\00\00\00\00\00\00\00")
+    (func (export "events") (param i32 i32) (result i32)
+      local.get 1 i32.const 1 i32.ne if unreachable end
+      i32.const 0))
+  (core instance $handler_m (instantiate $handler_m))
+  (type $event (variant (case "node-removed" u64)))
+  (type $intent (variant (case "close-node" u64)))
+  (type $submission (record (field "intent" $intent) (field "correlation" u64) (field "dedup-key" (option string))))
+  (func $events (param "batch" (list $event)) (result (list $submission))
+    (canon lift (core func $handler_m "events") (memory $handler_m "memory") (realloc (func $handler_m "realloc"))))
+  (instance $handler (export "event" (type $event)) (export "intent" (type $intent)) (export "submission" (type $submission)) (export "on-events" (func $events)))
+  (export "ilium:exports/handler@0.1.0" (instance $handler))
+)"#;
+fn package_with_optional_artifacts(extras: &[(&str, &[u8])]) -> Vec<u8> {
+    let mut component = wat::parse_str(OPTIONAL_ARTIFACT_COMPONENT).expect("valid fixture component");
+    component.extend_from_slice(&vector_component()[8..]);
+    let mut listed = vec![("server.wasm", component.as_slice())];
+    listed.extend_from_slice(extras);
+    listed.sort_by(|left, right| left.0.as_bytes().cmp(right.0.as_bytes()));
+    let manifest = manifest_text("", "server", "server.wasm", &listed);
+    let mut files: Vec<(&str, Vec<u8>)> = listed.iter().map(|(path, bytes)| (*path, bytes.to_vec())).collect();
+    files.push(("manifest.json", manifest));
+    files.sort_by(|left, right| left.0.as_bytes().cmp(right.0.as_bytes()));
+    zip_of(&files)
 }
 
 /// REQ: SEC-155
@@ -899,8 +1007,12 @@ fn sec_154_inspect_of_an_unsigned_package_still_prints_a_signature_line() {
 fn sec_155_optional_sbom_and_provenance_are_accepted_when_listed() {
     let sbom: &[u8] = b"{\"spdxVersion\":\"SPDX-2.3\"}";
     let provenance: &[u8] = b"{\"_type\":\"https://in-toto.io/Statement/v1\"}";
-    let bytes = package_with(&[("provenance.json", provenance), ("sbom.spdx.json", sbom)]);
-    assert!(check_codes(&bytes).is_empty(), "{:?}", check_codes(&bytes));
+    let bytes = package_with_optional_artifacts(&[("provenance.json", provenance), ("sbom.spdx.json", sbom)]);
+    // This contract checks optional archive contents without granting installation authority.
+    let (_directory, installer) = installer();
+    let report = installer.check(&bytes, ilium_plugin_api::manifest::CheckMode::Check);
+    let codes = error_codes(&report.diagnostics);
+    assert!(codes.is_empty(), "{codes:?}");
 }
 
 /// REQ: SEC-155

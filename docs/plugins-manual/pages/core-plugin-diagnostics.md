@@ -717,3 +717,24 @@ Log sinks receive redacted records ([SEC-249]); see [Secrets](/pages/reference-s
 **[USR-336]** `support-bundle` MUST work for a plugin in state `failed`, `blocked`, `incompatible` or missing helper, MUST build in at most 5 s (proposed, owner to confirm) for a 4 MiB log, and MUST exit with the error `bundle.plugin-unknown` if the id is not installed.
 
 **[USR-337]** `ilium plugin doctor` MUST check, and print one line each with `ok`, `warn` or `fail`, the state folders and their permissions, the policy file, the trust store, `installed.json` readability, free disk space (warn below 100 MiB (proposed, owner to confirm)), host API range, and the chosen language, and MUST exit 0 only when no line is `fail`.
+
+## Production additions: support bundle contract
+
+The bundle is specified in three places (USR-221 to USR-226 above, LIF-312 to LIF-314 in the lifecycle register, and HST-636 in the host telemetry page). They disagree on the command, the line count, the size cap and the contents. This section fixes one contract. Where another requirement differs, the values below apply.
+
+**[USR-104]** A support bundle MUST be written only by `ilium plugin support-bundle <id> --out <file>`. No other command MUST write a bundle, and an implementation MUST NOT offer `ilium plugin bundle` or `ilium plugin diagnostics --out <file>` as a second bundle format with its own contents, line count or cap. The values in the table below are the only values a bundle may use.
+
+| Setting | Governing value | Superseded value |
+|---|---|---|
+| Command | `ilium plugin support-bundle <id> --out <file>` | `ilium plugin bundle` (LIF-312); `ilium plugin diagnostics --out <file>` (HST-636) |
+| Log lines | The newest 200 lines of the plugin (USR-221) | The last 1000 log records (LIF-312); the last 500 lines (HST-636) |
+| Size cap | 8 MiB (USR-224) | 5 MiB (LIF-313) |
+| Entries | `summary.txt`, `log.txt`, `stats.txt`, `crashes.txt` (USR-221), with the summary keys of USR-335 | Report, manifest and state names (LIF-312); health, metrics, limits, manifest and grants (HST-636) |
+| Redaction | Credential headers, URL parameters and home paths, with `~` for home (USR-222, LIF-313) | None |
+| Owner | The `ilium.core.diagnostics` plugin, which defines this contract and its conformance tests | None |
+
+**[USR-105]** A bundle MUST NOT carry the plugin's manifest, the health and metrics of any other plugin, or the state names of other plugins. The grant list appears only inside `summary.txt` (USR-221), and no other entry MUST hold grants. When a conformance test is written against LIF-312 or HST-636 instead of this section, the test MUST be changed to this contract.
+
+**[USR-106]** Retention MUST follow one period for bundles from either origin. A bundle that the host offers after a plugin enters `failed` (LIF-314) MUST be held in the server state folder and MUST be deleted at the next start once it is 14 days old. A file that `support-bundle --out <file>` wrote MUST belong to the user: Ilium MUST NOT delete, move, rename, send or read it after it is written.
+
+**[USR-953]** A change to the bundle contents, the line count, the size cap or the retention period MUST change this section first. The matching rows of the user-admin register (USR-221 to USR-224, USR-334, USR-335), the lifecycle register (LIF-312 to LIF-314) and the host telemetry register (HST-636) MUST then be updated in the same change, so that no register keeps a superseded value.

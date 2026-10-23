@@ -75,3 +75,31 @@ Items the security tests use that the skeleton lacks. Signatures are as the test
 - The meta tests for SEC-347 check that tests tagged SEC-370/371/373/374 exist; they are repository-structure checks and pass once `reference_threat_model_p2.rs` is built.
 - The skeleton `Manifest` has no `description` or `security_contact` field.
 - SEC-346 is a manual row, covered by render and page doc tests.
+
+# Part 4 (SEC-950 .. SEC-968, security-policy requirements)
+
+Behaviour that the host does not provide yet has a body of `unimplemented!("<path>")` only. Harness
+hooks with an existing signature are called as they are, even where their body is still a stub.
+
+## Existing signatures used with a new meaning
+
+- `HarnessHandle::install_check(&str, Tier)` is called with `"<id>@<version>"` for SEC-951 and SEC-952 (version-denied and version-pinned refusals). The current signature takes only an id, so the version form must be accepted there.
+- `Setup::option("installed-plugins", [ids])` and `Setup::option("runtime-advisory", {id, severity, fixed})` are read as option keys (SEC-951, SEC-968).
+- `Setup::option("host-version", "<version>")` is a new option key the status bar reads to compare with `fixed` (SEC-968).
+- `HarnessHandle::effective_setting("plugins.limits.session_memory_mib")` and `user_set_setting` are assumed to address the user `[plugins.limits]` table by that dotted key (SEC-950).
+- `HarnessHandle::secret_value`, `keyring_value`, `stored_secret_text` and `forget_secrets(None|Some(plugin))` are assumed to mean "missing from the store" for SEC-963.
+- `Rig::value("settings.get-json", {"key": ...})` is assumed to return JSON `null` for an unset key (SEC-963).
+
+## Behaviour not in the crate yet (unimplemented bodies)
+
+- `ilium_plugin_host::audit`: storage-ceiling deletion ordering with `audit.keep_days` (SEC-953), `audit-retention-deleted` record before each deletion (SEC-954), torn-final-line move to `audit-torn-<seq>.jsonl` at open with an `audit-torn` record (SEC-956).
+- `ilium_plugin_host::cli::run` `plugin audit --verify` `torn-tail` reporting with byte offset and exit 0 (SEC-957).
+- `ilium_plugin_host::crash_records`: 30-day and 200-record retention, and uninstall (with or without `--purge`) deleting every crash record (SEC-955).
+- `ilium_plugin_host::secrets`: newer file value overwriting an older keyring value (SEC-959), file copy removed only after readback (SEC-959), unset-secret message naming the row and no retry with an empty credential (SEC-964).
+- `ilium_plugin_host::host_info`: end-of-life minor loads installed plugins (SEC-966), advisory check writing one `host.advisory-affected` warn line at start (SEC-967).
+- `ilium_plugin_host::cli::run` `version --json` `advisories` field (SEC-967).
+
+## Manual conflicts noticed
+
+- SEC-951, 952, 953, 955, 956, 957, 959, 963, 964, 966, 967 and 968 are marked "(proposed, owner to confirm)" in the manual. Their tests follow the text as written.
+- SEC-955 says the 14-day period of SEC-447 is superseded. `reference-audit-log.md` SEC-447 still says 14 days, so the owner must align it; the test checks the superseding text.

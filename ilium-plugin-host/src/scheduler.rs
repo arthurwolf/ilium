@@ -908,17 +908,19 @@ pub fn event_queue_policy(event: &Event) -> QueuePolicy {
         Event::Pointer(pointer)
             if matches!(
                 pointer.kind,
-                ilium_plugin_api::generated::types::ui::PointerKind::Move
-                    | ilium_plugin_api::generated::types::ui::PointerKind::Drag
+                ilium_plugin_api::generated::types::ui::PointerKind::Drag
             ) =>
         {
             QueuePolicy::Coalesce
         }
-        Event::EditorPointer(_) => QueuePolicy::Coalesce,
+        Event::EditorPointer(pointer)
+            if pointer.pointer.kind == ilium_plugin_api::generated::types::ui::PointerKind::Move => QueuePolicy::Coalesce,
         Event::UiAction(action)
             if matches!(
                 action.kind,
                 ilium_plugin_api::generated::types::ui::ActionKind::Scrolled
+                    | ilium_plugin_api::generated::types::ui::ActionKind::Pointer
+                    | ilium_plugin_api::generated::types::ui::ActionKind::DragOver
             ) =>
         {
             QueuePolicy::Coalesce

@@ -209,6 +209,13 @@ Add `ilium plugin test --conformance --json` to the pipeline. A fail verdict exi
 
 None. The first release of the suite is ids as listed.
 
+## Suite versions and case additions
+
+- **[DEV-103]** The `summary` record MUST carry a `suite` string field with the `MAJOR.MINOR` version of the suite that ran, so a pass in a CI log names the rules it covered. The field MUST have the same value as the `suite` of the report file of [DEV-923] for the same run. Test: run with `--json` and `--report`, assert the field on the last line and in the report file.
+- **[DEV-104]** A PATCH release of the suite MUST NOT add a case, remove one or change one. Cases are added only in a MINOR release, and a MINOR release MUST only add cases ([DEV-924]) (proposed, owner to confirm: patch releases never add cases).
+- **[DEV-105]** The release notes of every MINOR release that adds cases MUST list each new case id with its title, in that same release (proposed, owner to confirm). The notes are the notice to plugin authors that a build can newly fail.
+- **[DEV-106]** Adding a case MUST NOT change the verdict of an existing case id on any subject. A plugin build that passed the previous MINOR MAY newly fail a case added in the next MINOR; the failure is a `conformance` record with the new id and a `fail` verdict, and the exit code is 3 ([DEV-602]). A pipeline that must keep the previous catalogue MUST pin it with `--suite-version` ([DEV-924]). Test: run the shared ids of two consecutive MINOR versions, with `--suite-version` for each, and assert equal verdicts for every id that exists in both.
+
 ## Edge cases
 
 - A plugin with only a scene side skips all event and grant cases that need a server or client side, with `side-not-built`.

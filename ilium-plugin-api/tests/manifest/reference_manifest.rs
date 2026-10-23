@@ -2,12 +2,12 @@
 //! (PKG-013..PKG-035). Expected values come from the rule tables of that page and from the
 //! mapping of reference-manifest-schema.md (PKG-562).
 
-use ilium_plugin_api::manifest::{
-    parse_manifest, validate_json, CheckMode, Manifest, Stage, DEFAULT_DATA_VERSION,
-};
 use ilium_plugin_api::Tier;
+use ilium_plugin_api::manifest::{
+    CheckMode, DEFAULT_DATA_VERSION, Manifest, Stage, parse_manifest, validate_json,
+};
 use proptest::prelude::*;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::support::*;
 
@@ -588,17 +588,17 @@ fn pkg_012_each_single_side_is_accepted() {
 
 /// REQ: PKG-012
 #[test]
-fn pkg_012_empty_object_lists_the_five_missing_keys_then_the_missing_component() {
+fn pkg_012_empty_object_lists_all_missing_requirements_in_pointer_order() {
     let found = text_errors("{}");
     assert_codes(
         &found,
         &[
-            "manifest.key-missing",
-            "manifest.key-missing",
-            "manifest.key-missing",
-            "manifest.key-missing",
-            "manifest.key-missing",
             "manifest.schema",
+            "manifest.key-missing",
+            "manifest.key-missing",
+            "manifest.key-missing",
+            "manifest.key-missing",
+            "manifest.key-missing",
         ],
     );
 }
@@ -791,8 +791,8 @@ fn pkg_014_whole_id_of_129_characters_is_refused() {
     let id = segments.join(".");
     assert_eq!(id.len(), 129);
     let found = id_codes(&id);
-    assert_has(&found, "manifest.id-invalid");
-    assert_lacks(&found, "manifest.schema");
+    // The segment grammar is valid; only the independent maxLength fails (PKG-562).
+    assert_codes(&found, &["manifest.schema"]);
 }
 
 /// REQ: PKG-014
@@ -1013,12 +1013,12 @@ fn pkg_017_publisher_is_not_an_identity_any_text_is_accepted_in_a_source_manifes
 
 /// REQ: PKG-017
 #[test]
-fn pkg_017_doc_publisher_mismatch_is_a_stage_seven_trust_check() {
+fn pkg_017_doc_publisher_mismatch_is_a_stage_eight_trust_check() {
     let row = catalogue()
         .into_iter()
         .find(|row| row.code == "manifest.publisher-mismatch")
         .expect("publisher-mismatch is in the catalogue");
-    assert_eq!(row.stage, "7");
+    assert_eq!(row.stage, "8");
 }
 
 /// REQ: PKG-018
@@ -1391,33 +1391,37 @@ fn pkg_027_plugin_listing_itself_refused_requires_self() {
 
 /// REQ: PKG-027
 #[test]
-fn pkg_027_malformed_requires_values_refused_requires_invalid() {
-    for requires in [
-        json!({ "host": "not a range" }),
-        json!({ "plugins": [{ "id": "Bad Id" }] }),
-        json!({ "plugins": [{ "id": "com.other.a" }, { "id": "com.other.a" }] }),
-        json!({ "wait_ms": 5001 }),
-        json!({ "services": [""] }),
+fn pkg_027_malformed_requires_values_respect_schema_before_semantics() {
+    for (requires, code) in [
+        (
+            json!({ "host": "not a range" }),
+            "manifest.requires-invalid",
+        ),
+        (
+            json!({ "plugins": [{ "id": "Bad Id" }] }),
+            "manifest.schema",
+        ),
+        (
+            json!({ "plugins": [{ "id": "com.other.a" }, { "id": "com.other.a" }] }),
+            "manifest.requires-invalid",
+        ),
+        (json!({ "wait_ms": 5001 }), "manifest.schema"),
+        (json!({ "services": [""] }), "manifest.schema"),
     ] {
-        let found = errors(&set(client(), "/requires", requires.clone()));
-        assert_has(&found, "manifest.requires-invalid");
+        let found = errors(&set(client(), "/requires", requires));
+        assert_has(&found, code);
     }
 }
 
 /// REQ: PKG-027
 #[test]
 fn pkg_027_wait_ms_boundaries_0_5000_5001() {
-    assert_lacks(
-        &errors(&set(client(), "/requires", json!({ "wait_ms": 0 }))),
-        "manifest.requires-invalid",
-    );
-    assert_lacks(
-        &errors(&set(client(), "/requires", json!({ "wait_ms": 5000 }))),
-        "manifest.requires-invalid",
-    );
-    assert_has(
+    for wait_ms in [0, 5000] {
+        assert_clean(&set(client(), "/requires", json!({ "wait_ms": wait_ms })));
+    }
+    assert_codes(
         &errors(&set(client(), "/requires", json!({ "wait_ms": 5001 }))),
-        "manifest.requires-invalid",
+        &["manifest.schema"],
     );
 }
 
@@ -1462,19 +1466,20 @@ fn pkg_027_service_requirement_parses_name_and_range() {
 
 /// REQ: PKG-027
 #[test]
-fn pkg_027_service_requirement_without_range_defaults_to_any() {
+fn pkg_027_service_requirement_requires_a_full_contract_version() {
     use ilium_plugin_api::manifest::ServiceRequirement;
-    let parsed = ServiceRequirement::parse("com.example.git/status").expect("parses");
-    assert_eq!(parsed.version, "*");
+    let refused =
+        ServiceRequirement::parse("com.example.git/status").expect_err("version required");
+    assert_eq!(refused.code.as_str(), "manifest.service-version");
 }
 
 /// REQ: PKG-027
 #[test]
-fn pkg_027_bad_service_requirement_refused_requires_invalid() {
+fn pkg_027_bad_service_requirement_refused_service_version() {
     use ilium_plugin_api::manifest::ServiceRequirement;
     for text in ["", "@1.0.0", "name@", "bad name@1.0.0"] {
         let refused = ServiceRequirement::parse(text).expect_err(text);
-        assert_eq!(refused.code.as_str(), "manifest.requires-invalid", "{text}");
+        assert_eq!(refused.code.as_str(), "manifest.service-version", "{text}");
     }
 }
 
@@ -1483,7 +1488,7 @@ fn pkg_027_bad_service_requirement_refused_requires_invalid() {
 fn pkg_027_list_boundaries_32_and_33_for_services_and_plugins() {
     let services = |count: usize| -> Vec<String> {
         (0..count)
-            .map(|index| format!("com.example.s{index}/api"))
+            .map(|index| format!("com.example.s{index}/api@1.0.0"))
             .collect()
     };
     let plugins = |count: usize| -> Vec<Value> {
@@ -1493,22 +1498,16 @@ fn pkg_027_list_boundaries_32_and_33_for_services_and_plugins() {
     };
     {
         let count = 32usize;
-        assert_lacks(
-            &errors(&set(
-                client(),
-                "/requires",
-                json!({ "services": services(count) }),
-            )),
-            "manifest.requires-invalid",
-        );
-        assert_lacks(
-            &errors(&set(
-                client(),
-                "/requires",
-                json!({ "plugins": plugins(count) }),
-            )),
-            "manifest.requires-invalid",
-        );
+        assert_clean(&set(
+            client(),
+            "/requires",
+            json!({ "services": services(count) }),
+        ));
+        assert_clean(&set(
+            client(),
+            "/requires",
+            json!({ "plugins": plugins(count) }),
+        ));
     }
     assert_has(
         &errors(&set(
@@ -1516,7 +1515,7 @@ fn pkg_027_list_boundaries_32_and_33_for_services_and_plugins() {
             "/requires",
             json!({ "services": services(33) }),
         )),
-        "manifest.requires-invalid",
+        "manifest.schema",
     );
     assert_has(
         &errors(&set(
@@ -1524,7 +1523,7 @@ fn pkg_027_list_boundaries_32_and_33_for_services_and_plugins() {
             "/requires",
             json!({ "plugins": plugins(33) }),
         )),
-        "manifest.requires-invalid",
+        "manifest.schema",
     );
 }
 

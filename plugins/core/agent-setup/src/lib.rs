@@ -121,8 +121,8 @@ mod spec_tests {
         );
         assert_eq!(manifest["client"]["world"], "ilium:client/base@0.1.0");
         assert_eq!(string_items(&manifest["client"]["exports"]), vec!["views"]);
-        let _server = AgentSetupServer::default();
-        let _client = AgentSetupClient::default();
+        let _server = AgentSetupServer;
+        let _client = AgentSetupClient;
     }
 
     /// REQ: COR-050

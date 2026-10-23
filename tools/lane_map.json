@@ -1,679 +1,693 @@
 {
- "schema": 1,
- "source": "docs/research/plugin-platform/lane_ranges.json and test-plan.md section 4.2",
- "notes": [
-  "ranges: '<prefix><n>..<m>' or a single id; the prefix is everything before the trailing digits and numbers compare as integers",
-  "patterns: fnmatch globs for WIT function ids and named ids",
-  "port_plugins: core plugin names; a PORT id belongs to the lane whose plugin is the row's target_crate",
-  "owns: path globs relative to the workspace root; with '**' a glob covers every file below the directory. The more specific glob wins when two lanes match (for example a test directory inside a skeleton crate)"
- ],
- "lanes": {
-  "skel-api": {
-   "ranges": [
-    "ABI-001..051"
-   ],
-   "patterns": [],
-   "port_plugins": [],
-   "owns": [
-    "ilium-plugin-api/**",
-    "wit/**",
-    "tools/extract_wit.py",
-    "tools/gen_plugin_api.py",
-    "ilium-plugin-sdk-core/src/generated/**"
-   ]
-  },
-  "kernel-boot": {
-   "ranges": [
-    "HST-001..045",
-    "HST-380..388",
-    "HST-495..499",
-    "COR-010",
-    "COR-020..024"
-   ],
-   "patterns": [],
-   "port_plugins": [],
-   "owns": [
-    "ilium-plugin-host/tests/kernel_boot/**",
-    "ilium-server/tests/plugin_kernel_boot/**",
-    "ilium/tests/plugin_safe_start/**"
-   ]
-  },
-  "host-runtime": {
-   "ranges": [
-    "HST-050..089",
-    "HST-400..412",
-    "API-001..999"
-   ],
-   "patterns": [],
-   "port_plugins": [],
-   "owns": [
-    "ilium-plugin-host/tests/runtime/**"
-   ]
-  },
-  "host-sched": {
-   "ranges": [
-    "HST-180..216"
-   ],
-   "patterns": [],
-   "port_plugins": [],
-   "owns": [
-    "ilium-plugin-host/tests/sched/**",
-    "ilium-plugin-host/tests/loom/**"
-   ]
-  },
-  "host-ipc": {
-   "ranges": [
-    "HST-100..125"
-   ],
-   "patterns": [],
-   "port_plugins": [],
-   "owns": [
-    "ilium-ipc/tests/plugin_records/**",
-    "ilium-plugin-host/tests/ipc/**"
-   ]
-  },
-  "helper-sandbox": {
-   "ranges": [
-    "HST-150..171",
-    "SEC-020..067"
-   ],
-   "patterns": [],
-   "port_plugins": [],
-   "owns": [
-    "ilium-plugin-helper/tests/**"
-   ]
-  },
-  "observability": {
-   "ranges": [
-    "HST-350..363",
-    "DEV-650..744",
-    "DEV-800..830"
-   ],
-   "patterns": [],
-   "port_plugins": [],
-   "owns": [
-    "ilium-plugin-host/tests/telemetry/**",
-    "ilium-plugin-host/tests/cli_debug/**"
-   ]
-  },
-  "events-intents": {
-   "ranges": [
-    "EVT-001..999",
-    "RQO-001..999",
-    "HST-490..494"
-   ],
-   "patterns": [
-    "WIT:ilium:host/intents-host.*",
-    "WIT:ilium:exports/handler.*",
-    "WIT:ilium:exports/lifecycle.*"
-   ],
-   "port_plugins": [],
-   "owns": [
-    "ilium-plugin-host/tests/events/**"
-   ]
-  },
-  "extensions-services": {
-   "ranges": [
-    "EXT-001..999",
-    "SVC-001..999",
-    "HST-470..478",
-    "SEC-280..315"
-   ],
-   "patterns": [
-    "WIT:ilium:host/extensions.*",
-    "WIT:ilium:host/services.*",
-    "WIT:ilium:host/topics.*",
-    "WIT:ilium:host/commands.*",
-    "WIT:ilium:exports/hook-handler.*",
-    "WIT:ilium:exports/menu-provider.*",
-    "WIT:ilium:exports/virtual-rows-provider.*",
-    "WIT:ilium:exports/token-provider.*",
-    "WIT:ilium:exports/catalog-provider.*",
-    "WIT:ilium:exports/annotator.*",
-    "WIT:ilium:exports/service-provider.*"
-   ],
-   "port_plugins": [],
-   "owns": [
-    "ilium-plugin-host/tests/extensions/**"
-   ]
-  },
-  "render-widgets": {
-   "ranges": [
-    "WID-001..999",
-    "RND-001..999",
-    "HST-250..272"
-   ],
-   "patterns": [
-    "WIT:ilium:anim/*",
-    "WIT:ilium:exports/views.*",
-    "WIT:ilium:exports/renderer.*"
-   ],
-   "port_plugins": [],
-   "owns": [
-    "ilium-plugin-host/tests/render/**",
-    "ilium-client/tests/plugin_render/**"
-   ]
-  },
-  "primitives-panes": {
-   "ranges": [
-    "PRI-001..999",
-    "PAN-001..999",
-    "HST-450..457"
-   ],
-   "patterns": [
-    "WIT:ilium:primitives/*",
-    "WIT:ilium:exports/detector.*"
-   ],
-   "port_plugins": [],
-   "owns": [
-    "ilium-plugin-host/tests/primitives/**",
-    "ilium-server/tests/plugin_panes/**"
-   ]
-  },
-  "imports-core": {
-   "ranges": [
-    "SET-001..999"
-   ],
-   "patterns": [
-    "WIT:ilium:host/log.*",
-    "WIT:ilium:host/clock.*",
-    "WIT:ilium:host/timers.*",
-    "WIT:ilium:host/journal.*",
-    "WIT:ilium:host/tree.*",
-    "WIT:ilium:host/panes.*",
-    "WIT:ilium:host/storage.*",
-    "WIT:ilium:host/settings.*",
-    "WIT:ilium:host/codec.*",
-    "WIT:ilium:host/fs.*",
-    "WIT:ilium:host/http.*",
-    "WIT:ilium:host/jobs.*",
-    "WIT:ilium:host/process.*",
-    "WIT:ilium:exports/job-runner.*",
-    "WIT:ilium:exports/settings-validate.*"
-   ],
-   "port_plugins": [],
-   "owns": [
-    "ilium-plugin-host/tests/imports_core/**"
-   ]
-  },
-  "imports-ui": {
-   "ranges": [],
-   "patterns": [
-    "WIT:ilium:host/inference.*",
-    "WIT:ilium:host/vector.*",
-    "WIT:ilium:host/sounds.*",
-    "WIT:ilium:host/ui-host.*",
-    "WIT:ilium:host/keys.*",
-    "WIT:ilium:host/cli.*",
-    "WIT:ilium:host/http-api.*",
-    "WIT:ilium:host/workspace.*",
-    "WIT:ilium:host/clipboard.*",
-    "WIT:ilium:host/audio.*",
-    "WIT:ilium:host/media.*",
-    "WIT:ilium:host/location.*",
-    "WIT:ilium:host/help.*",
-    "WIT:ilium:host/plugins.*",
-    "WIT:ilium:host/catalogs.*",
-    "WIT:ilium:host/geocode.*",
-    "WIT:ilium:host/sessions.*",
-    "WIT:ilium:host/kernel-settings.*",
-    "WIT:ilium:host/keymap.*",
-    "WIT:ilium:host/gpu.*",
-    "WIT:ilium:host/client-requests.*",
-    "WIT:ilium:exports/inference-provider.*"
-   ],
-   "port_plugins": [],
-   "owns": [
-    "ilium-plugin-host/tests/imports_ui/**"
-   ]
-  },
-  "grants": {
-   "ranges": [
-    "CAP-001..999",
-    "SEC-100..124"
-   ],
-   "patterns": [],
-   "port_plugins": [],
-   "owns": [
-    "ilium-plugin-api/tests/grants/**",
-    "ilium-plugin-host/tests/grants/**"
-   ]
-  },
-  "manifest": {
-   "ranges": [
-    "PKG-001..079",
-    "PKG-560..583"
-   ],
-   "patterns": [],
-   "port_plugins": [],
-   "owns": [
-    "ilium-plugin-api/tests/manifest/**"
-   ]
-  },
-  "package-signing": {
-   "ranges": [
-    "PKG-100..182",
-    "PKG-200..258",
-    "SEC-140..178",
-    "PKG-650",
-    "PKG-651"
-   ],
-   "patterns": [],
-   "port_plugins": [],
-   "owns": [
-    "ilium-plugin-host/tests/package/**"
-   ]
-  },
-  "install-deps": {
-   "ranges": [
-    "PKG-260..305",
-    "PKG-310..360",
-    "PKG-654"
-   ],
-   "patterns": [],
-   "port_plugins": [],
-   "owns": [
-    "ilium-plugin-host/tests/install/**"
-   ]
-  },
-  "registry-publish": {
-   "ranges": [
-    "PKG-361..422",
-    "PKG-423..446",
-    "PKG-460..477",
-    "PKG-490..508",
-    "PKG-530..541",
-    "PKG-652",
-    "PKG-653",
-    "PKG-655..657",
-    "PKG-680..685"
-   ],
-   "patterns": [],
-   "port_plugins": [],
-   "owns": [
-    "ilium-plugin-host/tests/registry/**"
-   ]
-  },
-  "lifecycle": {
-   "ranges": [
-    "LIF-001..020",
-    "LIF-025..059",
-    "LIF-122..138",
-    "LIF-139..146",
-    "LIF-180..186"
-   ],
-   "patterns": [],
-   "port_plugins": [],
-   "owns": [
-    "ilium-plugin-host/tests/lifecycle/**"
-   ]
-  },
-  "lifecycle-ops": {
-   "ranges": [
-    "LIF-060..094",
-    "LIF-147..179",
-    "LIF-187..278",
-    "LIF-280..999"
-   ],
-   "patterns": [],
-   "port_plugins": [],
-   "owns": [
-    "ilium-plugin-host/tests/lifecycle_ops/**"
-   ]
-  },
-  "config-migration": {
-   "ranges": [
-    "LIF-095..121",
-    "COR-030..034",
-    "COR-090"
-   ],
-   "patterns": [
-    "WIT:ilium:exports/migrator.*"
-   ],
-   "port_plugins": [],
-   "owns": [
-    "ilium-server/tests/plugin_config_migration/**",
-    "ilium-plugin-host/tests/data_migration/**"
-   ]
-  },
-  "security": {
-   "ranges": [
-    "SEC-001..019",
-    "SEC-068..099",
-    "SEC-125..139",
-    "SEC-179..279",
-    "SEC-316..999"
-   ],
-   "patterns": [],
-   "port_plugins": [],
-   "owns": [
-    "ilium-plugin-host/tests/security/**"
-   ]
-  },
-  "sdk-fakehost": {
-   "ranges": [
-    "DEV-400..565"
-   ],
-   "patterns": [],
-   "port_plugins": [],
-   "owns": [
-    "ilium-plugin-testkit/tests/**",
-    "ilium-plugin-sdk/tests/sdk/**",
-    "ilium-plugin-sdk-macros/tests/**"
-   ]
-  },
-  "cli-commands": {
-   "ranges": [
-    "DEV-001..199"
-   ],
-   "patterns": [],
-   "port_plugins": [],
-   "owns": [
-    "ilium-plugin-host/tests/cli/**",
-    "ilium/tests/plugin_cli/**"
-   ]
-  },
-  "dev-pipeline": {
-   "ranges": [
-    "DEV-200..399",
-    "DEV-745..799",
-    "DEV-831..999",
-    "COR-002..003",
-    "COR-043..061"
-   ],
-   "patterns": [],
-   "port_plugins": [],
-   "owns": [
-    "ilium-plugin-host/tests/devtools/**",
-    "ilium-plugin-conformance/tests/manual_lint/**"
-   ]
-  },
-  "conformance": {
-   "ranges": [
-    "DEV-600..649",
-    "LIF-279"
-   ],
-   "patterns": [
-    "CONF-*"
-   ],
-   "port_plugins": [],
-   "owns": [
-    "ilium-plugin-conformance/**",
-    "plugins/fixtures/**"
-   ]
-  },
-  "perf-budgets": {
-   "ranges": [
-    "HST-300..313",
-    "B1..24"
-   ],
-   "patterns": [
-    "HOST-START",
-    "CLI-COLD"
-   ],
-   "port_plugins": [],
-   "owns": [
-    "ilium-plugin-bench/**"
-   ]
-  },
-  "user-admin": {
-   "ranges": [
-    "USR-001..999"
-   ],
-   "patterns": [],
-   "port_plugins": [],
-   "owns": [
-    "ilium-client/tests/plugin_screens/**",
-    "ilium/tests/plugin_user_flows/**"
-   ]
-  },
-  "authoring": {
-   "ranges": [
-    "AUT-001..999"
-   ],
-   "patterns": [],
-   "port_plugins": [],
-   "owns": [
-    "ilium-plugin-sdk/tests/authoring/**"
-   ]
-  },
-  "port-compat": {
-   "ranges": [
-    "COR-001",
-    "COR-011",
-    "COR-040..042",
-    "F-001..004",
-    "F-007",
-    "F-008",
-    "F-011..014",
-    "F-019",
-    "F-024",
-    "F-058",
-    "F-073..075",
-    "F-078",
-    "F-079",
-    "F-085..087",
-    "F-091..094",
-    "F-102",
-    "F-104..106",
-    "F-111"
-   ],
-   "patterns": [],
-   "port_plugins": [],
-   "owns": [
-    "tools/classify_existing_tests.py",
-    "tools/test_port_map.tsv",
-    "ilium/tests/cli_compat/**",
-    "ilium-server/tests/plugin_parity/**"
-   ]
-  },
-  "skel-host": {
-   "ranges": [],
-   "patterns": [],
-   "port_plugins": [],
-   "owns": [
-    "ilium-plugin-host/src/**",
-    "ilium-plugin-helper/src/**",
-    "ilium-ipc/src/plugin.rs",
-    "ilium-server/src/plugin_host.rs",
-    "ilium-client/src/plugin_host.rs",
-    "ilium/src/plugin_cmd.rs"
-   ]
-  },
-  "skel-sdk": {
-   "ranges": [],
-   "patterns": [],
-   "port_plugins": [],
-   "owns": [
-    "ilium-plugin-sdk-core/**",
-    "ilium-plugin-sdk-macros/**",
-    "ilium-plugin-sdk/**",
-    "ilium-plugin-testkit/src/**"
-   ]
-  },
-  "skel-workspace": {
-   "ranges": [],
-   "patterns": [],
-   "port_plugins": [],
-   "owns": [
-    "Cargo.toml",
-    "Cargo.lock",
-    "*/Cargo.toml",
-    "plugins/core/*/Cargo.toml",
-    ".ni-build-inputs",
-    "tools/req_coverage.py",
-    "tools/lane_map.json",
-    "tools/tests/**"
-   ]
-  },
-  "core-tree-term": {
-   "ranges": [
-    "F-005",
-    "F-006",
-    "F-015..018",
-    "F-020..023",
-    "F-025",
-    "F-065",
-    "F-066",
-    "F-114"
-   ],
-   "patterns": [],
-   "port_plugins": [
-    "tree",
-    "layout",
-    "terminal",
-    "smart-copy",
-    "editor",
-    "kanban"
-   ],
-   "owns": [
-    "plugins/core/tree/**",
-    "plugins/core/layout/**",
-    "plugins/core/terminal/**",
-    "plugins/core/smart-copy/**",
-    "plugins/core/editor/**",
-    "plugins/core/kanban/**"
-   ]
-  },
-  "core-agents": {
-   "ranges": [
-    "F-026..031",
-    "F-033..036",
-    "F-038..046",
-    "F-081",
-    "F-088",
-    "F-107",
-    "F-109",
-    "F-110",
-    "F-113",
-    "F-116"
-   ],
-   "patterns": [],
-   "port_plugins": [
-    "agent-detect",
-    "agent-toolbar",
-    "fleet",
-    "cost",
-    "titles"
-   ],
-   "owns": [
-    "plugins/core/agent-detect/**",
-    "plugins/core/agent-toolbar/**",
-    "plugins/core/fleet/**",
-    "plugins/core/cost/**",
-    "plugins/core/titles/**"
-   ]
-  },
-  "core-services": {
-   "ranges": [
-    "F-032",
-    "F-047..054",
-    "F-056",
-    "F-084",
-    "F-112"
-   ],
-   "patterns": [],
-   "port_plugins": [
-    "inference",
-    "notifications",
-    "voice",
-    "text-triggers",
-    "recap",
-    "diagnostics"
-   ],
-   "owns": [
-    "plugins/core/inference/**",
-    "plugins/core/notifications/**",
-    "plugins/core/voice/**",
-    "plugins/core/text-triggers/**",
-    "plugins/core/recap/**",
-    "plugins/core/diagnostics/**"
-   ]
-  },
-  "core-automation": {
-   "ranges": [
-    "chatroom-B01..17",
-    "progress-B01..15",
-    "scheduler-B01..21",
-    "F-055",
-    "F-057",
-    "F-059..062",
-    "F-064",
-    "F-080",
-    "F-082",
-    "F-083",
-    "F-108",
-    "F-115"
-   ],
-   "patterns": [],
-   "port_plugins": [
-    "scheduler",
-    "progress",
-    "chatroom",
-    "compaction"
-   ],
-   "owns": [
-    "plugins/core/scheduler/**",
-    "plugins/core/progress/**",
-    "plugins/core/chatroom/**",
-    "plugins/core/compaction/**"
-   ]
-  },
-  "core-sessions": {
-   "ranges": [
-    "F-037",
-    "F-063",
-    "F-067..072",
-    "F-076",
-    "F-077"
-   ],
-   "patterns": [],
-   "port_plugins": [
-    "worktrees",
-    "sessions",
-    "session-convert",
-    "agent-setup"
-   ],
-   "owns": [
-    "plugins/core/worktrees/**",
-    "plugins/core/sessions/**",
-    "plugins/core/session-convert/**",
-    "plugins/core/agent-setup/**"
-   ]
-  },
-  "core-ui": {
-   "ranges": [
-    "F-009",
-    "F-010",
-    "F-089",
-    "F-090",
-    "F-095..101",
-    "F-103"
-   ],
-   "patterns": [],
-   "port_plugins": [
-    "settings",
-    "keys-and-help",
-    "search",
-    "ambient",
-    "scenes"
-   ],
-   "owns": [
-    "plugins/core/settings/**",
-    "plugins/core/keys-and-help/**",
-    "plugins/core/search/**",
-    "plugins/core/ambient/**",
-    "plugins/core/scenes/**"
-   ]
-  },
-  "red-baseline": {
-   "ranges": [],
-   "patterns": [],
-   "port_plugins": [],
-   "owns": [
-    "tools/red_baseline.py",
-    "tools/red_baseline_allowlist.txt"
-   ]
+  "schema": 1,
+  "source": "docs/research/plugin-platform/lane_ranges.json and test-plan.md section 4.2",
+  "notes": [
+    "ranges: '<prefix><n>..<m>' or a single id; the prefix is everything before the trailing digits and numbers compare as integers",
+    "patterns: fnmatch globs for WIT function ids and named ids",
+    "port_plugins: core plugin names; a PORT id belongs to the lane whose plugin is the row's target_crate",
+    "owns: path globs relative to the workspace root; with '**' a glob covers every file below the directory. The more specific glob wins when two lanes match (for example a test directory inside a skeleton crate)"
+  ],
+  "lanes": {
+    "skel-api": {
+      "ranges": [
+        "ABI-001..051",
+        "ABI-950..951"
+      ],
+      "patterns": [],
+      "port_plugins": [],
+      "owns": [
+        "ilium-plugin-api/**",
+        "wit/**",
+        "tools/extract_wit.py",
+        "tools/gen_plugin_api.py",
+        "ilium-plugin-sdk-core/src/generated/**"
+      ]
+    },
+    "kernel-boot": {
+      "ranges": [
+        "HST-001..045",
+        "HST-380..388",
+        "HST-495..499",
+        "COR-010",
+        "COR-020..024"
+      ],
+      "patterns": [],
+      "port_plugins": [],
+      "owns": [
+        "ilium-plugin-host/tests/kernel_boot/**",
+        "ilium-server/tests/plugin_kernel_boot/**",
+        "ilium/tests/plugin_safe_start/**"
+      ]
+    },
+    "host-runtime": {
+      "ranges": [
+        "HST-050..089",
+        "HST-400..412",
+        "API-001..999"
+      ],
+      "patterns": [],
+      "port_plugins": [],
+      "owns": [
+        "ilium-plugin-host/tests/runtime/**"
+      ]
+    },
+    "host-sched": {
+      "ranges": [
+        "HST-180..216"
+      ],
+      "patterns": [],
+      "port_plugins": [],
+      "owns": [
+        "ilium-plugin-host/tests/sched/**",
+        "ilium-plugin-host/tests/loom/**"
+      ]
+    },
+    "host-ipc": {
+      "ranges": [
+        "HST-100..125"
+      ],
+      "patterns": [],
+      "port_plugins": [],
+      "owns": [
+        "ilium-ipc/tests/plugin_records/**",
+        "ilium-plugin-host/tests/ipc/**"
+      ]
+    },
+    "helper-sandbox": {
+      "ranges": [
+        "HST-150..171",
+        "SEC-020..067"
+      ],
+      "patterns": [],
+      "port_plugins": [],
+      "owns": [
+        "ilium-plugin-helper/tests/**"
+      ]
+    },
+    "observability": {
+      "ranges": [
+        "HST-350..363",
+        "DEV-650..744",
+        "DEV-800..830"
+      ],
+      "patterns": [],
+      "port_plugins": [],
+      "owns": [
+        "ilium-plugin-host/tests/telemetry/**",
+        "ilium-plugin-host/tests/cli_debug/**"
+      ]
+    },
+    "events-intents": {
+      "ranges": [
+        "EVT-001..999",
+        "RQO-001..999",
+        "HST-490..494"
+      ],
+      "patterns": [
+        "WIT:ilium:host/intents-host.*",
+        "WIT:ilium:exports/handler.*",
+        "WIT:ilium:exports/lifecycle.*"
+      ],
+      "port_plugins": [],
+      "owns": [
+        "ilium-plugin-host/tests/events/**"
+      ]
+    },
+    "extensions-services": {
+      "ranges": [
+        "EXT-001..999",
+        "SVC-001..999",
+        "HST-470..478",
+        "SEC-280..315"
+      ],
+      "patterns": [
+        "WIT:ilium:host/extensions.*",
+        "WIT:ilium:host/services.*",
+        "WIT:ilium:host/topics.*",
+        "WIT:ilium:host/commands.*",
+        "WIT:ilium:exports/hook-handler.*",
+        "WIT:ilium:exports/menu-provider.*",
+        "WIT:ilium:exports/virtual-rows-provider.*",
+        "WIT:ilium:exports/token-provider.*",
+        "WIT:ilium:exports/catalog-provider.*",
+        "WIT:ilium:exports/annotator.*",
+        "WIT:ilium:exports/service-provider.*"
+      ],
+      "port_plugins": [],
+      "owns": [
+        "ilium-plugin-host/tests/extensions/**"
+      ]
+    },
+    "render-widgets": {
+      "ranges": [
+        "WID-001..999",
+        "RND-001..999",
+        "HST-250..272"
+      ],
+      "patterns": [
+        "WIT:ilium:anim/*",
+        "WIT:ilium:exports/views.*",
+        "WIT:ilium:exports/renderer.*"
+      ],
+      "port_plugins": [],
+      "owns": [
+        "ilium-plugin-host/tests/render/**",
+        "ilium-client/tests/plugin_render/**"
+      ]
+    },
+    "primitives-panes": {
+      "ranges": [
+        "PRI-001..999",
+        "PAN-001..999",
+        "HST-450..457"
+      ],
+      "patterns": [
+        "WIT:ilium:primitives/*",
+        "WIT:ilium:exports/detector.*"
+      ],
+      "port_plugins": [],
+      "owns": [
+        "ilium-plugin-host/tests/primitives/**",
+        "ilium-server/tests/plugin_panes/**"
+      ]
+    },
+    "imports-core": {
+      "ranges": [
+        "SET-001..999"
+      ],
+      "patterns": [
+        "WIT:ilium:host/log.*",
+        "WIT:ilium:host/clock.*",
+        "WIT:ilium:host/timers.*",
+        "WIT:ilium:host/journal.*",
+        "WIT:ilium:host/tree.*",
+        "WIT:ilium:host/panes.*",
+        "WIT:ilium:host/storage.*",
+        "WIT:ilium:host/settings.*",
+        "WIT:ilium:host/codec.*",
+        "WIT:ilium:host/fs.*",
+        "WIT:ilium:host/http.*",
+        "WIT:ilium:host/jobs.*",
+        "WIT:ilium:host/process.*",
+        "WIT:ilium:exports/job-runner.*",
+        "WIT:ilium:exports/settings-validate.*"
+      ],
+      "port_plugins": [],
+      "owns": [
+        "ilium-plugin-host/tests/imports_core/**"
+      ]
+    },
+    "imports-ui": {
+      "ranges": [],
+      "patterns": [
+        "WIT:ilium:host/inference.*",
+        "WIT:ilium:host/vector.*",
+        "WIT:ilium:host/sounds.*",
+        "WIT:ilium:host/ui-host.*",
+        "WIT:ilium:host/keys.*",
+        "WIT:ilium:host/cli.*",
+        "WIT:ilium:host/http-api.*",
+        "WIT:ilium:host/workspace.*",
+        "WIT:ilium:host/clipboard.*",
+        "WIT:ilium:host/audio.*",
+        "WIT:ilium:host/media.*",
+        "WIT:ilium:host/location.*",
+        "WIT:ilium:host/help.*",
+        "WIT:ilium:host/plugins.*",
+        "WIT:ilium:host/catalogs.*",
+        "WIT:ilium:host/geocode.*",
+        "WIT:ilium:host/sessions.*",
+        "WIT:ilium:host/kernel-settings.*",
+        "WIT:ilium:host/keymap.*",
+        "WIT:ilium:host/gpu.*",
+        "WIT:ilium:host/client-requests.*",
+        "WIT:ilium:exports/inference-provider.*"
+      ],
+      "port_plugins": [],
+      "owns": [
+        "ilium-plugin-host/tests/imports_ui/**"
+      ]
+    },
+    "grants": {
+      "ranges": [
+        "CAP-001..999",
+        "SEC-100..124"
+      ],
+      "patterns": [],
+      "port_plugins": [],
+      "owns": [
+        "ilium-plugin-api/tests/grants/**",
+        "ilium-plugin-host/tests/grants/**"
+      ]
+    },
+    "manifest": {
+      "ranges": [
+        "PKG-001..079",
+        "PKG-560..583"
+      ],
+      "patterns": [],
+      "port_plugins": [],
+      "owns": [
+        "ilium-plugin-api/tests/manifest/**"
+      ]
+    },
+    "package-signing": {
+      "ranges": [
+        "PKG-100..182",
+        "PKG-200..258",
+        "SEC-140..178",
+        "PKG-650",
+        "PKG-651"
+      ],
+      "patterns": [],
+      "port_plugins": [],
+      "owns": [
+        "ilium-plugin-host/tests/package/**"
+      ]
+    },
+    "install-deps": {
+      "ranges": [
+        "PKG-260..305",
+        "PKG-310..360",
+        "PKG-654"
+      ],
+      "patterns": [],
+      "port_plugins": [],
+      "owns": [
+        "ilium-plugin-host/tests/install/**"
+      ]
+    },
+    "registry-publish": {
+      "ranges": [
+        "PKG-361..422",
+        "PKG-423..446",
+        "PKG-460..477",
+        "PKG-490..508",
+        "PKG-530..541",
+        "PKG-652",
+        "PKG-653",
+        "PKG-655..657",
+        "PKG-680..685"
+      ],
+      "patterns": [],
+      "port_plugins": [],
+      "owns": [
+        "ilium-plugin-host/tests/registry/**"
+      ]
+    },
+    "lifecycle": {
+      "ranges": [
+        "LIF-001..020",
+        "LIF-025..059",
+        "LIF-122..138",
+        "LIF-139..146",
+        "LIF-180..186"
+      ],
+      "patterns": [],
+      "port_plugins": [],
+      "owns": [
+        "ilium-plugin-host/tests/lifecycle/**"
+      ]
+    },
+    "lifecycle-ops": {
+      "ranges": [
+        "LIF-060..094",
+        "LIF-147..179",
+        "LIF-187..278",
+        "LIF-280..999"
+      ],
+      "patterns": [],
+      "port_plugins": [],
+      "owns": [
+        "ilium-plugin-host/tests/lifecycle_ops/**"
+      ]
+    },
+    "config-migration": {
+      "ranges": [
+        "LIF-095..121",
+        "COR-030..034",
+        "COR-090"
+      ],
+      "patterns": [
+        "WIT:ilium:exports/migrator.*"
+      ],
+      "port_plugins": [],
+      "owns": [
+        "ilium-server/tests/plugin_config_migration/**",
+        "ilium-plugin-host/tests/data_migration/**"
+      ]
+    },
+    "security": {
+      "ranges": [
+        "SEC-001..019",
+        "SEC-068..099",
+        "SEC-125..139",
+        "SEC-179..279",
+        "SEC-316..999"
+      ],
+      "patterns": [],
+      "port_plugins": [],
+      "owns": [
+        "ilium-plugin-host/tests/security/**"
+      ]
+    },
+    "sdk-fakehost": {
+      "ranges": [
+        "DEV-400..565"
+      ],
+      "patterns": [],
+      "port_plugins": [],
+      "owns": [
+        "ilium-plugin-testkit/tests/**",
+        "ilium-plugin-sdk/tests/sdk/**",
+        "ilium-plugin-sdk-macros/tests/**"
+      ]
+    },
+    "cli-commands": {
+      "ranges": [
+        "DEV-001..199"
+      ],
+      "patterns": [],
+      "port_plugins": [],
+      "owns": [
+        "ilium-plugin-host/tests/cli/**",
+        "ilium/tests/plugin_cli/**"
+      ]
+    },
+    "dev-pipeline": {
+      "ranges": [
+        "DEV-200..399",
+        "DEV-745..799",
+        "DEV-831..999",
+        "COR-002..003",
+        "COR-043..061"
+      ],
+      "patterns": [],
+      "port_plugins": [],
+      "owns": [
+        "ilium-plugin-host/tests/devtools/**",
+        "ilium-plugin-conformance/tests/manual_lint/**"
+      ]
+    },
+    "conformance": {
+      "ranges": [
+        "DEV-600..649",
+        "LIF-279"
+      ],
+      "patterns": [
+        "CONF-*"
+      ],
+      "port_plugins": [],
+      "owns": [
+        "ilium-plugin-conformance/**",
+        "plugins/fixtures/**"
+      ]
+    },
+    "perf-budgets": {
+      "ranges": [
+        "HST-300..313",
+        "B1..24"
+      ],
+      "patterns": [
+        "HOST-START",
+        "CLI-COLD"
+      ],
+      "port_plugins": [],
+      "owns": [
+        "ilium-plugin-bench/**"
+      ]
+    },
+    "user-admin": {
+      "ranges": [
+        "USR-001..999"
+      ],
+      "patterns": [],
+      "port_plugins": [],
+      "owns": [
+        "ilium-client/tests/plugin_screens/**",
+        "ilium/tests/plugin_user_flows/**"
+      ]
+    },
+    "authoring": {
+      "ranges": [
+        "AUT-001..999"
+      ],
+      "patterns": [],
+      "port_plugins": [],
+      "owns": [
+        "ilium-plugin-sdk/tests/authoring/**"
+      ]
+    },
+    "port-compat": {
+      "ranges": [
+        "COR-001",
+        "COR-011",
+        "COR-040..042",
+        "F-001..004",
+        "F-007",
+        "F-008",
+        "F-011..014",
+        "F-019",
+        "F-024",
+        "F-058",
+        "F-073..075",
+        "F-078",
+        "F-079",
+        "F-085..087",
+        "F-091..094",
+        "F-102",
+        "F-104..106",
+        "F-111"
+      ],
+      "patterns": [],
+      "port_plugins": [],
+      "owns": [
+        "tools/classify_existing_tests.py",
+        "tools/test_port_map.tsv",
+        "ilium/tests/cli_compat/**",
+        "ilium-server/tests/plugin_parity/**"
+      ]
+    },
+    "skel-host": {
+      "ranges": [],
+      "patterns": [],
+      "port_plugins": [],
+      "owns": [
+        "ilium-plugin-host/src/**",
+        "ilium-plugin-helper/src/**",
+        "ilium-ipc/src/plugin.rs",
+        "ilium-server/src/plugin_host.rs",
+        "ilium-client/src/plugin_host.rs",
+        "ilium/src/plugin_cmd.rs"
+      ]
+    },
+    "skel-sdk": {
+      "ranges": [],
+      "patterns": [],
+      "port_plugins": [],
+      "owns": [
+        "ilium-plugin-sdk-core/**",
+        "ilium-plugin-sdk-macros/**",
+        "ilium-plugin-sdk/**",
+        "ilium-plugin-testkit/src/**"
+      ]
+    },
+    "skel-workspace": {
+      "ranges": [],
+      "patterns": [],
+      "port_plugins": [],
+      "owns": [
+        "Cargo.toml",
+        "Cargo.lock",
+        "*/Cargo.toml",
+        "plugins/core/*/Cargo.toml",
+        ".ni-build-inputs",
+        "tools/req_coverage.py",
+        "tools/lane_map.json",
+        "tools/tests/**"
+      ]
+    },
+    "core-tree-term": {
+      "ranges": [
+        "F-005",
+        "F-006",
+        "F-015..018",
+        "F-020..023",
+        "F-025",
+        "F-065",
+        "F-066",
+        "F-114"
+      ],
+      "patterns": [],
+      "port_plugins": [
+        "tree",
+        "layout",
+        "terminal",
+        "smart-copy",
+        "editor",
+        "kanban"
+      ],
+      "owns": [
+        "plugins/core/tree/**",
+        "plugins/core/layout/**",
+        "plugins/core/terminal/**",
+        "plugins/core/smart-copy/**",
+        "plugins/core/editor/**",
+        "plugins/core/kanban/**"
+      ]
+    },
+    "core-agents": {
+      "ranges": [
+        "F-026..031",
+        "F-033..036",
+        "F-038..046",
+        "F-081",
+        "F-088",
+        "F-107",
+        "F-109",
+        "F-110",
+        "F-113",
+        "F-116"
+      ],
+      "patterns": [],
+      "port_plugins": [
+        "agent-detect",
+        "agent-toolbar",
+        "fleet",
+        "cost",
+        "titles"
+      ],
+      "owns": [
+        "plugins/core/agent-detect/**",
+        "plugins/core/agent-toolbar/**",
+        "plugins/core/fleet/**",
+        "plugins/core/cost/**",
+        "plugins/core/titles/**"
+      ]
+    },
+    "core-services": {
+      "ranges": [
+        "F-032",
+        "F-047..054",
+        "F-056",
+        "F-084",
+        "F-112",
+        "COR-950..952"
+      ],
+      "patterns": [],
+      "port_plugins": [
+        "inference",
+        "notifications",
+        "voice",
+        "text-triggers",
+        "recap",
+        "diagnostics"
+      ],
+      "owns": [
+        "plugins/core/inference/**",
+        "plugins/core/notifications/**",
+        "plugins/core/voice/**",
+        "plugins/core/text-triggers/**",
+        "plugins/core/recap/**",
+        "plugins/core/diagnostics/**"
+      ]
+    },
+    "core-automation": {
+      "ranges": [
+        "chatroom-B01..17",
+        "progress-B01..15",
+        "scheduler-B01..21",
+        "F-055",
+        "F-057",
+        "F-059..062",
+        "F-064",
+        "F-080",
+        "F-082",
+        "F-083",
+        "F-108",
+        "F-115"
+      ],
+      "patterns": [],
+      "port_plugins": [
+        "scheduler",
+        "progress",
+        "chatroom",
+        "compaction"
+      ],
+      "owns": [
+        "plugins/core/scheduler/**",
+        "plugins/core/progress/**",
+        "plugins/core/chatroom/**",
+        "plugins/core/compaction/**"
+      ]
+    },
+    "core-sessions": {
+      "ranges": [
+        "F-037",
+        "F-063",
+        "F-067..072",
+        "F-076",
+        "F-077"
+      ],
+      "patterns": [],
+      "port_plugins": [
+        "worktrees",
+        "sessions",
+        "session-convert",
+        "agent-setup"
+      ],
+      "owns": [
+        "plugins/core/worktrees/**",
+        "plugins/core/sessions/**",
+        "plugins/core/session-convert/**",
+        "plugins/core/agent-setup/**"
+      ]
+    },
+    "core-ui": {
+      "ranges": [
+        "F-009",
+        "F-010",
+        "F-089",
+        "F-090",
+        "F-095..101",
+        "F-103"
+      ],
+      "patterns": [],
+      "port_plugins": [
+        "settings",
+        "keys-and-help",
+        "search",
+        "ambient",
+        "scenes"
+      ],
+      "owns": [
+        "plugins/core/settings/**",
+        "plugins/core/keys-and-help/**",
+        "plugins/core/search/**",
+        "plugins/core/ambient/**",
+        "plugins/core/scenes/**"
+      ]
+    },
+    "red-baseline": {
+      "ranges": [],
+      "patterns": [],
+      "port_plugins": [],
+      "owns": [
+        "tools/red_baseline.py",
+        "tools/red_baseline_allowlist.txt"
+      ]
+    },
+    "host-production": {
+      "ranges": [
+        "HST-126..135",
+        "HST-389..392",
+        "HST-950..993"
+      ],
+      "patterns": [],
+      "port_plugins": [],
+      "owns": [
+        "ilium-plugin-host/tests/production/**"
+      ]
+    }
   }
- }
 }

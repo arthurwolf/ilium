@@ -87,9 +87,7 @@ mod spec_tests {
 
     fn has_cli_activation(manifest: &Value, command_name: &str) -> bool {
         let trigger = format!("cli:{command_name}");
-        string_list(&manifest["activation"])
-            .iter()
-            .any(|item| *item == trigger)
+        string_list(&manifest["activation"]).contains(&trigger)
     }
 
     /// REQ: COR-050

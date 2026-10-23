@@ -36,6 +36,8 @@ A host that ships `1.0.0` keeps the final `0.x` minor loadable for a limited tim
 
 Decision needed: how long the final `0.x` minor stays loadable after `1.0.0` is released. The default I would use is until the next major release, under the same window rule that applies to minors, so a plugin author has one full major cycle to rebuild. The owner should confirm this period before the `1.0.0` release is announced.
 
+- [ABI-950] The final `0.x` minor MUST stay loadable until 12 months (proposed, owner to confirm) after the release of `2.0.0`, which is the end point of the default above. After that date a package whose `api` is that minor MUST be refused with `package.api-unsupported` under [ABI-056]. The owner is the project maintainer who signs the `1.0.0` release (proposed, owner to confirm), and the owner MUST state the date in the release notes of `1.0.0`.
+
 Inputs are the `api` key of the manifest and the `ilium:api-version` section of the component. The output of the check is either a loaded package or one refusal code.
 
 ## 3. Refusal across the major boundary
@@ -77,6 +79,10 @@ Decision needed: how much notice a feature removal needs before a major release.
 After the boundary the rules of [ABI evolution](/pages/reference-abi-evolution/) apply again to `1.N` minors: a minor only adds, and the host loads the current minor and the previous one.
 
 - [ABI-060] Inside the 1.x line a host MUST apply the window rule of ABI evolution (current minor and previous one), and a package whose `api` major differs from the host's major MUST NOT be loaded through that window.
+
+### End of a major line
+
+- [ABI-951] For each major line `N` from `1` onward, the host MUST keep the final minor of major `N` loadable through its frozen copy and adapter, as [ABI-055] does for `0.x`, until 12 months (proposed, owner to confirm) after the release of major `N+1`. After that date the host MUST refuse packages of major `N` with `package.api-unsupported` under [ABI-056], and the release notes of major `N+1` MUST state that date.
 
 ## Limits
 
@@ -127,3 +133,10 @@ Target behaviour of the production plugin system.
 - **[DEV-964]** The project MUST support each host minor release with security fixes for at least 12 months (proposed, owner to confirm) after its release date and MUST publish that end date in the support matrix at release time; the window of ABI minors (current and previous) is a loading rule and MUST NOT be read as the support period.
 - **[DEV-966]** A fix for a vulnerability in the plugin host, sandbox or SDK MUST be released as a patch to every host minor still inside its support period (DEV-964), and a patch release MUST NOT change any WIT interface, limit, error code or manifest key.
 - **[DEV-995]** A major host release MUST be announced in the release notes of a minor at least 6 months (proposed, owner to confirm) before its release date, with the list of every removal and limit change it contains; the announced list MUST NOT grow after the announcement.
+- **[DEV-962]** The support matrix MUST list every host minor release in one row, with its release date, its security-fix end date from [DEV-964] and its support state. The state MUST read `supported` up to that end date and `end-of-life` after it, as [DEV-965] reports it. A row MUST NOT be removed when its minor reaches the end date. An installed plugin on an `end-of-life` minor MUST keep loading unchanged, because the end date limits security fixes and not loading.
+
+Example row (illustrative only):
+
+| Host minor | Released | Security fixes until | Support |
+|---|---|---|---|
+| `0.3.0` | 2026-01-15 | 2027-01-15 | `supported` until that date |

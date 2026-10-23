@@ -68,6 +68,17 @@ A **crash mark** is one timestamped record that the host writes to the server's 
 - [LIF-186] Three crashes during start within 5 minutes MUST cause the next start to use `third-party` safe mode. Test: write three crash marks.
 - [LIF-294] The crash-loop guard MUST clear all crash marks once a start has stayed up for 5 minutes after startup completed. A stop before that point MUST leave the marks in place. Test: write three crash marks, start, advance 4 minutes 59 seconds and stop (marks remain), start again, advance 5 minutes and stop, then assert the next start is not in safe mode.
 
+### When safe mode also crashes
+
+The guard has two more levels. They use the same crash marks as LIF-186, and a crash in any level counts toward the next level. The levels run in this order: `third-party`, then `all-optional`, then `--no-plugins` (no plugin host, kernel only).
+
+- [LIF-978] Three crashes during start within 5 minutes while the start runs in `third-party` safe mode MUST cause the next start to use `all-optional` safe mode (proposed, owner to confirm: the count of 3 and the 5-minute window). Test: write three crash marks, start in `third-party`, write three more crash marks within 5 minutes, and assert the next start runs in `all-optional`.
+- [LIF-979] Three crashes during start within 5 minutes while the start runs in `all-optional` safe mode MUST cause the next start to use `--no-plugins` (proposed, owner to confirm: the count of 3). The start MUST open the recovery page as its first screen. Test: write three crash marks in `all-optional` and assert the next start runs with no plugin host.
+- [LIF-980] Three crashes during start within 5 minutes while the start runs with `--no-plugins` MUST stop automatic restarts. Ilium MUST exit with a non-zero status and print one line with the code `crash-loop.exhausted` that names the state folder holding the crash marks and says that the fault is not caused by a plugin. Until the marks clear under LIF-294, every later start, with or without a flag, MUST use `--no-plugins`. Test: write three crash marks in `--no-plugins`, assert the exit status and the code, then start without flags and assert the start still runs with no plugin host.
+- [LIF-981] Every start MUST show the level it runs in on the footer banner (`third-party`, `all-optional` or `--no-plugins`), and a level change MUST NOT clear the crash marks; only LIF-294 clears them. Test: switch levels by writing crash marks, and assert the banner text and that the marks remain after each change.
+
+If you reach `crash-loop.exhausted`, keep the state folder unchanged and report the crash to the Ilium project through the contact in [Security response](/pages/reference-security-response/). Do not delete the crash marks by hand.
+
 ### Recovery steps
 
 1. Start with `ilium --safe-mode=third-party`.

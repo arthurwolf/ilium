@@ -97,6 +97,7 @@ impl App {
     pub(super) fn sync_attention_mode(&mut self) {
         let enabled = self.attention_enabled();
         crate::tree_ui::set_attention_button_reserved(enabled);
+        crate::tree_ui::set_attention_button_large(self.attention_settings.large_buttons);
         if !self.attention_settings.mode.uses_llm() {
             self.abandon_attention_refresh(unix_millis_now());
         }
@@ -251,7 +252,7 @@ impl App {
             .restore_deadline_ms
             .get_or_insert(now_ms + RESTORE_GRACE_MS);
         let restored = AttentionQueue::from_persisted(pending.clone(), live);
-        if !restored.is_empty() {
+        if !restored.to_persisted().items.is_empty() {
             self.attention.last_saved = Some(pending.clone());
             self.attention.queue = restored;
             self.attention.pending_restore = None;
@@ -1159,6 +1160,21 @@ mod tests {
         with_mode(&mut app, AttentionMode::InstantOnly);
         assert_eq!(app.request_attention_refresh(), None);
         assert_eq!(app.attention.refresh_requests, 1);
+    }
+
+    #[test]
+    fn an_entirely_snoozed_queue_is_adopted_after_restart() {
+        let mut first = app();
+        let pane_id = add_agent(&mut first, "asks", AgentActivity::WaitingApproval);
+        first.tick_attention();
+        first.attention.queue.snooze(pane_id);
+        let mut second = app();
+        second.attention.pending_restore = Some(first.attention.queue.to_persisted());
+        add_agent(&mut second, "asks", AgentActivity::WaitingApproval);
+        second.tick_attention();
+        assert!(second.attention.pending_restore.is_none());
+        assert!(second.attention.queue.is_snoozed(pane_id));
+        assert!(second.attention.queue.is_empty());
     }
 
     #[test]

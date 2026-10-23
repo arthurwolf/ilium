@@ -223,7 +223,7 @@ mod spec_tests {
             measured_iterations: 1000,
             pinned_core: Some(2),
             wasmtime_version: "0.0.0-test".to_string(),
-            wasmtime_config: ilium_plugin_host::engine::runtime_config(),
+            wasmtime_config: ilium_plugin_host::engine::runtime_settings(),
             cpu_model: "test cpu".to_string(),
             core_count: 8,
             os: "linux".to_string(),

@@ -183,3 +183,14 @@ The registry below lists every code the host writes to a log line, with its leve
 
 - **[HST-647]** Timestamps in logs, traces and status output MUST use UTC in storage and the user's local time in terminal display, and the format `YYYY-MM-DD HH:mm:ss` MUST be used for terminal display.
 
+## Personal data in logs and trace retention
+
+[HST-608] redacts secrets only. The rules below cover the personal data that a support bundle can carry out of the machine, and the retention and erasure of trace spans, which hold a history of every call.
+
+- **[HST-129]** The host MUST replace every e-mail address and every absolute path outside the user's home directory with `[redacted-email]` and `[redacted-path]` before a log line or span attribute is written, including lines written with `log`. The summary of a support bundle MUST count these replacements next to the secret redactions ([USR-335]).
+- **[HST-130]** A plugin MUST NOT write personal data into a log line, a span or a custom counter: no names, message text, terminal text, prompts or contents of user files. The redactor of [HST-129] does not detect names, so this rule is the only control for them.
+- **[HST-131]** The host MUST cut a log line longer than 4 KiB (proposed, owner to confirm) to its first 4 KiB, append `[truncated]`, and count the cut line under dropped log lines in `summary.txt` ([USR-335]).
+- **[HST-979]** Spans in `<state>/plugin-trace.jsonl` MUST be deleted once they are more than 7 days old (proposed, owner to confirm). The host MUST run this deletion at server start. The size cap of [HST-609] still applies.
+- **[HST-980]** `ilium plugin erase-data <plugin-id>` MUST remove every span of that plugin from `<state>/plugin-trace.jsonl`, by writing a new file and renaming it over the old one, and MUST report the removed count as the kind `trace` ([USR-325]). Spans of other plugins MUST stay in place.
+- **[HST-981]** `ilium plugin export-data` MUST write the spans of the plugin as one JSON-lines file, using the fields of [HST-609], in the export folder ([USR-245]). Trace recordings MUST NOT be included in a support bundle ([USR-223]).
+

@@ -45,6 +45,7 @@ This page shows which reference page answers which question, the values you look
 | [Capabilities](/pages/reference-capabilities/) | Every grant string, its argument form and its risk tier. | You add a grant to `capabilities`. |
 | [Events and intents](/pages/reference-events-and-intents/) | Every event case and intent case, its payload and its outcomes. | You write `on-events` or build submissions. |
 | [Errors and limits](/pages/reference-errors-and-limits/) | The error codes, the default resource limits, the per-call caps and the rate rules. | You handle a failed call or size a value. |
+| [Documentation lifecycle](/pages/reference-documentation-lifecycle/) | Who keeps the glossary, error catalogue, troubleshooting, FAQ and feature traceability pages true, and when they are reviewed. | You change a term, code or feature and need to know who updates the manual. |
 
 ## What you need
 
@@ -220,3 +221,4 @@ Requirement ids for this page: [API-073]. See the [requirements index](/pages/re
 - [Rust SDK](/pages/rust-sdk/)
 - [TypeScript SDK](/pages/typescript-sdk/)
 - [Glossary](/pages/glossary/)
+- [Documentation lifecycle](/pages/reference-documentation-lifecycle/)

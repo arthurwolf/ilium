@@ -179,9 +179,9 @@ Results for the three kinds of plugin:
 
 ## 7. The cases that the first freeze fixes
 
-The counts below are the sizes of the main variants and enums in 0.1.0. A later minor can only make them larger.
+The counts below are the sizes of the main variants and enums in 0.1.0. A later minor can only make them larger. The extension counts are subsets of those totals, not additions introduced in a later API version: the frozen WIT and case-order snapshot already include them in 0.1.0, including `ok-epoch`. Future additions require a separately recorded introduction version.
 
-| Type | Cases in 0.1.0 | Appended after the base set |
+| Type | Cases in 0.1.0 | Included extension cases in the same freeze |
 |---|---|---|
 | `event` | 56 | 18 |
 | `intent` | 42 | 23 |

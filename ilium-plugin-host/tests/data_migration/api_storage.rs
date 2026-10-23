@@ -59,11 +59,11 @@ fn lif_117_batch_of_255_entries_is_applied() {
 #[test]
 fn lif_117_batch_of_exactly_4_mib_is_applied() {
     let (_rig, server) = started();
-    let key = "k".to_owned();
-    let value = vec![0u8; 4 * MIB as usize - key.len()];
+    // Four one-byte keys keep every value within its independent 1 MiB cap.
+    let batch: Vec<_> = ["a", "b", "c", "d"].into_iter().enumerate().map(|(index,key)| (key.to_owned(), Some(vec![0; MIB as usize - if index == 3 { 4 } else { 0 }]))).collect();
     server
         .storage(NOTES)
-        .write_batch(Bucket::Global, &[(key, Some(value))])
+        .write_batch(Bucket::Global, &batch)
         .expect("exactly 4 MiB");
 }
 
@@ -71,11 +71,11 @@ fn lif_117_batch_of_exactly_4_mib_is_applied() {
 #[test]
 fn lif_117_batch_one_byte_over_4_mib_is_invalid_argument() {
     let (_rig, server) = started();
-    let key = "k".to_owned();
-    let value = vec![0u8; 4 * MIB as usize - key.len() + 1];
+    // Four one-byte keys keep every value within its independent 1 MiB cap.
+    let batch: Vec<_> = ["a", "b", "c", "d"].into_iter().enumerate().map(|(index,key)| (key.to_owned(), Some(vec![0; MIB as usize - if index == 3 { 3 } else { 0 }]))).collect();
     let error = server
         .storage(NOTES)
-        .write_batch(Bucket::Global, &[(key, Some(value))])
+        .write_batch(Bucket::Global, &batch)
         .expect_err("over");
     assert_eq!(error.code, ErrorCode::InvalidArgument);
 }
@@ -84,11 +84,11 @@ fn lif_117_batch_one_byte_over_4_mib_is_invalid_argument() {
 #[test]
 fn lif_117_batch_one_byte_under_4_mib_is_applied() {
     let (_rig, server) = started();
-    let key = "k".to_owned();
-    let value = vec![0u8; 4 * MIB as usize - key.len() - 1];
+    // Four one-byte keys keep every value within its independent 1 MiB cap.
+    let batch: Vec<_> = ["a", "b", "c", "d"].into_iter().enumerate().map(|(index,key)| (key.to_owned(), Some(vec![0; MIB as usize - if index == 3 { 5 } else { 0 }]))).collect();
     server
         .storage(NOTES)
-        .write_batch(Bucket::Global, &[(key, Some(value))])
+        .write_batch(Bucket::Global, &batch)
         .expect("under");
 }
 

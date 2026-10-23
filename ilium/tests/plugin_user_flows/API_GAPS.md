@@ -18,3 +18,11 @@
 - ilium: CLI commands used and not found in `ilium plugin` skeleton dispatch: `forget-settings <id> --yes`, `verify <id>`, `info <id>`, `grants <id> --side <side> --grant <g> --revoke <g>`, `uninstall --keep-data`, `install --disabled`, `install --grant <g>` (USR-033, USR-062, USR-085, USR-209).
 - ilium-plugin-host: `UserRig::audit_dir(&self) -> PathBuf` returning the audit directory holding `audit.jsonl` and rotated `audit-<first seq>.jsonl` files (USR-220, SEC-220/SEC-224).
 - ilium-plugin-host: `UserRig::log_lines(&self, id: &str) -> Vec<String>` (one entry per journal line of the plugin), USR-205; the str-size errors in reference_plugin_files.rs:231 cascade from the missing `user_rig` module.
+
+# API gaps of the user-admin lane, ilium side (part 2: contract, rollout, privacy, accessibility)
+
+- ilium-plugin-host: `ilium_plugin_host::cli::run` must reject `plugin bundle` as an unknown command, the only bundle writer being `plugin support-bundle <id> --out <file>`, why: USR-104 negative check on the dispatch.
+- ilium-plugin-host: `UserRig::support_bundle_entries(&mut self, id: &str) -> Vec<String>` listing the zip entry names of a bundle written with `support-bundle --out`, why: USR-105 and USR-221 check the archive holds exactly summary.txt, log.txt, stats.txt and crashes.txt and no manifest.
+- ilium-plugin-host: `UserRig::held_bundles(&self) -> Vec<PathBuf>` listing bundles held in the server state folder after a `failed` transition, and `UserRig::age_file` plus `start_server` already listed above, why: USR-106 checks a held bundle is deleted at the next start after 14 days and the `--out` file is never removed.
+- ilium-plugin-host: `UserRig::geocode_capture(&mut self) -> CapturedGeocodeRequests` (one search and one reverse lookup through a capture proxy, with the cache age control from `age_file`), why: USR-957 checks each provider request carries only the query text or coordinates and a cached result is gone after 24 hours.
+- ilium-plugin-host: `UserRig::accessibility_values(&self, id: &str) -> Vec<(String, String)>` returning each accessibility value a plugin receives with its source, why: USR-952 checks the host passes operating system values unchanged.

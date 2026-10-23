@@ -71,7 +71,7 @@ impl Isolated {
 }
 
 fn io_error(message: &str) -> io::Error {
-    io::Error::new(io::ErrorKind::Other, message)
+    io::Error::other(message)
 }
 
 fn write_snapshot(project: &Path, name: &str) {
@@ -592,7 +592,7 @@ fn live_session_socket_key_round_trips_through_session_name_candidates() {
 
 #[test]
 fn list_live_session_sockets_empty_socket_directory_returns_empty() {
-    let isolated = Isolated::new();
+    let _isolated = Isolated::new();
     let sockets = session::list_live_session_sockets().expect("list live sockets");
     assert!(
         sockets.is_empty(),

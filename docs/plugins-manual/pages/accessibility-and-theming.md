@@ -344,6 +344,7 @@ A T1 plugin may raise the render deadline through `render_deadline_ms`, up to 20
 - Search the plugin for `rgb` and `indexed` colours. Each one needs its own contrast check.
 - Turn on reduced motion and confirm that nothing in the view still moves.
 - Check that every state has a glyph or a word as well as a colour, for example `✓` and `✗` with a `notice`, so the state reads without colour.
+- Run the screen-reader check in [USR-951](#production-additions-t7-users-privacy-a11y) on each shipped platform, with the reader that the release names for that platform (USR-950).
 
 ### What the contract does not provide
 
@@ -369,3 +370,17 @@ Checked against the API version `ilium:plugin@0.1.0`.
 - **[USR-305]** When `[ui] screen_reader = true` (default false) the host MUST render widgets in a linear mode: one logical element per line in focus order, with role words (button, checked, unchecked, selected, N of M), no box-drawing or spinner frames, and MUST emit focus changes so that the cursor sits on the focused element's first cell.
 - **[USR-306]** A widget kind that can be focused (button, toggle, input, list row) MUST carry a non-empty text label; the view validator MUST reject a focusable widget with an empty label with `ui.label-missing` naming the widget id, and an icon-only button MUST supply a `label` used in screen-reader mode.
 - **[USR-307]** When reduced motion is on, the host MUST deliver at most 1 full-view redraw per second for a plugin that animates, MUST stop host-run decorative animations, and MUST count a plugin timer below 1000 ms that triggers only redraws as a `ui.motion-ignored` warning in the plugin log once per session.
+- **[USR-950]** The release notes MUST name, for each shipped platform, the screen reader and the terminal emulator that the screen-reader check of [USR-951](#production-additions-t7-users-privacy-a11y) passed with. A platform with no named reader MUST NOT be described as screen-reader supported in any user interface or document.
+- **[USR-951]** Before each release, a tester MUST run the consent dialog and one plugin settings screen with `[ui] screen_reader = true` on each shipped platform, at 48 columns (as [SEC-346](/pages/reference-security-testing/) requires), and MUST pass every step: (1) each focusable element is read on its own line, in focus order; (2) each element is read with its role word and state (button, checked, unchecked, selected, N of M); (3) no box-drawing character or spinner frame is read; (4) after each Tab the cursor sits on the first cell of the focused element; (5) the reader announces the focus change without the tester moving the cursor. A failed step blocks the release and the release record names the view and the step.
+
+### Operating system settings
+
+The host reads only its own `[ui]` settings. It does not read the operating system's accessibility settings to decide what a plugin receives. The table shows the settings a user may expect to take effect, and what the host does with each.
+
+| Operating system | Setting the user may expect | Read by the host | Effect on a plugin |
+|---|---|---|---|
+| Windows | High contrast theme | No | Use `[ui] contrast = "high"` (USR-302) |
+| macOS | Increase Contrast, Reduce Motion | No | Use `[ui] contrast = "high"` and the reduced-motion setting (USR-302, USR-307) |
+| Linux (GNOME) | High Contrast theme, Animations off | No | Use `[ui] contrast = "high"` and the reduced-motion setting (USR-302, USR-307) |
+
+- **[USR-952]** The host MUST NOT change any value that a plugin receives from an operating system accessibility setting. When a later version reads one, the `[ui]` value MUST win if both are set, and `ilium plugin doctor` MUST print each accessibility value with its source, `[ui]` or the operating system, as [USR-311](/pages/guide-internationalisation/) does for the UI language (proposed, owner to confirm).

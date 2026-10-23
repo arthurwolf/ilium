@@ -9,6 +9,12 @@ repository.workspace = true
 publish = false
 
 [dependencies]
+subtle = "2.6.1"
+unicode-normalization = "0.1"
+serde_json_canonicalizer = "0.3.2"
+ed25519-dalek = "2"
+base64 = "0.22.1"
+regex = "1.12.3"
 ilium-plugin-api = { version = "0.1.1", path = "../ilium-plugin-api" }
 ilium-execution = { version = "0.1.1", path = "../ilium-execution" }
 ilium-platform = { version = "0.1.1", path = "../ilium-platform" }
@@ -29,11 +35,7 @@ wat = { version = "=1.258.3", optional = true }
 zip = "8.6"
 # Test lanes of the plugin platform (test-plan.md sections 2.4 and 2.13).
 proptest = "1"
-# Signatures with other keys, prefixes and malformed scalars in the package lane (PKG-203, PKG-250..252).
-ed25519-dalek = "2"
 tempfile = "3.27.0"
-# Public-key encoding checks of the registry lane (`base64::engine::general_purpose::URL_SAFE_NO_PAD`).
-base64 = "0.22.1"
 # `ilium_plugin_testkit::manual::pages_dir()` in the documentation-lint tests (DEV-762, DEV-780).
 ilium-plugin-testkit = { version = "0.1.1", path = "../ilium-plugin-testkit" }
 

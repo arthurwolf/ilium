@@ -6,7 +6,7 @@ use super::{
     history_store::BoundMap,
     loader,
     native_binding::{self, NativeSourceSession, NativeTile},
-    projected_source, saved_binding, source_footprint, sparse_cells,
+    projected_source, saved_binding, source_footprint, sparse_cells, tile_cache,
     tours::{self, Plan, PreparedMap, ProjectedDisplay},
 };
 use crate::voxel_landscape::{
@@ -165,12 +165,48 @@ pub fn prepare_pinned(
 }
 
 const REQUIREMENT_CACHE_KIND: &str = "route-requirements";
+const ROUTE_TILES_CACHE_KIND: &str = "route-tiles";
 
 /// Everything that decides which model/texture IDs the viewport scan finds:
 /// the world's region files, the viewport chunks, the seed, the native jar and
 /// the selected pack.
 fn requirement_key(input: &Inputs<'_>, render_chunks: &[[i32; 2]]) -> crate::prepared_cache::Key {
-    let mut builder = crate::prepared_cache::KeyBuilder::new(REQUIREMENT_CACHE_KIND);
+    source_key_builder(REQUIREMENT_CACHE_KIND, input, render_chunks).finish()
+}
+
+/// The requirement inputs plus everything the finished tiles additionally
+/// depend on: the support (halo) chunks, the blend radius, the camera framing and
+/// the identity of the imported texture bank.
+fn route_tiles_key(
+    input: &Inputs<'_>,
+    render_chunks: &[[i32; 2]],
+    request: &source_footprint::Request,
+    camera_height: f64,
+    bank_epoch: Digest256,
+) -> crate::prepared_cache::Key {
+    let mut builder = source_key_builder(ROUTE_TILES_CACHE_KIND, input, render_chunks);
+    builder
+        .part(&bank_epoch.bytes())
+        .number(u64::from(input.blend_radius))
+        .number(camera_height.to_bits())
+        .number(input.scale.to_bits())
+        .number(input.viewport[0] as u64)
+        .number(input.viewport[1] as u64)
+        .number(request.support_chunks().len() as u64);
+    for chunk in request.support_chunks() {
+        builder
+            .part(&chunk[0].to_le_bytes())
+            .part(&chunk[1].to_le_bytes());
+    }
+    builder.finish()
+}
+
+fn source_key_builder(
+    kind: &str,
+    input: &Inputs<'_>,
+    render_chunks: &[[i32; 2]],
+) -> crate::prepared_cache::KeyBuilder {
+    let mut builder = crate::prepared_cache::KeyBuilder::new(kind);
     builder
         .path_fingerprint(&input.bound.directory.join("region"))
         .path_fingerprint(&input.bound.directory.join("level.dat"))
@@ -189,7 +225,7 @@ fn requirement_key(input: &Inputs<'_>, render_chunks: &[[i32; 2]]) -> crate::pre
             .path_fingerprint(Path::new(&selected.pack_path))
             .path_fingerprint(Path::new(&selected.pack_addon_path));
     }
-    builder.finish()
+    builder
 }
 
 fn prepare_source(
@@ -401,7 +437,24 @@ fn prepare_source(
     }
     // Each worker owns its compiler: the model caches are mutable, and a
     // tile's result does not depend on which worker's cache served it.
-    let worker_count = tile_worker_count(render_chunks.len());
+    let route_cache_key = input
+        .cache
+        .map(|_| route_tiles_key(&input, &render_chunks, &request, camera_height, bank_epoch));
+    let restored_tiles = input
+        .cache
+        .zip(route_cache_key)
+        .and_then(|(cache, key)| {
+            cache.load::<tile_cache::CachedRoute>(ROUTE_TILES_CACHE_KIND, &key)
+        })
+        .and_then(|cached| tile_cache::restore(cached, &shared, &map, input.cancel));
+    if restored_tiles.is_some() {
+        (input.progress)("Loaded projected viewport tiles from the prepared-data cache");
+    }
+    let worker_count = if restored_tiles.is_some() {
+        0
+    } else {
+        tile_worker_count(render_chunks.len())
+    };
     let mut compilers = Vec::with_capacity(worker_count);
     for _ in 0..worker_count {
         let mut compiler =
@@ -412,7 +465,8 @@ fn prepare_source(
         compilers.push(compiler);
     }
     let tiles_charge = input.account.reserve(1 << 20, input.cancel)?;
-    let mut tiles = Vec::<NativeTile>::new();
+    let route_from_cache = restored_tiles.is_some();
+    let mut tiles = restored_tiles.unwrap_or_default();
     tiles
         .try_reserve_exact(request.render_chunks().len())
         .map_err(|_| Error::Limit)?;
@@ -431,7 +485,11 @@ fn prepare_source(
     );
     // Batches hold one chunk per worker and are merged back in chunk order, so
     // the route is identical to a sequential build.
-    let mut next_index = 0;
+    let mut next_index = if route_from_cache {
+        render_chunks.len()
+    } else {
+        0
+    };
     while next_index < render_chunks.len() {
         input.cancel.check()?;
         let batch_end = (next_index + compilers.len()).min(render_chunks.len());
@@ -523,6 +581,15 @@ fn prepare_source(
         })
     {
         return Err(Error::Empty);
+    }
+    if let (false, Some(cache), Some(key)) = (route_from_cache, input.cache, route_cache_key) {
+        if let Err(error) = cache.store(
+            ROUTE_TILES_CACHE_KIND,
+            &key,
+            &tile_cache::capture(&tiles, bank_epoch),
+        ) {
+            tracing::warn!(%error, "could not save projected viewport tiles to the cache");
+        }
     }
     Ok(PreparedRoute {
         map,

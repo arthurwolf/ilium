@@ -14,7 +14,7 @@ use ilium_plugin_sdk_core::host::{Bucket, HttpResponse, ProcessExit};
 use ilium_plugin_sdk_core::plugin::NativeSurface;
 use ilium_plugin_sdk_core::types::ui::ViewTarget;
 use ilium_plugin_sdk_core::types::{
-    Activation, AgentActivity, DeactivationReason, ErrorCode, Event, NodeClass, PluginError,
+    Activation, AgentActivity, DeactivationReason, ErrorCode, Event, PluginError,
     PluginId, Submission,
 };
 use ilium_plugin_sdk_core::{NativeEntry, NativeRenderer};
@@ -1822,7 +1822,7 @@ fn conformance_failing_case_is_reported_by_name_with_reason() {
 fn manual_env_var_overrides_default_pages_dir() {
     let dir = with_env(
         &[("ILIUM_PLUGIN_MANUAL_DIR", Some("/srv/manual/pages"))],
-        || ilium_plugin_testkit::manual::pages_dir(),
+        ilium_plugin_testkit::manual::pages_dir,
     );
     assert_eq!(dir, PathBuf::from("/srv/manual/pages"));
 }

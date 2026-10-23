@@ -170,6 +170,9 @@ A `revocations.json` without a valid signature of the threshold of those keys is
 | [PKG-370] | The sequence in which a client refreshes is: fetch `timestamp.json`; if its snapshot version is unchanged, stop; fetch `snapshot.json`; fetch each changed file listed in it. A client fetches `root.json` first only when the timestamp signature fails with the known keys. |
 | [PKG-652] | The signature of a metadata document covers the JCS (RFC 8785) form of its `signed` value. A client MUST parse with refusal of duplicate keys, serialise `signed` again with JCS and verify over those bytes. The result for the vector of the metadata section MUST have the SHA-256 given there. |
 | [PKG-653] | `revocations.json` MUST carry the `signed` and `signatures` wrapper and MUST be signed with the `timestamp` role keys. Without a valid signature of the threshold it is refused with `registry.signature-invalid`. |
+| [PKG-974] | The `signed` object of every metadata document MUST carry `spec`, the registry protocol version it follows, with the same value that `root.json` carries (proposed, owner to confirm: the examples of this page are updated to show it). The integer `version` stays a rollback counter under [PKG-366] and is not a format version. |
+| [PKG-975] | A client MUST check `spec` before it reads any other field of a document. A `spec` it does not support is refused with `registry.format-unsupported`. The client keeps its cached metadata as [PKG-417] requires and reports the document's `spec` and the values it supports. |
+| [PKG-976] | After a successor `spec` is first published, the registry MUST keep serving the previous `spec` for at least 12 months (proposed, owner to confirm). During that window the previous `spec` keeps the signature rules that applied to it when the successor was published. |
 
 ## Transport
 
@@ -182,6 +185,8 @@ A `revocations.json` without a valid signature of the threshold of those keys is
 | [PKG-375] | A download is written to a temporary file under the cache folder and renamed only after the hash and length match. A resumed download MUST use `Range` and MUST verify the final hash. |
 | [PKG-376] | The only request data the client sends is the HTTP request itself: the path, the standard headers and `User-Agent: ilium/<version>`. It sends no identifier, no list of installed plugins and no install count. A registry operator who wants statistics reads their own server logs. |
 | [PKG-377] | The configured registries are listed in `[plugins.registry] urls` in order (default: none). A registry marked `default` is used when a request names no registry; when two registries return the same id, the order in `urls` decides ([PKG-422]). A client with no URLs makes no network request. |
+| [PKG-972] | A client MUST treat an HTTP `429` response as retryable. This is an exception to [PKG-373] for that status code. It waits for the `Retry-After` value, given in seconds or as an HTTP date, and MUST NOT send the request again sooner. A `Retry-After` longer than 300 s is not waited for: the client fails with `registry.rate-limited` (proposed, owner to confirm: 300 s). Without a `Retry-After` header the client uses the waits of PKG-373 and counts the response against the same 3 attempts. |
+| [PKG-973] | The registry MUST answer a request over its per-client limit on metadata and download requests with `429`, the code `registry.rate-limited` and a `Retry-After` header, as [PKG-704] requires. The limit is 600 metadata and download requests per hour per client address (proposed, owner to confirm). A mirror sync ([PKG-410]) that receives `registry.rate-limited` MUST stop, keep the files it has already verified and report the time it may resume. Cached and file installs are not limited. |
 
 Offline behaviour: the client keeps the last verified set of metadata in the cache folder. When the network fails, it uses the cached metadata and shows its age. [PKG-378] A cached index MAY be used after its `expires` time only when the user passes `--offline` or sets `[plugins.registry] offline = true`; the client then shows a clear warning that the data is stale. Without that setting the expired metadata is refused with `registry.metadata-expired`.
 
@@ -247,6 +252,17 @@ Publishing is the only part of the protocol that needs a server. The upload API 
 | [PKG-399] | A publisher MUST NOT delete a published blob. Removal happens only through takedown (below). |
 | [PKG-400] | Upload limits: 300 MiB per package (the package format cap), 20 publishes per hour per publisher id. A larger upload is refused with `registry.size`. |
 
+### Publish tokens
+
+The token of [PKG-392] is a secret that authorises publishes. Its issue, expiry, rotation and revocation follow the rules below. Leak response for a publisher key is in [Registry key compromise](/pages/reference-registry-key-compromise/).
+
+| Id | Rule |
+|---|---|
+| [PKG-968] | A registry token MUST be issued to one publisher id and MUST authorise publishes only under the namespace of that id ([PKG-388]). A token expires 90 days after it is issued (proposed, owner to confirm). A publish with an expired token is refused with `registry.auth`. |
+| [PKG-969] | A publisher MUST be able to issue a new token and revoke an old one without a gap in publishing. The new token works as soon as it is issued, and the old one keeps working until it is revoked or expires. A CI token MUST be rotated at least every 90 days (proposed, owner to confirm). |
+| [PKG-970] | A revocation MUST take effect within 1 hour of the publisher's request or of the operator's report of a leak (proposed, owner to confirm). From that moment a publish with the revoked token is refused with `registry.auth`. The revocation is appended to the transparency log ([PKG-802]), and the token value MUST NOT appear in that log or in any registry response. |
+| [PKG-971] | Every publish made with a token between the leak and its revocation MUST be listed in the transparency log and sent to every maintainer of the publisher id ([SEC-723]). The registry MUST NOT remove or yank such a publish by itself. The publisher or the operator decides under [PKG-396] and [PKG-403]. |
+
 ## Policy
 
 | Id | Rule |
@@ -275,6 +291,9 @@ Revocations travel in `revocations.json`. [PKG-407] A client MUST fetch it on ev
 | [PKG-409] | A **partial mirror** serves a subset: a list of plugin ids with their dependencies. It MUST include the metadata files, `index.json` filtered to the subset and a `snapshot.json` that lists only the mirrored files. A partial mirror re-signs `index.json` and `snapshot.json` with its own keys and has its own `root.json`. Clients treat it as a separate registry with its own root, set in `[plugins.registry]`. |
 | [PKG-410] | `ilium plugin mirror sync <dir> --registry <url> [--allow <id>...] [--channel stable\|beta]` copies the metadata and the blobs to `<dir>` and verifies every hash. For a full copy, omit `--allow`. The command is idempotent: it downloads only changed files. |
 | [PKG-411] | A client configured with a mirror URL uses it exactly like a registry. The root keys are the ones in the client's configuration (`[plugins.registry] root`), never fetched from the mirror alone, except at the first setup where `ilium plugin registry add <url> --root-key <key_id>` pins them. |
+| [PKG-986] | Registry and mirror requests MUST verify TLS against the system trust roots plus, when the policy sets `[network] ca_bundle`, the bundle it names, as [SEC-077] requires. No `[plugins.registry]` setting may disable verification or add a trust root. |
+| [PKG-987] | A mirror with a certificate from an internal CA works when the administrator sets `[network] ca_bundle` ([Administrator policy](/pages/reference-admin-policy/)). A certificate failure MUST NOT be handled by skipping verification or by falling back to `http:` ([PKG-371]). The client reports it as `network` with reason `tls`, as [SEC-077] requires. |
+| [PKG-988] | A change of a mirror's TLS certificate under the same CA needs no client change. A change of CA needs the administrator to update `ca_bundle`. TLS never decides metadata trust: every document is still verified with the root keys of [PKG-411], so a certificate change on a mirror cannot replace them. |
 
 ## Air-gapped installs
 
@@ -285,6 +304,9 @@ A machine with no network can install from a **bundle**: a directory with the sa
 | [PKG-412] | `ilium plugin export-bundle <dir> <id>[@range]... [--with-deps]` writes a bundle with the signed metadata of the registry, filtered to the listed plugins, and their blobs. The bundle keeps the original signatures. |
 | [PKG-413] | `ilium plugin install --from-bundle <dir> <id>` installs from the bundle. The client verifies the metadata with the root keys pinned in its configuration, enforces expiry (unless `--offline`) and rollback rules against its stored versions, and runs the normal install stages. |
 | [PKG-414] | A bundle's `snapshot.json` expires like any other. For a long-lived air-gapped setup the operator re-exports a bundle regularly or sets `offline = true`. |
+| [PKG-977] | A bundle given as a `.tar` file MUST have its outer listing checked before any entry is extracted. The client refuses the bundle with `registry.bundle-invalid` when an entry has an absolute path or a `..` component, is a symbolic link, a hard link, a device, a FIFO or a socket, or lies outside the layout of [PKG-412]. The package entry rules of [PKG-107] and [PKG-172] apply to each package inside the bundle. |
+| [PKG-978] | A bundle `.tar` MUST NOT expand beyond 2 GiB or contain more than 10,000 entries (proposed, owner to confirm). A bundle over either limit is refused with `registry.size` before any file is written. |
+| [PKG-979] | The client MUST extract a `.tar` bundle into a new temporary folder under the cache folder, verify its metadata with the pinned root keys ([PKG-413]) and move only verified packages into the install path. Nothing is written under the data directory before the install stages of [PKG-413] begin. A refused bundle leaves no extracted file behind. |
 
 ## Client error codes
 
@@ -307,6 +329,9 @@ A machine with no network can install from a **bundle**: a directory with the sa
 | `registry.category-unknown` | A category is not in the list |
 | `registry.auth` | The token is missing or refused |
 | `registry.policy` | The package fails the registry policy |
+| `registry.rate-limited` | A request is over the registry's limit, or the `Retry-After` wait is longer than the client accepts ([PKG-972], [PKG-973]) |
+| `registry.format-unsupported` | A document or bundle uses a `spec` the client does not support ([PKG-975]) |
+| `registry.bundle-invalid` | A `.tar` bundle has an entry that its outer listing rules refuse ([PKG-977]) |
 
 Message templates are in [Manifest schema and error catalogue](/pages/reference-manifest-schema/).
 

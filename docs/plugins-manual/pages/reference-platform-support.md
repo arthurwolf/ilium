@@ -31,6 +31,28 @@ The plugin host runs the same Wasmtime configuration on every platform that Iliu
 - **[HST-381]** The plugin host MUST work for T1 plugins on every shipped platform with the same Wasmtime version and the same `runtime_config()`, except for the platform switches in this page.
 - **[HST-382]** A package for a platform that is not shipped MUST NOT be reported as supported in any user interface.
 
+## Supported terminals
+
+The client draws in the terminal it runs in, so that terminal decides which colours and keys reach a plugin. The table names the terminal hosts that each shipped platform must be tested in. A terminal that the release notes do not name is not part of the support statement.
+
+| Platform | Terminal hosts to test | Notes |
+|---|---|---|
+| Linux (x86_64 and aarch64) | GNOME Terminal, Konsole, kitty | Any terminal that reports the colour depth of HST-390 below |
+| macOS (aarch64) | Terminal.app, iTerm2 | Legacy keyboard unless the terminal reports the kitty protocol |
+| Windows (x86_64) | Windows Terminal | The client runs under ConPTY, so the terminal host sets colour depth and key reports |
+
+- **[HST-389]** The release notes MUST name, for each shipped platform, the terminal emulators from the table above that the release was tested in, and MUST NOT describe the client as supported in any other terminal (proposed, owner to confirm: the table is the minimum set). Test: read the release notes and compare the named terminals with the release test log.
+- **[HST-390]** The client MUST expect at least 256 colours from the outer terminal (proposed, owner to confirm). When the outer terminal offers fewer colours, the client MUST still start, MUST map each `indexed` and `rgb` colour of a plugin to the nearest colour the terminal offers, and MUST NOT fail the plugin's call. Test: start the client in a 16-colour terminal and read the first paint of a plugin that uses an `rgb` colour.
+
+The colour rules of [Accessibility and theming](/pages/accessibility-and-theming/) state the contrast of the resolved colour, so the mapping above can change a plugin's contrast. Key release reports and the legacy keyboard fallback are described in [API keys](/pages/api-keys/).
+
+## Platform support lifecycle
+
+A shipped platform leaves the matrix only through the notice below. A platform that is not shipped has no lifecycle and needs no notice.
+
+- **[HST-391]** A shipped platform MUST NOT be removed from the support matrix in a release unless the minor release before it named the removal in its release notes (proposed, owner to confirm: at least one minor release before). A patch release MUST NOT remove a platform. Test: read the release notes of the minor release before a removal and assert the notice; compare the matrix of two consecutive patch releases.
+- **[HST-392]** When a shipped platform is removed, the release MUST stop shipping Ilium and its T1 bundled plugins for that platform, including the `.cwasm` for its triple (HST-383). An installed T2 or T3 plugin whose package targets the removed platform MUST be marked `refused-at-load` with `package.platform-unsupported` and MUST keep its data, as HST-655 requires for a restore on another operating system. Test: remove a platform in a test build, start the host on it, and read the state of each installed plugin.
+
 ## Precompiled artifacts
 
 A `.cwasm` file is machine code for one target triple and one Wasmtime fingerprint. The release embeds, for every T1 plugin, the `.wasm` component and one `.cwasm` per shipped target triple. The host picks the `.cwasm` that matches the running triple and fingerprint. If none matches, it compiles the `.wasm` with `Component::new` and the compile cache, and logs `host.cwasm-incompatible`.

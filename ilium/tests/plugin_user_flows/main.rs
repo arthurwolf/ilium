@@ -36,3 +36,8 @@ mod user_plugins_overview;
 mod user_privacy;
 mod user_troubleshooting;
 mod user_trust_policy;
+mod usr_accessibility_values;
+mod usr_admin_rollout;
+mod usr_bundle_handling;
+mod usr_privacy_retention;
+mod usr_support_bundle_contract;

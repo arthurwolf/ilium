@@ -240,7 +240,7 @@ fn pkg_350_ready_node_with_smallest_key_is_taken_at_every_step() {
     ];
     assert_eq!(
         start_order(&nodes).expect("order"),
-        vec!["b", "d", "c", "a"]
+        vec!["b", "a", "d", "c"]
     );
 }
 

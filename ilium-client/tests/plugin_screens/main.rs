@@ -10,3 +10,4 @@ mod install_dialogs;
 mod plugins_tab;
 mod recovery_page;
 mod support;
+mod usr_release_screen_reader;

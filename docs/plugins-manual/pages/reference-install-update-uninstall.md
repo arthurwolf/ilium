@@ -211,6 +211,8 @@ Disk cost: the store holds the active and the previous version, so a plugin uses
 
 If activation of the new version is deferred (a lazy plugin has no trigger yet), the update stays in `trial` until the first activation. The previous version is not removed in that time.
 
+- [LIF-957] A trial has no automatic time limit, because the candidate is activated only when a trigger fires, and the host MUST NOT remove the candidate or the previous version while the trial lasts. A trial older than 30 days (proposed, owner to confirm) MUST appear in `ilium plugin doctor` and on the Settings > Plugins screen as a `warning` with the code `update.trial-old`, naming the plugin, the candidate version and the age in days. Test: install a lazy plugin with an update, advance the clock 31 days without a trigger, and assert the warning and that both versions remain in `store/<id>/`.
+
 ### Rollback and downgrade
 
 `ilium plugin rollback <id>` makes the previous version active. `ilium plugin install --allow-downgrade <file>` installs a lower version than the active one. Both follow the same data rule.
@@ -218,6 +220,9 @@ If activation of the new version is deferred (a lazy plugin has no trigger yet),
 - [LIF-079] Activating a version whose `data_version` is lower than the stamp of any bucket in scope MUST be refused with `migration.data-newer` (stage I, exit 1), unless `--restore-backup` or `--discard-data` is given. This applies to downgrade and rollback. The user can pass `--restore-backup`, which restores the data snapshot taken before the update and loses what was written since, or `--discard-data`, which deletes the plugin's buckets and data directory. Test: update to a version that migrates data, write data, roll back without a flag and assert `migration.data-newer`; repeat with each flag.
 - [LIF-080] `--restore-backup` MUST fail with `rollback.no-backup` when the snapshot is gone. Test: delete the backup and roll back with the flag.
 - [LIF-081] Rollback MUST send `deactivate(upgrade)` to the running instances and activate the previous version with the same rules as an update. Test: read the reasons in the log.
+- [LIF-959] Before a rollback deactivates any running instance, the host MUST check the stored files of the previous version against its `manifest.sha256` (written at install, step 5) and against the hashes in the store. On a mismatch it MUST refuse with `package.corrupt` (exit code 1), leave `active_version` unchanged and deactivate no instance. Test: flip one byte in a component of the previous version, run the rollback, and assert the error, the unchanged active version and no `deactivate` call.
+- [LIF-976] A rollback MUST write no file other than the registry (LIF-065) and, with `--restore-backup`, the data snapshot restore of LIF-079. It needs no staging and no new store entry. A rollback that fails before its first `deactivate(upgrade)` MUST leave the registry byte for byte unchanged (LIF-069), keep the current version active and report `install.no-space` when the disk is full. Test: fill the data volume so that the registry temporary file cannot be written, run the rollback, and compare the registry hash and the active version.
+- [LIF-977] A rollback interrupted by a crash or power loss MUST be finished or undone at the next start by the rule of LIF-094, treating the rollback as an `update` in `trial` to the previous version. After the restart exactly one version MUST be active (LIF-074). Test: kill the host after the current instance receives `deactivate(upgrade)` and before the previous version is activated, restart, and assert that one version is active and no update state remains.
 
 ### Uninstall
 
@@ -254,6 +259,7 @@ If activation of the new version is deferred (a lazy plugin has no trigger yet),
 - [LIF-293] A `ilium plugin uninstall <id> --purge` on a TTY MUST print one line before it deletes, naming `ilium plugin export <id>` as the way to keep a copy. Without a TTY it MUST print no such prompt and MUST NOT ask a question (LIF-082). The line MUST NOT delay or block the purge. Test: run the purge on a TTY and assert the hint line and the purge; run it with standard input closed and assert no prompt and the purge.
 - [LIF-085] Uninstall MUST first set `uninstall-pending`, then stop all instances, then delete files. After a crash, the next start MUST finish it. Test: kill the host after the state is written.
 - [LIF-086] Uninstall MUST NOT delete data of other plugins, and MUST NOT remove a publisher key. Test: compare the other plugins' directories before and after.
+- [LIF-958] The kept data of an uninstalled plugin (`data/<id>/`, `storage/<id>/`, its settings values and `backups/<id>/`) MUST NOT be deleted by any automatic process, including start-up cleanup, a retention timer and a later update. Log files follow their own 7-day rule ([Plugin files](/pages/reference-plugin-files/)). The data is removed only by `ilium plugin uninstall <id> --purge` or by the Delete data choice of the uninstall dialog. The host MUST list it in `ilium plugin doctor` as orphaned with its size, as HST-675 does for project folders. This page sets no time limit for kept data. Test: uninstall without `--purge`, advance the clock 2 years, restart the host, and assert that every kept path exists and that `ilium plugin doctor` lists it with its size.
 
 ### Command reference
 
@@ -323,6 +329,7 @@ The catalogue in [Manifest schema and error catalogue](/pages/reference-manifest
 | `manifest.signature-invalid` | The signature does not match. | Edit the manifest after signing. |
 | `trust.key-unknown` | The signer is not trusted and the user declined or could not answer. | Install a package of a new key without `trust add`. |
 | `trust.key-revoked` | The signer key is on the revoked list. | Add the key to the revoked list. |
+| `package.publisher-key-changed` | Validation stage 8 (trust): an update is signed by a key that is neither the installed key nor endorsed by a rotation statement. The message names both fingerprints, and no dialog overrides it. See PKG-237 in [Signing and trust](/pages/reference-signing-and-trust/#publisher-key-change-and-rotation) and USR-126 in [Packages](/pages/packages/). | Sign version 2 with a second key that the installed key does not endorse. |
 | `policy.tier-denied` | The tier is not allowed on this machine by policy. | Deny T3 in the policy file. |
 | `package.api-unsupported` | The package API window does not include this host. | Set `api` to a window above the host. |
 | `manifest.service-cycle` | The non-optional `requires.services` entries form a cycle. | Install a cycle. |

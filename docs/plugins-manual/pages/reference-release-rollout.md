@@ -109,6 +109,32 @@ The command above is the default of a decision still open, not a settled command
 
 The publisher finds a defect and halts the rollout with `--percent 0`. At each client's next refresh the offer of `1.3.0` stops. A client that downloaded `1.3.0` but did not activate it does not activate it. A client that already runs `1.3.0` keeps running it. If `1.3.0` must also be withdrawn from new exact-version installs, the publisher yanks it ([Registry reference](/pages/reference-registry/), PKG-396). If it must leave installed copies, the operator uses a takedown (PKG-403).
 
+## Host release channels and rollout
+
+This section covers a new Ilium host release: the archive and `SHA256SUMS` of one release tag. The plugin rules above apply to a host release only where this section names them.
+
+### Channels
+
+- [PKG-953] A host release MUST be published on exactly one channel, `stable`, `beta` or `dev`, with the same names as the plugin channels of [Install and update](/pages/reference-install-and-update/) (PKG-265). A host release on the `beta` or `dev` channel MUST NOT be offered to a user who did not select that channel.
+- [PKG-954] The installer of [SEC-434] MUST resolve the selected channel to one release tag before it runs the checks of [SEC-430] to [SEC-438]. It MUST NOT fall back to another channel or another tag when that tag is missing or paused under [PKG-958].
+- [PKG-955] A release that is to become `stable` MUST first be published on `beta` and MUST stay on `beta` for at least 7 days (proposed, owner to confirm) before it is promoted.
+
+### Staged offer
+
+- [PKG-956] A new `stable` host release MUST start with a rollout percentage of at most 10 (proposed, owner to confirm). The percentage has the meaning of [PKG-686] and the cohort rule of [PKG-687] applies. A client outside the cohort MUST be offered the release it would have been offered without the new one, and MUST NOT see an error.
+- [PKG-957] A publisher MUST wait at least 24 hours (proposed, owner to confirm) between two widening steps of a staged `stable` host release. The publisher widens by hand and does not widen a release that a halt under [PKG-958] has paused.
+
+### Pausing a host release
+
+- [PKG-958] A host release MUST be paused by setting its rollout percentage to 0. A pause MUST be made by a maintainer with release permission on the Ilium release repository, and MUST start within 24 hours (proposed, owner to confirm) of a confirmed report that the release corrupts stored data, prevents startup or weakens a security control.
+- [PKG-959] A pause MUST NOT delete, replace or re-sign the archives or `SHA256SUMS` of its tag, and MUST NOT change any installed host or installed plugin. A pause MUST NOT be applied to a mirror by editing its files, which remains under [SEC-961]. Installed hosts keep running; the operator moves back to an earlier release only by the steps of [Upgrading Ilium and rolling back the host](/pages/guide-operator-upgrades/).
+
+Decision needed: where the channel and rollout percentage of a host release are stored, and how the installer reads them before it downloads an archive. The release pages do not define a file for this. Default: a `channels.json` asset of the release, signed with the release key of [SEC-426], read by the installer before it fetches the archive. Consequence: an installer that cannot read the file must stop with a fixed message and must not use a cached value.
+
+### Release notes
+
+- [PKG-960] Each `stable` host release MUST publish release notes before it is offered. The notes MUST name its channel and its starting rollout percentage, MUST list every change to stored data, and MUST record a pause under [PKG-958] with its date and a one-line reason.
+
 ## What this page does not cover
 
 - Signing, expiry, rollback protection and the static file rule: [Registry reference](/pages/reference-registry/).

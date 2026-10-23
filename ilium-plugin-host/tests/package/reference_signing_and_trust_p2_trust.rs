@@ -374,7 +374,7 @@ fn pkg_228_two_valid_signatures_one_trusted_is_t2() {
         &[obj(7, "example", &manifest), obj(0, "example", &manifest)],
     );
     let package = ilium_plugin_host::package::read_package(&with_sig(&text)).expect("package");
-    let verified = ilium_plugin_host::signing::verify(&package, &trust_of(0, "example"), now())
+    let verified = ilium_plugin_host::signing::verify_with_public_keys(&package, &trust_of(0, "example"), &trust_of(7, "example").keys, now())
         .expect("verified");
     assert_eq!(verified.tier, ilium_plugin_api::Tier::T2);
 }

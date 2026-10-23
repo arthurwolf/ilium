@@ -125,8 +125,8 @@ mod spec_tests {
         assert_eq!(document["server"]["world"], "ilium:server/base@0.1.0");
         assert_eq!(document["client"]["world"], "ilium:client/base@0.1.0");
         // The crate declares both sides, as the page's sides line says.
-        let _server_side = SearchServer::default();
-        let _client_side = SearchClient::default();
+        let _server_side = SearchServer;
+        let _client_side = SearchClient;
     }
 
     /// REQ: COR-050

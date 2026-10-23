@@ -202,7 +202,7 @@ mod spec_tests {
     /// REQ: COR-050
     #[test]
     fn server_and_client_sides_are_declared_structs() {
-        let _server: CostServer = CostServer::default();
-        let _client: CostClient = CostClient::default();
+        let _server: CostServer = CostServer;
+        let _client: CostClient = CostClient;
     }
 }

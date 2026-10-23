@@ -32,3 +32,10 @@ mod sandbox_prerequisites;
 mod secret_and_token_rotation;
 mod security_response_disclosure;
 mod signature_algorithm_allow_list;
+
+// Part 4: security-policy requirements SEC-950 .. SEC-968 (reference-requirements-security-policy).
+mod admin_policy_versions_and_ceilings;
+mod audit_torn_tail_and_crash_retention;
+mod offline_mirror_and_release_proof;
+mod secrets_at_rest_and_keyring_recovery;
+mod support_window_and_advisories;

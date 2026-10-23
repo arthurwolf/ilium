@@ -141,17 +141,25 @@ The audit file is per user, in the user's state folder, because Ilium runs as th
 1. **Stop it now.** Add its id to `plugins.deny_ids`. At the next server start every copy is disabled and shows "Blocked by policy".
 2. **Block its key.** If a whole publisher is at fault, remove its fingerprint from `publishers.allow`.
 3. **Find who has it.** Search the audit log for the plugin id.
-4. **Clean up.** Ask users to run `ilium plugin uninstall <id> --purge`. The policy does not delete anything on its own.
+4. **Clean up.** Ask each user to run `ilium plugin uninstall <id> --purge`. The policy does not delete anything on its own, and this guide has no command that purges a plugin's data on a machine you manage (see [USR-111]). Whether the purge also removes crash records is an open decision, see [Crash records and pre-migration backups](/pages/user-privacy/#crash-records-and-pre-migration-backups). When a plugin must be fully erased, also ask each user to run `ilium plugin erase-data` for it [USR-954].
 5. **Remove the key.** Users can run `ilium plugin trust remove <key_id> --force`. Without `--force` the command refuses with `trust.in-use` while an installed plugin is signed with the key. Plugins signed with it then show `untrusted`.
 
 Users see "Blocked by policy" and the detail code, for example `policy.id-denied`. See [Troubleshooting plugins](/pages/user-troubleshooting/).
 
 ### Roll out a change
 
-1. Write the new policy to a temporary file next to the real one.
-2. Check it for syntax. An unknown key or a wrong type makes the file malformed: at the next start T2 and T3 plugins refuse to load with `policy.invalid`, and the notice names the line.
-3. Rename it over the old one. The rename is atomic.
-4. Restart the sessions. Each server reads the policy at start only.
+1. Copy the current policy file to a previous-copy file beside it, for example `/etc/ilium/policy.toml.previous`, owned by root with mode `0644`. This copy is the revert point.
+2. Write the new policy to a temporary file next to the real one.
+3. Check it for syntax. An unknown key or a wrong type makes the file malformed: at the next start T2 and T3 plugins refuse to load with `policy.invalid`, and the notice names the line. A file that passes this check can still forbid a grant or plugin you need, so step 6 checks the effect.
+4. Rename it over the old one. The rename is atomic.
+5. Restart the sessions on the first ring only. Each server reads the policy at start only.
+6. On that machine, run `ilium plugin policy show`. Compare the merged `policy` line with the values you intended, and check that the `policy-source` line marks the file `used` [SEC-191]. Look for `policy-violation` and `policy.invalid` in the audit log.
+
+Roll out in rings. The first ring is one machine, or at most five machines (proposed, owner to confirm). Move to the next ring only after the first ring has run the new policy for one working day (proposed, owner to confirm), with no `policy-violation` or `policy.invalid` event in its audit log and no plugin reported as "Blocked by policy" that should run. Each later ring may be at most twice the size of the one before (proposed, owner to confirm). [USR-109]
+
+While a malformed policy is in place, a machine that restarts refuses T2 and T3 plugins and keeps core and T1 plugins running. A bad policy therefore reaches each machine at its next restart, not when the file is written. Stop the rollout at the first sign of a problem.
+
+To revert, copy the previous-copy file back over the policy file with the same rename, then restart the sessions on the affected machines. Keep the previous copy until every ring has passed [USR-107].
 
 Test the policy on one machine first. A policy that forbids `ilium.core.*` has no effect, because the policy never stops a core plugin.
 
@@ -183,6 +191,11 @@ After writing a policy, check it with a throwaway user:
 
 - [USR-072] An administrator MUST be able to block a running plugin by id, and the host MUST disable it at the next server start. Test: add the id while the plugin runs, restart the server and assert the state `Blocked by policy`.
 - [USR-073] The documentation MUST state that the policy only restricts, where the file lives per system, and how to respond to a bad plugin. Test: search this page for the three statements.
+- [USR-107] An administrator MUST keep the previous policy file until the change has passed every rollout ring, and MUST be able to restore it by renaming it back and restarting the sessions. Test: pending: test to be written.
+- [USR-108] Before a policy change leaves its first ring, an administrator MUST run `ilium plugin policy show` on that ring and MUST see the intended effective values, because a syntactically valid policy can still forbid a grant or plugin that is needed [SEC-191]. Test: pending: test to be written.
+- [USR-109] A policy change MUST roll out in rings. The first ring MUST be at most five machines (proposed, owner to confirm), and each later ring MUST be at most twice the size of the one before (proposed, owner to confirm). The next ring MUST NOT start until the previous ring has run the policy for one working day (proposed, owner to confirm) with no `policy-violation` or `policy.invalid` event and no wrongly blocked plugin. Test: pending: test to be written.
+- [USR-111] Version 0.1.0 has no policy key and no command that makes a user purge a plugin's data. An administrator MUST treat the removal of a plugin for a security or contract reason as incomplete until each user has run `ilium plugin uninstall <id> --purge`, and MUST NOT report it as done on the strength of the policy file alone. Test: pending: test to be written.
+- [USR-954] When an administrator removes a plugin for a security or contract reason, the administrator MUST ask each user to run `ilium plugin erase-data` for that plugin, because the purge may leave crash records in place ([USR-326], [USR-246]). Test: pending: test to be written.
 
 ### See also
 

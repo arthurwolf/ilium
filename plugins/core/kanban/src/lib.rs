@@ -74,7 +74,7 @@ mod spec_tests {
             manifest["activation"],
             serde_json::json!(["pane-kind:board"])
         );
-        let _client = KanbanClient::default();
+        let _client = KanbanClient;
     }
 
     /// REQ: COR-050

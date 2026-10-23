@@ -68,6 +68,7 @@ pub mod signature_algorithms;
 pub mod signing;
 pub mod storage;
 pub mod stores;
+pub mod trust;
 pub mod sync;
 pub mod telemetry;
 pub mod telemetry_history;

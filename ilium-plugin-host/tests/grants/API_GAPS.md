@@ -10,5 +10,6 @@ Items the host grants tests use that the skeleton lacks. Signatures are as the t
 - ilium-plugin-host::approval: `ApprovalChannel, ApprovalError::ReviewRequired`. Ids: SEC-116,117.
 - ilium-plugin-host: ilium-plugin-host::package::write_package; cli::{CliEnv, run_cli}. Ids: SEC-100, 117, 120.
 - ilium-plugin-host dev-dependencies: `sha2`, `serde_json`, `tempfile`.
+- ilium-plugin-api::codes::policy: `VERSION_DENIED` (`policy.version-denied`) and `VERSION_PINNED` (`policy.version-pinned`) constants, and a host refusal path that emits them; the manual lists both codes in reference-admin-policy.md (SEC-115), but no code or behaviour exists yet. Ids: SEC-115 (version-denied and version-pinned tests in reference_admin_policy.rs).
 - Risk tier "always" and `is_always_granted` missing in ilium-plugin-api (CAP-011).
 - ilium-plugin-host::testing (agent-config.propose, ids CAP-887..891): import `ilium:host/fs.propose-agent-config`; `FakeKernel::{agent_config_file_exists, open_proposal_dialog() -> Option<{rows[{checked}], full_diff}>, fail_next_rename, check_row_and_apply(usize), reject_all, write_agent_config_file, agent_config_revision, read_agent_config_file, consents_json_is_unchanged, plugin_data_file, audit_records(&str)}`, `HarnessHandle::{last_proposal_failure_code, last_proposal_failure, take_proposal}`, `ErrorCode::{Io,Conflict,Busy,InvalidArgument}`.

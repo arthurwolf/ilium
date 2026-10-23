@@ -142,7 +142,7 @@ mod spec_tests {
     /// REQ: COR-011
     #[test]
     fn density_change_produces_no_submission() {
-        let mut client = SettingsClient::default();
+        let mut client = SettingsClient;
         let submissions = client.on_events(vec![settings_changed(&["density"])]);
         assert!(
             submissions.is_empty(),
@@ -153,7 +153,7 @@ mod spec_tests {
     /// REQ: COR-011
     #[test]
     fn empty_event_batch_produces_no_submission() {
-        let mut client = SettingsClient::default();
+        let mut client = SettingsClient;
         assert!(client.on_events(Vec::new()).is_empty());
     }
 
@@ -161,7 +161,7 @@ mod spec_tests {
     /// REQ: COR-011
     #[test]
     fn unrelated_setting_change_is_ignored() {
-        let mut client = SettingsClient::default();
+        let mut client = SettingsClient;
         let submissions = client.on_events(vec![settings_changed(&["ui.motion_level"])]);
         assert!(submissions.is_empty());
     }
@@ -170,7 +170,7 @@ mod spec_tests {
     /// REQ: COR-011
     #[test]
     fn onboarding_step_renders_first_run_schema_form() {
-        let mut client = SettingsClient::default();
+        let mut client = SettingsClient;
         let tree = client.render(
             ViewTarget::OnboardingStep("first-run".to_string()),
             Area {
@@ -187,7 +187,7 @@ mod spec_tests {
     /// REQ: COR-011
     #[test]
     fn overview_panel_renders_appearance_schema_form() {
-        let mut client = SettingsClient::default();
+        let mut client = SettingsClient;
         let tree = client.render(
             ViewTarget::Panel("overview".to_string()),
             Area {

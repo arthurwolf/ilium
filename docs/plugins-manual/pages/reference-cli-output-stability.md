@@ -118,6 +118,20 @@ Decision needed: where the release notes live and in what form (file in the repo
 - **[DEV-998]** A CLI flag, field or record type marked deprecated under DEV-858 MUST keep working for at least two minor releases (proposed, owner to confirm) of the contract version, matching API-083 and ABI-052.
 
 
+## Production additions: release notes
+
+The rules below settle where the release notes of the command line live, which sections they use and when they are published. They adopt the default given in the decisions above; the owner confirms or replaces that default.
+
+- **[DEV-950]** The release notes of each release of the command line MUST be the `CHANGELOG.md` entry of that release, under a heading `## <version> (<YYYY-MM-DD>)` whose date is the release date. The entry MUST use only the Keep a Changelog sections `Added`, `Changed`, `Removed`, `Fixed` and `Security`. Deprecations under [DEV-863] go under `Changed`, and breaking removals go under `Removed`. (proposed, owner to confirm)
+
+- **[DEV-951]** The `CHANGELOG.md` entry MUST be committed in the same commit as the version change, and the release tag MUST NOT be created before that commit exists. The release pipeline MUST fail with no release artifact produced when the tag has no heading for its version. (proposed, owner to confirm)
+
+- **[DEV-952]** The release notes MUST be published together with the release artifacts, never after them. A release page MAY repeat the notes, but the `CHANGELOG.md` entry is the record that a check reads. (proposed, owner to confirm)
+
+- **[DEV-953]** A release that fixes a vulnerability in the command line MUST list the fix under `Security`, with the advisory identifier of [SEC-322] and the CVE identifier, when one is assigned ([SEC-702]). That entry MUST be published with the advisory and MUST NOT name the flaw before the advisory is public ([EXT-070]). (proposed, owner to confirm)
+
+- **[DEV-954]** The release pipeline MUST fail when a `Removed` entry names an item that no earlier `CHANGELOG.md` entry marked deprecated with that item's stop release equal to the release being built. (proposed, owner to confirm)
+
 ## See also
 
 - [Plugin command-line reference](/pages/reference-plugin-cli/)

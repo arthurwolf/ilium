@@ -227,6 +227,31 @@ impl BelowStyle {
     }
 }
 
+/// How the tide varies over the world.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TidePattern {
+    /// One sea level for the whole world, rising and falling together.
+    #[default]
+    Global,
+    /// Two tidal bulges on opposite sides of the world that travel around it,
+    /// so it is high tide in some places while it is low tide elsewhere.
+    Bulges,
+}
+
+impl TidePattern {
+    pub const LABELS: [&'static str; 2] = ["Same everywhere", "Travelling bulges"];
+    pub fn from_index(index: usize) -> Option<Self> {
+        [Self::Global, Self::Bulges].get(index).copied()
+    }
+    pub fn index(self) -> usize {
+        match self {
+            Self::Global => 0,
+            Self::Bulges => 1,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PaletteChoice {
@@ -307,8 +332,10 @@ pub struct TopographicMapsSettings {
     pub start_longitude: i32,
     /// Shift of the zero level in metres, -3000..=3000.
     pub zero_shift_m: i32,
-    /// Peak-to-peak rise and fall of the zero level, 0..=2000 metres.
+    /// Peak-to-peak rise and fall of the zero level, 0..=20000 metres.
     pub tide_range_m: u32,
+    /// Whether the tide is the same everywhere or differs around the world.
+    pub tide_pattern: TidePattern,
     /// Seconds for one full rise and fall, 10..=600.
     pub tide_seconds: u32,
 }
@@ -336,6 +363,7 @@ impl Default for TopographicMapsSettings {
             start_longitude: 0,
             zero_shift_m: 0,
             tide_range_m: 0,
+            tide_pattern: TidePattern::Global,
             tide_seconds: 120,
         }
     }
@@ -389,7 +417,7 @@ impl SceneSettings for TopographicMapsSettings {
             center_latitude: self.center_latitude.clamp(-80, 80),
             start_longitude: self.start_longitude.clamp(-180, 180),
             zero_shift_m: self.zero_shift_m.clamp(-3000, 3000),
-            tide_range_m: self.tide_range_m.min(2000),
+            tide_range_m: self.tide_range_m.min(20_000),
             tide_seconds: self.tide_seconds.clamp(10, 600),
             ..self.clone()
         }
@@ -416,7 +444,8 @@ impl SceneSettings for TopographicMapsSettings {
             Control::slider("center_latitude", "Start latitude", self.center_latitude, (-80, 80, 5), "°", "Latitude the view is centred on when it starts and, for a still view, always."),
             Control::slider("start_longitude", "Start longitude", self.start_longitude, (-180, 180, 5), "°", "Longitude the view is centred on when it starts."),
             Control::slider("zero_shift_m", "Zero level shift", self.zero_shift_m, (-3000, 3000, 50), " m", "Raise or lower the zero level that the shore line and below-zero style refer to, flooding or draining the world."),
-            Control::slider("tide_range_m", "Tide range", self.tide_range_m as i32, (0, 2000, 50), " m", "Let the zero level rise and fall by this much, so shores creep across the map. 0 keeps it fixed."),
+            Control::slider("tide_range_m", "Tide range", self.tide_range_m as i32, (0, 20_000, 50), " m", "Let the sea level rise and fall by this much (peak to peak), so water floods and drains the map. Large values simulate a climate swing. 0 keeps it fixed."),
+            Control::choice("tide_pattern", "Tide pattern", self.tide_pattern.index(), &TidePattern::LABELS, "Same everywhere: the whole sea rises and falls together. Travelling bulges: like the real tide, two bulges on opposite sides of the world circle it, so the sea is high in some places while it is low in others."),
         ];
         if self.tide_range_m > 0 {
             rows.push(Control::slider(
@@ -456,7 +485,8 @@ impl SceneSettings for TopographicMapsSettings {
             "center_latitude" => set_number(&mut self.center_latitude, &value, (-80, 80), |n| n),
             "start_longitude" => set_number(&mut self.start_longitude, &value, (-180, 180), |n| n),
             "zero_shift_m" => set_number(&mut self.zero_shift_m, &value, (-3000, 3000), |n| n),
-            "tide_range_m" => set_number(&mut self.tide_range_m, &value, (0, 2000), |n| n as u32),
+            "tide_range_m" => set_number(&mut self.tide_range_m, &value, (0, 20_000), |n| n as u32),
+            "tide_pattern" => set_choice(&mut self.tide_pattern, &value, TidePattern::from_index),
             "tide_seconds" => set_number(&mut self.tide_seconds, &value, (10, 600), |n| n as u32),
             _ => Ok(false),
         }

@@ -603,6 +603,15 @@ Every dotted code named on this page and on the conformance page is in this tabl
 | `test.no-expectation` | Warning: a fixture has no expectation file |
 | `trap.deadline`, `trap.memory`, `trap.table`, `trap.submission-batch`, `trap.invalid-ui-tree`, `trap.abi`, `trap.panic` | Trap codes (a never-requested capability traps with `host.capability-not-requested`). The table in [Errors and limits](/pages/reference-errors-and-limits/#trap-codes) owns them. |
 
+## Flaky tests and retries
+
+A plugin test that passes or fails between runs with the same code is a defect, in the test or in the plugin. The rules below keep a retry or a quarantine from hiding it.
+
+- **[DEV-956]** A release pipeline MUST NOT retry a failing plugin test. A pull-request pipeline MAY retry it at most 1 time (proposed, owner to confirm). Every attempt MUST start a fresh instance with the same seed as the first attempt ([DEV-413], [DEV-919]), so a retry cannot pass on state left by the failed attempt.
+- **[DEV-960]** A test MAY be quarantined only by a quarantine entry that names an owner and an expiry date. The expiry date MUST be no more than 14 days after the day the entry is added (proposed, owner to confirm). A quarantined test MUST still run and its result MUST still be reported; it is left out only of the pass or fail decision of the pipeline. After the expiry date the test MUST count in that decision again, and the pipeline MUST fail until the entry is removed.
+- **[DEV-961]** A conformance case of the [Conformance suite](/pages/reference-conformance-suite/) MUST NOT be quarantined. A `fail` verdict of a conformance case MUST keep the exit code 3 of [DEV-602].
+- **[DEV-963]** A test that fails on one attempt and passes on a later attempt MUST be listed as flaky in the summary of the run, with the number of attempts. A retry MUST NOT turn such a test into a plain pass.
+
 ## See also
 
 - [Testing plugins](/pages/testing/)

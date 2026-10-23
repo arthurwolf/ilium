@@ -273,6 +273,7 @@ impl ConfigurationChange {
                     + value.icons.agent_toolbar_exit.capacity()
                     + value.icons.agent_toolbar_fast.capacity()
                     + value.icons.agent_toolbar_selection.capacity()
+                    + value.icons.chrome_recap.capacity()
                     + value.icons.task_progress_frames.capacity() * std::mem::size_of::<String>()
                     + value
                         .icons

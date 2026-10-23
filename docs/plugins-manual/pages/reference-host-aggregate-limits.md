@@ -67,6 +67,16 @@ A request refused by the aggregate ceiling leaves its plugin side `inactive` wit
 
 - **[HST-509]** The aggregate ceiling MUST NOT raise any session key or any per-side bucket, and a request MUST pass the session key checks and the aggregate check on every attempt, including a retry of a waiting request.
 
+### Disk and CPU ceilings
+
+The memory and thread ceilings above do not bound disk or CPU. The rules below add a machine-wide disk ceiling and a machine-wide CPU ceiling. Their numbers are proposals, so they are marked (proposed, owner to confirm). Once the owner confirms the CPU ceiling, it replaces the open-decision default of "none" above.
+
+- **[HST-126]** The host MUST enforce one disk ceiling for all plugins on one machine. The ceiling counts the `data` plus `cache` bytes of every installed plugin, across every session server, and it MUST be 8,192 MiB (proposed, owner to confirm). The per-plugin `disk_mib` key and the `cache_mib` key still apply, and a write MUST pass both the per-plugin check and this ceiling.
+- **[HST-127]** A plugin write that would take the machine past the disk ceiling of HST-126 MUST fail with `quota-exceeded` and the message `host-disk-ceiling`, MUST NOT evict data of another plugin to make room, and MUST NOT be counted as a failure of the plugin side. The host MUST NOT retry the write itself. A plugin MAY retry after the user or an administrator frees space.
+- **[HST-128]** The host MUST enforce one CPU ceiling for all plugin sides on one machine, held as one token bucket that holds 4,000 ms of thread CPU time and refills at 4,000 ms of thread CPU time per second (proposed, owner to confirm). It charges the same work as the per-side `ilium-execution` group of [Resource accounting](/pages/reference-resource-accounting/), and it applies in addition to that group, never instead of it.
+- **[HST-953]** When the CPU bucket of HST-128 is empty, a new submission and every call that returns a `request-id` MUST return `quota-exceeded` with a `retry-after-ms` value computed with the formula of [API-072] on the machine bucket. The refusal MUST NOT trap the plugin, MUST NOT count as a failure, and MUST NOT charge CPU time to any side beyond the cost of the call itself, as [API-089] requires.
+- **[HST-954]** The disk ceiling and the CPU ceiling MUST NOT lower the free-space reserve of [EXT-064] or the low-disk steps of [Offline and low disk](/pages/reference-offline-and-low-disk/). When free space falls under either threshold, those steps MUST still run, and the ceiling of HST-126 MUST NOT be used to skip them.
+
 ### Examples
 
 1. Two session servers are running. A third plugin activation in session B would fit `session_memory_mib` of session B but would push the machine total past the aggregate memory ceiling. The side stays `inactive` with `host-capacity`, the log records an aggregate refusal, and no failure is counted. When a plugin in session A is deactivated and its reservation is released, the waiting activation is retried.
@@ -88,6 +98,8 @@ A request refused by the aggregate ceiling leaves its plugin side `inactive` wit
 | `session_helpers` | 16 default | [Errors and limits reference](/pages/reference-errors-and-limits/) |
 | Aggregate memory ceiling | Not set (open decision, default 4,096 MiB) | Below |
 | Aggregate thread ceiling | Not set (open decision, default 64) | Below |
+| Aggregate disk ceiling (`data` plus `cache`, all plugins) | 8,192 MiB (proposed, owner to confirm) | HST-126 |
+| Aggregate CPU bucket | 4,000 ms held, 4,000 ms per second refill (proposed, owner to confirm) | HST-128 |
 
 ### What this page does not cover
 

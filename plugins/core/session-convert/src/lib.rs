@@ -112,8 +112,8 @@ mod spec_tests {
     /// REQ: COR-050
     #[test]
     fn sides_worlds_and_exports_match_the_manual() {
-        let _server = SessionConvertServer::default();
-        let _client = SessionConvertClient::default();
+        let _server = SessionConvertServer;
+        let _client = SessionConvertClient;
         let manifest_value = manifest();
         assert_eq!(manifest_value["server"]["world"], "ilium:server/base@0.1.0");
         assert_eq!(

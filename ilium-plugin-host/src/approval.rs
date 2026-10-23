@@ -1,4 +1,4 @@
-//! The approval channel of a grant request: a connected client answers, a script answers, or the
+//! The approval channel of a grant request: a connected client answers, or the
 //! request needs the review dialog (reference-grant-review-and-consent.md).
 
 use ilium_plugin_api::grants::Grant;
@@ -12,27 +12,35 @@ pub enum ApprovalError {
 
 /// Where a grant request is answered.
 #[derive(Debug)]
-pub struct ApprovalChannel;
+pub struct ApprovalChannel {
+    client_attached: bool,
+    next_answer: Option<bool>,
+}
 
 impl ApprovalChannel {
     /// A channel with an attached client.
     pub fn with_client() -> ApprovalChannel {
-        unimplemented!("host::approval::ApprovalChannel::with_client")
+        ApprovalChannel { client_attached: true, next_answer: None }
     }
 
     /// A channel without a client (headless CLI).
     pub fn without_client() -> ApprovalChannel {
-        unimplemented!("host::approval::ApprovalChannel::without_client")
+        ApprovalChannel { client_attached: false, next_answer: None }
     }
 
-    /// A scripted answer for the next request.
-    pub fn script_answer(&mut self, _yes: bool) {
-        unimplemented!("host::approval::ApprovalChannel::script_answer")
+    /// Injects the attached client's next answer for controlled tests. This is
+    /// not an implementation of `--yes` or permission to bypass a client.
+    pub fn script_answer(&mut self, yes: bool) {
+        self.next_answer = Some(yes);
     }
 
     /// Asks for `grants` of `plugin`; `Ok(true)` when approved.
     pub fn ask(&mut self, _plugin: &str, _grants: &[Grant]) -> Result<bool, ApprovalError> {
-        unimplemented!("host::approval::ApprovalChannel::ask")
+        let answer = self.next_answer.take();
+        if !self.client_attached {
+            return Err(ApprovalError::ReviewRequired);
+        }
+        answer.ok_or(ApprovalError::ReviewRequired)
     }
 }
 

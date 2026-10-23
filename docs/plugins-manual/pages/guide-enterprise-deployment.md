@@ -156,3 +156,26 @@ Contract: `ilium:plugin@0.1.0`.
 - [HST-687] A system-wide install MUST be stored read-only for users (owner root/administrator, no write for others), MUST be verified by `manifest.sha256` on each server start for each user, and MUST be loaded by many users concurrently without a per-user copy; compiled-component cache for it MUST be per user.
 - [HST-688] When two users open the same project folder, each user's session MUST keep its own grants, and project buckets MUST be stored per user (keyed by user id) or the host MUST refuse the second user with `project.owned-by-other-user`; a plugin MUST NOT be able to read the other user's project bucket. The `.ilium` folder permissions of 0700 MUST NOT be widened by the host.
 - [HST-689] The host MUST provide `ilium plugin admin purge-user <user>` (proposed, owner to confirm) for an administrator that deletes the plugin data, storage, grants, logs and cache of that user under the user's roots, requires `--yes`, writes a system audit entry and refuses a user with a running session server (`purge.user-active`).
+
+## Plugin logs and metrics on managed machines
+
+Ilium does not send plugin logs, trap or crash lines, or metrics to a fleet collector. The audit log is the only record that can leave a machine by itself ([SEC-228]). The rules below set the route for everything else. They are new and owner to confirm.
+
+- [HST-990] The host MUST NOT send plugin operational logs (`<state>/plugins/logs/`), host trap or crash lines, or `ilium plugin metrics` output to any network address, socket or remote service. The only remote route is the audit sink of [SEC-228], which carries audit records and nothing else.
+- [HST-991] `ilium plugin metrics` MUST write its Prometheus text to standard output only and MUST NOT open a listening socket. A fleet collector obtains the text by running the command from a job the administrator controls (for example a scheduled job that writes stdout to a file that the collector reads).
+- [HST-992] An administrator who copies plugin logs to another machine MUST keep the copy under owner-only modes (0600 for files, 0700 for folders), MUST NOT copy the trust store, grants, consents or plugin data folders, and MUST document the copy in the site's change record. A copy holds whatever the log files hold, so review it before sharing it outside the administrator's team.
+- [HST-993] The admin policy MUST NOT define a key that forwards plugin logs or metrics in this version. A future forwarding key needs its own requirement with a record format and a rate limit (proposed, owner to confirm).
+
+Crash loops and trap counts are visible only on the machine that produced them. To compare plugin state across machines, run `ilium plugin list --json --inventory` ([USR-341]); that output carries no crash or trap counts. For a single machine, `ilium plugin doctor --bundle` ([DEV-941]) packs the doctor records and the last log lines into one file.
+
+## Distribute trusted publisher keys
+
+The system trust store is `/etc/ilium/trust.json` ([PKG-222]). The effective trust set is the union of the user store and the system store, minus revoked keys ([PKG-223]). This section says how the administrator produces that file, pushes it, checks it and revokes a key with it. The rules are new and owner to confirm.
+
+- [PKG-980] The administrator MUST produce `/etc/ilium/trust.json` from one source file under version control, in the format of [Signing and trust](/pages/reference-signing-and-trust/#the-trust-store), and MUST record the SHA-256 of the produced file in the change record for each push.
+- [PKG-981] A push MUST write the file as root with mode 0644, through a temporary file in `/etc/ilium/`, fsync and rename. A machine MUST NOT have the file edited in place. A file that another user can write is refused at load with `grants.unsafe-permissions`, as [USR-207] describes.
+- [PKG-982] After each push, the administrator MUST run `ilium plugin trust list` on each machine and `ilium plugin doctor` ([USR-337]). A trust store line that is not `ok`, or a key list that differs from the source file, MUST count as a failed push. Use the configuration-management tool that already owns `/etc` on the machine, or a root-run copy job. Do not use a per-user `ILIUM_TRUST_STORE` for fleet keys.
+- [PKG-983] An unreadable system store makes its set empty, so signed packages from those keys become untrusted ([PKG-223]). A machine whose push fails MUST be treated as not trusting the new keys until the push succeeds.
+- [PKG-984] To revoke a compromised key across the fleet, the administrator MUST push a revocation statement ([PKG-242]) in the same change as the new file, then run the post-push checks of [PKG-982]. A machine not yet reached keeps trusting the key until the new file arrives.
+- [PKG-985] On an air-gapped machine, the registry root key MUST be pinned with `ilium plugin registry add <url> --root-key <key_id>` ([PKG-411]) only after the `key_id` has been compared with the publisher's published fingerprint through a second channel, such as a signed release note. The pinned `key_id` MUST be written to the change record. Root keys are never taken from a mirror alone.
+

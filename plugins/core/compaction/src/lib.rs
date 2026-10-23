@@ -99,7 +99,7 @@ mod spec_tests {
                         grants
                             .iter()
                             .filter(|entry| {
-                                entry.as_str().map_or(false, |grant| {
+                                entry.as_str().is_some_and(|grant| {
                                     grant.starts_with("settings.write-kernel:")
                                 })
                             })

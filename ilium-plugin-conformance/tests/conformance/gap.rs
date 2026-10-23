@@ -118,6 +118,7 @@ pub fn state_name(state: InstanceState) -> &'static str {
         InstanceState::Active => "active",
         InstanceState::Deactivating => "deactivating",
         InstanceState::RestartScheduled => "restart-scheduled",
+        InstanceState::Failed => "failed",
         InstanceState::StoppedByFailure => "stopped-by-failure",
         InstanceState::Stopped => "stopped",
     }

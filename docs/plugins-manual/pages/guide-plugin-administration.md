@@ -61,6 +61,16 @@ A mirror copies a registry so that machines without internet can install. Run `i
 | [PKG-473] | A full mirror MUST NOT be signed by the mirror operator. Clients check the signatures of the original registry. The one exception is a partial mirror ([PKG-409]), which signs with its own keys and its own `root.json`; clients verify that mirror against its own root, set in `[plugins.registry]`. |
 | [PKG-474] | With `packages.allowed_sources` set to the mirror, a client that cannot reach the mirror reports `registry.unreachable` and never falls back to another registry. |
 
+### Keep an isolated fleet fresh
+
+An isolated network receives no metadata unless someone copies it in, and the metadata expires ([PKG-367], [PKG-468]). A mirror or bundle that is not re-synced therefore goes stale by itself. The rules below set the cadence, the expiry check and a fleet-wide offline mode.
+
+| Id | Rule |
+|---|---|
+| [PKG-950] | On an isolated network, the administrator MUST re-run `ilium plugin mirror sync` (or re-export the bundle with `export-bundle`) on a connected machine at least once a day (proposed, owner to confirm). A full copy keeps the source `timestamp.json` byte for byte ([PKG-408]), and that document expires after one day. Test: sync a mirror, move the client clock 25 hours forward, and assert an install fails with `registry.metadata-expired`. |
+| [PKG-951] | An administrator MAY set `[plugins.registry] offline = true` in the system policy file (proposed: this key is not yet in the [policy keys](/pages/reference-admin-policy/) table). The setting is combined with the user file by logical OR, as the `offline` flag is ([SEC-181]), so a user cannot clear it. With it set, a cached index past its `expires` time is used with the stale-data warning of [PKG-378], and the install does not fail with `registry.metadata-expired`. Test: set the key, expire the cached index, and assert the install succeeds with the warning. |
+| [PKG-952] | After every sync, the administrator MUST read the `signed.expires` field of `timestamp.json` in each mirror folder or unpacked bundle, and MUST raise an alert when less than 12 hours remain before it passes (proposed, owner to confirm). Test: create a mirror whose timestamp expires in 6 hours and assert that the check reports it. |
+
 ## Policy keys for registries and sources
 
 The keys `packages.allowed_sources` [PKG-470], `packages.allow_url_installs` [PKG-471] and `packages.allowed_channels` [PKG-472] are defined in [Plugin policy](/pages/reference-plugin-policy/#keys). Rules:

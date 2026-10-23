@@ -120,7 +120,17 @@ impl WasmGuest {
         );
         let linker = Linker::<GuestState>::new(runtime);
         let instance = block_on(linker.instantiate_async(&mut store, &compiled.component))
-            .map_err(|error| HostError::EngineError(error.to_string()))?;
+            .map_err(|error| {
+                if store.data().breach.is_some() || error.downcast_ref::<wasmtime::Trap>().is_some() {
+                    let code = store.data().breach.unwrap_or_else(|| match error.downcast_ref::<wasmtime::Trap>() {
+                        Some(wasmtime::Trap::Interrupt) => "trap.deadline",
+                        Some(wasmtime::Trap::MemoryOutOfBounds) => "trap.memory",
+                        Some(wasmtime::Trap::TableOutOfBounds) => "trap.table",
+                        _ => "trap.panic",
+                    });
+                    HostError::ActivationTrap(trap(code, LIFECYCLE, "activate"))
+                } else { HostError::EngineError(error.to_string()) }
+            })?;
         engine.record_instantiation();
         Ok(Self {
             engine,

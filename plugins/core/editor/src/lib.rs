@@ -210,7 +210,7 @@ mod spec_tests {
         >() {
         }
         assert_provides_manifest_exports::<EditorClient>();
-        let _default_client = EditorClient::default();
+        let _default_client = EditorClient;
     }
 
     /// REQ: COR-050

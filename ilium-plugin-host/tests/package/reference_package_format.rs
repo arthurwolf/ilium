@@ -220,7 +220,7 @@ fn pkg_105_directory_entry_refused_entry_directory() {
 #[test]
 fn pkg_105_top_level_directory_entry_refused_entry_directory() {
     let mut entries = base();
-    entries.insert(1, Z::new("help/", b""));
+    entries.insert(0, Z::new("help/", b""));
     let bytes = build(&entries, &Tail::default());
     assert_eq!(stage1_codes(&bytes), one_code("package.entry-directory"));
 }
@@ -997,7 +997,7 @@ fn pkg_123_names_differing_only_in_case_from_listed_ones_refused_entry_unexpecte
     );
     assert_eq!(
         location_codes("Server.wasm"),
-        one_code("package.entry-unexpected")
+        vec!["package.entry-unexpected".to_owned(), "package.path-case-collision".to_owned()]
     );
 }
 

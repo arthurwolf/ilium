@@ -59,3 +59,9 @@ else is invented. All time is virtual: `OpsRig::advance` moves the clock and run
 - Exact `session-result` fields (`session`, `ok`) and the `changed` field of enable and disable results are assumed.
 - `ilium_plugin_host::testing::ops::LifeEvent` enum, variants `PluginRestart, DisableEnable, Update, ServerRestart, ClientReconnect, SessionDelete, Uninstall, UninstallPurge` (derive Clone, Copy, Debug, PartialEq, Eq); LIF-150..157 (keep-and-lose matrix columns).
 - `ilium_plugin_host::testing::ops::Marker` enum, variants `LinearMemory, PendingRequest, Settings, RestoreServer, RestoreClient, GlobalBucket, ProjectBucket, SessionBucket, DataFolder, CacheFolder, Grants, NodeMetadata, DurableTimers` (derive Clone, Copy, Debug, PartialEq, Eq); LIF-150..157 (matrix rows). The E0408/E0425 errors in reference_persistence_and_restart.rs cascade from these.
+
+## LIF-950..981 (lane lifecycle-ops, part 2)
+
+- LIF-978, LIF-979, LIF-980, LIF-981: the rig cannot plant crash marks, start a server at a chosen safe-mode level (`third-party`, `all-optional`, `--no-plugins`), or report a start's exit status and footer. Missing: `ilium_plugin_host::testing::ops::OpsRig::plant_crash_marks` (writes the start-crash marks LIF-186 reads) and `ilium_plugin_host::testing::ops::OpsRig::start_server_with_safe_mode` (starts with a level, returns the exit status and the footer text). The behaviour tests call `unimplemented!` naming these items.
+- LIF-952 to LIF-955: the operator alert evaluator and the sampler that feed it are not a host API; the host exposes only `ilium plugin metrics` and `ilium plugin health`. These rows are tested by the alert table, thresholds and sampling text of `reference-health-and-watchdog`; no alert firing is driven.
+- LIF-956, LIF-950, LIF-951, LIF-960 to LIF-975: operator, release and documentation procedures. Tested by the manual text only.

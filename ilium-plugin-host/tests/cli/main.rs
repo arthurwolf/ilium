@@ -10,3 +10,4 @@ mod reference_plugin_cli_keys_trust;
 mod reference_plugin_cli_lifecycle;
 mod reference_plugin_cli_logs;
 mod reference_plugin_cli_new_build;
+mod reference_conformance_suite_versions;

@@ -107,10 +107,7 @@ fn read_request(stream: &mut TcpStream) -> String {
     let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
     let mut received = Vec::new();
     let mut chunk = [0_u8; 4_096];
-    loop {
-        let Ok(read) = stream.read(&mut chunk) else {
-            break;
-        };
+    while let Ok(read) = stream.read(&mut chunk) {
         if read == 0 {
             break;
         }

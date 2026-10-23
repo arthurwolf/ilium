@@ -103,8 +103,8 @@ mod spec_tests {
         assert_eq!(manifest["server"]["world"], "ilium:server/base@0.1.0");
         assert_eq!(manifest["client"]["entry"], "client.wasm");
         assert_eq!(manifest["client"]["world"], "ilium:client/base@0.1.0");
-        let _server: TerminalServer = TerminalServer::default();
-        let _client: TerminalClient = TerminalClient::default();
+        let _server: TerminalServer = TerminalServer;
+        let _client: TerminalClient = TerminalClient;
     }
 
     /// REQ: COR-050

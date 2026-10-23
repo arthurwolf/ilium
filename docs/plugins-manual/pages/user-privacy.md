@@ -21,10 +21,12 @@ Contract version: `ilium:plugin@0.1.0`. Requirement ids have the form `[USR-nnn]
 - Where a plugin can send data
 - What Ilium itself sends
 - What is stored on your machine
+- How long each kind of data is kept
 - Delete a plugin's data
 - Crash records and pre-migration backups
 - Core plugins and AI providers
 - Errors and edge cases
+- Who is responsible for your data
 - Requirements
 
 ### The short version
@@ -81,6 +83,10 @@ A plugin that holds both a read permission and a network permission can send wha
 - [USR-102] A T2 or T3 plugin MUST have no network access except through `http:` grants and the providers named above. Test: from a test plugin, try a raw socket and a request to an ungranted host, and assert failure.
 - [USR-103] Ilium MUST refuse a request to a host that the plugin has no grant for, including a redirect target. Test: redirect from a granted host to an ungranted host and assert `not-permitted`.
 
+The `location.geocode` service sends the query to the provider. A search sends the query text, between 2 and 200 characters, to Photon, with Nominatim as fallback. A reverse lookup sends the coordinates of the point. The host keeps each result for 24 hours, keyed by query text, so a repeated search does not contact the provider again. The provider's own terms and retention apply to what it receives. Ilium does not control them.
+
+- [USR-957] The host MUST send to the geocode provider only the query text of a search or the coordinates of a reverse lookup, and MUST NOT keep a cached result longer than 24 hours. Test: run one search and one reverse lookup against a capture proxy and assert that each request carries only those fields; assert that a cached result is gone 24 hours later.
+
 ### What Ilium itself sends
 
 Ilium does not contact any server on its own to check, list, download or update plugins. The only exception is a registry you set up yourself: the store then fetches that registry's metadata when you open it (see [the plugin store](/pages/user-plugin-store/)), and nothing else is fetched. Installing a plugin does not use the network. Reading a package does not use the network. Verifying a signature does not use the network, because the keys you trust are stored on your machine.
@@ -88,6 +94,10 @@ Ilium does not contact any server on its own to check, list, download or update 
 Ilium's own features that use the network are unchanged: for example, AI providers you configure. Core plugins contact the same services as before. Their page in Settings lists them. See [Inference providers](/pages/core-plugin-inference/).
 
 - [USR-062] Install, verify, update, uninstall and list of local packages MUST NOT use the network; only the store's registry fetch from a registry the user configured (the refresh sequence of PKG-370 in [the registry reference](/pages/reference-registry/)) may, and never with no registry configured (PKG-532). Test: run each in a network namespace without interfaces and assert success.
+
+A registry you configure receives each request you make to it, as any web server does. Each request carries your IP address and the `User-Agent` header. The registry operator decides how long its access logs keep them. Ilium does not control that period.
+
+- [USR-956] A registry operator MUST publish a privacy notice that states how long its access logs keep the IP address and `User-Agent` of each request, and that period MUST NOT exceed 30 days (proposed, owner to confirm). Test: pending: test to be written.
 
 ### What is stored on your machine
 
@@ -106,6 +116,28 @@ A project's `.ilium` folder may hold plugin settings and the plugin's project st
 
 Plugin logs are plain text. Plugins are told not to write secrets there, but Ilium cannot check. Read a log before you share it.
 
+### How long each kind of data is kept
+
+Each kind of plugin data that Ilium keeps is listed here with its default retention and the command that deletes it. The locations are in the table above. [USR-348] requires a test that compares each retention value with the code constants.
+
+| What | Default retention | Deleted by |
+|---|---|---|
+| Installed packages | Until you uninstall the plugin or update it | `ilium plugin uninstall <id>` removes the package ([USR-208]) |
+| Permissions and answers (`grants.json`, `consents.json`) | Until you revoke them or uninstall the plugin | A default uninstall removes grants ([USR-208]). `ilium plugin erase-data` removes grants and consent records ([USR-246], [USR-326]) |
+| Plugin settings | Until you delete them | `ilium plugin uninstall <id> --purge`, `erase-data`, or Recovery page > Forget settings. A default uninstall keeps them ([USR-208]) |
+| Plugin data and notes | Until you delete them | `ilium plugin uninstall <id> --purge` or `erase-data`. An uninstall without `--purge` leaves them inert |
+| Plugin logs | The active file and 4 rotated files. Rotated files are deleted after 14 days at server start. After an uninstall, logs are deleted 7 days later | `--purge` deletes them at once, and `erase-data` deletes them ([USR-246]) |
+| Crash records | 30 days and at most 200 records ([USR-236]; both values are proposed, owner to confirm, see [SEC-955](/pages/reference-audit-log/)) | `ilium plugin uninstall <id>`, with or without `--purge`, deletes all crash records of that plugin. `erase-data` deletes them ([USR-326]) |
+| Pre-migration backups | Only the newest one per plugin, kept after each committed update ([USR-237]) | `--purge` deletes all of them. An uninstall without `--purge` keeps them ([USR-238]). `erase-data` removes them ([USR-326]) |
+| Audit log | `audit.keep_days`, default 365 days ([SEC-224]) | `erase-data` does not delete it before the period ends. Erasure names the kept records ([USR-248]) |
+| Plugin cache | No fixed period. The host may evict it at any time | A default uninstall ([USR-208]) and `erase-data` ([USR-326]) |
+| Support-bundle staging files | Not stated in the source pages (owner to confirm) | `erase-data` ([USR-326]) |
+| `installed.json` extras that hold settings values | Until erased | `erase-data` ([USR-326]) |
+| Geocode results | 24 hours, keyed by query text ([USR-957]) | Not in the erase list of [USR-326] (owner to confirm) |
+| Registry metadata cache | Until a newer verified copy replaces it, for offline use (see [the registry reference](/pages/reference-registry/)) | Not stated in the source pages (owner to confirm) |
+
+- [USR-955] Every kind of plugin data the host keeps MUST have one row in the retention table, with its default retention and the command that deletes it. A kind with no deleting command MUST be named as kept. Test: pending: test to be written.
+
 ### Delete a plugin's data
 
 | I want to delete | Do this |
@@ -114,7 +146,7 @@ Plugin logs are plain text. Plugins are told not to write secrets there, but Ili
 | A plugin's settings only | Recovery page > Forget settings |
 | A plugin's logs | `--purge` |
 | A plugin's pre-migration backups | `ilium plugin uninstall <id> --purge` |
-| A plugin's crash records | Decision needed, see [Crash records and pre-migration backups](#crash-records-and-pre-migration-backups) |
+| A plugin's crash records | `ilium plugin uninstall <id>`, with or without `--purge`, or `ilium plugin erase-data` (see [Crash records and pre-migration backups](#crash-records-and-pre-migration-backups)) |
 | One project's plugin data | Delete the plugin's files in the project's `.ilium` folder, or use `--purge` while the project is open |
 | My trusted publisher keys | `ilium plugin trust remove <key_id>` |
 | Everything | Remove the plugin folders listed in [Plugin files on disk](/pages/reference-plugin-files/) with Ilium stopped |
@@ -134,11 +166,11 @@ Pre-migration backups are copies of a plugin's data and storage buckets, made be
 - [USR-237] After each committed update, Ilium MUST keep only the newest pre-migration backup of that plugin and delete the older ones. `ilium plugin uninstall <id> --purge` MUST delete every pre-migration backup of that plugin. Test: doc check in ilium/tests/plugin_user_flows that the backup rule and the purge row of the delete table name the newest-copy rule and `--purge`.
 - [USR-238] `ilium plugin uninstall <id>` without `--purge` MUST keep the pre-migration backups of that plugin, so that a reinstall finds them. Test: doc check in ilium/tests/plugin_user_flows that this rule matches the uninstall rules of the install and uninstall reference.
 
-Decision needed: should `uninstall --purge` also delete that plugin's crash records? The records name the plugin, but the manual names no command that removes them before the 30-day limit, so a full erase of one plugin leaves them behind. Default: yes. `--purge` is the command for erasing everything about one plugin, so it should delete that plugin's crash records and leave the records of other plugins alone.
+Crash records of an uninstalled plugin are deleted at once. `ilium plugin uninstall <id>`, with or without `--purge`, deletes every crash record of that plugin and leaves the records of other plugins alone. `--keep-data` does not keep crash records. This is the rule of [SEC-955](/pages/reference-audit-log/). Run the support bundle command above first if you need the records.
 
 ### Core plugins and AI providers
 
-Core plugins are made by the Ilium project and follow the same permission rules for high-risk abilities. Some of them send data to services you configure: the Inference plugin sends prompts to the AI provider you pick, the Voice plugin may use a speech service you set up (audio is sent only when that provider is remote, stays in memory, and transcripts are dropped when the voice session ends; see [Voice data and privacy](/pages/core-plugin-voice/#data-and-privacy)), and the Cost plugin may read agents' usage files. These behave as documented in the user documentation. A third-party plugin that asks for `inference` uses the same providers and the same privacy controls: the provider you choose for each purpose, and the AI admission gate, which checks every request against the `purpose` its caller named and records it in the privacy log (see [Inference](/pages/capability-inference/#risk-and-privacy-rules)). No separate setting exists for file names, paths or terminal text: a plugin sees them only through its own read grants, and sends them only if it puts them in a request.
+Core plugins are made by the Ilium project and follow the same permission rules for high-risk abilities. Some of them send data to services you configure: the Inference plugin sends prompts to the AI provider you pick, the Voice plugin may use a speech service you set up (audio is sent only when that provider is remote, stays in memory, and transcripts are dropped when the voice session ends; see [Voice data and privacy](/pages/core-plugin-voice/#data-and-privacy)), and the Cost plugin may read agents' usage files. These behave as documented in the user documentation. A third-party plugin that asks for `inference` uses the same providers and the same privacy controls: the provider you choose for each purpose, and the AI admission gate, which checks every request against the `purpose` its caller named and records it in the privacy log (see [Inference](/pages/capability-inference/#risk-and-privacy-rules)). No separate setting exists for file names, paths or terminal text: a plugin sees them only through its own read grants, and sends them only if it puts them in a request. What the Inference plugin keeps and for how long is in [Inference providers](/pages/core-plugin-inference/#what-is-kept-and-for-how-long).
 
 ### Errors and edge cases
 
@@ -149,6 +181,22 @@ Core plugins are made by the Ilium project and follow the same permission rules 
 | The audit log | Always on. Install, update, grant, consent, trust and block events are recorded. Plugin data and settings values are not. See [Audit log](/pages/reference-audit-log/) |
 | You share a project folder | Plugin settings and project storage in `.ilium` go with it. Permissions do not |
 | A plugin writes a secret to its log | Ilium cannot detect it. The log rotates at 4 MiB, keeps four rotated files, deletes rotated files older than 14 days at server start, and the logs of an uninstalled plugin are deleted 7 days after uninstall; `--purge` deletes them at once |
+
+### Who is responsible for your data
+
+Each party answers for the data it holds. Plugin data sits in your own folders on your machine. The other holders are:
+
+- **The Ilium project.** It makes Ilium and the core plugins. It receives no plugin data from your machine ([USR-060]).
+- **A registry operator.** It holds the access logs of the requests you make to its registry ([USR-956]).
+- **A plugin's publisher and the host it sends to.** A plugin sends data only to hosts you granted ([USR-102]). What a plugin does with the data it sends is the responsibility of its publisher and of that host's operator.
+- **The AI provider and the geocode provider.** They hold what is sent to them, under their own terms.
+- **Your administrator.** On a managed machine, the administrator sets the policy ([Administration guide](/pages/guide-administration/)).
+
+Whether any of these parties is a controller or a processor under a particular data protection law is owner to confirm. This page states only which party holds which data.
+
+To ask for a copy or the erasure of your data, use `ilium plugin export-data` and `ilium plugin erase-data` for data on your machine ([USR-245], [USR-246]). For data that a registry, a provider or a host holds, ask that party. Ask the Ilium project about anything it holds.
+
+- [USR-958] The Ilium project MUST answer a written request for access to or erasure of data it holds within 30 days (proposed, owner to confirm), and MUST name the party that holds any data it does not hold. Test: pending: test to be written.
 
 ## Personal data export and erasure requirements
 

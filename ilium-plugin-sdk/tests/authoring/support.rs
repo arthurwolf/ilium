@@ -369,3 +369,16 @@ impl<const N: usize> NativeEntry for SizedRestore<N> {
 
 /// One MiB in bytes.
 pub const MIB: usize = 1024 * 1024;
+
+/// Asserts that the guide-page line carrying the marker `[id]` contains every needle.
+/// The requirement table row is not consulted, so wording that only the guide states is checked here.
+pub fn assert_page_line(id: &str, needles: &[&str]) {
+    let lines = rule_lines(id);
+    assert!(!lines.is_empty(), "{id}: no page line carries the marker");
+    for needle in needles {
+        assert!(
+            lines.iter().any(|line| line.contains(needle)),
+            "{id}: page line lacks {needle:?}"
+        );
+    }
+}

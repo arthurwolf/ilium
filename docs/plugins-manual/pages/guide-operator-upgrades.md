@@ -75,6 +75,22 @@ A host rollback is the operator's replacement of the Ilium binary with an earlie
 
 Decision needed: decide whether this release supports a host rollback, and how earlier binaries are kept. The default is to document a host rollback as the steps above, with the checks in the next section, and to make no promise about stored data until the owner confirms that an earlier host starts with the data a later host wrote. Consequence: operators who need to undo a host release have no confirmed procedure yet, and the only refusal the manual states for a rollback is `migration.data-newer`, which applies to a plugin rollback.
 
+### Data written by a newer host
+
+A host rollback changes the binary, not the data on disk. The earlier host meets whatever the newer host wrote at its next start. These rules decide what it does; the first three are stated elsewhere and are repeated here only as they apply to a rollback.
+
+- The earlier host reads a file only when its format number is at most its own (LIF-304). It never converts newer data downward (PKG-288).
+- A file with a higher format number in `installed.json`, a bucket or a stamp makes the earlier host start with the affected plugins disabled, log `host.format-newer` naming the file, and leave the file unchanged (LIF-305).
+- A plugin bucket whose stamp is newer than the earlier plugin version is refused with `migration.data-newer` on activation, unless `--restore-backup` or `--discard-data` is given (LIF-079).
+- A core snapshot or config file written by a newer build is kept unmodified, and the earlier build starts with persistence read-only and a notice naming both versions (COR-093). See [Data written by a newer build, and unknown section versions](/pages/reference-config-and-data-migration/#data-written-by-a-newer-build-and-unknown-section-versions).
+
+The following rules are new and apply to any host rollback.
+
+- [LIF-950] Before replacing the Ilium binary, the operator MUST keep a copy of the previous Ilium binary and of the plugin state files (`installed.json`, the plugin buckets and the stamps), and MUST keep both until the checks in the next section pass. Keeping one previous binary is the minimum this page relies on (proposed, owner to confirm).
+- [LIF-951] After a host rollback, an operator MUST NOT enable a plugin whose log shows `host.format-newer` until either the newer host has been started again or the file named in that log line has been restored from the copy kept under LIF-950, because the earlier host cannot read that file.
+
+The owner has not yet decided whether this release supports a host rollback at all. LIF-950 and LIF-951 state the data rule that applies in either case, and the numbers they carry are proposals.
+
 ### Checks after an upgrade or a host rollback
 
 - [LIF-298] After a host upgrade or a host rollback, the operator MUST run `ilium plugin list --json` and MUST read `ilium plugin logs <id> --tail 100` for each plugin that does not behave as expected. A plugin in `stopped-by-failure` MUST be enabled again only after its cause is fixed, because enabling clears its failure window.
@@ -132,7 +148,7 @@ An operator who manages many machines or sessions applies a plugin update to a s
 
 Each entry gives detection, mitigation and recovery. The runbook is part of the contract: the commands and codes it names MUST exist.
 
-- [EXT-074] The runbook MUST cover a crash loop: detection by the plugin state `stopped-by-failure` with a restart count shown by `ilium plugin list --json`; mitigation by `ilium plugin disable <id>`; recovery by reading `ilium plugin logs <id>` and re-enabling. The host MUST stop restarting a plugin after 5 failures in 10 minutes.
+- [EXT-074] The runbook MUST cover a crash loop: detection by the plugin state `stopped-by-failure` with a restart count shown by `ilium plugin list --json`; mitigation by `ilium plugin disable <id>`; recovery by reading `ilium plugin logs <id>` and re-enabling. The host MUST stop restarting a plugin at the third failure within 10 minutes (HST-400).
 - [EXT-075] The runbook MUST cover a quarantined or blocked plugin that users still depend on: detection by `Quarantined` or `Blocked` in the list; mitigation by naming the replacement or the fixed version; recovery by upgrade, with the data kept as stated in [SEC-327].
 - [EXT-076] The runbook MUST cover an upgrade that fails part way: detection by the error code and the audit line; mitigation by the guarantee that the previous version stays installed ([EXT-062]); recovery by `ilium plugin rollback <id>` and a retry after the cause is fixed.
 

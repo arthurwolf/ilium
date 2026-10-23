@@ -157,7 +157,7 @@ mod spec_tests {
     /// Manual: `Lifecycle`: `deactivate` has a default that saves no state
     #[test]
     fn default_deactivate_saves_no_state_for_every_delivered_reason() {
-        let mut plugin = QuietPlugin::default();
+        let mut plugin = QuietPlugin;
         for reason in [
             DeactivationReason::Shutdown,
             DeactivationReason::Disabled,

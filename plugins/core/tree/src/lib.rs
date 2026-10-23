@@ -182,7 +182,7 @@ mod spec_tests {
 
     #[test]
     fn empty_event_batch_submits_nothing() {
-        let submissions = TreeServer::default().on_events(Vec::new());
+        let submissions = TreeServer.on_events(Vec::new());
         assert!(submissions.is_empty());
     }
 }

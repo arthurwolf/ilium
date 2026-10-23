@@ -39,6 +39,7 @@ ilium plugin check
 ilium plugin lint --deny warnings
 ilium plugin test
 ilium plugin build --release
+ilium plugin test --conformance --json
 ilium plugin pack
 ilium plugin verify dist/com.example.notes-1.4.0.iliumpkg
 ```
@@ -49,12 +50,15 @@ ilium plugin verify dist/com.example.notes-1.4.0.iliumpkg
 | `lint` | Weak spots such as an unused grant, a missing help topic or a debug build in a release |
 | `test` | Behaviour against your fixtures |
 | `build --release` | A release build without debug information |
+| `test --conformance` | Contract limits that the fixtures do not reach: deadlines, grants and restart rules. A fail verdict exits with code 3. |
 | `pack` | The deterministic archive with the `files` inventory |
 | `verify` | Offline replay of the install stages 1 to 7 on the finished file |
 
 A release MUST pass `check` without errors and SHOULD pass `lint --deny warnings`. [AUT-302]
 
 A release package MUST be built with `--release`, because a package that carries debug information or source maps is larger and fails `lint.debug-info-in-release`. [AUT-303]
+
+A release MUST run the conformance suite on the release build, after `build --release` and before `pack`, and the run MUST have no `fail` verdict (proposed, owner to confirm: zero fail verdicts). The conformance report MUST be kept with the release. The suite runs in component mode only, so the release build is the one it can test. [AUT-950]
 
 The release checklist of [Quality checklist](/pages/guide-quality-checklist/) lists what each of these checks and what they cannot check.
 
@@ -161,6 +165,18 @@ Wherever the file goes, the author SHOULD name the file `<id>-<version>.iliumpkg
 
 A user can check a file before installing it: `ilium plugin verify <file>` runs the install stages offline, and `ilium plugin inspect <file> --verify` recomputes the hashes.
 
+## Registry availability
+
+This section is for a registry operator, and for an author who pins a registry address in a policy file. A team can accept a registry as a dependency only when the operator states the following.
+
+A retirement of a registry URL, a mirror or an API version MUST be announced at least 90 days before it takes effect (proposed, owner to confirm). [AUT-951]
+
+The operator MUST name a status page, and MUST update it within 1 hour (proposed, owner to confirm) of the start of an incident that affects installs or updates. [AUT-952]
+
+Planned maintenance MUST be announced at least 48 hours before it starts (proposed, owner to confirm), and the announcement MUST say which operations stop during it. [AUT-953]
+
+What a client does while the registry is unreachable is in [Registry reference](/pages/reference-registry/), under [Client behaviour on each failure](/pages/reference-registry/#client-behaviour-on-each-failure). Those rules describe the client, not the operator's promises above.
+
 ## Platforms
 
 T2 and T3 packages run only on Linux in version 0.1.0 and are refused on Windows and macOS with `package.platform-unsupported`. A release page MUST state that signed and unsigned third-party packages need Linux. [AUT-313]
@@ -181,6 +197,8 @@ A bug report is useful when it lets you see what the plugin did. The user has fo
 Payloads in a normal trace are redacted and print as `<redacted N bytes>`. `--unredacted` works only for a plugin installed with `ilium plugin dev`, so an author MUST NOT ask a user for unredacted output from a normal install. [AUT-314]
 
 A plugin that logs MUST NOT write secrets, tokens, file contents or whole payloads to the plugin log. A log line is 16 KiB at most, so write a count or an id. [AUT-315]
+
+When the log or a trace shows that Ilium itself, and not your plugin, caused the failure, tell the user to report it to the Ilium project, not to you. Your README MUST name the route for that report (owner to confirm: the host project does not publish a general support channel yet). [AUT-954]
 
 ### A template for bug reports
 

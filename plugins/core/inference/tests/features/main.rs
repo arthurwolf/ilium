@@ -11,6 +11,7 @@ mod doc_page;
 mod hooks_topic;
 mod manifest;
 mod provider;
+mod retention;
 mod service;
 mod streaming;
 mod test_provider;

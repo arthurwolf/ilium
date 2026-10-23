@@ -207,6 +207,7 @@ fn dev_489_a_hook_on_a_stub_yields_pass() {
         let call = HookCall {
             call: 1,
             point: "before-move".to_string(),
+            extension: "ilium.core.tree".to_string(),
             payload_json: "{}".to_string(),
         };
         let reply = session
@@ -318,6 +319,7 @@ fn dev_487_run_hook_for_an_uninstalled_plugin_fails_with_plugin_unknown() {
         let call = HookCall {
             call: 1,
             point: "x".to_string(),
+            extension: "example.absent".to_string(),
             payload_json: "{}".to_string(),
         };
         let error = session

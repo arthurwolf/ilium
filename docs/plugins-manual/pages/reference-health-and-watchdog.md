@@ -134,6 +134,26 @@ com.example.cursor    <span class="t-err">failed</span>     -      -
 - [LIF-137] `ilium plugin status` MUST print the health and the metrics of every installed plugin, as JSON lines when output is not a terminal. Test: run it in a pipe and parse.
 - [LIF-138] The diagnostics report MUST contain a `Plugins` section with the health of every plugin that is not `healthy`. Test: degrade a plugin and generate the report.
 
+### Operator alert rules
+
+An administrator who alerts on plugins uses the health states and counters above. Each threshold below is one that this page already defines, except where it is marked as proposed.
+
+| Alert | Signal and source | Fires when | Operator action |
+|---|---|---|---|
+| Plugin failed | `health` from `ilium plugin health` (exit code 2) or `plugin-status` | any plugin is `failed` | Read the stopped side with `ilium plugin status <id> --json`, then the crash record with `ilium plugin logs <id>` ([API-092]). Enable the plugin again only after reading the cause ([API-093]). |
+| Plugin degraded | `health` from `plugin-status` | any plugin is `degraded` for 15 minutes or more (proposed, owner to confirm) | Read the `Why` line ([HST-363]). A degraded state clears on its own when its counter leaves its time span, so act on a state that persists. |
+| Near-misses | `near_misses` | 5 or more in 5 minutes, as in the degraded table | Compare `p99_ms` with the deadline. A call close to its deadline traps when it runs past it ([LIF-125]). |
+| Traps | `traps`, per side | 1 or more in 10 minutes (proposed, owner to confirm) | Find the trap code in the plugin log ([API-092] keeps a counter per trap code) and read its `code` and `phase` fields ([ABI-079]). |
+| Event queue | `queue_high_water` | 768 or more of the 1,024 queued events in 1 minute | Read the plugin log for slow `on-events` calls. A queue that stays near full means the handler is slower than the event rate. |
+| Quota | `quota_hits` | 1 or more `quota-exceeded` or `rate-limited` results in 5 minutes | Find the grant or limit that returned the result in the plugin log. Budgets are in [Resource accounting](/pages/reference-resource-accounting/). |
+| ABI failure | the per-code ABI counter, labelled by plugin id ([ABI-080]) | 1 or more in 10 minutes (proposed, owner to confirm) | Check the plugin's contract version against `ilium:plugin@0.1.0`, then the `code` field of the log record ([ABI-079]). |
+
+- [LIF-952] An administrator who monitors plugins MUST alert on each row of the table above at the stated threshold, and MUST NOT rely on reading logs for these signals. Test: drive a fixture plugin into each state, run the sampling job, and assert that each alert fires when its threshold is met and not before.
+- [LIF-953] An administrator MUST sample `ilium plugin metrics` and `ilium plugin health` at an interval of at most 1 minute (proposed, owner to confirm), which is the shortest time span in the degraded table. Test: run the sampler against a fixture for 10 minutes and count the samples.
+- [LIF-954] Counters reset at a server restart ([LIF-136]), so an alert MUST NOT resolve because a counter fell. After a restart, an alert that is open MUST stay open until a sample taken after the restart reports `healthy` for that plugin. Test: raise a near-miss alert, restart the server, and assert that the alert closes only on the first sample that reports `healthy`.
+- [LIF-955] An alert whose newest sample is older than 3 minutes (proposed, owner to confirm), which is three sampling intervals of LIF-953, is stale. A stale alert MUST show `no data`, MUST NOT show as clear, and MUST be treated as a failure of the monitoring. Test: stop the sampler and assert that each alert shows `no data` 3 minutes later.
+- [LIF-956] An operator alert MUST NOT be silenced by `ilium plugin mute <id>`, because that command mutes only the user notification of [HST-641]. Test: mute a degraded plugin and assert that the operator alert still fires.
+
 ### Edge cases
 
 | Situation | What happens |

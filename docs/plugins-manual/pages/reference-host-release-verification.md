@@ -80,6 +80,18 @@ $ gh attestation verify ilium-linux-x86_64.tar.gz --repo arthurwolf/ilium
 
 - [SEC-435] A hash comparison MUST use the whole 64-character value and the exact archive name. A user who finds no line for the archive, or more than one, MUST treat the download as failed.
 
+## Offline verification
+
+This section applies to a site that cannot reach the download page or GitHub. The attestation check of [SEC-429] needs GitHub, so an offline site cannot run it itself. The hash check still works offline, once the files are copied in.
+
+- [SEC-960] A site without GitHub access MUST run the attestation check of [SEC-429] on a connected machine, against the same archive bytes that the site will receive, and MUST NOT carry the archive into the site until that check reports a verified attestation. The hash of the archive MUST be computed again on the offline site.
+- [SEC-961] A mirror of a host release MUST hold the five archives of the archive inventory and the `SHA256SUMS` of one release tag, with the file names and bytes unchanged. A mirror MUST NOT edit, rebuild or re-sign `SHA256SUMS`, and MUST NOT combine files from two release tags.
+- [SEC-962] Each offline verification MUST leave a written record with the release tag, the archive name, the SHA-256 hash, the time of the check in `YYYY-MM-DD HH:mm:ss`, the machine that ran the attestation check and the result. A record without the attestation result MUST NOT be used as proof that the archive is genuine.
+
+A matching hash on the offline site shows that the archive is the file listed in `SHA256SUMS`, as in [SEC-429]. It shows nothing about the builder, so the record of [SEC-962] is the only proof of origin that the site keeps.
+
+Decision needed: whether each release should also publish an attestation bundle, a file that `gh attestation verify` can check without contacting GitHub. Default I would use: no bundle for now, because this page does not yet confirm that the GitHub CLI supports offline bundle checks in the version the project documents. Until the bundle or a detached signature exists, an offline site has no install path from a local archive: the installer of [SEC-434] downloads over HTTPS only, so this page does not define an offline install.
+
 ## What the host reports about itself
 
 The host does not re-check the release archive at start. The checks above run once, in the installer, before the files are installed. To see which build is running, use:

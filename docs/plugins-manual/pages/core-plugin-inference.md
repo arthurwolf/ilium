@@ -731,6 +731,16 @@ Side basis: `ilium.core.inference/provider-profiles` is client because its entri
 - [Titles and organisation](/pages/core-plugin-titles/), a main consumer
 - [Security](/pages/security/)
 
+### What is kept and for how long
+
+Ilium keeps no copy of a prompt or a reply in the privacy log. Each admitted request adds one record with the plugin, the purpose, the provider, the model, the token counts and the `local` flag, and the log keeps 90 days or 16 MiB, whichever is smaller ([SEC-265] in [user privacy and security](/pages/user-plugin-security-and-privacy/)). The audit log never holds request bodies ([SEC-223] in [audit log](/pages/reference-audit-log/)).
+
+Retention at the provider is set by the provider, not by Ilium. Ilium does not see or enforce how long a remote provider keeps prompts or whether it uses them for training.
+
+- [COR-950] The Inference plugin MUST NOT write prompt text, reply text or screen text to its plugin log, the audit log or the privacy log.
+- [COR-951] Settings MUST show, for the selected provider, the data retention statement configured in its provider entry, or the text "retention unknown" when the entry has none. Settings MUST NOT imply that Ilium enforces that statement.
+- [COR-952] Before the first request to a remote provider, the user MUST confirm that provider's retention statement once, the same way as the voice provider in [Core dumps, swap and provider retention](/pages/core-plugin-voice/#core-dumps-swap-and-provider-retention) ([COR-106]). A local provider sends nothing off the machine and needs no confirmation.
+
 ### Security
 
 Risk marks of this plugin's extension points follow the corrected table in [Extension security](/pages/reference-extension-security/) ([SEC-293]).

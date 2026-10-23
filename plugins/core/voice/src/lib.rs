@@ -160,8 +160,8 @@ mod spec_tests {
             manifest["client"]["world"].as_str(),
             Some("ilium:client/base@0.1.0")
         );
-        let _server = VoiceServer::default();
-        let _client = VoiceClient::default();
+        let _server = VoiceServer;
+        let _client = VoiceClient;
     }
 
     /// REQ: COR-030

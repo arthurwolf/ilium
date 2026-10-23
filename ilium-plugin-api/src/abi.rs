@@ -151,56 +151,318 @@ pub enum DeliveryPolicy {
 }
 
 /// ABI-015: the policy of an event case name such as `output-matched`; `None` for an unknown name.
-pub fn delivery_policy(_event_case: &str) -> Option<DeliveryPolicy> {
-    unimplemented!("api::abi::delivery_policy")
+pub fn delivery_policy(event_case: &str) -> Option<DeliveryPolicy> {
+    if !crate::generated::types::Event::CASE_NAMES.contains(&event_case) {
+        return None;
+    }
+    Some(match event_case {
+        "output-matched" | "topic-published" | "audio-frames" => DeliveryPolicy::DropOldestCounted,
+        "tree-changed"
+        | "pane-focused"
+        | "pane-resized"
+        | "pane-title-changed"
+        | "agent-goal-changed"
+        | "editor-changed"
+        | "settings-changed"
+        | "timer-fired"
+        | "job-progress"
+        | "view-visibility"
+        | "fs-changed"
+        | "theme-changed"
+        | "events-dropped"
+        | "screen-changed"
+        | "signal-changed"
+        | "agent-model-changed"
+        | "editor-pointer"
+        | "editor-viewport-changed"
+        | "attention-changed"
+        | "kernel-settings-changed"
+        | "keymap-changed"
+        | "display-mode-changed" => DeliveryPolicy::Coalesced,
+        // Payload-dependent cases have the safe non-coalescing baseline.
+        _ => DeliveryPolicy::NeverDropped,
+    })
 }
 
-/// ABI-015, ABI-039: whether losing or merging this event case is reported in `events-dropped`.
-pub fn counted_in_events_dropped(_event_case: &str) -> bool {
-    unimplemented!("api::abi::counted_in_events_dropped")
+/// Payload-aware policy, including the extended UI action kinds (EVT-043).
+/// Static case names cannot distinguish a pointer drag from a button press.
+pub fn delivery_policy_for_event(event: &crate::generated::types::Event) -> DeliveryPolicy {
+    use crate::generated::types::{ActionKind, Event, PointerKind};
+    match event {
+        Event::Pointer(pointer) if pointer.kind == PointerKind::Drag => DeliveryPolicy::Coalesced,
+        Event::UiAction(action)
+            if matches!(
+                action.kind,
+                ActionKind::Scrolled | ActionKind::Pointer | ActionKind::DragOver
+            ) =>
+        {
+            DeliveryPolicy::Coalesced
+        }
+        Event::EditorPointer(pointer) => {
+            if pointer.pointer.kind == PointerKind::Move {
+                DeliveryPolicy::Coalesced
+            } else {
+                DeliveryPolicy::NeverDropped
+            }
+        }
+        // Every generated event is covered by the catalogue checked above.
+        _ => delivery_policy(event.case_name()).unwrap_or(DeliveryPolicy::NeverDropped),
+    }
 }
 
-/// A pure model of one plugin side's event queue, for the queue rules (ABI-033, ABI-036,
-/// ABI-039, ABI-045). The host queue must behave like it.
+/// Only actual drop-oldest losses, never coalescing, contribute to loss records.
+pub fn counted_in_events_dropped(event_case: &str) -> bool {
+    delivery_policy(event_case) == Some(DeliveryPolicy::DropOldestCounted)
+}
+
+/// Metadata retained by the pure queue model. Payload unions belong to the host queue.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QueuedEvent {
+    /// Kebab-case WIT event name.
+    pub event: String,
+    /// Caller-provided identity of the coalescing key.
+    pub key: u64,
+    /// Filter id, topic name or decimal capture id, as appropriate.
+    pub source: Option<String>,
+    policy: DeliveryPolicy,
+}
+
+/// Admission is explicit: a never-dropped event remains owned by the caller on refusal.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum QueueAdmission {
+    /// One new event occupies a queue slot.
+    Enqueued,
+    /// A pending occurrence was replaced at the newest position.
+    Coalesced,
+    /// The incoming drop-oldest event was counted and discarded.
+    Dropped,
+    /// No evictable slot exists; restart the instance and retain/reconcile this event.
+    Stuck(QueuedEvent),
+    /// A message cannot be accepted; its sender must receive refused(busy).
+    Busy(QueuedEvent),
+    /// The name is not a generated event case.
+    Unknown(QueuedEvent),
+    /// Counted event metadata omitted the required filter, topic or capture source.
+    MissingSource(QueuedEvent),
+}
+
+/// One delivery batch, with loss records attached to its head report, if present.
+#[derive(Debug, Clone, PartialEq)]
+pub struct QueueBatch {
+    /// Ordered events, including the single head events-dropped marker.
+    pub events: Vec<QueuedEvent>,
+    /// Records carried by that marker, in first-loss order.
+    pub dropped: Vec<crate::generated::types::DroppedCount>,
+}
+
+/// A bounded, pure metadata model of queue admission, ordering and loss accounting.
+/// It does not simulate payload unions, debounce clocks or node-id ownership.
 #[derive(Debug, Clone)]
 pub struct QueueModel {
     capacity: usize,
+    events: std::collections::VecDeque<QueuedEvent>,
+    losses: Vec<crate::generated::types::DroppedCount>,
+    dropped: u64,
 }
 
 impl QueueModel {
-    /// An empty queue holding at most `capacity` events (ABI-045).
+    /// An empty queue holding at most `capacity` pending events.
     pub fn new(capacity: usize) -> QueueModel {
-        QueueModel { capacity }
+        QueueModel {
+            capacity,
+            events: Default::default(),
+            losses: Vec::new(),
+            dropped: 0,
+        }
     }
 
-    /// The most events this queue holds before it starts dropping (ABI-045).
+    /// Maximum pending event count, including the loss-report slot.
     pub fn capacity(&self) -> usize {
         self.capacity
     }
 
-    /// Enqueues one event of `event_case` with coalescing `key` (ABI-033, ABI-039).
-    pub fn push(&mut self, _event_case: &str, _key: u64) {
-        unimplemented!("api::abi::QueueModel::push")
+    /// Metadata convenience for cases without a loss source. Refusals return custody
+    /// directly; the queue never retains an unbounded side list of rejected events.
+    /// Counted cases require [`Self::admit`] or [`Self::admit_event`] instead.
+    pub fn push(&mut self, event_case: &str, key: u64) -> QueueAdmission {
+        self.admit(event_case, key, None)
     }
 
-    /// Events queued now, `events-dropped` included (ABI-033).
+    /// Admits a case using its static policy; `source` identifies counted losses.
+    /// Unrelated event kinds always have source `None`, per EVT-045.
+    pub fn admit(&mut self, event_case: &str, key: u64, source: Option<&str>) -> QueueAdmission {
+        let policy = delivery_policy(event_case);
+        let entry = QueuedEvent {
+            event: event_case.into(),
+            key,
+            source: loss_source(event_case, source),
+            policy: policy.unwrap_or(DeliveryPolicy::NeverDropped),
+        };
+        if policy.is_none() {
+            return QueueAdmission::Unknown(entry);
+        }
+        self.admit_entry(entry)
+    }
+
+    /// Uses a real payload to resolve pointer and UI-action delivery policy.
+    /// The caller supplies its complete logical coalescing key; no payload is consumed.
+    pub fn admit_event(
+        &mut self,
+        event: &crate::generated::types::Event,
+        key: u64,
+        source: Option<&str>,
+    ) -> QueueAdmission {
+        use crate::generated::types::Event;
+        // The payload is authoritative, even when caller metadata disagrees.
+        let derived_source = match event {
+            Event::OutputMatched(payload) => Some(payload.filter_id.clone()),
+            Event::TopicPublished(payload) => Some(payload.topic.clone()),
+            Event::AudioFrames(payload) => Some(payload.capture.to_string()),
+            _ => loss_source(event.case_name(), source),
+        };
+        self.admit_entry(QueuedEvent {
+            event: event.case_name().into(),
+            key,
+            source: derived_source,
+            policy: delivery_policy_for_event(event),
+        })
+    }
+
+    fn admit_entry(&mut self, mut entry: QueuedEvent) -> QueueAdmission {
+        if entry.policy == DeliveryPolicy::DropOldestCounted && entry.source.is_none() {
+            return QueueAdmission::MissingSource(entry);
+        }
+        if entry.event == "events-dropped" {
+            entry.key = 0;
+        }
+        if entry.policy == DeliveryPolicy::Coalesced {
+            if let Some(index) = self.events.iter().position(|pending| {
+                pending.policy == DeliveryPolicy::Coalesced
+                    && pending.event == entry.event
+                    && pending.key == entry.key
+            }) {
+                let _ = self.events.remove(index);
+                if entry.event == "events-dropped" {
+                    self.events.push_front(entry);
+                } else {
+                    self.events.push_back(entry);
+                }
+                return QueueAdmission::Coalesced;
+            }
+        }
+        while self.events.len() >= self.capacity {
+            if let Some(index) = self
+                .events
+                .iter()
+                .position(|pending| pending.policy == DeliveryPolicy::DropOldestCounted)
+            {
+                // The index came from this deque; remove cannot fail before mutation.
+                if let Some(evicted) = self.events.remove(index) {
+                    self.record_loss(&evicted);
+                }
+                continue;
+            }
+            if entry.policy == DeliveryPolicy::DropOldestCounted && self.has_report() {
+                self.record_loss(&entry);
+                return QueueAdmission::Dropped;
+            }
+            // Without space for even a first loss report, silently discarding a
+            // counted event would violate EVT-045. Report stuck with custody intact.
+            return if entry.event == "message" {
+                QueueAdmission::Busy(entry)
+            } else {
+                QueueAdmission::Stuck(entry)
+            };
+        }
+        if entry.event == "events-dropped" {
+            self.events.push_front(entry);
+        } else {
+            self.events.push_back(entry);
+        }
+        QueueAdmission::Enqueued
+    }
+
+    fn has_report(&self) -> bool {
+        self.events
+            .iter()
+            .any(|event| event.event == "events-dropped")
+    }
+
+    fn record_loss(&mut self, event: &QueuedEvent) {
+        self.dropped = self.dropped.saturating_add(1);
+        if let Some(record) = self
+            .losses
+            .iter_mut()
+            .find(|record| record.event == event.event && record.source == event.source)
+        {
+            record.count = record.count.saturating_add(1);
+        } else {
+            self.losses.push(crate::generated::types::DroppedCount {
+                event: event.event.clone(),
+                source: event.source.clone(),
+                count: 1,
+            });
+        }
+        if !self.has_report() {
+            self.events.push_front(QueuedEvent {
+                event: "events-dropped".into(),
+                key: 0,
+                source: None,
+                policy: DeliveryPolicy::Coalesced,
+            });
+        }
+    }
+
+    /// Ordered pending metadata, with the loss report at the head.
+    pub fn pending(&self) -> impl Iterator<Item = &QueuedEvent> {
+        self.events.iter()
+    }
+
+    /// Takes at most 256 events and clears only the loss records delivered with the head.
+    pub fn take_batch(&mut self, maximum: usize) -> QueueBatch {
+        let count = maximum.min(MAX_EVENTS_PER_BATCH).min(self.events.len());
+        let events: Vec<_> = self.events.drain(..count).collect();
+        let dropped = if events
+            .first()
+            .is_some_and(|event| event.event == "events-dropped")
+        {
+            std::mem::take(&mut self.losses)
+        } else {
+            Vec::new()
+        };
+        QueueBatch { events, dropped }
+    }
+
+    /// Pending events, including the head loss report.
     pub fn len(&self) -> usize {
-        unimplemented!("api::abi::QueueModel::len")
+        self.events.len()
     }
-
-    /// Whether nothing is queued (ABI-033).
+    /// Whether no event is pending delivery.
     pub fn is_empty(&self) -> bool {
-        unimplemented!("api::abi::QueueModel::is_empty")
+        self.events.is_empty()
     }
-
-    /// Total events evicted and counted (ABI-033).
+    /// Cumulative counted losses, independent of whether reports were delivered.
     pub fn dropped_total(&self) -> u64 {
-        unimplemented!("api::abi::QueueModel::dropped_total")
+        self.dropped
     }
-
-    /// The pending `events-dropped` records as (event case, count), one per (event, source) (ABI-036).
+    /// Legacy view of records, preserving one entry for each (event, source) pair.
     pub fn events_dropped_records(&self) -> Vec<(String, u64)> {
-        unimplemented!("api::abi::QueueModel::events_dropped_records")
+        self.losses
+            .iter()
+            .map(|record| (record.event.clone(), u64::from(record.count)))
+            .collect()
+    }
+    /// Source-aware records in order of each pair's first loss.
+    pub fn events_dropped_records_with_sources(&self) -> &[crate::generated::types::DroppedCount] {
+        &self.losses
+    }
+}
+
+fn loss_source(event_case: &str, source: Option<&str>) -> Option<String> {
+    if counted_in_events_dropped(event_case) {
+        source.map(str::to_owned)
+    } else {
+        None
     }
 }
 

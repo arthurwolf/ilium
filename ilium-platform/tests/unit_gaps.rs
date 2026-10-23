@@ -303,8 +303,7 @@ fn join_until_with_expired_deadline_is_not_a_successful_join() {
         "an expired deadline must not report a join"
     );
     let deadline: JoinDeadline = timeout
-        .err()
-        .expect("the expired deadline should be reported as JoinDeadline");
+        .expect_err("the expired deadline should be reported as JoinDeadline");
     assert_eq!(
         deadline.worker_id,
         ticket.id(),

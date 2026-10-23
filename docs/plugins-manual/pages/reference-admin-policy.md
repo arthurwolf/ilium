@@ -123,6 +123,8 @@ keep_days = 365
 | `inference.allowed_providers` | list | all | Other providers are refused with reason `policy` |
 | `projects.allow_project_values` | bool | true | `false` ignores all plugin values in `.ilium/` |
 | `audit.sink`, `max_mib`, `keep_days` | | file, 64, 365 | See [Audit log](/pages/reference-audit-log/) |
+| `packages.blocked_versions` | list of `id@version` | none | Exact versions refused with `policy.version-denied` (proposed, owner to confirm; see [SEC-951]) |
+| `packages.pinned_versions` | table, id to version | none | The only version of that id that may be installed or run (proposed, owner to confirm; see [SEC-952]) |
 
 ## Evaluation
 
@@ -163,6 +165,32 @@ keep_days = 365
 **[SEC-382]** Denied extension points. A contribution grant to a point in `extensions.deny_points` is treated as a denied grant ([SEC-198]): the install succeeds, the grant row is locked off, the contribution is not registered, and the owner never calls it. A plugin that owns a denied point (`extensions.provide`) still runs, and contributions from other plugins to it are dropped. The audit log records `policy-violation` with the point id. Test: deny a point, install a plugin that contributes to it, and assert the install succeeds, the row is locked, the owner's callback is never invoked and the audit record exists.
 
 **[SEC-199]** Multi-user machines: see [Enterprise deployment](/pages/guide-enterprise-deployment/). Each user has their own stores and runtime directory. The system policy applies to all users. No store is shared between users.
+
+## Ceilings, versions, retention and notices
+
+### Resource ceilings
+
+**[SEC-950]** The policy has no key that sets a ceiling for a session resource: `session_memory_mib`, `session_helpers`, `session_processes`, `disk_mib`, `storage_bucket_mib` and the `ilium-execution` CPU budget. A user may only lower them under `[plugins.limits]`, and a higher user value is clamped with a logged warning ([HST-406], [Errors and limits](/pages/reference-errors-and-limits/)). An administrator who needs a ceiling per resource must ask the owner for a key such as `limits.session_memory_mib_max` (proposed, owner to confirm); until that key exists, this page does not promise any administrator cap. Test: set `[plugins.limits] session_memory_mib` above the default and assert the clamp and the warning, with no policy key that changes the result.
+
+### Version rules
+
+**[SEC-951]** (proposed, owner to confirm) An entry of `packages.blocked_versions` has the form `<id>@<version>` with an exact version. A package whose id and version match an entry MUST be refused at install and update with `policy.version-denied`. An installed copy of a blocked version MUST be disabled at the next server start, with the notice `Disabled by your administrator` ([SEC-186]), and its data MUST be kept. The other versions of the same id are not affected. Test: block `example.pane-tools@2.0.0`, assert that 2.0.1 installs, that 2.0.0 is refused, and that an installed 2.0.0 is disabled at the next start.
+
+**[SEC-952]** (proposed, owner to confirm) An entry of `packages.pinned_versions` names one version for one id. Install and update of that id MUST install only the pinned version, and a different installed version MUST NOT run; the refusal code is `policy.version-pinned`. A pin never removes data. Test: pin `example.pane-tools` to 1.4.2, attempt an update to 2.0.1 and assert the refusal, then remove the pin and assert the update succeeds.
+
+### Audit retention and the storage ceiling
+
+**[SEC-953]** (proposed, owner to confirm) Precedence between `audit.keep_days` and the storage ceiling of [USR-258]. `audit.keep_days` is the minimum retention for audit files: the host MUST NOT delete a rotated audit file younger than `audit.keep_days`, even when the ceiling is reached. When the ceiling is reached, the host deletes crash records first, then the oldest rotated audit files that are older than `audit.keep_days`. If only younger audit files remain above the ceiling, the host keeps them, writes `policy-violation` with reason `audit-storage-full`, and shows a persistent notice. Test: age three rotated files to 10, 100 and 400 days, fill the ceiling, and assert that only the 400-day file is deleted.
+
+**[SEC-954]** (proposed, owner to confirm) Every deletion of an audit or crash file by the storage ceiling or by `audit.keep_days` MUST write one `audit-retention-deleted` record first, with the file name, the age in days, the bytes freed and the rule that applied (`keep-days` or `storage-ceiling`). The record is written to the current audit file, so the deletion stays visible after the file is gone. Test: trigger each rule and read back the record.
+
+### Schema versions
+
+**[SEC-101]** (proposed, owner to confirm) Schema version `1` is the only version in 0.1.0 ([SEC-187]). A later schema version is introduced in a release note, and a server MUST keep reading the previous version for two minor releases after it is introduced (proposed, owner to confirm). A server that reads a `version` it does not support treats the file as malformed under [SEC-187]. Because a key that a newer server understands is an unknown key to an older server, the staged path is: write the file as `version = 1` until every machine runs a server that reads the new key, then change the version. The file is not ignored key by key, so [SEC-187] stays the only rule for unknown keys. Test: a file with `version = 2` on a server that supports 1 is refused with `policy.invalid` and third parties do not load.
+
+### Notice text
+
+**[SEC-115]** (proposed, owner to confirm) The reason codes are the stable contract for every notice on this page: `policy.invalid`, `policy.tier-denied`, `policy.id-denied`, `policy.publisher-denied`, `policy.source-denied`, `policy.replacement`, `policy.version-denied` and `policy.version-pinned`. The notice and refusal texts are host English text in 0.1.0, with no translation shipped and no locale switch. A localised text MUST map from the code, and support staff MUST match a user's text to the code in the `audit` record. Open item: [SEC-186] gives `Disabled by your administrator`, while the Plugins row label in [Settings, plugin rows](/pages/core-plugin-settings/) is `Blocked by policy`. The owner MUST choose one text per surface before release. Test: for each code, trigger the refusal and assert that the audit record carries the code and not the text.
 
 ## Examples
 

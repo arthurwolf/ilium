@@ -152,7 +152,7 @@ mod spec_tests {
 
     #[test]
     fn chatroom_row_lists_the_room_file_for_an_empty_parent() {
-        let mut server = ChatroomServer::default();
+        let mut server = ChatroomServer;
         let result = server.list_virtual_children("chatroom".to_string(), String::new(), None);
         let (children, cursor) = match result {
             Ok(page) => page,
@@ -164,7 +164,7 @@ mod spec_tests {
 
     #[test]
     fn unknown_row_kind_is_refused() {
-        let mut server = ChatroomServer::default();
+        let mut server = ChatroomServer;
         let result = server.list_virtual_children("not-chatroom".to_string(), String::new(), None);
         assert!(result.is_err());
     }

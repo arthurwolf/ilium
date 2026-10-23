@@ -225,3 +225,23 @@ fn default_constructor_fails_closed_for_plugin_grants() {
     );
     assert_eq!(dispatcher.config().dedup_window_ms, 600_000);
 }
+
+#[test]
+fn bounded_completion_handoff_keeps_remaining_results_with_their_owner() {
+    let (_, dispatcher) = dispatcher(4);
+    for correlation in 0..4 {
+        dispatcher.submit(origin(), submission(correlation, "ok", None));
+    }
+    dispatcher.pump(1);
+    assert!(dispatcher.take_outcomes_for(&origin(), 0).is_empty());
+    let first = dispatcher.take_outcomes_for(&origin(), 1);
+    assert_eq!(first.len(), 1);
+    let second = dispatcher.take_outcomes_for(&origin(), 2);
+    assert_eq!(second.len(), 2);
+    let last = dispatcher.take_outcomes_for(&origin(), 2);
+    assert_eq!(last.len(), 1);
+    let all: Vec<_> = first.into_iter().chain(second).chain(last).collect();
+    assert_eq!(all.iter().map(|result| result.request.clone()).collect::<Vec<_>>(),
+        (0..4).map(RequestRef::Submission).collect::<Vec<_>>());
+    assert!(dispatcher.take_outcomes_for(&origin(), 1).is_empty());
+}

@@ -119,26 +119,31 @@ pub struct PreparedCache {
     root: PathBuf,
 }
 
+/// Environment variable that overrides the prepared-data cache folder.
+pub const CACHE_DIR_ENV: &str = "ILIUM_PREPARED_CACHE_DIR";
+
 impl PreparedCache {
     pub fn at(root: impl Into<PathBuf>) -> Self {
         Self { root: root.into() }
     }
 
-    /// The user-facing location is `~/.ilium/cache/minecraft`. A scene given a
-    /// non-default `cache_dir` (tests, isolated runs) keeps its cache inside it,
-    /// so isolated runs never touch the user's real cache.
-    pub fn for_scene_cache_dir(scene_cache_dir: &Path) -> Self {
-        if scene_cache_dir == crate::source::default_cache_dir() {
-            if let Some(dirs) = directories::BaseDirs::new() {
-                return Self::at(
-                    dirs.home_dir()
-                        .join(".ilium")
-                        .join("cache")
-                        .join("minecraft"),
-                );
-            }
+    /// The user cache `~/.ilium/cache/minecraft`. `ILIUM_PREPARED_CACHE_DIR`
+    /// redirects it, so tests and isolated runs never touch the real cache.
+    pub fn for_user() -> Option<Self> {
+        if let Some(directory) = std::env::var_os(CACHE_DIR_ENV).filter(|value| !value.is_empty()) {
+            return Some(Self::at(PathBuf::from(directory)));
         }
-        Self::at(scene_cache_dir.join("prepared"))
+        // Unit tests never write into the real home folder.
+        if cfg!(test) {
+            return None;
+        }
+        let dirs = directories::BaseDirs::new()?;
+        Some(Self::at(
+            dirs.home_dir()
+                .join(".ilium")
+                .join("cache")
+                .join("minecraft"),
+        ))
     }
 
     pub fn root(&self) -> &Path {
@@ -316,9 +321,9 @@ mod tests {
     }
 
     #[test]
-    fn non_default_cache_dir_stays_inside_it() {
-        let directory = tempfile::tempdir().unwrap();
-        let cache = PreparedCache::for_scene_cache_dir(directory.path());
-        assert!(cache.root().starts_with(directory.path()));
+    fn user_cache_is_disabled_in_unit_tests() {
+        if std::env::var_os(CACHE_DIR_ENV).is_none() {
+            assert!(PreparedCache::for_user().is_none());
+        }
     }
 }

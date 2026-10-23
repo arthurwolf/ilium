@@ -211,9 +211,14 @@ The contract version `ilium:plugin@0.1.0` is one thing. Each extension point has
 - Expect a refusal for a package whose `api` is outside the window. Rebuild it with an SDK for a version the host supports.
 - Read [Compatibility and upgrades](/pages/guide-compatibility-and-upgrades/) before you rename anything, change a data layout or raise a version. The plugin MUST keep every name of the stable public list across its own releases. [AUT-214]
 
+## Documentation versions
+
+The manual has its own versions. Each host release has one manual snapshot that describes that release, and the rules for which snapshot matches which host, how long it stays online and how corrections reach it are in [Reference, documentation versions](/pages/reference-documentation-versions/). Use that page to find the manual for the host you run. The `api` string on this page names the contract, not the manual.
+
 ## See also
 
 - [Compatibility and upgrades](/pages/guide-compatibility-and-upgrades/) for the author side of versions
+- [Reference, documentation versions](/pages/reference-documentation-versions/) for which manual matches which host
 - [Packages and manifests](/pages/packages/)
 - [Manifest reference](/pages/reference-manifest/)
 - [Plugin services](/pages/services/)

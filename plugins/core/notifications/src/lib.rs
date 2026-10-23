@@ -189,7 +189,7 @@ mod spec_tests {
 
     #[test]
     fn approval_prompt_submits_one_sound_keyed_to_the_prompt() {
-        let mut server = NotificationsServer::default();
+        let mut server = NotificationsServer;
         let batch = vec![agent_activity_event(
             7,
             AgentActivity::Working,
@@ -209,7 +209,7 @@ mod spec_tests {
 
     #[test]
     fn a_new_revision_of_the_same_node_is_sounded_again() {
-        let mut server = NotificationsServer::default();
+        let mut server = NotificationsServer;
         let batch = vec![
             agent_activity_event(
                 7,
@@ -233,14 +233,14 @@ mod spec_tests {
 
     #[test]
     fn empty_batch_submits_nothing() {
-        let mut server = NotificationsServer::default();
+        let mut server = NotificationsServer;
         assert!(server.on_events(Vec::new()).is_empty());
     }
 
     /// Manual: failure case: a transition that is not an approval prompt
     #[test]
     fn transition_to_idle_does_not_sound_an_approval_prompt() {
-        let mut server = NotificationsServer::default();
+        let mut server = NotificationsServer;
         let batch = vec![agent_activity_event(
             7,
             AgentActivity::Working,

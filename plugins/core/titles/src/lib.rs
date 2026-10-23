@@ -165,7 +165,7 @@ mod spec_tests {
         for tab in OWNED_KERNEL_TABS {
             let grant = format!("settings.write-kernel:{tab}");
             assert!(
-                grants.iter().any(|held| *held == grant),
+                grants.contains(&grant),
                 "missing server grant {grant}"
             );
         }
@@ -187,7 +187,7 @@ mod spec_tests {
         let grants = server_capabilities(&shipped_manifest());
         for point in ["before-apply-title", "title-styles"] {
             let grant = format!("extensions.provide:ilium.core.titles/{point}");
-            assert!(grants.iter().any(|held| *held == grant), "missing {grant}");
+            assert!(grants.contains(&grant), "missing {grant}");
         }
     }
 

@@ -505,6 +505,7 @@ impl Fx {
             builder: None,
             runner: None,
             session: None,
+            installer: None,
             interrupt: None,
             dev_script: Vec::new(),
             build_duration_ms: 0,

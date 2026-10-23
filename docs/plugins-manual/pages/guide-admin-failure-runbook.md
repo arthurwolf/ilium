@@ -66,6 +66,7 @@ A crash mark is written as soon as a start begins and removed when startup compl
 - **The guard.** Three crashes during start within 5 minutes make the next start use `third-party` safe mode and open the recovery page. The guard clears after one start that stays up for 5 minutes after startup completed. A stop before that point keeps the marks.
 - **What to do.** Run `ilium --safe-mode=third-party` and follow [Bad plugin](#bad-plugin) steps 2 to 4 to find and stop the plugin that the crashes point to.
 - **Evidence.** Before you remove anything, keep a copy of the crash records: `ilium plugin support-bundle <id> --out <file>` writes a zip with `summary.txt`, `log.txt`, `stats.txt` and `crashes.txt`. The `<file>` must not exist already; the command fails with `support-bundle.exists` otherwise. [USR-221, DEV-832]
+- **Handling the bundle.** A bundle can hold personal data: credential headers, URL parameters and home paths are redacted, but other text in a plugin's log is not, so `log.txt` may contain names, messages or other personal data. Treat every bundle as sensitive. Send it outside your organisation only to the plugin's `security_contact` or to the Ilium project contact in the escalation path, and only over a channel your organisation approves. Keep it no longer than the retention in the Open decisions table (proposed, owner to confirm), and delete every copy at the end of that period, including copies in tickets and mail. Before any transfer, read `log.txt` and remove or refuse the bundle if it holds data you may not share. [USR-960, USR-961, USR-962]
 - **Helper crashes.** A helper is restarted at most 5 times in 10 minutes. After the sixth crash the T2 and T3 plugins of that session stop with the reason `helper.unstable`. Clear each affected plugin with `ilium plugin reset-failures <id>` once the cause is fixed. [LIF-134]
 
 Audit and log events: `safe-mode` (written at each safe-mode start). Crash records live in the server state folder, not in the plugin data folder. [USR-229]
@@ -175,6 +176,8 @@ This section is target behaviour for the public plugin system. This section is f
 | Clearing crash marks by hand | None documented. The guard clears itself after 5 minutes of stable running (LIF-294). | An administrator who wants to clear marks at once has no supported command. |
 | Text of the notice for a policy-disabled plugin | SEC-186 gives `Disabled by your administrator`. The lifecycle table and the Administration guide give `Blocked by policy`. | An administrator searching for the notice text may find the other one. |
 | Internal escalation inside an organisation | Not defined. | Each administrator must set their own contact order. |
+| Retention of a support bundle kept as evidence | 90 days after the incident is closed (proposed, owner to confirm). | LIF-314 has the host delete bundles older than 14 days at the next start. A copy kept longer must be stored outside that location. |
+| Recipients of a bundle outside the organisation | Only the plugin's security contact or the Ilium project contact. | Other recipients (vendors, consultants, customers) are not covered by the manual and need the organisation's own approval. |
 
 ### Requirements
 
@@ -184,6 +187,9 @@ This section is target behaviour for the public plugin system. This section is f
 - [USR-233] The runbook MUST state the time limits of the failure window, the helper kill sequence, the crash-loop guard and the install lock as the source pages define them. Test: compare each value in the time-limits table with its source page.
 - [USR-234] The runbook MUST name the audit file path for Linux and each event it tells the administrator to search for, and every event name MUST appear in the source page that defines it. Test: run the `jq` command of the Bad plugin section on a fixture audit log and search each event name in the source pages.
 - [USR-235] The runbook MUST name the escalation path in this order: the plugin's security contact, then the Ilium project's security contact, then the release blocklist, and MUST list the security contact address as an open decision while it is a placeholder. Test: check the page for the three steps and the open decision row.
+- [USR-960] An administrator MUST treat a support bundle as sensitive data and MUST send it outside the organisation only to the plugin's `security_contact` or the Ilium project contact, over a channel the organisation approves. Test: check the procedure against the recipient rule in the escalation path, and confirm the Open decisions row names the same recipients.
+- [USR-961] An administrator MUST keep a support bundle no longer than 90 days after the incident is closed (proposed, owner to confirm) and MUST delete every copy, including copies in tickets and mail, when that period ends. Test: keep a bundle copy past the period in a test ticket and assert that the retention row and the 14-day host cleanup of LIF-314 are both stated on the page.
+- [USR-962] Before a support bundle leaves the machine or the organisation, an administrator MUST read its `log.txt` and MUST NOT send the bundle while it holds personal data that the recipient is not entitled to receive. Test: give a fixture bundle with a personal name in `log.txt` to a reviewer and assert that the reviewer finds the procedure stops the transfer.
 
 ### Emergency kill switch
 

@@ -131,8 +131,8 @@ mod spec_tests {
         assert_eq!(manifest["client"]["world"], "ilium:client/base@0.1.0");
         assert_eq!(string_list(&manifest["client"]["exports"]), vec!["views"]);
 
-        let _server = DiagnosticsServer::default();
-        let _client = DiagnosticsClient::default();
+        let _server = DiagnosticsServer;
+        let _client = DiagnosticsClient;
     }
 
     /// REQ: COR-050

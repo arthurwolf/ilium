@@ -63,6 +63,10 @@
   url: /pages/ui-model/
 - title: Versioning
   url: /pages/versioning/
+- title: Documentation versions
+  url: /pages/reference-documentation-versions/
+- title: Documentation lifecycle
+  url: /pages/reference-documentation-lifecycle/
 - title: Worlds and sides
   url: /pages/worlds-and-sides/
 - title: audio
@@ -493,6 +497,8 @@
   url: /pages/core-plugin-diagnostics/
 - title: "Plugin administration guide"
   url: /pages/guide-administration/
+- title: "Backup and restore guide"
+  url: /pages/guide-backup-and-restore/
 - title: "CI recipes"
   url: /pages/guide-ci-recipes/
 - title: "Compatibility and upgrades"

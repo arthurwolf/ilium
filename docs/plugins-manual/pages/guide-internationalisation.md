@@ -214,12 +214,12 @@ fn wide_text_never_overflows() {
 
 ## Built-in and replaced core plugin text
 
-The 30 core plugins that ship with Ilium show their menu labels, settings tab titles, command titles and notices in English. The host has no locale and no catalogue, so the user's language setting does not change this text. Each kind of text has one owner.
+The 30 core plugins that ship with Ilium show their menu labels, settings tab titles, command titles and notices in English. Until the host catalogue of [AUT-623] ships, the user's language setting does not change this text. Each kind of text has one owner.
 
 | Text | Who owns it | Who translates it |
 |---|---|---|
 | Id of a command, settings tab, pane kind, setting key, error code or event | The plugin that defines it | Nobody. Ids are never translated |
-| Title or notice of a built-in core plugin | The Ilium project | Not translated in this release. See the decision below |
+| Title or notice of a built-in core plugin | The Ilium project, through the host catalogue | Translated into the launch languages, [AUT-623] and [AUT-624] |
 | Title or notice of a replacement's own tab, command or notice | The author of the replacement | The author, in any language the author chooses |
 
 A replacement takes over the surface of a core plugin. The rules below say what it keeps and what it writes itself. The install rules are in [Extending core plugins](/pages/extending-core-plugins/) and [Tutorial 21: replace a core plugin](/pages/tutorial-21-replace-a-core-plugin/).
@@ -227,9 +227,11 @@ A replacement takes over the surface of a core plugin. The rules below say what 
 - [USR-239] A replacement MUST keep every command id and every settings tab id of the core plugin it replaces, with the same spelling, and MUST NOT translate them. A replacement MAY give its tab and command titles in another language. If a command id is missing from the replacement, install refuses with `manifest.replaces-surface-incomplete`, which names the missing item.
 - [USR-240] A replacement that takes over a settings tab, a command or a notice MUST supply the title and notice text of that item itself, in the language it chooses. The built-in English text of the replaced plugin returns only when the replacement is turned off, and the stored settings of the tab stay as they were.
 
-Decision needed: whether built-in core plugin text (menu labels, tab titles, command titles and notices) gets a translation catalogue owned by the Ilium project. Default: no catalogue in this release, so core text stays English. A catalogue needs a translator for each language and a locale setting that the host does not yet have.
+Decided: the Ilium project owns the host text catalogue. English is its source language. The catalogue holds the menu labels, tab titles, command titles and notices of the host and of the bundled core plugins, and the wording of host dialogs such as the grant review. The Ilium project translates that text itself. Third-party replacements always translate their own text, as [USR-240] states.
 
-Decision needed: who translates the built-in core plugin text when a catalogue exists. Default: the Ilium project translates its own bundled text. Third-party replacements always translate their own text, as [USR-240] states.
+- [AUT-623] The Ilium project MUST own the host text catalogue, keep English as its source, and translate into each launch language every host text that is listed above, including the text of the 30 bundled core plugins. Translation is the work of the Ilium project maintainers, and a release MUST NOT ship a launch language with a host text missing from its catalogue unless the missing text falls back to English under the lookup order of [USR-312].
+- [AUT-624] The host MUST ship its catalogue in these launch languages: English, German and French (proposed, owner to confirm). A language tag outside this set MUST show English for every host text.
+- [AUT-625] The release candidate MUST pass the `en-XA` pseudo-locale check of [USR-316] over every host dialog and every view of a bundled core plugin, and an `i18n.layout-overflow` finding MUST block the release. The check runs in CI on each release candidate (proposed, owner to confirm).
 
 ## See also
 

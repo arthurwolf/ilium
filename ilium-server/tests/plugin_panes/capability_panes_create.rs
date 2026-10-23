@@ -1,17 +1,24 @@
 //! create-pane errors and defaults (capability-panes-create.md): PAN-030, PAN-031.
 
+use ilium_plugin_api::generated::types::paths::FsPath;
 use ilium_plugin_api::generated::types::{CreatePaneSpec, ErrorCode, Intent, NodeId, Outcome};
 
 use crate::common::*;
 
 const CREATE: &[&str] = &["panes.create", "fs.scope.project"];
 
+/// `scope/path` names a scope and a relative path, the form the create-pane cwd takes.
+fn fs_path(text: &str) -> FsPath {
+    let (scope, path) = text.split_once('/').expect("cwd names a scope and a path");
+    FsPath { scope: scope.to_owned(), path: path.to_owned() }
+}
+
 fn create(cwd: Option<&str>, command: Option<Vec<&str>>) -> Intent {
     Intent::CreatePane(CreatePaneSpec {
         parent: Some(NodeId(1)),
         title: "new".into(),
         content_kind: "ilium.terminal".into(),
-        cwd: cwd.map(str::to_owned),
+        cwd: cwd.map(fs_path),
         command: command.map(|parts| parts.into_iter().map(str::to_owned).collect()),
         initial_input: None,
     })

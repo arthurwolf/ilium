@@ -2,3 +2,5 @@
 //! Missing API is listed in `API_GAPS.md` beside the other lanes' gap files.
 
 mod core_parity;
+mod dev_pipeline_doc_lint;
+mod dev_pipeline_manual;

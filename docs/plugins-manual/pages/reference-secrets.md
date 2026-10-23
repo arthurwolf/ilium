@@ -25,6 +25,8 @@ The attacker classes are A1, A3 and A8 in the [Threat model](/pages/reference-th
 
 **[SEC-242]** A settings row with `secret` together with `scope: "project"` is refused at install with `manifest.secret-scope`. A secret never comes from a project file. A secret value found in a project file is ignored and audited.
 
+**[SEC-958]** (proposed, owner to confirm) Plugin data is stored as plain bytes, and the host does not encrypt it at rest. This covers the plugin data and bucket folders, the pre-migration backups, the session snapshot files, the plugin logs and the archives that `ilium plugin backup` writes. The only protection the host gives these files is the owner-only access of [USR-206] and the encryption, if any, that the user or administrator applies to the disk or the home folder. A plugin that holds personal data it must not expose at rest MUST encrypt that data itself and keep any key it needs in a secret row ([SEC-240]). This version offers no host-side encryption option for plugin data. Test: review against the page text, and read the stored files of a test plugin to confirm that the values are readable.
+
 ## Who can read a secret
 
 **[SEC-244]** Only the plugin side that owns the row reads its secrets, through `settings.get-json`. `settings.read-all` and `settings.read-kernel` return an empty string for a plugin secret and `<redacted>` for a kernel secret. A secret does not appear in events, in the `settings-changed` payload (the event names the key only), in the review dialog or in `ilium plugin ... --json` output.
@@ -89,6 +91,14 @@ export async function callApi(): Promise<Uint8Array> {
 ## What the user sees
 
 **[SEC-248]** A secret row is masked with `••••`; `reveal_last` shows up to 8 trailing characters. Settings > Plugins > Secrets lists which plugins hold secrets (names only) and offers **Forget secrets** per plugin and for all. Forgetting removes the values from the store and the keyring and sends the plugin a `settings-changed` event.
+
+## Keyring changes and restores
+
+**[SEC-959]** (proposed, owner to confirm) When the keyring becomes available again after a start that used the file store ([SEC-241]), the host MUST move every value in `secrets.json` into the keyring at the next start. A value written while the file store was in use is the newest value, so it MUST overwrite any older keyring value for the same key. The host MUST remove the file copy only after the keyring returns the value on readback. Test: start with the keyring locked, store one secret, unlock the keyring, restart, and assert that the keyring holds the value and that `secrets.json` no longer holds it.
+
+**[SEC-963]** (proposed, owner to confirm) When the keyring is reset or emptied, or a secret value is missing from the store for any other reason, the host MUST treat that secret as unset. `settings.get-json` MUST then read the key as unset, as it does for a key with no stored value in [API: settings](/pages/api-settings/). At the next start the host MUST send the plugin a `settings-changed` event for each such key, so that the plugin can tell the user that the credential is missing. Test: delete one keyring entry, restart, and assert that `get-json` reads the key as unset and that the event arrives once.
+
+**[SEC-964]** (proposed, owner to confirm) A secret lost by a keyring change ([SEC-963]) or by a restore ([SEC-250]) is re-entered by the user, one secret row at a time, on the settings tab of the plugin that owns the row. The host MUST NOT offer a bulk import of secrets, and it MUST NOT export a secret to make re-entry easier ([SEC-250]). A plugin SHOULD show a clear message that names the missing row when its secret is unset, and MUST NOT retry a request with an empty credential. Test: restore a snapshot that holds a plugin secret, assert that the row is empty, re-enter the value, and assert that `get-json` returns the value to the plugin.
 
 ## Edge cases
 

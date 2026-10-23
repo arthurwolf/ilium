@@ -90,7 +90,7 @@ fn bind_with_a_missing_parent_directory_returns_bind_error_naming_endpoint() {
     let endpoint = SessionEndpoint::from_path(directory.path().join("missing").join("s.sock"));
     let expected_display = endpoint.display();
 
-    let error = block_on(endpoint.bind()).err().expect("bind must fail");
+    let error = block_on(endpoint.bind()).expect_err("bind must fail");
 
     let TransportError::Bind {
         endpoint: named,
@@ -109,7 +109,7 @@ fn bind_with_a_path_longer_than_the_socket_address_limit_returns_bind_error() {
     let long_name = format!("{}.sock", "a".repeat(120));
     let endpoint = SessionEndpoint::from_path(directory.path().join(long_name));
 
-    let error = block_on(endpoint.bind()).err().expect("bind must fail");
+    let error = block_on(endpoint.bind()).expect_err("bind must fail");
 
     assert!(
         matches!(error, TransportError::Bind { .. }),
@@ -145,7 +145,7 @@ fn bind_over_stale_debris_in_a_read_only_directory_reports_clear_stale() {
     leave_stale_socket(&endpoint);
     set_mode(directory.path(), 0o555);
 
-    let error = block_on(endpoint.bind()).err().expect("bind must fail");
+    let error = block_on(endpoint.bind()).expect_err("bind must fail");
 
     set_mode(directory.path(), 0o755);
     assert!(
@@ -180,8 +180,7 @@ fn connect_with_no_listener_and_no_file_returns_connect_error() {
     let (_directory, endpoint) = temp_endpoint("nothing.sock");
 
     let error = block_on(endpoint.connect())
-        .err()
-        .expect("connect must fail");
+        .expect_err("connect must fail");
 
     let TransportError::Connect {
         endpoint: named,
@@ -201,8 +200,7 @@ fn connect_to_a_stale_socket_returns_connect_error_with_refused_source() {
     leave_stale_socket(&endpoint);
 
     let error = block_on(endpoint.connect())
-        .err()
-        .expect("connect must fail");
+        .expect_err("connect must fail");
 
     let TransportError::Connect { source, .. } = error else {
         panic!("expected a Connect error for a stale socket");
@@ -217,8 +215,7 @@ fn connect_to_a_regular_file_is_a_connect_error_not_a_live_session() {
     std::fs::write(endpoint.as_path(), b"not a socket").expect("write a plain file");
 
     let error = block_on(endpoint.connect())
-        .err()
-        .expect("connect must fail");
+        .expect_err("connect must fail");
 
     assert!(
         matches!(error, TransportError::Connect { .. }),
@@ -232,8 +229,7 @@ fn connect_error_message_names_the_endpoint() {
     let (_directory, endpoint) = temp_endpoint("message.sock");
 
     let message = block_on(endpoint.connect())
-        .err()
-        .expect("connect must fail")
+        .expect_err("connect must fail")
         .to_string();
 
     assert!(
@@ -325,7 +321,7 @@ fn bind_through_a_symlink_loop_reports_bind_and_never_clears_debris() {
     std::os::unix::fs::symlink(&loop_link, &loop_link).expect("create a self-referencing link");
     let endpoint = SessionEndpoint::from_path(loop_link.join("session.sock"));
 
-    let error = block_on(endpoint.bind()).err().expect("bind must fail");
+    let error = block_on(endpoint.bind()).expect_err("bind must fail");
 
     assert!(
         matches!(error, TransportError::Bind { .. }),
@@ -506,15 +502,15 @@ fn transport_error_source_is_the_wrapped_io_error_for_every_variant() {
     let errors = [
         TransportError::Bind {
             endpoint: "a".to_string(),
-            source: io::Error::new(io::ErrorKind::Other, "boom"),
+            source: io::Error::other("boom"),
         },
         TransportError::Connect {
             endpoint: "a".to_string(),
-            source: io::Error::new(io::ErrorKind::Other, "boom"),
+            source: io::Error::other("boom"),
         },
         TransportError::ClearStale {
             endpoint: "a".to_string(),
-            source: io::Error::new(io::ErrorKind::Other, "boom"),
+            source: io::Error::other("boom"),
         },
     ];
 
