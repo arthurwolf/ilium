@@ -36,7 +36,7 @@ fn points_050_transcript_is_a_transform_hook_with_text_confidence_and_language()
         "Correct the transcript before commands are matched."
     );
     assert_eq!(row[3], "text, confidence, language; reply: text");
-    assert_eq!(row[4], "standard");
+    assert_eq!(row[4], "high");
 }
 
 /// REQ: F-050

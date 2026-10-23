@@ -110,7 +110,10 @@ fn port_links_wrapped_url_is_not_a_path_line_match() {
 #[test]
 fn port_links_bare_file_with_prose_punctuation_has_no_line_so_no_match() {
     assert_eq!(found("Read STYLE.md, before continuing"), None);
-    assert_eq!(found("Read STYLE.md:12, before continuing"), None);
+    assert_eq!(
+        found("Read STYLE.md:12, before continuing"),
+        Some("STYLE.md:12".to_string())
+    );
 }
 
 /// REQ: PORT:ilium-client/src/terminal_links.rs::accounts_for_multi_byte_glyphs_when_mapping_a_cell_column

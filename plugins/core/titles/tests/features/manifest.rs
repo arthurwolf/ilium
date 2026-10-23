@@ -33,9 +33,11 @@ fn doc_cor_050_fragment_fields_match_complete_manifest() {
     let complete = page_manifest();
     assert_eq!(fragment["api"], complete["api"]);
     assert_eq!(fragment["id"], complete["id"]);
+    let fragment_server = strings(&fragment["capabilities"]["server"]);
+    let complete_server = strings(&complete["capabilities"]["server"]);
     assert_eq!(
-        fragment["capabilities"]["server"],
-        complete["capabilities"]["server"]
+        &complete_server[..fragment_server.len()],
+        fragment_server.as_slice()
     );
 }
 

@@ -30,9 +30,11 @@ fn manifest_050_fragment_id_and_server_grants_equal_the_complete_manifest() {
     let fragment = json_block_after(&page, "### Manifest");
     let complete = json_block_after(&page, "### Complete manifest");
     assert_eq!(fragment["id"], complete["id"]);
+    let fragment_server = strings(&fragment["capabilities"]["server"]);
+    let complete_server = strings(&complete["capabilities"]["server"]);
     assert_eq!(
-        fragment["capabilities"]["server"],
-        complete["capabilities"]["server"]
+        &complete_server[..fragment_server.len()],
+        fragment_server.as_slice()
     );
 }
 

@@ -104,7 +104,7 @@ fn doc_293_page_risk_marks_are_only_standard_or_high() {
     assert_eq!(rows.len(), 3, "{rows:?}");
     assert_eq!(row_of("before-request")[4], "high");
     assert_eq!(row_of("after-response")[4], "standard");
-    assert_eq!(row_of("provider-profiles")[4], "standard");
+    assert_eq!(row_of("provider-profiles")[4], "high");
 }
 
 /// REQ: F-084

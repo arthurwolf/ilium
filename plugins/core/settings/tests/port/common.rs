@@ -22,7 +22,7 @@ pub fn client_host() -> FakeHost {
     host
 }
 
-/// The settings page of a tab id (core-plugin-settings.md, "The 25 tabs").
+/// The settings page of a tab id (core-plugin-settings.md, "The 26 tabs").
 pub fn tab(id: &str) -> ViewTarget {
     ViewTarget::SettingsPage(id.to_string())
 }

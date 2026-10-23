@@ -36,17 +36,35 @@ fn doc_cor_050_page_has_fragment_complete_manifest_and_example_blocks() {
 fn doc_cor_050_fragment_contributions_equal_the_complete_manifest() {
     let fragment = fragment();
     let complete = page_manifest();
-    for key in [
-        "api",
-        "id",
-        "version",
-        "publisher",
-        "server",
-        "client",
-        "capabilities",
-        "contributes",
-    ] {
+    for key in ["api", "id", "version", "publisher", "server", "client"] {
         assert_eq!(fragment[key], complete[key], "fragment key {key}");
+    }
+    // The fragment grants and contributions are a subset of the complete manifest; the complete
+    // block also lists the extension grants and the extension_points contribution.
+    let fragment_server = fragment["capabilities"]["server"]
+        .as_array()
+        .expect("server grants");
+    let complete_server = complete["capabilities"]["server"]
+        .as_array()
+        .expect("server grants");
+    for grant in fragment_server {
+        assert!(
+            complete_server.contains(grant),
+            "server grant {grant} missing from complete manifest"
+        );
+    }
+    assert_eq!(
+        fragment["capabilities"]["client"],
+        complete["capabilities"]["client"]
+    );
+    for (kind, entries) in fragment["contributes"]
+        .as_object()
+        .expect("contributes object")
+    {
+        assert_eq!(
+            &complete["contributes"][kind], entries,
+            "fragment contribution {kind}"
+        );
     }
 }
 

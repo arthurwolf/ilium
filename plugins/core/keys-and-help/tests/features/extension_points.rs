@@ -37,7 +37,7 @@ fn example_package(id: &str, priority: i64, chord: &str, label: &str) -> Value {
                 "point": KEY_HINTS,
                 "id": "board-hints",
                 "priority": priority,
-                "entry": { "context": "pane:board", "chord": chord, "label": label }
+                "entry": { "id": "board-hints", "context": "pane:board", "chord": chord, "label": label }
             }]
         }
     })
@@ -65,7 +65,7 @@ fn points_010_the_page_example_matches_the_documented_entry_shape() {
     let entry = &example["contributes"]["extensions"][0]["entry"];
     assert_eq!(
         entry,
-        &json!({"context": "pane:board", "chord": "n", "label": "New card"})
+        &json!({"id": "board-hints", "context": "pane:board", "chord": "n", "label": "New card"})
     );
     assert_eq!(example["contributes"]["extensions"][0]["point"], KEY_HINTS);
     assert_eq!(example["contributes"]["extensions"][0]["priority"], 50);
@@ -82,7 +82,9 @@ fn points_010_a_contributed_key_hint_is_collected_with_its_payload() {
     let entries = session.collected(KEY_HINTS);
     assert_eq!(
         entries,
-        vec![json!({"context": "pane:board", "chord": "n", "label": "New card"})]
+        vec![
+            json!({"id": "board-hints", "context": "pane:board", "chord": "n", "label": "New card"})
+        ]
     );
 }
 

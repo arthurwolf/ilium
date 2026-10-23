@@ -37,10 +37,13 @@ fn manifest_050_fragment_server_grants_equal_the_complete_manifest() {
     let page = page_text();
     let fragment = json_block_after(&page, "### Manifest");
     let complete = json_block_after(&page, "### Complete manifest");
-    assert_eq!(
-        fragment["capabilities"]["server"],
-        complete["capabilities"]["server"]
-    );
+    let short = fragment["capabilities"]["server"]
+        .as_array()
+        .expect("fragment server");
+    let full = complete["capabilities"]["server"]
+        .as_array()
+        .expect("complete server");
+    assert_eq!(short.as_slice(), &full[..short.len()]);
     assert_eq!(fragment["id"], complete["id"]);
     assert_eq!(fragment["api"], complete["api"]);
 }

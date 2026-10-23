@@ -44,7 +44,15 @@ fn manifest_050_fragment_contributions_equal_the_complete_manifest() {
     let page = page_text();
     let fragment = json_block_after(&page, "### Manifest");
     let complete = json_block_after(&page, "### Complete manifest");
-    assert_eq!(fragment["contributes"], complete["contributes"]);
+    for (kind, contribution) in fragment["contributes"]
+        .as_object()
+        .expect("fragment contributes")
+    {
+        assert_eq!(
+            contribution, &complete["contributes"][kind],
+            "contribution kind {kind} must match the complete manifest"
+        );
+    }
     assert_eq!(fragment["server"], complete["server"]);
     assert_eq!(fragment["client"], complete["client"]);
     assert_eq!(fragment["id"], complete["id"]);

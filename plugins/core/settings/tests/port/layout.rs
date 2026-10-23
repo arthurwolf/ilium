@@ -1,5 +1,5 @@
 //! Twins of ilium-client/src/settings_ui.rs and mouse.rs: layout, chrome, scrolling and hit regions
-//! of the 25 tabs, observed through render(), click() and send_action() (F-089, F-090).
+//! of the 26 tabs, observed through render(), click() and send_action() (F-089, F-090).
 
 use ilium_plugin_sdk::types::{ActionKind, ActionValue, ViewTarget};
 use serde_json::json;
@@ -13,7 +13,7 @@ fn port_089_every_tab_renders_within_its_frame_at_the_four_acceptance_sizes() {
     let mut host = client_host();
     for (columns, rows) in SIZES {
         let texts = render_every_tab(&mut host, columns, rows);
-        assert_eq!(texts.len(), 25);
+        assert_eq!(texts.len(), 26);
         for (id, text) in texts {
             assert!(!text.trim().is_empty(), "{id} at {columns}x{rows}");
         }

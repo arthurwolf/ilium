@@ -112,7 +112,7 @@ fn doc_f_093_page_says_every_scene_receives_the_palette_in_its_constructor() {
 fn doc_f_093_harness_core_stub_row_lists_both_points() {
     let row = table_row(&page("reference-test-harness"), "`ilium.core.ambient`");
     assert_eq!(row[1], "`palettes` (collect), `style-presets` (collect)");
-    assert_eq!(row[3], "collect: empty list");
+    assert_eq!(row[3], "collect: empty list; service: `{\"ok\":true}`");
 }
 
 /// The page offers a `look` service while the harness stub row says `none`: the stub must offer it too.
@@ -121,7 +121,7 @@ fn doc_f_093_harness_core_stub_row_lists_both_points() {
 #[test]
 fn doc_f_093_harness_core_stub_row_offers_the_look_service_the_page_declares() {
     let row = table_row(&page("reference-test-harness"), "`ilium.core.ambient`");
-    assert_eq!(row[2], "`look`");
+    assert_eq!(row[2], "`look` (get)");
 }
 
 /// REQ: F-093

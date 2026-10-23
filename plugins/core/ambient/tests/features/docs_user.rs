@@ -95,7 +95,10 @@ fn doc_f_093_palette_menu_starts_and_ends_with_the_documented_names() {
         &palettes[..4],
         ["Scene colors", "Rainbow", "Pastel rainbow", "Cotton candy"]
     );
-    assert_eq!(&palettes[34..], ["Tokyo Night", "Rose gold", "Slate"]);
+    assert_eq!(
+        &palettes[34..],
+        ["Gruvbox", "Tokyo Night", "Rose gold", "Slate"]
+    );
 }
 
 /// REQ: F-093

@@ -46,8 +46,30 @@ fn manifest_050_fragment_matches_the_complete_manifest_where_it_overlaps() {
     let page = page_text();
     let fragment = json_block_after(&page, "### Manifest");
     let complete = json_block_after(&page, "### Complete manifest");
-    assert_eq!(fragment["capabilities"], complete["capabilities"]);
-    assert_eq!(fragment["contributes"], complete["contributes"]);
+    // The fragment lists a subset of the grants: the complete block also holds the extensions.provide grants.
+    for side in ["server", "client"] {
+        let complete_grants = complete["capabilities"][side]
+            .as_array()
+            .expect("complete grants");
+        for grant in fragment["capabilities"][side]
+            .as_array()
+            .expect("fragment grants")
+        {
+            assert!(
+                complete_grants.contains(grant),
+                "{side} grant {grant} missing from complete manifest"
+            );
+        }
+    }
+    for (kind, entries) in fragment["contributes"]
+        .as_object()
+        .expect("fragment contributes")
+    {
+        assert_eq!(
+            &complete["contributes"][kind], entries,
+            "fragment contribution {kind}"
+        );
+    }
     assert_eq!(fragment["id"], complete["id"]);
     assert_eq!(fragment["api"], complete["api"]);
 }

@@ -57,13 +57,21 @@ fn points_048_channels_is_a_collect_point_with_entry_id_title_service() {
         row[3],
         "entry: id, title, service (a service the plugin provides that delivers one notice)"
     );
-    assert_eq!(row[4], "standard");
+    assert_eq!(row[4], "high");
 }
 
 /// REQ: F-048
 #[test]
-fn points_048_every_point_is_standard_risk() {
-    assert!(point_rows().iter().all(|row| row[4] == "standard"));
+fn points_048_before_notify_is_standard_and_channels_is_high_risk() {
+    let rows = point_rows();
+    let risk_of = |name: &str| {
+        rows.iter()
+            .find(|row| row[0] == format!("`{name}`"))
+            .expect("row")[4]
+            .clone()
+    };
+    assert_eq!(risk_of("before-notify"), "standard");
+    assert_eq!(risk_of("channels"), "high");
 }
 
 /// REQ: F-048
@@ -71,7 +79,7 @@ fn points_048_every_point_is_standard_risk() {
 fn points_048_the_reference_page_agrees_with_the_plugin_page() {
     let reference = reference_page();
     assert!(reference.contains("| `ilium.core.notifications/before-notify` | hook: veto | standard | Mute or refuse a notification, for example at night. |"));
-    assert!(reference.contains("| `ilium.core.notifications/channels` | collect | standard | Add a delivery channel such as a chat webhook. |"));
+    assert!(reference.contains("| `ilium.core.notifications/channels` | collect | high | Add a delivery channel such as a chat webhook. |"));
     assert!(reference.contains("| [Notifications](/pages/core-plugin-notifications/) | `ilium.core.notifications` | 2 | 1 | 1 | yes |"));
 }
 

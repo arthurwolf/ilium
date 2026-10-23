@@ -40,11 +40,23 @@ fn manifest_050_fragment_matches_the_complete_manifest_where_it_overlaps() {
     let fragment = fragment_manifest();
     let complete = complete_manifest();
     assert_eq!(fragment["id"], complete["id"]);
-    assert_eq!(fragment["contributes"], complete["contributes"]);
-    assert_eq!(
-        fragment["capabilities"]["server"],
-        complete["capabilities"]["server"]
-    );
+    for (kind, fragment_entries) in fragment["contributes"].as_object().expect("contributes") {
+        let complete_entries = complete["contributes"][kind]
+            .as_array()
+            .unwrap_or_else(|| panic!("complete manifest contributes {kind}"));
+        for entry in fragment_entries.as_array().expect("fragment entries") {
+            assert!(complete_entries.contains(entry), "{kind}: {entry}");
+        }
+    }
+    let short = fragment["capabilities"]["server"]
+        .as_array()
+        .expect("fragment server grants")
+        .clone();
+    let long = complete["capabilities"]["server"]
+        .as_array()
+        .expect("complete server grants")
+        .clone();
+    assert_eq!(&long[..short.len()], &short[..]);
 }
 
 /// REQ: COR-050

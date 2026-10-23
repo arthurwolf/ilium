@@ -29,16 +29,17 @@ fn manifest_050_page_has_the_fragment_and_the_complete_block_in_that_order() {
 fn manifest_050_every_fragment_key_has_the_same_value_in_the_complete_manifest() {
     let fragment = fragment_on_page();
     let complete = complete_manifest_on_page();
-    for key in [
-        "api",
-        "id",
-        "name",
-        "version",
-        "publisher",
-        "client",
-        "contributes",
-    ] {
+    for key in ["api", "id", "name", "version", "publisher", "client"] {
         assert_eq!(fragment[key], complete[key], "{key}");
+    }
+    for (kind, contribution) in fragment["contributes"]
+        .as_object()
+        .expect("fragment contributes")
+    {
+        assert_eq!(
+            contribution, &complete["contributes"][kind],
+            "contribution kind {kind} must match the complete manifest"
+        );
     }
 }
 

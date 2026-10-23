@@ -9,13 +9,25 @@ fn field_after(text: &str, marker: &str) -> String {
     text[at..].lines().next().unwrap().to_string()
 }
 
+/// The figure whose text contains `marker`; the page has several figures, so they are found by content.
+fn figure_containing<'a>(blocks: &'a [String], marker: &str) -> &'a String {
+    blocks
+        .iter()
+        .find(|block| block.contains(marker))
+        .unwrap_or_else(|| panic!("no figure contains {marker:?}"))
+}
+
 /// REQ: F-077
 #[test]
-fn page_077_has_two_terminal_figures_the_progress_dialog_and_the_failure() {
+fn page_077_has_three_terminal_figures_including_the_progress_and_failure_dialogs() {
+    // The page also shows the right-click menu figure before the progress dialog and the failure.
     let blocks = term_blocks(&page_text());
-    assert_eq!(blocks.len(), 2, "{blocks:?}");
-    assert!(blocks[0].contains("Convert Claude Code to Codex"));
-    assert!(blocks[1].contains("Conversion failed"));
+    assert_eq!(blocks.len(), 3, "{blocks:?}");
+    assert!(
+        figure_containing(&blocks, "Convert Claude Code to Codex").contains("Import the session")
+    );
+    assert!(figure_containing(&blocks, "Conversion failed")
+        .contains("The original session is untouched."));
 }
 
 /// REQ: F-077
@@ -33,8 +45,14 @@ fn page_077_figures_are_48_columns_wide_on_every_row() {
 fn page_077_golden_files_equal_the_figures() {
     let blocks = term_blocks(&page_text());
     for (name, block) in [
-        ("dialog_progress_48.txt", &blocks[0]),
-        ("dialog_failed_48.txt", &blocks[1]),
+        (
+            "dialog_progress_48.txt",
+            figure_containing(&blocks, "Convert Claude Code to Codex"),
+        ),
+        (
+            "dialog_failed_48.txt",
+            figure_containing(&blocks, "Conversion failed"),
+        ),
     ] {
         let golden_text = std::fs::read_to_string(golden(name)).expect("golden");
         assert_eq!(golden_text.trim_end(), block.trim_end(), "{name}");

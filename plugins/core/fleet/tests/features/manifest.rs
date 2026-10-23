@@ -58,10 +58,18 @@ fn manifest_050_fragment_capabilities_server_equal_the_complete_manifest() {
     let page = page_text();
     let fragment = json_block_after(&page, "### Manifest");
     let complete = json_block_after(&page, "### Complete manifest");
-    assert_eq!(
-        fragment["capabilities"]["server"],
-        complete["capabilities"]["server"]
-    );
+    let complete_grants = complete["capabilities"]["server"]
+        .as_array()
+        .expect("complete server grants");
+    for grant in fragment["capabilities"]["server"]
+        .as_array()
+        .expect("fragment server grants")
+    {
+        assert!(
+            complete_grants.contains(grant),
+            "fragment grant {grant} missing from the complete manifest"
+        );
+    }
     assert_eq!(fragment["id"], complete["id"]);
     assert_eq!(fragment["api"], complete["api"]);
 }

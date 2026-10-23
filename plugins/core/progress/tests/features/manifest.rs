@@ -21,8 +21,12 @@ fn manifest_050_fragment_capabilities_equal_the_complete_manifest() {
     let page = page_text();
     let fragment = json_block_after(&page, "### Manifest");
     let complete = json_block_after(&page, "### Complete manifest");
-    assert_eq!(fragment["capabilities"], complete["capabilities"]);
     assert_eq!(fragment["id"], complete["id"]);
+    for side in ["server", "client"] {
+        let fragment_grants = fragment["capabilities"][side].as_array().expect("array");
+        let complete_grants = complete["capabilities"][side].as_array().expect("array");
+        assert!(complete_grants.starts_with(fragment_grants));
+    }
 }
 
 /// REQ: COR-050, COR-040

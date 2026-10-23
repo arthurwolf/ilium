@@ -70,7 +70,7 @@ fn feature_027_classify_is_a_transform_hook_replying_with_a_state() {
     let row = rows.iter().find(|row| row[0] == "`classify`").expect("row");
     assert_eq!(row[1], "hook (transform)");
     assert_eq!(row[3], "pane, signature, state, reason; reply: state");
-    assert_eq!(row[4], "standard");
+    assert_eq!(row[4], "high");
 }
 
 /// REQ: F-027

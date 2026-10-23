@@ -86,7 +86,7 @@ fn cor_050_the_page_table_lists_both_points_with_kind_and_risk() {
     let text = page_text();
     let sinks = table_row(&text, "| `log-sinks` |");
     assert_eq!(sinks[1], "hook (observe)");
-    assert_eq!(sinks[4], "standard");
+    assert_eq!(sinks[4], "high");
     let sections = table_row(&text, "| `report-sections` |");
     assert_eq!(sections[1], "collect");
     assert_eq!(sections[4], "standard");
@@ -117,7 +117,7 @@ fn cor_050_the_page_kinds_agree_with_the_core_points_table() {
     );
     assert_eq!(
         table_row(&core, "| `ilium.core.diagnostics/log-sinks` |")[2],
-        "standard"
+        "high"
     );
     assert_eq!(
         table_row(&core, "| `ilium.core.diagnostics/report-sections` |")[2],

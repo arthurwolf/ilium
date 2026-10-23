@@ -21,6 +21,15 @@ fn json_block_after(page: &str, heading: &str) -> Value {
     serde_json::from_str(&rest[open..open + close]).expect("page block is JSON")
 }
 
+fn strings(value: &Value) -> Vec<String> {
+    value
+        .as_array()
+        .expect("array")
+        .iter()
+        .map(|item| item.as_str().expect("string").to_string())
+        .collect()
+}
+
 /// REQ: COR-050
 #[test]
 fn manifest_050_equals_the_complete_manifest_of_the_page() {
@@ -34,7 +43,16 @@ fn manifest_050_fragment_capabilities_equal_the_complete_manifest() {
     let page = page_text();
     let fragment = json_block_after(&page, "### Manifest");
     let complete = json_block_after(&page, "### Complete manifest");
-    assert_eq!(fragment["capabilities"], complete["capabilities"]);
+    let fragment_server = strings(&fragment["capabilities"]["server"]);
+    let complete_server = strings(&complete["capabilities"]["server"]);
+    assert_eq!(
+        &complete_server[..fragment_server.len()],
+        fragment_server.as_slice()
+    );
+    assert_eq!(
+        fragment["capabilities"]["client"],
+        complete["capabilities"]["client"]
+    );
     assert_eq!(fragment["id"], complete["id"]);
     assert_eq!(fragment["version"], complete["version"]);
 }

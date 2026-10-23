@@ -61,7 +61,7 @@ fn points_062_before_post_is_a_transform_hook_with_author_text_kind() {
     assert_eq!(row[1], "hook (transform)");
     assert_eq!(row[2], "Change a message before it is written to the room.");
     assert_eq!(row[3], "author, text, kind; reply: text");
-    assert_eq!(row[4], "standard");
+    assert_eq!(row[4], "high");
 }
 
 /// REQ: F-062

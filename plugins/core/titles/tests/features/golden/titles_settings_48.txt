@@ -8,5 +8,5 @@
 │ │ Keep titles under four words.            │ │
 │ │ Use the repository name first.           │ │
 │ ╰──────────────────────────────────────────╯ │
-│  Each change is saved at once.               │
+│  Saved 600 ms after you stop typing.         │
 ╰──────────────────────────────────────────────╯

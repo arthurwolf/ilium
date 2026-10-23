@@ -42,7 +42,7 @@ fn doc_cor_030_migration_page_names_compaction_as_owner_of_both_tabs() {
     assert_eq!(optimization[6], "none");
     let remote = table_row(&page, "| `remote-compaction` |");
     assert_eq!(remote[4], "Compaction");
-    assert_eq!(remote[7], "`[remote_compaction]`");
+    assert_eq!(remote[6], "`[remote_compaction]`");
 }
 
 /// REQ: COR-030, COR-033

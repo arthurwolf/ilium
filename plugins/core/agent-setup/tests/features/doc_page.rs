@@ -46,7 +46,7 @@ fn doc_063_each_status_has_its_documented_meaning() {
     assert_eq!(rows[0][1], "The current managed block is present.");
     assert_eq!(
         rows[1][1],
-        "An older managed block is present. It is refreshed automatically."
+        "An older managed block is present. The plugin proposes the refresh, and it is applied when the user accepts it."
     );
     assert_eq!(
         rows[2][1],
@@ -152,12 +152,12 @@ fn doc_063_the_extension_point_table_has_the_three_points_with_their_kinds_and_r
             (
                 "`instruction-blocks`".to_string(),
                 "collect".to_string(),
-                "standard".to_string()
+                "high".to_string()
             ),
             (
                 "`targets`".to_string(),
                 "collect".to_string(),
-                "standard".to_string()
+                "high".to_string()
             ),
             (
                 "`before-install`".to_string(),

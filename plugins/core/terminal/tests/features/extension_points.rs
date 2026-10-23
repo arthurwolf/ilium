@@ -196,7 +196,10 @@ fn dev_489_the_harness_stub_row_for_terminal_replies_empty_collect_and_pass_hook
         row[1],
         "`before-send-input` (veto), `open-link` (first), `link-actions` (collect)"
     );
-    assert_eq!(row[3], "collect: empty list; hooks: `pass`");
+    assert_eq!(
+        row[3],
+        "collect: empty list; hooks: `pass`; service: `{\"ok\":true}`"
+    );
 }
 
 /// REQ: EXT-052

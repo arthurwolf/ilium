@@ -93,11 +93,11 @@ pub fn table_rows(text: &str, header_prefix: &str) -> Vec<Vec<String>> {
         .collect()
 }
 
-/// The 25 rows of "The 25 tabs and who owns them": position, tab id, label, owner.
+/// The 26 rows of "The 26 tabs and who owns them": position, tab id, label, owner.
 pub fn tab_rows() -> Vec<Vec<String>> {
     let page = page_text();
     let start = page
-        .find("### The 25 tabs and who owns them")
+        .find("### The 26 tabs and who owns them")
         .expect("tabs section");
     table_rows(&page[start..], "| Position |")
 }

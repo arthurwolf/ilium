@@ -72,7 +72,7 @@ fn manifest_050_the_fragment_client_grants_already_hold_the_kernel_tab_grant_onc
     let page = page_text();
     let fragment = json_block_after(&page, "### Manifest");
     let complete = json_block_after(&page, "### Complete manifest");
-    let expected = strings(&fragment["capabilities"]["client"]);
+    let expected = strings(&fragment["capabilities"]["server"]);
     assert_eq!(
         expected
             .iter()
@@ -80,7 +80,7 @@ fn manifest_050_the_fragment_client_grants_already_hold_the_kernel_tab_grant_onc
             .count(),
         1
     );
-    assert_eq!(strings(&complete["capabilities"]["client"]), expected);
+    assert_eq!(strings(&complete["capabilities"]["server"]), expected);
 }
 
 /// REQ: COR-050

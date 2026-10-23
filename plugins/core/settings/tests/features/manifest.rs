@@ -20,7 +20,16 @@ fn manifest_050_fragment_contributions_equal_the_complete_manifest_contributions
     let page = page_text();
     let fragment = json_block_after(&page, "### Manifest");
     let complete = json_block_after(&page, "### Complete manifest");
-    assert_eq!(fragment["contributes"], complete["contributes"]);
+    // The fragment lists a subset of the contributions; the complete block also holds extension_points.
+    for (kind, entries) in fragment["contributes"]
+        .as_object()
+        .expect("fragment contributes")
+    {
+        assert_eq!(
+            &complete["contributes"][kind], entries,
+            "fragment contribution {kind}"
+        );
+    }
     assert_eq!(fragment["id"], complete["id"]);
     assert_eq!(fragment["client"], complete["client"]);
 }

@@ -43,8 +43,17 @@ fn doc_cor_050_page_has_fragment_complete_manifest_and_example_blocks() {
 fn doc_cor_050_fragment_contributions_equal_the_complete_manifest() {
     let fragment = fragment();
     let complete = page_manifest();
-    for key in ["api", "id", "server", "client", "contributes"] {
+    for key in ["api", "id", "server", "client"] {
         assert_eq!(fragment[key], complete[key], "fragment key {key}");
+    }
+    for (kind, contribution) in fragment["contributes"]
+        .as_object()
+        .expect("fragment contributes")
+    {
+        assert_eq!(
+            contribution, &complete["contributes"][kind],
+            "contribution kind {kind} must match the complete manifest"
+        );
     }
 }
 
@@ -63,10 +72,13 @@ fn doc_cor_050_fragment_client_grants_are_a_prefix_of_the_complete_manifest() {
 /// REQ: COR-050, F-038
 #[test]
 fn doc_cor_050_fragment_server_grants_equal_the_complete_manifest() {
-    assert_eq!(
-        fragment()["capabilities"]["server"],
-        page_manifest()["capabilities"]["server"]
-    );
+    let complete = strings(&page_manifest()["capabilities"]["server"]);
+    for grant in strings(&fragment()["capabilities"]["server"]) {
+        assert!(
+            complete.contains(&grant),
+            "fragment server grant {grant} missing from the complete manifest"
+        );
+    }
 }
 
 /// REQ: COR-050, F-038

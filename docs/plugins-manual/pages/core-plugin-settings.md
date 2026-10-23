@@ -92,37 +92,38 @@ In safe mode, a third-party row reads `Off, safe mode`. A dimmed row of a plugin
 - [USR-163] The tab MUST offer **Forget settings** on a plugin's Details page. It MUST delete that plugin's saved settings values for the user and the open project, MUST ask for confirmation, and MUST NOT touch permissions or data. Test: set a value, forget, assert the value is the default and the grant file is unchanged.
 - [USR-164] The state words MUST be the same in the footer notice N14, which is defined in [Lifecycle](/pages/lifecycle/#failure-counting-and-restart). Test: stop a plugin and compare.
 
-### The 25 tabs and who owns them
+### The 26 tabs and who owns them
 
 The Settings plugin draws the tab strip and the auto-save behaviour. Each tab's rows and values belong to the owner plugin in the last column, which writes them with `settings.write-kernel:<tab>`. The Settings plugin itself owns four tabs. [COR-030]
 
 | Position | Tab id | Label | Owner plugin |
 |---|---|---|---|
 | 1 | `user-interface` | User Interface | [Settings](/pages/core-plugin-settings/) |
-| 2 | `icons` | Icons | [Settings](/pages/core-plugin-settings/) |
-| 3 | `agent-monitoring` | Agent Monitoring | [Agent detect](/pages/core-plugin-agent-detect/) |
-| 4 | `agent-cost` | Agent Cost | [Cost](/pages/core-plugin-cost/) |
-| 5 | `optimization` | Optimization | [Compaction](/pages/core-plugin-compaction/) |
-| 6 | `remote-compaction` | Remote compaction | [Compaction](/pages/core-plugin-compaction/) |
-| 7 | `keyboard` | Keyboard | [Keys and help](/pages/core-plugin-keys-and-help/) |
-| 8 | `terminal` | Terminal | [Terminal](/pages/core-plugin-terminal/) |
-| 9 | `editor` | Editor | [Editor (kernel while native)](/pages/core-plugin-editor/) |
-| 10 | `session` | Session | [Sessions](/pages/core-plugin-sessions/) |
-| 11 | `git` | Git | [Worktrees](/pages/core-plugin-worktrees/) |
-| 12 | `kanban-board` | Kanban Board | [Kanban (kernel while native)](/pages/core-plugin-kanban/) |
-| 13 | `animations` | Animations | [Ambient look](/pages/core-plugin-ambient/) |
-| 14 | `sound` | Sound | [Notifications](/pages/core-plugin-notifications/) |
-| 15 | `voice-control` | Voice control | [Voice](/pages/core-plugin-voice/) |
-| 16 | `reset-planning` | Reset planning | [Cost](/pages/core-plugin-cost/) |
-| 17 | `inference` | Inference | [Inference](/pages/core-plugin-inference/) |
-| 18 | `llm-instructions` | LLM Instructions | [Inference](/pages/core-plugin-inference/) |
-| 19 | `titles` | Titles | [Titles](/pages/core-plugin-titles/) |
-| 20 | `triggers` | Triggers | [Titles](/pages/core-plugin-titles/) |
-| 21 | `text-triggers` | Text Triggers | [Text triggers](/pages/core-plugin-text-triggers/) |
-| 22 | `debug` | Debug | [Settings](/pages/core-plugin-settings/) |
-| 23 | `api` | API | [Fleet](/pages/core-plugin-fleet/) |
-| 24 | `about` | About | [Settings](/pages/core-plugin-settings/) |
-| 25 | `setup` | Setup | [Agent setup](/pages/core-plugin-agent-setup/) |
+| 2 | `padding` | Padding | [Settings](/pages/core-plugin-settings/) |
+| 3 | `icons` | Icons | [Settings](/pages/core-plugin-settings/) |
+| 4 | `agent-monitoring` | Agent Monitoring | [Agent detect](/pages/core-plugin-agent-detect/) |
+| 5 | `agent-cost` | Agent Cost | [Cost](/pages/core-plugin-cost/) |
+| 6 | `optimization` | Optimization | [Compaction](/pages/core-plugin-compaction/) |
+| 7 | `remote-compaction` | Remote compaction | [Compaction](/pages/core-plugin-compaction/) |
+| 8 | `keyboard` | Keyboard | [Keys and help](/pages/core-plugin-keys-and-help/) |
+| 9 | `terminal` | Terminal | [Terminal](/pages/core-plugin-terminal/) |
+| 10 | `editor` | Editor | [Editor (kernel while native)](/pages/core-plugin-editor/) |
+| 11 | `session` | Session | [Sessions](/pages/core-plugin-sessions/) |
+| 12 | `git` | Git | [Worktrees](/pages/core-plugin-worktrees/) |
+| 13 | `kanban-board` | Kanban Board | [Kanban (kernel while native)](/pages/core-plugin-kanban/) |
+| 14 | `animations` | Animations | [Ambient look](/pages/core-plugin-ambient/) |
+| 15 | `sound` | Sound | [Notifications](/pages/core-plugin-notifications/) |
+| 16 | `voice-control` | Voice control | [Voice](/pages/core-plugin-voice/) |
+| 17 | `reset-planning` | Reset planning | [Cost](/pages/core-plugin-cost/) |
+| 18 | `inference` | Inference | [Inference](/pages/core-plugin-inference/) |
+| 19 | `llm-instructions` | LLM Instructions | [Inference](/pages/core-plugin-inference/) |
+| 20 | `titles` | Titles | [Titles](/pages/core-plugin-titles/) |
+| 21 | `triggers` | Triggers | [Titles](/pages/core-plugin-titles/) |
+| 22 | `text-triggers` | Text Triggers | [Text triggers](/pages/core-plugin-text-triggers/) |
+| 23 | `debug` | Debug | [Settings](/pages/core-plugin-settings/) |
+| 24 | `api` | API | [Fleet](/pages/core-plugin-fleet/) |
+| 25 | `about` | About | [Settings](/pages/core-plugin-settings/) |
+| 26 | `setup` | Setup | [Agent setup](/pages/core-plugin-agent-setup/) |
 
 The table order is the rail order, equal to `src/docs/settings.md`. Plugin tabs follow after About and Setup. The labels are the baseline labels; the high-risk marking of the API tab is a notice row inside the tab, not part of the label.
 

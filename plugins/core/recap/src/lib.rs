@@ -187,7 +187,8 @@ mod spec_tests {
         assert_eq!(fact_sources["kind"], "collect");
         let before_recap =
             named_entry(points, "id", "before-recap").expect("before-recap declared");
-        assert_eq!(before_recap["kind"], "transform");
+        assert_eq!(before_recap["kind"], "hook");
+        assert_eq!(before_recap["mode"], "transform");
     }
 
     /// REQ: COR-050

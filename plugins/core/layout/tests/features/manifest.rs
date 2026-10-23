@@ -31,8 +31,16 @@ fn doc_cor_050_fragment_fields_match_complete_manifest() {
     let blocks = json_blocks(&page_text());
     let fragment: Value = serde_json::from_str(&blocks[0]).expect("fragment is JSON");
     let complete = page_manifest();
-    for key in ["api", "id", "name", "version", "publisher", "capabilities"] {
+    for key in ["api", "id", "name", "version", "publisher"] {
         assert_eq!(fragment[key], complete[key], "fragment key {key}");
+    }
+    for side in ["server", "client"] {
+        let fragment_grants = strings(&fragment["capabilities"][side]);
+        let complete_grants = strings(&complete["capabilities"][side]);
+        assert!(
+            complete_grants.starts_with(&fragment_grants),
+            "fragment {side} grants are a prefix of the complete {side} grants"
+        );
     }
 }
 

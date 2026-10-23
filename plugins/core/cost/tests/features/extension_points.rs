@@ -173,7 +173,7 @@ fn doc_f_040_harness_core_stub_row_lists_the_same_points_and_service() {
         row[1],
         "`price-sources` (collect), `quota-sources` (collect)"
     );
-    assert_eq!(row[2], "`usage`");
+    assert_eq!(row[2], "`usage` (get)");
 }
 
 /// REQ: F-088

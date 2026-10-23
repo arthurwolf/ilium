@@ -1,4 +1,4 @@
-//! The 25 tabs, their owners and the four tabs this plugin owns (COR-030, COR-033, COR-022).
+//! The 26 tabs, their owners and the four tabs this plugin owns (COR-030, COR-033, COR-022).
 
 use crate::common::*;
 
@@ -12,9 +12,9 @@ fn owned_rows() -> Vec<Vec<String>> {
 
 /// REQ: COR-030, F-090
 #[test]
-fn tabs_030_the_rail_has_25_tabs_at_positions_1_to_25() {
+fn tabs_030_the_rail_has_26_tabs_at_positions_1_to_26() {
     let rows = tab_rows();
-    assert_eq!(rows.len(), 25);
+    assert_eq!(rows.len(), 26);
     for (index, row) in rows.iter().enumerate() {
         assert_eq!(row[0], (index + 1).to_string());
     }

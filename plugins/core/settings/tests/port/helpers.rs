@@ -6,9 +6,10 @@ use serde_json::{json, Value};
 
 use crate::common::*;
 
-/// The 25 tab ids in rail order (core-plugin-settings.md, "The 25 tabs").
-pub const TABS: [&str; 25] = [
+/// The 26 tab ids in rail order (core-plugin-settings.md, "The 26 tabs").
+pub const TABS: [&str; 26] = [
     "user-interface",
+    "padding",
     "icons",
     "agent-monitoring",
     "agent-cost",

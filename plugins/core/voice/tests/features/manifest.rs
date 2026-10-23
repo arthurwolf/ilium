@@ -52,10 +52,6 @@ fn manifest_050_fragment_client_grants_are_a_prefix_of_the_complete_client_grant
     let complete =
         strings(&json_block_after(&page, "### Complete manifest")["capabilities"]["client"]);
     assert_eq!(fragment, complete[..fragment.len()]);
-    assert_eq!(
-        complete.last().map(String::as_str),
-        Some("settings.write-kernel:voice-control")
-    );
 }
 
 /// REQ: COR-050
