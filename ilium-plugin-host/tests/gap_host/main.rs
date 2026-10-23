@@ -4,7 +4,8 @@
 //! 631, 633, 634, 636, 638, 639, 640, 641, 642, 643, 644, 646, 647, 648, 651, 652, 653, 654, 655,
 //! 656, 657, 659, 660, 661, 662, 663, 664, 665, 666, 667, 668, 669, 670, 671, 672, 673, 674, 675,
 //! 677, 679, 680, 681, 682, 683, 686, 687, 688, 689, 690, 691, 692, 693, 694, 695, 696, 697, 699.
-//! HST-512, 520 and 521 are manual process checks and are not written here (see the report).
+//! HST-512, 520 and 521 are covered by `security_and_release_rules`: they check that the manual
+//! states each rule and that `SECURITY.md` exists. Their timing stays a manual release check.
 //!
 //! The tests drive the `ilium_plugin_host::testing::ops` rig named in API_GAPS.md and read the
 //! manual pages under `docs/plugins-manual/pages`. Hooks that the rig does not yet provide are
@@ -26,4 +27,5 @@ mod reference_offline_and_low_disk;
 mod reference_persistence_and_restart;
 mod reference_plugin_files;
 mod reference_resource_accounting;
+mod security_and_release_rules;
 mod user_plugin_health;
