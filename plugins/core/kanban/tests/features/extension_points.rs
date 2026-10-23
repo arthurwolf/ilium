@@ -163,6 +163,7 @@ fn points_024_the_stub_hook_reply_for_card_moved_is_pass() {
             HookCall {
                 call: 1,
                 point: "ilium.core.kanban/card-moved".to_string(),
+                extension: "test-contributor".to_string(),
                 payload_json: r#"{"board":"plan.md","card":"c1","from_column":0,"to_column":2}"#
                     .to_string(),
             },

@@ -214,7 +214,14 @@ fn port_014_a_missing_project_is_refused_then_accepted_once_it_exists() {
     post(&mut host, 2, &agent_body("ilium", "keep me"));
     let specs = created_panes(&host);
     assert_eq!(specs.len(), 1);
-    assert_eq!(specs[0].cwd.as_deref(), Some("/home/me/dev/ai/ilium"));
+    // `cwd` is a granted scope plus a relative path (absolute paths are invalid); the session directory is the project scope root.
+    assert_eq!(
+        specs[0]
+            .cwd
+            .as_ref()
+            .map(|path| (path.scope.as_str(), path.path.as_str())),
+        Some(("project", ""))
+    );
     assert_eq!(specs[0].initial_input.as_deref(), Some("keep me"));
 }
 

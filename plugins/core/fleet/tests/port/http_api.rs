@@ -41,7 +41,14 @@ fn http_api_project_name_lookup_finds_nested_directories() {
     post(&mut host, 1, &agent("ilium"));
     let specs = created_panes(&host);
     assert_eq!(specs.len(), 1);
-    assert_eq!(specs[0].cwd.as_deref(), Some("/home/me/dev/ai/ilium"));
+    // `cwd` is a granted scope plus a relative path (absolute paths are invalid); the session directory is the project scope root.
+    assert_eq!(
+        specs[0]
+            .cwd
+            .as_ref()
+            .map(|path| (path.scope.as_str(), path.path.as_str())),
+        Some(("project", ""))
+    );
 }
 
 /// REQ: PORT:ilium-server/src/http_api.rs::project_name_lookup_stops_at_depth_two
@@ -138,8 +145,11 @@ fn http_api_http_workspace_uses_server_path_and_preserves_legacy_request() {
     let specs = created_panes(&host);
     assert_eq!(specs.len(), 1);
     assert_eq!(
-        specs[0].cwd.as_deref(),
-        Some("/home/me/dev/app.worktrees/agent-x")
+        specs[0]
+            .cwd
+            .as_ref()
+            .map(|path| (path.scope.as_str(), path.path.as_str())),
+        Some(("project", ""))
     );
 }
 

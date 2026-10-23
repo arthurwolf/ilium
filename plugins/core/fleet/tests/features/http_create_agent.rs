@@ -98,7 +98,14 @@ fn http_058_the_prompt_becomes_the_initial_input() {
 fn http_058_an_absolute_project_path_is_the_working_directory() {
     let mut host = server_host();
     post(&mut host, 1, &good_body());
-    assert_eq!(creates(&host)[0].cwd.as_deref(), Some("/home/me/dev/app"));
+    // `cwd` is a granted scope plus a relative path; the absolute project path is the project scope root.
+    assert_eq!(
+        creates(&host)[0]
+            .cwd
+            .as_ref()
+            .map(|path| (path.scope.as_str(), path.path.as_str())),
+        Some(("project", ""))
+    );
 }
 
 /// REQ: F-058

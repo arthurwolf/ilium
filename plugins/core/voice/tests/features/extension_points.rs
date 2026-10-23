@@ -126,6 +126,7 @@ fn points_050_the_hook_call_shape_is_a_plain_hook_call() {
     let call = HookCall {
         call: 1,
         point: "transcript".to_string(),
+        extension: "test-contributor".to_string(),
         payload_json: "{}".to_string(),
     };
     assert_eq!(call.point, "transcript");

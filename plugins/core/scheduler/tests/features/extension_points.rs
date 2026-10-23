@@ -156,6 +156,7 @@ fn points_the_stub_hook_reply_for_before_send_scheduled_is_pass() {
             HookCall {
                 call: 1,
                 point: "ilium.core.scheduler/before-send-scheduled".to_string(),
+                extension: "test-contributor".to_string(),
                 payload_json:
                     r#"{"pane":1,"text_length":8,"schedule":"send:1","source":"scheduled"}"#
                         .to_string(),

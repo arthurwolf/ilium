@@ -157,6 +157,7 @@ fn points_062_the_stub_hook_reply_for_before_post_is_pass() {
             HookCall {
                 call: 1,
                 point: "ilium.core.chatroom/before-post".to_string(),
+                extension: "strip-secrets".to_string(),
                 payload_json: r#"{"author":"agent","text":"hello","kind":"message"}"#.to_string(),
             },
         )

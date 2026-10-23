@@ -203,6 +203,7 @@ fn f_041_hook_call_shape_is_a_plain_hook_call() {
     let call = HookCall {
         call: 1,
         point: "before-apply-title".to_string(),
+        extension: "test-contributor".to_string(),
         payload_json: "{}".to_string(),
     };
     assert_eq!(call.point, "before-apply-title");

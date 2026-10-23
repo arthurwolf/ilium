@@ -118,6 +118,7 @@ fn feature_027_the_classify_hook_without_a_contributor_passes() {
     let reply = host.run_hook(HookCall {
         call: 1,
         point: "classify".to_string(),
+        extension: "test-contributor".to_string(),
         payload_json: payload.to_string(),
     });
     assert_eq!(reply, HookReply::Pass);
@@ -131,6 +132,7 @@ fn feature_027_a_replaced_state_from_the_classify_hook_is_a_valid_activity_name(
     let reply = host.run_hook(HookCall {
         call: 2,
         point: "classify".to_string(),
+        extension: "test-contributor".to_string(),
         payload_json: payload.to_string(),
     });
     if let HookReply::Replace(text) = reply {
