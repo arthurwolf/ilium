@@ -14,7 +14,7 @@ use std::{
 /// Ephemeral snapshot-local handle. A handle from another bank is rejected,
 /// even when its slot happens to name a valid texture in this bank. Persist a
 /// ResourceId and source review/configuration, never this handle.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TextureHandle {
     bank: Digest256,
     slot: u32,

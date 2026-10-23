@@ -4642,5 +4642,15 @@
     "frames": [
       "Show briefing on arrival ........ ‹ ☑ On ›\n\nOn   a box above the terminal explains why you are here\nOff  you land on the agent with no extra box"
     ]
+  },
+  {
+    "id": "ATT-07",
+    "title": "Large attention buttons",
+    "explanation": "Use larger attention controls at the bottom of the left panel.",
+    "specimen": "Large attention buttons ........ ‹ ☐ Off ›",
+    "states": "Off (default) uses one row. On uses three rows with centered text and a three-row by five-column overview button.",
+    "motion": "The list gives its bottom two rows to the larger buttons.",
+    "caveat": "Very short panels fall back to a one-row button to preserve the list and toolbar.",
+    "frames": ["Large attention buttons ........ ‹ ☐ Off ›", "Large attention buttons ........ ‹ ☑ On ›"]
   }
 ]

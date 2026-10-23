@@ -274,6 +274,19 @@ impl SharedNative {
         self.imports.bank.identity()
     }
 
+    /// Shared texture import; restored cache tiles must reference this exact Arc.
+    pub fn imports(&self) -> &Arc<ImportResult> {
+        &self.imports
+    }
+
+    pub fn budget(&self) -> &ByteBudget {
+        &self.budget
+    }
+
+    pub fn provenance(&self) -> &native_assets::Provenance {
+        self.sources.provenance()
+    }
+
     pub fn definitions(&self) -> Result<DefinitionSources<'_>, Error> {
         Ok(self.sources.definitions()?)
     }

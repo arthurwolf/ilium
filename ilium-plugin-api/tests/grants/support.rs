@@ -59,7 +59,15 @@ pub fn manifest_json(side: Side, grants: &[&str]) -> String {
 
 /// The diagnostics the install check gives for a manifest with these grants on `side`.
 pub fn diagnostics_for(tier: Tier, side: Side, grants: &[&str]) -> Vec<Diagnostic> {
-    validate_json(&manifest_json(side, grants), &context(tier))
+    // Tier admission is stage 9; source-only Check stops after stage 4.
+    let mut value: serde_json::Value = serde_json::from_str(&manifest_json(side, grants)).unwrap();
+    value["files"] = serde_json::json!([{
+        "path": format!("{}.wasm", side.as_str()), "length": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }]);
+    let mut admission = context(tier);
+    admission.mode = CheckMode::Install;
+    validate_json(&value.to_string(), &admission)
 }
 
 /// The codes of `diagnostics_for`, in order.

@@ -242,3 +242,30 @@ fn actual_guest_memory_growth_past_limit_has_memory_trap_code() {
         "trap.memory"
     );
 }
+
+#[test]
+fn component_start_deadline_is_a_counted_activation_trap() {
+    use ilium_plugin_api::limits::LimitKey;
+    let engine = engine();
+    let compiled = compile(&engine, r#"(component
+        (core module $m (func $start (loop $spin br $spin)) (start $start))
+        (core instance $i (instantiate $m)))"#);
+    let result = WasmGuest::instantiate(engine, &compiled,
+        ResolvedLimits(BTreeMap::from([(LimitKey::ActivateDeadlineMs, 1)])));
+    let error = result.err().expect("start function must be interrupted");
+    assert!(matches!(error, ilium_plugin_host::HostError::ActivationTrap(_)));
+    assert_eq!(error.code().as_str(), "trap.deadline");
+}
+
+#[test]
+fn initial_component_memory_limit_preserves_activation_trap_identity() {
+    use ilium_plugin_api::limits::LimitKey;
+    let engine = engine();
+    let compiled = compile(&engine, r#"(component
+        (core module $m (memory 32)) (core instance $i (instantiate $m)))"#);
+    let result = WasmGuest::instantiate(engine.clone(), &compiled,
+        ResolvedLimits(BTreeMap::from([(LimitKey::MemoryMib, 1)])));
+    let error = result.err().expect("initial memory exceeds the resolved limit");
+    assert_eq!(error.code().as_str(), "trap.memory");
+    assert_eq!(engine.stats().instantiations, 0);
+}

@@ -3,14 +3,14 @@
 
 use std::collections::BTreeMap;
 
-use ilium_plugin_api::grants::{check_grant, Grant};
+use ilium_plugin_api::grants::{Grant, check_grant};
 use ilium_plugin_api::limits::{self, LimitKey, Limits};
 use ilium_plugin_api::manifest::{
-    check_component, parse_activation, CheckMode, ComponentSummary, Stage, ValidationContext,
+    CheckMode, ComponentSummary, Stage, ValidationContext, check_component, parse_activation,
 };
 use ilium_plugin_api::{Side, Tier};
 use proptest::prelude::*;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::support::*;
 
@@ -25,6 +25,7 @@ fn manifest_of(value: &Value) -> ilium_plugin_api::manifest::Manifest {
 fn summary(exports: &[&str]) -> ComponentSummary {
     ComponentSummary {
         exports: exports.iter().map(|name| (*name).to_owned()).collect(),
+        api_sections: vec![ilium_plugin_api::version::API_VERSION_BYTES.to_vec()],
         ..ComponentSummary::default()
     }
 }
@@ -209,15 +210,18 @@ fn pkg_044_hook_handler_with_a_handler_extension_is_consistent() {
         "/contributes/extensions",
         json!([extension_value(Some("client"))]),
     );
-    let found = errors(&value);
-    assert_lacks(&found, "manifest.exports-mismatch");
+    let found = install_errors(&packed(value), Tier::T3);
+    assert!(found.is_empty(), "valid hook-handler fixture: {found:?}");
 }
 
 /// REQ: PKG-044
 #[test]
 fn pkg_044_hook_handler_without_any_handler_extension_refused_exports_mismatch() {
     let value = set(client(), "/client/exports", json!(["hook-handler"]));
-    assert_has(&errors(&value), "manifest.exports-mismatch");
+    assert_has(
+        &install_errors(&packed(value.clone()), Tier::T3),
+        "manifest.exports-mismatch",
+    );
 }
 
 /// REQ: PKG-044
@@ -228,7 +232,10 @@ fn pkg_044_handler_extension_without_hook_handler_in_the_list_refused_exports_mi
         "/contributes/extensions",
         json!([extension_value(Some("client"))]),
     );
-    assert_has(&errors(&value), "manifest.exports-mismatch");
+    assert_has(
+        &install_errors(&packed(value.clone()), Tier::T3),
+        "manifest.exports-mismatch",
+    );
 }
 
 /// REQ: PKG-044
@@ -239,25 +246,34 @@ fn pkg_044_extension_without_handler_needs_no_hook_handler() {
         "/contributes/extensions",
         json!([extension_value(None)]),
     );
-    assert_lacks(&errors(&value), "manifest.exports-mismatch");
+    assert_lacks(
+        &install_errors(&packed(value.clone()), Tier::T3),
+        "manifest.exports-mismatch",
+    );
 }
 
 /// REQ: PKG-045
 #[test]
 fn pkg_045_data_version_above_one_needs_migrator_in_exports() {
     let value = set(client(), "/data_version", json!(2));
-    assert_has(&errors(&value), "manifest.exports-mismatch");
+    assert_has(
+        &install_errors(&packed(value.clone()), Tier::T3),
+        "manifest.exports-mismatch",
+    );
     let listed = set(value, "/client/exports", json!(["migrator"]));
-    assert_lacks(&errors(&listed), "manifest.exports-mismatch");
+    assert_lacks(
+        &install_errors(&packed(listed), Tier::T3),
+        "manifest.exports-mismatch",
+    );
 }
 
 /// REQ: PKG-045
 #[test]
 fn pkg_045_data_version_one_needs_no_migrator() {
     let value = set(client(), "/data_version", json!(1));
-    assert_clean(&value);
+    assert!(install_errors(&packed(value.clone()), Tier::T3).is_empty());
     assert_has(
-        &errors(&set(client(), "/data_version", json!(2))),
+        &install_errors(&packed(set(client(), "/data_version", json!(2))), Tier::T3),
         "manifest.exports-mismatch",
     );
 }
@@ -271,16 +287,25 @@ fn pkg_045_each_server_and_client_component_needs_its_own_migrator() {
         json!({ "entry": "server.wasm", "world": "ilium:server/base@0.1.0" }),
     );
     let only_client = set(both.clone(), "/client/exports", json!(["migrator"]));
-    assert_has(&errors(&only_client), "manifest.exports-mismatch");
+    assert_has(
+        &install_errors(&packed(only_client.clone()), Tier::T3),
+        "manifest.exports-mismatch",
+    );
     let both_listed = set(only_client, "/server/exports", json!(["migrator"]));
-    assert_lacks(&errors(&both_listed), "manifest.exports-mismatch");
+    assert_lacks(
+        &install_errors(&packed(both_listed), Tier::T3),
+        "manifest.exports-mismatch",
+    );
 }
 
 /// REQ: PKG-045
 #[test]
 fn pkg_045_a_scene_component_has_no_migrator_and_needs_none() {
     let value = set(scene(), "/data_version", json!(2));
-    assert_lacks(&errors(&value), "manifest.exports-mismatch");
+    assert_lacks(
+        &install_errors(&packed(value.clone()), Tier::T3),
+        "manifest.exports-mismatch",
+    );
 }
 
 /// REQ: PKG-045
@@ -745,18 +770,26 @@ fn pkg_060_a_trigger_that_names_a_missing_own_contribution_refused_contribution_
 
 /// REQ: PKG-061
 #[test]
-fn pkg_061_a_list_of_32_entries_is_accepted_and_33_refused() {
+fn pkg_061_commands_allow_256_entries_and_refuse_257() {
     let commands = |count: usize| -> Vec<Value> {
         (0..count)
             .map(|index| json!({ "id": format!("c{index}"), "title": "T" }))
             .collect()
     };
     assert_lacks(
-        &errors(&set(client(), "/contributes/commands", json!(commands(32)))),
+        &errors(&set(
+            client(),
+            "/contributes/commands",
+            json!(commands(256)),
+        )),
         "manifest.contribution-limit",
     );
     assert_has(
-        &errors(&set(client(), "/contributes/commands", json!(commands(33)))),
+        &errors(&set(
+            client(),
+            "/contributes/commands",
+            json!(commands(257)),
+        )),
         "manifest.contribution-limit",
     );
 }
@@ -896,14 +929,14 @@ fn pkg_063_a_sound_file_missing_from_files_refused_file_missing() {
 
 /// REQ: PKG-063
 #[test]
-fn pkg_063_a_file_outside_help_or_sounds_directory_is_refused() {
+fn pkg_063_a_file_outside_help_or_sounds_directory_is_refused_by_schema() {
     let value = set(
         client(),
         "/contributes/sounds",
         json!([{ "id": "ding", "file": "other/ding.ogg" }]),
     );
     let found = install_errors(&packed_with(value, &["other/ding.ogg"]), Tier::T3);
-    assert_has(&found, "manifest.file-missing");
+    assert_has(&found, "manifest.schema");
 }
 
 /// REQ: PKG-064
@@ -963,13 +996,13 @@ fn pkg_065_distinct_names_are_accepted() {
 
 /// REQ: PKG-065
 #[test]
-fn pkg_065_a_cli_alias_that_collides_with_a_name_of_the_same_plugin_is_refused() {
+fn pkg_065_undeclared_cli_alias_field_is_refused_before_name_checks() {
     let value = set(
         client(),
         "/contributes/cli",
         json!([{ "name": "one", "summary": "A", "aliases": ["two"] }, { "name": "two", "summary": "B" }]),
     );
-    assert_has(&errors(&value), "manifest.cli-name-taken");
+    assert_has(&errors(&value), "manifest.unknown-key");
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1247,9 +1280,9 @@ fn pkg_079_a_provider_name_with_the_plugin_prefix_is_accepted() {
     let value = set(
         client(),
         "/contributes/services",
-        json!([{ "provides": ["example.demo/status"] }]),
+        json!({ "provides": [{"name":"example.demo/status", "version":"1.0.0", "schema":"schemas/status.json"}] }),
     );
-    assert_lacks(&errors(&value), "manifest.service-name");
+    assert_clean(&value);
 }
 
 /// REQ: PKG-079
@@ -1258,7 +1291,7 @@ fn pkg_079_a_provider_name_with_a_foreign_prefix_refused_service_name() {
     let value = set(
         client(),
         "/contributes/services",
-        json!([{ "provides": ["com.other.thing/status"] }]),
+        json!({ "provides": [{"name":"com.other.thing/status", "version":"1.0.0", "schema":"schemas/status.json"}] }),
     );
     assert_has(&errors(&value), "manifest.service-name");
 }
@@ -1269,7 +1302,7 @@ fn pkg_079_a_duplicate_provider_name_refused_service_name() {
     let value = set(
         client(),
         "/contributes/services",
-        json!([{ "provides": ["example.demo/status", "example.demo/status"] }]),
+        json!({ "provides": [{"name":"example.demo/status", "version":"1.0.0", "schema":"schemas/status.json"}, {"name":"example.demo/status", "version":"1.0.0", "schema":"schemas/other.json"}] }),
     );
     assert_has(&errors(&value), "manifest.service-name");
 }
@@ -1280,7 +1313,7 @@ fn pkg_079_a_missing_schema_file_refused_file_missing() {
     let value = set(
         client(),
         "/contributes/services",
-        json!([{ "provides": ["example.demo/status"], "schema": "schemas/status.json" }]),
+        json!({ "provides": [{"name":"example.demo/status", "version":"1.0.0", "schema":"schemas/status.json"}] }),
     );
     assert_has(
         &install_errors(&packed(value), Tier::T3),
@@ -1294,9 +1327,9 @@ fn pkg_079_a_core_plugin_prefix_is_accepted_for_its_surface_when_replaced() {
     let value = set(
         set(packed(client()), "/replaces", json!(["ilium.core.titles"])),
         "/contributes/services",
-        json!([{ "provides": ["ilium.core.titles/suggest"] }]),
+        json!({ "provides": [{"name":"ilium.core.titles/suggest", "version":"1.0.0", "schema":"schemas/status.json"}] }),
     );
-    let found = install_errors(&value, Tier::T1);
+    let found = install_errors(&packed_with(value, &["schemas/status.json"]), Tier::T1);
     assert_lacks(&found, "manifest.service-name");
 }
 

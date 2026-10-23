@@ -919,6 +919,9 @@ fn adjust_setting(app: &mut App, path: &str, direction: i32) -> Result<(), Strin
         "attention.press_sorts" => {
             app.step_settings_choice(SettingsChoice::AttentionPressSorts, direction)
         }
+        "attention.large_buttons" => {
+            app.step_settings_choice(SettingsChoice::AttentionLargeButtons, direction)
+        }
         "attention.show_briefing" => {
             app.step_settings_choice(SettingsChoice::AttentionShowBriefing, direction)
         }
@@ -992,6 +995,7 @@ fn set_attention_setting(app: &mut App, path: &str, value: &Value) -> Result<(),
         }
         "attention.press_sorts" => settings.press_sorts = boolean(value)?,
         "attention.show_briefing" => settings.show_briefing = boolean(value)?,
+        "attention.large_buttons" => settings.large_buttons = boolean(value)?,
         "attention.turbo_concurrency" => {
             settings.turbo_concurrency = u8::try_from(unsigned(value)?)
                 .ok()
@@ -1465,8 +1469,16 @@ mod tests {
     #[test]
     fn attention_control_paths_set_validate_and_clear_the_model() {
         let mut app = App::new("default".to_owned(), PathBuf::from("/tmp/project"));
+        let directory = tempfile::tempdir().unwrap();
+        app.config_dir = Some(directory.path().to_path_buf());
         set_setting(&mut app, "attention.mode", json!("Instant-Only")).unwrap();
         set_setting(&mut app, "attention.press_sorts", json!(false)).unwrap();
+        assert!(!app.attention_settings.large_buttons);
+        set_setting(&mut app, "attention.large_buttons", json!(true)).unwrap();
+        assert!(app.attention_settings.large_buttons);
+        assert!(set_setting(&mut app, "attention.large_buttons", json!("yes")).is_err());
+        adjust_setting(&mut app, "attention.large_buttons", 1).unwrap();
+        assert!(!app.attention_settings.large_buttons);
         set_setting(&mut app, "attention.show_briefing", json!(false)).unwrap();
         assert!(!app.attention_settings.show_briefing);
         assert!(set_setting(&mut app, "attention.show_briefing", json!("no")).is_err());

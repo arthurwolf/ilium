@@ -322,6 +322,7 @@ fn recap_context(
     // inference.
     let fence_lookup: FenceLookup = Arc::new(move |pane_id: &str| captured.get(pane_id).cloned());
     RecapContext {
+        progress: None,
         provider,
         options: RecapOptions {
             lengths: lengths.to_vec(),

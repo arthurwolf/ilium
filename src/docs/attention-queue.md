@@ -80,9 +80,16 @@ All settings save as you change them.
 - **Press also sorts**: default on.
 - **Turbo concurrency**: default 16.
 - **Item expiry**: seconds before an unrefreshed item is dropped.
+- **Large attention buttons**: default off (`attention.large_buttons` in the control API). Turn it on for a three-line, centered **Next: needs you** button and a three-line by five-column overview **+** button.
 - **Show briefing on arrival**: default on. Turn it off to arrive at an agent with no box. It has no effect while the mode is Off.
 - **Model for attention**: empty uses the Inference model; set a model id to override it for this feature only. The override applies to Turbo mode's own calls; Shared mode rides on the Sort call and uses the Sort model.
 
 ## Persistence and privacy
 
 The queue is one global list, tagged by project, saved when it changes and re-validated on start: an item whose agent no longer exists or whose screen evidence differs is dropped. In Shared and Turbo modes the same bounded screen excerpts that Sort already sends are sent to your Inference provider; see [Inference and privacy](inference-and-privacy.md). Off and Instant only send nothing.
+
+### Snoozing attention cards
+
+Click the 💤 icon on an attention card to snooze that agent. Hover over the icon for an explanation. Snoozed agents are excluded from the overview, the attention panel and the next-agent button. The snooze survives updated text or screen evidence within the same attention category. It ends when the category changes or the agent stops needing attention.
+
+Press **S**, or click **S show snoozed** in the overview footer, to reveal snoozed cards; use the same control again to hide them. Revealed cards are marked **snoozed**. Change the glyph under **Settings → Icons → Attention: snooze**. Snoozes are saved with the attention queue.

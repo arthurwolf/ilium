@@ -52,3 +52,4 @@ pub mod projected_source;
 
 pub mod projected_route;
 pub mod saved_scene;
+mod tile_cache;

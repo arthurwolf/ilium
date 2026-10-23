@@ -995,15 +995,17 @@ pub enum AttentionRow {
     ExpirySeconds,
     Model,
     ShowBriefing,
+    LargeButtons,
 }
 impl AttentionRow {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::Mode,
         Self::PressSorts,
         Self::TurboConcurrency,
         Self::ExpirySeconds,
         Self::Model,
         Self::ShowBriefing,
+        Self::LargeButtons,
     ];
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2067,6 +2069,9 @@ pub struct PendingRestructureRequest {
     /// The worker returns it unchanged so the server can preserve anything
     /// that arrived after inference began as dirty for the next pass.
     pub inference_activity_revisions: Vec<ilium_core::NodeActivityRevision>,
+    /// Session and generation stamped for every agent pane at request time,
+    /// so the batch recaps the reply carries are fenced against later work.
+    pub recap_stamps: HashMap<NodeId, (String, u64)>,
     /// Shared attention mode: the prompt also asks for the optional
     /// `attention` list, which rides back on the worker result.
     pub include_attention: bool,
@@ -2706,6 +2711,14 @@ pub struct App {
     /// retry (`crate::title_inference`'s `PaneBecameDone` trigger) doesn't
     /// need the server to resend it.
     pub agent_session_ids: HashMap<NodeId, String>,
+    /// Recap fence, in-flight dedupe and the recaps the server last reported.
+    pub recap: crate::recap_state::RecapState,
+    pub(crate) pending_recap_requests: Vec<crate::recap_worker::RecapWorkerRequest>,
+    pub(crate) recap_progress: HashMap<NodeId, crate::recap_ui::RecapProgress>,
+    pub(crate) recap_errors: HashMap<NodeId, String>,
+    pub recap_popover: Option<crate::recap_ui::RecapPopover>,
+    /// Tree refresh icon under the pointer, with the cell to anchor its tooltip.
+    pub hovered_recap_refresh: Option<(NodeId, ratatui::layout::Position)>,
     /// Server-verified transcript path for each pane's `agent_session_ids`
     /// entry. A hint only: lookups re-verify it before trusting it and fall
     /// back to a bounded scan, so a stale or foreign path cannot be shown.
@@ -3328,6 +3341,12 @@ impl App {
             terminal_activity: TerminalActivityTracker::default(),
             has_applied_first_snapshot: false,
             agent_session_ids: HashMap::new(),
+            recap: crate::recap_state::RecapState::default(),
+            pending_recap_requests: Vec::new(),
+            recap_progress: HashMap::new(),
+            recap_errors: HashMap::new(),
+            recap_popover: None,
+            hovered_recap_refresh: None,
             agent_transcript_paths: HashMap::new(),
             frozen_panes: HashSet::new(),
             frozen_screens: HashMap::new(),
@@ -17671,6 +17690,7 @@ impl App {
         self.hovered_tree_node = hit;
         if hit.is_none() {
             self.hovered_status_slot = None;
+            self.hovered_recap_refresh = None;
         }
     }
 
@@ -18763,13 +18783,15 @@ impl App {
         self.request_project_restructure(project_id, RestructureRequestOrigin::Automatic);
     }
 
+    /// Returns whether a worker request was queued, like the `_with_attention`
+    /// form it wraps.
     fn request_project_restructure(
         &mut self,
         project_id: NodeId,
         request_origin: RestructureRequestOrigin,
-    ) {
+    ) -> bool {
         let attention = self.default_restructure_attention();
-        self.request_project_restructure_with_attention(project_id, request_origin, attention);
+        self.request_project_restructure_with_attention(project_id, request_origin, attention)
     }
 
     /// Queues one restructure call for `project_id`. With `attention` set the
@@ -18953,6 +18975,7 @@ impl App {
             );
         }
         let title_observations = self.capture_title_observations(&contexts);
+        let recap_stamps = self.stamp_batch_recaps(&contexts);
         self.pending_restructure_requests
             .push(PendingRestructureRequest {
                 project_id,
@@ -18964,6 +18987,7 @@ impl App {
                 current_structure,
                 recommendation_snapshot,
                 inference_activity_revisions,
+                recap_stamps,
                 include_attention,
             });
         self.refresh_structure_loading();
@@ -19011,6 +19035,43 @@ impl App {
     }
 
     /// Drains every queued project request for worker startup.
+    /// Stamps one recap generation per agent pane that has a known session.
+    fn stamp_batch_recaps(&mut self, contexts: &[LeafContext]) -> HashMap<NodeId, (String, u64)> {
+        let mut stamps = HashMap::new();
+        for context in contexts {
+            if let Some(session_id) = self.agent_session_ids.get(&context.id).cloned() {
+                let generation = self.recap.next_generation(context.id);
+                stamps.insert(context.id, (session_id, generation));
+            }
+        }
+        stamps
+    }
+
+    /// Sends the batch short recaps of a finished restructure to the server.
+    /// A recap is dropped when its pane changed session since the request.
+    pub fn apply_batch_recaps(
+        &mut self,
+        recaps: Vec<crate::restructure::BatchRecap>,
+        stamps: &HashMap<NodeId, (String, u64)>,
+    ) {
+        for recap in recaps {
+            let Some((session_id, recap_generation)) = stamps.get(&recap.pane_id) else {
+                continue;
+            };
+            if self.agent_session_ids.get(&recap.pane_id) != Some(session_id) {
+                continue;
+            }
+            self.queue_request(ClientRequest::ApplyRecap {
+                pane_id: recap.pane_id,
+                session_id: session_id.clone(),
+                recap_generation: *recap_generation,
+                trigger: ilium_ipc::RecapTrigger::Batch,
+                short: recap.short,
+                long: None,
+            });
+        }
+    }
+
     pub fn take_pending_restructure_requests(&mut self) -> Vec<PendingRestructureRequest> {
         for request in &self.pending_restructure_requests {
             if let Some(job) = self.project_restructure_jobs.get_mut(&request.project_id) {

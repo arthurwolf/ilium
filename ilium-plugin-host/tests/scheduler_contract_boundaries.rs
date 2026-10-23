@@ -108,15 +108,15 @@ fn per_side_resolved_deadline_controls_queued_call_expiry() {
 }
 
 #[test]
-fn only_scrolled_view_actions_coalesce() {
+fn documented_pointer_scroll_and_drag_view_actions_coalesce() {
     use ilium_plugin_api::generated::types::events::Event;
     use ilium_plugin_api::generated::types::ui::{ActionKind, UiAction, ViewTarget};
     use ilium_plugin_host::scheduler::{event_queue_policy, QueuePolicy};
 
     for (kind, expected) in [
         (ActionKind::Scrolled, QueuePolicy::Coalesce),
-        (ActionKind::Pointer, QueuePolicy::NeverDrop),
-        (ActionKind::DragOver, QueuePolicy::NeverDrop),
+        (ActionKind::Pointer, QueuePolicy::Coalesce),
+        (ActionKind::DragOver, QueuePolicy::Coalesce),
     ] {
         let event = Event::UiAction(UiAction {
             view: ViewTarget::Panel("contract-test".to_owned()),

@@ -12,6 +12,13 @@ use serde_json::Value;
 
 use crate::registry_client::Fetcher;
 use crate::telemetry::{HourBucket, InspectNode, MemoryView, TraceRecord};
+mod offline;
+pub mod check_command;
+pub mod install_command;
+pub mod project_inputs;
+pub mod local_install;
+pub mod verify_install;
+pub mod session_commands;
 
 /// The environment a command runs in (injected so tests need no real directories).
 #[derive(Clone)]
@@ -51,6 +58,10 @@ pub struct CliEnv {
     pub runner: Option<Arc<dyn ComponentRunner>>,
     /// The running session the command talks to, when attached (reference-plugin-cli.md DEV-004).
     pub session: Option<Arc<dyn SessionBackend>>,
+    /// Explicit trusted file-install service, including consent and durable effects.
+    pub installer: Option<Arc<dyn install_command::InstallCommandBackend>>,
+    /// Actual invocation provenance for durable command audit records.
+    pub audit_context: Option<crate::audit::AuditContext>,
     /// Raised by Ctrl-C; a long command stops at the next step (DEV-050).
     pub interrupt: Option<Arc<AtomicBool>>,
     /// Scripted events `ilium plugin dev` consumes instead of watching files (DEV-050).
@@ -61,17 +72,26 @@ pub struct CliEnv {
 
 impl CliEnv {
     /// An environment with the given directories, time, CI flag and fetcher; everything else
-    /// defaults (no probe, builder, runner or session) (reference-cli.md).
+    /// defaults (no probe, builder, runner or session). The pure environment
+    /// defaults to Linux; the process adapter must inject its actual platform.
     pub fn new(
-        _data_dir: PathBuf,
-        _state_dir: PathBuf,
-        _config_dir: PathBuf,
-        _cwd: PathBuf,
-        _now: SystemTime,
-        _is_ci: bool,
-        _fetcher: Arc<dyn Fetcher>,
+        data_dir: PathBuf,
+        state_dir: PathBuf,
+        config_dir: PathBuf,
+        cwd: PathBuf,
+        now: SystemTime,
+        is_ci: bool,
+        fetcher: Arc<dyn Fetcher>,
     ) -> CliEnv {
-        unimplemented!("host::cli::CliEnv::new")
+        CliEnv {
+            cache_dir: data_dir.join("cache"),
+            data_dir, state_dir, config_dir, cwd, now, is_ci, fetcher,
+            platform: Platform::Linux,
+            host_release: format!("v{}", env!("CARGO_PKG_VERSION")),
+            env: BTreeMap::new(), system_dir: None, policy_file: None,
+            probe: None, builder: None, runner: None, session: None, installer: None, audit_context: None,
+            interrupt: None, dev_script: Vec::new(), build_duration_ms: 0,
+        }
     }
 
     /// Uses `probe` for `doctor` (DEV-010).
@@ -95,6 +115,18 @@ impl CliEnv {
     /// Attaches the command to a session (DEV-004).
     pub fn with_session(mut self, session: Arc<dyn SessionBackend>) -> CliEnv {
         self.session = Some(session);
+        self
+    }
+
+    /// Supplies the trusted installation service without inferring approval.
+    pub fn with_installer(mut self, installer: Arc<dyn install_command::InstallCommandBackend>) -> CliEnv {
+        self.installer = Some(installer);
+        self
+    }
+
+    /// Supplies actual invocation provenance without inventing a session identity.
+    pub fn with_audit_context(mut self, context: crate::audit::AuditContext) -> CliEnv {
+        self.audit_context = Some(context);
         self
     }
 
@@ -139,8 +171,48 @@ pub struct CliOutput {
 }
 
 /// Runs `ilium plugin <args...>`.
-pub fn run(_args: &[String], _env: &CliEnv) -> CliOutput {
-    unimplemented!("host::cli::run")
+pub fn run(args: &[String], env: &CliEnv) -> CliOutput {
+    let started = std::time::Instant::now();
+    let mut output = run_inner(args, env);
+    if let Some(summary) = output.stdout_jsonl.iter_mut().find(|record| record["type"] == "summary") {
+        summary["duration_ms"] = serde_json::json!(started.elapsed().as_secs_f64() * 1000.0);
+    }
+    let custom_text = (output.stdout_text != output.stdout_raw).then_some(output.stdout_text);
+    let mut rendered = offline::render(output.stdout_jsonl, output.exit_code);
+    if let Some(text) = custom_text { rendered.stdout_text = text; }
+    rendered.stderr = output.stderr;
+    rendered
+}
+
+fn run_inner(args: &[String], env: &CliEnv) -> CliOutput {
+    let Some(command) = args.first().map(String::as_str) else {
+        return offline::failure("usage.command-missing", "A plugin command is required", 2);
+    };
+    if args.iter().any(|arg| arg == "--help") {
+        return offline::finish(vec![], 0);
+    }
+    if env.interrupt.as_ref().is_some_and(|flag| flag.load(std::sync::atomic::Ordering::Acquire)) {
+        return offline::failure("command.interrupted", "Command interrupted", 130);
+    }
+    if matches!(command, "list" | "logs" | "grants" | "audit") {
+        return session_commands::run(command, &args[1..], env);
+    }
+    if command == "install" {
+        return match &env.installer {
+            Some(installer) => install_command::run(&args[1..], &env.cwd, installer.as_ref()),
+            None => offline::failure("command.context-required", "No trusted installation service was supplied", 1),
+        };
+    }
+    match command {
+        "check" | "lint" => check_command::run(command, &args[1..], env),
+        "inspect" | "verify" => offline::run(command, &args[1..], env),
+        "install" | "uninstall" | "enable" | "disable" | "grants" | "list" | "dev" | "logs" | "log-level" | "trace" | "profile" if env.session.is_none() =>
+            offline::failure("session.unreachable", "No reachable session was supplied", 6),
+        "install" | "uninstall" | "enable" | "disable" | "grants" | "list" | "dev" | "logs" | "log-level" | "trace" | "profile" |
+        "new" | "build" | "test" | "pack" | "keygen" | "sign" | "trust" | "publish" | "doctor" =>
+            offline::failure("command.context-required", "The command adapter is not connected", 1),
+        _ => offline::failure("usage.command-unknown", format!("Unknown plugin command: {command}"), 2),
+    }
 }
 
 /// What `run_cli` produced: the exit code and the raw stdout and stderr text
@@ -156,13 +228,19 @@ pub struct CliRunOutput {
 }
 
 /// Runs `ilium plugin <args...>` and returns the raw text output (reference-cli.md).
-pub fn run_cli(_env: &CliEnv, _args: &[String]) -> CliRunOutput {
-    unimplemented!("host::cli::run_cli")
+pub fn run_cli(env: &CliEnv, args: &[String]) -> CliRunOutput {
+    let args = args.strip_prefix(&["plugin".to_owned()]).unwrap_or(args);
+    let output = run(args, env);
+    CliRunOutput {
+        exit_code: output.exit_code,
+        stdout: if args.iter().any(|arg| arg == "--json") { output.stdout_raw } else { output.stdout_text },
+        stderr: output.stderr,
+    }
 }
 
 /// Runs `ilium plugin check <dir>` on an unpacked package directory (reference-requirements-api-host.md API-080).
-pub fn run_check_dir(_directory: &std::path::Path) -> CliOutput {
-    unimplemented!("host::cli::run_check_dir")
+pub fn run_check_dir(directory: &std::path::Path) -> CliOutput {
+    offline::check_directory(directory)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -235,6 +313,10 @@ pub struct ProfileCall {
 
 /// The running session as the debugging commands see it (reference-debugging-tools.md DEV-660..690).
 pub trait SessionBackend: Send + Sync {
+    /// Explicit command channel; unsupported adapters must refuse operations.
+    fn request(&self, _request: SessionRequest) -> Result<SessionResponse, String> {
+        Err("session.operation-unsupported".into())
+    }
     /// The plugin, when installed.
     fn plugin(&self, id: &str) -> Option<SessionPlugin>;
     /// The trace ring of the plugin.
@@ -316,268 +398,395 @@ pub struct InstallRecord {
     pub grants: Vec<String>,
 }
 
-/// An in-memory session for the CLI tests: a `SessionBackend` that also records what the
-/// commands did to it (reference-plugin-cli.md DEV-004, DEV-100..160).
-#[derive(Debug, Default)]
-pub struct MemorySession;
+/// Typed operations on a session adapter. Lifecycle commands require a real
+/// backend outcome; an in-memory fixture must inject that outcome explicitly.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SessionRequest {
+    Connect,
+    List,
+    Describe { id: String },
+    Review { grants: Vec<String> },
+    TrustPrompt,
+    RevokeGrant { id: String, grant: String },
+    SetGrantState { id: String, grant: String, risk: String, state: String },
+    /// Observation after the real installer has committed admission.
+    RecordInstall { record: InstallRecord, state: String },
+    Logs { id: String },
+    ResetFailures { id: String },
+    Activate { id: String },
+    Deactivate { id: String, reason: String, state: String },
+    Restart { id: String },
+    Uninstall { id: String, purge_data: bool, purge_log: bool },
+    SetLogLevel { id: String, level: String },
+}
 
-impl MemorySession {
-    /// A reachable, empty session.
-    pub fn new() -> Arc<MemorySession> {
-        unimplemented!("host::cli::MemorySession::new")
-    }
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionPluginDetails {
+    pub id: String,
+    pub version: String,
+    pub tier: String,
+    pub state: String,
+    pub dev: bool,
+    pub signed_by: Option<String>,
+    pub grants: Vec<(String, String, String)>,
+    pub failure_count: u32,
+    pub data_exists: bool,
+    pub cache_exists: bool,
+    pub storage_buckets: usize,
+    pub settings_values: usize,
+    pub log_kept: bool,
+}
 
-    /// A session every connection attempt fails to reach (`session.unreachable`, DEV-004).
-    pub fn unreachable() -> Arc<MemorySession> {
-        unimplemented!("host::cli::MemorySession::unreachable")
-    }
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SessionResponse {
+    Done,
+    Plugins(Vec<SessionPluginDetails>),
+    Plugin(SessionPluginDetails),
+    Decision(bool),
+    Logs(Vec<(String, String, String)>),
+}
 
-    /// Installs a plugin with a state (`running`, `disabled`, `stopped`, `untrusted`) and
-    /// grants as `(grant, risk, state)` triples.
-    pub fn add_plugin(
-        &self,
-        _id: &str,
-        _version: &str,
-        _tier: &str,
-        _state: &str,
-        _dev: bool,
-        _grants: &[(&str, &str, &str)],
-    ) {
-        unimplemented!("host::cli::MemorySession::add_plugin")
-    }
+/// Deterministic in-memory CLI test adapter, with explicit runtime observations.
+#[derive(Default)]
+pub struct MemorySession {
+    state: std::sync::Mutex<MemorySessionState>,
+}
 
-    /// The same as `add_plugin`; kept for the tests that name the grants explicitly.
-    pub fn add_plugin_with_grants(
-        &self,
-        _id: &str,
-        _version: &str,
-        _tier: &str,
-        _state: &str,
-        _dev: bool,
-        _grants: &[(&str, &str, &str)],
-    ) {
-        unimplemented!("host::cli::MemorySession::add_plugin_with_grants")
-    }
-
-    /// Records which key signed the installed package.
-    pub fn set_signed_by(&self, _id: &str, _key_id: &str) {
-        unimplemented!("host::cli::MemorySession::set_signed_by")
-    }
-
-    /// The state word of a plugin, when installed.
-    pub fn plugin_state(&self, _id: &str) -> Option<String> {
-        unimplemented!("host::cli::MemorySession::plugin_state")
-    }
-
-    /// Whether an interactive client is attached (review dialogs need one).
-    pub fn set_client_attached(&self, _attached: bool) {
-        unimplemented!("host::cli::MemorySession::set_client_attached")
-    }
-
-    /// Review dialogs shown.
-    pub fn review_dialog_count(&self) -> usize {
-        unimplemented!("host::cli::MemorySession::review_dialog_count")
-    }
-
-    /// Plugins started.
-    pub fn started_plugin_count(&self) -> usize {
-        unimplemented!("host::cli::MemorySession::started_plugin_count")
-    }
-
-    /// The grants of a plugin in state `granted`.
-    pub fn granted(&self, _id: &str) -> Vec<String> {
-        unimplemented!("host::cli::MemorySession::granted")
-    }
-
-    /// Whether a grant is high risk.
-    pub fn is_high_risk(&self, _grant: &str) -> bool {
-        unimplemented!("host::cli::MemorySession::is_high_risk")
-    }
-
-    /// Connection attempts made to the session.
-    pub fn connect_attempts(&self) -> usize {
-        unimplemented!("host::cli::MemorySession::connect_attempts")
-    }
-
-    /// Sessions a command started.
-    pub fn sessions_started(&self) -> usize {
-        unimplemented!("host::cli::MemorySession::sessions_started")
-    }
-
-    /// Every mutation the commands made, in order.
-    pub fn journal(&self) -> Vec<String> {
-        unimplemented!("host::cli::MemorySession::journal")
-    }
-
-    /// Adds a plugin log line (side, level, message).
-    pub fn add_log_line(&self, _id: &str, _side: &str, _level: &str, _message: &str) {
-        unimplemented!("host::cli::MemorySession::add_log_line")
-    }
-
-    /// Makes the attached client decline review dialogs.
-    pub fn decline_review(&self, _decline: bool) {
-        unimplemented!("host::cli::MemorySession::decline_review")
-    }
-
-    /// Makes the attached client decline trust prompts.
-    pub fn decline_trust(&self, _decline: bool) {
-        unimplemented!("host::cli::MemorySession::decline_trust")
-    }
-
-    /// The installed version of a plugin.
-    pub fn plugin_version(&self, _id: &str) -> Option<String> {
-        unimplemented!("host::cli::MemorySession::plugin_version")
-    }
-
-    /// Activations of a plugin.
-    pub fn activations(&self, _id: &str) -> usize {
-        unimplemented!("host::cli::MemorySession::activations")
-    }
-
-    /// The reason word of each deactivation of a plugin, in order (`upgrade`, `disabled`, ...).
-    pub fn deactivations(&self, _id: &str) -> Vec<String> {
-        unimplemented!("host::cli::MemorySession::deactivations")
-    }
-
-    /// Restarts of a plugin.
-    pub fn restarts(&self, _id: &str) -> usize {
-        unimplemented!("host::cli::MemorySession::restarts")
-    }
-
-    /// Whether the package files of a plugin are still installed.
-    pub fn package_installed(&self, _id: &str) -> bool {
-        unimplemented!("host::cli::MemorySession::package_installed")
-    }
-
-    /// Adds a contribution of a plugin (kind, required grant).
-    pub fn add_contribution(&self, _id: &str, _kind: &str, _grant: &str) {
-        unimplemented!("host::cli::MemorySession::add_contribution")
-    }
-
-    /// Contributions of a plugin still registered.
-    pub fn contribution_count(&self, _id: &str) -> usize {
-        unimplemented!("host::cli::MemorySession::contribution_count")
-    }
-
-    /// Creates data, cache, storage buckets and settings values for a plugin.
-    pub fn seed_plugin_data(&self, _id: &str) {
-        unimplemented!("host::cli::MemorySession::seed_plugin_data")
-    }
-
-    /// Whether the data folder of a plugin exists.
-    pub fn data_folder_exists(&self, _id: &str) -> bool {
-        unimplemented!("host::cli::MemorySession::data_folder_exists")
-    }
-
-    /// Whether the cache folder of a plugin exists.
-    pub fn cache_folder_exists(&self, _id: &str) -> bool {
-        unimplemented!("host::cli::MemorySession::cache_folder_exists")
-    }
-
-    /// Storage buckets of a plugin.
-    pub fn storage_bucket_count(&self, _id: &str) -> usize {
-        unimplemented!("host::cli::MemorySession::storage_bucket_count")
-    }
-
-    /// Settings values of a plugin.
-    pub fn settings_value_count(&self, _id: &str) -> usize {
-        unimplemented!("host::cli::MemorySession::settings_value_count")
-    }
-
-    /// Whether the log of a plugin was kept after uninstall.
-    pub fn log_kept(&self, _id: &str) -> bool {
-        unimplemented!("host::cli::MemorySession::log_kept")
-    }
-
-    /// Keeps log lines (side, level, message) of an uninstalled plugin.
-    pub fn keep_log(&self, _id: &str, _lines: &[(&str, &str, &str)]) {
-        unimplemented!("host::cli::MemorySession::keep_log")
-    }
-
-    /// Sets the failure count of a plugin.
-    pub fn set_failure_count(&self, _id: &str, _count: u32) {
-        unimplemented!("host::cli::MemorySession::set_failure_count")
-    }
-
-    /// The failure count of a plugin.
-    pub fn failure_count(&self, _id: &str) -> u32 {
-        unimplemented!("host::cli::MemorySession::failure_count")
-    }
-
-    /// The state word of one grant of a plugin.
-    pub fn grant_state(&self, _id: &str, _grant: &str) -> Option<String> {
-        unimplemented!("host::cli::MemorySession::grant_state")
-    }
-
-    /// Every install performed, in order.
-    pub fn install_history(&self) -> Vec<InstallRecord> {
-        unimplemented!("host::cli::MemorySession::install_history")
-    }
-
-    /// The state words a plugin went through; `with_initial` includes the installed state.
-    pub fn state_history(&self, _id: &str, _with_initial: bool) -> Vec<String> {
-        unimplemented!("host::cli::MemorySession::state_history")
-    }
-
-    /// The grants each review dialog listed, one entry per dialog.
-    pub fn review_dialog_grants(&self) -> Vec<Vec<String>> {
-        unimplemented!("host::cli::MemorySession::review_dialog_grants")
-    }
-
-    /// Attaches `count` interactive clients.
-    pub fn attach_clients(&self, _count: usize) {
-        unimplemented!("host::cli::MemorySession::attach_clients")
-    }
-
-    /// Sets the bytes the next activation of a plugin restores.
-    pub fn set_restore_bytes(&self, _id: &str, _bytes: u64) {
-        unimplemented!("host::cli::MemorySession::set_restore_bytes")
-    }
-
-    /// The bytes restored by each activation of a plugin, in order.
-    pub fn activation_restore_bytes(&self, _id: &str) -> Vec<u64> {
-        unimplemented!("host::cli::MemorySession::activation_restore_bytes")
-    }
-
-    /// The effective log level word of a plugin.
-    pub fn log_level(&self, _id: &str) -> String {
-        unimplemented!("host::cli::MemorySession::log_level")
-    }
-
-    /// Sets the default log level word.
-    pub fn set_default_log_level(&self, _level: &str) {
-        unimplemented!("host::cli::MemorySession::set_default_log_level")
+impl std::fmt::Debug for MemorySession {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.debug_struct("MemorySession").finish_non_exhaustive()
     }
 }
 
+#[derive(Default)]
+struct MemorySessionState {
+    unreachable: bool,
+    clients: usize,
+    decline_review: bool,
+    decline_trust: bool,
+    connects: usize,
+    sessions_started: usize,
+    started: usize,
+    plugins: BTreeMap<String, MemoryPlugin>,
+    calls: Vec<String>,
+    journal: Vec<String>,
+    reviews: Vec<Vec<String>>,
+    installs: Vec<InstallRecord>,
+    default_log_level: String,
+    errors: BTreeMap<String, String>,
+}
+
+#[derive(Default)]
+struct MemoryPlugin {
+    version: String,
+    tier: String,
+    state: String,
+    dev: bool,
+    installed: bool,
+    signed_by: Option<String>,
+    grants: Vec<(String, String, String)>,
+    history: Vec<String>,
+    activations: usize,
+    deactivations: Vec<String>,
+    restarts: usize,
+    contributions: Vec<(String, String)>,
+    data: bool,
+    cache: bool,
+    storage: usize,
+    settings: usize,
+    logs: Vec<(String, String, String)>,
+    failure_count: u32,
+    restore_bytes: u64,
+    restored: Vec<u64>,
+    log_level: Option<String>,
+    traces: Vec<TraceRecord>,
+    trees: BTreeMap<String, InspectNode>,
+    exports: Vec<String>,
+    profile: Vec<ProfileCall>,
+    runtime_outcomes: BTreeMap<String, Result<(), String>>,
+    memory: Vec<MemoryView>,
+    counters: Vec<(Side, Vec<HourBucket>)>,
+}
+
+impl MemorySession {
+    // No callback is invoked while this lock is held. All in-memory effects and
+    // call records share the same serialization point.
+    fn access<T>(&self, call: String, action: impl FnOnce(&mut MemorySessionState) -> T) -> T {
+        let mut state = self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        state.calls.push(call);
+        action(&mut state)
+    }
+
+    pub fn new() -> Arc<Self> { Arc::new(Self::default()) }
+
+    pub fn unreachable() -> Arc<Self> {
+        Arc::new(Self { state: std::sync::Mutex::new(MemorySessionState { unreachable: true, ..Default::default() }) })
+    }
+
+    pub fn add_plugin(&self, id: &str, version: &str, tier: &str, state: &str, dev: bool, grants: &[(&str, &str, &str)]) {
+        self.access(format!("add-plugin:{id}"), |session| {
+            session.plugins.insert(id.into(), MemoryPlugin {
+                version: version.into(), tier: tier.into(), state: state.into(), dev, installed: true,
+                grants: grants.iter().map(|(grant, risk, state)| ((*grant).into(), (*risk).into(), (*state).into())).collect(),
+                history: vec![state.into()], ..Default::default()
+            });
+        });
+    }
+    pub fn add_plugin_with_grants(&self, id: &str, version: &str, tier: &str, state: &str, dev: bool, grants: &[(&str, &str, &str)]) {
+        self.add_plugin(id, version, tier, state, dev, grants);
+    }
+    pub fn set_signed_by(&self, id: &str, key_id: &str) {
+        self.access(format!("set-signed-by:{id}"), |session| { if let Some(plugin) = session.plugins.get_mut(id) { plugin.signed_by = Some(key_id.into()); } });
+    }
+    pub fn signed_by(&self, id: &str) -> Option<String> {
+        self.access(format!("signed-by:{id}"), |session| session.plugins.get(id).and_then(|plugin| plugin.signed_by.clone()))
+    }
+    pub fn plugin_state(&self, id: &str) -> Option<String> {
+        self.access(format!("plugin-state:{id}"), |session| session.plugins.get(id).filter(|plugin| plugin.installed).map(|plugin| plugin.state.clone()))
+    }
+    pub fn set_client_attached(&self, attached: bool) { self.attach_clients(usize::from(attached)); }
+    pub fn review_dialog_count(&self) -> usize { self.access("review-dialog-count".into(), |session| session.reviews.len()) }
+    pub fn started_plugin_count(&self) -> usize { self.access("started-plugin-count".into(), |session| session.started) }
+    pub fn granted(&self, id: &str) -> Vec<String> {
+        self.access(format!("granted:{id}"), |session| session.plugins.get(id).map(|plugin| plugin.grants.iter().filter(|(_, _, state)| state == "granted").map(|(grant, _, _)| grant.clone()).collect()).unwrap_or_default())
+    }
+    pub fn is_high_risk(&self, grant: &str) -> bool {
+        self.access(format!("is-high-risk:{grant}"), |session| session.plugins.values().any(|plugin| plugin.grants.iter().any(|(name, risk, _)| name == grant && risk == "high")))
+    }
+    pub fn connect_attempts(&self) -> usize { self.access("connect-attempts".into(), |session| session.connects) }
+    pub fn sessions_started(&self) -> usize { self.access("sessions-started".into(), |session| session.sessions_started) }
+    pub fn journal(&self) -> Vec<String> { self.access("journal".into(), |session| session.journal.clone()) }
+    /// All calls, including read-only probes, in their serialized order.
+    pub fn calls(&self) -> Vec<String> { self.access("calls".into(), |session| session.calls.clone()) }
+    pub fn add_log_line(&self, id: &str, side: &str, level: &str, message: &str) {
+        self.access(format!("add-log-line:{id}"), |session| { session.plugins.entry(id.into()).or_default().logs.push((side.into(), level.into(), message.into())); });
+    }
+    pub fn log_lines(&self, id: &str) -> Vec<(String, String, String)> {
+        self.access(format!("log-lines:{id}"), |session| session.plugins.get(id).map(|plugin| plugin.logs.clone()).unwrap_or_default())
+    }
+    pub fn decline_review(&self, decline: bool) { self.access("decline-review".into(), |session| session.decline_review = decline); }
+    pub fn decline_trust(&self, decline: bool) { self.access("decline-trust".into(), |session| session.decline_trust = decline); }
+    pub fn plugin_version(&self, id: &str) -> Option<String> {
+        self.access(format!("plugin-version:{id}"), |session| session.plugins.get(id).filter(|plugin| plugin.installed).map(|plugin| plugin.version.clone()))
+    }
+    pub fn activations(&self, id: &str) -> usize { self.access(format!("activations:{id}"), |session| session.plugins.get(id).map_or(0, |plugin| plugin.activations)) }
+    pub fn deactivations(&self, id: &str) -> Vec<String> { self.access(format!("deactivations:{id}"), |session| session.plugins.get(id).map(|plugin| plugin.deactivations.clone()).unwrap_or_default()) }
+    pub fn restarts(&self, id: &str) -> usize { self.access(format!("restarts:{id}"), |session| session.plugins.get(id).map_or(0, |plugin| plugin.restarts)) }
+    pub fn package_installed(&self, id: &str) -> bool { self.access(format!("package-installed:{id}"), |session| session.plugins.get(id).is_some_and(|plugin| plugin.installed)) }
+    pub fn add_contribution(&self, id: &str, kind: &str, grant: &str) {
+        self.access(format!("add-contribution:{id}"), |session| { if let Some(plugin) = session.plugins.get_mut(id) { plugin.contributions.push((kind.into(), grant.into())); } });
+    }
+    pub fn contribution_count(&self, id: &str) -> usize { self.access(format!("contribution-count:{id}"), |session| session.plugins.get(id).map_or(0, |plugin| plugin.contributions.len())) }
+    pub fn seed_plugin_data(&self, id: &str) {
+        self.access(format!("seed-plugin-data:{id}"), |session| { if let Some(plugin) = session.plugins.get_mut(id) { plugin.data = true; plugin.cache = true; plugin.storage = 1; plugin.settings = 1; } });
+    }
+    pub fn data_folder_exists(&self, id: &str) -> bool { self.access(format!("data-folder-exists:{id}"), |session| session.plugins.get(id).is_some_and(|plugin| plugin.data)) }
+    pub fn cache_folder_exists(&self, id: &str) -> bool { self.access(format!("cache-folder-exists:{id}"), |session| session.plugins.get(id).is_some_and(|plugin| plugin.cache)) }
+    pub fn storage_bucket_count(&self, id: &str) -> usize { self.access(format!("storage-bucket-count:{id}"), |session| session.plugins.get(id).map_or(0, |plugin| plugin.storage)) }
+    pub fn settings_value_count(&self, id: &str) -> usize { self.access(format!("settings-value-count:{id}"), |session| session.plugins.get(id).map_or(0, |plugin| plugin.settings)) }
+    pub fn log_kept(&self, id: &str) -> bool { self.access(format!("log-kept:{id}"), |session| session.plugins.get(id).is_some_and(|plugin| !plugin.logs.is_empty())) }
+    pub fn keep_log(&self, id: &str, lines: &[(&str, &str, &str)]) {
+        self.access(format!("keep-log:{id}"), |session| { session.plugins.entry(id.into()).or_default().logs = lines.iter().map(|(side, level, message)| ((*side).into(), (*level).into(), (*message).into())).collect(); });
+    }
+    pub fn set_failure_count(&self, id: &str, count: u32) {
+        self.access(format!("set-failure-count:{id}"), |session| { if let Some(plugin) = session.plugins.get_mut(id) { plugin.failure_count = count; } });
+    }
+    pub fn failure_count(&self, id: &str) -> u32 { self.access(format!("failure-count:{id}"), |session| session.plugins.get(id).map_or(0, |plugin| plugin.failure_count)) }
+    pub fn grant_state(&self, id: &str, grant: &str) -> Option<String> {
+        self.access(format!("grant-state:{id}:{grant}"), |session| session.plugins.get(id).and_then(|plugin| plugin.grants.iter().find(|(name, _, _)| name == grant)).map(|(_, _, state)| state.clone()))
+    }
+    pub fn install_history(&self) -> Vec<InstallRecord> { self.access("install-history".into(), |session| session.installs.clone()) }
+    pub fn state_history(&self, id: &str, with_initial: bool) -> Vec<String> {
+        self.access(format!("state-history:{id}:{with_initial}"), |session| session.plugins.get(id).map(|plugin| plugin.history.iter().skip(usize::from(!with_initial)).cloned().collect()).unwrap_or_default())
+    }
+    pub fn review_dialog_grants(&self) -> Vec<Vec<String>> { self.access("review-dialog-grants".into(), |session| session.reviews.clone()) }
+    pub fn attach_clients(&self, count: usize) { self.access(format!("attach-clients:{count}"), |session| session.clients = count); }
+    pub fn set_restore_bytes(&self, id: &str, bytes: u64) {
+        self.access(format!("set-restore-bytes:{id}"), |session| { if let Some(plugin) = session.plugins.get_mut(id) { plugin.restore_bytes = bytes; } });
+    }
+    pub fn activation_restore_bytes(&self, id: &str) -> Vec<u64> { self.access(format!("activation-restore-bytes:{id}"), |session| session.plugins.get(id).map(|plugin| plugin.restored.clone()).unwrap_or_default()) }
+    pub fn log_level(&self, id: &str) -> String {
+        self.access(format!("log-level:{id}"), |session| session.plugins.get(id).and_then(|plugin| plugin.log_level.clone()).unwrap_or_else(|| if session.default_log_level.is_empty() { "info".into() } else { session.default_log_level.clone() }))
+    }
+    pub fn set_default_log_level(&self, level: &str) { self.access(format!("set-default-log-level:{level}"), |session| session.default_log_level = level.into()); }
+
+    /// Explicit fixture outcome for a lifecycle operation. Without one, a
+    /// runtime command is refused rather than claiming a component ran.
+    pub fn set_runtime_outcome(&self, id: &str, operation: &str, outcome: Result<(), String>) {
+        self.access(format!("set-runtime-outcome:{id}:{operation}"), |session| {
+            session.plugins.entry(id.into()).or_default().runtime_outcomes.insert(operation.into(), outcome);
+        });
+    }
+    fn require_runtime_outcome(&self, id: &str, operation: &str) -> Result<(), String> {
+        self.access(format!("runtime-outcome:{id}:{operation}"), |session| {
+            let plugin = session.plugins.get(id).filter(|plugin| plugin.installed).ok_or("plugin.not-found")?;
+            plugin.runtime_outcomes.get(operation).cloned().unwrap_or_else(|| Err("session.runtime-required".into()))
+        })
+    }
+    fn details(id: &str, plugin: &MemoryPlugin) -> SessionPluginDetails {
+        SessionPluginDetails { id: id.into(), version: plugin.version.clone(), tier: plugin.tier.clone(), state: plugin.state.clone(), dev: plugin.dev, signed_by: plugin.signed_by.clone(), grants: plugin.grants.clone(), failure_count: plugin.failure_count, data_exists: plugin.data, cache_exists: plugin.cache, storage_buckets: plugin.storage, settings_values: plugin.settings, log_kept: !plugin.logs.is_empty() }
+    }
+    /// Persistent failure injection: it remains active until explicitly cleared.
+    pub fn inject_error(&self, operation: &str, error: &str) { self.access(format!("inject-error:{operation}"), |session| { session.errors.insert(operation.into(), error.into()); }); }
+    pub fn clear_error(&self, operation: &str) { self.access(format!("clear-error:{operation}"), |session| { session.errors.remove(operation); }); }
+    pub fn connect(&self) -> Result<(), String> {
+        self.access("connect".into(), |session| {
+            session.connects += 1;
+            if session.unreachable { return Err("session.unreachable".into()); }
+            if let Some(error) = session.errors.get("connect") { return Err(error.clone()); }
+            Ok(())
+        })
+    }
+    /// Records only an explicitly performed session start; connecting never starts one.
+    pub fn record_session_started(&self) { self.access("record-session-started".into(), |session| { session.sessions_started += 1; session.journal.push("session-started".into()); }); }
+    pub fn review(&self, grants: &[String]) -> Result<bool, String> {
+        self.access("review".into(), |session| {
+            if let Some(error) = session.errors.get("review") { return Err(error.clone()); }
+            if session.clients == 0 { return Err("consent.no-client".into()); }
+            session.reviews.push(grants.to_vec());
+            session.journal.push("review".into());
+            Ok(!session.decline_review)
+        })
+    }
+    pub fn trust_prompt(&self) -> Result<bool, String> {
+        self.access("trust-prompt".into(), |session| {
+            if let Some(error) = session.errors.get("trust") { return Err(error.clone()); }
+            if session.clients == 0 { return Err("consent.no-client".into()); }
+            session.journal.push("trust".into());
+            Ok(!session.decline_trust)
+        })
+    }
+    /// Applies an admitted install to this test session. This does not validate a
+    /// package or run Wasm; the actual installer must have done admission first.
+    pub fn record_install(&self, record: InstallRecord, state: &str) -> Result<(), String> {
+        self.access(format!("install:{}", record.id), |session| {
+            if let Some(error) = session.errors.get("install") { return Err(error.clone()); }
+            let plugin = session.plugins.entry(record.id.clone()).or_default();
+            plugin.version = record.version.clone(); plugin.tier = record.tier.clone(); plugin.dev = record.dev; plugin.installed = true;
+            plugin.state = state.into(); plugin.history.push(state.into());
+            plugin.grants = record.grants.iter().map(|grant| (grant.clone(), "unknown".into(), "granted".into())).collect();
+            session.journal.push(format!("install:{}", record.id));
+            session.installs.push(record);
+            Ok(())
+        })
+    }
+    /// Explicit lifecycle observation: records an actual adapter outcome, without
+    /// claiming this in-memory object executed a component.
+    pub fn record_activation(&self, id: &str) -> Result<(), String> {
+        self.access(format!("activate:{id}"), |session| {
+            if let Some(error) = session.errors.get("activate") { return Err(error.clone()); }
+            let plugin = session.plugins.get_mut(id).filter(|plugin| plugin.installed).ok_or("plugin.not-found")?;
+            plugin.activations += 1; plugin.restored.push(plugin.restore_bytes); plugin.state = "running".into(); plugin.history.push("running".into());
+            session.started += 1; session.journal.push(format!("activate:{id}"));
+            Ok(())
+        })
+    }
+    pub fn record_deactivation(&self, id: &str, reason: &str, state: &str) -> Result<(), String> {
+        self.access(format!("deactivate:{id}:{reason}"), |session| {
+            if let Some(error) = session.errors.get("deactivate") { return Err(error.clone()); }
+            let plugin = session.plugins.get_mut(id).filter(|plugin| plugin.installed).ok_or("plugin.not-found")?;
+            plugin.deactivations.push(reason.into()); plugin.state = state.into(); plugin.history.push(state.into()); plugin.contributions.clear();
+            session.journal.push(format!("deactivate:{id}:{reason}"));
+            Ok(())
+        })
+    }
+    pub fn record_restart(&self, id: &str) -> Result<(), String> {
+        self.access(format!("restart:{id}"), |session| {
+            if let Some(error) = session.errors.get("restart") { return Err(error.clone()); }
+            let plugin = session.plugins.get_mut(id).filter(|plugin| plugin.installed).ok_or("plugin.not-found")?;
+            plugin.restarts += 1; session.journal.push(format!("restart:{id}")); Ok(())
+        })
+    }
+    /// Stores an explicit admission/review result; does not infer approval.
+    pub fn set_grant_state(&self, id: &str, grant: &str, risk: &str, state: &str) -> Result<(), String> {
+        self.access(format!("set-grant-state:{id}:{grant}:{state}"), |session| {
+            if let Some(error) = session.errors.get("set-grant-state") { return Err(error.clone()); }
+            let plugin = session.plugins.get_mut(id).filter(|plugin| plugin.installed).ok_or("plugin.not-found")?;
+            if let Some(entry) = plugin.grants.iter_mut().find(|(name, _, _)| name == grant) { entry.1 = risk.into(); entry.2 = state.into(); }
+            else { plugin.grants.push((grant.into(), risk.into(), state.into())); }
+            if state != "granted" { plugin.contributions.retain(|(_, required)| required != grant); }
+            session.journal.push(format!("set-grant-state:{id}:{grant}:{state}")); Ok(())
+        })
+    }
+    pub fn revoke_grant(&self, id: &str, grant: &str) -> Result<(), String> {
+        self.access(format!("revoke:{id}:{grant}"), |session| {
+            if let Some(error) = session.errors.get("revoke") { return Err(error.clone()); }
+            let plugin = session.plugins.get_mut(id).filter(|plugin| plugin.installed).ok_or("plugin.not-found")?;
+            let entry = plugin.grants.iter_mut().find(|(name, _, _)| name == grant).ok_or("grant.not-found")?;
+            entry.2 = "revoked".into(); plugin.contributions.retain(|(_, required)| required != grant);
+            session.journal.push(format!("revoke:{id}:{grant}")); Ok(())
+        })
+    }
+    pub fn record_uninstall(&self, id: &str, purge_data: bool, purge_log: bool) -> Result<(), String> {
+        self.access(format!("uninstall:{id}"), |session| {
+            if let Some(error) = session.errors.get("uninstall") { return Err(error.clone()); }
+            let plugin = session.plugins.get_mut(id).filter(|plugin| plugin.installed).ok_or("plugin.not-found")?;
+            plugin.installed = false; plugin.state = "uninstalled".into(); plugin.history.push("uninstalled".into()); plugin.contributions.clear(); plugin.grants.clear();
+            if purge_data { plugin.data = false; plugin.cache = false; plugin.storage = 0; plugin.settings = 0; }
+            if purge_log { plugin.logs.clear(); }
+            session.journal.push(format!("uninstall:{id}")); Ok(())
+        })
+    }
+    pub fn set_log_level(&self, id: &str, level: &str) -> Result<(), String> {
+        self.access(format!("set-log-level:{id}:{level}"), |session| {
+            if let Some(error) = session.errors.get("log-level") { return Err(error.clone()); }
+            let plugin = session.plugins.get_mut(id).filter(|plugin| plugin.installed).ok_or("plugin.not-found")?;
+            plugin.log_level = Some(level.into()); session.journal.push(format!("log-level:{id}:{level}")); Ok(())
+        })
+    }
+    pub fn set_trace_records(&self, id: &str, records: Vec<TraceRecord>) { self.access(format!("set-trace-records:{id}"), |session| { session.plugins.entry(id.into()).or_default().traces = records; }); }
+    pub fn set_last_tree(&self, id: &str, target: &str, tree: InspectNode) { self.access(format!("set-last-tree:{id}:{target}"), |session| { session.plugins.entry(id.into()).or_default().trees.insert(target.into(), tree); }); }
+    pub fn set_profile(&self, id: &str, exports: Vec<String>, calls: Vec<ProfileCall>) { self.access(format!("set-profile:{id}"), |session| { let plugin = session.plugins.entry(id.into()).or_default(); plugin.exports = exports; plugin.profile = calls; }); }
+    pub fn set_memory_views(&self, id: &str, views: Vec<MemoryView>) { self.access(format!("set-memory-views:{id}"), |session| { session.plugins.entry(id.into()).or_default().memory = views; }); }
+    pub fn set_counters(&self, id: &str, counters: Vec<(Side, Vec<HourBucket>)>) { self.access(format!("set-counters:{id}"), |session| { session.plugins.entry(id.into()).or_default().counters = counters; }); }
+}
+
 impl SessionBackend for MemorySession {
-    fn plugin(&self, _id: &str) -> Option<SessionPlugin> {
-        unimplemented!("host::cli::MemorySession::plugin")
+    fn request(&self, request: SessionRequest) -> Result<SessionResponse, String> {
+        self.access(format!("request:{request:?}"), |session| {
+            if !matches!(&request, SessionRequest::Connect) && session.unreachable {
+                return Err("session.unreachable".to_owned());
+            }
+            let operation = match &request {
+                SessionRequest::List => Some("list"),
+                SessionRequest::Describe { .. } => Some("describe"),
+                SessionRequest::Logs { .. } => Some("logs"),
+                _ => None,
+            };
+            if let Some(error) = operation.and_then(|operation| session.errors.get(operation)) { return Err(error.clone()); }
+            Ok(())
+        })?;
+        match request {
+            SessionRequest::Connect => self.connect().map(|()| SessionResponse::Done),
+            SessionRequest::List => Ok(self.access("list".into(), |session| SessionResponse::Plugins(session.plugins.iter().filter(|(_, plugin)| plugin.installed).map(|(id, plugin)| Self::details(id, plugin)).collect()))),
+            SessionRequest::Describe { id } => self.access(format!("describe:{id}"), |session| session.plugins.get(&id).filter(|plugin| plugin.installed).map(|plugin| SessionResponse::Plugin(Self::details(&id, plugin))).ok_or_else(|| "plugin.not-found".into())),
+            SessionRequest::Review { grants } => self.review(&grants).map(SessionResponse::Decision),
+            SessionRequest::TrustPrompt => self.trust_prompt().map(SessionResponse::Decision),
+            SessionRequest::RevokeGrant { id, grant } => self.revoke_grant(&id, &grant).map(|()| SessionResponse::Done),
+            SessionRequest::SetGrantState { id, grant, risk, state } => self.set_grant_state(&id, &grant, &risk, &state).map(|()| SessionResponse::Done),
+            SessionRequest::RecordInstall { record, state } => self.record_install(record, &state).map(|()| SessionResponse::Done),
+            SessionRequest::Logs { id } => Ok(SessionResponse::Logs(self.log_lines(&id))),
+            SessionRequest::ResetFailures { id } => self.access(format!("reset-failures:{id}"), |session| {
+                if let Some(error) = session.errors.get("reset-failures") { return Err(error.clone()); }
+                let plugin = session.plugins.get_mut(&id).filter(|plugin| plugin.installed).ok_or("plugin.not-found")?;
+                plugin.failure_count = 0; session.journal.push(format!("reset-failures:{id}")); Ok(SessionResponse::Done)
+            }),
+            SessionRequest::Activate { id } => { self.require_runtime_outcome(&id, "activate")?; self.record_activation(&id).map(|()| SessionResponse::Done) },
+            SessionRequest::Deactivate { id, reason, state } => { self.require_runtime_outcome(&id, "deactivate")?; self.record_deactivation(&id, &reason, &state).map(|()| SessionResponse::Done) },
+            SessionRequest::Restart { id } => { self.require_runtime_outcome(&id, "restart")?; self.record_restart(&id).map(|()| SessionResponse::Done) },
+            SessionRequest::Uninstall { id, purge_data, purge_log } => self.record_uninstall(&id, purge_data, purge_log).map(|()| SessionResponse::Done),
+            SessionRequest::SetLogLevel { id, level } => self.set_log_level(&id, &level).map(|()| SessionResponse::Done),
+        }
     }
-
-    fn trace_records(&self, _id: &str) -> Vec<TraceRecord> {
-        unimplemented!("host::cli::MemorySession::trace_records")
+    fn plugin(&self, id: &str) -> Option<SessionPlugin> {
+        self.access(format!("plugin:{id}"), |session| session.plugins.get(id).filter(|plugin| plugin.installed).map(|plugin| SessionPlugin { dev: plugin.dev, running: plugin.state == "running" }))
     }
-
-    fn last_tree(&self, _id: &str, _target: &str) -> Option<InspectNode> {
-        unimplemented!("host::cli::MemorySession::last_tree")
-    }
-
-    fn profile_exports(&self, _id: &str) -> Vec<String> {
-        unimplemented!("host::cli::MemorySession::profile_exports")
-    }
-
-    fn profile_calls(&self, _id: &str, _duration_secs: u32) -> Vec<ProfileCall> {
-        unimplemented!("host::cli::MemorySession::profile_calls")
-    }
-
-    fn memory_views(&self, _id: &str) -> Vec<MemoryView> {
-        unimplemented!("host::cli::MemorySession::memory_views")
-    }
-
-    fn counters(&self, _id: &str) -> Vec<(Side, Vec<HourBucket>)> {
-        unimplemented!("host::cli::MemorySession::counters")
-    }
+    fn trace_records(&self, id: &str) -> Vec<TraceRecord> { self.access(format!("trace-records:{id}"), |session| session.plugins.get(id).map(|plugin| plugin.traces.clone()).unwrap_or_default()) }
+    fn last_tree(&self, id: &str, target: &str) -> Option<InspectNode> { self.access(format!("last-tree:{id}:{target}"), |session| session.plugins.get(id).and_then(|plugin| plugin.trees.get(target).cloned())) }
+    fn profile_exports(&self, id: &str) -> Vec<String> { self.access(format!("profile-exports:{id}"), |session| session.plugins.get(id).map(|plugin| plugin.exports.clone()).unwrap_or_default()) }
+    fn profile_calls(&self, id: &str, duration_secs: u32) -> Vec<ProfileCall> { self.access(format!("profile-calls:{id}:{duration_secs}"), |session| session.plugins.get(id).map(|plugin| plugin.profile.clone()).unwrap_or_default()) }
+    fn memory_views(&self, id: &str) -> Vec<MemoryView> { self.access(format!("memory-views:{id}"), |session| session.plugins.get(id).map(|plugin| plugin.memory.clone()).unwrap_or_default()) }
+    fn counters(&self, id: &str) -> Vec<(Side, Vec<HourBucket>)> { self.access(format!("counters:{id}"), |session| session.plugins.get(id).map(|plugin| plugin.counters.clone()).unwrap_or_default()) }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -585,28 +794,37 @@ impl SessionBackend for MemorySession {
 // ---------------------------------------------------------------------------------------------
 
 /// The hash of every build input of a project, as `dist/build.json` records it (DEV-024).
-pub fn project_input_hash(_project: &Path) -> Result<String, String> {
-    unimplemented!("host::cli::project_input_hash")
+pub fn project_input_hash(project: &Path) -> Result<String, String> {
+    project_inputs::project_input_hash(project)
 }
 
 /// Whether a component carries a `name` custom section (debug builds keep it, DEV-041).
-pub fn component_has_name_section(_component: &[u8]) -> bool {
-    unimplemented!("host::cli::component_has_name_section")
+pub fn component_has_name_section(component: &[u8]) -> bool {
+    let mut found = false;
+    for payload in wasmparser::Parser::new(0).parse_all(component) {
+        match payload {
+            Ok(wasmparser::Payload::CustomSection(section)) if section.name() == "name" => found = true,
+            Ok(_) => {},
+            Err(_) => return false,
+        }
+    }
+    found
 }
 
 /// The project-relative path of the source map of one side (DEV-041).
-pub fn source_map_path(_side: Side) -> PathBuf {
-    unimplemented!("host::cli::source_map_path")
+pub fn source_map_path(side: Side) -> PathBuf {
+    PathBuf::from("dist").join(format!("{}.wasm.map", side.as_str()))
 }
 
 /// Whether a release tag names the version of the manifest (DEV-044).
-pub fn release_tag_matches(_tag: &str, _version: &str) -> bool {
-    unimplemented!("host::cli::release_tag_matches")
+pub fn release_tag_matches(tag: &str, version: &str) -> bool {
+    semver::Version::parse(version).is_ok() && tag.strip_prefix('v') == Some(version)
 }
 
 /// The `<sha256>  <file name>` line of a sidecar checksum file (DEV-045).
-pub fn sha256_sidecar_line(_bytes: &[u8], _file_name: &str) -> String {
-    unimplemented!("host::cli::sha256_sidecar_line")
+pub fn sha256_sidecar_line(bytes: &[u8], file_name: &str) -> String {
+    use sha2::{Digest, Sha256};
+    format!("{:x}  {file_name}", Sha256::digest(bytes))
 }
 
 /// The timing rules of `ilium plugin dev` (reference-plugin-cli.md DEV-053, DEV-853).
@@ -621,22 +839,34 @@ pub mod dev {
 
     /// Counts the rebuilds owed after debounced changes (DEV-853).
     #[derive(Debug)]
-    pub struct Debouncer;
+    pub struct Debouncer {
+        window_millis: u64,
+        last_change: Option<u64>,
+        ready: usize,
+    }
 
     impl Debouncer {
         /// A debouncer with the given window.
-        pub fn new(_window: Duration) -> Debouncer {
-            Debouncer
+        pub fn new(window: Duration) -> Debouncer {
+            Debouncer { window_millis: window.as_millis().min(u64::MAX as u128) as u64, last_change: None, ready: 0 }
         }
 
         /// Records a change at `at_millis`.
-        pub fn change(&mut self, _at_millis: u64) {
-            unimplemented!("host::cli::dev::Debouncer::change")
+        pub fn change(&mut self, at_millis: u64) {
+            let at_millis = self.last_change.map_or(at_millis, |last| at_millis.max(last));
+            if self.last_change.is_some_and(|last| at_millis.saturating_sub(last) >= self.window_millis) {
+                self.ready = self.ready.saturating_add(1);
+            }
+            self.last_change = Some(at_millis);
         }
 
         /// The rebuilds due at `now_millis`.
-        pub fn due(&mut self, _now_millis: u64) -> usize {
-            unimplemented!("host::cli::dev::Debouncer::due")
+        pub fn due(&mut self, now_millis: u64) -> usize {
+            if self.last_change.is_some_and(|last| now_millis >= last && now_millis - last >= self.window_millis) {
+                self.ready = self.ready.saturating_add(1);
+                self.last_change = None;
+            }
+            std::mem::take(&mut self.ready)
         }
     }
 }

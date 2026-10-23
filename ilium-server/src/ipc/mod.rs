@@ -10,6 +10,7 @@ pub(crate) use direct_events::EventReply;
 // same function `handle_new_pane` uses for a live client's `NewPane`
 // request -- see that function's doc comment for why the two share it.
 pub(crate) mod handlers;
+mod recaps;
 
 use std::future::Future;
 use std::pin::Pin;

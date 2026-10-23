@@ -119,21 +119,31 @@ pub struct PreparedCache {
     root: PathBuf,
 }
 
+/// Environment variable that overrides the prepared-data cache folder.
+pub const CACHE_DIR_ENV: &str = "ILIUM_PREPARED_CACHE_DIR";
+
 impl PreparedCache {
     pub fn at(root: impl Into<PathBuf>) -> Self {
         Self { root: root.into() }
     }
 
-    /// The user-facing location is `~/.ilium/cache/minecraft`. A scene given a
-    /// non-default `cache_dir` (tests, isolated runs) keeps its cache inside it,
-    /// so isolated runs never touch the user's real cache.
-    pub fn for_scene_cache_dir(scene_cache_dir: &Path) -> Self {
-        if scene_cache_dir == crate::source::default_cache_dir() {
-            if let Some(dirs) = directories::BaseDirs::new() {
-                return Self::at(dirs.home_dir().join(".ilium").join("cache").join("minecraft"));
-            }
+    /// The user cache `~/.ilium/cache/minecraft`. `ILIUM_PREPARED_CACHE_DIR`
+    /// redirects it, so tests and isolated runs never touch the real cache.
+    pub fn for_user() -> Option<Self> {
+        if let Some(directory) = std::env::var_os(CACHE_DIR_ENV).filter(|value| !value.is_empty()) {
+            return Some(Self::at(PathBuf::from(directory)));
         }
-        Self::at(scene_cache_dir.join("prepared"))
+        // Unit tests never write into the real home folder.
+        if cfg!(test) {
+            return None;
+        }
+        let dirs = directories::BaseDirs::new()?;
+        Some(Self::at(
+            dirs.home_dir()
+                .join(".ilium")
+                .join("cache")
+                .join("minecraft"),
+        ))
     }
 
     pub fn root(&self) -> &Path {
@@ -185,11 +195,7 @@ impl PreparedCache {
         let path = self.entry_path(kind, key);
         let directory = path.parent().unwrap_or(&self.root);
         fs::create_dir_all(directory)?;
-        let temporary = directory.join(format!(
-            ".{}.{}.tmp",
-            key.hex(),
-            std::process::id()
-        ));
+        let temporary = directory.join(format!(".{}.{}.tmp", key.hex(), std::process::id()));
         let result = (|| -> io::Result<()> {
             let mut file = fs::File::create(&temporary)?;
             file.write_all(&file_bytes)?;
@@ -246,7 +252,10 @@ mod tests {
         let value: BTreeSet<String> = (0..500).map(|n| format!("minecraft:block/{n}")).collect();
         assert!(cache.load::<BTreeSet<String>>("ids", &key("a")).is_none());
         cache.store("ids", &key("a"), &value).unwrap();
-        assert_eq!(cache.load::<BTreeSet<String>>("ids", &key("a")), Some(value));
+        assert_eq!(
+            cache.load::<BTreeSet<String>>("ids", &key("a")),
+            Some(value)
+        );
         assert!(cache.load::<BTreeSet<String>>("ids", &key("b")).is_none());
     }
 
@@ -256,7 +265,9 @@ mod tests {
         let cache = PreparedCache::at(directory.path());
         let value = vec!["minecraft:block/stone".to_owned(); 2000];
         cache.store("ids", &key("a"), &value).unwrap();
-        let size = fs::metadata(cache.entry_path("ids", &key("a"))).unwrap().len();
+        let size = fs::metadata(cache.entry_path("ids", &key("a")))
+            .unwrap()
+            .len();
         assert!(size < 2000, "entry was {size} bytes");
     }
 
@@ -295,18 +306,24 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let file = directory.path().join("r.0.0.mca");
         fs::write(&file, b"one").unwrap();
-        let before = KeyBuilder::new("k").path_fingerprint(directory.path()).finish();
+        let before = KeyBuilder::new("k")
+            .path_fingerprint(directory.path())
+            .finish();
         fs::write(&file, b"three").unwrap();
-        let after = KeyBuilder::new("k").path_fingerprint(directory.path()).finish();
+        let after = KeyBuilder::new("k")
+            .path_fingerprint(directory.path())
+            .finish();
         assert_ne!(before, after);
-        let missing = KeyBuilder::new("k").path_fingerprint(&directory.path().join("x")).finish();
+        let missing = KeyBuilder::new("k")
+            .path_fingerprint(&directory.path().join("x"))
+            .finish();
         assert_ne!(missing, after);
     }
 
     #[test]
-    fn non_default_cache_dir_stays_inside_it() {
-        let directory = tempfile::tempdir().unwrap();
-        let cache = PreparedCache::for_scene_cache_dir(directory.path());
-        assert!(cache.root().starts_with(directory.path()));
+    fn user_cache_is_disabled_in_unit_tests() {
+        if std::env::var_os(CACHE_DIR_ENV).is_none() {
+            assert!(PreparedCache::for_user().is_none());
+        }
     }
 }

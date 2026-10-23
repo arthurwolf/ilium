@@ -377,9 +377,10 @@ pub fn catalogue() -> Vec<CatalogueRow> {
         .filter(|cells| cells.len() >= 4 && cells[0].starts_with('`'))
         .map(|cells| CatalogueRow {
             code: unquote(&cells[0]),
-            stage: cells[1].clone(),
-            exit: cells[2].clone(),
-            template: unquote(&cells[3]),
+            // The warning table includes a severity column before stage and exit.
+            stage: cells[cells.len() - 3].clone(),
+            exit: cells[cells.len() - 2].clone(),
+            template: unquote(&cells[cells.len() - 1]),
         })
         .collect()
 }

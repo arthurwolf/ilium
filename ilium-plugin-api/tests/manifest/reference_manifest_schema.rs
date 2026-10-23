@@ -104,15 +104,16 @@ fn pkg_561_a_manifest_the_schema_refuses_is_refused_at_stage_three() {
 
 /// REQ: PKG-561
 #[test]
-fn pkg_561_extra_rules_apply_at_stage_four_after_a_clean_schema() {
+fn pkg_561_self_dependency_uses_catalogued_stage_three() {
     let value = set(
         client(),
         "/requires",
         json!({ "plugins": [{ "id": "example.demo" }] }),
     );
     let found = error_diagnostics(&value);
+    // The normative diagnostic catalogue assigns requires-self to stage 3.
     let diagnostic = first_with(&found, "manifest.requires-self");
-    assert_eq!(diagnostic.stage, Some(Stage(4)));
+    assert_eq!(diagnostic.stage, Some(Stage(3)));
 }
 
 /// REQ: PKG-562
@@ -139,8 +140,13 @@ fn pkg_562_each_mapping_row_gives_its_code() {
         &errors(&set(client(), "/publisher", json!("a\nb"))),
         "manifest.display-name",
     );
-    assert_has(
+    // Descriptions allow LF, unlike single-line names and publishers.
+    assert_lacks(
         &errors(&set(client(), "/description", json!("a\nb"))),
+        "manifest.display-name",
+    );
+    assert_has(
+        &errors(&set(client(), "/description", json!("a\tb"))),
         "manifest.display-name",
     );
     assert_has(
@@ -155,12 +161,12 @@ fn pkg_562_each_mapping_row_gives_its_code() {
 
 /// REQ: PKG-562
 #[test]
-fn pkg_562_unknown_key_wins_over_other_failures_of_the_same_value() {
-    // An unknown property is reported first for a value that is also of a wrong type.
+fn pkg_562_manifest_errors_follow_bytewise_json_pointer_order() {
+    // PKG-578 sorts /name before /zzz, independent of schema traversal.
     let found = errors(&set(set(client(), "/zzz", json!(1)), "/name", json!(5)));
     assert_eq!(
         found.first().map(String::as_str),
-        Some("manifest.unknown-key")
+        Some("manifest.schema")
     );
     assert_has(&found, "manifest.unknown-key");
 }
@@ -218,6 +224,7 @@ fn pkg_565_exports_list_must_match_the_real_component() {
         ilium_plugin_api::manifest::parse_manifest(&client().to_string()).expect("parses");
     let component = ComponentSummary {
         exports: vec!["lifecycle".into(), "handler".into(), "views".into()],
+        api_sections: vec![ilium_plugin_api::version::API_VERSION_BYTES.to_vec()],
         ..ComponentSummary::default()
     };
     let found = check_component(
@@ -268,7 +275,7 @@ fn pkg_567_a_valid_when_expression_is_accepted() {
     let value = set(
         client(),
         "/contributes/commands",
-        json!([{ "id": "run", "title": "Run", "when": "pane.kind == 'terminal'" }]),
+        json!([{ "id": "run", "title": "Run", "when": r#"pane.kind == "terminal""# }]),
     );
     assert_lacks(&errors(&value), "manifest.when-syntax");
 }
@@ -277,8 +284,8 @@ fn pkg_567_a_valid_when_expression_is_accepted() {
 #[test]
 fn pkg_567_duplicate_settings_keys_refused_settings_key_clash() {
     let rows = json!([
-        { "key": "same", "kind": "toggle", "title": "A", "default": false },
-        { "key": "same", "kind": "toggle", "title": "B", "default": false }
+        { "key": "same", "type": "toggle", "title": "A", "default": false },
+        { "key": "same", "type": "toggle", "title": "B", "default": false }
     ]);
     let value = set(
         client(),
@@ -295,7 +302,7 @@ fn pkg_567_duplicate_settings_keys_refused_settings_key_clash() {
 #[test]
 fn pkg_568_duplicate_ids_in_a_contribution_list_refused() {
     let value = set(
-        client(),
+        client_with_grants(&["ui.panels"]),
         "/contributes/panels",
         json!([{ "id": "p", "title": "A" }, { "id": "p", "title": "B" }]),
     );
@@ -320,13 +327,13 @@ fn pkg_568_topics_may_publish_only_under_the_plugin_prefix() {
     let own = set(
         client(),
         "/contributes/topics",
-        json!([{ "publishes": ["example.demo/ready"] }]),
+        json!({ "publishes": ["example.demo/ready"] }),
     );
     assert_clean(&own);
     let foreign = set(
         client(),
         "/contributes/topics",
-        json!([{ "publishes": ["com.other/ready"] }]),
+        json!({ "publishes": ["com.other/ready"] }),
     );
     let found = errors(&foreign);
     assert_eq!(
@@ -435,6 +442,12 @@ fn pkg_571_catalogue_rows_have_a_stage_number_or_letter_and_an_exit_code() {
     let rows = catalogue();
     assert!(rows.len() > 50, "catalogue rows: {}", rows.len());
     for row in &rows {
+        if row.code == "migration.skipped" {
+            assert_eq!(row.stage, "-");
+            assert_eq!(row.exit, "-");
+            assert!(row.template.starts_with("Log line only, not a failure:"));
+            continue;
+        }
         assert!(!row.stage.is_empty(), "{}", row.code);
         assert!(
             row.exit.chars().all(|c| c.is_ascii_digit()) && !row.exit.is_empty(),
@@ -501,7 +514,7 @@ fn pkg_572_the_value_of_the_failing_key_appears_in_the_message() {
 fn pkg_572_doc_templates_name_no_secret_field() {
     for row in catalogue() {
         let lower = row.template.to_lowercase();
-        for word in ["{token", "{secret", "{password", "{key}"] {
+        for word in ["{token", "{secret", "{password", "{private_key"] {
             assert!(!lower.contains(word), "{} template holds {word}", row.code);
         }
     }

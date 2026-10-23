@@ -157,7 +157,7 @@ fn abi_033_1500_output_matched_into_1024_drops_477() {
     // The events-dropped record holds one slot, so 1,023 events stay: 1,500 - 1,023 = 477.
     let mut queue = QueueModel::new(1_024);
     for key in 0..1_500 {
-        queue.push("output-matched", key);
+        queue.admit("output-matched", key, Some("fixture-source"));
     }
     assert_eq!(queue.dropped_total(), 477);
     assert_eq!(queue.len(), 1_024);
@@ -172,7 +172,7 @@ fn abi_033_1500_output_matched_into_1024_drops_477() {
 fn abi_033_queue_below_capacity_drops_nothing() {
     let mut queue = QueueModel::new(1_024);
     for key in 0..1_024 {
-        queue.push("output-matched", key);
+        queue.admit("output-matched", key, Some("fixture-source"));
     }
     assert_eq!(queue.dropped_total(), 0);
     assert_eq!(queue.len(), 1_024);
@@ -193,12 +193,12 @@ fn abi_036_two_kinds_dropped_twice_give_one_event_with_two_records() {
     // Capacity 4: two output-matched and two topic-published fill it; three audio-frames
     // evict the four oldest drop-oldest events, one slot going to events-dropped.
     let mut queue = QueueModel::new(4);
-    queue.push("output-matched", 1);
-    queue.push("output-matched", 1);
-    queue.push("topic-published", 1);
-    queue.push("topic-published", 1);
+    queue.admit("output-matched", 1, Some("fixture-source"));
+    queue.admit("output-matched", 1, Some("fixture-source"));
+    queue.admit("topic-published", 1, Some("fixture-source"));
+    queue.admit("topic-published", 1, Some("fixture-source"));
     for _ in 0..3 {
-        queue.push("audio-frames", 1);
+        queue.admit("audio-frames", 1, Some("fixture-source"));
     }
     let mut records = queue.events_dropped_records();
     records.sort();
@@ -232,7 +232,7 @@ proptest! {
     fn abi_033_drop_count_is_pushes_minus_capacity_minus_one(capacity in 2usize..256, pushes in 0usize..1_024) {
         let mut queue = QueueModel::new(capacity);
         for key in 0..pushes as u64 {
-            queue.push("output-matched", key);
+            queue.admit("output-matched", key, Some("fixture-source"));
         }
         let expected = if pushes > capacity { (pushes - (capacity - 1)) as u64 } else { 0 };
         prop_assert_eq!(queue.dropped_total(), expected);

@@ -172,7 +172,7 @@ fn abi_004_component_without_section_is_refused() {
     let mut component = matching_server();
     component.api_sections.clear();
     assert!(component_codes(&minimal_manifest(), &component)
-        .contains(&codes::manifest::API_VERSION.to_owned()));
+        .contains(&codes::package::API_SECTION_MISSING.to_owned()));
 }
 
 /// REQ: ABI-004, ABI-021
@@ -302,7 +302,14 @@ fn abi_022_unknown_feature_is_unstable_unknown() {
 fn abi_022_third_party_feature_outside_dev_mode_is_unstable_tier() {
     let mut value = minimal_manifest();
     value["unstable"] = json!(["websocket"]);
-    assert!(codes_of_json(&value, Tier::T2).contains(&codes::manifest::UNSTABLE_TIER.to_owned()));
+    value["files"] = json!([{
+        "path": "server.wasm", "length": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }]);
+    let mut admission = context(Tier::T2);
+    admission.mode = ilium_plugin_api::manifest::CheckMode::Install;
+    assert!(codes(&validate_json(&value.to_string(), &admission))
+        .contains(&codes::manifest::UNSTABLE_TIER.to_owned()));
 }
 
 /// REQ: ABI-022

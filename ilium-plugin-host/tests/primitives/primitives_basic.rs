@@ -58,6 +58,7 @@ struct BodyRig {
 fn body_rig() -> BodyRig {
     let kernel = Arc::new(FakeKernel::new(ProcessKind::Client));
     kernel.set_tree(standard_tree());
+    kernel.register_pane_kind("test.plugin", "test.plugin.notes", ilium_plugin_api::generated::types::tree::PrimitiveKind::Basic);
     let seen = Arc::new(Mutex::new(Vec::new()));
     let areas = Arc::new(Mutex::new(Vec::new()));
     let host = HostHarness::new()
@@ -138,7 +139,7 @@ fn pri_030_basic_pane_side_receives_on_events_like_any_plugin_side() {
     let rig = body_rig();
     rig.host.deliver(vec![Event::PaneCreated(PaneInfo {
         node: BASIC_PANE,
-        content_kind: "example.scratchpad.notes".to_owned(),
+        content_kind: "test.plugin.notes".to_owned(),
         primitive: PrimitiveKind::Basic,
         columns: 40,
         rows: 10,

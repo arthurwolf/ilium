@@ -13,6 +13,9 @@ pub enum HostError {
     /// The engine reported an error (`host.engine-error`).
     #[error("engine error: {0}")]
     EngineError(String),
+    /// A guest start function trapped during instantiation; lifecycle must count it.
+    #[error("activation {0}")]
+    ActivationTrap(crate::calls::Trap),
     /// The engine failed and cannot continue (`host.engine-failed`).
     #[error("the plugin engine failed")]
     EngineFailed,
@@ -42,6 +45,7 @@ impl HostError {
         match self {
             HostError::ImportPanic => Code(Cow::Borrowed("host.import-panic")),
             HostError::EngineError(_) => Code(Cow::Borrowed("host.engine-error")),
+            HostError::ActivationTrap(trap) => trap.code.clone(),
             HostError::EngineFailed => Code(Cow::Borrowed("host.engine-failed")),
             HostError::EmbeddedIncompatible => Code(Cow::Borrowed("host.cwasm-incompatible")),
             HostError::HelperMissing => Code(Cow::Borrowed("host.helper-missing")),

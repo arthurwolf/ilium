@@ -823,6 +823,15 @@ impl HeapBytes for ServerEvent {
             }
             Self::PaneNodeChanged(node) => 0usize.saturating_add(node.heap_bytes()),
             Self::PaneRecapScreen { result, .. } => result.heap_bytes(),
+            Self::RecapUpdated {
+                session_id,
+                short,
+                long,
+                ..
+            } => session_id
+                .heap_bytes()
+                .saturating_add(short.heap_bytes())
+                .saturating_add(long.heap_bytes()),
             // Plugin traffic is bounded by the plugin IPC limits (HST-104, HST-109); its exact
             // heap accounting is added with the implementation.
             Self::Plugin(_) | Self::Contributions(_) => 0,

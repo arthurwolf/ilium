@@ -13,6 +13,9 @@ pub use std::sync::atomic::{AtomicU64, Ordering};
 pub use std::sync::{Arc, Mutex};
 
 /// Constant-time byte comparison for secrets (reference-threat-model.md SEC-376).
-pub fn constant_time_eq(_left: &[u8], _right: &[u8]) -> bool {
-    unimplemented!("host::sync::constant_time_eq")
+pub fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
+    use subtle::ConstantTimeEq;
+    // Token lengths are public protocol metadata. For equal lengths, subtle
+    // prevents content-dependent early returns and optimizer removal.
+    bool::from(left.ct_eq(right))
 }

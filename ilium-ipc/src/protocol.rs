@@ -1036,6 +1036,20 @@ pub enum ClientRequest {
     GetPaneRecapScreen {
         pane_id: NodeId,
     },
+    /// Stores a recap a client produced for `pane_id`. The server never calls
+    /// a model: it only fences the result (same live `session_id`, newest
+    /// `recap_generation`) and keeps it. A `Batch` result replaces the stored
+    /// short recap and keeps the stored long one; a `Manual` result replaces
+    /// both (`long` must then be present).
+    /// Appended to preserve all prior request discriminants.
+    ApplyRecap {
+        pane_id: NodeId,
+        session_id: String,
+        recap_generation: u64,
+        trigger: RecapTrigger,
+        short: String,
+        long: Option<String>,
+    },
     /// One envelope of plugin traffic from the client half (reference-host-ipc.md HST-100).
     /// Appended to preserve all prior request discriminants.
     Plugin(crate::plugin::PluginEnvelope),
@@ -1052,6 +1066,15 @@ pub enum ClientRequest {
     },
 }
 
+/// Which client path produced a stored recap.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RecapTrigger {
+    /// Short recap that rode in the project restructure call.
+    Batch,
+    /// Dedicated per-pane call (refresh click or recap popover) with both lengths.
+    Manual,
+}
+
 impl ClientRequest {
     /// Stable, payload-free request name for process diagnostics. Keeping this
     /// exhaustive means every future IPC feature must make an explicit logging
@@ -1061,6 +1084,7 @@ impl ClientRequest {
             Self::Plugin(_) => "plugin",
             Self::TerminalHistory { .. } => "terminal_history",
             Self::GetPaneRecapScreen { .. } => "get_pane_recap_screen",
+            Self::ApplyRecap { .. } => "apply_recap",
             Self::Attach { .. } => "attach",
             Self::UserKeyInput { .. } => "user_key_input",
             Self::ReportAgentPromptFromTranscript { .. } => "report_agent_prompt_from_transcript",
@@ -1573,6 +1597,18 @@ pub enum ServerEvent {
     PaneCreateFinished {
         request_id: u64,
         result: Result<NodeId, String>,
+    },
+    /// A recap was stored (or replayed on attach). Carries the fence the
+    /// server accepted it under and the texts now held, so every client
+    /// shows the same recap. `long` is `None` until a manual recap exists.
+    /// Appended to preserve all prior event discriminants.
+    RecapUpdated {
+        pane_id: NodeId,
+        session_id: String,
+        recap_generation: u64,
+        trigger: RecapTrigger,
+        short: String,
+        long: Option<String>,
     },
     /// One envelope of plugin traffic from the server half (reference-host-ipc.md HST-100).
     /// Appended to preserve all prior event discriminants.

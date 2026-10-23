@@ -82,7 +82,12 @@ impl Grant {
         if info(family).is_none() {
             return Err(grant_error("manifest.grant-unknown", format!("capability {text:?} is not known to plugin API ilium:plugin@0.1.0")));
         }
-        Ok(Grant(text.to_owned()))
+        if !(3..=256).contains(&text.chars().count()) {
+            return Err(grant_error("manifest.grant-argument", "capability must contain 3 to 256 characters"));
+        }
+        let grant = Grant(text.to_owned());
+        validate_argument(&grant)?;
+        Ok(grant)
     }
 
     /// The grant text as written in the manifest (reference-capabilities.md).
@@ -204,7 +209,7 @@ static GRANTS: &[GrantInfo] = &[
     row!("location.geocode", false, Low, &Tier::ALL, &[Side::Client, Side::Scene], None, &["ilium:host/geocode@0.1.0"]),
     row!("messages.peer", true, Low, &Tier::ALL, &[Side::Server, Side::Client], None, &["ilium:host/topics@0.1.0"]),
     row!("topics.subscribe", true, Low, &Tier::ALL, &[Side::Server, Side::Client], None, &["ilium:host/topics@0.1.0"]),
-    row!("sessions.cross", false, High, &Tier::ALL, &[Side::Server], None, &["ilium:host/sessions@0.1.0"]),
+    row!("sessions.cross", false, High, &[Tier::T1, Tier::T2], &[Side::Server], None, &["ilium:host/sessions@0.1.0"]),
     row!("cli.contribute", false, Low, &Tier::ALL, &[Side::Server], None, &["ilium:host/cli@0.1.0"]),
     row!("http-api.route", true, Low, &Tier::ALL, &[Side::Server], None, &["ilium:host/http-api@0.1.0"]),
     row!("workspace.manage", false, High, &Tier::ALL, &[Side::Server], None, &["ilium:host/workspace@0.1.0"]),
@@ -242,7 +247,7 @@ pub fn check_grant(grant: &Grant, tier: Tier, side: Side) -> Result<(), Diagnost
     }
     validate_argument(grant)?;
     if !entry.tiers.contains(&tier) || tier != Tier::T1 && grant.argument().is_some_and(|argument| argument.starts_with("path:/")) {
-        return Err(grant_error("manifest.grant-tier", format!("capability {:?} is available to bundled plugins only", grant.family())));
+        return Err(grant_error("manifest.grant-tier", format!("capability {:?} is not available at tier {tier}", grant.family())));
     }
     if !entry.sides.contains(&side) {
         return Err(grant_error("manifest.grant-side", format!("capability {:?} is not available on the {side} side", grant.family())));

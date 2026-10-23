@@ -103,6 +103,7 @@ mod tests {
 
     fn sample_queue() -> PersistedQueue {
         PersistedQueue {
+            snoozed: Vec::new(),
             items: vec![AttentionItem {
                 pane_id: NodeId(7),
                 project_id: Some(NodeId(1)),

@@ -706,6 +706,12 @@ fn hst_196_non_yielding_calls_stay_on_one_thread_until_they_return() {
 #[test]
 fn soft_deadline_traps_at_the_full_hundred_millisecond_grace_boundary() {
     let limits = default_limits();
-    assert_eq!(evaluate_breach(CallClass::Annotate, ms(109), &limits), BreachVerdict::SoftLate);
-    assert_eq!(evaluate_breach(CallClass::Annotate, ms(110), &limits), BreachVerdict::SoftTrap);
+    assert_eq!(
+        evaluate_breach(CallClass::Annotate, ms(109), &limits),
+        BreachVerdict::SoftLate
+    );
+    assert_eq!(
+        evaluate_breach(CallClass::Annotate, ms(110), &limits),
+        BreachVerdict::SoftTrap
+    );
 }

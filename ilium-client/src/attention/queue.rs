@@ -41,6 +41,8 @@ pub struct PersistedQueue {
     /// Older stores lack this: they load with no visit memory.
     #[serde(default)]
     pub visited_as: Vec<(NodeId, VisitedAs)>,
+    #[serde(default)]
+    pub snoozed: Vec<(NodeId, AttentionKind)>,
 }
 
 #[derive(Debug, Default)]
@@ -49,6 +51,7 @@ pub struct AttentionQueue {
     generation: u64,
     last_looked_ms: HashMap<NodeId, u64>,
     visited_as: HashMap<NodeId, VisitedAs>,
+    snoozed: HashMap<NodeId, AttentionKind>,
     /// Evidence fingerprint each pane was last analysed at by an accepted LLM
     /// reply, including replies that found nothing to report. Not persisted:
     /// after a restart every agent is analysed once more.
@@ -71,15 +74,50 @@ impl AttentionQueue {
     }
 
     pub fn len(&self) -> usize {
-        self.items.len()
+        self.items
+            .values()
+            .filter(|item| !self.is_snoozed(item.pane_id))
+            .count()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.items.is_empty()
+        self.len() == 0
     }
 
     pub fn item(&self, pane_id: NodeId) -> Option<&AttentionItem> {
         self.items.get(&pane_id)
+    }
+
+    pub fn is_snoozed(&self, pane_id: NodeId) -> bool {
+        self.items
+            .get(&pane_id)
+            .is_some_and(|item| self.snoozed.get(&pane_id) == Some(&item.kind))
+    }
+
+    pub fn snooze(&mut self, pane_id: NodeId) {
+        if let Some(item) = self.items.get(&pane_id) {
+            self.snoozed.insert(pane_id, item.kind);
+        }
+    }
+
+    pub fn ordered_including_snoozed(&self, now_ms: u64) -> Vec<&AttentionItem> {
+        let mut items = self.ordered_for_display(now_ms);
+        let mut snoozed: Vec<_> = self
+            .items
+            .values()
+            .filter(|item| self.is_snoozed(item.pane_id))
+            .collect();
+        snoozed.sort_by_key(|item| (item.kind, item.pane_id));
+        items.extend(snoozed);
+        items
+    }
+
+    fn reconcile_snoozes(&mut self) {
+        self.snoozed.retain(|pane_id, kind| {
+            self.items
+                .get(pane_id)
+                .is_some_and(|item| item.kind == *kind)
+        });
     }
 
     /// Starts a refresh and returns the generation that stamps its replies.
@@ -90,7 +128,11 @@ impl AttentionQueue {
 
     /// Items best-first: kind rank, then priority, then oldest, then pane id.
     pub fn ordered(&self) -> Vec<&AttentionItem> {
-        let mut items: Vec<&AttentionItem> = self.items.values().collect();
+        let mut items: Vec<&AttentionItem> = self
+            .items
+            .values()
+            .filter(|item| !self.is_snoozed(item.pane_id))
+            .collect();
         items.sort_by(|a, b| {
             a.kind
                 .cmp(&b.kind)
@@ -200,6 +242,7 @@ impl AttentionQueue {
             };
             self.items.insert(merged.pane_id, merged);
         }
+        self.reconcile_snoozes();
     }
 
     /// Merges one LLM reply. Returns how many panes changed.
@@ -248,6 +291,7 @@ impl AttentionQueue {
             self.items.insert(merged.pane_id, merged);
             changed += 1;
         }
+        self.reconcile_snoozes();
         changed
     }
 
@@ -258,11 +302,13 @@ impl AttentionQueue {
             item.source == AttentionSource::Instant
                 || now_ms.saturating_sub(item.created_ms) <= ttl_ms
         });
+        self.reconcile_snoozes();
         before - self.items.len()
     }
 
     pub fn clear(&mut self) {
         self.items.clear();
+        self.snoozed.clear();
         self.analysed.clear();
     }
 
@@ -281,10 +327,13 @@ impl AttentionQueue {
             .map(|(id, visit)| (*id, *visit))
             .collect();
         visited_as.sort_by_key(|(id, _)| *id);
+        let mut snoozed: Vec<_> = self.snoozed.iter().map(|(id, kind)| (*id, *kind)).collect();
+        snoozed.sort_by_key(|(id, _)| *id);
         PersistedQueue {
             items,
             last_looked_ms,
             visited_as,
+            snoozed,
         }
     }
 
@@ -313,6 +362,8 @@ impl AttentionQueue {
                 queue.visited_as.insert(pane_id, visit);
             }
         }
+        queue.snoozed = persisted.snoozed.into_iter().collect();
+        queue.reconcile_snoozes();
         queue
     }
 }
@@ -387,6 +438,31 @@ mod tests {
 
     fn live(panes: &[u64]) -> LiveFingerprints {
         panes.iter().map(|p| (NodeId(*p), 100 + p)).collect()
+    }
+
+    #[test]
+    fn snooze_tracks_category_not_fingerprint_and_clears_when_absent() {
+        let mut queue = AttentionQueue::new();
+        let mut entry = item(1, AttentionKind::Changed, 50, AttentionSource::Instant);
+        let mut fingerprints = live(&[1]);
+        queue.reconcile_instant(&fingerprints, vec![entry.clone()]);
+        queue.snooze(NodeId(1));
+        assert!(queue.ordered().is_empty());
+        assert!(queue.next_to_visit(None, 0).is_none());
+        assert_eq!(queue.ordered_including_snoozed(0).len(), 1);
+        entry.fingerprint += 1;
+        fingerprints.insert(NodeId(1), entry.fingerprint);
+        queue.reconcile_instant(&fingerprints, vec![entry.clone()]);
+        assert!(queue.is_snoozed(NodeId(1)));
+        let restored = AttentionQueue::from_persisted(queue.to_persisted(), &fingerprints);
+        assert!(restored.is_snoozed(NodeId(1)));
+        entry.kind = AttentionKind::Question;
+        queue.reconcile_instant(&fingerprints, vec![entry.clone()]);
+        assert!(!queue.is_snoozed(NodeId(1)));
+        queue.snooze(NodeId(1));
+        queue.reconcile_instant(&fingerprints, Vec::new());
+        queue.reconcile_instant(&fingerprints, vec![entry]);
+        assert!(!queue.is_snoozed(NodeId(1)));
     }
 
     #[test]

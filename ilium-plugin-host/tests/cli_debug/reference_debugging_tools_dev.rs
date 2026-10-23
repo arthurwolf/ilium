@@ -8,7 +8,7 @@ use ilium_plugin_host::cli::{
     component_has_name_section, release_tag_matches, sha256_sidecar_line, source_map_path,
 };
 use ilium_plugin_host::package::write_package;
-use ilium_plugin_host::telemetry::{DevBackend, DevLoop, RebuildOutcome};
+use ilium_plugin_host::telemetry::{DevBackend, DevDataRoots, DevLoop, RebuildOutcome, Refusal};
 
 use crate::common::{env, error_code, records_of, run, scratch};
 
@@ -17,11 +17,15 @@ struct FakeDevBackend {
     release_installed: bool,
     outcomes: Mutex<Vec<RebuildOutcome>>,
     steps: Mutex<Vec<String>>,
+    _data_context: Option<tempfile::TempDir>,
 }
 
 impl DevBackend for FakeDevBackend {
     fn release_installed(&self, _id: &str) -> bool {
         self.release_installed
+    }
+    fn replace_release(&self, _id: &str) -> Result<(), Refusal> {
+        Ok(()) // Fixture installer transaction: no real release or running process exists.
     }
     fn build(&self) -> RebuildOutcome {
         self.outcomes.lock().expect("lock").remove(0)
@@ -47,12 +51,18 @@ fn dev_loop(
     release_installed: bool,
     outcomes: Vec<RebuildOutcome>,
 ) -> (DevLoop, Arc<FakeDevBackend>) {
+    let data_context = scratch();
+    let roots = DevDataRoots {
+        dev: data_context.path().join("dev"),
+        release: data_context.path().join("release"),
+    };
     let backend = Arc::new(FakeDevBackend {
         release_installed,
         outcomes: Mutex::new(outcomes),
         steps: Mutex::default(),
+        _data_context: Some(data_context),
     });
-    (DevLoop::new(backend.clone()), backend)
+    (DevLoop::with_data_roots(backend.clone(), roots), backend)
 }
 
 fn built(version: &str) -> RebuildOutcome {

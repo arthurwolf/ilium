@@ -24,14 +24,20 @@ fn gradient(stops: &[(f32, Rgb)], position: f32) -> Rgb {
     stops.last().map_or([255, 255, 255], |stop| stop.1)
 }
 
-fn hypsometric(height: f32, min: f32, max: f32) -> Rgb {
+/// Water reaches its deepest colour at this depth. It is deliberately
+/// shallow and fixed: grading by the depth of the sea floor itself would keep
+/// a light/dark edge at the steep continental slope while the tide moves the
+/// water over it, so a rising or falling sea would not look like water.
+const WATER_DEEP_M: f32 = 600.0;
+
+fn hypsometric(height: f32, _min: f32, max: f32) -> Rgb {
     if height < 0.0 {
-        let depth = (height / min.min(-1.0)).clamp(0.0, 1.0);
+        let depth = (-height / WATER_DEEP_M).clamp(0.0, 1.0);
         gradient(
             &[
                 (0.0, [90, 170, 215]),
-                (0.5, [35, 90, 170]),
-                (1.0, [8, 22, 85]),
+                (0.5, [45, 105, 185]),
+                (1.0, [25, 60, 140]),
             ],
             depth,
         )

@@ -45,7 +45,7 @@ fn pkg_200_signature_is_64_bytes_of_pure_ed25519() {
     let doc = signature_text(&vector_signed());
     let value: serde_json::Value = serde_json::from_str(&doc).expect("json");
     assert_eq!(value["format"], "ilium-sig/1");
-    assert_eq!(value["signature"], VECTOR_SIGNATURE_B64URL);
+    assert_eq!(value["signatures"][0]["signature"], VECTOR_SIGNATURE_B64URL);
     assert_eq!(unhex(VECTOR_SIGNATURE_HEX).len(), 64);
 }
 
@@ -134,7 +134,11 @@ fn pkg_201_signature_binds_the_manifest_hash() {
         now()
     )
     .is_ok());
-    let changed = patch_data(&vector_signed(), "manifest.json", 20, b'Z', true);
+    // Change a valid display-name byte so schema validation cannot mask the
+    // cryptographic requirement to bind the exact stored manifest bytes.
+    let raw = data_of(&vector_signed(), "manifest.json");
+    let offset = raw.windows(b"Example".len()).position(|part| part == b"Example").expect("publisher display name");
+    let changed = patch_data(&vector_signed(), "manifest.json", offset, b'Z', true);
     let tampered = read_package(&changed).expect("CRC repaired, must read");
     let failure = verify(
         &tampered,

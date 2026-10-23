@@ -74,6 +74,8 @@ pub struct AttentionSettings {
     pub mode: AttentionMode,
     /// Pressing Sort also refreshes the attention queue.
     pub press_sorts: bool,
+    /// Use three-row attention buttons in the left-panel footer.
+    pub large_buttons: bool,
     /// Show the briefing box (why you were brought here) at the top of an
     /// agent reached through the attention queue. Only effective while the
     /// mode is not Off.
@@ -92,6 +94,7 @@ impl Default for AttentionSettings {
         Self {
             mode: AttentionMode::Shared,
             press_sorts: true,
+            large_buttons: false,
             show_briefing: true,
             turbo_concurrency: 16,
             expiry_seconds: 1_800,
@@ -139,6 +142,7 @@ mod tests {
         let settings = AttentionSettings::default();
         assert_eq!(settings.mode, AttentionMode::Shared);
         assert!(settings.press_sorts);
+        assert!(!settings.large_buttons);
         assert!(settings.show_briefing, "the briefing is on by default");
         assert_eq!(settings.turbo_concurrency, 16);
         assert_eq!(settings.expiry_seconds, 1_800);
@@ -201,6 +205,7 @@ mod tests {
         let settings = AttentionSettings {
             mode: AttentionMode::InstantOnly,
             press_sorts: false,
+            large_buttons: true,
             show_briefing: false,
             turbo_concurrency: 3,
             expiry_seconds: 600,

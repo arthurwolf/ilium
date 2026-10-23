@@ -6,6 +6,8 @@
 //! its pointers → drop the text if the pane's session changed meanwhile.
 //! Goals and states come from evidence; the model writes prose only.
 
+pub mod batch;
+pub mod comparison;
 pub mod custody;
 pub mod evidence;
 pub mod fence;
@@ -16,6 +18,7 @@ pub mod render;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
@@ -78,7 +81,22 @@ pub struct RecapOptions {
 /// Pane lookup used by the stale fence. Returns `None` when the pane is gone.
 pub type FenceLookup = Arc<dyn Fn(&str) -> Option<PaneFence> + Send + Sync>;
 
+/// Coarse pipeline phases, written to `RecapContext::progress` so a UI can
+/// show where a running recap is. Values only grow within one run.
+pub const PHASE_EVIDENCE: u8 = 2;
+pub const PHASE_PROMPT: u8 = 3;
+pub const PHASE_PROVIDER: u8 = 4;
+pub const PHASE_PARSE: u8 = 5;
+
+fn set_phase(progress: &Option<Arc<AtomicU8>>, phase: u8) {
+    if let Some(progress) = progress {
+        progress.fetch_max(phase, Ordering::Relaxed);
+    }
+}
+
 pub struct RecapContext {
+    /// Optional phase report; `None` for the CLI.
+    pub progress: Option<Arc<AtomicU8>>,
     pub provider: Arc<dyn InferenceProvider>,
     pub options: RecapOptions,
     pub cancel: watch::Receiver<bool>,
@@ -279,6 +297,7 @@ async fn recap_pane(
     let captured = input.fence.clone();
     let pane_id = input.pane_id.clone();
     let source = input.source.clone();
+    set_phase(&context.progress, PHASE_EVIDENCE);
     let gathered = match tokio::task::spawn_blocking(move || gather_evidence(source)).await {
         Ok(gathered) => gathered,
         Err(error) => blocked(
@@ -313,6 +332,7 @@ async fn recap_pane(
         }
     }
 
+    set_phase(&context.progress, PHASE_PROMPT);
     let prompt = match render_recap_prompt(
         &ready.facts,
         &ready.activity,
@@ -335,6 +355,7 @@ async fn recap_pane(
     } else {
         Duration::from_secs(SHORT_TIMEOUT_SECONDS)
     };
+    set_phase(&context.progress, PHASE_PROVIDER);
     let raw = match complete_bounded(
         context.provider.clone(),
         gate,
@@ -350,6 +371,7 @@ async fn recap_pane(
             return pane_without_text(&input, state, ready.facts, Some(failure.to_string()));
         }
     };
+    set_phase(&context.progress, PHASE_PARSE);
     let parsed = match parse_recap_response(&raw) {
         Ok(parsed) => parsed,
         Err(error) => {

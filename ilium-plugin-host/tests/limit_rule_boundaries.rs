@@ -1,6 +1,6 @@
 //! Overflow and release boundaries of the pure host limit rules.
 use ilium_plugin_api::ErrorCode;
-use ilium_plugin_host::limits_rules::{ProcessQuota, ReplyKind, ReplyWaiter, retry_after_ms};
+use ilium_plugin_host::limits_rules::{retry_after_ms, ProcessQuota, ReplyKind, ReplyWaiter};
 
 #[test]
 fn retry_hint_handles_extreme_balances_without_overflow() {

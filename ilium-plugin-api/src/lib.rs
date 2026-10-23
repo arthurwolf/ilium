@@ -5,9 +5,9 @@
 //! model, grants, limits, lifecycle states, error codes and the object-safe kernel facade.
 //! It does no I/O and has no runtime: no Wasmtime, no V8, no tokio, no files, no network.
 //!
-//! Skeleton state: data types, constants and closed enums are complete. Every function with
-//! behaviour, and every table that encodes a manual table, is `unimplemented!("api::<path>")`
-//! until the implementation fills it from the manual (test plan section 1.3).
+//! Contract validation and policy functions live here so runtime adapters and tests use
+//! the same rules. Host execution, persistence and capability effects belong to the host
+//! crate; generated wire types remain a direct mirror of the WIT contract.
 //!
 //! Manual: reference-wit.md, reference-abi-evolution.md, reference-errors-and-limits.md,
 //! reference-manifest.md, reference-manifest-schema.md, reference-runtime-model.md.

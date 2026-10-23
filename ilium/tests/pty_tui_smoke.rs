@@ -4097,6 +4097,8 @@ async fn existing_markdown_creates_populated_boards_from_tree_and_dialog() {
     let context_card_border = tui.with_screen(|screen| {
         let border_row = context_card_row.saturating_sub(1);
         let columns = screen.size().1;
+        // The theme draws rounded panel corners (`BorderType::Rounded`), so the
+        // card's top-left corner is `╭`, not the square `┌`.
         let border_start = (25..columns)
             .find(|column| {
                 screen
