@@ -5503,9 +5503,23 @@ async fn agent_debug_log_filters_panel_resizes_and_saves_the_active_view() {
         .expect("return to the oldest retained debug events");
 
     tokio::time::sleep(Duration::from_millis(2200)).await;
-    let (save_column, save_row) = tui
-        .with_screen(|screen| first_cell_containing(screen, "💾"))
-        .expect("find top Save button");
+    // The view redraws after the scroll-to-top; wait for the button to be
+    // on screen rather than reading one frame that may still be drawing.
+    let mut save_position = None;
+    let save_button_visible = wait_until(
+        || {
+            save_position = tui.with_screen(|screen| first_cell_containing(screen, "💾"));
+            save_position.is_some()
+        },
+        WAIT_TIMEOUT,
+    )
+    .await;
+    assert!(
+        save_button_visible,
+        "top Save button never appeared, last screen: {:?}",
+        tui.screen_text()
+    );
+    let (save_column, save_row) = save_position.expect("save button position recorded");
     tui.write(&sgr_mouse_click(0, save_column, save_row))
         .expect("click top Save button");
     assert!(

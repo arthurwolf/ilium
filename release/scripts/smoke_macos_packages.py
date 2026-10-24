@@ -7,7 +7,7 @@ import hashlib  # Hash native containers.
 import json  # Retain JSONL evidence.
 import math  # Reject nonfinite embedding vectors when reopening receipts.
 import os  # Manage owned objects.
-from pathlib import Path  # Keep paths explicit.
+from pathlib import Path, PurePosixPath  # Keep paths explicit; macOS receipt paths are POSIX on every host.
 import plistlib  # Parse Apple observations.
 import re  # Validate native names.
 import selectors  # Bound Darwin protocol.
@@ -165,7 +165,7 @@ def validate_smoke_receipt(receipt: dict[str, Any], build: dict[str, Any], targe
         require(installed.is_absolute() and installed.is_relative_to(root_path / name) and '..' not in installed.parts, 'installed macOS directory escaped its smoke root')
         hidden = result.get('source_hiding')
         require(isinstance(hidden, list) and len(hidden) == 3 and all(isinstance(item, dict) and set(item) == {'original', 'hidden'} and all(isinstance(value, str) for value in item.values()) for item in hidden), 'source/build/package inputs were not hidden')
-        originals = [Path(item['original']) for item in hidden]
+        originals = [PurePosixPath(item['original']) for item in hidden]
         require(len(set(originals)) == 3 and all(path.is_absolute() and '..' not in path.parts and not installed.is_relative_to(path) for path in originals), 'hidden macOS input custody differs')
         require(all(Path(item['hidden']).is_relative_to(root_path / name / 'hidden-inputs') and '..' not in Path(item['hidden']).parts for item in hidden), 'hidden macOS input escaped its owned root')
         hidden_originals.append(originals)

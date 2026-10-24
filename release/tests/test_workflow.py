@@ -1155,8 +1155,9 @@ class PipelineTests(unittest.TestCase):
                     (container_log / 'containers-results.jsonl').write_text(
                         ''.join(json.dumps(row) + '\n' for row in marker['container_events']))
                     for kind, proof in marker['host'].items():
-                        (host_log / (kind + '-host-installed-animation.json')).write_text(
-                            json.dumps(proof, indent=2, sort_keys=True) + '\n')
+                        # Write exact LF bytes: the validator hashes them, and text mode would emit CRLF on Windows.
+                        (host_log / (kind + '-host-installed-animation.json')).write_bytes(
+                            (json.dumps(proof, indent=2, sort_keys=True) + '\n').encode('utf-8'))
                     (host_log / 'host-results.jsonl').write_text(
                         ''.join(json.dumps(row) + '\n' for row in marker['host_events']))
                     (host_log / 'appimage-host.log').write_text(
