@@ -16,14 +16,19 @@ use unicode_width::UnicodeWidthStr;
 use crate::app::{App, SettingsState};
 use crate::padding::{PaddingMode, PaddingSettings};
 use crate::theme;
+use crate::value_control::{
+    ControlAction, ControlKind, ControlSpec, ControlStyles, PointerButton, ValueControl,
+};
 
 /// Height of every mode box, borders included.
 pub const CARD_HEIGHT: u16 = 10;
 const CARD_GAP: u16 = 1;
 const SIDE_MARGIN: u16 = 2;
 const INTRO_ROWS: u16 = 4;
-const BUTTON_WIDTH: u16 = 3;
-const FIELD_WIDTH: u16 = 7;
+/// Cells reserved for the threshold value: four digits (the largest value the
+/// field accepts is 1000) plus the caret shown while typing. A fixed width keeps
+/// the control's geometry identical while the value is being edited.
+const THRESHOLD_TEXT_CELLS: usize = 5;
 const SUMMARY_ROWS: usize = 4;
 const FINE_TUNE_LABEL: &str = " Padding fine-tuning ";
 
@@ -37,9 +42,9 @@ pub const ROW_FINE_TUNE: usize = 2;
 pub enum PaddingHit {
     /// A mode box (anywhere on it that is not a control).
     Mode(PaddingMode),
-    /// A threshold stepper, by the number of columns it moves.
+    /// The threshold's "-" or "+" button, by the number of columns it moves.
     Step(i32),
-    /// The threshold's number field (starts typing).
+    /// The threshold's value (starts typing, the shared "*" action).
     Field,
     /// The "Padding fine-tuning" button.
     FineTune,
@@ -58,11 +63,8 @@ pub struct PaddingUiState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TabLayout {
     pub cards: [Rect; 3],
-    pub big_decrement: Option<Rect>,
-    pub decrement: Rect,
-    pub field: Rect,
-    pub increment: Rect,
-    pub big_increment: Option<Rect>,
+    /// The threshold's number control row inside the size-dependent card.
+    pub threshold: Rect,
     pub fine_tune: Option<Rect>,
 }
 
@@ -83,23 +85,7 @@ pub fn tab_layout(area: Rect, settings: &PaddingSettings) -> TabLayout {
 
     let inside = Block::default().borders(Borders::ALL).inner(cards[1]);
     let input_row = inside.bottom().saturating_sub(1);
-    let has_big_steps = inside.width >= BUTTON_WIDTH * 4 + FIELD_WIDTH + 4;
-    let total = if has_big_steps {
-        BUTTON_WIDTH * 4 + FIELD_WIDTH + 4
-    } else {
-        BUTTON_WIDTH * 2 + FIELD_WIDTH + 2
-    };
-    let mut x = inside.x + inside.width.saturating_sub(total) / 2;
-    let mut place = |width: u16| {
-        let rect = Rect::new(x, input_row, width.min(inside.right().saturating_sub(x)), 1);
-        x = x.saturating_add(width + 1);
-        rect
-    };
-    let big_decrement = has_big_steps.then(|| place(BUTTON_WIDTH));
-    let decrement = place(BUTTON_WIDTH);
-    let field = place(FIELD_WIDTH);
-    let increment = place(BUTTON_WIDTH);
-    let big_increment = has_big_steps.then(|| place(BUTTON_WIDTH));
+    let threshold = Rect::new(inside.x, input_row, inside.width, 1);
 
     let button_width = FINE_TUNE_LABEL.width() as u16;
     let fine_tune = (settings.mode != PaddingMode::Disabled).then(|| {
@@ -113,13 +99,32 @@ pub fn tab_layout(area: Rect, settings: &PaddingSettings) -> TabLayout {
 
     TabLayout {
         cards,
-        big_decrement,
-        decrement,
-        field,
-        increment,
-        big_increment,
+        threshold,
         fine_tune,
     }
+}
+
+/// The threshold's shared number control. `editing` replaces the stored value
+/// with the digits being typed; the text is padded to a fixed width so every
+/// state uses the same geometry.
+fn threshold_control(row: Rect, threshold: u16, editing: Option<&str>) -> ValueControl {
+    let text = match editing {
+        Some(buffer) => format!("{buffer}▏"),
+        None => threshold.to_string(),
+    };
+    let padded = format!("{text:^width$}", width = THRESHOLD_TEXT_CELLS);
+    ValueControl::new(
+        row,
+        ControlSpec {
+            kind: ControlKind::Number,
+            label: "",
+            value: &padded,
+            label_width: 0,
+            previous_enabled: true,
+            next_enabled: true,
+            open_enabled: true,
+        },
+    )
 }
 
 /// What is under `position`, if anything.
@@ -130,19 +135,19 @@ pub fn hit(area: Rect, settings: &PaddingSettings, position: Position) -> Option
             return Some(PaddingHit::FineTune);
         }
     }
-    let steps = [
-        (layout.big_decrement, -10),
-        (Some(layout.decrement), -1),
-        (Some(layout.increment), 1),
-        (layout.big_increment, 10),
-    ];
-    for (rect, delta) in steps {
-        if rect.is_some_and(|rect| rect.contains(position)) {
-            return Some(PaddingHit::Step(delta));
+    if layout.threshold.contains(position) {
+        // Inert spots of the row (leaders, label padding) fall through to the card.
+        let action = threshold_control(layout.threshold, settings.width_threshold, None)
+            .hit(position, PointerButton::Left);
+        let target = match action {
+            Some(ControlAction::Decrement) => Some(PaddingHit::Step(-1)),
+            Some(ControlAction::Increment) => Some(PaddingHit::Step(1)),
+            Some(ControlAction::EditNumber) => Some(PaddingHit::Field),
+            _ => None,
+        };
+        if target.is_some() {
+            return target;
         }
-    }
-    if layout.field.contains(position) {
-        return Some(PaddingHit::Field);
     }
     PaddingMode::ALL
         .into_iter()
@@ -185,20 +190,6 @@ fn card_border_style(is_selected: bool, is_hovered: bool) -> Style {
     } else {
         theme::border_style(false)
     }
-}
-
-fn pill(frame: &mut Frame, rect: Rect, text: &str, is_hovered: bool, is_active: bool) {
-    let style = if is_hovered {
-        theme::selected_style().add_modifier(Modifier::BOLD)
-    } else if is_active {
-        Style::new().add_modifier(Modifier::BOLD | Modifier::REVERSED)
-    } else {
-        Style::new().add_modifier(Modifier::REVERSED | Modifier::DIM)
-    };
-    frame.render_widget(
-        Paragraph::new(Span::styled(text.to_owned(), style)).alignment(Alignment::Center),
-        rect,
-    );
 }
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
@@ -316,32 +307,45 @@ fn render_threshold(
     };
     frame.render_widget(
         Paragraph::new(Span::styled("Terminal columns:", label_style)),
-        Rect::new(inside.x, layout.field.y.saturating_sub(1), inside.width, 1),
+        Rect::new(
+            inside.x,
+            layout.threshold.y.saturating_sub(1),
+            inside.width,
+            1,
+        ),
     );
-    let hovered_step = |delta: i32| ui.hover == Some(PaddingHit::Step(delta));
-    if let Some(rect) = layout.big_decrement {
-        pill(frame, rect, "«", hovered_step(-10), is_active);
-    }
-    pill(frame, layout.decrement, "‹", hovered_step(-1), is_active);
-    pill(frame, layout.increment, "›", hovered_step(1), is_active);
-    if let Some(rect) = layout.big_increment {
-        pill(frame, rect, "»", hovered_step(10), is_active);
-    }
     let is_editing = ui.editing.is_some();
-    let text = match &ui.editing {
-        Some(buffer) => format!("{buffer}▏"),
-        None => settings.width_threshold.to_string(),
-    };
-    let style = if is_editing {
+    let is_highlighted = is_editing
+        || ui.hover == Some(PaddingHit::Field)
+        || ui.hover == Some(PaddingHit::Step(-1))
+        || ui.hover == Some(PaddingHit::Step(1))
+        || state.selected_row == ROW_THRESHOLD;
+    let value_style = if is_editing {
         theme::selected_style().add_modifier(Modifier::BOLD)
-    } else if ui.hover == Some(PaddingHit::Field) || state.selected_row == ROW_THRESHOLD {
+    } else if is_highlighted {
         Style::new().add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
     } else {
         Style::new().add_modifier(Modifier::BOLD)
     };
-    frame.render_widget(
-        Paragraph::new(Span::styled(text, style)).alignment(Alignment::Center),
-        layout.field,
+    let button_style = if is_active {
+        Style::new().add_modifier(Modifier::BOLD | Modifier::REVERSED)
+    } else {
+        Style::new().add_modifier(Modifier::REVERSED | Modifier::DIM)
+    };
+    threshold_control(
+        layout.threshold,
+        settings.width_threshold,
+        ui.editing.as_deref(),
+    )
+    .render(
+        frame,
+        ControlStyles {
+            background: Style::new(),
+            label: label_style,
+            value: value_style,
+            button: button_style,
+            disabled: Style::new().add_modifier(Modifier::DIM),
+        },
     );
 }
 
@@ -446,6 +450,16 @@ pub fn handle_key(
                 _ => {}
             }
         }
+        KeyCode::Char('-') if state.selected_row == ROW_THRESHOLD => {
+            app.padding_step_threshold(-1);
+        }
+        KeyCode::Char('+') if state.selected_row == ROW_THRESHOLD => {
+            app.padding_step_threshold(1);
+        }
+        KeyCode::Char('*') if state.selected_row == ROW_THRESHOLD => {
+            state.padding.editing = Some(String::new());
+        }
+        // Double steps have no pointer button: PageUp/PageDown move the threshold by ten.
         KeyCode::PageUp | KeyCode::PageDown if state.selected_row == ROW_THRESHOLD => {
             app.padding_step_threshold(if key.code == KeyCode::PageUp { 10 } else { -10 });
         }
@@ -499,7 +513,7 @@ mod tests {
             assert_eq!(pair[0].width, pair[1].width);
         }
         assert!(layout.fine_tune.is_none(), "hidden while disabled");
-        assert!(layout.cards[1].contains(layout.field.as_position()));
+        assert!(layout.cards[1].contains(layout.threshold.as_position()));
     }
 
     #[test]
@@ -541,18 +555,116 @@ mod tests {
         assert!(state.padding.dialog.is_some());
         state.padding.dialog = None;
 
-        let step = hit(area, &app.padding_settings, layout.increment.as_position()).unwrap();
+        let control =
+            threshold_control(layout.threshold, app.padding_settings.width_threshold, None);
+        let increment = control.geometry().next.as_position();
+        let step = hit(area, &app.padding_settings, increment).unwrap();
         assert_eq!(step, PaddingHit::Step(1));
         click(&mut app, &mut state, step);
         assert_eq!(app.padding_settings.mode, PaddingMode::WidthDependent);
         assert_eq!(app.padding_settings.width_threshold, 201);
-        let big = hit(
-            area,
-            &app.padding_settings,
-            layout.big_decrement.unwrap().as_position(),
+        let decrement = control.geometry().previous.as_position();
+        let step = hit(area, &app.padding_settings, decrement);
+        assert_eq!(step, Some(PaddingHit::Step(-1)));
+        click(&mut app, &mut state, step.unwrap());
+        assert_eq!(app.padding_settings.width_threshold, 200);
+    }
+
+    #[test]
+    fn threshold_keys_step_by_one_and_page_by_ten() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        let (mut app, _directory) = app();
+        let mut state = SettingsState {
+            selected_row: ROW_THRESHOLD,
+            ..SettingsState::default()
+        };
+        let press = |app: &mut App, state: &mut SettingsState, code: KeyCode| {
+            handle_key(app, state, KeyEvent::new(code, KeyModifiers::NONE))
+        };
+        assert!(press(&mut app, &mut state, KeyCode::Char('-')));
+        assert_eq!(app.padding_settings.width_threshold, 199);
+        assert!(press(&mut app, &mut state, KeyCode::Char('+')));
+        assert_eq!(app.padding_settings.width_threshold, 200);
+        assert!(press(&mut app, &mut state, KeyCode::PageDown));
+        assert_eq!(app.padding_settings.width_threshold, 190);
+        assert!(press(&mut app, &mut state, KeyCode::PageUp));
+        assert_eq!(app.padding_settings.width_threshold, 200);
+        assert!(press(&mut app, &mut state, KeyCode::Char('*')));
+        assert_eq!(state.padding.editing.as_deref(), Some(""));
+        press(&mut app, &mut state, KeyCode::Esc);
+        assert!(state.padding.editing.is_none());
+        assert_eq!(app.padding_settings.width_threshold, 200);
+    }
+
+    #[test]
+    fn threshold_buttons_are_left_click_targets_and_the_value_starts_typing() {
+        let settings = PaddingSettings::default();
+        let area = Rect::new(0, 0, 90, 20);
+        let layout = tab_layout(area, &settings);
+        let control = threshold_control(layout.threshold, settings.width_threshold, None);
+        let geometry = control.geometry();
+        assert_eq!(
+            hit(area, &settings, geometry.previous.as_position()),
+            Some(PaddingHit::Step(-1))
         );
-        click(&mut app, &mut state, big.unwrap());
-        assert_eq!(app.padding_settings.width_threshold, 191);
+        assert_eq!(
+            hit(area, &settings, geometry.next.as_position()),
+            Some(PaddingHit::Step(1))
+        );
+        assert_eq!(
+            hit(area, &settings, geometry.open.as_position()),
+            Some(PaddingHit::Field)
+        );
+        let ink = control.value_ink()[0];
+        assert_eq!(
+            hit(area, &settings, ink.as_position()),
+            Some(PaddingHit::Field)
+        );
+        assert_eq!(
+            control.hit(geometry.previous.as_position(), PointerButton::Right),
+            None,
+            "only the left button steps"
+        );
+    }
+
+    #[test]
+    fn threshold_glyphs_are_plain_minus_plus_and_star() {
+        let (mut app, _directory) = app();
+        app.padding_settings.mode = PaddingMode::WidthDependent;
+        let state = SettingsState::default();
+        let mut terminal = Terminal::new(TestBackend::new(90, 20)).unwrap();
+        terminal
+            .draw(|frame| render(frame, frame.area(), &app, &state))
+            .unwrap();
+        let layout = tab_layout(Rect::new(0, 0, 90, 20), &app.padding_settings);
+        let geometry =
+            threshold_control(layout.threshold, app.padding_settings.width_threshold, None)
+                .geometry();
+        for (rect, glyph) in [
+            (geometry.previous, "-"),
+            (geometry.next, "+"),
+            (geometry.open, "*"),
+        ] {
+            assert_eq!(
+                terminal.backend().buffer()[(rect.x, rect.y)].symbol(),
+                glyph
+            );
+        }
+    }
+
+    #[test]
+    fn editing_keeps_the_threshold_geometry_fixed() {
+        let settings = PaddingSettings::default();
+        let area = Rect::new(0, 0, 90, 20);
+        let row = tab_layout(area, &settings).threshold;
+        let stored = threshold_control(row, settings.width_threshold, None).geometry();
+        for buffer in ["", "1", "15", "1000"] {
+            let editing = threshold_control(row, settings.width_threshold, Some(buffer));
+            let geometry = editing.geometry();
+            assert_eq!(geometry.previous, stored.previous, "buffer {buffer:?}");
+            assert_eq!(geometry.next, stored.next, "buffer {buffer:?}");
+            assert_eq!(geometry.open, stored.open, "buffer {buffer:?}");
+        }
     }
 
     #[test]
@@ -601,10 +713,14 @@ mod tests {
     }
 
     #[test]
-    fn narrow_content_drops_the_double_step_buttons_but_keeps_the_input() {
+    fn narrow_content_keeps_every_threshold_target() {
         let settings = PaddingSettings::default();
         let layout = tab_layout(Rect::new(0, 0, 60, 20), &settings);
-        assert!(layout.big_decrement.is_none() && layout.big_increment.is_none());
-        assert!(layout.field.width > 0);
+        let geometry =
+            threshold_control(layout.threshold, settings.width_threshold, None).geometry();
+        assert_eq!(geometry.previous.width, 1);
+        assert_eq!(geometry.next.width, 1);
+        assert_eq!(geometry.open.width, 1);
+        assert!(geometry.value.width >= 3, "the value stays readable");
     }
 }

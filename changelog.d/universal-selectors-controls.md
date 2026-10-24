@@ -1,0 +1,3 @@
+### Changed
+- Every selector and number input now follows one control convention. Choices show `←  →  +`: the `←` and `→` buttons step back and forward, clicking the value steps forward and right-clicking it steps back, and `+` opens the full option list. Numbers show `-  value  +  *`: `-` and `+` step by one, and `*` (or clicking the value) types a number. The onboarding keyboard editor's prefix rows use the same controls and the same letter list as Settings.
+- The Padding tab's "Terminal columns" value uses the number control. The `«` and `»` buttons (steps of ten) are removed; `PageUp` and `PageDown` move the threshold by ten while its row is focused.
