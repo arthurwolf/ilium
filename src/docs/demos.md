@@ -216,39 +216,3 @@ An agent runs in its own linked worktree on its own branch, with the path, branc
 ![A Claude session converts to Codex, which still remembers the secret word, then converts back to Claude](../../assets/demos/26-convert-session.gif)
 
 A session is converted from Claude to Codex and back while keeping its context. Explained in [Session recovery](session-recovery.md).
-
-## Additional file
-
-`14-chatroom-limit-preview.gif` in the same directory is a companion recording to the Chatroom demo above, named for the Chatroom message limit. Chatroom is covered in [Automation](automation.md).
-
-![Chatroom limit preview](../../assets/demos/14-chatroom-limit-preview.gif)
-
-## Duplicate file names
-
-The `assets/demos/` directory also holds copies of several demos under earlier numbering. They are byte-identical to the files shown above (checked by checksum), so they are not repeated in this gallery. Use the names above in links.
-
-| Older name | Same recording as |
-| --- | --- |
-| `01-agent-activity.gif` | `08-agent-activity.gif` |
-| `02-pane-tree.gif` | `09-pane-tree.gif` |
-| `03-mixed-splits.gif` | `10-mixed-splits.gif` |
-| `04-smart-copy.gif` | `11-smart-copy.gif` |
-| `05-ask-for-update.gif` | `12-ask-for-update.gif` |
-| `06-prompt-queue.gif` | `13-prompt-queue.gif` |
-| `07-progress-monitor.gif` | `14-progress-monitor.gif` |
-| `08-kanban.gif` | `15-kanban.gif` |
-| `09-agent-from-line.gif` | `16-agent-from-line.gif` |
-| `10-workspace-search.gif` | `17-workspace-search.gif` |
-| `11-detach-reattach.gif` | `18-detach-reattach.gif` |
-| `12-ai-tree.gif` | `01-ai-tree.gif` |
-| `13-markdown-editor.gif` | `19-markdown-editor.gif` |
-| `14-chatroom.gif` | `20-chatroom.gif` |
-| `15-scheduled-input.gif` | `04-scheduled-input.gif` |
-| `16-text-triggers.gif` | `21-text-triggers.gif` |
-| `17-goal-indicators.gif` | `22-goal-indicators.gif` |
-| `18-screen-transfer.gif` | `05-screen-transfer.gif` |
-| `19-snapshot-resume.gif` | `23-snapshot-resume.gif` |
-| `20-contextual-titles.gif` | `03-contextual-titles.gif` |
-| `21-settings-tour-a / b / c.gif` | `07a / 07b / 07c-settings-tour.gif` |
-| `22-voice-control.gif` | `02-voice-control.gif` |
-| `23-cost-and-stats.gif` | `06-cost-and-stats.gif` |
