@@ -18,7 +18,9 @@
 //! or cancellation and keep output pipes or other resources open.
 
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(target_os = "linux")]
+use std::path::PathBuf;
 use std::process::Command;
 use std::time::Duration;
 #[cfg(target_os = "linux")]
