@@ -102,6 +102,15 @@ pub(super) fn run(command: &str, args: &[String], env: &CliEnv) -> CliOutput {
         return failure("usage.argument-missing", "A package path is required", 2);
     };
     let path = env.cwd.join(name);
+    if command == "verify"
+        && !name.contains(['/', '\\'])
+        && !name.ends_with(".iliumpkg")
+        && !path.is_file()
+    {
+        if let Some(context) = &env.audit_context {
+            return super::verify_install::run(name, env, context.clone());
+        }
+    }
     if command == "check" && path.is_dir() {
         return check_directory(&path);
     }

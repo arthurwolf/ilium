@@ -93,10 +93,13 @@ pub enum IconTarget {
     ResourceAttention,
     ResourceOwner,
     ResourceQueue,
+    SpendingMedalGold,
+    SpendingMedalSilver,
+    SpendingMedalBronze,
 }
 
 impl IconTarget {
-    pub const ALL: [Self; 77] = [
+    pub const ALL: [Self; 80] = [
         Self::Group,
         Self::TopLevel,
         Self::Project,
@@ -174,6 +177,9 @@ impl IconTarget {
         Self::ResourceAttention,
         Self::ResourceOwner,
         Self::ResourceQueue,
+        Self::SpendingMedalGold,
+        Self::SpendingMedalSilver,
+        Self::SpendingMedalBronze,
     ];
 
     pub const fn label(self) -> &'static str {
@@ -255,6 +261,9 @@ impl IconTarget {
             Self::ResourceAttention => "Resource: needs attention",
             Self::ResourceOwner => "Resource: owner",
             Self::ResourceQueue => "Resource: queue count",
+            Self::SpendingMedalGold => "Spending medal: gold",
+            Self::SpendingMedalSilver => "Spending medal: silver",
+            Self::SpendingMedalBronze => "Spending medal: bronze",
         }
     }
 
@@ -337,6 +346,9 @@ impl IconTarget {
             Self::ResourceAttention => "resource_attention",
             Self::ResourceOwner => "resource_owner",
             Self::ResourceQueue => "resource_queue",
+            Self::SpendingMedalGold => "spending_medal_gold",
+            Self::SpendingMedalSilver => "spending_medal_silver",
+            Self::SpendingMedalBronze => "spending_medal_bronze",
         }
     }
 
@@ -423,6 +435,9 @@ impl IconTarget {
             Self::ResourceAttention => "⚠",
             Self::ResourceOwner => "🔑",
             Self::ResourceQueue => "⇥",
+            Self::SpendingMedalGold => "🥇",
+            Self::SpendingMedalSilver => "🥈",
+            Self::SpendingMedalBronze => "🥉",
         }
     }
 
@@ -530,6 +545,9 @@ impl IconTarget {
             Self::ResourceAttention => &["⚠"],
             Self::ResourceOwner => &["🔑"],
             Self::ResourceQueue => &["⇥"],
+            Self::SpendingMedalGold => &["🥇", "🏆", "★", "◆"],
+            Self::SpendingMedalSilver => &["🥈", "☆", "◇", "◆"],
+            Self::SpendingMedalBronze => &["🥉", "✦", "◈", "◆"],
         }
     }
 }
@@ -618,6 +636,9 @@ pub struct IconSettings {
     pub resource_attention: String,
     pub resource_owner: String,
     pub resource_queue: String,
+    pub spending_medal_gold: String,
+    pub spending_medal_silver: String,
+    pub spending_medal_bronze: String,
 }
 
 impl Default for IconSettings {
@@ -707,6 +728,9 @@ impl IconSettings {
             resource_attention: value(IconTarget::ResourceAttention),
             resource_owner: value(IconTarget::ResourceOwner),
             resource_queue: value(IconTarget::ResourceQueue),
+            spending_medal_gold: value(IconTarget::SpendingMedalGold),
+            spending_medal_silver: value(IconTarget::SpendingMedalSilver),
+            spending_medal_bronze: value(IconTarget::SpendingMedalBronze),
         }
     }
 
@@ -789,6 +813,9 @@ impl IconSettings {
             IconTarget::ResourceAttention => &self.resource_attention,
             IconTarget::ResourceOwner => &self.resource_owner,
             IconTarget::ResourceQueue => &self.resource_queue,
+            IconTarget::SpendingMedalGold => &self.spending_medal_gold,
+            IconTarget::SpendingMedalSilver => &self.spending_medal_silver,
+            IconTarget::SpendingMedalBronze => &self.spending_medal_bronze,
         }
     }
 
@@ -880,6 +907,9 @@ impl IconSettings {
             IconTarget::ResourceAttention => &mut self.resource_attention,
             IconTarget::ResourceOwner => &mut self.resource_owner,
             IconTarget::ResourceQueue => &mut self.resource_queue,
+            IconTarget::SpendingMedalGold => &mut self.spending_medal_gold,
+            IconTarget::SpendingMedalSilver => &mut self.spending_medal_silver,
+            IconTarget::SpendingMedalBronze => &mut self.spending_medal_bronze,
         };
         *slot = glyph;
     }

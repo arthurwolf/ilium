@@ -547,6 +547,12 @@ async fn run_one_shot(xdg: &IsolatedXdgDirs, cwd: &Path, args: &[&str]) -> std::
         })
         .unwrap_or_else(|error| panic!("failed to spawn `ilium {args:?}`: {error}"));
 
+    if !status.success() {
+        eprintln!(
+            "failed one-shot command {args:?}: {}",
+            session_state_report(xdg)
+        );
+    }
     std::process::Output {
         status,
         stdout: captured().into_bytes(),
@@ -1896,15 +1902,13 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
                 && screen.contains("Focused width")
                 && screen.contains("Tree order")
                 && screen.contains("Age down (oldest first)")
-                && screen.contains("Agent identifier")
-                && screen.contains("Full name")
         },
         WAIT_TIMEOUT,
     )
     .await;
     assert!(
         agent_controls_shown,
-        "expected agent identifier controls in User Appearance, got: {:?}",
+        "expected sizing controls in User Interface, got: {:?}",
         tui.screen_text()
     );
     tui.write(b"?")
@@ -1927,8 +1931,8 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         .expect("closing Settings help back to the same Settings screen");
     assert!(
         wait_until(
-            || tui.screen_text().contains("Agent identifier")
-                && tui.screen_text().contains("Full name"),
+            || tui.screen_text().contains("Left panel sizing")
+                && tui.screen_text().contains("Focused width"),
             WAIT_TIMEOUT,
         )
         .await,
@@ -2350,7 +2354,7 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
                 let screen = tui.screen_text();
                 screen.contains("Debug")
                     && screen.contains("File logging")
-                    && screen.contains("‹ Off ›")
+                    && screen.contains("[○ OFF]")
                     && screen.contains("full text LLM")
                     && screen.contains("requests/responses")
             },
@@ -6283,7 +6287,13 @@ async fn worktree_launcher_dialog_menu_and_footer_popover_render_and_accept_inpu
         already_cleaned_up: false,
     };
     let new_pane_output = run_one_shot(&xdg, &project_dir, &new_idle_pane_arguments()).await;
-    assert!(new_pane_output.status.success(), "create isolated pane");
+    assert!(
+        new_pane_output.status.success(),
+        "create isolated pane: status={:?}, stdout={}, stderr={}",
+        new_pane_output.status,
+        String::from_utf8_lossy(&new_pane_output.stdout),
+        String::from_utf8_lossy(&new_pane_output.stderr)
+    );
     let attach_command = PtyCommand::new(ilium_binary(), &project_dir, 44, 120)
         .arg("--restart-server")
         .arg("--cwd")

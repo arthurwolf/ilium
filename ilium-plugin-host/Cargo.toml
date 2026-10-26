@@ -30,6 +30,7 @@ wasmtime = { workspace = true, default-features = false, features = ["async", "c
 wasmparser = "=0.258.3"
 sha2 = "0.10.9"
 wat = { version = "=1.258.3", optional = true }
+tempfile = { version = "3.27.0", optional = true }
 
 [dev-dependencies]
 # Test lanes of the plugin platform (test-plan.md sections 2.4 and 2.13).
@@ -40,6 +41,6 @@ ilium-plugin-testkit = { version = "0.1.1", path = "../ilium-plugin-testkit" }
 
 [features]
 # FakeKernel, NativeGuest, WAT loader and HostHarness for host and conformance tests.
-testing = ["dep:wat"]
+testing = ["dep:wat", "dep:tempfile"]
 # Maps the `sync` shim to loom types for the loom model tests (test plan section 2.7).
 loom = ["dep:loom"]

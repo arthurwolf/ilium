@@ -8,6 +8,16 @@ use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
+
+/// Fixed-width textual switch used by boolean settings across the client.
+/// Both states occupy seven terminal cells, including the circle indicator.
+pub const fn boolean_switch(value: bool) -> &'static str {
+    if value {
+        "[ON  ●]"
+    } else {
+        "[○ OFF]"
+    }
+}
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ControlKind {
     Choice,

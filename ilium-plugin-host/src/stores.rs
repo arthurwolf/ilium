@@ -18,15 +18,19 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
 /// Why a store could not be used.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum StoreError {
     /// A newer format must be left untouched.
+    #[error("unsupported store format version {0}")]
     UnsupportedVersion(u32),
     /// A filesystem operation failed.
+    #[error("store I/O failed: {0}")]
     Io(String),
     /// The document or requested identity is invalid.
+    #[error("invalid store: {0}")]
     Corrupt(String),
     /// Another writer changed the snapshot. Reopen explicitly rather than lose data.
+    #[error("store changed concurrently; reopen before retrying")]
     Conflict,
 }
 fn io(error: std::io::Error) -> StoreError {

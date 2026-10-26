@@ -117,6 +117,23 @@ impl fmt::Debug for Retention {
     }
 }
 
+/// Fixed ownership allocation retained after a completed result releases its
+/// job credit. Expose the same layout used by the checked per-result helper so
+/// composition roots can include it in their original admission envelopes.
+pub const fn retained_result_storage_overhead_bytes() -> usize {
+    std::mem::size_of::<JobHold>() + 2 * std::mem::size_of::<usize>()
+}
+
+/// Charge a retained payload together with its Arc-owned execution metadata.
+/// `payload_bytes` includes the inline value and all retained allocations;
+/// this helper adds the JobHold and the Arc strong/weak counters once.
+pub fn retained_result_storage_bytes<T>(payload_bytes: usize) -> Result<usize, RejectReason> {
+    payload_bytes
+        .max(std::mem::size_of::<T>().max(1))
+        .checked_add(retained_result_storage_overhead_bytes())
+        .ok_or(RejectReason::InvalidCost)
+}
+
 impl<T> Retained<T> {
     pub(crate) fn from_external(value: T, hold: Arc<JobHold>) -> Self {
         Self { value, hold }
@@ -124,6 +141,27 @@ impl<T> Retained<T> {
 
     pub fn view(&self) -> &T {
         &self.value
+    }
+
+    /// Keep a completed result charged while releasing its execution credit.
+    /// The caller must account for every retained allocation in `result_bytes`
+    /// and must have destroyed all input/capture backing first. Never use on a
+    /// NotStarted outcome, which still owns the original job and its input.
+    /// Shared receipts, callback owners and retention guards refuse conversion;
+    /// they may still rely on the original declaration. No fresh admission is
+    /// needed, and refusal preserves the value and the full original charge.
+    pub fn try_reduce_to_result_storage(
+        &mut self,
+        result_bytes: usize,
+    ) -> Result<(), RejectReason> {
+        if result_bytes < retained_result_storage_bytes::<T>(0)? {
+            return Err(RejectReason::InvalidCost);
+        }
+        let hold = Arc::get_mut(&mut self.hold).ok_or(RejectReason::Busy)?;
+        if hold.service_slots.is_some() {
+            return Err(RejectReason::InvalidCost);
+        }
+        hold._debit.reduce_to_result_storage(result_bytes)
     }
 
     /// Moves the original payload and its charge to another typed owner.

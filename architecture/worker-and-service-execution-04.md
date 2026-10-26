@@ -1,5 +1,23 @@
 # Worker and service execution — continued 4
 
+receipt releases its separate storage admission. Diff encoding streams against
+the last emitted frame without a whole-frame diff vector. Isolated release tests
+cover refusal before spawn, blocked retirement and storage after actual join;
+full-client output and measured memory qualification remain open.
+Successful presentations expose `request_to_emission_us`,
+`composition_to_emission_us`, `completed_frame_age_us`, terminal `frame_age_us`
+and `emission_us`. Those acknowledgement-side measurements include the owner’s
+flush boundary; rejected or uncertain writes are not successful presentation
+samples. The matched before/after release measurements still need to report
+p50/p95 input latency and frame age, client/server CPU and peak RSS for cached
+playback, live playback and a large document workload.
+
+Snapshot publication flushes and syncs the temporary data file, then uses the
+platform durable replacement operation before reporting success. On Unix that
+operation also syncs the containing directory; Windows uses write-through
+replacement. Existing snapshot persistence readback and oversize-preservation
+tests pass on Linux; crash/power-loss and Windows execution remain unverified.
+
 The ordered snapshot disk service now reserves one physical worker from the
 existing server execution quota before constructing its channels. Its declaration
 includes a requested 2 MiB stack, the existing 64 MiB service allowance and bounded
@@ -508,3 +526,9 @@ the captured client Cargo run, together with test compilation and package format
 The tested Root-owned seams match current source at audit; two concurrently changed
 statistics files keep whole-current client integration and release qualification open.
 Picker-list admission alone does not qualify downstream consumers.
+
+Startup-dialog observations now use the existing filesystem I/O client rather
+than reading a file on each UI-loop pass. One active receipt and one immutable
+charged observation retain their original admission; reads are paced at 100 ms
+and fenced by the startup-file path. A missing, malformed or oversized record
+uses the existing indeterminate display. The reader accepts at most 64 KiB,

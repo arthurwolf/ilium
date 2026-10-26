@@ -669,6 +669,74 @@ impl AuditLog {
         self.scan_chain().map(|_| ())
     }
 
+    /// Read all retained redacted records without creating or repairing any file.
+    /// Uses the writer's existing lock and the same frame/chain verifier as verify.
+    /// An expired prefix remains an unverifiable anchor, as for writer verification.
+    /// The final record has no external trusted head; its content cannot be
+    /// authenticated independently of a subsequent record. Unsupported platform
+    /// permission or handle-enumeration checks return an error, never a fallback.
+    pub fn read_verified(path: &Path) -> Result<Vec<Value>, HostError> {
+        use std::path::Component;
+        if !path.is_absolute()
+            || path
+                .components()
+                .any(|part| matches!(part, Component::CurDir | Component::ParentDir))
+        {
+            return Err(failure(
+                "audit.io",
+                "Audit read requires an absolute path without dot traversal",
+            ));
+        }
+        let directory = match readonly_directory(parent(path)) {
+            Ok(directory) => directory,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) => return Err(io_error(error)),
+        };
+        let segments = readonly_segments(&directory)?;
+        let name = path
+            .file_name()
+            .ok_or_else(|| failure("audit.io", "Audit file name is required"))?;
+        let active = match directory.open_regular(name) {
+            Ok(file) => Some(file),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => return Err(io_error(error)),
+        };
+        if active.is_none() && segments.is_empty() {
+            return Ok(Vec::new());
+        }
+        // An absent log has no private contents to validate. Do not reject an
+        // otherwise ordinary parent directory or mutate its permissions.
+        let directory_file = directory.try_clone_file().map_err(io_error)?;
+        secure_fs::validate_private_open_file(&directory_file).map_err(io_error)?;
+        // Creating a lock would violate this API's noncreating contract. Existing
+        // logs without their writer lock cannot be read as a consistent snapshot.
+        let lock_name = path.with_extension("lock");
+        let lock = directory
+            .open_regular(
+                lock_name
+                    .file_name()
+                    .ok_or_else(|| failure("audit.io", "Audit lock name is required"))?,
+            )
+            .map_err(io_error)?;
+        secure_fs::validate_private_open_file(&lock).map_err(io_error)?;
+        lock.lock_shared().map_err(io_error)?;
+        // Rotation may have completed while waiting for the writer; enumerate and
+        // open the active file again under the shared lock, using the same anchor.
+        let segments = readonly_segments(&directory)?;
+        let mut head = ChainHead::default();
+        let mut records = Vec::new();
+        for (_, name) in segments {
+            let file = directory.open_regular(&name).map_err(io_error)?;
+            readonly_scan(file, &mut head, false, &mut records)?;
+        }
+        match directory.open_regular(name) {
+            Ok(file) => readonly_scan(file, &mut head, true, &mut records)?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(io_error(error)),
+        }
+        Ok(records)
+    }
+
     fn prepare(&self, record: &AuditRecord) -> Result<Value, HostError> {
         if !EVENT_NAMES.contains(&record.action.as_str())
             || matches!(record.action.as_str(), "audit-reset" | "audit-dropped")
@@ -1127,6 +1195,14 @@ fn scan_file(path: &Path, head: &mut ChainHead, active: bool) -> Result<(), Host
     let mut file = private_file(path, false)?;
     let mut bytes = Vec::new();
     file.read_to_end(&mut bytes).map_err(io_error)?;
+    scan_bytes(&bytes, head, active, None)
+}
+fn scan_bytes(
+    bytes: &[u8],
+    head: &mut ChainHead,
+    active: bool,
+    mut records: Option<&mut Vec<Value>>,
+) -> Result<(), HostError> {
     if !bytes.is_empty() && !bytes.ends_with(b"\n") {
         return Err(failure(
             "audit.chain-invalid",
@@ -1187,12 +1263,64 @@ fn scan_file(path: &Path, head: &mut ChainHead, active: bool) -> Result<(), Host
         }
         head.seq = seq;
         head.hash = format!("{:x}", Sha256::digest(line));
+        if let Some(records) = records.as_mut() {
+            records.push(value);
+        }
     }
     if active {
         head.active_bytes = bytes.len() as u64;
     }
     Ok(())
 }
+fn readonly_directory(path: &Path) -> std::io::Result<secure_fs::NoFollowDirectory> {
+    use std::path::Component;
+    let root = path
+        .ancestors()
+        .last()
+        .ok_or_else(|| std::io::Error::other("Audit filesystem root is missing"))?;
+    let mut directory = secure_fs::NoFollowDirectory::open_root(root)?;
+    for part in path.components() {
+        if let Component::Normal(name) = part {
+            directory = directory.open_directory(name)?;
+        }
+    }
+    Ok(directory)
+}
+fn readonly_segments(
+    directory: &secure_fs::NoFollowDirectory,
+) -> Result<Vec<(u64, std::ffi::OsString)>, HostError> {
+    let mut segments = Vec::new();
+    for name in directory.entry_names().map_err(io_error)? {
+        if let Some(sequence) = name
+            .to_str()
+            .and_then(|name| name.strip_prefix("audit-"))
+            .and_then(|name| name.strip_suffix(".jsonl"))
+            .and_then(|name| name.parse::<u64>().ok())
+        {
+            segments.push((sequence, name));
+        }
+    }
+    segments.sort_by_key(|(sequence, _)| *sequence);
+    if segments.windows(2).any(|pair| pair[0].0 == pair[1].0) {
+        return Err(failure(
+            "audit.chain-invalid",
+            "Ambiguous retained rotation sequence",
+        ));
+    }
+    Ok(segments)
+}
+fn readonly_scan(
+    mut file: std::fs::File,
+    head: &mut ChainHead,
+    active: bool,
+    records: &mut Vec<Value>,
+) -> Result<(), HostError> {
+    secure_fs::validate_private_open_file(&file).map_err(io_error)?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes).map_err(io_error)?;
+    scan_bytes(&bytes, head, active, Some(records))
+}
+
 fn internal_event(source: &Value, event: &str, count: Option<u64>) -> Value {
     let mut value = json!({"ts":source["ts"],"session":source["session"],"actor":{"kind":"kernel"},"event":event,"result":"ok"});
     if let Some(count) = count {

@@ -12,11 +12,13 @@ use serde_json::Value;
 
 use crate::registry_client::Fetcher;
 use crate::telemetry::{HourBucket, InspectNode, MemoryView, TraceRecord};
+pub mod check_command;
 pub mod install_command;
 pub mod local_install;
 mod offline;
 pub mod project_inputs;
 pub mod session_commands;
+pub mod verify_install;
 
 /// The environment a command runs in (injected so tests need no real directories).
 #[derive(Clone)]
@@ -58,6 +60,8 @@ pub struct CliEnv {
     pub session: Option<Arc<dyn SessionBackend>>,
     /// Explicit trusted file-install service, including consent and durable effects.
     pub installer: Option<Arc<dyn install_command::InstallCommandBackend>>,
+    /// Actual invocation provenance for durable command audit records.
+    pub audit_context: Option<crate::audit::AuditContext>,
     /// Raised by Ctrl-C; a long command stops at the next step (DEV-050).
     pub interrupt: Option<Arc<AtomicBool>>,
     /// Scripted events `ilium plugin dev` consumes instead of watching files (DEV-050).
@@ -98,6 +102,7 @@ impl CliEnv {
             runner: None,
             session: None,
             installer: None,
+            audit_context: None,
             interrupt: None,
             dev_script: Vec::new(),
             build_duration_ms: 0,
@@ -134,6 +139,12 @@ impl CliEnv {
         installer: Arc<dyn install_command::InstallCommandBackend>,
     ) -> CliEnv {
         self.installer = Some(installer);
+        self
+    }
+
+    /// Supplies actual invocation provenance without inventing a session identity.
+    pub fn with_audit_context(mut self, context: crate::audit::AuditContext) -> CliEnv {
+        self.audit_context = Some(context);
         self
     }
 
@@ -188,7 +199,13 @@ pub fn run(args: &[String], env: &CliEnv) -> CliOutput {
     {
         summary["duration_ms"] = serde_json::json!(started.elapsed().as_secs_f64() * 1000.0);
     }
-    offline::render(output.stdout_jsonl, output.exit_code)
+    let custom_text = (output.stdout_text != output.stdout_raw).then_some(output.stdout_text);
+    let mut rendered = offline::render(output.stdout_jsonl, output.exit_code);
+    if let Some(text) = custom_text {
+        rendered.stdout_text = text;
+    }
+    rendered.stderr = output.stderr;
+    rendered
 }
 
 fn run_inner(args: &[String], env: &CliEnv) -> CliOutput {
@@ -205,7 +222,7 @@ fn run_inner(args: &[String], env: &CliEnv) -> CliOutput {
     {
         return offline::failure("command.interrupted", "Command interrupted", 130);
     }
-    if matches!(command, "list" | "logs" | "grants") {
+    if matches!(command, "list" | "logs" | "grants" | "audit") {
         return session_commands::run(command, &args[1..], env);
     }
     if command == "install" {
@@ -219,7 +236,8 @@ fn run_inner(args: &[String], env: &CliEnv) -> CliOutput {
         };
     }
     match command {
-        "inspect" | "verify" | "check" => offline::run(command, &args[1..], env),
+        "check" | "lint" => check_command::run(command, &args[1..], env),
+        "inspect" | "verify" => offline::run(command, &args[1..], env),
         "install" | "uninstall" | "enable" | "disable" | "grants" | "list" | "dev" | "logs"
         | "log-level" | "trace" | "profile"
             if env.session.is_none() =>
@@ -231,8 +249,8 @@ fn run_inner(args: &[String], env: &CliEnv) -> CliOutput {
             )
         }
         "install" | "uninstall" | "enable" | "disable" | "grants" | "list" | "dev" | "logs"
-        | "log-level" | "trace" | "profile" | "new" | "build" | "lint" | "test" | "pack"
-        | "keygen" | "sign" | "trust" | "publish" | "doctor" => offline::failure(
+        | "log-level" | "trace" | "profile" | "new" | "build" | "test" | "pack" | "keygen"
+        | "sign" | "trust" | "publish" | "doctor" => offline::failure(
             "command.context-required",
             "The command adapter is not connected",
             1,

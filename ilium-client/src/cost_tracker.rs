@@ -42,6 +42,42 @@ const PANE_REFRESH_INTERVAL: Duration = Duration::from_secs(10);
 /// Transcript readers the tracker may keep busy at once.
 pub const MAX_CONCURRENT_STATS_WORKERS: usize = 1;
 
+/// The three positions displayed beside the highest spenders.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum SpendingMedal {
+    Gold,
+    Silver,
+    Bronze,
+}
+
+/// Ranks non-zero rolling spend totals. Callers provide a stable secondary
+/// key (normally the pane identity) so equal spend never makes badges jump.
+pub fn rank_spending_medals<T: Ord + Copy>(totals: &[(T, f64)]) -> Vec<(T, SpendingMedal)> {
+    let mut ranked: Vec<_> = totals
+        .iter()
+        .copied()
+        .filter(|(_, amount)| amount.is_finite() && *amount > 0.0)
+        .collect();
+    ranked.sort_by(|(left_id, left), (right_id, right)| {
+        right.total_cmp(left).then_with(|| left_id.cmp(right_id))
+    });
+    ranked
+        .into_iter()
+        .take(3)
+        .enumerate()
+        .map(|(index, (id, _))| {
+            (
+                id,
+                [
+                    SpendingMedal::Gold,
+                    SpendingMedal::Silver,
+                    SpendingMedal::Bronze,
+                ][index],
+            )
+        })
+        .collect()
+}
+
 /// Dollars for one model inside one session.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ModelCost {
@@ -75,6 +111,10 @@ pub struct PaneCost {
     /// Codex rate-limit windows: name and percent used.
     pub quota: Vec<(String, f64)>,
     pub spend_points: Vec<SpendPoint>,
+    /// Minute-bucket token spend, retained separately from estimated dollars
+    /// because medals recognise the greatest model usage even when a model has
+    /// no recorded price.
+    pub token_spend_points: Vec<TokenSpendPoint>,
     pub(crate) storage: CostStorage,
 }
 
@@ -98,6 +138,14 @@ impl PaneCost {
                     at_ms: bucket.minute_ms,
                     usd: prices.cost(&bucket.model, &bucket.tokens)?,
                 })
+            })
+            .collect();
+        let token_spend_points = stats
+            .spend
+            .iter()
+            .map(|bucket| TokenSpendPoint {
+                at_ms: bucket.minute_ms,
+                tokens: bucket.tokens.total(),
             })
             .collect();
         let window_key = settings.quota_window.key();
@@ -148,9 +196,16 @@ impl PaneCost {
                 .map(|(name, window)| (name.clone(), window.used_percent))
                 .collect(),
             spend_points,
+            token_spend_points,
             storage: CostStorage::default(),
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TokenSpendPoint {
+    pub at_ms: i64,
+    pub tokens: u64,
 }
 
 impl PaneCost {
@@ -208,6 +263,8 @@ pub struct CostOverlay {
     pub metric: CostMetric,
     /// Agent panes, plus project/group rows when totals or ordering need them.
     pub rows: HashMap<NodeId, RowCost>,
+    /// Medal awarded from rolling spend, keyed by pane identity.
+    pub medals: HashMap<NodeId, SpendingMedal>,
     pub total_amount: f64,
     pub total_is_lower_bound: bool,
     /// Agents that have a figure under the metric.
@@ -238,6 +295,7 @@ impl Default for CostOverlay {
             metric: settings.metric,
             settings,
             rows: HashMap::new(),
+            medals: HashMap::new(),
             total_amount: 0.0,
             total_is_lower_bound: false,
             agent_count: 0,
@@ -325,6 +383,7 @@ impl PartialEq for CostStorage {
 trait CostTopology {
     fn is_pane(&self, id: NodeId) -> bool;
     fn children(&self, id: NodeId) -> Option<&[NodeId]>;
+    fn agent_provider(&self, id: NodeId) -> Option<String>;
 }
 impl CostTopology for Tree {
     fn is_pane(&self, id: NodeId) -> bool {
@@ -333,6 +392,14 @@ impl CostTopology for Tree {
     }
     fn children(&self, id: NodeId) -> Option<&[NodeId]> {
         self.children_of(id).ok()
+    }
+    fn agent_provider(&self, id: NodeId) -> Option<String> {
+        self.get(id)
+            .and_then(|node| match &node.kind {
+                NodeKind::Pane { status, .. } => status.agent_state(),
+                _ => None,
+            })
+            .map(|agent| agent.class.label().to_owned())
     }
 }
 trait CostStatistics {
@@ -678,6 +745,45 @@ impl DerivedCosts {
             }
         }
 
+        let medal_window_ms = i64::from(settings.medal_window_minutes) * 60_000;
+        let medal_totals: Vec<_> = input
+            .agent_panes
+            .iter()
+            .filter_map(|id| self.panes.get(id).map(|entry| (*id, entry)))
+            .map(|(id, entry)| {
+                let total = entry
+                    .cost
+                    .token_spend_points
+                    .iter()
+                    .filter(|point| {
+                        point.at_ms > input.now_ms - medal_window_ms && point.at_ms <= input.now_ms
+                    })
+                    .map(|point| point.tokens as f64)
+                    .sum();
+                (id, total)
+            })
+            .collect();
+        let medals = if !settings.medals_enabled {
+            HashMap::new()
+        } else if settings.medal_scope == crate::cost_settings::MedalScope::Global {
+            rank_spending_medals(&medal_totals).into_iter().collect()
+        } else {
+            let mut by_provider: BTreeMap<String, Vec<(NodeId, f64)>> = BTreeMap::new();
+            for (pane_id, total) in medal_totals {
+                let provider = input
+                    .tree
+                    .agent_provider(pane_id)
+                    .unwrap_or_else(|| "Other".to_owned());
+                by_provider
+                    .entry(provider)
+                    .or_default()
+                    .push((pane_id, total));
+            }
+            by_provider
+                .values()
+                .flat_map(|totals| rank_spending_medals(totals))
+                .collect()
+        };
         let ranks: HashMap<NodeId, f64> = rows.iter().map(|(id, row)| (*id, row.amount)).collect();
         let rank_epoch = if ranks == self.overlay.ranks {
             self.overlay.rank_epoch
@@ -688,6 +794,7 @@ impl DerivedCosts {
             settings: settings.clone(),
             metric,
             rows,
+            medals,
             total_amount: total.amount,
             total_is_lower_bound: total.is_lower_bound,
             agent_count: total.agents,
@@ -772,6 +879,18 @@ mod tests {
             sparkline_cells: cells,
             ..CostSettings::default()
         }
+    }
+
+    #[test]
+    fn spending_medals_are_descending_stable_and_skip_zero_spend() {
+        assert_eq!(
+            rank_spending_medals(&[(3_u8, 12.0), (1, 12.0), (2, 4.0), (4, 0.0)]),
+            vec![
+                (1, SpendingMedal::Gold),
+                (3, SpendingMedal::Silver),
+                (2, SpendingMedal::Bronze),
+            ]
+        );
     }
 
     #[test]
@@ -931,11 +1050,76 @@ mod tests {
     }
 
     #[test]
+    fn provider_local_medals_rank_recent_tokens_without_a_price() {
+        let (mut tree, _, first, second) = agent_tree();
+        tree.set_pane_status(
+            second,
+            PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Idle, None),
+        )
+        .unwrap();
+        let now = 1_000 * MINUTE;
+        let settings = CostSettings {
+            medal_scope: crate::cost_settings::MedalScope::PerProvider,
+            medal_window_minutes: 60,
+            ..CostSettings::default()
+        };
+        let spend = |tokens| {
+            vec![SpendBucket {
+                minute_ms: now - MINUTE,
+                model: Arc::from("unpriced-codex"),
+                tokens: TokenTotals {
+                    input: tokens,
+                    ..TokenTotals::default()
+                },
+            }]
+        };
+        let mut tracker = DerivedCosts::default();
+        tracker.panes.insert(
+            first,
+            PaneEntry {
+                cost: Arc::new(PaneCost::from_stats(
+                    &stats_with(vec![usage("claude-haiku-4-5", 1, 0)], spend(10)),
+                    &tracker.prices,
+                    &settings,
+                    now,
+                )),
+                source: Weak::new(),
+            },
+        );
+        tracker.panes.insert(
+            second,
+            PaneEntry {
+                cost: Arc::new(PaneCost::from_stats(
+                    &stats_with(vec![usage("unpriced-codex", 1, 0)], spend(100)),
+                    &tracker.prices,
+                    &settings,
+                    now,
+                )),
+                source: Weak::new(),
+            },
+        );
+        let input = TickInput {
+            settings: &settings,
+            tree: &tree,
+            tree_version: 1,
+            store: &SessionStatsStore::default(),
+            agent_panes: &[first, second],
+            now: Instant::now(),
+            now_ms: now,
+            home: None,
+        };
+        let overlay = tracker.build_overlay(&DerivationInput::from(&input));
+        assert_eq!(overlay.medals[&first], SpendingMedal::Gold);
+        assert_eq!(overlay.medals[&second], SpendingMedal::Gold);
+    }
+
+    #[test]
     fn disabled_settings_track_nothing() {
         let (tree, _, first, _) = agent_tree();
         let mut tracker = CostTracker::default();
         let mut settings = CostSettings::default();
         settings.meter.enabled = false;
+        settings.medals_enabled = false;
         let input = TickInput {
             settings: &settings,
             tree: &tree,

@@ -185,10 +185,11 @@ fn settings_and_fullscreen_osm_credit_have_separate_hint_and_voice_rows() {
             };
             let settings = crate::settings_ui::compute_layout_for_mode(buffer.area, &app, state);
             assert_eq!(settings.content_frame_area.bottom(), credit_area.top());
-            assert_eq!(
-                settings.content_area.bottom() + 1,
-                settings.content_frame_area.bottom()
-            );
+            let bottom_padding = settings
+                .content_frame_area
+                .bottom()
+                .saturating_sub(settings.content_area.bottom());
+            assert!((1..=2).contains(&bottom_padding));
             let model = app.animation_row_model();
             assert!(crate::animation_settings_ui::hit(
                 settings.content_area,

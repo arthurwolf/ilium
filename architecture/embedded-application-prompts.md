@@ -98,3 +98,51 @@ Root879 checkpoint1702, 2026-10-06: private graph1701 selects264 verified hashes
 Instruction1679 selected plus Root1687: full Voice refusal retained; exact active acceptance proof; actual instruction source custody fences native FIFO; clear collector runs without modal; fixture immediately proves typed handoff. PreCPU VoiceCapture, terminal refusal/mismatch native reconciliation and shutdown disposition remain incomplete. Animation1680 and1692 selected: actual IO producer moves original home into measured Source with same client; typed refusal retains accepted migration/read result; path-only retry uses enabled admission wake and bank-close fallback. Root1697 fixed CoordinatorOriginals slot preserves original before await, with sizeof complete root metadata accounting. Read-only1698 source review accepted; cancellation/physical retirement native checks UNRUN.
 
 Root1694/1700 adapt six value indices and borrowed emitted-editor Path fence; immutable ROM glyphs now travel as ConfigText::Static through the existing UI CPU-update queue, avoiding UI String allocation. All staged exact forward/inverse reconstructions and scoped pinned fmt/check pass. No current graph compiler/native/lint/release/PTY/performance claim; compiler1669 remains terminal failed/audited/cleaned. Search132 independently pending, original tab retained and no resubmission. Value host1678 and original semantic/native refusal integration remain unfinished, along with Naming882 startup/frame contracts and full eleven-area acceptance. Canonical Rust unchanged; no Git mutation/install/user-owned restart.
+
+### Input latency and freeze containment
+
+Interactive input and server-event batches have both a count limit and a 4 ms
+elapsed-time budget. A consumed lookahead stays owned by the next turn; batching
+never drops or replays input. Terminal chunks do not trigger a full projection
+retention scan because they cannot remove tree nodes or debug-log owners.
+
+IPC transport keeps idle header waits uncharged, but partial headers, payloads
+and frame writes have a 30 s transfer deadline. Timeout or cancellation abandons
+the connection; a partially written request is never retried automatically.
+A completed reader lets final replies drain; a completed writer cancels its
+reader. Codec input charges include requested payload capacity, growth overlap
+and metadata; decoded results keep their original conservative allowance.
+The client process result ceiling is the unchanged 768 MiB general allowance
+plus two dedicated 128 MiB codec envelopes (1024 MiB total), preventing general
+work from consuming codec headroom. Ready journal and broadcast events alternate
+below direct reply, attach and control priority.
+
+PTY command deadlines use their own notification, independent of ordinary
+output availability. Expiry removes commands in place without rebuilding the
+FIFO, rechecks cancellation after publishing receipts, and publishes shutdown
+receipts outside the admission lock. Frozen-screen restore reads retain their
+original charge while waiting in the existing bounded load budget for parser
+admission; temporary pressure is retried and shutdown cancels unused restores.
+
+Deep generic mutation dispatch and cache-miss repository queries use awaited
+abort-on-drop task handles, giving each handler a fresh runtime poll stack.
+The decoded request and its reservation move into the owned task; the reader
+awaits it before admitting the next mutation and retains the attach barrier.
+Cancellation aborts the owned task; a failed join closes the connection without
+replaying a request whose partial outcome is unknown.
+
+Server output reserves storage before encoder admission. Only active writers
+spend the 512 MiB ordinary output or 384 MiB protected output partition; an
+exact guard from this server's 64 MiB visible-capture root selects protected
+output. These partitions, the exact metadata allowance for 64 output retirement
+envelopes, and general worker storage sum to the existing 4 GiB ceiling.
+A conservative window covers the existing 256 MiB aggregate encoder input
+allowance and 64 MiB frame ceiling. The coordinating runtime retains the
+existing backing-size walk and charges measured input; the CPU encodes within
+that window, then shrinks its lease before socket flushing can block. Original producer guards
+and the output guard remain attached through physical CPU destruction.
+The same 64 retirement slots remain shared with snapshot work; no extra CPU
+bank or slot pool is created. Writers never reacquire storage after encoding,
+so queued producer storage cannot hold encoder credit hostage. Fair admission
+and the existing 30 s transfer deadline bound slow-peer backpressure; peers
+sharing protected output can still backpressure one another.

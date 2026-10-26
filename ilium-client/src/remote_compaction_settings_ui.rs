@@ -19,7 +19,9 @@ use crate::remote_compaction_settings::{
     RemoteCompactionSettings, TechniqueTarget, THRESHOLD_PERCENT_RANGE,
 };
 use crate::theme;
-use crate::value_control::{leader_span, NUMBER_DECREMENT_GLYPH, NUMBER_INCREMENT_GLYPH};
+use crate::value_control::{
+    boolean_switch, leader_span, NUMBER_DECREMENT_GLYPH, NUMBER_INCREMENT_GLYPH,
+};
 
 /// Left margin shared with the other settings tabs.
 const INSET: u16 = 2;
@@ -532,7 +534,7 @@ pub fn view(app: &App, selected_row: usize, width: u16) -> RemoteCompactionView 
                     Style::new()
                 };
                 lines.push(Line::from(Span::styled(
-                    format!("  {} {}", if is_on { "[x]" } else { "[ ]" }, row.label()),
+                    format!("  {} {}", boolean_switch(is_on), row.label()),
                     label_style,
                 )));
                 push_description(&mut lines, row, app, body_width);
@@ -939,8 +941,8 @@ mod tests {
             }
             assert!(page.contains(row.label()), "{}", row.label());
         }
-        assert!(page.contains("[ ] Remote compaction"));
-        assert!(page.contains("[x] Redact secrets"));
+        assert!(page.contains("[○ OFF] Remote compaction"));
+        assert!(page.contains("[ON  ●] Redact secrets"));
         assert!(page.contains("- 65% + *"));
         assert!(page.contains("← Claude Code + →"));
         assert!(page.contains("← Codex + →"));

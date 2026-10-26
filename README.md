@@ -90,7 +90,7 @@ More: [Getting started](src/docs/getting-started.md) · [Building from source](s
 </tbody>
 </table>
 
-All demos, with the feature each one shows: [Demo gallery](src/docs/demos.md).
+See the full [Demo gallery](src/docs/demos.md) for every feature clip and its recording notes.
 
 ## Daily use
 
@@ -136,6 +136,10 @@ Agent worktrees and recovery in short: start an agent with `Ctrl+B W` or
 ```sh
 ilium new-pane --worktree --branch agent/fix-login -- codex
 ```
+
+Several agents can share an existing worktree. With two or more agents, the
+worktree becomes an expandable leaf-icon row under the project, with its
+agents fixed beneath it. A single agent keeps the compact branch line.
 
 After a restart, Ilium restores the layout and relaunches pane programs, resuming verified Claude Code, Codex, or Antigravity sessions when provider data remains. Unsaved process state does not survive. Snapshots live in `<project>/.ilium/sessions/`; add `.ilium/` to `.gitignore` to keep them out of Git.
 

@@ -26,8 +26,9 @@ mod voice_text;
 pub use bounded_decode::{deserialize_allocation_checked, AllocationDecodeError, BoundedMessage};
 pub use error::IpcError;
 pub use framing::{
-    decode_bounded_frame, decode_frame, encode_frame, encoded_capacity_bound, read_frame,
-    write_frame, EncodedFrame, FrameReader, FrameWriter, MAX_FRAME_LEN,
+    decode_bounded_frame, decode_bounded_frame_with_storage, decode_frame, encode_frame,
+    encoded_capacity_bound, read_frame, write_frame, EncodedFrame, FrameReader, FrameWriter,
+    MAX_FRAME_LEN,
 };
 pub use ilium_agent_debug::{
     AgentDebugContext, AgentDebugEntry, AgentDebugEventDraft, AgentDebugEventKind,

@@ -1,10 +1,5 @@
 # Worker and service execution — continued 5
 
-Startup-dialog observations now use the existing filesystem I/O client rather
-than reading a file on each UI-loop pass. One active receipt and one immutable
-charged observation retain their original admission; reads are paced at 100 ms
-and fenced by the startup-file path. A missing, malformed or oversized record
-uses the existing indeterminate display. The reader accepts at most 64 KiB,
 without modifying the server's file, and closes on initial sync or terminal
 shutdown. A blocked native read keeps its bank debit until it returns. No
 additional thread, bank or provider quota is introduced. The oversized-file

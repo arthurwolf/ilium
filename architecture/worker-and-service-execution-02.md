@@ -1,5 +1,11 @@
 # Worker and service execution — continued 2
 
+and the captured destination before reporting success; a replaced settings
+source cannot finish a current dialog. A non-Clone save intent keeps the previous
+and desired settings, studio model, native input, dialog identity and single
+prepared outbound request. Queue acceptance and CPU completion remain distinct
+from durable success.
+
 The Sound pending owner uses the existing CPU and outbound clients, retains
 original requests across admission retries, and includes cancellation and receipt
 loss in family shutdown accounting. Its external admission preflight uses a
@@ -517,6 +523,3 @@ Independent source review found that composed and acknowledged animation
 descriptors would survive the existing editor-only frame release. An unselected
 successor explicitly releases both readers at the actual presentation-drain
 boundary before CPU-bank retirement. The renderer successor now consumes the
-same captured sources and scalars and retains CPU-produced error chrome through
-a separate admitted original. Those source changes still need complete caller
-integration and actual emitted/rejected/shutdown test execution.

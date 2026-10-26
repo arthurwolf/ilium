@@ -1,5 +1,14 @@
 ## Agent worktrees
 
+Multiple agent panes may share a linked Git worktree. The tree keeps each
+worktree in a fixed `ContainerKind::Worktree` directly under its project,
+identified by the repository common directory and exact worktree root. Its
+members cannot be moved outside that container by reparenting, splitting,
+restructuring, or undo. A single member keeps the compact agent-and-branch
+presentation; multiple members appear below an expandable worktree row using
+the configured branch icon. Closing one member retains its siblings; closing
+the final member removes only the empty tree container.
+
 An agent pane may own a linked Git worktree. `ilium-core` persists the pane's
 `launch_cwd` and `PaneWorkspace` provenance; `Tree::pane_cwd` is the sole
 directory source for launch, transcript lookup, and restore. For a project

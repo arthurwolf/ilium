@@ -87,14 +87,15 @@ is opaque and the declared job cost is cooperative rather than a strict peak
 memory bound; this remains a resource-qualification gap.
 
 Session conversion uses the process's shared bounded I/O bank and admits one
-job with a 512 MiB working-set declaration and a 2 MiB result allowance. Its
-progress channel is bounded and nonblocking; overload requests cancellation,
-while semantic completion is delivered through the retained job receipt so a
-full UI queue cannot hide a committed conversion. The worker owns cancellation
-and physical completion through shutdown. Source and generated transcripts are
-capped at 128 MiB, including bounded reads for inspection and verification;
-the Codex import ledger is a regular file capped at 16 MiB. These limits and
-ownership changes are source-integrated but await remote qualification.
+job with a working-set declaration of four times the verified source
+transcript size plus 16 MiB, capped at 512 MiB, and a 2 MiB result allowance.
+The worker checks that the transcript has not grown since admission before
+conversion. Its progress channel is bounded and nonblocking; overload requests
+cancellation, while semantic completion is delivered through the retained job
+receipt so a full UI queue cannot hide a committed conversion. The worker owns
+cancellation and physical completion through shutdown. Source and generated
+transcripts are capped at 128 MiB, including bounded reads for inspection and
+verification; the Codex import ledger is a regular file capped at 16 MiB.
 
 Area 11 ambient-map loading now uses the host's shared physical worker quota
 and retained-storage admission. Topographic decoding/generation reserves a
@@ -552,8 +553,3 @@ writer confirms the original destination and desired settings.
 The private Sound family writer now consumes the validated prepared object and
 calls the existing borrowed durable saver. Its receipt returns the original
 settings snapshot. The application acknowledgement checks both that snapshot
-and the captured destination before reporting success; a replaced settings
-source cannot finish a current dialog. A non-Clone save intent keeps the previous
-and desired settings, studio model, native input, dialog identity and single
-prepared outbound request. Queue acceptance and CPU completion remain distinct
-from durable success.

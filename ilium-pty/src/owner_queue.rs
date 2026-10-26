@@ -104,6 +104,7 @@ pub(crate) struct Queue {
     pub(crate) stop: StopToken,
     state: Mutex<State>,
     changed: Condvar,
+    deadlines_changed: Condvar,
 }
 
 impl Queue {
@@ -124,6 +125,7 @@ impl Queue {
                 wake_generation: 0,
             }),
             changed: Condvar::new(),
+            deadlines_changed: Condvar::new(),
         })
     }
 
@@ -163,17 +165,21 @@ impl Queue {
                 return;
             }
             let now = Instant::now();
-            let mut retained = VecDeque::with_capacity(state.entries.len());
+            // Preserve the resident deque and leave output in admission order.
+            // Output traffic must not allocate and copy the entire command queue.
             let mut expired = Vec::new();
-            while let Some(entry) = state.entries.pop_front() {
+            let mut index = 0;
+            while index < state.entries.len() {
+                let entry = &state.entries[index];
                 if entry.command.is_some() && (entry.stop.is_stopped() || now >= entry.deadline) {
-                    Self::uncharge(&mut state.load, true, entry.charge);
-                    expired.push(entry);
+                    if let Some(entry) = state.entries.remove(index) {
+                        Self::uncharge(&mut state.load, true, entry.charge);
+                        expired.push(entry);
+                    }
                 } else {
-                    retained.push_back(entry);
+                    index += 1;
                 }
             }
-            state.entries = retained;
             if !expired.is_empty() {
                 Self::notify_changed(&self.changed, &mut state);
             }
@@ -192,6 +198,17 @@ impl Queue {
             if state.closed.is_some() || worker_stop.is_stopped() {
                 return;
             }
+            // Cancellation can race publication while the lock is released.
+            // Its notification may already have fired; inspect the predicate
+            // again before sleeping, rather than waiting until the deadline.
+            if state
+                .entries
+                .iter()
+                .any(|entry| entry.command.is_some() && entry.stop.is_stopped())
+            {
+                drop(state);
+                continue;
+            }
             // The deadline may have changed while completions were published.
             // Rechecking under the queue lock prevents a lost admission wake.
             let deadline = state
@@ -204,14 +221,14 @@ impl Queue {
                 let wait = deadline.saturating_duration_since(Instant::now());
                 if !wait.is_zero() {
                     state = self
-                        .changed
+                        .deadlines_changed
                         .wait_timeout(state, wait)
                         .unwrap_or_else(|error| error.into_inner())
                         .0;
                 }
             } else {
                 state = self
-                    .changed
+                    .deadlines_changed
                     .wait(state)
                     .unwrap_or_else(|error| error.into_inner());
             }
@@ -236,6 +253,7 @@ impl Queue {
     pub(crate) fn wake(&self) {
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Self::notify_changed(&self.changed, &mut state);
+        self.deadlines_changed.notify_all();
     }
 
     pub(crate) fn wake_generation(&self) -> u64 {
@@ -299,6 +317,7 @@ impl Queue {
         state.load.commands += 1;
         state.load.command_bytes += charge;
         Self::notify_changed(&self.changed, &mut state);
+        self.deadlines_changed.notify_one();
         let queue = Arc::clone(self);
         Ok(DeliveryReceipt::new(id, completion, stop, move || {
             queue.wake()
@@ -432,8 +451,16 @@ impl Queue {
         self.stop.stop();
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let reason = *state.closed.get_or_insert(reason);
-        while let Some(entry) = state.entries.pop_front() {
+        let entries = std::mem::take(&mut state.entries);
+        for entry in &entries {
             Self::uncharge(&mut state.load, entry.command.is_some(), entry.charge);
+        }
+        Self::notify_changed(&self.changed, &mut state);
+        self.deadlines_changed.notify_all();
+        drop(state);
+        // Receipt observers may immediately submit again; publish outside the
+        // queue lock so teardown never nests completion and admission locks.
+        for entry in entries {
             if let Some(completion) = entry.completion {
                 completion.finish(Err(DeliveryError::new(
                     Some(entry.id),
@@ -441,7 +468,6 @@ impl Queue {
                 )));
             }
         }
-        Self::notify_changed(&self.changed, &mut state);
     }
 
     fn notify_changed(changed: &Condvar, state: &mut State) {
@@ -516,6 +542,32 @@ impl Drop for WorkItem {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn close_releases_queued_quota_before_receipts_are_observed() {
+        let queue = Queue::new(OwnerLimits::default());
+        let receipt = queue
+            .submit(OperationKind::Input, 1, || Event::Input(Arc::from([1_u8])))
+            .unwrap();
+        assert_eq!(queue.load().commands, 1);
+        queue.close(ShutdownReason::Requested);
+        assert_eq!(queue.load().commands, 0);
+        assert_eq!(queue.load().command_bytes, 0);
+        drop(receipt);
+        assert!(queue
+            .submit(OperationKind::Input, 1, || Event::Input(Arc::from([2_u8])))
+            .is_err());
+    }
+
+    #[test]
+    fn write_wait_observes_completion_without_queued_output() {
+        let queue = Queue::new(OwnerLimits::default());
+        let generation = queue.wake_generation();
+        // A completed writer has no output entry; only its wake counter changes.
+        queue.wake();
+        assert!(queue.take_output_while_writing().is_none());
+        assert!(!queue.wait_during_write(generation, Duration::from_secs(5)));
+    }
 
     #[test]
     fn write_wait_observes_output_queued_after_owner_check() {

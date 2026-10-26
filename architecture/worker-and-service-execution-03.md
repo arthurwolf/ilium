@@ -1,5 +1,9 @@
 # Worker and service execution — continued 3
 
+same captured sources and scalars and retains CPU-produced error chrome through
+a separate admitted original. Those source changes still need complete caller
+integration and actual emitted/rejected/shutdown test execution.
+
 Startup still has a distinct producer gap: system-sound and audio-device
 discovery run synchronously while the startup dialog is active, before the
 shared execution bank starts. Wrapping those raw results later does not move
@@ -533,20 +537,3 @@ spawning, plus97 MiB of independently retained frame and control storage. The
 quota charges the stack request with the worker, while the platform reservation
 applies it to the OS thread. Both use the composition root quota. Actual
 join releases physical admission; the last retained frame or original failure
-receipt releases its separate storage admission. Diff encoding streams against
-the last emitted frame without a whole-frame diff vector. Isolated release tests
-cover refusal before spawn, blocked retirement and storage after actual join;
-full-client output and measured memory qualification remain open.
-Successful presentations expose `request_to_emission_us`,
-`composition_to_emission_us`, `completed_frame_age_us`, terminal `frame_age_us`
-and `emission_us`. Those acknowledgement-side measurements include the owner’s
-flush boundary; rejected or uncertain writes are not successful presentation
-samples. The matched before/after release measurements still need to report
-p50/p95 input latency and frame age, client/server CPU and peak RSS for cached
-playback, live playback and a large document workload.
-
-Snapshot publication flushes and syncs the temporary data file, then uses the
-platform durable replacement operation before reporting success. On Unix that
-operation also syncs the containing directory; Windows uses write-through
-replacement. Existing snapshot persistence readback and oversize-preservation
-tests pass on Linux; crash/power-loss and Windows execution remain unverified.

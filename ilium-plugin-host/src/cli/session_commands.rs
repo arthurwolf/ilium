@@ -174,16 +174,23 @@ pub fn run_with_log_reader(
     env: &CliEnv,
     logs: Option<&dyn SessionLogReader>,
 ) -> CliOutput {
+    if command == "audit" {
+        return audit(args, env);
+    }
     let options = match parse(command, args) {
         Ok(options) => options,
         Err(output) => return output,
     };
     let Some(session) = env.session.as_ref() else {
-        return offline::failure(
-            "session.unreachable",
-            "No reachable session was supplied",
-            6,
-        );
+        return if command == "list" {
+            offline_list(options, env)
+        } else {
+            offline::failure(
+                "session.unreachable",
+                "No reachable session was supplied",
+                6,
+            )
+        };
     };
     if options.follow {
         return offline::failure(
@@ -334,4 +341,170 @@ fn render_logs(options: Options, now: SystemTime, reader: &dyn SessionLogReader)
         output.stdout_text = text;
     }
     output
+}
+
+fn host_failure(error: crate::error::HostError) -> CliOutput {
+    offline::failure(error.code().as_str(), error.to_string(), 1)
+}
+
+fn offline_list(options: Options, env: &CliEnv) -> CliOutput {
+    let registry = match crate::registry::InstalledRegistry::open(
+        &env.data_dir.join("plugins/installed.json"),
+    ) {
+        Ok(registry) => registry,
+        Err(error) => return host_failure(error),
+    };
+    let rows = match registry.list() {
+        Ok(rows) => rows,
+        Err(error) => return host_failure(error),
+    };
+    let flags = match crate::registry::EnableFlags::open(&env.config_dir.join("config.toml")) {
+        Ok(flags) => flags,
+        Err(error) => return host_failure(error),
+    };
+    let mut records = Vec::new();
+    let mut text = String::new();
+    for row in rows {
+        let enabled = flags.is_enabled(&ilium_plugin_api::ids::PluginId(row.id.clone()));
+        text.push_str(&format!(
+            "{} {} {} (runtime unobserved)\n",
+            row.id,
+            row.version,
+            if enabled { "enabled" } else { "disabled" }
+        ));
+        // This projection has no tier, side roster, grant count or live state.
+        // A durable enabled flag is not evidence of activation or a live stop.
+        records.push(json!({"type":"plugin","id":row.id,"version":row.version,
+            "details":{"enabled":enabled,"disabled":!enabled,"runtime_observed":false}}));
+    }
+    let mut output = offline::finish(records, 0);
+    if !options.json {
+        output.stdout_text = text;
+    }
+    output
+}
+
+fn audit(args: &[String], env: &CliEnv) -> CliOutput {
+    let mut plugin = None;
+    let mut event = None;
+    let mut since = None;
+    let mut limit = None;
+    let mut verify = false;
+    let mut as_json = false;
+    let mut args = args.iter();
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--json" => as_json = true,
+            "--quiet" | "--no-color" => {}
+            "--verify" => verify = true,
+            "--plugin" | "--event" | "--since" | "--limit" => {
+                let Some(value) = args.next() else {
+                    return usage("An audit filter value is required");
+                };
+                match arg.as_str() {
+                    "--plugin" => {
+                        if ilium_plugin_api::ids::parse_plugin_id(value).is_err() {
+                            return usage("Invalid audit plugin id");
+                        }
+                        plugin = Some(value.clone());
+                    }
+                    "--event" if !value.is_empty() => event = Some(value.clone()),
+                    "--since" if duration(value).is_some() || valid_iso_time(value) => {
+                        since = Some(value.clone())
+                    }
+                    "--limit"
+                        if !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()) =>
+                    {
+                        limit = match value.parse::<usize>() {
+                            Ok(limit) => Some(limit),
+                            Err(_) => return usage("Audit limit is too large"),
+                        };
+                    }
+                    _ => return usage("Invalid audit filter"),
+                }
+            }
+            _ => return offline::failure("usage.unknown-flag", "Unsupported audit argument", 2),
+        }
+    }
+    let mut records =
+        match crate::audit::AuditLog::read_verified(&env.state_dir.join("audit/audit.jsonl")) {
+            Ok(records) => records,
+            Err(error) => return host_failure(error),
+        };
+    let cutoff = match since {
+        Some(value) => match duration(&value) {
+            Some(duration) => match env.now.checked_sub(duration) {
+                Some(time) => match iso_time(time) {
+                    Ok(value) => Some(value),
+                    Err(output) => return output,
+                },
+                None => None,
+            },
+            None => Some(normalize_iso(&value)),
+        },
+        None => None,
+    };
+    records.retain(|record| {
+        plugin
+            .as_ref()
+            .is_none_or(|id| record["plugin_id"].as_str() == Some(id.as_str()))
+            && event
+                .as_ref()
+                .is_none_or(|event| record["event"].as_str() == Some(event.as_str()))
+            && cutoff.as_ref().is_none_or(|cutoff| {
+                record["ts"]
+                    .as_str()
+                    .is_some_and(|at| normalize_iso(at) >= *cutoff)
+            })
+    });
+    if let Some(limit) = limit {
+        records.truncate(limit);
+    }
+    let records = if verify {
+        Vec::new()
+    } else {
+        records
+            .into_iter()
+            .map(|mut record| {
+                record["type"] = json!("audit");
+                record
+            })
+            .collect()
+    };
+    let mut output = offline::finish(records, 0);
+    if verify && !as_json {
+        output.stdout_text = "ok\n".into();
+    }
+    output
+}
+
+fn valid_iso_time(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    if !matches!(bytes.len(), 20 | 24)
+        || bytes.get(10) != Some(&b'T')
+        || bytes.last() != Some(&b'Z')
+    {
+        return false;
+    }
+    if bytes.len() == 24 && (bytes[19] != b'.' || !bytes[20..23].iter().all(u8::is_ascii_digit)) {
+        return false;
+    }
+    let local = format!("{} {}", &value[..10], &value[11..19]);
+    valid_time(&local)
+}
+fn normalize_iso(value: &str) -> String {
+    if value.len() == 20 {
+        format!("{}.000Z", &value[..19])
+    } else {
+        value.to_owned()
+    }
+}
+fn iso_time(time: SystemTime) -> Result<String, CliOutput> {
+    let stamp = crate::trust::utc_timestamp(time)
+        .map_err(|error| offline::failure(error.code.as_str(), error.message, 1))?;
+    let millis = time
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map_err(|_| usage("Audit time is before Unix epoch"))?
+        .subsec_millis();
+    Ok(format!("{}.{millis:03}Z", stamp.replace(' ', "T")))
 }
