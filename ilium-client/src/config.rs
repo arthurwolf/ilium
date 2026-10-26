@@ -1041,6 +1041,7 @@ pub struct UiSettings {
     /// Split-view child order remains structural because it controls pane
     /// placement in the right panel.
     pub tree_order: TreeOrder,
+    pub tree_row_layout: crate::tree_row_layout::TreeRowLayout,
     /// Per-project Appearance setting mirrored from `.ilium/config.yaml`.
     /// This value is intentionally excluded from the global `config.toml`.
     pub show_project_separators: bool,
@@ -1059,6 +1060,8 @@ pub struct UiSettings {
     /// action strip. They are optional because keyboard shortcuts and context
     /// menus keep the operations available without persistent row clutter.
     pub show_tree_row_management_controls: bool,
+    /// Keep the tree panel's bottom action toolbar visible when the tree is not focused.
+    pub tree_toolbar_always_visible: bool,
     /// Exposes a pane-scoped right-click debug history for detected agents.
     /// Capture is deliberately opt-in because prompts and provider details
     /// are persisted in the project session snapshot.
@@ -1145,6 +1148,7 @@ impl Default for UiSettings {
             color_scheme: ColorScheme::Dark,
             agent_identifiers: AgentIdentifierSettings::default(),
             tree_order: TreeOrder::Manual,
+            tree_row_layout: crate::tree_row_layout::TreeRowLayout::default(),
             show_project_separators: false,
             motion_level: MotionLevel::default(),
             sidebar_density: SidebarDensity::Standard,
@@ -1152,6 +1156,7 @@ impl Default for UiSettings {
             show_inferred_title_icons: false,
             agent_tree_model_icons: false,
             show_tree_row_management_controls: false,
+            tree_toolbar_always_visible: true,
             agent_debug_menu_enabled: false,
             show_context_menu_icons: true,
             agent_toolbar_enabled: true,
@@ -1273,11 +1278,13 @@ struct RawUiConfig {
     codex_agent_icon: Option<String>,
     antigravity_agent_icon: Option<String>,
     tree_order: Option<String>,
+    tree_row_layout: Option<crate::tree_row_layout::TreeRowLayout>,
     motion_level: Option<String>,
     sidebar_density: Option<String>,
     use_stable_glyphs: Option<bool>,
     show_inferred_title_icons: Option<bool>,
     show_tree_row_management_controls: Option<bool>,
+    tree_toolbar_always_visible: Option<bool>,
     agent_debug_menu_enabled: Option<bool>,
     show_context_menu_icons: Option<bool>,
     agent_toolbar_enabled: Option<bool>,
@@ -1772,6 +1779,7 @@ fn merge_ui(raw: RawUiConfig) -> Result<UiSettings, ConfigLoadError> {
             antigravity_icon,
         },
         tree_order,
+        tree_row_layout: raw.tree_row_layout.unwrap_or_default().normalized(),
         show_project_separators: false,
         motion_level,
         sidebar_density,
@@ -1785,6 +1793,9 @@ fn merge_ui(raw: RawUiConfig) -> Result<UiSettings, ConfigLoadError> {
         show_tree_row_management_controls: raw
             .show_tree_row_management_controls
             .unwrap_or(defaults.show_tree_row_management_controls),
+        tree_toolbar_always_visible: raw
+            .tree_toolbar_always_visible
+            .unwrap_or(defaults.tree_toolbar_always_visible),
         agent_debug_menu_enabled: raw
             .agent_debug_menu_enabled
             .unwrap_or(defaults.agent_debug_menu_enabled),
@@ -2946,6 +2957,55 @@ fn write_toml_document(path: &Path, document: &ConfigDocument) -> Result<(), Cli
 fn ui_settings_to_toml(ui: &UiSettings) -> toml::Value {
     let mut table = toml::value::Table::new();
     table.insert(
+        "tree_row_layout".to_string(),
+        toml::Value::Table(toml::value::Table::from_iter([
+            (
+                "order".to_string(),
+                toml::Value::Array(
+                    ui.tree_row_layout
+                        .order()
+                        .iter()
+                        .map(|element| {
+                            toml::Value::String(
+                                match element {
+                                    crate::tree_row_layout::TreeRowElement::Identity => "identity",
+                                    crate::tree_row_layout::TreeRowElement::Objective => {
+                                        "objective"
+                                    }
+                                    crate::tree_row_layout::TreeRowElement::Activity => "activity",
+                                    crate::tree_row_layout::TreeRowElement::Title => "title",
+                                }
+                                .to_string(),
+                            )
+                        })
+                        .collect(),
+                ),
+            ),
+            (
+                "hidden".to_string(),
+                toml::Value::Array(
+                    ui.tree_row_layout
+                        .hidden
+                        .iter()
+                        .map(|element| {
+                            toml::Value::String(
+                                match element {
+                                    crate::tree_row_layout::TreeRowElement::Identity => "identity",
+                                    crate::tree_row_layout::TreeRowElement::Objective => {
+                                        "objective"
+                                    }
+                                    crate::tree_row_layout::TreeRowElement::Activity => "activity",
+                                    crate::tree_row_layout::TreeRowElement::Title => "title",
+                                }
+                                .to_string(),
+                            )
+                        })
+                        .collect(),
+                ),
+            ),
+        ])),
+    );
+    table.insert(
         "left_panel_sizing_mode".to_string(),
         toml::Value::String(left_panel_sizing_mode_name(ui.left_panel_sizing.mode).to_string()),
     );
@@ -3028,6 +3088,10 @@ fn ui_settings_to_toml(ui: &UiSettings) -> toml::Value {
     table.insert(
         "show_tree_row_management_controls".to_string(),
         toml::Value::Boolean(ui.show_tree_row_management_controls),
+    );
+    table.insert(
+        "tree_toolbar_always_visible".to_string(),
+        toml::Value::Boolean(ui.tree_toolbar_always_visible),
     );
     table.insert(
         "agent_debug_menu_enabled".to_string(),
@@ -3525,6 +3589,9 @@ mod tests {
             (IconTarget::ToolbarSearch, "🔎"),
             (IconTarget::WaitingApproval, "✋"),
             (IconTarget::WaitingBackground, "🕗"),
+            (IconTarget::SpendingMedalGold, "🥇"),
+            (IconTarget::SpendingMedalSilver, "🥈"),
+            (IconTarget::SpendingMedalBronze, "🥉"),
         ] {
             assert_eq!(ui.icons.glyph(target), glyph, "{}", target.key());
         }
@@ -4051,6 +4118,29 @@ mod tests {
     }
 
     #[test]
+    fn tree_row_layout_persists_and_normalizes_loaded_values() {
+        let dir = scratch_dir();
+        let mut ui = UiSettings {
+            tree_row_layout: crate::tree_row_layout::TreeRowLayout::mixed(),
+            ..UiSettings::default()
+        };
+        ui.tree_row_layout
+            .hidden
+            .push(crate::tree_row_layout::TreeRowElement::Objective);
+        save_ui_settings(&dir, &ui).unwrap();
+        assert_eq!(load(&dir).unwrap().ui.tree_row_layout, ui.tree_row_layout);
+        std::fs::write(
+            dir.join("config.toml"),
+            "[ui.tree_row_layout]\norder = ['title', 'title']\nhidden = ['title', 'activity']\n",
+        )
+        .unwrap();
+        let layout = load(&dir).unwrap().ui.tree_row_layout;
+        assert_eq!(layout.order().len(), 4);
+        assert!(layout.is_visible(crate::tree_row_layout::TreeRowElement::Title));
+        assert!(!layout.is_visible(crate::tree_row_layout::TreeRowElement::Activity));
+    }
+
+    #[test]
     fn missing_ui_table_loads_ui_defaults() {
         let dir = scratch_dir();
         let config = load(&dir).expect("missing file is not an error");
@@ -4347,11 +4437,13 @@ mod tests {
         use crate::attention::{AttentionMode, AttentionSettings};
         let dir = scratch_dir();
         assert_eq!(load(&dir).unwrap().attention, AttentionSettings::default());
+        assert!(load(&dir).unwrap().attention.large_buttons);
         std::fs::write(
             dir.join("config.toml"),
-            "[ui]\nshow_context_menu_icons = false\n",
+            "[ui]\nshow_context_menu_icons = false\n\n[attention]\nlarge_buttons = false\n",
         )
         .unwrap();
+        assert!(!load(&dir).unwrap().attention.large_buttons);
         let settings = AttentionSettings {
             mode: AttentionMode::Turbo,
             press_sorts: false,
@@ -4655,7 +4747,9 @@ mod tests {
                 antigravity_icon: AntigravityAgentIcon::Orbit,
             },
             tree_order: TreeOrder::NameDescending,
+            tree_row_layout: crate::tree_row_layout::TreeRowLayout::mixed(),
             show_project_separators: false,
+            tree_toolbar_always_visible: false,
             motion_level: MotionLevel::Reduced,
             sidebar_density: SidebarDensity::Comfortable,
             show_inferred_title_icons: true,
@@ -4894,6 +4988,41 @@ mod tests {
                 .expect("tree row management preference should load")
                 .ui
                 .show_tree_row_management_controls
+        );
+    }
+
+    #[test]
+    fn tree_toolbar_visibility_defaults_on_and_preserves_explicit_off() {
+        let dir = scratch_dir();
+        assert!(
+            load(&dir)
+                .expect("missing config should use defaults")
+                .ui
+                .tree_toolbar_always_visible
+        );
+
+        std::fs::write(
+            dir.join("config.toml"),
+            "[ui]\ntree_toolbar_always_visible = false\n",
+        )
+        .expect("write UI preference");
+        assert!(
+            !load(&dir)
+                .expect("explicit false should load")
+                .ui
+                .tree_toolbar_always_visible
+        );
+
+        let settings = UiSettings {
+            tree_toolbar_always_visible: false,
+            ..UiSettings::default()
+        };
+        save_ui_settings(&dir, &settings).expect("save explicit false");
+        assert!(
+            !load(&dir)
+                .expect("saved false should reload")
+                .ui
+                .tree_toolbar_always_visible
         );
     }
 

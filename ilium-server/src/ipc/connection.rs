@@ -77,6 +77,20 @@ fn stream_control_requires_request_barrier(control: &StreamControl) -> bool {
     )
 }
 
+/// Progress-monitor commands use one correlated reply and never render a
+/// terminal.  Long-lived `ilium progress wait` clients must therefore not
+/// inherit the legacy pre-attach all-terminal subscription.
+fn progress_monitor_request_does_not_need_terminal_stream(request: &ClientRequest) -> bool {
+    matches!(
+        request,
+        ClientRequest::CheckPaneProgressMonitor { .. }
+            | ClientRequest::SetPaneProgressMonitor { .. }
+            | ClientRequest::GetPaneProgressMonitorStatus { .. }
+            | ClientRequest::ClearPaneProgressMonitor { .. }
+            | ClientRequest::WaitPaneProgressMonitor { .. }
+    )
+}
+
 struct StreamControlCommand {
     control: StreamControl,
     applied: oneshot::Sender<()>,
@@ -197,6 +211,14 @@ enum AttachPhase {
     Ready,
 }
 
+/// Normal disconnects drain final replies. A failed attach seed must instead
+/// drop its writer immediately, releasing the journal cursor that can retain
+/// the very General storage the seed could not admit.
+enum RequestReaderExit {
+    DrainReplies,
+    CloseImmediately,
+}
+
 /// Drives one accepted connection to completion: concurrently reads
 /// requests (dispatching each one) and writes replies/broadcasts, until
 /// either side signals the connection is done (client disconnected, a
@@ -251,7 +273,18 @@ where
         stream_control_rx,
         Some(Arc::clone(&state)),
     );
-    tokio::join!(reader, writer);
+    tokio::pin!(reader, writer);
+    tokio::select! {
+        // A completed reader may have queued final replies: let the writer
+        // drain them. A failed writer, however, must cancel the idle reader
+        // and release this connection's subscriptions immediately.
+        outcome = &mut reader => {
+            if matches!(outcome, RequestReaderExit::DrainReplies) {
+                writer.await;
+            }
+        },
+        () = &mut writer => {},
+    }
 }
 
 /// Reads and dispatches `ClientRequest` frames until the stream ends, a
@@ -266,15 +299,18 @@ async fn read_requests<R>(
     direct_tx: DirectEventSender,
     attach_phase_tx: watch::Sender<AttachPhase>,
     stream_control_tx: mpsc::Sender<StreamControlCommand>,
-) where
+) -> RequestReaderExit
+where
     R: AsyncRead + Unpin,
 {
+    static NEXT_CONNECTION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    let connection_id = NEXT_CONNECTION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let mut frame_reader = FrameReader::new(read_half);
     let preparation = match codec_client(Some(&state), true) {
         Ok(preparation) => preparation,
         Err(error) => {
             tracing::warn!(%error, "server decoder bootstrap failed");
-            return;
+            return RequestReaderExit::CloseImmediately;
         }
     };
     let mut terminal_subscription_guard = TerminalSubscriptionGuard::new(Arc::clone(&state));
@@ -296,7 +332,7 @@ async fn read_requests<R>(
             // `terminal_subscription_guard` contribution until the peer
             // eventually disconnects or the whole server shuts down.
             () = direct_tx.closed() => break,
-            read_result = decode_client_request(&mut frame_reader, &preparation) => match read_result {
+            read_result = decode_client_request(&mut frame_reader, &preparation, connection_id) => match read_result {
                 Ok(request) => request,
                 Err(ilium_ipc::IpcError::Io(io_error))
                     if io_error.kind() == std::io::ErrorKind::UnexpectedEof =>
@@ -382,6 +418,13 @@ async fn read_requests<R>(
                 has_terminal_stream_selection = true;
                 Some(StreamControl::StreamNoTerminals)
             }
+            _ if !has_terminal_stream_selection
+                && progress_monitor_request_does_not_need_terminal_stream(request) =>
+            {
+                terminal_subscription_guard.set_visible(HashSet::new());
+                has_terminal_stream_selection = true;
+                Some(StreamControl::StreamNoTerminals)
+            }
             _ if !has_terminal_stream_selection => {
                 // Lifecycle clients historically issue commands before an
                 // Attach. Preserve their all-terminal stream contract, while
@@ -401,25 +444,52 @@ async fn read_requests<R>(
             // make keyboard latency proportional to replay size.
             let requires_request_barrier = stream_control_requires_request_barrier(&stream_control);
             let (applied_tx, applied_rx) = oneshot::channel();
-            if stream_control_tx
-                .send(StreamControlCommand {
-                    control: stream_control,
-                    applied: applied_tx,
-                })
-                .await
-                .is_err()
-            {
-                break;
-            }
+            let command = StreamControlCommand {
+                control: stream_control,
+                applied: applied_tx,
+            };
             if !requires_request_barrier {
+                if stream_control_tx.send(command).await.is_err() {
+                    break;
+                }
                 // The writer still applies selections in FIFO order and
-                // repairs their journals before live bytes resume.  Only the
+                // repairs their journals before live bytes resume. Only the
                 // request reader proceeds independently, so keyboard input
                 // is not a hostage to output bandwidth.
                 continue;
             }
-            if applied_rx.await.is_err() {
-                break;
+            // No request handler has started: abandoning this barrier cannot
+            // cancel accepted mutations or recovery. Include queue admission
+            // so preceding visible-pane controls cannot defeat the deadline.
+            let started = tokio::time::Instant::now();
+            let barrier = async {
+                stream_control_tx.send(command).await.map_err(|_| ())?;
+                applied_rx.await.map_err(|_| ())
+            };
+            match request_stage(
+                tokio::time::timeout(std::time::Duration::from_secs(30), barrier),
+                &preparation,
+                connection_id,
+                "attach_stream_barrier",
+                request_name,
+                0,
+            )
+            .await
+            {
+                Ok(Ok(())) => {}
+                Ok(Err(())) => return RequestReaderExit::CloseImmediately,
+                Err(_) => {
+                    tracing::warn!(
+                        connection_id,
+                        request_name,
+                        stage = "attach_stream_barrier",
+                        elapsed_ms = started.elapsed().as_millis() as u64,
+                        tenant = ?preparation.foundation.usage(),
+                        process = ?preparation.quota_group().snapshot(),
+                        "initial request stream barrier deadline expired; closing connection and releasing its journal cursor before handler dispatch"
+                    );
+                    return RequestReaderExit::CloseImmediately;
+                }
             }
         }
 
@@ -460,23 +530,59 @@ async fn read_requests<R>(
             // output produced after the cutover cannot pass the direct batch.
             attach_phase_tx.send_replace(AttachPhase::Replaying);
         }
-        let should_close = decoded
-            .map_async(|request| async {
-                handlers::handle_request(&state, request, &direct_tx).await
-            })
-            .await;
-        let should_close = *should_close.view();
+        // Deep mutation handlers need their own poll stack rather than the
+        // connection reader/writer and retained-decoding frames below them.
+        // Await this one owned task before reading the next request: ordering
+        // and attach replay barriers remain unchanged. Move the retained
+        // request into it so cancellation keeps its reservation with the work.
+        let request_state = Arc::clone(&state);
+        let request_replies = direct_tx.clone();
+        let request_task = crate::task_guard::AbortOnDropHandle::new(tokio::spawn(async move {
+            let should_close = decoded
+                .map_async(|request| async {
+                    handlers::handle_request(&request_state, request, &request_replies).await
+                })
+                .await;
+            *should_close.view()
+        }));
+        let should_close = match request_stage(
+            request_task.join(),
+            &preparation,
+            connection_id,
+            "request_handler",
+            request_name,
+            0,
+        )
+        .await
+        {
+            Ok(should_close) => should_close,
+            Err(error) => {
+                // End this connection on handler failure; never dispatch the
+                // next mutation after an unknown partial request outcome.
+                tracing::warn!(%error, "client request task failed; closing connection");
+                if completes_attach {
+                    return RequestReaderExit::CloseImmediately;
+                }
+                break;
+            }
+        };
         // `handle_attach` only returns after every tree/replay/metadata event
         // has entered `direct_tx`. Publishing the phase transition here gives
         // the writer a precise barrier rather than relying on a momentarily
         // empty direct queue or scheduler timing.
         if completes_attach {
+            if should_close {
+                // Keep Replaying: no complete seed boundary was published.
+                // Do not await writer drain, which could retain our cursor.
+                return RequestReaderExit::CloseImmediately;
+            }
             attach_phase_tx.send_replace(AttachPhase::Ready);
         }
         if should_close {
             break;
         }
     }
+    RequestReaderExit::DrainReplies
 }
 
 /// Forwards direct replies and session events from the ordered journal and
@@ -531,6 +637,29 @@ async fn write_replies_ordered<W, E>(
     .await;
 }
 
+/// Alternate ready session sources below the direct-reply and attach gates.
+/// A dormant source never prevents its ready peer from making progress.
+async fn select_session_source<O: std::future::Future, B: std::future::Future>(
+    ordered: O,
+    broadcast: B,
+    prefer_broadcast: bool,
+) -> Result<O::Output, B::Output> {
+    tokio::pin!(ordered, broadcast);
+    if prefer_broadcast {
+        tokio::select! {
+            biased;
+            result = &mut broadcast => Err(result),
+            result = &mut ordered => Ok(result),
+        }
+    } else {
+        tokio::select! {
+            biased;
+            result = &mut ordered => Ok(result),
+            result = &mut broadcast => Err(result),
+        }
+    }
+}
+
 async fn write_replies_inner<W, E>(
     write_half: W,
     mut broadcast_rx: tokio::sync::broadcast::Receiver<E>,
@@ -554,9 +683,14 @@ async fn write_replies_inner<W, E>(
     let mut is_stream_control_open = true;
     let mut is_ordered_journal_open = ordered_rx.is_some();
     let mut pending_stream_control = None;
+    let mut is_attach_phase_open = true;
+    let mut prefer_broadcast = false;
     let mut frame_writer = FrameWriter::new(write_half);
 
     loop {
+        // Hidden-pane filtering and redundant journal entries can otherwise
+        // spin without a pending socket operation on a Tokio worker.
+        tokio::task::yield_now().await;
         let has_pending_stream_control = pending_stream_control.is_some();
         let ordered_journal_open = is_ordered_journal_open;
         // While an Attach handler is building its replay batch, drain direct
@@ -565,9 +699,9 @@ async fn write_replies_inner<W, E>(
         if *attach_phase_rx.borrow() == AttachPhase::Replaying {
             tokio::select! {
                 biased;
-                attach_changed = attach_phase_rx.changed() => {
+                attach_changed = attach_phase_rx.changed(), if is_attach_phase_open => {
                     if attach_changed.is_err() {
-                        return;
+                        is_attach_phase_open = false;
                     }
                     continue;
                 },
@@ -595,16 +729,8 @@ async fn write_replies_inner<W, E>(
 
         let (event, is_session_event, producer_storage, journal_sequence) = tokio::select! {
             biased;
-            // Checked ahead of `attach_changed`: this connection's reader
-            // task owns both `direct_tx` and `attach_phase_tx` and drops
-            // them together when it returns, so on every normal disconnect
-            // `direct_rx` (buffered replies, then `None`) and the watch
-            // channel closing become ready in the same poll. `changed()`
-            // resolves to `Err` immediately and forever once its sender is
-            // gone, so under `biased` it would otherwise win this race on
-            // every single disconnect -- listing it first previously made
-            // the `None` arm below (and its broadcast drain) unreachable.
-            // Draining `direct_rx` first guarantees that never happens.
+            // Direct replay must drain before live session events even after
+            // Attach changes to Ready (Ready means queued, not yet flushed).
             direct_event = direct_rx.recv_queued() => match direct_event {
                 Some(QueuedServerEvent { event, producer_storage }) => {
                     (Arc::new(event), false, producer_storage, None)
@@ -637,28 +763,10 @@ async fn write_replies_inner<W, E>(
                     break;
                 }
             },
-            // Still checked ahead of `broadcast_result`: on reattachment
-            // this must engage the replay gate before one more broadcast
-            // slips across the replay boundary (see the module-level
-            // comment on `attach_phase_tx`).
-            attach_changed = attach_phase_rx.changed() => {
+            attach_changed = attach_phase_rx.changed(), if is_attach_phase_open => {
+                // Closure must not spin or discard buffered direct replies.
                 if attach_changed.is_err() {
-                    // Unreachable today -- `direct_event`'s `None` arm above
-                    // always wins this race first, since both channels close
-                    // together (see the comment on that branch). Drain
-                    // defensively anyway so a future change that decouples
-                    // `attach_phase_tx` from `direct_tx` cannot silently
-                    // drop already-queued broadcasts instead of merely
-                    // hitting dead code.
-                    drain_pending_broadcasts(
-                        &mut broadcast_rx,
-                        &mut frame_writer,
-                        &terminal_stream_selection,
-                        &mut delivered_terminal_sequences,
-                        resynchronization_state.as_deref(),
-                    )
-                    .await;
-                    break;
+                    is_attach_phase_open = false;
                 }
                 continue;
             },
@@ -724,12 +832,19 @@ async fn write_replies_inner<W, E>(
                 }
                 continue;
             },
-            ordered_result = async {
-                match ordered_rx.as_ref().filter(|_| ordered_journal_open) {
-                    Some(subscription) => subscription.recv().await,
-                    None => std::future::pending().await,
-                }
-            } => match ordered_result {
+            session_result = select_session_source(
+                async {
+                    match ordered_rx.as_ref().filter(|_| ordered_journal_open) {
+                        Some(subscription) => subscription.recv().await,
+                        None => std::future::pending().await,
+                    }
+                },
+                broadcast_rx.recv(),
+                prefer_broadcast,
+            ) => match session_result {
+                Ok(ordered_result) => {
+                    prefer_broadcast = true;
+                    match ordered_result {
                 Ok(Some(event)) => {
                     let sequence = event.sequence;
                     (event.shared_event(), true, None, Some(sequence))
@@ -742,8 +857,11 @@ async fn write_replies_inner<W, E>(
                     tracing::warn!(?error, "ordered server event journal lost its cursor; closing connection");
                     break;
                 }
-            },
-            broadcast_result = broadcast_rx.recv() => match broadcast_result {
+            }
+                },
+                Err(broadcast_result) => {
+                    prefer_broadcast = false;
+                    match broadcast_result {
                 Ok(event) => (event.into(), true, None, None),
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
                     tracing::warn!("connection lagged behind the session broadcast, skipped {skipped} event(s)");
@@ -767,6 +885,8 @@ async fn write_replies_inner<W, E>(
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => {
                     break;
                 }
+            }
+                },
             },
         };
 
@@ -1087,8 +1207,18 @@ where
                     return false;
                 }
             }
-            if let Some(sequence) = handlers::terminal_output_sequence(state, *pane_id).await {
-                target_sequences.insert(*pane_id, sequence);
+            match handlers::terminal_output_sequence(state, *pane_id).await {
+                Ok(Some(sequence)) => {
+                    target_sequences.insert(*pane_id, sequence);
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    tracing::warn!(pane_id = ?pane_id, %error, "terminal sequence capture failed; closing connection without advancing delivery");
+                    for applied in applied_controls {
+                        let _ = applied.send(());
+                    }
+                    return false;
+                }
             }
         }
 
@@ -1209,13 +1339,6 @@ fn should_forward_terminal_event(
     }
 }
 
-/// Writes one event and advances the per-connection output watermark only
-/// after the frame reached the socket. Failed writes must not claim delivery.
-const SERVER_CODEC_COST: ilium_execution::JobCost = ilium_execution::JobCost {
-    input_bytes: 128 * 1024 * 1024,
-    result_bytes: 192 * 1024 * 1024,
-};
-
 fn codec_client(
     state: Option<&ServerState>,
     is_decoder: bool,
@@ -1239,38 +1362,173 @@ fn codec_client(
     }
 }
 
+/// This timer is owned by the existing connection future, not a new task.
+/// Its deadline cannot be reset by unrelated worker-completion notifications.
+async fn request_stage<T>(
+    work: impl Future<Output = T>,
+    preparation: &crate::execution::ExecutionClient,
+    connection_id: u64,
+    stage: &'static str,
+    request_name: &'static str,
+    frame_bytes: u32,
+) -> T {
+    tokio::pin!(work);
+    let started = tokio::time::Instant::now();
+    let mut next_report = started + std::time::Duration::from_secs(2);
+    loop {
+        tokio::select! {
+            result = &mut work => return result,
+            () = tokio::time::sleep_until(next_report) => {
+                tracing::warn!(connection_id, stage, request_name, frame_bytes,
+                    elapsed_ms = started.elapsed().as_millis() as u64,
+                    tenant = ?preparation.foundation.usage(),
+                    process = ?preparation.quota_group().snapshot(),
+                    "Ilium request stage is waiting; no completion or mutation rollback is implied");
+                next_report = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+            }
+        }
+    }
+}
+
 async fn decode_client_request<R: AsyncRead + Unpin>(
     reader: &mut FrameReader<R>,
     preparation: &crate::execution::ExecutionClient,
+    connection_id: u64,
 ) -> Result<ilium_execution::Retained<ClientRequest>, ilium_ipc::IpcError> {
     let length = reader.read_encoded_length().await?;
-    let reservation = preparation
-        .reserve(ilium_execution::Lane::Cpu, SERVER_CODEC_COST)
-        .await
+    // No request has been dispatched yet. Closing a peer whose admission
+    // cannot progress is safe here; timing out a mutation handler would not be.
+    let admission = preparation.reserve(
+        ilium_execution::Lane::Cpu,
+        ilium_execution::JobCost {
+            input_bytes: reader.encoded_payload_input_bytes(length)?,
+            result_bytes: crate::execution::SERVER_DECODER_RESULT_BYTES,
+        },
+    );
+    let reservation = request_stage(
+        tokio::time::timeout(std::time::Duration::from_secs(15), admission),
+        preparation, connection_id, "decoder_admission", "not_decoded", length,
+    ).await.map_err(|_| ilium_ipc::IpcError::Io(std::io::Error::new(
+        std::io::ErrorKind::TimedOut,
+        format!("Ilium connection {connection_id}: decoder admission exceeded 15 seconds for {length} frame bytes; request was not dispatched; inspect request-stage quota diagnostics"),
+    )))?.map_err(|error| ilium_ipc::IpcError::Io(std::io::Error::other(format!(
+        "Ilium connection {connection_id}: decoder admission refused for {length} frame bytes: {error:?}; request was not dispatched"
+    ))))?;
+    let frame = request_stage(
+        reader.read_encoded_payload(length),
+        preparation,
+        connection_id,
+        "frame_body",
+        "not_decoded",
+        length,
+    )
+    .await?;
+    // Keep captured bytes charged even if cancellation precedes the first
+    // CPU poll. Destroy bytes before their retention, on the CPU owner.
+    let charged_frame = (frame, reservation.retention());
+    let decoded = request_stage(
+        preparation.run_reserved(reservation, move |_| {
+            let result =
+                ilium_ipc::decode_bounded_frame_with_storage::<ClientRequest>(&charged_frame.0);
+            drop(charged_frame);
+            result
+        }),
+        preparation,
+        connection_id,
+        "cpu_decode",
+        "not_decoded",
+        length,
+    )
+    .await
+    .map_err(|error| ilium_ipc::IpcError::Io(std::io::Error::other(error)))?;
+    let bytes = ilium_execution::retained_result_storage_bytes::<ClientRequest>(decoded.view().1)
         .map_err(|error| {
-            ilium_ipc::IpcError::Io(std::io::Error::other(format!(
-                "server decoder admission: {error:?}"
-            )))
-        })?;
-    let frame = reader.read_encoded_payload(length).await?;
-    preparation
-        .run_reserved(reservation, move |_| {
-            ilium_ipc::decode_bounded_frame::<ClientRequest>(&frame)
-        })
-        .await
-        .map_err(|error| ilium_ipc::IpcError::Io(std::io::Error::other(error)))
+        ilium_ipc::IpcError::Io(std::io::Error::other(format!(
+            "Ilium connection {connection_id}: completed request storage sizing refused: {error:?}"
+        )))
+    })?;
+    let mut decoded = decoded.map(|(request, _)| request);
+    // A complete request needs backing storage, not a decoder job for the
+    // duration of a slow handler or attachment barrier. This only subtracts
+    // the existing charge; no fresh admission can form a handoff cycle.
+    request_stage(async {
+        loop {
+            match decoded.try_reduce_to_result_storage(bytes) {
+                Ok(()) => return Ok(decoded),
+                Err(ilium_execution::RejectReason::Busy) => tokio::time::sleep(std::time::Duration::from_millis(1)).await,
+                Err(error) => return Err(ilium_ipc::IpcError::Io(std::io::Error::other(format!(
+                    "Ilium connection {connection_id}: completed request storage transfer refused: {error:?}"
+                )))),
+            }
+        }
+    }, preparation, connection_id, "completed_request_storage", "decoded", length).await
 }
+
+fn output_client(
+    state: Option<&ServerState>,
+    producer_storage: Option<&ilium_execution::StorageAdmission>,
+) -> Result<crate::execution::ServerOutput, ilium_ipc::IpcError> {
+    if let Some(owner) = state.and_then(|state| state.execution.get()) {
+        // Matching limits are not provenance. Only a guard from this exact
+        // server's visible-capture root selects protected output headroom.
+        return Ok(
+            if producer_storage
+                .is_some_and(|storage| storage.shares_root(&owner.visible_recovery.quota_group()))
+            {
+                owner.visible_output.clone()
+            } else {
+                owner.output.clone()
+            },
+        );
+    }
+    #[cfg(test)]
+    {
+        Ok(crate::execution::test_output_client())
+    }
+    #[cfg(not(test))]
+    {
+        Err(ilium_ipc::IpcError::Io(std::io::Error::other(
+            "server output storage owner is not initialized",
+        )))
+    }
+}
+
+// One window covers the actual single-event aggregate encoder input ceiling,
+// the maximum complete wire allocation, and their owned metadata. This keeps
+// the original retained-input contract, including sparse allocations >128 MiB.
+const SERVER_EVENT_PREPARATION_BYTES: usize = crate::execution::SERVER_ENCODER_MAX_INPUT_BYTES
+    + ilium_ipc::MAX_FRAME_LEN as usize
+    + std::mem::size_of::<StoredServerEvent>()
+    + std::mem::size_of::<ilium_execution::StorageAdmission>()
+    + 2 * std::mem::size_of::<usize>();
+
+pub(crate) const SERVER_EVENT_RETIREMENT_BYTES: usize =
+    match ilium_execution::retirement_storage_bytes::<StoredServerEvent>(std::mem::size_of::<
+        StoredServerEvent,
+    >()) {
+        Some(bytes) => match bytes.checked_mul(ilium_execution::RETIREMENT_SLOTS) {
+            Some(bytes) => bytes,
+            None => panic!("fixed server output metadata declaration overflow"),
+        },
+        None => panic!("fixed server output metadata layout overflow"),
+    };
 
 /// The SAME event allocation enters this envelope before CPU publication. Its
 /// optional frame is populated exactly once by that CPU callback. Retirement
-/// metadata has its own small debit; large backings are covered first by the
-/// original codec retention, then by the shared persistent storage guard.
+/// metadata has guaranteed capacity within the process ceiling. A private
+/// output window is acquired before encoder credit and stays with the exact
+/// originals through physical CPU destruction. Queued producer storage never
+/// pays for a second writer allocation and cannot block this writer's drain.
 struct StoredServerEvent {
     frame: Option<ilium_ipc::EncodedFrame>,
     event: Arc<ServerEvent>,
     storage_bytes: usize,
     #[cfg(test)]
     drop_notice: Option<encoded_storage_tests::OriginalDropNotice>,
+    // Field order: original frame/event (and the test notice) die before every
+    // backing lease, including when cancellation queues this envelope on CPU.
+    _producer_storage: Option<Arc<ilium_execution::StorageAdmission>>,
+    output_storage: Option<ilium_execution::StorageAdmission>,
 }
 
 #[cfg(test)]
@@ -1377,43 +1635,96 @@ where
         });
     }
     let preparation = codec_client(state, false)?;
-    // Acquire the empty envelope before scarce codec credit. The raw event
-    // already exists; preattachment cancellation still needs producer custody.
-    let retirement = match preparation
+    let output = output_client(state, producer_storage.as_deref())?;
+    // This reserve can cover all 64 existing retirement slots at once. It
+    // does not create slots: snapshots and output still share the same CPU
+    // retirement owner, and QueueFull remains honest physical backpressure.
+    let retirement = match output
+        .metadata
         .reserve_retirement::<StoredServerEvent>(std::mem::size_of::<StoredServerEvent>())
         .await
     {
         Ok(retirement) => retirement,
         Err(reason) => return Err(unadmitted_server_event(reason, event)),
     };
-    let reservation = match preparation
-        .reserve(ilium_execution::Lane::Cpu, SERVER_CODEC_COST)
-        .await
-    {
-        Ok(reservation) => reservation,
-        Err(reason) => return Err(unadmitted_server_event(reason, event)),
-    };
     #[cfg(test)]
-    let drop_notice = encoded_storage_tests::take_original_notice(&event, &preparation);
+    let drop_notice = encoded_storage_tests::take_original_notice(&event, &preparation, &output);
     let mut stored = retirement.attach(StoredServerEvent {
         frame: None,
         event,
         storage_bytes: 0,
         #[cfg(test)]
         drop_notice,
+        _producer_storage: producer_storage,
+        output_storage: None,
     });
-    // MUST precede submit: rejected publication, NotStarted and a delivered
-    // result abandoned in its receipt can all drop on the coordinating task.
-    // The outer Retained guard alone would release credit after enqueueing
-    // retirement, before the blocked CPU actually destroyed these originals.
+    // Preserve the original exact input JobCost and its aggregate tenant
+    // ceiling. This existing capacity walk is on the coordination runtime;
+    // moving all producer sizing off that runtime is a separate latency task.
+    // It acquires no encoder credit and serializes no payload or frame bytes.
+    let event_bytes = stored.event.retained_bytes();
+    let input_bytes = event_bytes
+        .checked_add(std::mem::size_of::<StoredServerEvent>())
+        .ok_or_else(|| {
+            ilium_ipc::IpcError::Io(std::io::Error::other(
+                "server event input declaration overflow",
+            ))
+        })?;
+    let encoder_limit = preparation
+        .foundation
+        .maximum_cpu_job_cost()
+        .map_err(|error| {
+            ilium_ipc::IpcError::Io(std::io::Error::other(format!(
+                "server output encoder capability: {error:?}"
+            )))
+        })?
+        .input_bytes
+        .min(crate::execution::SERVER_ENCODER_MAX_INPUT_BYTES);
+    if input_bytes > encoder_limit {
+        return Err(ilium_ipc::IpcError::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "server event exceeds the existing aggregate encoder input ceiling",
+        )));
+    }
+    #[cfg(test)]
+    encoded_storage_tests::observe_storage_wait(&stored);
+    // The admission turn is fair and cancellation-safe. No encoder debit,
+    // CPU job, encoded allocation or socket byte exists while waiting here.
+    // Only active writers spend this pool; producer queues/journal cannot
+    // hold a lease that this same writer must flush to satisfy this request.
+    stored.output_storage = Some(
+        output
+            .reserve_storage(SERVER_EVENT_PREPARATION_BYTES)
+            .await
+            .map_err(|error| {
+                ilium_ipc::IpcError::Io(std::io::Error::other(format!(
+                    "server output preparation storage admission: {error:?}"
+                )))
+            })?,
+    );
+    let reservation = preparation
+        .reserve(
+            ilium_execution::Lane::Cpu,
+            ilium_execution::JobCost {
+                input_bytes,
+                result_bytes: crate::execution::SERVER_CODEC_RESULT_BYTES,
+            },
+        )
+        .await
+        .map_err(|error| {
+            ilium_ipc::IpcError::Io(std::io::Error::other(format!(
+                "server output encoder admission: {error:?}"
+            )))
+        })?;
+    // MUST precede submit: rejected publication, NotStarted and an abandoned
+    // encoded receipt retain this debit through actual original destruction.
     stored.set_retention(reservation.retention());
     let encoded = preparation
         .run_reserved(reservation, move |_| {
             let frame = ilium_ipc::encode_frame(stored.event.as_ref())?;
-            let storage_bytes = stored
-                .event
-                .retained_bytes()
+            let storage_bytes = event_bytes
                 .checked_add(frame.retained_bytes())
+                .and_then(|bytes| bytes.checked_add(std::mem::size_of::<StoredServerEvent>()))
                 .and_then(|bytes| {
                     bytes.checked_add(std::mem::size_of::<ilium_execution::StorageAdmission>())
                 })
@@ -1425,6 +1736,24 @@ where
                 })?;
             stored.frame = Some(frame);
             stored.storage_bytes = storage_bytes;
+            let resident_bytes = stored.storage_bytes;
+            // Shrinking is subtraction-only on this exclusive lease. Retain
+            // codec credit until the writer consumes the receipt; a cancelled
+            // receipt must still retain the exact originals on the CPU bank.
+            stored
+                .output_storage
+                .as_mut()
+                .ok_or_else(|| {
+                    ilium_ipc::IpcError::Io(std::io::Error::other(
+                        "server output invariant: encoder has no admitted storage window",
+                    ))
+                })?
+                .shrink_to(resident_bytes)
+                .map_err(|error| {
+                    ilium_ipc::IpcError::Io(std::io::Error::other(format!(
+                        "server output window declaration: {error:?}"
+                    )))
+                })?;
             #[cfg(test)]
             encoded_storage_tests::observe_encoded_original(&stored);
             Ok::<_, ilium_ipc::IpcError>(stored)
@@ -1432,39 +1761,10 @@ where
         .await
         .map_err(|error| ilium_ipc::IpcError::Io(std::io::Error::other(error)))?;
     let (mut stored, result_retention) = encoded.into_parts();
-    // This drops only a reference to the same debit; the envelope already owns
-    // another reference and therefore also covers storage-wait cancellation.
     drop(result_retention);
-    #[cfg(test)]
-    encoded_storage_tests::observe_storage_wait(&stored);
-    let storage = match producer_storage {
-        Some(storage)
-            if storage.shares_root(&preparation.quota_group())
-                && storage.resident_bytes() >= stored.storage_bytes =>
-        {
-            storage
-        }
-        Some(storage) => {
-            drop(storage);
-            preparation
-                .reserve_storage(stored.storage_bytes)
-                .await
-                .map_err(|error| {
-                    ilium_ipc::IpcError::Io(std::io::Error::other(format!(
-                        "server encoded storage admission after producer lease mismatch: {error:?}"
-                    )))
-                })?
-        }
-        None => preparation
-            .reserve_storage(stored.storage_bytes)
-            .await
-            .map_err(|error| {
-                ilium_ipc::IpcError::Io(std::io::Error::other(format!(
-                    "server encoded storage admission: {error:?}"
-                )))
-            })?,
-    };
-    stored.set_storage_guard(storage);
+    // The private output lease already covers both originals. No byte or
+    // retirement admission can occur between releasing encoder credit and
+    // the actual flush, so the two finite encoder slots cannot be hostages.
     stored.clear_retention();
     frame_writer
         .write_encoded(
@@ -1588,19 +1888,25 @@ async fn drain_pending_broadcasts<W, E>(
     W: AsyncWrite + Unpin,
     E: Into<Arc<ServerEvent>> + Clone,
 {
-    loop {
+    // Snapshot the cursor distance, including already-lagged entries. New
+    // production cannot extend this closing connection's drain prefix.
+    let mut remaining = broadcast_rx.len();
+    while remaining > 0 {
         let event = match broadcast_rx.try_recv() {
             Ok(event) => event.into(),
             Err(tokio::sync::broadcast::error::TryRecvError::Lagged(skipped)) => {
                 tracing::warn!(
                     "connection lagged while draining final broadcasts, skipped {skipped} event(s)"
                 );
+                remaining =
+                    remaining.saturating_sub(usize::try_from(skipped).unwrap_or(usize::MAX));
                 continue;
             }
             // Empty: nothing left queued. Closed: the whole server is gone.
             // Either way, nothing more to flush.
             Err(_) => return,
         };
+        remaining = remaining.saturating_sub(1);
         if !should_forward_terminal_event(&event, terminal_stream_selection) {
             continue;
         }
@@ -1644,6 +1950,30 @@ mod tests {
 
     use super::*;
 
+    #[tokio::test]
+    async fn session_sources_alternate_when_both_are_ready() {
+        let mut prefer_broadcast = false;
+        for index in 0..20 {
+            let selected = select_session_source(
+                std::future::ready(1),
+                std::future::ready(2),
+                prefer_broadcast,
+            )
+            .await;
+            assert_eq!(selected.is_err(), index % 2 == 1);
+            prefer_broadcast = selected.is_ok();
+        }
+        assert_eq!(
+            select_session_source(std::future::pending::<i32>(), std::future::ready(2), false)
+                .await,
+            Err(2)
+        );
+        assert_eq!(
+            select_session_source(std::future::ready(1), std::future::pending::<i32>(), true).await,
+            Ok(1)
+        );
+    }
+
     #[test]
     fn visible_pane_selection_does_not_block_request_intake() {
         assert!(!stream_control_requires_request_barrier(
@@ -1655,6 +1985,42 @@ mod tests {
         assert!(stream_control_requires_request_barrier(
             &StreamControl::StreamNoTerminals,
         ));
+    }
+
+    #[test]
+    fn progress_monitor_requests_do_not_need_terminal_streams() {
+        let pane_id = NodeId(7);
+        let requests = [
+            ClientRequest::CheckPaneProgressMonitor {
+                request_id: 1,
+                pane_id,
+                command: "printf '{}'".to_string(),
+            },
+            ClientRequest::SetPaneProgressMonitor {
+                request_id: 2,
+                pane_id,
+                command: "printf '{}'".to_string(),
+                interval_seconds: 10,
+            },
+            ClientRequest::GetPaneProgressMonitorStatus {
+                request_id: 3,
+                pane_id,
+            },
+            ClientRequest::ClearPaneProgressMonitor {
+                request_id: 4,
+                pane_id,
+                expected_monitor_id: Some(9),
+            },
+            ClientRequest::WaitPaneProgressMonitor {
+                request_id: 5,
+                pane_id,
+                monitor_id: 9,
+            },
+        ];
+
+        assert!(requests
+            .iter()
+            .all(progress_monitor_request_does_not_need_terminal_stream));
     }
 
     #[tokio::test]
@@ -2451,6 +2817,43 @@ mod text_trigger_writer_tests {
         initialize_fixture_execution(&state);
         (state, Task(sound_task))
     }
+
+    #[tokio::test]
+    async fn progress_monitor_wait_starts_without_terminal_subscription() {
+        let directory = tempfile::tempdir().unwrap();
+        let (state, _sounds) = state_at(directory.path());
+        let (client, server) = duplex(4096);
+        let (replies, _reply_events) = DirectEventSender::channel(8);
+        let (phase, _phase_receiver) = watch::channel(AttachPhase::Ready);
+        let (controls, mut control_events) = mpsc::channel::<StreamControlCommand>(8);
+        let mut reader = Task(tokio::spawn(read_requests(
+            state, server, replies, phase, controls,
+        )));
+        let mut requests = FrameWriter::new(client);
+
+        requests
+            .write(&ClientRequest::WaitPaneProgressMonitor {
+                request_id: 70,
+                pane_id: ilium_core::NodeId(7),
+                monitor_id: 9,
+            })
+            .await
+            .unwrap();
+
+        let control = timeout(WAIT, control_events.recv())
+            .await
+            .expect("progress monitor wait did not select a stream")
+            .expect("progress monitor wait closed before selecting a stream");
+        assert!(matches!(control.control, StreamControl::StreamNoTerminals));
+        control
+            .applied
+            .send(())
+            .expect("request reader stopped before stream selection applied");
+
+        drop(requests);
+        reader.joined().await;
+    }
+
     #[tokio::test]
     async fn slow_repository_query_does_not_block_following_tree_mutation() {
         let directory = tempfile::tempdir().unwrap();
@@ -2963,3 +3366,124 @@ mod text_trigger_ordering_regressions {
 #[cfg(test)]
 #[path = "encoded_storage_tests.rs"]
 mod encoded_storage_tests;
+
+#[cfg(test)]
+mod completed_request_storage_tests {
+    use super::*;
+
+    async fn decode_one(
+        preparation: &crate::execution::ExecutionClient,
+        connection_id: u64,
+    ) -> ilium_execution::Retained<ClientRequest> {
+        let (mut sender, receiver) = tokio::io::duplex(4096);
+        ilium_ipc::write_frame(&mut sender, &ClientRequest::Detach)
+            .await
+            .unwrap();
+        let mut reader = FrameReader::new(receiver);
+        tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            decode_client_request(&mut reader, preparation, connection_id),
+        )
+        .await
+        .expect("a retained completed request must not consume the next decoder job")
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn sixty_four_retained_completed_requests_do_not_exhaust_four_decoder_jobs() {
+        let owner = crate::execution::ServerExecution::start().unwrap();
+        let initial = owner.decoder.foundation.usage();
+        let mut pending_handlers = Vec::new();
+        for connection_id in 1..=64 {
+            pending_handlers.push(decode_one(&owner.decoder, connection_id).await);
+            let usage = owner.decoder.foundation.usage();
+            assert_eq!(usage.jobs, initial.jobs);
+            assert_eq!(usage.input_bytes, initial.input_bytes);
+            assert!(
+                usage.result_bytes > initial.result_bytes,
+                "request backing remains charged throughout a pending handler"
+            );
+        }
+        assert_eq!(pending_handlers.len(), 64);
+        assert!(pending_handlers
+            .iter()
+            .all(|request| matches!(request.view(), ClientRequest::Detach)));
+        drop(pending_handlers);
+        assert_eq!(
+            owner.decoder.foundation.usage().result_bytes,
+            initial.result_bytes
+        );
+        owner.request_shutdown();
+    }
+
+    #[tokio::test]
+    async fn result_storage_conversion_refuses_shared_retention_and_growth_without_losing_charge() {
+        let owner = crate::execution::ServerExecution::start().unwrap();
+        let request = owner
+            .decoder
+            .run(
+                ilium_execution::Lane::Cpu,
+                ilium_execution::JobCost {
+                    input_bytes: 4096,
+                    result_bytes: 4096,
+                },
+                move |_| Ok::<_, std::io::Error>(ClientRequest::Detach),
+            )
+            .await
+            .unwrap();
+        let (request, retention) = request.into_parts();
+        let other_owner = retention.clone();
+        let mut request = retention.retain(request);
+        let before = owner.decoder.foundation.usage();
+        let minimum = ilium_execution::retained_result_storage_bytes::<ClientRequest>(0).unwrap();
+        assert!(before.jobs > 0 && before.input_bytes > 0);
+        assert_eq!(
+            request.try_reduce_to_result_storage(minimum),
+            Err(ilium_execution::RejectReason::Busy)
+        );
+        assert_eq!(
+            owner.decoder.foundation.usage().input_bytes,
+            before.input_bytes
+        );
+        assert_eq!(
+            owner.decoder.foundation.usage().result_bytes,
+            before.result_bytes
+        );
+        assert_eq!(owner.decoder.foundation.usage().jobs, before.jobs);
+        drop(other_owner);
+        assert_eq!(
+            request.try_reduce_to_result_storage(before.result_bytes + 1),
+            Err(ilium_execution::RejectReason::InvalidCost)
+        );
+        assert_eq!(
+            owner.decoder.foundation.usage().result_bytes,
+            before.result_bytes
+        );
+        assert_eq!(owner.decoder.foundation.usage().jobs, before.jobs);
+        assert!(matches!(request.view(), ClientRequest::Detach));
+        assert_eq!(
+            request.try_reduce_to_result_storage(minimum - 1),
+            Err(ilium_execution::RejectReason::InvalidCost)
+        );
+        assert_eq!(owner.decoder.foundation.usage().jobs, before.jobs);
+        assert_eq!(
+            owner.decoder.foundation.usage().input_bytes,
+            before.input_bytes
+        );
+        assert_eq!(
+            owner.decoder.foundation.usage().result_bytes,
+            before.result_bytes
+        );
+        request.try_reduce_to_result_storage(minimum).unwrap();
+        assert_eq!(owner.decoder.foundation.usage().jobs, 0);
+        assert_eq!(owner.decoder.foundation.usage().input_bytes, 0);
+        assert_eq!(owner.decoder.foundation.usage().result_bytes, minimum);
+        assert!(matches!(
+            ilium_execution::retained_result_storage_bytes::<ClientRequest>(usize::MAX),
+            Err(ilium_execution::RejectReason::InvalidCost)
+        ));
+        drop(request);
+        assert_eq!(owner.decoder.foundation.usage().result_bytes, 0);
+        owner.request_shutdown();
+    }
+}

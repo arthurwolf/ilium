@@ -85,10 +85,13 @@ pub enum IconTarget {
     /// The small dot in a pane's header that opens the recap popover.
     ChromeRecap,
     AttentionSnooze,
+    SpendingMedalGold,
+    SpendingMedalSilver,
+    SpendingMedalBronze,
 }
 
 impl IconTarget {
-    pub const ALL: [Self; 69] = [
+    pub const ALL: [Self; 72] = [
         Self::Group,
         Self::TopLevel,
         Self::Project,
@@ -158,6 +161,9 @@ impl IconTarget {
         Self::AgentToolbarSelection,
         Self::ChromeRecap,
         Self::AttentionSnooze,
+        Self::SpendingMedalGold,
+        Self::SpendingMedalSilver,
+        Self::SpendingMedalBronze,
     ];
 
     pub const fn label(self) -> &'static str {
@@ -231,6 +237,9 @@ impl IconTarget {
             Self::AgentToolbarSelection => "Agent toolbar: text selection toggle",
             Self::ChromeRecap => "Pane header: recap dot",
             Self::AttentionSnooze => "Attention: snooze",
+            Self::SpendingMedalGold => "Spending medal: gold",
+            Self::SpendingMedalSilver => "Spending medal: silver",
+            Self::SpendingMedalBronze => "Spending medal: bronze",
         }
     }
 
@@ -305,6 +314,9 @@ impl IconTarget {
             Self::AgentToolbarSelection => "agent_toolbar_selection",
             Self::ChromeRecap => "chrome_recap",
             Self::AttentionSnooze => "attention_snooze",
+            Self::SpendingMedalGold => "spending_medal_gold",
+            Self::SpendingMedalSilver => "spending_medal_silver",
+            Self::SpendingMedalBronze => "spending_medal_bronze",
         }
     }
 
@@ -383,6 +395,9 @@ impl IconTarget {
             Self::AgentToolbarSelection => "🖱️",
             Self::ChromeRecap => "·",
             Self::AttentionSnooze => "💤",
+            Self::SpendingMedalGold => "🥇",
+            Self::SpendingMedalSilver => "🥈",
+            Self::SpendingMedalBronze => "🥉",
         }
     }
 
@@ -482,6 +497,9 @@ impl IconTarget {
             Self::AgentToolbarSelection => &["🖱️", "◫", "▧", "Ⓢ"],
             Self::ChromeRecap => &["·", "•", "◦", "∙"],
             Self::AttentionSnooze => &["💤", "⏸", "☾"],
+            Self::SpendingMedalGold => &["🥇", "🏆", "★", "◆"],
+            Self::SpendingMedalSilver => &["🥈", "☆", "◇", "◆"],
+            Self::SpendingMedalBronze => &["🥉", "✦", "◈", "◆"],
         }
     }
 }
@@ -562,6 +580,9 @@ pub struct IconSettings {
     pub agent_toolbar_selection: String,
     pub chrome_recap: String,
     pub attention_snooze: String,
+    pub spending_medal_gold: String,
+    pub spending_medal_silver: String,
+    pub spending_medal_bronze: String,
 }
 
 impl Default for IconSettings {
@@ -643,6 +664,9 @@ impl IconSettings {
             agent_toolbar_selection: value(IconTarget::AgentToolbarSelection),
             chrome_recap: value(IconTarget::ChromeRecap),
             attention_snooze: value(IconTarget::AttentionSnooze),
+            spending_medal_gold: value(IconTarget::SpendingMedalGold),
+            spending_medal_silver: value(IconTarget::SpendingMedalSilver),
+            spending_medal_bronze: value(IconTarget::SpendingMedalBronze),
         }
     }
 
@@ -717,6 +741,9 @@ impl IconSettings {
             IconTarget::AgentToolbarSelection => &self.agent_toolbar_selection,
             IconTarget::ChromeRecap => &self.chrome_recap,
             IconTarget::AttentionSnooze => &self.attention_snooze,
+            IconTarget::SpendingMedalGold => &self.spending_medal_gold,
+            IconTarget::SpendingMedalSilver => &self.spending_medal_silver,
+            IconTarget::SpendingMedalBronze => &self.spending_medal_bronze,
         }
     }
 
@@ -800,6 +827,9 @@ impl IconSettings {
             IconTarget::AgentToolbarSelection => &mut self.agent_toolbar_selection,
             IconTarget::ChromeRecap => &mut self.chrome_recap,
             IconTarget::AttentionSnooze => &mut self.attention_snooze,
+            IconTarget::SpendingMedalGold => &mut self.spending_medal_gold,
+            IconTarget::SpendingMedalSilver => &mut self.spending_medal_silver,
+            IconTarget::SpendingMedalBronze => &mut self.spending_medal_bronze,
         };
         *slot = glyph;
     }

@@ -371,18 +371,18 @@ fn edit_toml(source: &str, path: &str, replacement: &str) -> Result<String, &'st
         } else {
             format!("{table}.{}", keys.last().copied().unwrap_or(""))
         };
-        let assignment = line
-            .split_once('=')
-            .filter(|(left, _)| left.trim() == keys.last().copied().unwrap_or(""));
-        if let (true, Some((left, _))) = (expected == path, assignment) {
-            if found || line.contains('#') {
-                return Err("config.edit-context-required");
+        match line.split_once('=') {
+            Some((left, _))
+                if expected == path && left.trim() == keys.last().copied().unwrap_or("") =>
+            {
+                if found || line.contains('#') {
+                    return Err("config.edit-context-required");
+                }
+                let suffix = if line.ends_with('\n') { "\n" } else { "" };
+                output.push_str(&format!("{left}= {replacement}{suffix}"));
+                found = true;
             }
-            let suffix = if line.ends_with('\n') { "\n" } else { "" };
-            output.push_str(&format!("{left}= {replacement}{suffix}"));
-            found = true;
-        } else {
-            output.push_str(line);
+            _ => output.push_str(line),
         }
     }
     if !found {

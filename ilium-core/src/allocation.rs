@@ -394,6 +394,12 @@ impl AllocationSize for ContainerKind {
     fn heap_bytes(&self) -> usize {
         match self {
             Self::Project { path } => 0usize.saturating_add(path.heap_bytes()),
+            Self::Worktree {
+                repo_common_dir,
+                worktree_root,
+            } => repo_common_dir
+                .heap_bytes()
+                .saturating_add(worktree_root.heap_bytes()),
             Self::Group => 0usize,
             Self::SplitView { orientation } => 0usize.saturating_add(orientation.heap_bytes()),
         }

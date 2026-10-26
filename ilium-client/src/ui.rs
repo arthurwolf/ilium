@@ -61,6 +61,7 @@ pub(crate) fn draw_at_with_cursor(
     // reservation must match the mode before anything is measured or drawn.
     tree_ui::set_attention_button_reserved(app.attention_enabled());
     tree_ui::set_attention_button_large(app.attention_settings.large_buttons);
+    tree_ui::set_tree_toolbar_always_visible(app.ui_settings.tree_toolbar_always_visible);
     app.reconcile_animation_presentation();
     app.composed_editor_sources.clear();
     let area = frame.area();
@@ -531,6 +532,7 @@ fn status_tooltip_content(
                 let (title, kind) = match &container.kind {
                     ilium_core::ContainerKind::Project { .. } => ("Project", "project"),
                     ilium_core::ContainerKind::Group => ("Group", "group"),
+                    ilium_core::ContainerKind::Worktree { .. } => ("Worktree", "fixed worktree"),
                     ilium_core::ContainerKind::SplitView { .. } => ("Split view", "split view"),
                 };
                 Some((title, kind))
@@ -874,6 +876,7 @@ fn draw_base_layer(frame: &mut Frame, area: Rect, app: &mut App) -> Option<Posit
             agent_identifiers: &app.ui_settings.agent_identifiers,
             agent_models: &agent_models,
             icons: &app.ui_settings.icons,
+            row_layout: &app.ui_settings.tree_row_layout,
             workspace_git_statuses: &app.workspace_git_statuses,
             show_worktree_branch_line: app.git_settings.branch_line
                 != crate::config::GitBranchLine::Off,

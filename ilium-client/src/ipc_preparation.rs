@@ -8,6 +8,7 @@ use std::{io, sync::Arc};
 use tokio::sync::Notify;
 
 const MIB: usize = 1024 * 1024;
+#[cfg(test)]
 pub(crate) const CODEC_COST: JobCost = JobCost {
     input_bytes: 128 * MIB,
     result_bytes: 128 * MIB,
@@ -83,20 +84,54 @@ impl IpcPreparation {
         self.outbound.clone()
     }
 
+    #[cfg(test)]
     pub(crate) async fn reserve_decoder(&self) -> Result<Reservation, IpcError> {
-        self.reserve(&self.decoder).await
+        self.reserve(&self.decoder, CODEC_COST).await
     }
 
+    pub(crate) async fn reserve_decoder_for(
+        &self,
+        input_bytes: usize,
+    ) -> Result<Reservation, IpcError> {
+        self.reserve(
+            &self.decoder,
+            JobCost {
+                input_bytes,
+                // Decoding can expand compact collections. Preserve the audited
+                // result ceiling rather than assuming wire size bounds allocations.
+                result_bytes: 128 * MIB,
+            },
+        )
+        .await
+    }
+
+    #[cfg(test)]
     pub(crate) async fn reserve_encoder(&self) -> Result<Reservation, IpcError> {
-        self.reserve(&self.encoder).await
+        self.reserve(&self.encoder, CODEC_COST).await
     }
 
-    async fn reserve(&self, client: &Client) -> Result<Reservation, IpcError> {
+    async fn reserve(&self, client: &Client, cost: JobCost) -> Result<Reservation, IpcError> {
         loop {
             let notified = self.completed.notified();
             tokio::pin!(notified);
             notified.as_mut().enable();
-            match client.try_reserve(Lane::Cpu, CODEC_COST) {
+            // Permanent capability refusal cannot be repaired by a capacity
+            // notification. Do not park a connection on an impossible cost.
+            match client.maximum_cpu_job_cost() {
+                Ok(maximum) if cost.input_bytes > maximum.input_bytes => {
+                    return Err(rejected(RejectReason::InputBytes))
+                }
+                Ok(maximum) if cost.result_bytes > maximum.result_bytes => {
+                    return Err(rejected(RejectReason::ResultBytes))
+                }
+                Ok(_) => {}
+                Err(RejectReason::Busy) => {
+                    tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+                    continue;
+                }
+                Err(reason) => return Err(rejected(reason)),
+            }
+            match client.try_reserve(Lane::Cpu, cost) {
                 Ok(reservation) => return Ok(reservation),
                 Err(RejectReason::Busy) => {
                     // A short admission mutex can unlock without releasing a
@@ -671,9 +706,14 @@ pub(crate) fn reserve_request(
 const MAX_DECODED_STORAGE_BYTES: usize = 64 * MIB;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum StorageRefusal {
+pub(crate) enum StorageRefusal {
     SizeOverflow,
     TooLarge {
+        requested: usize,
+        capacity: usize,
+    },
+    SourceOverlapTooLarge {
+        source: usize,
         requested: usize,
         capacity: usize,
     },
@@ -687,11 +727,18 @@ enum StorageRefusal {
     ProcessQuota(RejectReason),
 }
 impl StorageRefusal {
-    fn reason(self) -> RejectReason {
+    pub(crate) fn reason(self) -> RejectReason {
         match self {
             Self::ProcessQuota(reason) => reason,
             _ => RejectReason::WorkerBytes,
         }
+    }
+
+    pub(crate) fn is_permanent(self) -> bool {
+        matches!(
+            self,
+            Self::SizeOverflow | Self::TooLarge { .. } | Self::SourceOverlapTooLarge { .. }
+        )
     }
 
     /// Terminal kind alone does not prove progress: a refused projection head
@@ -891,6 +938,47 @@ impl DecodedAllocation {
     pub(crate) fn declared_bytes(&self) -> usize {
         self.bytes
     }
+    pub(crate) fn validate_projection_overlap(
+        &self,
+        required: usize,
+    ) -> Result<(), StorageRefusal> {
+        if self
+            .bytes
+            .checked_add(required)
+            .is_none_or(|overlap| overlap > self.owner.capacity_bytes)
+        {
+            return Err(StorageRefusal::SourceOverlapTooLarge {
+                source: self.bytes,
+                requested: required,
+                capacity: self.owner.capacity_bytes,
+            });
+        }
+        Ok(())
+    }
+    pub(crate) fn try_reserve_projection(&self, bytes: usize) -> Result<Arc<Self>, StorageRefusal> {
+        let requested = bytes.checked_add(512).ok_or(StorageRefusal::SizeOverflow)?;
+        if requested > self.owner.capacity_bytes {
+            return Err(StorageRefusal::TooLarge {
+                requested,
+                capacity: self.owner.capacity_bytes,
+            });
+        }
+        // This exact source must survive until its projection is installed.
+        // Its debit cannot be counted as future releasable replacement credit.
+        if self
+            .bytes
+            .checked_add(requested)
+            .is_none_or(|overlap| overlap > self.owner.capacity_bytes)
+        {
+            return Err(StorageRefusal::SourceOverlapTooLarge {
+                source: self.bytes,
+                requested,
+                capacity: self.owner.capacity_bytes,
+            });
+        }
+        self.owner.admit_classified(bytes, false)
+    }
+
     pub(crate) fn try_reserve_derived(&self, bytes: usize) -> Result<Arc<Self>, RejectReason> {
         // A derivation may outlive terminal consumption. It is never eligible
         // terminal-release credit merely because its source was a terminal.
@@ -940,7 +1028,18 @@ impl IpcPreparation {
         &self,
         request: ilium_ipc::ClientRequest,
     ) -> Result<StoredEncodedFrame, IpcError> {
-        let reservation = self.reserve_encoder().await?;
+        let request_bytes = request_retained_bytes(&request);
+        // Sizing returns the same original request, plus one scalar. It does
+        // not allocate a maximum-size encoded payload.
+        let reservation = self
+            .reserve(
+                &self.encoder,
+                JobCost {
+                    input_bytes: request_bytes,
+                    result_bytes: request_bytes.saturating_add(64),
+                },
+            )
+            .await?;
         let sized = self
             .run_reserved(reservation, move |_| {
                 let bytes = ilium_ipc::encoded_capacity_bound(&request)?;
@@ -962,7 +1061,18 @@ impl IpcPreparation {
                 Err(error) => return Err(rejected(error)),
             }
         };
-        let reservation = self.reserve_encoder().await?;
+        let reservation = self
+            .reserve(
+                &self.encoder,
+                JobCost {
+                    input_bytes: request_bytes,
+                    // Geometric growth may temporarily own the previous buffer too.
+                    result_bytes: bytes
+                        .saturating_add((bytes / 2).max(256))
+                        .saturating_add(std::mem::size_of::<ilium_ipc::EncodedFrame>()),
+                },
+            )
+            .await?;
         let encoded = self
             .run_reserved(reservation, move |_| ilium_ipc::encode_frame(&request))
             .await?;
@@ -1036,7 +1146,11 @@ impl IpcPreparation {
                 Err(StorageRefusal::ProcessQuota(RejectReason::Busy)) => {
                     // The process admission mutex can unlock without releasing
                     // any debit. Preserve its bounded timer retry, not a spin.
-                    tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+                    tokio::select! {
+                        biased;
+                        reason = &mut cancelled => return Err(decoded_wait_cancelled(reason, bytes)),
+                        () = tokio::time::sleep(std::time::Duration::from_millis(1)) => {},
+                    }
                 }
                 Err(refusal) if refusal.can_wait_for_terminal_release() => {
                     if !waited_for_capacity {
@@ -1272,5 +1386,64 @@ mod antigravity_statusline_request_tests {
             request_retained_bytes(&with_command) - request_retained_bytes(&without_command),
             command_capacity,
         );
+    }
+}
+
+#[cfg(test)]
+mod projection_refusal_classification_tests {
+    use super::*;
+    #[test]
+    fn impossible_derivation_preserves_size_and_original_owner() {
+        let storage = Arc::new(DecodedStorage::new(4096, crate::execution::process_quota()));
+        let owner = storage.admit(1).unwrap();
+        let before = storage.bytes.load(std::sync::atomic::Ordering::Acquire);
+        let error = owner.try_reserve_projection(4097).unwrap_err();
+        assert!(error.is_permanent());
+        assert!(matches!(
+            error,
+            StorageRefusal::TooLarge {
+                requested: 4609,
+                capacity: 4096
+            }
+        ));
+        assert_eq!(
+            storage.bytes.load(std::sync::atomic::Ordering::Acquire),
+            before
+        );
+        assert_eq!(owner.bytes, 513);
+        assert!(owner
+            .try_reserve_projection(usize::MAX)
+            .unwrap_err()
+            .is_permanent());
+        // Each 1600-byte derivation alone fits with its source, but both
+        // coexisting allocations plus their debits cannot fit together.
+        assert!(owner.try_reserve_projection(1600).is_ok());
+        assert!(owner
+            .validate_projection_overlap((1600 + 512) * 2)
+            .unwrap_err()
+            .is_permanent());
+    }
+    #[test]
+    fn occupied_storage_preserves_occupancy_as_retryable() {
+        let storage = Arc::new(DecodedStorage::new(2048, crate::execution::process_quota()));
+        let owner = storage.admit(1).unwrap();
+        let competing = storage.admit(1).unwrap();
+        let error = owner.try_reserve_projection(512).unwrap_err();
+        assert!(!error.is_permanent());
+        assert!(matches!(
+            error,
+            StorageRefusal::LocalCapacity {
+                used: 1026,
+                requested: 1024,
+                capacity: 2048,
+                ..
+            }
+        ));
+        drop(competing);
+        assert!(owner.try_reserve_projection(512).is_ok());
+        assert!(matches!(
+            owner.try_reserve_projection(1536),
+            Err(StorageRefusal::SourceOverlapTooLarge { .. })
+        ));
     }
 }

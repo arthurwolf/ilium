@@ -1105,6 +1105,9 @@ fn handle_move_mode_key(app: &mut App, key: &KeyEvent) {
 /// preceding sibling is a pane) -- nothing is sent in that case rather
 /// than a request that could only be rejected.
 fn compute_indent_target(tree: &Tree, id: NodeId) -> Option<(NodeId, Option<usize>)> {
+    if tree.worktree_container_for_node(id).is_some() {
+        return None;
+    }
     let parent = tree.parent_of(id)?;
     let siblings = tree.children_of(parent).ok()?;
     let own_index = siblings.iter().position(|&sibling| sibling == id)?;
@@ -1131,6 +1134,9 @@ fn compute_indent_target(tree: &Tree, id: NodeId) -> Option<(NodeId, Option<usiz
 /// need an enclosing group) -- nothing is sent in either case rather than
 /// a request that could only be rejected.
 fn compute_outdent_target(tree: &Tree, id: NodeId) -> Option<(NodeId, Option<usize>)> {
+    if tree.worktree_container_for_node(id).is_some() {
+        return None;
+    }
     let current_group = tree.parent_of(id)?;
     if current_group == ROOT_ID {
         return None;
@@ -2588,6 +2594,12 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
         crate::onboarding::integration::open(app, true);
         return;
     }
+    if state.tab == SettingsTab::Icons
+        && crate::tree_layout_settings::handle_key(app, &mut state, *key)
+    {
+        app.mode = Mode::Settings(Box::new(state));
+        return;
+    }
     state.animation_slider_drag = None;
     app.clear_animation_hover();
 
@@ -3308,6 +3320,9 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                 app.settings_reset_agent_setup_path(*feature);
             }
         }
+        KeyCode::Char('L') if state.tab == SettingsTab::Icons => {
+            state.tree_layout_editor = Some(Default::default());
+        }
         KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::Icons => {
             state.selected_row = state.selected_row.saturating_sub(1);
         }
@@ -3637,6 +3652,13 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                 .get(state.selected_row)
                 .copied()
             {
+                if matches!(key.code, KeyCode::Enter | KeyCode::Char(' ')) {
+                    if let Some(target) = row.icon_target() {
+                        state.icon_picker = Some(crate::app::IconPickerState::new(target));
+                        app.mode = Mode::Settings(Box::new(state));
+                        return;
+                    }
+                }
                 if row == crate::cost_settings::CostRow::SparklineWindow
                     && matches!(key.code, KeyCode::Enter | KeyCode::Char(' '))
                 {
@@ -5450,7 +5472,7 @@ mod indent_outdent_tests {
         assert!(matches!(app.mode, Mode::Normal));
         assert!(matches!(
             app.take_outbound_requests().as_slice(),
-            [ilium_ipc::ClientRequest::QueryRepoFacts { .. }, ilium_ipc::ClientRequest::NewPane {
+            [ilium_ipc::ClientRequest::NewPane {
                 kind: ilium_ipc::NewPaneKind::Command(command),
                 ..
             }] if command == "claude"
