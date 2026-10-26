@@ -6065,3 +6065,165 @@ mod text_trigger_retry_and_delete_tests {
         assert!(matches!(app.mode, Mode::Settings(_)));
     }
 }
+
+#[cfg(test)]
+mod board_storage_catalog_submission_tests {
+    use super::*;
+
+    fn fixture(
+        storage_kind: BoardStorageKind,
+        relative_path: &str,
+    ) -> (tempfile::TempDir, App, CreateBoardState, std::path::PathBuf) {
+        let directory = tempfile::tempdir().unwrap();
+        let project = ilium_platform::paths::canonicalize(directory.path()).unwrap();
+        let expected_path = project.join(relative_path);
+        let mut app = App::new("board-selector".into(), project);
+        let parent_group = app.tree.add_group(ROOT_ID, "Captured destination").unwrap();
+        let mut draft = CreateBoardState {
+            parent_group,
+            name: TextPromptState::new("Authored λ board"),
+            path: TextPromptState::new(relative_path),
+            storage_kind,
+            editing_path: true,
+        };
+        draft.name.cursor = 3;
+        draft.path.cursor = 7;
+        app.mode = Mode::CreateBoard(draft.clone());
+        (directory, app, draft, expected_path)
+    }
+
+    fn press(app: &mut App, code: KeyCode) {
+        handle_event(app, Event::Key(KeyEvent::new(code, KeyModifiers::NONE)));
+    }
+
+    fn open_catalog(app: &mut App) {
+        handle_event(
+            app,
+            Event::Key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::CONTROL)),
+        );
+        assert!(matches!(app.mode, Mode::ValueDialog(_)));
+    }
+
+    fn assert_authored_fields(current: &CreateBoardState, original: &CreateBoardState) {
+        assert_eq!(current.name, original.name);
+        assert_eq!(current.path, original.path);
+        assert_eq!(current.editing_path, original.editing_path);
+    }
+
+    #[test]
+    fn chosen_board_storage_reaches_submission_and_disk_readback() {
+        // Losing the catalog choice before submission must fail the file and request assertions.
+        for (initial, chosen, selection_key, relative_path) in [
+            (
+                BoardStorageKind::MarkdownFile,
+                BoardStorageKind::Folder,
+                KeyCode::Up,
+                "plans/authored folder",
+            ),
+            (
+                BoardStorageKind::Folder,
+                BoardStorageKind::MarkdownFile,
+                KeyCode::Down,
+                "plans/authored plan.md",
+            ),
+        ] {
+            let (_directory, mut app, draft, expected_path) = fixture(initial, relative_path);
+            open_catalog(&mut app);
+            press(&mut app, selection_key);
+            press(&mut app, KeyCode::Enter);
+            let Mode::CreateBoard(parent) = &app.mode else {
+                panic!("accepted storage catalog did not restore Create Board");
+            };
+            assert_authored_fields(parent, &draft);
+            assert_eq!(parent.parent_group, draft.parent_group);
+            assert_eq!(parent.storage_kind, chosen);
+            assert!(app.take_outbound_requests().is_empty());
+            assert!(
+                !expected_path.exists(),
+                "choosing storage must not create a board"
+            );
+
+            press(&mut app, KeyCode::Enter);
+            app.settle_filesystem_for_test();
+            assert!(matches!(app.mode, Mode::Normal));
+            let expected_storage = match chosen {
+                BoardStorageKind::Folder => ilium_core::BoardStorage::Folder {
+                    path: expected_path.clone(),
+                },
+                BoardStorageKind::MarkdownFile => ilium_core::BoardStorage::MarkdownFile {
+                    path: expected_path.clone(),
+                },
+            };
+            let requests = app.take_outbound_requests();
+            let [ClientRequest::NewBoard {
+                parent_group,
+                name,
+                storage,
+            }] = requests.as_slice()
+            else {
+                panic!("expected one board creation request, got {requests:?}");
+            };
+            assert_eq!(*parent_group, draft.parent_group);
+            assert_eq!(name, &draft.name.buf);
+            assert_eq!(storage, &expected_storage);
+            assert_eq!(expected_path.is_dir(), chosen == BoardStorageKind::Folder);
+            assert_eq!(
+                expected_path.is_file(),
+                chosen == BoardStorageKind::MarkdownFile
+            );
+
+            let reloaded = crate::board::BoardPane::load(storage.clone()).unwrap();
+            assert_eq!(reloaded.storage, expected_storage);
+            let mut titles = reloaded
+                .columns
+                .iter()
+                .map(|column| column.title.as_str())
+                .collect::<Vec<_>>();
+            titles.sort();
+            assert_eq!(titles, vec!["Doing", "Done", "To do"]);
+        }
+    }
+
+    #[test]
+    fn stale_board_storage_catalog_keeps_the_draft_without_creating_storage() {
+        // Removing the destination fence must not apply the choice to a replacement parent.
+        let (_directory, mut app, draft, expected_path) =
+            fixture(BoardStorageKind::Folder, "plans/authored plan.md");
+        let changed_destination = app.tree.add_group(ROOT_ID, "Changed destination").unwrap();
+        open_catalog(&mut app);
+        let Some(Mode::CreateBoard(parent)) = app.modal_stack.last_mut() else {
+            panic!("storage catalog lost its Create Board parent");
+        };
+        parent.parent_group = changed_destination;
+        press(&mut app, KeyCode::Down);
+        press(&mut app, KeyCode::Enter);
+
+        let Mode::ValueDialog(host) = &app.mode else {
+            panic!("stale destination incorrectly accepted the storage choice");
+        };
+        let crate::value_dialog::ValueDialogState::Choice(choice) = &host.dialog else {
+            panic!("storage catalog changed kind");
+        };
+        assert!(choice
+            .notice
+            .as_deref()
+            .is_some_and(|notice| notice.contains("destination changed")));
+        let Some(Mode::CreateBoard(parent)) = app.modal_stack.last() else {
+            panic!("stale catalog lost its authored parent");
+        };
+        assert_authored_fields(parent, &draft);
+        assert_eq!(parent.parent_group, changed_destination);
+        assert_eq!(parent.storage_kind, draft.storage_kind);
+        app.settle_filesystem_for_test();
+        assert!(app.take_outbound_requests().is_empty());
+        assert!(!expected_path.exists());
+
+        press(&mut app, KeyCode::Esc);
+        let Mode::CreateBoard(parent) = &app.mode else {
+            panic!("cancelling stale catalog did not restore the authored form");
+        };
+        assert_authored_fields(parent, &draft);
+        assert_eq!(parent.parent_group, changed_destination);
+        assert_eq!(parent.storage_kind, draft.storage_kind);
+    }
+}

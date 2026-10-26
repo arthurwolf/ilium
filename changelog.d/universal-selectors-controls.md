@@ -6,3 +6,5 @@
 - Text-trigger delays reject invalid and out-of-range drafts instead of saving a substitute value. A completed earlier save cannot dismiss a later invalid draft.
 - Location-coordinate arrows disable at the correct latitude and longitude limits, including OpenStreetMap's latitude range. Focused coordinates accept `-`, `+` and `*`; the location entry-mode selector accepts `+` for its complete catalog.
 - Padding exact entry buffers the complete draft until confirmation, preserves the saved mode and threshold on cancellation, and retains invalid or failed saves for correction or retry through the shared numeric editor. Threshold arrows disable at domain limits, and the columns label fits compact layouts.
+- Pane creation keeps repository admission off the nested request polling stack, avoiding debug server stack exhaustion without increasing stack or capacity limits. The admission task remains owned and aborts when its caller is cancelled.
+- Global animation settings honor the same explicit configuration-directory override as other settings, keeping isolated runs inside their own configuration on every platform.

@@ -134,7 +134,7 @@ pub fn set_animation(
 /// module's atomic, lock-protected `.ilium/config.yaml` format under a
 /// dedicated directory beside the client's main configuration.
 pub fn global_animation_home() -> Option<PathBuf> {
-    directories::ProjectDirs::from("", "", "ilium").map(|dirs| dirs.config_dir().join("animation"))
+    ilium_platform::paths::config_dir().map(|directory| directory.join("animation"))
 }
 
 /// Adopts the launch project's animation as the global one, once. Before the
@@ -404,6 +404,39 @@ animation:
             assert!(!mutated);
             assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
         }
+    }
+
+    #[test]
+    fn global_animation_home_honors_the_isolated_config_directory() {
+        // Environment resolution runs in a child so concurrent App tests retain
+        // their own configuration and never inspect the user's animation file.
+        let directory = tempfile::tempdir().unwrap();
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "project_config::tests::global_animation_home_child",
+                "--ignored",
+                "--nocapture",
+            ])
+            .env(ilium_platform::paths::CONFIG_DIR_ENV, directory.path())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "isolated animation path child failed: {}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[test]
+    #[ignore = "environment resolution; launched by the isolated parent test"]
+    fn global_animation_home_child() {
+        let directory = std::env::var_os(ilium_platform::paths::CONFIG_DIR_ENV).unwrap();
+        assert_eq!(
+            global_animation_home(),
+            Some(PathBuf::from(directory).join("animation"))
+        );
     }
 
     #[test]
