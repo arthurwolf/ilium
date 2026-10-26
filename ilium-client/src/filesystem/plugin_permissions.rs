@@ -756,7 +756,6 @@ impl PluginPermissionFiles {
     pub(crate) fn is_pending(&self) -> bool {
         self.pending.is_some()
     }
-    #[cfg(test)]
     pub(crate) fn notification(&self) -> Arc<Notify> {
         self.writer.notification()
     }

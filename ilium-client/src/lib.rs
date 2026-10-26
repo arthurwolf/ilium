@@ -2729,7 +2729,7 @@ async fn finish_input_retirement(
             report.complete_exit_resizes();
             return report
                 .into_result()
-                .map_err(|failure| crate::error::InputRetirementError::Failed(*failure));
+                .map_err(crate::error::InputRetirementError::Failed);
         }
         if tokio::time::Instant::now() >= deadline {
             return Err(crate::error::InputRetirementError::Deadline(
@@ -4710,8 +4710,8 @@ impl InputBatchItem
     fn coalesce_motion(self) -> Result<(), Self> {
         match self {
             Ok(event) => match event.coalesce_motion() {
-                Some(original) => Err(Ok(original)),
-                None => Ok(()),
+                Err(original) => Err(Ok(original)),
+                Ok(()) => Ok(()),
             },
             Err(error) => Err(Err(error)),
         }

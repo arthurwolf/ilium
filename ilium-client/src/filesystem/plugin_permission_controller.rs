@@ -22,6 +22,7 @@ use std::{
     collections::BTreeMap,
     sync::{Arc, Mutex},
 };
+use tokio::sync::Notify;
 
 type Result<T> = std::result::Result<T, String>;
 type LoadedOutcome = Retained<std::result::Result<LedgerSnapshot, PersistenceError>>;

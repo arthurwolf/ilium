@@ -319,9 +319,9 @@ impl ImportsFixtureBuilder {
             for kind in kinds {
                 if kind["primitive"] == "basic" {
                     let id = kind["id"].as_str().ok_or("basic pane kind requires id")?;
-                    if !id
+                    if id
                         .strip_prefix(&format!("{plugin}."))
-                        .is_some_and(|local| !local.is_empty())
+                        .is_none_or(|local| local.is_empty())
                     {
                         return Err("fixture pane kind must belong to its plugin".into());
                     }
