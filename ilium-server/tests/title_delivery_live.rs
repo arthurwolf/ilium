@@ -133,6 +133,7 @@ async fn acknowledged_authored_enter_authorizes_title_before_request_history_flu
             &mut client,
             &ClientRequest::Attach {
                 session: SESSION.into(),
+                hello: Default::default(),
             },
         )
         .await

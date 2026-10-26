@@ -169,9 +169,8 @@ impl ProjectionRetention {
             | BlockingErrorsSnapshot { .. }
             | PaneCreateFinished { .. }
             | WorkspaceRemovalBlocked { .. } => return update,
-            | WorkspaceRemovalBlocked { .. }
             // Plugin-platform events are projected by the plugin client layer, not here (skeleton).
-            | Plugin(_)
+            Plugin(_)
             | Contributions(_)
             | Rejected(_) => return update,
             AgentDetectionSettingsChanged { result, .. } => match result {
@@ -184,8 +183,6 @@ impl ProjectionRetention {
             TextTriggersChanged { .. }
             | PaneProcessTerminated { .. }
             | PaneFrozen { .. }
-            | BlockingErrorsSnapshot { .. }
-            | PaneCreateFinished { .. }
             | SoundPreviewCompleted { .. } => (global, None),
         };
         update.keys.push(Key { slot, scope });

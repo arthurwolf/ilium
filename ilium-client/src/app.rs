@@ -28208,11 +28208,11 @@ mod tests {
                 .find(|request| matches!(request, ClientRequest::NewPane { .. })),
             Some(ClientRequest::NewPane {
                 request_id: 1,
-                parent_group: group,
-                kind: ilium_ipc::NewPaneKind::Editor(resolved_path.clone()),
+                parent_group,
+                kind: ilium_ipc::NewPaneKind::Editor(path),
                 working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
                 ..
-            }) if parent_group == group && *path == resolved_path
+            }) if parent_group == group && path == resolved_path
         ));
         assert_eq!(
             app.status_message.as_deref(),

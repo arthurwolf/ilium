@@ -2164,9 +2164,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn read_error_after_planned_stop_is_not_an_input_failure() {
-        let _serial = INPUT_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
+        let _serial = INPUT_TEST_LOCK.lock().await;
         let quota = quota();
         let reservation = InputReservation::prepare(&quota).expect("input admission");
         let session = reservation.session_claim();
