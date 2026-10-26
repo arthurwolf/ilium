@@ -3818,6 +3818,7 @@ dependencies = [
 name = "ilium-plugin-testkit"
 version = "0.1.1"
 dependencies = [
+ "ilium-plugin-api",
  "ilium-plugin-sdk-core",
  "proptest",
  "rand 0.9.5",

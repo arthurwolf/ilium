@@ -7,6 +7,7 @@
 
 mod cli_support;
 mod common;
+mod kernel_regressions;
 
 mod reference_test_harness_activation;
 mod reference_test_harness_coverage;

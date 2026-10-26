@@ -391,13 +391,12 @@ fn dev_435_a_key_with_a_space_is_refused_with_dedup_key_invalid() {
 fn dev_435_a_second_submission_with_the_same_key_inside_ten_minutes_is_a_duplicate() {
     with_clean_env(|| {
         let mut host = sound_host();
-        spy_script(vec![
-            vec![sound_keyed(1, "same")],
-            vec![sound_keyed(2, "same")],
-        ]);
+        spy_script(vec![vec![sound_keyed(1, "same")]]);
         host.deliver(client_batch(1));
         host.settle();
         host.advance_clock(599_000);
+        // Completion delivery also calls the handler: arm the retry only after fake time moves.
+        spy_script(vec![vec![sound_keyed(2, "same")]]);
         host.deliver(client_batch(1));
         host.settle();
         let outcomes = host.outcomes();
@@ -415,13 +414,12 @@ fn dev_435_a_second_submission_with_the_same_key_inside_ten_minutes_is_a_duplica
 fn dev_435_after_ten_minutes_the_same_key_is_accepted_again() {
     with_clean_env(|| {
         let mut host = sound_host();
-        spy_script(vec![
-            vec![sound_keyed(1, "same")],
-            vec![sound_keyed(2, "same")],
-        ]);
+        spy_script(vec![vec![sound_keyed(1, "same")]]);
         host.deliver(client_batch(1));
         host.settle();
         host.advance_clock(601_000);
+        // Completion delivery also calls the handler: arm the retry only after fake time moves.
+        spy_script(vec![vec![sound_keyed(2, "same")]]);
         host.deliver(client_batch(1));
         host.settle();
         assert_eq!(host.outcomes(), vec![Outcome::Ok, Outcome::Ok]);

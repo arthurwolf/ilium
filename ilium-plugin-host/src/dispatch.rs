@@ -108,25 +108,7 @@ fn plugin(origin: &Origin) -> Option<&PluginId> {
 }
 
 fn malformed(submission: &Submission) -> Option<PluginError> {
-    let mandatory = matches!(
-        submission.intent,
-        Intent::SendInput(_) | Intent::AgentAction(_)
-    );
-    let valid = submission.dedup_key.as_ref().is_none_or(|key| {
-        !key.is_empty()
-            && key.len() <= 128
-            && key
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || b"._:/-".contains(&byte))
-    });
-    if !valid || (mandatory && submission.dedup_key.is_none()) {
-        Some(error(
-            ErrorCode::InvalidArgument,
-            "invalid or missing dedup key",
-        ))
-    } else {
-        None
-    }
+    ilium_plugin_api::submission::check_shape(submission).err()
 }
 
 impl Dispatcher {

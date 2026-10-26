@@ -1309,3 +1309,90 @@ fn path_scope_covers(held: &str, wanted: &str) -> bool {
     // cannot cover another directory grant, which would add grandchildren.
     false
 }
+
+/// Canonical intent-to-grant requirements (reference-events-and-intents.md).
+/// This maps typed operations onto the existing grant catalogue; parsing and wildcard/scope
+/// coverage remain owned by Grant. It performs no effects or contribution-ownership guesses.
+pub fn required_by_intent(
+    intent: &crate::generated::types::intents::Intent,
+    origin_plugin: &str,
+) -> Result<Vec<Grant>, crate::generated::types::errors::PluginError> {
+    use crate::generated::types::errors::{ErrorCode, PluginError};
+    use crate::generated::types::intents::{ExpandTarget, Intent};
+
+    let mut names: Vec<String> = match intent {
+        Intent::RenameNode(_)
+        | Intent::MoveNode(_)
+        | Intent::CloseNode(_)
+        | Intent::SetNodeLocked(_)
+        | Intent::SetBookmarked(_) => vec!["tree.write".into()],
+        Intent::CreatePane(spec) => {
+            let mut names = vec!["panes.create".into()];
+            if spec.initial_input.is_some() {
+                names.push("terminal.write".into());
+            }
+            names
+        }
+        Intent::SignalPane(_) => vec!["panes.signal".into()],
+        Intent::SendInput(spec) => {
+            let mut names = vec!["terminal.write".into()];
+            if spec.raw.is_some() || spec.mouse.is_some() {
+                names.push("terminal.raw-input".into());
+            }
+            if spec.lock_user_input {
+                names.push("terminal.input-lock".into());
+            }
+            names
+        }
+        Intent::AgentAction(_) => vec!["agent.control".into()],
+        Intent::SetDecoration(_)
+        | Intent::ClearDecoration(_)
+        | Intent::SetVirtualRows(_)
+        | Intent::SetInferredIcon(_) => vec!["tree.decorate".into()],
+        Intent::PlaySound(_) => vec!["sound.play".into()],
+        Intent::Notify(_) => vec!["notify.desktop".into()],
+        Intent::OpenView(_) | Intent::CloseView(_) => vec!["ui.panels".into()],
+        Intent::InvokeCommand(spec) => vec![format!("commands.invoke:{}", spec.command)],
+        Intent::Message(spec) if spec.to.plugin.0 == origin_plugin => Vec::new(),
+        Intent::Message(spec) => vec![format!("messages.peer:{}", spec.to.plugin.0)],
+        Intent::EditorApplyEdits(_) | Intent::EditorOpen(_) => vec!["editor.edit".into()],
+        Intent::FreezePane(_)
+        | Intent::UnfreezePane(_)
+        | Intent::ReplacePaneCommand(_)
+        | Intent::TerminatePaneProcess(_)
+        | Intent::ResizePane(_) => vec!["panes.lifecycle".into()],
+        Intent::CreateGroup(_)
+        | Intent::CreateFolder(_)
+        | Intent::CreateProject(_)
+        | Intent::CreateSplit(_)
+        | Intent::Restructure(_)
+        | Intent::RevertRestructure(_) => vec!["tree.restructure".into()],
+        Intent::SetExpanded(spec) => match &spec.target {
+            ExpandTarget::Node(_) => vec!["tree.write".into()],
+            ExpandTarget::VirtualRow(_) => {
+                // A grant is insufficient proof of an own contribution. A future caller with
+                // authenticated contribution metadata can add that separate ownership check.
+                return Err(PluginError::new(
+                    ErrorCode::NotPermitted,
+                    "own virtual-row declaration must be verified by the host",
+                ));
+            }
+        },
+        Intent::MarkAttention(_) | Intent::AckAttention(_) => vec!["tree.attention".into()],
+        Intent::OpenExternal(_) => vec!["open-external".into()],
+        Intent::SetStatusSegment(_)
+        | Intent::ClearStatusSegment(_)
+        | Intent::SetFrameSlot(_)
+        | Intent::ClearFrameSlot(_) => vec!["ui.chrome".into()],
+        Intent::Toast(_) | Intent::DismissToast(_) => vec!["notify.toast".into()],
+    };
+    names.sort();
+    names.dedup();
+    names
+        .into_iter()
+        .map(|name| {
+            Grant::parse(&name)
+                .map_err(|error| PluginError::new(ErrorCode::InvalidArgument, error.message))
+        })
+        .collect()
+}
