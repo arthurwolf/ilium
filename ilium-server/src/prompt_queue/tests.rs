@@ -50,12 +50,18 @@ async fn completion_delayed_in_durability_cannot_claim_or_send_into_new_turn() {
         .expect("queued request");
         pane
     };
-    let session = ilium_pty::PtySession::spawn(
-        ilium_pty::PtyCommand::new("/bin/sh", directory.path(), 24, 80)
-            .arg("-c")
-            .arg("exec cat"),
-    )
-    .expect("owned isolated PTY");
+    // Keep a real input-capable child alive throughout the durability race.
+    // A one-shot echo command would exit before stale delivery is attempted.
+    #[cfg(unix)]
+    let command = ilium_pty::PtyCommand::new("/bin/sh", directory.path(), 24, 80)
+        .arg("-c")
+        .arg("exec cat");
+    #[cfg(windows)]
+    let command = ilium_pty::PtyCommand::new("cmd.exe", directory.path(), 24, 80)
+        .arg("/D")
+        .arg("/Q")
+        .arg("/K");
+    let session = ilium_pty::PtySession::spawn(command).expect("owned isolated PTY");
     let runtime = crate::pane::TerminalPaneRuntime::new(
         session,
         crate::pane::TerminalOrigin::PlainShell,
