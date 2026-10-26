@@ -1484,7 +1484,9 @@ async fn catalog_io_progresses_with_retained_general_results() {
         .unwrap();
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(2),
-        memory::io(&fixture.state, || Ok(PathBuf::from("synthetic-catalog-read"))),
+        memory::io(&fixture.state, || {
+            Ok(PathBuf::from("synthetic-catalog-read"))
+        }),
     )
     .await
     .expect("catalog I/O must not wait for unrelated general results to be dropped")

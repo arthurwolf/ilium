@@ -94,8 +94,11 @@ pub(super) async fn reserve_after_contention(
     bytes: usize,
     context: &str,
 ) -> Result<Arc<StorageAdmission>, ResourceError> {
-    let client = &state.execution.get()
-        .ok_or_else(|| err("unavailable", "Execution unavailable"))?.client;
+    let client = &state
+        .execution
+        .get()
+        .ok_or_else(|| err("unavailable", "Execution unavailable"))?
+        .client;
     loop {
         match client.try_reserve_storage(bytes) {
             Ok(storage) => return Ok(storage),
@@ -119,9 +122,8 @@ pub(super) async fn io<T: ResourceBytes + Send + 'static>(
     // constructs it. Reserving the whole 128 MiB as a job result instead would
     // wait forever while logging or an attaching request retains even 64 KiB
     // of the general client's result allowance.
-    let payload_storage = reserve_after_contention(
-        state, RESULT_BYTES, "Resource worker allocation refused",
-    ).await?;
+    let payload_storage =
+        reserve_after_contention(state, RESULT_BYTES, "Resource worker allocation refused").await?;
     let admission = client
         .reserve(
             ilium_execution::Lane::Io,
@@ -131,7 +133,8 @@ pub(super) async fn io<T: ResourceBytes + Send + 'static>(
                     .saturating_add(store::MAX_CATALOG_BYTES as usize),
                 // Heap payload is covered by payload_storage; the execution
                 // result still admits its wrapper and bounded error envelope.
-                result_bytes: size_of::<ResourceMemory<Result<T, ResourceError>>>().saturating_add(ENVELOPE_BYTES),
+                result_bytes: size_of::<ResourceMemory<Result<T, ResourceError>>>()
+                    .saturating_add(ENVELOPE_BYTES),
             },
         )
         .await
@@ -176,9 +179,8 @@ pub(super) async fn io<T: ResourceBytes + Send + 'static>(
         })?;
     // No payload crosses a charge gap. Refuse transient pressure rather than
     // awaiting another lease while retaining a complete worker reservation.
-    let storage = reserve_after_contention(
-        state, bytes, "Resource retained allocation refused",
-    ).await?;
+    let storage =
+        reserve_after_contention(state, bytes, "Resource retained allocation refused").await?;
     let (payload, hold) = loaded.into_parts();
     let (value, worker_storage) = payload.into_parts();
     let value = value?;
@@ -236,9 +238,7 @@ pub(super) async fn send(
 ) -> Result<(), ResourceError> {
     let bytes = DirectEventSender::required_storage_bytes(&event.value)
         .ok_or_else(|| err("capacity", "Resource reply envelope overflow"))?;
-    let storage = reserve_after_contention(
-        state, bytes, "Resource reply custody refused",
-    ).await?;
+    let storage = reserve_after_contention(state, bytes, "Resource reply custody refused").await?;
     let (event, producer) = event.into_parts();
     let result = replies
         .send_with_storage(event, Some(storage))

@@ -235,7 +235,9 @@ async fn event(
     tokio::time::timeout(TIMEOUT, async {
         loop {
             let event: ServerEvent = read_frame(stream).await.unwrap();
-            if observed.len() == 8 { observed.pop_front(); }
+            if observed.len() == 8 {
+                observed.pop_front();
+            }
             observed.push_back(format!("{:?}", std::mem::discriminant(&event)));
             if predicate(&event) {
                 return event;
@@ -243,7 +245,9 @@ async fn event(
         }
     })
     .await
-    .unwrap_or_else(|error| panic!("candidate server event {label}: {error}; recent event kinds: {observed:?}"))
+    .unwrap_or_else(|error| {
+        panic!("candidate server event {label}: {error}; recent event kinds: {observed:?}")
+    })
 }
 async fn tree(stream: &mut SessionStream) -> Tree {
     match event(stream, "initial tree snapshot", |event| {
@@ -327,16 +331,17 @@ async fn rpc(
         )
         .await
         .unwrap();
-        let ServerEvent::ResourceResult { result, .. } = event(stream, "resource RPC response", |event| {
-            matches!(
-                event,
-                ServerEvent::ResourceResult {
-                    request_id: 700,
-                    ..
-                }
-            )
-        })
-        .await
+        let ServerEvent::ResourceResult { result, .. } =
+            event(stream, "resource RPC response", |event| {
+                matches!(
+                    event,
+                    ServerEvent::ResourceResult {
+                        request_id: 700,
+                        ..
+                    }
+                )
+            })
+            .await
         else {
             unreachable!()
         };
@@ -901,16 +906,17 @@ async fn independent_usb_boards_and_interrupted_wait_keep_authority() {
     )
     .await
     .unwrap();
-    let ServerEvent::ProgressMonitorStatusReported { result, .. } = event(&mut control, "progress monitor status", |event| {
-        matches!(
-            event,
-            ServerEvent::ProgressMonitorStatusReported {
-                request_id: 850,
-                ..
-            }
-        )
-    })
-    .await
+    let ServerEvent::ProgressMonitorStatusReported { result, .. } =
+        event(&mut control, "progress monitor status", |event| {
+            matches!(
+                event,
+                ServerEvent::ProgressMonitorStatusReported {
+                    request_id: 850,
+                    ..
+                }
+            )
+        })
+        .await
     else {
         unreachable!()
     };

@@ -322,7 +322,8 @@ async fn evidence(state: &ServerState, catalog: &Catalog) -> Result<Eligibility,
         .len()
         .saturating_mul(std::mem::size_of::<(NodeId, Option<(u32, u64)>)>())
         .saturating_add(4096);
-    let storage = memory::reserve_after_contention(state, bytes, "Invocation observation metadata").await?;
+    let storage =
+        memory::reserve_after_contention(state, bytes, "Invocation observation metadata").await?;
     let local = {
         let panes = state.panes.read().await;
         let mut local = Vec::with_capacity(claims.len());
@@ -559,7 +560,8 @@ async fn local_invocations(
             count += 1;
             bytes.saturating_add(claim.agent.retained_bytes().saturating_mul(2))
         });
-    let storage = memory::reserve_after_contention(state, bytes, "Local invocation projection").await?;
+    let storage =
+        memory::reserve_after_contention(state, bytes, "Local invocation projection").await?;
     let mut live = Vec::with_capacity(count);
     for claim in catalog
         .resources
