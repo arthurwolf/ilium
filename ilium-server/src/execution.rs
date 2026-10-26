@@ -909,9 +909,10 @@ mod tests {
                     .output_metadata_quota
                     .snapshot()
                     .limits
-                    .worker_bytes,
+                    .worker_bytes
+                + DECODER_RESULT_OWNER_BYTES,
             PROCESS_WORKER_BYTES,
-            "general, recovery, output and retirement shares stay inside the process ceiling"
+            "worker shares and decoder-result ownership stay inside the process ceiling"
         );
     }
 

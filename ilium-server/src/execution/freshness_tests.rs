@@ -74,7 +74,13 @@ async fn detection_progresses_with_full_general_and_codec_envelopes_and_busy_wor
             owner
                 .decoder
                 .foundation
-                .try_reserve(Lane::Cpu, codec_cost)
+                .try_reserve(
+                    Lane::Cpu,
+                    JobCost {
+                        result_bytes: SERVER_DECODER_RESULT_BYTES,
+                        ..codec_cost
+                    },
+                )
                 .expect("full existing decoder capacity")
         })
         .collect();
