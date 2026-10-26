@@ -57,14 +57,17 @@ fn sec_241_secret_values_are_not_written_to_config_snapshots_exports_or_the_jour
 /// REQ: SEC-241
 #[test]
 fn sec_241_without_a_keyring_secrets_json_has_the_documented_form_and_mode_0600() {
-    use std::os::unix::fs::PermissionsExt;
     let rig = setup(&[]).no_keyring().secret("token", SECRET).start();
     rig.host.persist_all_stores();
     let path = rig.state.path().join("secrets.json");
-    assert_eq!(
-        std::fs::metadata(&path).expect("file").permissions().mode() & 0o777,
-        0o600
-    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            std::fs::metadata(&path).expect("file").permissions().mode() & 0o777,
+            0o600
+        );
+    }
     let parsed: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&path).expect("read")).expect("json");
     assert_eq!(parsed["version"], 1);

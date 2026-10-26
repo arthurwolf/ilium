@@ -1,6 +1,7 @@
 //! reference-audit-log.md: file location and modes, record schema, event catalogue, redaction,
 //! rotation, disk-full queue, verification, the `audit` command and the system-log sink.
 
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::time::Duration;
 
@@ -55,6 +56,7 @@ fn run_audit(
 }
 
 /// REQ: SEC-220
+#[cfg(unix)]
 #[test]
 fn sec_220_the_file_is_mode_0600_in_a_0700_directory() {
     let rig = t3(&["clipboard.read"]);

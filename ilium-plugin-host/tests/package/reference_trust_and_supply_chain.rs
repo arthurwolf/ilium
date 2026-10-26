@@ -102,10 +102,15 @@ fn find_installed(root: &std::path::Path, name: &str) -> Option<std::path::PathB
 }
 
 fn tamper_installed(fixture: &CliFixture) {
-    use std::os::unix::fs::PermissionsExt;
     let path = find_installed(&fixture.root.path().join("data"), "server.wasm")
         .expect("installed server.wasm");
-    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).expect("chmod");
+    ilium_platform::secure_fs::restrict_file_to_owner(&path).expect("owner permissions");
+    #[cfg(windows)]
+    {
+        let mut permissions = std::fs::metadata(&path).expect("metadata").permissions();
+        permissions.set_readonly(false);
+        std::fs::set_permissions(&path, permissions).expect("clear test file read-only attribute");
+    }
     let mut bytes = std::fs::read(&path).expect("read");
     let last = bytes.len() - 1;
     bytes[last] ^= 0x01;
@@ -855,6 +860,7 @@ fn sec_151_compression_ratio_above_200_to_1_is_refused() {
 // ---- SEC-152/153/156: install dir and integrity ----
 
 /// REQ: SEC-152
+#[cfg(unix)]
 #[test]
 fn sec_152_files_are_installed_read_only_in_a_0700_folder() {
     let fixture = installed_fixture();
@@ -1234,6 +1240,7 @@ fn sec_178_keygen_writes_publisher_pub_with_the_algorithm_and_a_32_byte_key() {
 }
 
 /// REQ: SEC-178
+#[cfg(unix)]
 #[test]
 fn sec_178_publisher_key_file_has_mode_0600() {
     let fixture = cli_fixture();

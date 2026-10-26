@@ -411,23 +411,27 @@ fn sec_008_the_platform_does_not_claim_to_stop_same_user_malware() {
 /// REQ: SEC-008
 #[test]
 fn sec_008_the_http_token_file_is_readable_by_the_same_user() {
-    use std::os::unix::fs::PermissionsExt;
     let rig = t3(&[]);
-    let mode = std::fs::metadata(rig.host.http_api_token_path())
-        .expect("token")
-        .permissions()
-        .mode()
-        & 0o777;
-    assert_eq!(
-        mode & 0o400,
-        0o400,
-        "the owner can read it, which is the accepted risk"
-    );
-    assert_eq!(
-        mode & 0o077,
-        0,
-        "group and others get no access (owner-only store)"
-    );
+    std::fs::read(rig.host.http_api_token_path()).expect("same user can read token");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(rig.host.http_api_token_path())
+            .expect("token")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(
+            mode & 0o400,
+            0o400,
+            "the owner can read it, which is the accepted risk"
+        );
+        assert_eq!(
+            mode & 0o077,
+            0,
+            "group and others get no access (owner-only store)"
+        );
+    }
 }
 
 /// REQ: SEC-009

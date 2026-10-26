@@ -326,12 +326,12 @@ pub fn to_std_b64(bytes: &[u8]) -> String {
     format!("{s}{}", "=".repeat(pad))
 }
 
-pub fn write_key(path: &std::path::Path, n: u8, mode: u32) {
-    use std::os::unix::fs::PermissionsExt;
+pub fn write_key(path: &std::path::Path, n: u8) {
     write_file(path, pkcs8_pem(n).as_bytes());
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).expect("chmod");
+    ilium_platform::secure_fs::restrict_file_to_owner(path).expect("owner-only signing key");
 }
 
+#[cfg(unix)]
 pub fn mode_of(path: &std::path::Path) -> u32 {
     use std::os::unix::fs::PermissionsExt;
     std::fs::metadata(path)

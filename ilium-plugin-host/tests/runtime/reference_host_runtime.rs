@@ -493,6 +493,7 @@ fn hst_061_cache_dir_name_carries_version_and_fingerprint() {
 }
 
 /// REQ: HST-061
+#[cfg(unix)]
 #[test]
 fn hst_061_cache_dir_is_owner_only_once_the_engine_uses_it() {
     use std::os::unix::fs::PermissionsExt;
@@ -534,6 +535,7 @@ fn hst_061_prune_with_no_cache_root_removes_nothing() {
 }
 
 /// REQ: HST-062
+#[cfg(unix)]
 #[test]
 fn hst_062_read_only_cache_dir_still_loads_and_logs_once() {
     use std::os::unix::fs::PermissionsExt;

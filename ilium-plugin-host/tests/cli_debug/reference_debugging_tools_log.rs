@@ -1,6 +1,7 @@
 //! reference-debugging-tools.md, "The log": line format, thresholds, rate limit, rotation,
 //! retention and `ilium plugin logs` (DEV-650..667).
 
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::time::Duration;
@@ -645,6 +646,7 @@ fn dev_661_installed_plugins_logs_are_never_purged() {
 // ---------------------------------------------------------------- DEV-663
 
 /// REQ: DEV-663
+#[cfg(unix)]
 #[test]
 fn dev_663_log_folder_is_created_owner_only() {
     let scratch = scratch();
@@ -658,6 +660,7 @@ fn dev_663_log_folder_is_created_owner_only() {
 }
 
 /// REQ: DEV-663
+#[cfg(unix)]
 #[test]
 fn dev_663_log_files_are_not_group_or_world_accessible() {
     let scratch = scratch();

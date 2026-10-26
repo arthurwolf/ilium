@@ -8,6 +8,10 @@
 //! `ObservationStopped`. Every path lives under one isolated temporary
 //! directory, so the test never touches a live session or the user's config.
 
+// The sole test and its shell probe already require Unix; keep their support
+// code at the same boundary instead of compiling unused helpers on Windows.
+#![cfg(unix)]
+
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};

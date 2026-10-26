@@ -874,6 +874,9 @@ mod tests {
         let home_dir = temporary.path().join("home");
         let project_cwd = temporary.path().join("project");
         std::fs::create_dir_all(&project_cwd).unwrap();
+        // The transcript locator slugifies the canonical project path, including
+        // macOS temporary-directory aliases such as /var and /private/var.
+        let project_cwd = ilium_platform::paths::canonicalize(&project_cwd).unwrap();
         let source_session_id = "11111111-1111-4111-8111-111111111111";
         let project_slug: String = project_cwd
             .to_string_lossy()

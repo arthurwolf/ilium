@@ -820,17 +820,20 @@ fn pkg_267_relative_ilium_trust_store_is_not_accepted() {
 /// REQ: PKG-267
 #[test]
 fn pkg_267_trust_store_is_written_with_mode_0600_atomically() {
-    use std::os::unix::fs::PermissionsExt;
     let fx = Fx::new();
     let path = fx.state_dir().join("ilium").join("trust.json");
     let store = TrustStore { keys: Vec::new() };
     store.save_atomic(&path).expect("save");
-    let mode = std::fs::metadata(&path)
-        .expect("metadata")
-        .permissions()
-        .mode()
-        & 0o777;
-    assert_eq!(mode, 0o600);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&path)
+            .expect("metadata")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o600);
+    }
     let leftovers: Vec<_> = std::fs::read_dir(path.parent().expect("parent"))
         .expect("dir")
         .flatten()
@@ -1236,8 +1239,13 @@ fn pkg_274_reinstall_rewrites_the_store_folder_from_the_package() {
     assert_eq!(fx.install(&spec).exit_code, 0);
     let wasm = fx.store_dir("example.a", "1.0.0").join("server.wasm");
     let mut permissions = std::fs::metadata(&wasm).expect("metadata").permissions();
-    use std::os::unix::fs::PermissionsExt;
-    permissions.set_mode(permissions.mode() | 0o200);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        permissions.set_mode(permissions.mode() | 0o200);
+    }
+    #[cfg(windows)]
+    permissions.set_readonly(false);
     std::fs::set_permissions(&wasm, permissions).expect("chmod");
     std::fs::write(&wasm, b"damaged").expect("damage");
     let out = fx.install_with(&spec, &["--reinstall"]);

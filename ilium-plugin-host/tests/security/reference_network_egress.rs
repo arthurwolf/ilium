@@ -1179,15 +1179,18 @@ fn sec_098_token_never_appears_in_environment_arguments_or_events() {
 /// REQ: SEC-099
 #[test]
 fn sec_099_token_file_has_mode_0600_and_changes_at_each_start() {
-    use std::os::unix::fs::PermissionsExt;
     let rig = t3(&[]);
     let path = rig.host.http_api_token_path();
-    let mode = std::fs::metadata(&path)
-        .expect("token file")
-        .permissions()
-        .mode()
-        & 0o777;
-    assert_eq!(mode, 0o600);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&path)
+            .expect("token file")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o600);
+    }
     let first = std::fs::read_to_string(&path).expect("token");
     let rig = rig.restart();
     let second = std::fs::read_to_string(rig.host.http_api_token_path()).expect("token");
