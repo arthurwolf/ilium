@@ -2896,11 +2896,11 @@ async fn split_view_renders_two_live_panes_and_routes_input_to_each_active_slot(
     // each child through the tree and type a distinct marker. Since
     // both markers remain visible together, the active child receives input
     // while split presentation continues rendering every member.
-    tui.write(b"\x1b[C").expect("expand selected split view");
-    let split_children_visible = wait_until(
-        || tui.screen_text().matches(IDLE_PANE_LABEL).count() >= 2,
-        WAIT_TIMEOUT,
-    )
+    let split_children_visible = write_until(&tui, b"\x1b[C", || {
+        tui.with_screen(|screen| {
+            rows_containing_in_order(screen, &[TERMINAL_ICON, IDLE_PANE_LABEL]).len() == 2
+        })
+    })
     .await;
     assert!(
         split_children_visible,
@@ -2909,7 +2909,12 @@ async fn split_view_renders_two_live_panes_and_routes_input_to_each_active_slot(
     );
     let split_child_rows = tui
         .with_screen(|screen| rows_containing_in_order(screen, &[TERMINAL_ICON, IDLE_PANE_LABEL]));
-    assert_eq!(split_child_rows.len(), 2, "expected two split child rows");
+    assert_eq!(
+        split_child_rows.len(),
+        2,
+        "expected two split child rows: {:?}",
+        tui.screen_text()
+    );
     tui.write(&sgr_mouse_down(0, 8, split_child_rows[0]))
         .expect("focus first split child");
     tui.write(&sgr_mouse_up(8, split_child_rows[0]))
@@ -4687,21 +4692,22 @@ async fn existing_markdown_creates_populated_boards_from_tree_and_dialog() {
             command.env(key, value.to_string_lossy().to_string())
         });
     let mut tui = PtySession::spawn(reattach_command).expect("reattach board TUI under a PTY");
+    let dialog_board_rows = wait_for_stable_value(
+        || {
+            let rows =
+                tui.with_screen(|screen| rows_containing_in_order(screen, &[BOARD_ICON, "Board"]));
+            (rows.len() == 1).then_some(rows)
+        },
+        SETTLED_LAYOUT_DURATION,
+        WAIT_TIMEOUT,
+    )
+    .await;
     assert!(
-        wait_until(
-            || {
-                let screen = tui.screen_text();
-                screen.contains(BOARD_ICON) && screen.contains("Board")
-            },
-            WAIT_TIMEOUT,
-        )
-        .await,
-        "fresh client should list the dialog-backed board, got: {:?}",
+        dialog_board_rows.is_some(),
+        "fresh client should stably list one dialog-backed board row, got: {:?}",
         tui.screen_text()
     );
-    let dialog_board_rows =
-        tui.with_screen(|screen| rows_containing_in_order(screen, &[BOARD_ICON, "Board"]));
-    assert_eq!(dialog_board_rows.len(), 1);
+    let dialog_board_rows = dialog_board_rows.expect("one stable dialog-backed board row");
     tui.write(&sgr_mouse_click(0, 8, dialog_board_rows[0]))
         .expect("focus dialog-backed board after reattach");
     assert!(
@@ -6437,9 +6443,13 @@ async fn agent_stats_popover_previews_on_hover_pins_on_click_and_closes() {
         .expect("click the Tokens tab");
     tui.write(&sgr_mouse_up(tokens_column + 1, tokens_row))
         .expect("release the Tokens tab");
-    let (close_column, close_row) = tui
-        .with_screen(|screen| first_cell_containing(screen, "✕"))
-        .expect("the close control is drawn");
+    let close_control = wait_for_stable_value(
+        || tui.with_screen(|screen| first_cell_containing(screen, "✕")),
+        SETTLED_LAYOUT_DURATION,
+        WAIT_TIMEOUT,
+    )
+    .await;
+    let (close_column, close_row) = close_control.expect("the close control is drawn and stable");
     tui.write(&sgr_mouse_down(0, close_column, close_row))
         .expect("click the close control");
     tui.write(&sgr_mouse_up(close_column, close_row))
