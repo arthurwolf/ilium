@@ -175,6 +175,26 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
     if app.handle_plugin_permission_mouse(mouse) {
         return;
     }
+    if app.resources.dialog.is_some() || app.resources.help_open {
+        app.resource_key(&Event::Mouse(mouse));
+        return;
+    }
+    if matches!(app.mode, Mode::Normal) && app.modal_stack.is_empty() {
+        if matches!(app.right_panel_target, RightPanelTarget::Resource { .. })
+            && app
+                .layout
+                .pane_area
+                .contains(Position::new(mouse.column, mouse.row))
+        {
+            app.resource_key(&Event::Mouse(mouse));
+            return;
+        }
+        if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
+            && app.open_resource_from_wait_footer(Position::new(mouse.column, mouse.row))
+        {
+            return;
+        }
+    }
     let position = Position::new(mouse.column, mouse.row);
     app.set_terminal_focused(true);
     app.set_pointer_position(Some(position));
@@ -1224,6 +1244,21 @@ fn handle_tree_mouse(app: &mut App, mouse: MouseEvent, position: Position) {
                 .tree_node_at(position)
                 .map(|hit| hit.id)
                 .unwrap_or(ROOT_ID);
+            if let Some(target) = app.resources.rows.targets.get(&selected_target).cloned() {
+                let target = match target {
+                    crate::resource_queue::ResourceRowTarget::Participant {
+                        pane_id: Some(pane),
+                        ..
+                    } => pane,
+                    crate::resource_queue::ResourceRowTarget::Resource { project_id, .. }
+                    | crate::resource_queue::ResourceRowTarget::Participant {
+                        project_id, ..
+                    } => project_id,
+                };
+                app.select_node(target);
+                app.open_context_menu(target, mouse.column, mouse.row);
+                return;
+            }
             let target =
                 tree_ui::chatroom_project(&app.tree, selected_target, &app.chatroom_projects)
                     .unwrap_or(selected_target);
@@ -1232,6 +1267,10 @@ fn handle_tree_mouse(app: &mut App, mouse: MouseEvent, position: Position) {
         }
         MouseEventKind::Down(MouseButton::Left) => {
             if let Some(hit) = app.tree_node_at(position) {
+                if let Some(target) = app.resources.rows.targets.get(&hit.id).cloned() {
+                    app.resource_select_target(hit.id, target);
+                    return;
+                }
                 if let Some(project_id) =
                     tree_ui::chatroom_project(&app.tree, hit.id, &app.chatroom_projects)
                 {

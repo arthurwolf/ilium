@@ -281,6 +281,7 @@ async fn read_requests<R>(
     let mut has_terminal_stream_selection = false;
     // Connection ownership bounds work and aborts queries on disconnect.
     let mut repository_queries = tokio::task::JoinSet::new();
+    let mut resource_waits = tokio::task::JoinSet::new();
     loop {
         let decoded = tokio::select! {
             biased;
@@ -423,6 +424,39 @@ async fn read_requests<R>(
             }
         }
 
+        if let ClientRequest::Resource {
+            request_id,
+            request: resource_request,
+        } = request
+        {
+            if matches!(
+                resource_request.operation,
+                ilium_ipc::resource::ResourceOperation::Wait { .. }
+                    | ilium_ipc::resource::ResourceOperation::ValidateInvocation { .. }
+            ) {
+                while resource_waits.try_join_next().is_some() {}
+                if resource_waits.len() >= 128 {
+                    let _ = direct_tx
+                        .send(ServerEvent::ResourceResult {
+                            request_id: *request_id,
+                            result: Err(ilium_ipc::resource::ResourceError {
+                                code: "capacity".into(),
+                                message: "Too many resource wait subscriptions".into(),
+                            }),
+                        })
+                        .await;
+                } else {
+                    let wait_state = Arc::clone(&state);
+                    let replies = direct_tx.clone();
+                    let request = resource_request.clone();
+                    let request_id = *request_id;
+                    resource_waits.spawn(async move {
+                        crate::resources::handle(&wait_state, request_id, request, &replies).await;
+                    });
+                }
+                continue;
+            }
+        }
         if let ClientRequest::QueryRepoFacts {
             request_id,
             project,

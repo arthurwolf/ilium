@@ -147,6 +147,7 @@ pub mod remote_compaction_settings_ui;
 pub mod remote_compaction_worker;
 pub mod render_cache;
 pub mod reset_planning;
+pub mod resource_queue;
 pub mod restructure;
 pub mod scheduled_input;
 pub mod screen_transfer;
@@ -1166,6 +1167,9 @@ async fn run_inner(
             ),
         }
     };
+    // Wait registry revisions are scoped to this server transport incarnation.
+    app.resources.wait_revision=None;
+    app.resources.waits.clear();
     let mut trigger_execution_lease = TriggerExecutionLease::open(&options.socket_path);
     // Tells the server this connection hosts the voice session, so
     // `ilium voice say` can offer typed sentences to it. One-shot CLI

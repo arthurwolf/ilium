@@ -1018,6 +1018,7 @@ pub fn settings_help_anchors(
                     AppearanceRow::TerminalTextSelection => "AP-23",
                     AppearanceRow::LockClosedEnabled => "AP-24",
                     AppearanceRow::ProjectSeparators => "AP-25",
+                    AppearanceRow::ResourceGrouping => "AP-36",
                     AppearanceRow::AutoRemoveEmptyGroups => "AP-26",
                     AppearanceRow::AutoFreeze => "AP-27",
                     AppearanceRow::AutoFreezeAfter => "AP-28",
@@ -2126,6 +2127,7 @@ fn render_icons_tab(frame: &mut Frame, area: Rect, app: &App, state: &SettingsSt
                 hover: crate::tree_ui::TreeHoverState::default(),
                 sidebar_files: &Default::default(),
                 chatroom_projects: &Default::default(),
+                resources: Some(&app.resources),
                 panes: &app.panes,
             },
         );
@@ -4579,6 +4581,7 @@ fn appearance_row_label(row: AppearanceRow) -> &'static str {
         AppearanceRow::MinimumTerminalWidth => "Minimum terminal width",
         AppearanceRow::TreeOrder => "Tree order",
         AppearanceRow::ProjectSeparators => "Project separators",
+        AppearanceRow::ResourceGrouping => "Group agents under resources",
         AppearanceRow::TreeRowManagementControls => "Tree row management buttons",
         AppearanceRow::AgentIdentifierMode => "Agent identifier",
         AppearanceRow::ColorScheme => "Color theme",
@@ -4638,6 +4641,7 @@ fn appearance_row_description(row: AppearanceRow) -> &'static str {
         AppearanceRow::TreeOrder => {
             "Order entries independently inside each group; split-view placement stays fixed."
         }
+        AppearanceRow::ResourceGrouping => "Display owners and FIFO waiters beneath shared resource rows. Pane parents and split layouts stay unchanged.",
         AppearanceRow::ProjectSeparators => {
             "Draw a frame-style line after each project’s full tree, except the last. Saved for this project."
         }
@@ -4728,6 +4732,13 @@ fn appearance_row_value(row: AppearanceRow, ui: &UiSettings) -> String {
             format!("{} columns", ui.left_panel_sizing.minimum_terminal_width)
         }
         AppearanceRow::TreeOrder => ui.tree_order.label().to_string(),
+        AppearanceRow::ResourceGrouping => {
+            if ui.resource_queue_grouping {
+                "On".into()
+            } else {
+                "Off".into()
+            }
+        }
         AppearanceRow::ProjectSeparators => {
             if ui.show_project_separators {
                 "On".to_string()

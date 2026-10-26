@@ -530,9 +530,62 @@ impl HeapBytes for AgentDebugEventMetadata {
         0usize.saturating_add(pane_resize_cause.heap_bytes())
     }
 }
+domain!(
+    ilium_core::resource_queue::AgentIdentity,
+    ilium_core::resource_queue::ResourceCatalog,
+    ilium_core::resource_queue::ResourceClock,
+    ilium_core::resource_queue::Reservation,
+    ilium_core::resource_queue::ResourceCommandResult,
+    ilium_core::resource_queue::ReservationId
+);
+impl HeapBytes for crate::resource::ResourceError {
+    fn heap_bytes(&self) -> usize {
+        let Self { code, message } = self;
+        code.heap_bytes().saturating_add(message.heap_bytes())
+    }
+}
+impl HeapBytes for crate::resource::ResourceReply {
+    fn heap_bytes(&self) -> usize {
+        let Self {
+            catalog,
+            clock,
+            result,
+            reservation,
+            recovery_token,
+            message,
+            local_invocations,
+            active_waits,
+            wait_revision: _,
+        } = self;
+        active_waits
+            .heap_bytes()
+            .saturating_add(local_invocations.heap_bytes())
+            .saturating_add(catalog.heap_bytes())
+            .saturating_add(clock.heap_bytes())
+            .saturating_add(result.heap_bytes())
+            .saturating_add(reservation.heap_bytes())
+            .saturating_add(recovery_token.heap_bytes())
+            .saturating_add(message.heap_bytes())
+    }
+}
 impl HeapBytes for ServerEvent {
     fn heap_bytes(&self) -> usize {
         match self {
+            Self::ResourceObservationFailed { message } => message.heap_bytes(),
+            Self::ResourceSnapshot {
+                catalog,
+                clock,
+                local_invocations,
+                active_waits,
+                wait_revision: _,
+            } => active_waits.heap_bytes().saturating_add(
+                local_invocations
+                    .heap_bytes()
+                    .saturating_add(catalog.heap_bytes())
+                    .saturating_add(clock.heap_bytes()),
+            ),
+            Self::ResourceResult { result, .. } => result.heap_bytes(),
+            Self::ResourceWaitChanged { reservation_id, .. } => reservation_id.heap_bytes(),
             Self::TreeSnapshot(value0) => 0usize.saturating_add(value0.heap_bytes()),
             Self::ScreenUpdate {
                 pane_id,

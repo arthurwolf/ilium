@@ -303,6 +303,10 @@ pub enum RightPanelTarget {
     Chatroom {
         project_id: NodeId,
     },
+    Resource {
+        project_id: NodeId,
+        resource_id: ilium_core::resource_queue::ResourceId,
+    },
     /// The global attention queue: every agent that needs the user, listed in
     /// the order the "Next: needs you" button visits them. Like the chatroom
     /// it owns no PTY, snapshot or split-view slot.
@@ -321,6 +325,7 @@ impl RightPanelTarget {
         match self {
             Self::Empty
             | Self::Chatroom { .. }
+            | Self::Resource { .. }
             | Self::Attention
             | Self::SplitView {
                 active_pane_id: None,
@@ -836,6 +841,7 @@ pub enum AppearanceRow {
     MinimumTerminalWidth,
     TreeOrder,
     ProjectSeparators,
+    ResourceGrouping,
     TreeRowManagementControls,
     AgentIdentifierMode,
     ColorScheme,
@@ -865,9 +871,10 @@ pub enum AppearanceRow {
 }
 
 impl AppearanceRow {
-    const GENERAL: [AppearanceRow; 25] = [
+    const GENERAL: [AppearanceRow; 26] = [
         Self::TreeOrder,
         Self::ProjectSeparators,
+        Self::ResourceGrouping,
         Self::TreeRowManagementControls,
         Self::AgentIdentifierMode,
         Self::ColorScheme,
@@ -1434,6 +1441,8 @@ pub enum ContextMenuAction {
     NewSplitView,
     NewFolder,
     AddChatroom,
+    NewResource,
+    LinkResource,
     ChangeProjectFolder,
     /// Sets a durable bookmark on the context-menu target. The desired state
     /// is captured while the menu opens, making the server mutation idempotent
@@ -1488,6 +1497,8 @@ impl ContextMenuAction {
             Self::NewSplitView => (2, 4),
             Self::NewFolder => (2, 5),
             Self::AddChatroom => (2, 6),
+            Self::NewResource => (2, 7),
+            Self::LinkResource => (2, 8),
             Self::Worktree => (3, 0),
             Self::ManageWorktrees => (3, 1),
             Self::ChangeProjectFolder => (3, 2),
@@ -1544,7 +1555,7 @@ impl ContextMenuAction {
             Self::NewAgent(BuiltinAgentProvider::Antigravity) => IconTarget::Antigravity,
             Self::NewEditor => IconTarget::Editor,
             Self::NewFolder | Self::ChangeProjectFolder => IconTarget::Folder,
-            Self::AddChatroom => IconTarget::Project,
+            Self::AddChatroom | Self::NewResource | Self::LinkResource => IconTarget::Project,
             Self::SetBookmark { .. } => IconTarget::Bookmark,
             Self::SetNodeLockedClosed { .. } => IconTarget::Lock,
             Self::Rename => IconTarget::RowRename,
@@ -1580,6 +1591,8 @@ impl ContextMenuAction {
             Self::NewSplitView => "New split view\u{2026}".to_string(),
             Self::NewFolder => "Open folder\u{2026}".to_string(),
             Self::AddChatroom => "Add chatroom to project".to_string(),
+            Self::NewResource => "New resource…".to_string(),
+            Self::LinkResource => "Link existing resource…".to_string(),
             Self::ChangeProjectFolder => "Change project folder\u{2026}".to_string(),
             Self::SetBookmark {
                 is_bookmarked: true,
@@ -2187,6 +2200,7 @@ pub struct App {
     pub panes: HashMap<NodeId, PaneRuntime>,
     /// File-backed room presentation keyed by the owning real project node.
     pub chatrooms: HashMap<NodeId, ChatroomViewState>,
+    pub resources: crate::resource_queue::ResourceUi,
     /// Last observed room availability. This is only used to invalidate the
     /// sidebar hit-test cache when another process creates/removes a room.
     pub(crate) chatroom_projects: HashSet<NodeId>,
@@ -2944,6 +2958,7 @@ impl App {
             tree: Tree::new(),
             panes: HashMap::new(),
             chatrooms: HashMap::new(),
+            resources: crate::resource_queue::ResourceUi::default(),
             chatroom_projects: HashSet::new(),
             // The first authoritative tree snapshot installs this deadline.
             // Until then an empty client has no project to inspect.
@@ -4546,6 +4561,7 @@ impl App {
         match self.right_panel_target {
             RightPanelTarget::Empty
             | RightPanelTarget::Chatroom { .. }
+            | RightPanelTarget::Resource { .. }
             | RightPanelTarget::Attention => [None; 4],
             RightPanelTarget::Pane { pane_id } => [Some(pane_id), None, None, None],
             RightPanelTarget::SplitView { split_id, .. } => {
@@ -4602,6 +4618,7 @@ impl App {
             }
             RightPanelTarget::Empty
             | RightPanelTarget::Chatroom { .. }
+            | RightPanelTarget::Resource { .. }
             | RightPanelTarget::Attention => false,
         }
     }
@@ -4758,6 +4775,7 @@ impl App {
         let viewports = match self.right_panel_target {
             RightPanelTarget::Empty
             | RightPanelTarget::Chatroom { .. }
+            | RightPanelTarget::Resource { .. }
             | RightPanelTarget::Attention => Vec::new(),
             RightPanelTarget::Pane { pane_id } => split_layout::allocate_viewports(
                 self.layout.pane_area,
@@ -5105,6 +5123,8 @@ impl App {
     /// broadcast arrives.
     pub fn shows_progress_footer(&self, pane_id: NodeId) -> bool {
         !self.visible_progress_monitors(pane_id).is_empty()
+            || (self.ui_settings.progress_monitor_enabled
+                && self.resources.waits.contains_key(&pane_id))
     }
 
     /// The pane's monitors whose footer rows are shown now, in registration
@@ -5120,6 +5140,16 @@ impl App {
         )
     }
 
+    /// Divide the existing footer without changing terminal geometry. When
+    /// clipped, retain one ordinary monitor summary row alongside the wait.
+    pub(crate) fn resource_wait_footer_rows(&self, pane_id: NodeId, height: u16) -> u16 {
+        if !self.resources.waits.contains_key(&pane_id) {
+            return 0;
+        }
+        let ordinary_rows = u16::from(!self.visible_progress_monitors(pane_id).is_empty());
+        height.saturating_sub(ordinary_rows).min(2)
+    }
+
     /// The monitor under footer row `position` of pane `pane_id`, if any.
     pub(crate) fn progress_monitor_at(
         &self,
@@ -5128,6 +5158,13 @@ impl App {
         position: ratatui::layout::Position,
     ) -> Option<&ilium_core::PaneProgress> {
         let visible = self.visible_progress_monitors(pane_id);
+        let native_rows = self.resource_wait_footer_rows(pane_id, progress_area.height);
+        let progress_area = ratatui::layout::Rect::new(
+            progress_area.x,
+            progress_area.y.saturating_add(native_rows),
+            progress_area.width,
+            progress_area.height.saturating_sub(native_rows),
+        );
         let row_offset = position.y.checked_sub(progress_area.y)?;
         let index =
             crate::progress_bar::monitor_at_row(visible.len(), progress_area.height, row_offset)?;
@@ -5554,6 +5591,17 @@ impl App {
     pub fn reconcile_right_panel_target(&mut self) {
         self.right_panel_target = match self.right_panel_target.clone() {
             RightPanelTarget::Empty => RightPanelTarget::Empty,
+            RightPanelTarget::Resource {
+                project_id,
+                resource_id,
+            } if self.tree.get(project_id).is_some_and(Node::is_project)
+                && self.resources.record(&resource_id).is_some() =>
+            {
+                RightPanelTarget::Resource {
+                    project_id,
+                    resource_id,
+                }
+            }
             // Turning the feature off closes its panel.
             RightPanelTarget::Attention if self.attention_enabled() => RightPanelTarget::Attention,
             RightPanelTarget::Chatroom { project_id }
@@ -6921,7 +6969,7 @@ impl App {
     /// setting stays live for the rest of this session either way, matching
     /// every other "config write is a nice-to-have, not a gate" policy in
     /// this crate (see `ConfigLoadError`'s doc comments).
-    fn apply_and_persist_ui_settings(&mut self, ui: UiSettings) {
+    pub(crate) fn apply_and_persist_ui_settings(&mut self, ui: UiSettings) {
         let debug_menu_changed =
             self.ui_settings.agent_debug_menu_enabled != ui.agent_debug_menu_enabled;
         let progress_monitor_changed =
@@ -11458,6 +11506,7 @@ impl App {
             }
             AppearanceRow::TreeOrder => self.settings_adjust_tree_order(direction),
             AppearanceRow::ProjectSeparators => self.settings_toggle_project_separators(),
+            AppearanceRow::ResourceGrouping => self.settings_toggle_resource_grouping(),
             AppearanceRow::TreeRowManagementControls => {
                 self.settings_toggle_tree_row_management_controls()
             }
@@ -13202,7 +13251,7 @@ impl App {
 
     /// The full identifier path (top-level down to `id`) as
     /// `tui_tree_widget::TreeState` expects it for `select`/`open`.
-    fn path_to(&self, id: NodeId) -> Vec<NodeId> {
+    pub(crate) fn path_to(&self, id: NodeId) -> Vec<NodeId> {
         let mut path = vec![id];
         let mut current = id;
         while let Some(parent) = self.tree.parent_of(current) {
@@ -13235,6 +13284,27 @@ impl App {
     /// Selects `id` in the tree widget's state (does not change focus),
     /// opening every ancestor so the selection is actually visible.
     pub(crate) fn select_node(&mut self, id: NodeId) {
+        if self.resources.grouping {
+            let participant = self
+                .resources
+                .rows
+                .targets
+                .iter()
+                .find_map(|(row, target)| match target {
+                    crate::resource_queue::ResourceRowTarget::Participant {
+                        project_id,
+                        resource_id,
+                        pane_id: Some(pane),
+                        ..
+                    } if *pane == id => Some((*row, *project_id, resource_id.clone())),
+                    _ => None,
+                });
+            if let Some((row, project, resource)) = participant {
+                if let Some(resource_row)=self.resources.rows.targets.iter().find_map(|(row,target)|matches!(target,crate::resource_queue::ResourceRowTarget::Resource{project_id,resource_id} if *project_id==project&&*resource_id==resource).then_some(*row)) {
+                    let mut path=self.path_to(project); path.push(resource_row);path.push(row);self.select_tree_path(path);return;
+                }
+            }
+        }
         self.select_tree_path(self.path_to(id));
     }
 
@@ -13255,6 +13325,14 @@ impl App {
             return;
         }
 
+        if self
+            .tree_state
+            .selected()
+            .last()
+            .is_some_and(|id| self.resources.rows.targets.contains_key(id))
+        {
+            return;
+        }
         let canonical_path = self.path_to(selected_node_id);
         if self.tree_state.selected() != canonical_path {
             self.select_tree_path(canonical_path);
@@ -13297,7 +13375,14 @@ impl App {
     }
 
     pub(crate) fn selected_node_id(&self) -> Option<NodeId> {
-        self.tree_state.selected().last().copied()
+        let selected = self.tree_state.selected().last().copied()?;
+        match self.resources.rows.targets.get(&selected) {
+            Some(crate::resource_queue::ResourceRowTarget::Participant {
+                pane_id: Some(pane_id),
+                ..
+            }) => Some(*pane_id),
+            _ => Some(selected),
+        }
     }
 
     /// Requests the server lock or unlock a project, group, or folder
@@ -13344,7 +13429,12 @@ impl App {
                     if self.tree.get(*leaf).is_some() {
                         self.path_to(*leaf) != *path
                     } else {
-                        crate::tree_ui::folder_entry(&self.tree, *leaf, &self.sidebar_snapshot)
+                        !self.resources.rows.targets.contains_key(leaf)
+                            && crate::tree_ui::folder_entry(
+                                &self.tree,
+                                *leaf,
+                                &self.sidebar_snapshot,
+                            )
                             .is_none_or(|entry| entry.identifier_path != *path)
                     }
                 }
@@ -16660,6 +16750,8 @@ impl App {
             Some(node) if node.is_project() => {
                 actions.push(ContextMenuAction::SendMessageToAll);
                 actions.insert(0, ContextMenuAction::AddChatroom);
+                actions.insert(0, ContextMenuAction::NewResource);
+                actions.insert(0, ContextMenuAction::LinkResource);
                 actions.insert(0, ContextMenuAction::ChangeProjectFolder);
                 self.insert_lock_actions(&mut actions, target, 0);
                 if !self.tree.panes_eligible_for_update(target).is_empty() {
@@ -16801,6 +16893,8 @@ impl App {
             ContextMenuAction::NewSplitView => self.open_create_split_dialog(),
             ContextMenuAction::NewFolder => self.action_new_folder(),
             ContextMenuAction::AddChatroom => self.action_add_chatroom_to_project(target),
+            ContextMenuAction::NewResource => self.open_resource_dialog(target, false),
+            ContextMenuAction::LinkResource => self.open_resource_dialog(target, true),
             ContextMenuAction::ChangeProjectFolder => self.action_change_project_folder(target),
             ContextMenuAction::SetBookmark { is_bookmarked } => {
                 self.request_set_node_bookmarked(target, is_bookmarked);
@@ -17726,7 +17820,11 @@ impl App {
             tree_order,
             self.tree_state.opened(),
             (&overlay.ranks, overlay.rank_epoch),
-            (&self.sidebar_snapshot, &self.chatroom_projects),
+            (
+                &self.sidebar_snapshot,
+                &self.chatroom_projects,
+                Some(&self.resources),
+            ),
         );
         tree_ui::status_slot_at_position(
             items,
@@ -17775,6 +17873,7 @@ impl App {
                     self.tree.get(hit.id).is_some()
                         || tree_ui::folder_entry(&self.tree, hit.id, &self.sidebar_snapshot)
                             .is_some()
+                        || self.resources.rows.targets.contains_key(&hit.id)
                         || tree_ui::chatroom_project(&self.tree, hit.id, &self.chatroom_projects)
                             .is_some()
                 });
@@ -17800,7 +17899,11 @@ impl App {
             tree_order,
             self.tree_state.opened(),
             (&overlay.ranks, overlay.rank_epoch),
-            (&self.sidebar_snapshot, &self.chatroom_projects),
+            (
+                &self.sidebar_snapshot,
+                &self.chatroom_projects,
+                Some(&self.resources),
+            ),
         );
         tree_ui::node_at_position(
             items,
@@ -17884,6 +17987,10 @@ impl App {
             }
             KeyCode::Enter | KeyCode::Char(' ') => {
                 if let Some(id) = self.selected_node_id() {
+                    if let Some(target) = self.resources.rows.targets.get(&id).cloned() {
+                        self.resource_select_target(id, target);
+                        return;
+                    }
                     if let Some(project_id) =
                         crate::tree_ui::chatroom_project(&self.tree, id, &self.chatroom_projects)
                     {

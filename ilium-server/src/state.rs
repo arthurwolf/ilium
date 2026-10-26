@@ -121,6 +121,10 @@ impl ServerEvents {
         self.sender.subscribe()
     }
 
+    pub(crate) fn has_subscribers(&self) -> bool {
+        self.sender.receiver_count() > 0
+    }
+
     #[cfg(test)]
     pub(crate) fn subscribe_owned(&self) -> OwnedServerEventReceiver {
         OwnedServerEventReceiver {
@@ -265,6 +269,7 @@ pub struct ServerState {
     blocking_error_generations:
         std::sync::Mutex<std::collections::HashMap<(Option<NodeId>, String), u64>>,
     blocking_error_next_generation: std::sync::atomic::AtomicU64,
+    pub(crate) resources: std::sync::OnceLock<crate::resources::ResourceService>,
     pub session_name: String,
     /// Canonical project boundary shared by every pane in this server.
     pub session_cwd: PathBuf,
@@ -539,6 +544,7 @@ impl ServerState {
         tree.ensure_launch_project(options.session_cwd.clone())
             .expect("a new tree always accepts its launch project");
         Self {
+            resources: std::sync::OnceLock::new(),
             blocking_errors: std::sync::Mutex::new(Vec::new()),
             blocking_error_generations: std::sync::Mutex::new(std::collections::HashMap::new()),
             blocking_error_next_generation: std::sync::atomic::AtomicU64::new(1),

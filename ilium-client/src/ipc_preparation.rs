@@ -209,6 +209,21 @@ pub(crate) fn request_retained_bytes(request: &ilium_ipc::ClientRequest) -> usiz
         R::Attach { session, .. } | R::AttachInteractive { session, .. } => count.string(session),
         // Plugin envelopes are bounded by the plugin IPC limits (HST-104), not counted here.
         R::Plugin(_) => {}
+        R::Resource { request, .. } => {
+            use ilium_core::AllocationSize;
+            use ilium_ipc::resource::ResourceOperation;
+            count.optional_string(&request.request_key);
+            count.optional_string(&request.recovery_token);
+            count.add(match &request.operation {
+                ResourceOperation::Snapshot => 0,
+                ResourceOperation::Mutate(command) => command.heap_bytes(),
+                ResourceOperation::ValidateInvocation { agent } => agent.heap_bytes(),
+                ResourceOperation::Status { reservation_id }
+                | ResourceOperation::Wait { reservation_id } => reservation_id.heap_bytes(),
+                ResourceOperation::PrepareRecovery { resource_id }
+                | ResourceOperation::RepairInstructions { resource_id } => resource_id.heap_bytes(),
+            });
+        }
         R::KeyInput { bytes, .. } => count.add(bytes.capacity()),
         R::UserKeyInput {
             bytes,
@@ -1271,6 +1286,46 @@ mod antigravity_statusline_request_tests {
         assert_eq!(
             request_retained_bytes(&with_command) - request_retained_bytes(&without_command),
             command_capacity,
+        );
+    }
+}
+
+#[cfg(test)]
+mod resource_queue_request_tests {
+    use super::request_retained_bytes;
+    use ilium_core::resource_queue::{ReservationId, ResourceCommand};
+    use ilium_ipc::{
+        resource::{ResourceOperation, ResourceRequest},
+        ClientRequest,
+    };
+
+    #[test]
+    fn resource_queue_retention_counts_recovery_and_mutation_capacity() {
+        let snapshot = ClientRequest::Resource {
+            request_id: 1,
+            request: ResourceRequest::new(None, ResourceOperation::Snapshot),
+        };
+        let mut reason = String::with_capacity(8192);
+        reason.push_str("Confirmed reservation cancellation");
+        let mut token = String::with_capacity(512);
+        token.push_str("synthetic-recovery-token");
+        let reservation_id = String::from("synthetic-reservation");
+        let extra_capacity = reason.capacity() + token.capacity() + reservation_id.capacity();
+        let mut request = ResourceRequest::new(
+            None,
+            ResourceOperation::Mutate(ResourceCommand::CancelByUser {
+                reservation_id: ReservationId(reservation_id),
+                reason,
+            }),
+        );
+        request.recovery_token = Some(token);
+        let mutation = ClientRequest::Resource {
+            request_id: 2,
+            request,
+        };
+        assert_eq!(
+            request_retained_bytes(&mutation) - request_retained_bytes(&snapshot),
+            extra_capacity
         );
     }
 }

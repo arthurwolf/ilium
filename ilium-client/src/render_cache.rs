@@ -25,6 +25,56 @@ enum SelectionReconciliation {
 /// there is one. State is always applied before the occurrence is returned.
 pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
     match event {
+        ServerEvent::ResourceObservationFailed { message } => {
+            app.resources.observation_error = Some(message);
+            app.bump_tree_version();
+            None
+        }
+        ServerEvent::ResourceSnapshot {
+            catalog,
+            clock,
+            local_invocations,
+            active_waits,
+            wait_revision,
+        } => {
+            app.receive_resource_catalog(
+                catalog,
+                clock,
+                local_invocations,
+                active_waits,
+                wait_revision,
+            );
+            None
+        }
+        ServerEvent::ResourceResult { request_id, result } => {
+            app.receive_resource_reply(request_id, result);
+            None
+        }
+        ServerEvent::ResourceWaitChanged {
+            pane_id,
+            reservation_id,
+            wait_revision,
+        } => {
+            if app
+                .resources
+                .wait_revision
+                .is_some_and(|revision| wait_revision < revision)
+            {
+                return None;
+            }
+            app.resources.wait_revision = Some(wait_revision);
+            match reservation_id {
+                Some(id) => {
+                    app.resources.waits.insert(pane_id, id);
+                }
+                None => {
+                    app.resources.waits.remove(&pane_id);
+                }
+            }
+            app.bump_tree_version();
+            None
+        }
+
         ServerEvent::PaneStateSnapshot {
             tree,
             detection_evidence,

@@ -19,6 +19,9 @@ enum Slot {
     EditorPath,
     LastPrompt,
     Progress,
+    Resources,
+    ResourceObservation,
+    ResourceWait,
     Git,
     Debug(u64),
     Global(Discriminant<ServerEvent>),
@@ -118,6 +121,17 @@ impl ProjectionRetention {
             }
             PaneLastPromptChanged { pane_id, .. } => (Slot::LastPrompt, Some(*pane_id)),
             PaneProgressChanged { pane_id, .. } => (Slot::Progress, Some(*pane_id)),
+            ResourceObservationFailed { .. } => (Slot::ResourceObservation, None),
+            ResourceSnapshot { catalog, .. } => {
+                if app.resources.catalog.as_ref().is_some_and(|old|old.revision>catalog.revision){return update;}
+                (Slot::Resources,None)
+            }
+            ResourceResult { result:Ok(reply), .. } => {
+                if app.resources.catalog.as_ref().is_some_and(|old|old.revision>reply.catalog.revision){return update;}
+                (Slot::Resources,None)
+            }
+            ResourceResult { result:Err(_), .. } => (Slot::ResourceObservation,None),
+            ResourceWaitChanged { pane_id, .. } => (Slot::ResourceWait, Some(*pane_id)),
             PaneGitStatusChanged { pane_id, .. } => (Slot::Git, Some(*pane_id)),
             PaneDebugLogSnapshot {
                 pane_id, entries, ..

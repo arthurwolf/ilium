@@ -170,6 +170,7 @@ pub(crate) fn draw_at_with_cursor(
         app.animation_frame.discard_composed_receipt();
         return None;
     }
+    app.resource_overlay(frame);
     cursor
 }
 
@@ -896,6 +897,7 @@ fn draw_base_layer(frame: &mut Frame, area: Rect, app: &mut App) -> Option<Posit
             },
             sidebar_files: &app.sidebar_snapshot,
             chatroom_projects: &app.chatroom_projects,
+            resources: Some(&app.resources),
             panes: &app.panes,
         },
     );
@@ -2598,6 +2600,10 @@ fn draw_pane_sources(
         crate::agent_debug_ui::render(frame, area, app, state);
         return Vec::new();
     }
+    if matches!(app.right_panel_target, RightPanelTarget::Resource { .. }) {
+        app.resource_detail(frame, area);
+        return Vec::new();
+    }
     if let RightPanelTarget::Chatroom { project_id } = &app.right_panel_target {
         crate::chatroom_ui::render(frame, area, app, *project_id);
         return Vec::new();
@@ -3008,9 +3014,33 @@ fn draw_pane_runtime(
         if matches!(runtime, PaneRuntime::Terminal(_))
             && app.shows_progress_footer(viewport.pane_id)
         {
+            let native_rows = app.resource_wait_footer_rows(viewport.pane_id, progress_area.height);
+            let native_wait = native_rows > 0;
+            let ordinary_area = if native_wait {
+                Rect::new(
+                    progress_area.x,
+                    progress_area.y.saturating_add(native_rows),
+                    progress_area.width,
+                    progress_area.height.saturating_sub(native_rows),
+                )
+            } else {
+                progress_area
+            };
+            if native_wait {
+                app.resource_wait_footer(
+                    frame,
+                    Rect::new(
+                        progress_area.x,
+                        progress_area.y,
+                        progress_area.width,
+                        native_rows,
+                    ),
+                    viewport.pane_id,
+                );
+            }
             crate::progress_bar::render_monitors(
                 frame,
-                progress_area,
+                ordinary_area,
                 &app.visible_progress_monitors(viewport.pane_id),
                 app.ui_settings.progress_max_lines.into(),
                 app.ui_settings.color_scheme,

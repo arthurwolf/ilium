@@ -587,3 +587,49 @@ mod tests {
             "initial body must wait for ownership; first detection must not invalidate a body already sent");
     }
 }
+
+/// Resource notices use the same readiness and input-generation fence as
+/// initial prompts. A successful write is a hint, never acquisition receipt acknowledgement.
+pub(crate) async fn try_resource_notice(
+    state: &ServerState,
+    agent: &ilium_core::resource_queue::AgentIdentity,
+    text: &str,
+) -> Result<bool, String> {
+    let gate = {
+        let panes = state.panes.read().await;
+        let Some(PaneResource::Terminal(runtime)) = panes.get(&agent.pane_id) else {
+            return Ok(false);
+        };
+        Arc::clone(&runtime.input_gate)
+    };
+    let _guard = gate.lock().await;
+    {
+        let panes = state.panes.read().await;
+        let Some(PaneResource::Terminal(runtime)) = panes.get(&agent.pane_id) else {
+            return Ok(false);
+        };
+        let expected = format!(":{}", runtime.agent_generation);
+        let expected_process = agent
+            .invocation_id
+            .0
+            .split(':')
+            .nth(1)
+            .and_then(|value| value.parse::<u32>().ok());
+        if expected_process != runtime.detected_agent_process_id
+            || !Arc::ptr_eq(&gate, &runtime.input_gate)
+            || !agent.invocation_id.0.ends_with(&expected)
+            || !initial_prompt_is_ready(runtime)
+        {
+            return Ok(false);
+        }
+    }
+    submit_terminal_text_locked(
+        state,
+        agent.pane_id,
+        text,
+        PromptSubmissionSource::ProgressResult,
+        &gate,
+    )
+    .await?;
+    Ok(true)
+}

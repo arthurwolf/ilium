@@ -453,3 +453,7 @@ Most Settings rows have a help affordance. Press `?` on a selected row (or click
 - **Experiments in a temporary configuration.** Run Ilium with `ILIUM_CONFIG_DIR` pointing at an empty directory to start from defaults without touching your real file.
 
 Related: [Getting started](getting-started.md), [Inference and privacy](inference-and-privacy.md), [Voice](voice.md), [Session recovery](session-recovery.md), [CLI reference](cli-reference.md).
+
+## Resource queue grouping
+
+**Group agents under resources** (`[ui].resource_queue_grouping`, default `true`) displays a local owner and waiting agents beneath the resource row, in authoritative queue order. Queue numbers remain global when agents belong to another linked project. Turning this off restores the ordinary pane placement while retaining waiting badges, resource rows, queue details and native wait progress. Grouping changes display only; it does not move real pane parents, alter splits or redirect input. See [Resource queues](resource-queues.md).

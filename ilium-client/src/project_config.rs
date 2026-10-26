@@ -200,7 +200,14 @@ pub(crate) fn update_if(
     cwd: &Path,
     mutate: impl FnOnce(&mut ProjectConfig) -> bool,
 ) -> anyhow::Result<bool> {
-    let path = cwd.join(RELATIVE_PATH);
+    let logical_path = cwd.join(RELATIVE_PATH);
+    // Keep a linked project configuration linked; publish to its real target.
+    // The caller holds the same logical config lock as the server projector.
+    let path = match std::fs::symlink_metadata(&logical_path) {
+        Ok(_) => std::fs::canonicalize(&logical_path)?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => logical_path,
+        Err(error) => return Err(error.into()),
+    };
     let Some(parent) = path.parent() else {
         anyhow::bail!("project config path {path:?} has no parent");
     };

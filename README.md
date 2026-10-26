@@ -127,6 +127,7 @@ Also included:
 - AI [titles, tree organization and custom instructions](src/docs/titles-and-instructions.md), with [provider and privacy controls](src/docs/inference-and-privacy.md).
 - [Voice control](src/docs/voice.md).
 - [Scheduled input, text triggers, prompt queues, progress monitors and Chatroom](src/docs/automation.md).
+- [Shared resource queues](src/docs/resource-queues.md) for exclusive GPU and USB-board coordination across projects.
 - [Editors, boards](src/docs/editors-and-boards.md) and [Smart Copy](src/docs/smart-copy.md).
 - Ambient [animated backgrounds](src/docs/animations.md): landscapes, space, maps, live data, video and more, all sharing one look.
 
@@ -158,7 +159,7 @@ Open Settings with `Ctrl+B :` and the key map with `Ctrl+B ?`. Global settings l
 
 ## Project, help, and licence
 
-Report problems in [issues](https://github.com/arthurwolf/ilium/issues) with your version, OS, terminal, command and observed behaviour; remove private content from logs. Design: [ARCHITECTURE.md](ARCHITECTURE.md). Contribution rules: [AGENTS.md](AGENTS.md) and [Contributing](src/docs/contributing.md).
+Report problems in [issues](https://github.com/arthurwolf/ilium/issues) with your version, OS, terminal, command and observed behaviour; remove private content from logs. Design: [ARCHITECTURE.md](ARCHITECTURE.md). Contribution rules: [CLAUDE.md](CLAUDE.md) and [Contributing](src/docs/contributing.md).
 
 Ilium is [MIT licensed](LICENSE). The vendored `vt100` patch and `tui-tree-widget` fork retain their MIT licences. Cascadia Code uses SIL Open Font License 1.1; see the [font notice](ilium-client/assets/fonts/NOTICE.md).
 

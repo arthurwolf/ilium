@@ -118,6 +118,13 @@ pub fn sync_parent_directory_if_supported(path: &Path) -> io::Result<DirectorySy
     }
 }
 
+#[cfg(test)]
+thread_local! {static RESOURCE_TEST_DIRECTORY_SYNC_FAILURE:std::cell::Cell<bool>=const{std::cell::Cell::new(false)};}
+#[cfg(test)]
+pub(crate) fn fail_next_replacement_directory_sync_for_test() {
+    RESOURCE_TEST_DIRECTORY_SYNC_FAILURE.with(|failure| failure.set(true));
+}
+
 /// Publishes an already flushed temporary file and waits for the platform's
 /// durable replacement operation. Both paths must be on the same filesystem.
 /// Also supports renaming a directory to a new path; the domain writer must
@@ -158,6 +165,12 @@ pub fn replace_file_durably(source: &Path, destination: &Path) -> io::Result<()>
     #[cfg(not(windows))]
     {
         std::fs::rename(source, destination)?;
+        #[cfg(test)]
+        if RESOURCE_TEST_DIRECTORY_SYNC_FAILURE.with(|failure| failure.replace(false)) {
+            return Err(io::Error::other(
+                "injected directory sync failure; replacement durability unknown",
+            ));
+        }
         sync_parent_directory(destination)
     }
 }
@@ -211,9 +224,12 @@ fn create_directory_tree_privately(path: &Path) -> io::Result<()> {
 /// Restricts an existing directory to the current user.
 #[cfg(unix)]
 pub fn restrict_directory_to_owner(path: &Path) -> io::Result<()> {
-    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
 
     refuse_pre_existing_symlink(path)?;
+    if std::fs::metadata(path)?.mode() & 0o7777 == 0o700 {
+        return Ok(());
+    }
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
 }
 
@@ -231,9 +247,12 @@ pub fn restrict_directory_to_owner(path: &Path) -> io::Result<()> {
 /// did not exist at open time and so could not be opened privately.
 #[cfg(unix)]
 pub fn restrict_file_to_owner(path: &Path) -> io::Result<()> {
-    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
 
     refuse_pre_existing_symlink(path)?;
+    if std::fs::metadata(path)?.mode() & 0o7777 == 0o600 {
+        return Ok(());
+    }
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
 }
 
@@ -286,8 +305,11 @@ pub fn restrict_file_to_owner(path: &Path) -> io::Result<()> {
 /// the handle should always prefer this variant.
 #[cfg(unix)]
 pub fn restrict_open_file_to_owner(file: &std::fs::File) -> io::Result<()> {
-    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
 
+    if file.metadata()?.mode() & 0o7777 == 0o600 {
+        return Ok(());
+    }
     file.set_permissions(std::fs::Permissions::from_mode(0o600))
 }
 
@@ -864,6 +886,50 @@ impl NoFollowDirectory {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    #[test]
+    fn repeated_owner_restriction_does_not_dirty_private_inode_metadata() {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+        let directory = tempfile::tempdir().expect("private directory");
+        let path = directory.path().join("catalog");
+        let file = super::private_open_options()
+            .create_new(true)
+            .write(true)
+            .open(&path)
+            .expect("private catalog");
+        super::restrict_directory_to_owner(directory.path()).expect("directory restriction");
+        super::restrict_open_file_to_owner(&file).expect("file restriction");
+        let directory_before = std::fs::metadata(directory.path()).expect("directory metadata");
+        let file_before = file.metadata().expect("file metadata");
+        // Separate timestamp ticks so an unnecessary chmod is observable even
+        // on filesystems whose inode timestamps have coarse resolution.
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        super::restrict_directory_to_owner(directory.path()).expect("repeat directory restriction");
+        super::restrict_open_file_to_owner(&file).expect("repeat file restriction");
+        let directory_after = std::fs::metadata(directory.path()).expect("directory readback");
+        let file_after = file.metadata().expect("file readback");
+        for (before, after, mode) in [
+            (directory_before, directory_after, 0o700),
+            (file_before, file_after, 0o600),
+        ] {
+            assert_eq!(after.permissions().mode() & 0o7777, mode);
+            assert_eq!(
+                (before.ctime(), before.ctime_nsec()),
+                (after.ctime(), after.ctime_nsec()),
+                "an already-private inode must remain clean before durable catalog reads"
+            );
+        }
+        // Tightening still removes both public access and special mode bits.
+        file.set_permissions(std::fs::Permissions::from_mode(0o6644))
+            .expect("broaden fixture permissions");
+        super::restrict_open_file_to_owner(&file).expect("tighten fixture");
+        assert_eq!(
+            file.metadata().unwrap().permissions().mode() & 0o7777,
+            0o600
+        );
+    }
+
     #[test]
     fn durable_replacement_preserves_flushed_contents_on_readback() {
         let directory = tempfile::tempdir().expect("temporary directory");

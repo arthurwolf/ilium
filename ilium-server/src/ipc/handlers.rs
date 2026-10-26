@@ -9,6 +9,8 @@
 
 use ilium_core::animation_recommendation::RecommendedRestructurePlan;
 use std::collections::{HashMap, HashSet};
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use ilium_agent_debug::{
@@ -165,60 +167,62 @@ fn request_error_node(request: &ClientRequest) -> Option<NodeId> {
     }
 }
 
-pub async fn handle_request(
-    state: &Arc<ServerState>,
+pub fn handle_request<'a>(
+    state: &'a Arc<ServerState>,
     request: ClientRequest,
-    direct_tx: &DirectEventSender,
-) -> bool {
-    // Dialog snapshots are hints; lifecycle/working-directory changes invalidate
-    // them. Launch admission always performs fresh Git and ownership checks.
-    if matches!(
-        &request,
-        ClientRequest::NewPane { .. }
-            | ClientRequest::ClosePane { .. }
-            | ClientRequest::ChangeProjectFolder { .. }
-            | ClientRequest::CreateAgentInWorkspace { .. }
-            | ClientRequest::PruneWorkspace { .. }
-            | ClientRequest::RemoveWorkspace { .. }
-            | ClientRequest::ClosePaneWithWorkspaceDisposition { .. }
-            | ClientRequest::ReplacePaneWithCommand { .. }
-    ) {
-        state.repo_discovery_cache.invalidate();
-        state.repo_facts_cache.invalidate();
-    }
-    let operation = request.diagnostic_name();
-    let requested_node = request_error_node(&request);
-    let target = {
-        let tree = state.tree.read().await;
-        requested_node.filter(|node_id| tree.get(*node_id).is_some())
-    };
-    // A request aimed at a node that no longer exists (a duplicate close, a
-    // click racing a restructure) has no node to attach a retained error to.
-    // Filing it as session-wide would mark every node with a blocking error
-    // that nothing ever clears, so its failure stays a transient status line.
-    let scoped_tx = if requested_node.is_some() && target.is_none() {
-        direct_tx.clone()
-    } else {
-        direct_tx.with_error_scope(state, target, operation)
-    };
-    let should_close = handle_scoped_request(state, request, &scoped_tx).await;
-    if matches!(
-        operation,
-        "rename_node"
-            | "move_node"
-            | "reparent_node"
-            | "new_group"
-            | "new_project"
-            | "new_folder"
-            | "change_project_folder"
-            | "create_split_view"
-            | "set_node_bookmarked"
-            | "set_node_expanded"
-            | "set_node_locked_closed"
-    ) {
-        scoped_tx.finish_synchronous_mutation();
-    }
-    should_close
+    direct_tx: &'a DirectEventSender,
+) -> Pin<Box<dyn Future<Output = bool> + Send + 'a>> {
+    Box::pin(async move {
+        // Dialog snapshots are hints; lifecycle/working-directory changes invalidate
+        // them. Launch admission always performs fresh Git and ownership checks.
+        if matches!(
+            &request,
+            ClientRequest::NewPane { .. }
+                | ClientRequest::ClosePane { .. }
+                | ClientRequest::ChangeProjectFolder { .. }
+                | ClientRequest::CreateAgentInWorkspace { .. }
+                | ClientRequest::PruneWorkspace { .. }
+                | ClientRequest::RemoveWorkspace { .. }
+                | ClientRequest::ClosePaneWithWorkspaceDisposition { .. }
+                | ClientRequest::ReplacePaneWithCommand { .. }
+        ) {
+            state.repo_discovery_cache.invalidate();
+            state.repo_facts_cache.invalidate();
+        }
+        let operation = request.diagnostic_name();
+        let requested_node = request_error_node(&request);
+        let target = {
+            let tree = state.tree.read().await;
+            requested_node.filter(|node_id| tree.get(*node_id).is_some())
+        };
+        // A request aimed at a node that no longer exists (a duplicate close, a
+        // click racing a restructure) has no node to attach a retained error to.
+        // Filing it as session-wide would mark every node with a blocking error
+        // that nothing ever clears, so its failure stays a transient status line.
+        let scoped_tx = if requested_node.is_some() && target.is_none() {
+            direct_tx.clone()
+        } else {
+            direct_tx.with_error_scope(state, target, operation)
+        };
+        let should_close = handle_scoped_request(state, request, &scoped_tx).await;
+        if matches!(
+            operation,
+            "rename_node"
+                | "move_node"
+                | "reparent_node"
+                | "new_group"
+                | "new_project"
+                | "new_folder"
+                | "change_project_folder"
+                | "create_split_view"
+                | "set_node_bookmarked"
+                | "set_node_expanded"
+                | "set_node_locked_closed"
+        ) {
+            scoped_tx.finish_synchronous_mutation();
+        }
+        should_close
+    })
 }
 
 async fn handle_scoped_request(
@@ -227,6 +231,13 @@ async fn handle_scoped_request(
     direct_tx: &DirectEventSender,
 ) -> bool {
     match request {
+        ClientRequest::Resource {
+            request_id,
+            request,
+        } => {
+            crate::resources::handle(state, request_id, request, direct_tx).await;
+            false
+        }
         ClientRequest::ApplyRecap {
             pane_id,
             session_id,
@@ -1610,6 +1621,7 @@ async fn handle_attach(
         .await;
         return;
     }
+    crate::resources::send_snapshot(state, direct_tx).await;
     loop {
         match state.recovery.attach_status().await {
             crate::recovery::AttachStatus::Pending { pane_count } => {

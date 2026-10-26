@@ -17,6 +17,7 @@ mod error;
 mod framing;
 pub mod plugin;
 mod protocol;
+pub mod resource;
 mod startup;
 mod terminal_bytes;
 mod text_trigger;

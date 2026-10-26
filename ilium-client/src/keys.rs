@@ -74,6 +74,9 @@ pub(crate) fn intercept_event(app: &mut App, event: &Event) -> bool {
     if crate::onboarding::integration::handle_event(app, event) {
         return true;
     }
+    if app.resource_key(event) {
+        return true;
+    }
     if matches!(app.mode, Mode::ValueDialog(_)) {
         let Mode::ValueDialog(mut host) = std::mem::replace(&mut app.mode, Mode::Normal) else {
             unreachable!("matched value dialog");

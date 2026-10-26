@@ -85,10 +85,18 @@ pub enum IconTarget {
     /// The small dot in a pane's header that opens the recap popover.
     ChromeRecap,
     AttentionSnooze,
+    ResourceFree,
+    ResourceTaken,
+    ResourceQueued,
+    ResourcePaused,
+    ResourceUnavailable,
+    ResourceAttention,
+    ResourceOwner,
+    ResourceQueue,
 }
 
 impl IconTarget {
-    pub const ALL: [Self; 69] = [
+    pub const ALL: [Self; 77] = [
         Self::Group,
         Self::TopLevel,
         Self::Project,
@@ -158,6 +166,14 @@ impl IconTarget {
         Self::AgentToolbarSelection,
         Self::ChromeRecap,
         Self::AttentionSnooze,
+        Self::ResourceFree,
+        Self::ResourceTaken,
+        Self::ResourceQueued,
+        Self::ResourcePaused,
+        Self::ResourceUnavailable,
+        Self::ResourceAttention,
+        Self::ResourceOwner,
+        Self::ResourceQueue,
     ];
 
     pub const fn label(self) -> &'static str {
@@ -231,6 +247,14 @@ impl IconTarget {
             Self::AgentToolbarSelection => "Agent toolbar: text selection toggle",
             Self::ChromeRecap => "Pane header: recap dot",
             Self::AttentionSnooze => "Attention: snooze",
+            Self::ResourceFree => "Resource: free",
+            Self::ResourceTaken => "Resource: taken",
+            Self::ResourceQueued => "Resource: waiting agent",
+            Self::ResourcePaused => "Resource: paused",
+            Self::ResourceUnavailable => "Resource: unavailable",
+            Self::ResourceAttention => "Resource: needs attention",
+            Self::ResourceOwner => "Resource: owner",
+            Self::ResourceQueue => "Resource: queue count",
         }
     }
 
@@ -305,6 +329,14 @@ impl IconTarget {
             Self::AgentToolbarSelection => "agent_toolbar_selection",
             Self::ChromeRecap => "chrome_recap",
             Self::AttentionSnooze => "attention_snooze",
+            Self::ResourceFree => "resource_free",
+            Self::ResourceTaken => "resource_taken",
+            Self::ResourceQueued => "resource_queued",
+            Self::ResourcePaused => "resource_paused",
+            Self::ResourceUnavailable => "resource_unavailable",
+            Self::ResourceAttention => "resource_attention",
+            Self::ResourceOwner => "resource_owner",
+            Self::ResourceQueue => "resource_queue",
         }
     }
 
@@ -383,6 +415,14 @@ impl IconTarget {
             Self::AgentToolbarSelection => "🖱️",
             Self::ChromeRecap => "·",
             Self::AttentionSnooze => "💤",
+            Self::ResourceFree => "✓",
+            Self::ResourceTaken => "🔒",
+            Self::ResourceQueued => "⌛",
+            Self::ResourcePaused => "⏸",
+            Self::ResourceUnavailable => "⊘",
+            Self::ResourceAttention => "⚠",
+            Self::ResourceOwner => "🔑",
+            Self::ResourceQueue => "⇥",
         }
     }
 
@@ -482,6 +522,14 @@ impl IconTarget {
             Self::AgentToolbarSelection => &["🖱️", "◫", "▧", "Ⓢ"],
             Self::ChromeRecap => &["·", "•", "◦", "∙"],
             Self::AttentionSnooze => &["💤", "⏸", "☾"],
+            Self::ResourceFree => &["✓"],
+            Self::ResourceTaken => &["🔒"],
+            Self::ResourceQueued => &["⌛"],
+            Self::ResourcePaused => &["⏸"],
+            Self::ResourceUnavailable => &["⊘"],
+            Self::ResourceAttention => &["⚠"],
+            Self::ResourceOwner => &["🔑"],
+            Self::ResourceQueue => &["⇥"],
         }
     }
 }
@@ -562,6 +610,14 @@ pub struct IconSettings {
     pub agent_toolbar_selection: String,
     pub chrome_recap: String,
     pub attention_snooze: String,
+    pub resource_free: String,
+    pub resource_taken: String,
+    pub resource_queued: String,
+    pub resource_paused: String,
+    pub resource_unavailable: String,
+    pub resource_attention: String,
+    pub resource_owner: String,
+    pub resource_queue: String,
 }
 
 impl Default for IconSettings {
@@ -643,6 +699,14 @@ impl IconSettings {
             agent_toolbar_selection: value(IconTarget::AgentToolbarSelection),
             chrome_recap: value(IconTarget::ChromeRecap),
             attention_snooze: value(IconTarget::AttentionSnooze),
+            resource_free: value(IconTarget::ResourceFree),
+            resource_taken: value(IconTarget::ResourceTaken),
+            resource_queued: value(IconTarget::ResourceQueued),
+            resource_paused: value(IconTarget::ResourcePaused),
+            resource_unavailable: value(IconTarget::ResourceUnavailable),
+            resource_attention: value(IconTarget::ResourceAttention),
+            resource_owner: value(IconTarget::ResourceOwner),
+            resource_queue: value(IconTarget::ResourceQueue),
         }
     }
 
@@ -717,6 +781,14 @@ impl IconSettings {
             IconTarget::AgentToolbarSelection => &self.agent_toolbar_selection,
             IconTarget::ChromeRecap => &self.chrome_recap,
             IconTarget::AttentionSnooze => &self.attention_snooze,
+            IconTarget::ResourceFree => &self.resource_free,
+            IconTarget::ResourceTaken => &self.resource_taken,
+            IconTarget::ResourceQueued => &self.resource_queued,
+            IconTarget::ResourcePaused => &self.resource_paused,
+            IconTarget::ResourceUnavailable => &self.resource_unavailable,
+            IconTarget::ResourceAttention => &self.resource_attention,
+            IconTarget::ResourceOwner => &self.resource_owner,
+            IconTarget::ResourceQueue => &self.resource_queue,
         }
     }
 
@@ -800,6 +872,14 @@ impl IconSettings {
             IconTarget::AgentToolbarSelection => &mut self.agent_toolbar_selection,
             IconTarget::ChromeRecap => &mut self.chrome_recap,
             IconTarget::AttentionSnooze => &mut self.attention_snooze,
+            IconTarget::ResourceFree => &mut self.resource_free,
+            IconTarget::ResourceTaken => &mut self.resource_taken,
+            IconTarget::ResourceQueued => &mut self.resource_queued,
+            IconTarget::ResourcePaused => &mut self.resource_paused,
+            IconTarget::ResourceUnavailable => &mut self.resource_unavailable,
+            IconTarget::ResourceAttention => &mut self.resource_attention,
+            IconTarget::ResourceOwner => &mut self.resource_owner,
+            IconTarget::ResourceQueue => &mut self.resource_queue,
         };
         *slot = glyph;
     }

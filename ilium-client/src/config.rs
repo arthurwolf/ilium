@@ -1044,6 +1044,8 @@ pub struct UiSettings {
     /// Per-project Appearance setting mirrored from `.ilium/config.yaml`.
     /// This value is intentionally excluded from the global `config.toml`.
     pub show_project_separators: bool,
+    /// Display resource participants beneath their shared resource, without reparenting panes.
+    pub resource_queue_grouping: bool,
     pub motion_level: MotionLevel,
     pub sidebar_density: SidebarDensity,
     /// Uses single-cell text symbols in the row-action hover overlay. This
@@ -1146,6 +1148,7 @@ impl Default for UiSettings {
             agent_identifiers: AgentIdentifierSettings::default(),
             tree_order: TreeOrder::Manual,
             show_project_separators: false,
+            resource_queue_grouping: true,
             motion_level: MotionLevel::default(),
             sidebar_density: SidebarDensity::Standard,
             use_stable_glyphs: false,
@@ -1278,6 +1281,7 @@ struct RawUiConfig {
     use_stable_glyphs: Option<bool>,
     show_inferred_title_icons: Option<bool>,
     show_tree_row_management_controls: Option<bool>,
+    resource_queue_grouping: Option<bool>,
     agent_debug_menu_enabled: Option<bool>,
     show_context_menu_icons: Option<bool>,
     agent_toolbar_enabled: Option<bool>,
@@ -1773,6 +1777,9 @@ fn merge_ui(raw: RawUiConfig) -> Result<UiSettings, ConfigLoadError> {
         },
         tree_order,
         show_project_separators: false,
+        resource_queue_grouping: raw
+            .resource_queue_grouping
+            .unwrap_or(defaults.resource_queue_grouping),
         motion_level,
         sidebar_density,
         use_stable_glyphs: raw.use_stable_glyphs.unwrap_or(defaults.use_stable_glyphs),
@@ -3024,6 +3031,10 @@ fn ui_settings_to_toml(ui: &UiSettings) -> toml::Value {
     table.insert(
         "agent_tree_model_icons".to_string(),
         toml::Value::Boolean(ui.agent_tree_model_icons),
+    );
+    table.insert(
+        "resource_queue_grouping".to_string(),
+        toml::Value::Boolean(ui.resource_queue_grouping),
     );
     table.insert(
         "show_tree_row_management_controls".to_string(),
@@ -4635,6 +4646,16 @@ mod tests {
     }
 
     #[test]
+    fn resource_grouping_defaults_on_and_disabled_preference_survives_reload() {
+        let directory = scratch_dir();
+        let mut ui = UiSettings::default();
+        assert!(ui.resource_queue_grouping);
+        ui.resource_queue_grouping = false;
+        save_ui_settings(&directory, &ui).unwrap();
+        assert!(!load(&directory).unwrap().ui.resource_queue_grouping);
+    }
+
+    #[test]
     fn save_ui_settings_round_trips_through_load() {
         let dir = scratch_dir();
         let mut icons = IconSettings::default();
@@ -4656,6 +4677,7 @@ mod tests {
             },
             tree_order: TreeOrder::NameDescending,
             show_project_separators: false,
+            resource_queue_grouping: true,
             motion_level: MotionLevel::Reduced,
             sidebar_density: SidebarDensity::Comfortable,
             show_inferred_title_icons: true,

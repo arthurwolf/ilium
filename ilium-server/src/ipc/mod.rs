@@ -268,8 +268,11 @@ mod tests {
     async fn full_connection_registry_preserves_queued_bytes_then_reaps_and_reaccepts() {
         let listener = TestListener::start(1).await;
         let mut admitted = listener.connect().await;
+        let initial_events = attach(&mut admitted).await;
         assert!(matches!(
-            attach(&mut admitted).await.first(),
+            initial_events
+                .iter()
+                .find(|event| matches!(event, ServerEvent::PaneStateSnapshot { .. })),
             Some(ServerEvent::PaneStateSnapshot { .. })
         ));
 
@@ -336,8 +339,9 @@ mod tests {
                 remaining[..snapshot_index].iter().all(
                     |event| matches!(event, ServerEvent::BlockingErrorsSnapshot { errors }
                     if errors.iter().any(|error| error.message.contains(wrong_session.as_str())))
+                        || matches!(event, ServerEvent::ResourceObservationFailed { .. })
                 ),
-                "only visible feedback for the refused request may precede attachment"
+                "only refused-request feedback or an independent resource warning may precede attachment"
             );
             assert!(
                 remaining[snapshot_index..].iter().any(

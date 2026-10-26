@@ -769,6 +769,7 @@ pub struct TreeRenderOptions<'a> {
     /// composed.
     pub sidebar_files: &'a crate::filesystem::sidebar::SidebarSnapshot,
     pub chatroom_projects: &'a HashSet<NodeId>,
+    pub resources: Option<&'a crate::resource_queue::ResourceUi>,
     pub panes: &'a HashMap<NodeId, crate::app::PaneRuntime>,
     pub frozen_panes: &'a HashSet<NodeId>,
 }
@@ -806,6 +807,7 @@ struct TreeItemBuildContext<'a> {
     opened_paths: &'a HashSet<Vec<NodeId>>,
     sidebar_files: &'a crate::filesystem::sidebar::SidebarSnapshot,
     chatroom_projects: &'a HashSet<NodeId>,
+    resources: Option<&'a crate::resource_queue::ResourceUi>,
     panes: &'a HashMap<NodeId, crate::app::PaneRuntime>,
     frozen_panes: &'a HashSet<NodeId>,
 }
@@ -933,6 +935,7 @@ fn build_children(
     let mut identifier_path = Vec::with_capacity(ancestor_path.len().saturating_add(1));
     identifier_path.extend_from_slice(ancestor_path);
     for child_id in children.iter().copied() {
+        if context.resources.is_some_and(|resources| resources.grouping && !tree.get(parent).is_some_and(Node::is_split_view) && resources.rows.targets.values().any(|target|matches!(target,crate::resource_queue::ResourceRowTarget::Participant{pane_id:Some(pane),..} if *pane==child_id))) { continue; }
         identifier_path.push(child_id);
         if let Some(node) = tree.get(child_id) {
             let mut item = build_item(tree, node, context, &identifier_path);
@@ -979,6 +982,116 @@ fn build_item(
                 collapsed_placeholder_children(tree, node.id)
             };
             if let ContainerKind::Project { .. } = &container.kind {
+                if let Some(resources) = context.resources {
+                    if let Some(catalog) = &resources.catalog {
+                        if resources.grouping {
+                            let grouped = crate::resource_queue::tree::grouped_local_panes(
+                                &resources.rows,
+                                tree,
+                                node.id,
+                            );
+                            children.retain(|child| !grouped.contains(child.identifier()));
+                        }
+                        let mut resource_items = resources.rows.items(
+                            node.id,
+                            catalog,
+                            resources.grouping,
+                            context.icons,
+                            context.use_stable_glyphs,
+                        );
+                        for resource_item in &mut resource_items {
+                            if resources.observation_error.is_some() {
+                                let title = resources
+                                    .rows
+                                    .targets
+                                    .get(resource_item.identifier())
+                                    .and_then(|target| match target {
+                                        crate::resource_queue::ResourceRowTarget::Resource {
+                                            resource_id,
+                                            ..
+                                        } => catalog.resources.get(resource_id).map(|record| {
+                                            record
+                                                .definition
+                                                .title
+                                                .chars()
+                                                .map(|character| {
+                                                    if character.is_control() {
+                                                        '�'
+                                                    } else {
+                                                        character
+                                                    }
+                                                })
+                                                .collect::<String>()
+                                        }),
+                                        _ => None,
+                                    })
+                                    .unwrap_or_default();
+                                if let Ok(stale) = TreeItem::new(
+                                    *resource_item.identifier(),
+                                    Line::from(format!("⚠ State unknown · {title}")),
+                                    resource_item.children().to_vec(),
+                                ) {
+                                    *resource_item = stale;
+                                }
+                            }
+                            for index in 0..resource_item.children().len() {
+                                let Some(child) = resource_item.child_mut(index) else {
+                                    continue;
+                                };
+                                let id = *child.identifier();
+                                if let Some(
+                                    crate::resource_queue::ResourceRowTarget::Participant {
+                                        pane_id: Some(pane_id),
+                                        resource_id,
+                                        reservation_id,
+                                        ..
+                                    },
+                                ) = resources.rows.targets.get(&id)
+                                {
+                                    if let Some(pane) = tree.get(*pane_id) {
+                                        let position=catalog.resources.get(resource_id).and_then(|record| {let queued=record.reservations.iter().filter(|reservation|matches!(reservation.state,ilium_core::resource_queue::ReservationState::Queued)).count();(queued>1).then(||crate::resource_queue::tree::ordered(record).into_iter().filter(|reservation|matches!(reservation.state,ilium_core::resource_queue::ReservationState::Queued)).position(|reservation|&reservation.id==reservation_id)).flatten()});
+                                        let owner = catalog.resources.get(resource_id).is_some_and(
+                                            |record| {
+                                                record.reservations.iter().any(|reservation| {
+                                                    &reservation.id == reservation_id
+                                                        && reservation.state.occupied()
+                                                })
+                                            },
+                                        );
+                                        let prefix = if owner {
+                                            format!(
+                                                "{} ",
+                                                context.icons.glyph_for_display(
+                                                    IconTarget::ResourceOwner,
+                                                    context.use_stable_glyphs
+                                                )
+                                            )
+                                        } else {
+                                            position.map_or_else(
+                                                || "↳ ".to_string(),
+                                                |position| {
+                                                    format!(
+                                                        "{} {}. ",
+                                                        context.icons.glyph_for_display(
+                                                            IconTarget::ResourceQueued,
+                                                            context.use_stable_glyphs
+                                                        ),
+                                                        position + 1
+                                                    )
+                                                },
+                                            )
+                                        };
+                                        *child = build_item(tree, pane, context, identifier_path)
+                                            .with_identifier(id)
+                                            .with_prefix(prefix);
+                                    }
+                                }
+                            }
+                        }
+                        resource_items.append(&mut children);
+                        children = resource_items;
+                    }
+                }
                 if context.chatroom_projects.contains(&node.id) {
                     children.insert(
                         0,
@@ -1059,6 +1172,27 @@ fn build_item(
                     display_title(node, context.panel_width),
                     prompt_queue.len()
                 )
+            };
+            let display_name = if context
+                .resources
+                .is_some_and(|resources| resources.waiting(node.id))
+            {
+                format!(
+                    "{} {} {display_name}",
+                    context
+                        .icons
+                        .glyph_for_display(IconTarget::ResourceQueued, context.use_stable_glyphs),
+                    if context
+                        .resources
+                        .is_some_and(|resources| resources.waits.contains_key(&node.id))
+                    {
+                        "parked"
+                    } else {
+                        "queued"
+                    }
+                )
+            } else {
+                display_name
             };
             // A pending scheduled input's countdown is a number, so it belongs
             // in the text; the long-term slot carries its marker only when no
@@ -2449,7 +2583,7 @@ impl TreeItemCache {
             tree_order,
             opened_paths,
             (&HashMap::new(), 0),
-            (&Default::default(), &HashSet::new()),
+            (&Default::default(), &HashSet::new(), None),
         )
     }
 
@@ -2465,10 +2599,11 @@ impl TreeItemCache {
         filesystem: (
             &crate::filesystem::sidebar::SidebarSnapshot,
             &HashSet<NodeId>,
+            Option<&crate::resource_queue::ResourceUi>,
         ),
     ) -> &[TreeItem<'static, NodeId>] {
         let (cost_ranks, cost_epoch) = cost;
-        let (sidebar_files, chatroom_projects) = filesystem;
+        let (sidebar_files, chatroom_projects, resources) = filesystem;
         if self.version != Some(version)
             || self.tree_order != Some(tree_order)
             || self.cost_epoch != cost_epoch
@@ -2507,6 +2642,7 @@ impl TreeItemCache {
                     opened_paths,
                     sidebar_files,
                     chatroom_projects,
+                    resources,
                     panes: &HashMap::new(),
                 },
             );
@@ -2575,6 +2711,7 @@ pub(crate) fn render(
             opened_paths: state.opened(),
             sidebar_files: options.sidebar_files,
             chatroom_projects: options.chatroom_projects,
+            resources: options.resources,
             panes: options.panes,
             frozen_panes: options.frozen_panes,
         },
@@ -2642,6 +2779,7 @@ pub(crate) fn render(
                 opened_paths: state.opened(),
                 sidebar_files: options.sidebar_files,
                 chatroom_projects: options.chatroom_projects,
+                resources: options.resources,
                 panes: options.panes,
             },
         );
@@ -3675,6 +3813,7 @@ mod tests {
                         hover: TreeHoverState::default(),
                         sidebar_files: &Default::default(),
                         chatroom_projects: &HashSet::new(),
+                        resources: None,
                         panes: &HashMap::new(),
                     },
                 );
@@ -4839,6 +4978,7 @@ mod tests {
                         hover: TreeHoverState::default(),
                         sidebar_files: &Default::default(),
                         chatroom_projects: &HashSet::new(),
+                        resources: None,
                         panes: &HashMap::new(),
                     },
                 );
@@ -4902,6 +5042,7 @@ mod tests {
                         },
                         sidebar_files: &Default::default(),
                         chatroom_projects: &HashSet::new(),
+                        resources: None,
                         panes: &HashMap::new(),
                     },
                 );
@@ -4977,6 +5118,7 @@ mod tests {
                         hover: TreeHoverState::default(),
                         sidebar_files: &Default::default(),
                         chatroom_projects: &HashSet::new(),
+                        resources: None,
                         panes: &HashMap::new(),
                     },
                 );
@@ -5735,6 +5877,7 @@ mod tests {
                 opened_paths: state.opened(),
                 sidebar_files: &Default::default(),
                 chatroom_projects: &HashSet::new(),
+                resources: None,
                 panes: &HashMap::new(),
             },
         );
@@ -5895,6 +6038,7 @@ mod tests {
                 sidebar_files: crate::filesystem::sidebar::prepared_for_test(&tree, &opened_paths)
                     .view(),
                 chatroom_projects: &HashSet::new(),
+                resources: None,
                 panes: &HashMap::new(),
             },
         );
@@ -5935,6 +6079,7 @@ mod tests {
                 sidebar_files: crate::filesystem::sidebar::prepared_for_test(&tree, &opened_paths)
                     .view(),
                 chatroom_projects: &HashSet::new(),
+                resources: None,
                 panes: &HashMap::new(),
             },
         );
@@ -5975,6 +6120,7 @@ mod tests {
                 sidebar_files: crate::filesystem::sidebar::prepared_for_test(&tree, &opened_paths)
                     .view(),
                 chatroom_projects: &HashSet::new(),
+                resources: None,
                 panes: &HashMap::new(),
             },
         );
@@ -6037,6 +6183,7 @@ mod tests {
                 opened_paths: &opened_paths,
                 sidebar_files: &Default::default(),
                 chatroom_projects: &HashSet::new(),
+                resources: None,
                 panes: &HashMap::new(),
             },
         );
@@ -6293,6 +6440,7 @@ mod tests {
                 opened_paths: &opened_paths,
                 sidebar_files: &Default::default(),
                 chatroom_projects: &HashSet::new(),
+                resources: None,
                 panes: &HashMap::new(),
             },
         );
@@ -6587,6 +6735,7 @@ mod tests {
                 opened_paths: &opened_paths,
                 sidebar_files: &Default::default(),
                 chatroom_projects: &HashSet::new(),
+                resources: None,
                 panes: &HashMap::new(),
             },
         );
@@ -6846,6 +6995,7 @@ mod cost_indicator_tests {
                         hover,
                         sidebar_files: &Default::default(),
                         chatroom_projects: &HashSet::new(),
+                        resources: None,
                         panes: &HashMap::new(),
                     },
                 );
