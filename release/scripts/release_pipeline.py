@@ -568,7 +568,8 @@ def macos_package_inventory(directory, target, audit, binding, source_root):
                     ('release/scripts/smoke_macos_packages.py', 'release/tests/test_macos_packages.py',
                      *animation_gate.SOURCE_FILES)}
     macos_smoke.validate_smoke_receipt(proof, build, target, audit, binding, sha(directory / build_name),
-                                     smoke_sources, release_tool.read_json(source_root / 'release/embedding-model.json'))
+                                     smoke_sources, release_tool.read_json(source_root / 'release/embedding-model.json'),
+                                     evidence_root=directory.absolute())
     for name in macos_packages.package_names(target['arch']):
         path = macos_packages.regular_file(directory / name)
         require(sha(path) == build['packages'][name] and path.stat().st_size == build['package_bytes'][name], 'macOS package bytes differ: ' + name)
@@ -583,7 +584,8 @@ def macos_package_inventory(directory, target, audit, binding, source_root):
     macos_smoke.validate_package_metadata(parts['Distribution'], parts['PackageInfo'], build['layout'], build['payload_tree'])
     # DMG traversal needs Darwin's native mount. Its exact container hash and the
     # source-detached installed lifecycle above bind that native observation.
-    return {**build['packages'], build_name: sha(directory / build_name), smoke_name: sha(directory / smoke_name)}
+    return {**build['packages'], build_name: sha(directory / build_name), smoke_name: sha(directory / smoke_name),
+            **{name: sha(directory / name) for name in macos_smoke.retained_evidence_names(target['arch'])}}
 
 
 def validate_macos_candidate_binding(binding, target, metadata, source_root):
@@ -719,8 +721,9 @@ def aggregate(arguments):
     for name in sorted(linux_package_hashes):
         shutil.copyfile(packages_directory / name, output / name)
     macos_rows = [row for row in targets if row['os'] == 'macos']
-    macos_directory = arguments.macos_packages.resolve()
-    expected_macos = {name for row in macos_rows for name in (*macos_packages.package_names(row['arch']), macos_packages.receipt_name(row['arch']), macos_packages.smoke_receipt_name(row['arch']))}
+    macos_directory = arguments.macos_packages.absolute()
+    expected_macos = {name for row in macos_rows for name in (*macos_packages.package_names(row['arch']), macos_packages.receipt_name(row['arch']), macos_packages.smoke_receipt_name(row['arch']),
+                                                                          *macos_smoke.retained_evidence_names(row['arch']))}
     require(macos_directory.is_dir() and not macos_directory.is_symlink() and {path.name for path in macos_directory.iterdir()} == expected_macos, 'macOS package artifact inventory differs')
     macos_hashes, macos_bindings = {}, {}
     for row in macos_rows:

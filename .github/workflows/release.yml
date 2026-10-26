@@ -302,7 +302,7 @@ jobs:
         --source-commit "${{ needs.source.outputs.commit }}" --runner-identity "${{ matrix.runner }}"
         --native native-macos --archive "native-macos/ilium-macos-${{ matrix.arch }}.tar.gz"
         --work "$RUNNER_TEMP/macos-package-work" --output macos-packages
-    - name: Qualify all three installed formats with hidden source and build inputs
+    - name: Qualify all three formats and retain exact native audit and installed animation bytes
       run: >-
         python release/scripts/smoke_macos_packages.py
         --tag "${{ needs.source.outputs.tag }}" --arch "${{ matrix.arch }}"
@@ -499,6 +499,8 @@ jobs:
           candidate/macos-packages-*.json
 
           candidate/macos-smoke-*.json
+
+          candidate/macos-evidence-*.json
 
           candidate/SHA256SUMS
 

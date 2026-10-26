@@ -425,8 +425,10 @@ For each format the smoke gate checks the installed payload against the exact
 native audit, exercises both executable versions and creates, lists and stops a
 real pane through the installed client/server. It checks the live server's
 ancestry and the pane's nonce-bearing readiness marker. During execution it
-hides the native artifact, package directory and retained build inputs, then
-restores all three. The embedding gate holds the installed client alive, checks
+hides the native artifact, package directory, retained build inputs and container
+snapshots, then restores all four. The receipt requires the same four distinct
+source roots for every format, with snapshots at the recorded smoke root and
+numbered destinations under each format's owned hidden-input directory. The embedding gate holds the installed client alive, checks
 its loaded dylib through `vmmap`, binds the binary, model and runtime hashes, and
 requires a finite nonzero 384-dimensional result from the reviewed wrapper.
 
@@ -440,8 +442,11 @@ process retirement, source restoration, receipt removal or image teardown fails
 the gate and retains recovery evidence.
 
 The workflow supplies a fresh build directory and a disjoint smoke root under
-the runner's temporary directory. It uploads the five final files for each
-architecture after native smoke passes, and uploads both build and smoke
+the runner's temporary directory. It uploads nine final files for each
+architecture after native smoke passes: the three packages, both receipts, the
+original native audit and the three original installed-animation JSON receipts.
+The four evidence files use the flat `macos-evidence-<arch>-*.json` names beside
+the packages. It uploads both build and smoke
 diagnostics on failure as well as success. Local execution needs the same native
 architecture, Apple packaging/image tools, Python 3.11+, a complete qualified
 native artifact and noninteractive sudo for the isolated PKG transaction. Do
@@ -449,8 +454,8 @@ not run this gate against an existing user's installation or adopt their mounts.
 
 ### Aggregation and publication
 
-Aggregation requires exactly ten macOS files: ZIP, PKG, DMG and both receipts
-for each architecture. It reconstructs the native/source binding from the
+Aggregation requires exactly eighteen macOS files: ZIP, PKG, DMG, both receipts
+and four retained JSON evidence files for each architecture. It reconstructs the native/source binding from the
 qualified native artifacts, then checks the receipts against that binding and
 the current acceptance sources. It rehashes every container, independently
 parses ZIP and PKG payloads, and checks their members and installation metadata
@@ -458,9 +463,20 @@ against the native audit. DMG filesystem traversal needs Darwin; the aggregate
 host binds the exact DMG hash to the native mount, source-detachment and installed
 lifecycle evidence rather than substituting a portable parser result.
 
+The smoke receipt's `retained_evidence` map names exactly four roles: native
+audit and one installed-animation receipt for ZIP, PKG and DMG. Each entry fixes
+the portable filename, original absolute Darwin path, byte count and SHA-256.
+Transport copies the original JSON bytes; it never rewrites provenance paths or
+recomputes a digest to make edited evidence pass. Every consumer supplies its
+explicit local evidence directory. Recorded macOS roots, runtime paths and hidden
+input paths use POSIX semantics even when the consumer runs on Windows. Missing
+or extra evidence, changed bytes, duplicate JSON keys, aliases, redirected roots,
+foreign paths and source mismatches block qualification. The retained native
+audit must also match the independently qualified audit and its native binding.
+
 `candidate.json` retains the complete macOS asset map and native/source bindings.
-Every later candidate read repeats these checks. Attestation covers the packages
-and receipts; the shared draft, publication, public asset readback and recovery
+Every later candidate read repeats these checks. Attestation covers the packages,
+receipts and retained evidence; the shared draft, publication, public asset readback and recovery
 paths use the same complete asset inventory. The stable names match the installation guide's (src/docs/installation.md)
 six direct ZIP/PKG/DMG links. GitHub asset digests and `candidate.json` carry their
 hashes; the five-entry `SHA256SUMS` remains the portable native-archive inventory

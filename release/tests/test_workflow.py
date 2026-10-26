@@ -497,7 +497,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(download['with']['path'], 'macos-packages')
         self.assertEqual(download['with']['merge-multiple'], 'true')
         subjects = next(step['with']['subject-path'] for step in self.workflow['jobs']['attest']['steps'] if 'subject-path' in step.get('with', {}))
-        for pattern in ('candidate/*.zip', 'candidate/*.pkg', 'candidate/*.dmg', 'candidate/macos-packages-*.json', 'candidate/macos-smoke-*.json'):
+        for pattern in ('candidate/*.zip', 'candidate/*.pkg', 'candidate/*.dmg', 'candidate/macos-packages-*.json', 'candidate/macos-smoke-*.json', 'candidate/macos-evidence-*.json'):
             self.assertIn(pattern, subjects)
 
     def linux_smoke_commands(self) -> dict[str, list[str]]:  # Parse actual workflow commands instead of accepting loose format substrings.
@@ -1208,9 +1208,10 @@ class PipelineTests(unittest.TestCase):
                 with self.assertRaises((ValueError, OSError)):  # Keep malformed Windows and missing Linux retained-proof rejections.
                     seal_fixture()  # Reuse the same production validation and fixture path boundary.
 
-    def test_aggregate_publishes_all_ten_bound_macos_assets_and_rejects_each_changed_file(self):
+    def test_aggregate_publishes_all_eighteen_bound_macos_assets_and_rejects_each_changed_file(self):
         packages = pipeline.macos_packages
-        names = {name for arch in ('x86_64', 'aarch64') for name in (*packages.package_names(arch), packages.receipt_name(arch), packages.smoke_receipt_name(arch))}
+        names = {name for arch in ('x86_64', 'aarch64') for name in (*packages.package_names(arch), packages.receipt_name(arch), packages.smoke_receipt_name(arch),
+                                                                                 *pipeline.macos_smoke.retained_evidence_names(arch))}
         original_root = self.root
         for index, name in enumerate(sorted(names)):
             with self.subTest(asset=name):
@@ -1227,6 +1228,40 @@ class PipelineTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     pipeline.candidate_data(arguments.output, arguments.manifest, arguments.workspace)
         self.root = original_root
+
+
+    def test_aggregate_and_candidate_keep_macos_evidence_after_native_roots_disappear(self):
+        arguments = self.create_native_fixture()
+        packages = pipeline.macos_packages
+        original = {name: (arguments.macos_packages / name).read_bytes()
+                    for arch in ('x86_64', 'aarch64')
+                    for name in (packages.smoke_receipt_name(arch),
+                                 *pipeline.macos_smoke.retained_evidence_names(arch))}
+        for arch in ('x86_64', 'aarch64'):
+            shutil.rmtree(self.root / ('smoke-root-' + arch))
+        with patch.object(pipeline, 'git_identity', return_value='a' * 40), patch.object(pipeline, 'emit'):
+            pipeline.aggregate(arguments)
+        # Validate the immutable aggregate with every producer artifact tree absent.
+        shutil.rmtree(arguments.artifacts)
+        shutil.rmtree(arguments.macos_packages)
+        metadata, _targets = pipeline.candidate_data(arguments.output, arguments.manifest, arguments.workspace)
+        for name, expected in original.items():
+            self.assertEqual((arguments.output / name).read_bytes(), expected)
+            self.assertEqual(metadata['macos_packages'][name], release_tool.digest(expected))
+        extra = arguments.output / 'macos-evidence-aarch64-unowned.json'
+        extra.write_bytes(b'{}\n')
+        with self.assertRaises(ValueError):
+            pipeline.candidate_data(arguments.output, arguments.manifest, arguments.workspace)
+
+    @unittest.skipIf(sys.platform == 'win32', 'Windows symlink creation requires an independently configured privilege')
+    def test_aggregate_rejects_a_symlink_macos_artifact_root(self):
+        arguments = self.create_native_fixture()
+        alias = self.root / 'macos-products-alias'
+        alias.symlink_to(arguments.macos_packages, target_is_directory=True)
+        arguments.macos_packages = alias
+        with patch.object(pipeline, 'git_identity', return_value='a' * 40), patch.object(pipeline, 'emit'):
+            with self.assertRaisesRegex(ValueError, 'macOS package artifact inventory differs'):
+                pipeline.aggregate(arguments)
 
     def test_aggregate_requires_complete_macos_assets_and_passed_installed_receipt(self):
         original_root = self.root

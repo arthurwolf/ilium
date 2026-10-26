@@ -2,8 +2,11 @@
 from copy import deepcopy
 import hashlib
 import json
-from pathlib import Path
+import os
+import shutil
+from pathlib import Path, PurePosixPath
 import sys
+import subprocess
 import tempfile
 import unittest
 
@@ -24,11 +27,12 @@ def qualified_fixture(f, build, binding):
     (smoke_root / 'acceptance-assets').mkdir(parents=True)
     audit_copy = smoke_root / 'acceptance-assets/native-audit.json'
     audit_copy.write_bytes((f.native / 'native-audit.json').read_bytes())
-    root = str(smoke_root)
+    recorded_root = PurePosixPath('/synthetic/darwin') / f.arch / 'smoke'
+    root = str(recorded_root)
     formats = {}
     model = json.loads((f.source / 'release/embedding-model.json').read_text())['files']['model.onnx']
     for name in ('zip', 'pkg', 'dmg'):
-        installed_path = smoke_root / name / 'installed'  # Model fixture storage with the executing host's path grammar.
+        installed_path = recorded_root / name / 'installed'  # Preserve Darwin provenance on every test host.
         installed = str(installed_path)  # Serialize the local installed directory once.
         client_path = str(installed_path / 'ilium')  # Reuse the validator's exact client spelling.
         server_path = str(installed_path / 'ilium-server')  # Reuse the validator's exact server spelling.
@@ -53,7 +57,7 @@ def qualified_fixture(f, build, binding):
                      'vector_sha256': release_tool.digest(json.dumps(proof['embedding'], allow_nan=False).encode()),
                      'process': {'pid': 103, 'ppid': 99, 'started': 'synthetic start', 'executable': client_path},  # Match the proof's client.
                      'native_mappings': client_path + '\n' + runtime_path + '\n', 'proof': proof,  # Preserve exact mapped-image identities.
-                     'command': ['/synthetic/python', str(smoke_root / 'assets' / 'embedding_acceptance.py')],  # Keep fixture-local storage paths coherent.
+                     'command': ['/synthetic/python', str(recorded_root / 'assets' / 'embedding_acceptance.py')],  # Keep recorded Darwin wrapper paths coherent.
                      'wrapper_sha256': binding['source_inputs']['release/tests/embedding_acceptance.py'],
                      'register_sha256': binding['source_inputs']['release/embedding-model.json'],
                      'stdout': output, 'stdout_sha256': release_tool.digest(output.encode()), 'stderr': ''}
@@ -90,19 +94,21 @@ def qualified_fixture(f, build, binding):
                      'catalogue': animation_rows[0], 'renders': animation_rows[1:3]}
         animation_path = smoke_root / name / 'installed-animation.json'
         animation_path.parent.mkdir()
-        animation_path.write_text(json.dumps(animation, sort_keys=True) + '\n')
+        animation_path.write_bytes((json.dumps(animation, sort_keys=True) + '\n').encode('utf-8'))
         installation = {'format': name, 'payload_removed': True}
         if name == 'dmg':
-            installation.update(source_image_detached_before_execution=True, source_image={'image': str(smoke_root / 'containers' / ('ilium-macos-' + f.arch + '.dmg')), 'device': '/dev/disk99', 'mount': str(smoke_root / 'dmg' / 'source-volume')})  # Join retained fixture paths without altering target device identity.
+            installation.update(source_image_detached_before_execution=True, source_image={'image': str(recorded_root / 'container-snapshots' / ('ilium-macos-' + f.arch + '.dmg')), 'device': '/dev/disk99', 'mount': str(recorded_root / 'dmg' / 'source-volume')})  # Join recorded Darwin paths without altering target device identity.
         if name == 'pkg':
             installation.update(receipt_removed=True, target_detached=True, target_image_removed=True, host_receipts_unchanged=True)
         formats[name] = {'state': 'passed', 'installed_directory': installed, 'payload_tree': build['payload_tree'],
                          'versions': f.audit['binary_versions'], 'session': session, 'embedding': embedding,
                          'animation': animation, 'animation_receipt_sha256': digest(animation_path),
-                         'source_hiding': [{'original': '/synthetic/' + item, 'hidden': str(smoke_root / name / 'hidden-inputs' / str(index))} for index, item in enumerate(('native', 'products', 'build'))],  # Keep target originals POSIX and fixture destinations host-local.
+                         'source_hiding': [{'original': original, 'hidden': str(recorded_root / name / 'hidden-inputs' / str(index))}
+                                           for index, original in enumerate(('/synthetic/native', '/synthetic/products',
+                                                                             '/synthetic/build', str(recorded_root / 'container-snapshots')))],
                          'installation': installation, 'owned_processes_stopped': True}
     cleanup = {'state': 'passed', **dict.fromkeys(('sources_restored', 'owned_images_detached', 'installed_payloads_removed', 'package_receipts_removed', 'owned_processes_stopped', 'work_retained'), True)}
-    return {'schema': 1, 'state': 'passed', 'publication_allowed': True, 'tag': f.tag, 'version': f.version,
+    proof = {'schema': 1, 'state': 'passed', 'publication_allowed': True, 'tag': f.tag, 'version': f.version,
             'arch': f.arch, 'target': f.target['rust_target'], **binding, 'smoke_source_inputs': source_inputs,
             'build_receipt_sha256': digest(f.base / 'products' / ('macos-packages-' + f.arch + '.json')),
             'packages': build['packages'], 'package_bytes': build['package_bytes'], 'package_files': f.files,
@@ -110,6 +116,8 @@ def qualified_fixture(f, build, binding):
             'formats': formats, 'cleanup': cleanup, 'commands': [{'label': 'synthetic native fixture', 'exit_code': 0}],
             'container_signing': build['container_signing'], 'container_notarization': build['container_notarization'],
             'credentials_used': False, 'root': root}
+    proof['retained_evidence'] = smoke.retain_smoke_evidence(proof, smoke_root.absolute(), (f.base / 'products').absolute())
+    return proof
 
 
 class MacosPublicationTests(unittest.TestCase):
@@ -119,19 +127,19 @@ class MacosPublicationTests(unittest.TestCase):
                 f = native_fixture(Path(directory), arch)
                 build, target, audit, binding = fixture_build_receipt(f, f.base / 'products')
                 proof = qualified_fixture(f, build, binding)
-                smoke.validate_smoke_receipt(proof, build, target, audit, binding, proof['build_receipt_sha256'], proof['smoke_source_inputs'], json.loads((f.source / 'release/embedding-model.json').read_text()))
+                smoke.validate_smoke_receipt(proof, build, target, audit, binding, proof['build_receipt_sha256'], proof['smoke_source_inputs'], json.loads((f.source / 'release/embedding-model.json').read_text()), evidence_root=(f.base / 'products').absolute())
 
     def test_installed_receipt_rejects_path_and_byte_substitutions(self) -> None:  # Keep path repairs subordinate to existing custody and byte gates.
         with tempfile.TemporaryDirectory() as directory:  # Retain all synthetic evidence inside an owned fixture directory.
             f = native_fixture(Path(directory), 'aarch64')  # Use inert package and process fixtures only.
             build, target, audit, binding = fixture_build_receipt(f, f.base / 'products')  # Preserve the complete source and native bindings.
-            proof = qualified_fixture(f, build, binding)  # Generate a coherent baseline using host-local paths.
+            proof = qualified_fixture(f, build, binding)  # Generate coherent Darwin provenance with separate local storage.
             model_register = json.loads((f.source / 'release/embedding-model.json').read_text())  # Reuse the model authority for every mutation.
-            def validate(receipt: dict[str, object]) -> None:  # Exercise the unchanged complete production validator.
-                smoke.validate_smoke_receipt(receipt, build, target, audit, binding, proof['build_receipt_sha256'], proof['smoke_source_inputs'], model_register)  # Keep expected bindings independent of each changed receipt.
+            def validate(receipt: dict[str, object]) -> None:  # Exercise the complete production validator.
+                smoke.validate_smoke_receipt(receipt, build, target, audit, binding, proof['build_receipt_sha256'], proof['smoke_source_inputs'], model_register, evidence_root=(f.base / 'products').absolute())  # Keep expected bindings independent of each changed receipt.
             validate(proof)  # Ensure an unrelated fixture failure cannot satisfy a negative assertion.
-            installed = Path(proof['formats']['zip']['installed_directory'])  # Derive mutations from the actual accepted fixture root.
-            hidden = Path(proof['formats']['zip']['source_hiding'][0]['hidden'])  # Preserve the original hidden-input location for comparison.
+            installed = PurePosixPath(proof['formats']['zip']['installed_directory'])  # Derive mutations from the actual accepted fixture root.
+            hidden = PurePosixPath(proof['formats']['zip']['source_hiding'][0]['hidden'])  # Preserve the original hidden-input location for comparison.
             changes = {  # Associate each independent mutation with the gate that must reject it.
                 'installed-traversal': ('escaped its smoke root', lambda value: value['formats']['zip'].update(installed_directory=str(installed / '..' / 'installed'))),  # Do not normalize traversal into an accepted path.
                 'hidden-traversal': ('escaped its owned root', lambda value: value['formats']['zip']['source_hiding'][0].update(hidden=str(hidden / '..' / '0'))),  # Keep hidden-input custody strict.
@@ -146,24 +154,205 @@ class MacosPublicationTests(unittest.TestCase):
                     mutate(changed)  # Alter only the declared evidence field.
                     with self.assertRaisesRegex(release_tool.ReleaseError, message):  # Prevent an unrelated validation error from satisfying the test.
                         validate(changed)  # Retain all production checks in their original order.
-            animation_path = Path(proof['root']) / 'zip' / 'installed-animation.json'  # Select the retained file the validator actually reopens.
+            animation_path = f.base / 'products' / proof['retained_evidence']['animation-zip']['path']  # Select the retained file the validator actually reopens.
             original_bytes = animation_path.read_bytes()  # Preserve exact bytes for restoration between negative cases.
             try:  # Keep fixture storage recoverable even if an assertion fails.
                 animation_path.write_bytes(original_bytes + b' ')  # Change raw bytes while leaving the parsed JSON value identical.
                 with self.assertRaisesRegex(release_tool.ReleaseError, 'animation evidence is missing or changed'):  # Require actual file hashing to catch the mutation.
                     validate(proof)  # Leave both the retained digest and embedded proof untouched.
                 animation_path.unlink()  # Remove only this owned fixture artifact.
-                with self.assertRaisesRegex(release_tool.ReleaseError, 'animation evidence is missing or changed'):  # Keep missing evidence fail-closed.
+                with self.assertRaisesRegex(release_tool.ReleaseError, 'file inventory differs'):  # Keep missing evidence fail-closed.
                     validate(proof)  # Never replace a missing file with embedded JSON alone.
             finally:  # Restore exact retained bytes after every test outcome.
                 animation_path.write_bytes(original_bytes)  # Preserve the original fixture for cleanup and inspection.
+
+
+    def test_transport_reopens_exact_darwin_bytes_without_original_tree(self):
+        for arch in ('x86_64', 'aarch64'):
+            with self.subTest(arch=arch), tempfile.TemporaryDirectory() as directory:
+                f = native_fixture(Path(directory), arch)
+                build, target, audit, binding = fixture_build_receipt(f, f.base / 'products')
+                proof = qualified_fixture(f, build, binding)
+                receipt_bytes = (json.dumps(proof, sort_keys=True, indent=2) + '\n').encode('utf-8')
+                transported = f.base / 'transported'; transported.mkdir()
+                expected = {}
+                for name in smoke.retained_evidence_names(arch):
+                    data = (f.base / 'products' / name).read_bytes()
+                    (transported / name).write_bytes(data)
+                    expected[name] = data
+                shutil.rmtree(f.base / ('smoke-root-' + arch))
+                # No Path mocking: target paths are Darwin POSIX even under native Windows Python.
+                decoded = smoke.strict_json(receipt_bytes)
+                smoke.validate_smoke_receipt(decoded, build, target, audit, binding,
+                    proof['build_receipt_sha256'], proof['smoke_source_inputs'],
+                    json.loads((f.source / 'release/embedding-model.json').read_text()),
+                    evidence_root=transported.absolute())
+                self.assertEqual((json.dumps(decoded, sort_keys=True, indent=2) + '\n').encode(), receipt_bytes)
+                self.assertEqual({name: (transported / name).read_bytes() for name in expected}, expected)
+                self.assertTrue(all(value['installed_directory'].startswith('/synthetic/darwin/')
+                                    for value in proof['formats'].values()))
+
+    def test_transport_rejects_manifest_path_role_and_custody_mutations(self):
+        with tempfile.TemporaryDirectory() as directory:
+            f = native_fixture(Path(directory), 'aarch64')
+            build, target, audit, binding = fixture_build_receipt(f, f.base / 'products')
+            proof = qualified_fixture(f, build, binding)
+            model = json.loads((f.source / 'release/embedding-model.json').read_text())
+            def validate(value):
+                smoke.validate_smoke_receipt(value, build, target, audit, binding,
+                    proof['build_receipt_sha256'], proof['smoke_source_inputs'], model,
+                    evidence_root=(f.base / 'products').absolute())
+            validate(proof)
+            cases = {
+                'missing-role': lambda v: v['retained_evidence'].pop('native-audit'),
+                'extra-role': lambda v: v['retained_evidence'].update(foreign={}),
+                'extra-field': lambda v: v['retained_evidence']['animation-zip'].update(extra=True),
+                'traversal': lambda v: v['retained_evidence']['animation-zip'].update(path='../outside.json'),
+                'absolute': lambda v: v['retained_evidence']['animation-zip'].update(path='/outside.json'),
+                'windows-path': lambda v: v['retained_evidence']['animation-zip'].update(path='C:\\outside.json'),
+                'duplicate-path': lambda v: v['retained_evidence']['animation-zip'].update(path=v['retained_evidence']['animation-pkg']['path']),
+                'foreign-source': lambda v: v['retained_evidence']['animation-zip'].update(source_path='/foreign/zip/installed-animation.json'),
+                'source-traversal': lambda v: v['retained_evidence']['animation-zip'].update(source_path=v['root'] + '/zip/../zip/installed-animation.json'),
+                'source-hash': lambda v: v['formats']['zip']['animation']['source_files'].update({'Cargo.lock': 'f' * 64}),
+                'digest': lambda v: v['retained_evidence']['animation-zip'].update(sha256='f' * 64),
+                'boolean-bytes': lambda v: v['retained_evidence']['animation-zip'].update(bytes=True),
+                'three-hidden': lambda v: v['formats']['zip']['source_hiding'].pop(),
+                'five-hidden': lambda v: v['formats']['zip']['source_hiding'].append(deepcopy(v['formats']['zip']['source_hiding'][0])),
+                'duplicate-hidden': lambda v: v['formats']['zip']['source_hiding'][1].update(original=v['formats']['zip']['source_hiding'][0]['original']),
+                'foreign-container-root': lambda v: v['formats']['zip']['source_hiding'][3].update(original='/foreign/container-snapshots'),
+                'duplicate-hidden-destination': lambda v: v['formats']['zip']['source_hiding'][1].update(hidden=v['formats']['zip']['source_hiding'][0]['hidden']),
+                'posix-root-alias': lambda v: v.update(root=v['root'] + '/.'),
+                'windows-root': lambda v: v.update(root='C:\\synthetic\\smoke'),
+            }
+            for case, mutate in cases.items():
+                with self.subTest(case=case):
+                    changed = deepcopy(proof); mutate(changed)
+                    with self.assertRaises(release_tool.ReleaseError):
+                        validate(changed)
+
+    def test_transport_rejects_missing_changed_and_extra_retained_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            f = native_fixture(Path(directory), 'aarch64')
+            build, target, audit, binding = fixture_build_receipt(f, f.base / 'products')
+            proof = qualified_fixture(f, build, binding)
+            model = json.loads((f.source / 'release/embedding-model.json').read_text())
+            products = f.base / 'products'
+            def validate(value=proof, evidence_root=products):
+                smoke.validate_smoke_receipt(value, build, target, audit, binding,
+                    proof['build_receipt_sha256'], proof['smoke_source_inputs'], model,
+                    evidence_root=evidence_root.absolute())
+            validate()
+            for name in smoke.retained_evidence_names(f.arch):
+                path = products / name; data = path.read_bytes()
+                try:
+                    with self.subTest(file=name, mutation='changed-byte'):
+                        path.write_bytes(data + b' ')
+                        with self.assertRaises(release_tool.ReleaseError): validate()
+                    with self.subTest(file=name, mutation='missing'):
+                        path.unlink()
+                        with self.assertRaises(release_tool.ReleaseError): validate()
+                finally:
+                    path.write_bytes(data)
+            extra = products / 'macos-evidence-aarch64-foreign.json'
+            extra.write_bytes(b'{}\n')
+            try:
+                with self.assertRaisesRegex(release_tool.ReleaseError, 'file inventory differs'): validate()
+            finally:
+                extra.unlink()
+            foreign = f.base / 'foreign'; foreign.mkdir()
+            with self.assertRaises(release_tool.ReleaseError): validate(evidence_root=foreign)
+            # Matching digest alone cannot replace duplicate-key JSON evidence.
+            path = products / proof['retained_evidence']['animation-zip']['path']
+            original = path.read_bytes()
+            duplicate = b'{"duplicate":1,"duplicate":2}\n'
+            changed = deepcopy(proof)
+            changed['retained_evidence']['animation-zip'].update(sha256=release_tool.digest(duplicate), bytes=len(duplicate))
+            changed['formats']['zip']['animation_receipt_sha256'] = release_tool.digest(duplicate)
+            try:
+                path.write_bytes(duplicate)
+                with self.assertRaisesRegex(release_tool.ReleaseError, 'duplicate JSON evidence key'): validate(changed)
+            finally:
+                path.write_bytes(original)
+
+            # Rehashing edited JSON cannot remove the independent source binding.
+            changed = deepcopy(proof)
+            changed['formats']['zip']['animation']['source_files']['Cargo.lock'] = 'f' * 64
+            altered = (json.dumps(changed['formats']['zip']['animation']) + '\n').encode('utf-8')
+            changed['retained_evidence']['animation-zip'].update(sha256=release_tool.digest(altered), bytes=len(altered))
+            changed['formats']['zip']['animation_receipt_sha256'] = release_tool.digest(altered)
+            try:
+                path.write_bytes(altered)
+                with self.assertRaisesRegex(release_tool.ReleaseError, 'animation evidence is missing or changed'): validate(changed)
+            finally:
+                path.write_bytes(original)
+
+    @unittest.skipIf(sys.platform == 'win32', 'Windows symlink creation requires an independently configured privilege')
+    def test_transport_rejects_symlink_root_and_members(self):
+        with tempfile.TemporaryDirectory() as directory:
+            f = native_fixture(Path(directory), 'aarch64')
+            build, target, audit, binding = fixture_build_receipt(f, f.base / 'products')
+            proof = qualified_fixture(f, build, binding)
+            products = f.base / 'products'
+            def validate(evidence_root=products):
+                smoke.validate_smoke_receipt(proof, build, target, audit, binding,
+                    proof['build_receipt_sha256'], proof['smoke_source_inputs'],
+                    json.loads((f.source / 'release/embedding-model.json').read_text()),
+                    evidence_root=evidence_root.absolute())
+            validate()
+            alias = f.base / 'aliased-root'; alias.symlink_to(products, target_is_directory=True)
+            with self.assertRaisesRegex(release_tool.ReleaseError, 'explicit regular local directory'): validate(alias)
+            for name in smoke.retained_evidence_names(f.arch):
+                path = products / name; saved = f.base / ('saved-' + name)
+                path.rename(saved)
+                try:
+                    path.symlink_to(saved)
+                    with self.subTest(file=name, mutation='symlink'), self.assertRaises(release_tool.ReleaseError): validate()
+                    path.unlink()
+                finally:
+                    saved.rename(path)
+
+    def test_transport_rejects_hardlinked_members(self):
+        with tempfile.TemporaryDirectory() as directory:
+            f = native_fixture(Path(directory), 'aarch64')
+            build, target, audit, binding = fixture_build_receipt(f, f.base / 'products')
+            proof = qualified_fixture(f, build, binding)
+            products = f.base / 'products'
+            model = json.loads((f.source / 'release/embedding-model.json').read_text())
+            for name in smoke.retained_evidence_names(f.arch):
+                path = products / name; alias = f.base / ('hardlink-' + name)
+                os.link(path, alias)
+                try:
+                    with self.subTest(file=name), self.assertRaisesRegex(release_tool.ReleaseError, 'admitted regular file'):
+                        smoke.validate_smoke_receipt(proof, build, target, audit, binding,
+                            proof['build_receipt_sha256'], proof['smoke_source_inputs'], model,
+                            evidence_root=products.absolute())
+                finally:
+                    alias.unlink()
+
+    @unittest.skipUnless(sys.platform == 'win32', 'Windows directory-junction filesystem semantics')
+    def test_transport_rejects_a_windows_directory_junction_root(self):
+        with tempfile.TemporaryDirectory() as directory:
+            f = native_fixture(Path(directory), 'aarch64')
+            build, target, audit, binding = fixture_build_receipt(f, f.base / 'products')
+            proof = qualified_fixture(f, build, binding)
+            alias = f.base / 'junction-root'
+            subprocess.run(['cmd', '/c', 'mklink', '/J', str(alias), str(f.base / 'products')],
+                           check=True, capture_output=True, text=True)
+            try:
+                with self.assertRaisesRegex(release_tool.ReleaseError, 'explicit regular local directory'):
+                    smoke.validate_smoke_receipt(proof, build, target, audit, binding,
+                        proof['build_receipt_sha256'], proof['smoke_source_inputs'],
+                        json.loads((f.source / 'release/embedding-model.json').read_text()),
+                        evidence_root=alias.absolute())
+            finally:
+                alias.rmdir()
 
     def test_publication_rejects_incomplete_changed_and_forged_claims(self):
         with tempfile.TemporaryDirectory() as directory:
             f = native_fixture(Path(directory), 'aarch64')
             build, target, audit, binding = fixture_build_receipt(f, f.base / 'products')
             proof = qualified_fixture(f, build, binding)
-            smoke.validate_smoke_receipt(proof, build, target, audit, binding, proof['build_receipt_sha256'], proof['smoke_source_inputs'], json.loads((f.source / 'release/embedding-model.json').read_text()))  # Require a valid baseline before testing rejection.
+            smoke.validate_smoke_receipt(proof, build, target, audit, binding, proof['build_receipt_sha256'], proof['smoke_source_inputs'], json.loads((f.source / 'release/embedding-model.json').read_text()), evidence_root=(f.base / 'products').absolute())  # Require a valid baseline before testing rejection.
             changes = {
                 'build-only': lambda v: v.update(state='built-not-qualified'),
                 'permission': lambda v: v.update(publication_allowed=False),
@@ -208,4 +397,4 @@ class MacosPublicationTests(unittest.TestCase):
                     changed = deepcopy(proof)
                     mutate(changed)
                     with self.assertRaises(release_tool.ReleaseError):
-                        smoke.validate_smoke_receipt(changed, build, target, audit, binding, proof['build_receipt_sha256'], proof['smoke_source_inputs'], json.loads((f.source / 'release/embedding-model.json').read_text()))
+                        smoke.validate_smoke_receipt(changed, build, target, audit, binding, proof['build_receipt_sha256'], proof['smoke_source_inputs'], json.loads((f.source / 'release/embedding-model.json').read_text()), evidence_root=(f.base / 'products').absolute())

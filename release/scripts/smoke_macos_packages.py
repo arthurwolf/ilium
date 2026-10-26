@@ -93,7 +93,109 @@ def validate_build_receipt(receipt: dict[str, Any], target: dict[str, Any], audi
     require(isinstance(command, list) and command.count('--compression') == 1, 'build must explicitly select legacy PKG compression')  # Reject implicit compression.
     require(command[command.index('--compression'):][:2] == ['--compression', 'legacy'], 'unsupported PKG payload compression')  # Require supported compression.
 #
-def validate_smoke_session(session: dict[str, Any], installed: Path) -> None:
+
+def recorded_posix_path(value: Any, message: str) -> PurePosixPath:
+    """Interpret Darwin provenance independently of the publication host's OS."""
+    require(isinstance(value, str) and value.startswith('/') and
+            not value.startswith('//') and '\\' not in value and
+            all(ord(character) >= 32 and ord(character) != 127 for character in value), message)
+    path = PurePosixPath(value)
+    require(str(path) == value and '..' not in path.parts and path != PurePosixPath('/'), message)
+    return path
+
+
+def retained_evidence_specs(architecture: str) -> dict[str, tuple[str, str]]:
+    """Own the complete role -> (Darwin suffix, portable filename) contract."""
+    require(architecture in packages.architectures, 'unsupported macOS evidence architecture')
+    prefix = 'macos-evidence-' + architecture + '-'
+    return {'native-audit': ('acceptance-assets/native-audit.json', prefix + 'native-audit.json'),
+            **{'animation-' + name: (name + '/installed-animation.json',
+                                    prefix + name + '-installed-animation.json')
+               for name in packages.formats}}
+
+
+def retained_evidence_names(architecture: str) -> tuple[str, ...]:
+    return tuple(filename for _suffix, filename in retained_evidence_specs(architecture).values())
+
+
+def redirected_evidence_entry(path: Path) -> bool:
+    """Reject Windows junctions/reparse points as well as ordinary symlinks."""
+    metadata = path.lstat()
+    reparse = getattr(stat, 'FILE_ATTRIBUTE_REPARSE_POINT', 0x400)
+    return path.is_symlink() or bool(getattr(metadata, 'st_file_attributes', 0) & reparse)
+
+
+def local_evidence_root(directory: Path) -> Path:
+    """Establish one explicit local authority; never resolve recorded Darwin paths."""
+    require(isinstance(directory, Path) and directory.is_absolute() and '..' not in directory.parts
+            and directory.is_dir() and not redirected_evidence_entry(directory),
+            'retained macOS evidence root must be an explicit regular local directory')
+    # Parent aliases such as Darwin's /var are resolved only at this caller-owned boundary.
+    return directory.resolve(strict=True)
+
+
+def retain_smoke_evidence(receipt: dict[str, Any], source_root: Path,
+                          destination: Path) -> dict[str, dict[str, Any]]:
+    """Copy exact native JSON bytes; path labels remain original Darwin provenance."""
+    source_root, destination = local_evidence_root(source_root), local_evidence_root(destination)
+    recorded_root = recorded_posix_path(receipt['root'], 'invalid macOS smoke root')
+    result = {}
+    for role, (suffix, filename) in retained_evidence_specs(receipt['arch']).items():
+        original = source_root / suffix
+        require(all(parent.is_dir() and not redirected_evidence_entry(parent)
+                    for parent in original.parents if parent != source_root and
+                    parent.is_relative_to(source_root)), 'macOS evidence source parent is redirected')
+        packages.regular_file(original, max_metadata_bytes)
+        expected = (receipt['native_audit_sha256'] if role == 'native-audit' else
+                    receipt['formats'][role.removeprefix('animation-')]['animation_receipt_sha256'])
+        copy_verified(original, destination / filename, expected)
+        result[role] = {'path': filename, 'source_path': str(recorded_root / suffix),
+                        'sha256': expected, 'bytes': (destination / filename).stat().st_size}
+    return result
+
+
+def validate_retained_evidence(receipt: dict[str, Any], directory: Path,
+                               audit: dict[str, Any]) -> dict[str, tuple[Path, dict[str, Any]]]:
+    """Bind a closed portable inventory to original paths and independent digest edges."""
+    directory = local_evidence_root(directory)
+    specs = retained_evidence_specs(receipt['arch'])
+    entries = receipt.get('retained_evidence')
+    require(isinstance(entries, dict) and set(entries) == set(specs),
+            'retained macOS evidence role inventory differs')
+    prefix = 'macos-evidence-' + receipt['arch'] + '-'
+    actual = {path.name for path in directory.iterdir()
+              if path.name.casefold().startswith(prefix.casefold())}
+    require(actual == set(retained_evidence_names(receipt['arch'])),
+            'retained macOS evidence file inventory differs')
+    recorded_root = recorded_posix_path(receipt['root'], 'invalid macOS smoke root')
+    result = {}
+    for role, (suffix, filename) in specs.items():
+        entry = entries[role]
+        message = ('retained macOS native audit is missing or changed' if role == 'native-audit'
+                   else 'installed macOS animation evidence is missing or changed')
+        expected = (receipt['native_audit_sha256'] if role == 'native-audit' else
+                    receipt['formats'][role.removeprefix('animation-')].get('animation_receipt_sha256'))
+        require(isinstance(entry, dict) and set(entry) == {'path', 'source_path', 'sha256', 'bytes'}
+                and entry['path'] == filename
+                and entry['source_path'] == str(recorded_root / suffix),
+                'retained macOS evidence path or schema differs')
+        require(isinstance(expected, str) and re.fullmatch('[0-9a-f]{64}', expected)
+                and entry['sha256'] == expected and type(entry['bytes']) is int
+                and 0 < entry['bytes'] <= max_metadata_bytes, message)
+        path = directory / filename  # A fixed flat name cannot introduce subdirectory links or traversal.
+        require(path.is_file() and not redirected_evidence_entry(path), message)
+        packages.regular_file(path, max_metadata_bytes)
+        data = path.read_bytes()
+        require(len(data) == entry['bytes'] and release_tool.digest(data) == expected, message)
+        document = strict_json(data)
+        if role == 'native-audit':
+            require(document == audit, 'retained macOS native audit differs from qualified audit')
+        else:
+            require(document == receipt['formats'][role.removeprefix('animation-')].get('animation'), message)
+        result[role] = (path, document)
+    return result
+
+def validate_smoke_session(session: dict[str, Any], installed: PurePosixPath) -> None:
     require(isinstance(session, dict) and session.get('state') == 'passed' and session.get('pane_stopped_by_kill_session') is True, 'installed session lifecycle did not pass')
     nonce = session.get('nonce')
     require(isinstance(nonce, str) and re.fullmatch('[0-9a-f]{32}', nonce), 'invalid installed session nonce')
@@ -109,7 +211,7 @@ def validate_smoke_session(session: dict[str, Any], installed: Path) -> None:
     require(isinstance(session.get('listing'), str) and re.search(r'(?<![A-Za-z0-9_-])' + re.escape(session['name']) + r'(?![A-Za-z0-9_-])', session['listing']), 'installed session listing differs')
 
 
-def validate_smoke_embedding(embedding: dict[str, Any], installed: Path, audit: dict[str, Any], binding: dict[str, Any], model_register: dict[str, Any]) -> None:
+def validate_smoke_embedding(embedding: dict[str, Any], installed: PurePosixPath, audit: dict[str, Any], binding: dict[str, Any], model_register: dict[str, Any]) -> None:
     require(isinstance(embedding, dict) and embedding.get('state') == 'passed' and embedding.get('dimensions') == 384, 'installed embedding did not pass')
     proof = embedding.get('proof')
     require(isinstance(proof, dict) and proof.get('type') == 'embedding-proof' and proof.get('input') == 'release embedding acceptance', 'missing installed embedding proof')
@@ -121,7 +223,7 @@ def validate_smoke_embedding(embedding: dict[str, Any], installed: Path, audit: 
     require(isinstance(vector, list) and len(vector) == 384 and all(type(value) in (int, float) and -sys.float_info.max <= value <= sys.float_info.max and math.isfinite(value) for value in vector) and any(value != 0 for value in vector), 'installed embedding vector is not finite and nonzero')
     require(embedding.get('vector_sha256') == release_tool.digest(json.dumps(vector, allow_nan=False).encode()), 'installed embedding vector digest differs')
     require(isinstance(proof.get('loaded_runtime'), str), 'invalid installed embedding runtime path')
-    runtime = Path(proof['loaded_runtime'])
+    runtime = recorded_posix_path(proof['loaded_runtime'], 'embedding loaded an unshipped runtime')
     require(runtime.parent == installed and re.fullmatch(r'libonnxruntime\.[0-9]+\.[0-9]+\.[0-9]+\.dylib', runtime.name) and runtime.name in audit['files'], 'embedding loaded an unshipped runtime')
     require(embedding.get('loaded_runtime') == str(runtime) and embedding.get('runtime_sha256') == audit['files'][runtime.name], 'installed embedding runtime digest differs')
     process = embedding.get('process')
@@ -137,10 +239,10 @@ def validate_smoke_embedding(embedding: dict[str, Any], installed: Path, audit: 
     require([record for record in records if record.get('type') == 'embedding-proof'] == [proof], 'installed embedding stdout proof differs')
 
 
-def validate_smoke_receipt(receipt: dict[str, Any], build: dict[str, Any], target: dict[str, Any], audit: dict[str, Any], binding: dict[str, Any], build_receipt_sha256: str, smoke_sources: dict[str, str], model_register: dict[str, Any]) -> None:
+def validate_smoke_receipt(receipt: dict[str, Any], build: dict[str, Any], target: dict[str, Any], audit: dict[str, Any], binding: dict[str, Any], build_receipt_sha256: str, smoke_sources: dict[str, str], model_register: dict[str, Any], *, evidence_root: Path) -> None:
     """Reopen native M3 evidence on the publication host without executing payloads."""
     validate_build_receipt(build, target, audit, binding)
-    fields = {'schema', 'state', 'publication_allowed', 'tag', 'version', 'arch', 'target', 'smoke_source_inputs', 'build_receipt_sha256', 'packages', 'package_bytes', 'package_files', 'payload_tree', 'native_identity', 'formats', 'cleanup', 'commands', 'container_signing', 'container_notarization', 'credentials_used', 'root'} | set(binding)
+    fields = {'schema', 'state', 'publication_allowed', 'tag', 'version', 'arch', 'target', 'smoke_source_inputs', 'build_receipt_sha256', 'packages', 'package_bytes', 'package_files', 'payload_tree', 'native_identity', 'formats', 'cleanup', 'commands', 'container_signing', 'container_notarization', 'credentials_used', 'root', 'retained_evidence'} | set(binding)
     require(isinstance(receipt, dict) and set(receipt) == fields, 'smoke receipt has missing or unknown fields')
     require(receipt['schema'] == 1 and receipt['state'] == 'passed' and receipt['publication_allowed'] is True, 'macOS smoke did not qualify publication')
     require(all(receipt.get(key) == value for key, value in binding.items()), 'smoke native/source binding differs')
@@ -151,38 +253,39 @@ def validate_smoke_receipt(receipt: dict[str, Any], build: dict[str, Any], targe
     require(isinstance(identity, dict) and identity.get('system') == 'Darwin' and identity.get('machine') == packages.architectures[target['arch']][0] and identity.get('runner') == target['runner'] and identity.get('translated') is False, 'smoke was not genuinely native')
     cleanup = {'state': 'passed', **dict.fromkeys(('sources_restored', 'owned_images_detached', 'installed_payloads_removed', 'package_receipts_removed', 'owned_processes_stopped', 'work_retained'), True)}
     require(receipt['cleanup'] == cleanup, 'installed macOS cleanup is incomplete')
-    require(isinstance(receipt['root'], str), 'invalid macOS smoke root')
-    root_path = Path(receipt['root'])
-    require(root_path.is_absolute() and '..' not in root_path.parts, 'invalid macOS smoke root')
+    root_path = recorded_posix_path(receipt['root'], 'invalid macOS smoke root')
     results = receipt['formats']
     require(isinstance(results, dict) and set(results) == set(packages.formats), 'macOS smoke format inventory differs')
+    require(all(isinstance(result, dict) for result in results.values()), 'invalid macOS format evidence')
+    retained = validate_retained_evidence(receipt, evidence_root, audit)
     hidden_originals = []
     for name, result in results.items():
         require(isinstance(result, dict) and result.get('state') == 'passed' and result.get('owned_processes_stopped') is True, 'macOS format lifecycle did not pass')
         require(result.get('payload_tree') == build['payload_tree'] and result.get('versions') == audit['binary_versions'], 'installed macOS payload or versions differ')
         require(isinstance(result.get('installed_directory'), str), 'invalid installed macOS directory')
-        installed = Path(result['installed_directory'])
+        installed = recorded_posix_path(result['installed_directory'], 'installed macOS directory escaped its smoke root')
         require(installed.is_absolute() and installed.is_relative_to(root_path / name) and '..' not in installed.parts, 'installed macOS directory escaped its smoke root')
         hidden = result.get('source_hiding')
-        require(isinstance(hidden, list) and len(hidden) == 3 and all(isinstance(item, dict) and set(item) == {'original', 'hidden'} and all(isinstance(value, str) for value in item.values()) for item in hidden), 'source/build/package inputs were not hidden')
-        originals = [PurePosixPath(item['original']) for item in hidden]
-        require(len(set(originals)) == 3 and all(path.is_absolute() and '..' not in path.parts and not installed.is_relative_to(path) for path in originals), 'hidden macOS input custody differs')
-        require(all(Path(item['hidden']).is_relative_to(root_path / name / 'hidden-inputs') and '..' not in Path(item['hidden']).parts for item in hidden), 'hidden macOS input escaped its owned root')
+        require(isinstance(hidden, list) and len(hidden) == 4 and all(isinstance(item, dict) and set(item) == {'original', 'hidden'} and all(isinstance(value, str) for value in item.values()) for item in hidden), 'source/build/package inputs were not hidden')
+        originals = [recorded_posix_path(item['original'], 'hidden macOS input custody differs') for item in hidden]
+        require(len(set(originals)) == 4 and originals[3] == root_path / 'container-snapshots'
+                and all(not installed.is_relative_to(path) for path in originals)
+                and all(not first.is_relative_to(second) for first in originals for second in originals if first != second)
+                and all(not path.is_relative_to(root_path) and not root_path.is_relative_to(path) for path in originals[:3]),
+                'hidden macOS input custody differs')
+        require(all(recorded_posix_path(item['hidden'], 'hidden macOS input escaped its owned root') ==
+                    root_path / name / 'hidden-inputs' / str(index) for index, item in enumerate(hidden)),
+                'hidden macOS input escaped its owned root')
         hidden_originals.append(originals)
         validate_smoke_session(result.get('session'), installed)
         validate_smoke_embedding(result.get('embedding'), installed, audit, binding, model_register)
-        animation_path = root_path / name / 'installed-animation.json'
-        animation = result.get('animation')
-        require(isinstance(animation, dict) and animation_path.is_file() and
-                not animation_path.is_symlink() and
-                result.get('animation_receipt_sha256') == packages.sha(animation_path) and
-                packages.read_json(animation_path) == animation and
-                animation.get('source_files') == {source_name: smoke_sources[source_name]
-                                                  for source_name in animation_gate.SOURCE_FILES},
+        animation_path, animation = retained['animation-' + name]
+        require(animation.get('source_files') == {source_name: smoke_sources[source_name]
+                                                 for source_name in animation_gate.SOURCE_FILES},
                 'installed macOS animation evidence is missing or changed')
         animation_gate.validate_receipt(
             animation, target=target, tag=receipt['tag'], package_format=name,
-            audit_path=root_path / 'acceptance-assets/native-audit.json',
+            audit_path=retained['native-audit'][0],
             installed_root=installed, executable_root=installed,
             command=[str(installed / 'ilium'), 'release-animation-probe'],
             source_hashes={source_name: smoke_sources[source_name]
@@ -924,7 +1027,8 @@ def smoke(arguments: argparse.Namespace) -> dict[str, Any]:  # Qualify all forma
     require(packages.sha(products / packages.receipt_name(arguments.arch)) == build_receipt_sha256 and all(packages.sha(source / name) == digest for name, digest in smoke_sources.items()), 'acceptance code or build receipt changed')  # Rebind final evidence.
     cleanup = {'state': 'passed', 'sources_restored': True, 'owned_images_detached': True, 'installed_payloads_removed': True, 'package_receipts_removed': True, 'owned_processes_stopped': True, 'work_retained': True}  # Distinguish retained diagnostics.
     result = {'schema': 1, 'state': 'passed', 'publication_allowed': True, 'tag': arguments.tag, 'version': audit['version'], 'arch': arguments.arch, 'target': target['rust_target'], **binding, 'smoke_source_inputs': smoke_sources, 'build_receipt_sha256': build_receipt_sha256, 'packages': receipt['packages'], 'package_bytes': receipt['package_bytes'], 'package_files': audit['files'], 'payload_tree': receipt['payload_tree'], 'native_identity': identity, 'formats': results, 'cleanup': cleanup, 'commands': runner.records, 'container_signing': receipt['container_signing'], 'container_notarization': receipt['container_notarization'], 'credentials_used': False, 'root': str(smoke_root)}  # Bind lifecycle results.
-    validate_smoke_receipt(result, receipt, target, audit, binding, build_receipt_sha256, smoke_sources, packages.read_json(source / 'release/embedding-model.json'))
+    result['retained_evidence'] = retain_smoke_evidence(result, smoke_root, products)
+    validate_smoke_receipt(result, receipt, target, audit, binding, build_receipt_sha256, smoke_sources, packages.read_json(source / 'release/embedding-model.json'), evidence_root=products)
     packages.write_json(output, result)  # Commit qualified receipt.
     packages.emit('artifact', path=str(output), sha256=packages.sha(output), bytes=output.stat().st_size)  # Report actual artifact.
     packages.emit('result', command='smoke', state='passed', publication_allowed=True, receipt=str(output), root=str(smoke_root), packages=receipt['packages'])  # Qualify without publication.
