@@ -1135,7 +1135,9 @@ class PipelineTests(unittest.TestCase):
                 marker_path = packages / marker_name
                 marker = release_tool.read_json(marker_path)
                 marker_path.unlink()
-                log = self.root / ('seal-log-' + target['os'])
+                # Darwin exposes temporary storage through /var and /private/var aliases.
+                # Canonicalize owned fixture storage, never the recorded foreign evidence names.
+                log = (self.root / ('seal-log-' + target['os'])).resolve()
                 log.mkdir()
                 inputs = dict(workspace=arguments.workspace, manifest=arguments.manifest,
                               audit=native / 'native-audit.json',
@@ -1370,7 +1372,7 @@ class PipelineTests(unittest.TestCase):
         native = arguments.artifacts / ('native-' + target['rust_target'])
         install_arguments = SimpleNamespace(candidate=arguments.output, manifest=arguments.manifest, workspace=arguments.workspace, native=native, target=target['rust_target'], mode='candidate', baseline=None, preview_receipt=None, output=self.root / 'receipt.json', log=self.root / 'install.log')
         with patch.object(pipeline, 'logged') as logged, patch.object(pipeline, 'validate_install_receipt'), patch.object(pipeline, 'validate_install_evidence'), patch.object(pipeline.release_tool, 'read_json', wraps=pipeline.release_tool.read_json) as read_json:
-            read_json.side_effect = lambda path: ({'schema': 2, 'state': 'passed'} if Path(path) == install_arguments.output else json.loads(Path(path).read_text()))
+            read_json.side_effect = lambda path: ({'schema': 2, 'state': 'passed'} if Path(path).resolve() == install_arguments.output.resolve() else json.loads(Path(path).read_text()))
             pipeline.install(install_arguments)
         command = list(map(str, logged.call_args.args[0]))
         self.assertEqual(command[command.index('--embedding-wrapper') + 1], str(arguments.workspace.parent / 'release/tests/embedding_acceptance.py'))
