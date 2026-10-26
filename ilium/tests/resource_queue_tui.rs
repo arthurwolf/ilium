@@ -33,7 +33,7 @@ impl Sandbox {
         // may be overridden when the verified binary is exercised on aquarelle.
         let base = std::env::var_os("ILIUM_RESOURCE_TEST_ROOT")
             .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("/data/ilium-resource-queue-tests"));
+            .unwrap_or_else(|| PathBuf::from("/data/ilium-rq"));
         std::fs::create_dir_all(&base).unwrap();
         std::fs::write(base.join(".scratch-reaper"), b"").unwrap();
         let root = tempfile::Builder::new()
@@ -52,7 +52,12 @@ impl Sandbox {
             "project name: QueueTui\n",
         )
         .unwrap();
-        std::fs::write(config.join("config.toml"), "[keyboard]\nshortcut_base = \"b\"\n[agent_setup]\nnever_ask_global = true\n[detection]\nworking_poll_seconds = 1\n").unwrap();
+        let http_port = std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        std::fs::write(config.join("config.toml"), format!("[keyboard]\nshortcut_base = \"b\"\n[agent_setup]\nnever_ask_global = true\n[detection]\nworking_poll_seconds = 1\n[debug]\nfile_logging_enabled = true\n[api]\nport = {http_port}\n")).unwrap();
         let mut settings = ilium_client::config::load(&config).unwrap();
         settings
             .agent_setup
@@ -76,7 +81,7 @@ impl Sandbox {
             (ilium_platform::paths::CONFIG_DIR_ENV, config.clone()),
             (
                 ilium_platform::runtime_dir::DEBUG_LOG_DIR_ENV,
-                root.path().join("debug"),
+                root.path().join("d"),
             ),
             (
                 ilium_client::AGENT_SETUP_HOME_ENV,
@@ -107,17 +112,48 @@ impl Sandbox {
         command.kill_on_drop(true);
         command
     }
+    fn server_log_excerpt(&self) -> String {
+        let debug_root = self._root.path().join("d");
+        let mut excerpts = Vec::new();
+        if let Ok(session_directories) = std::fs::read_dir(&debug_root) {
+            let mut log_paths = Vec::new();
+            for session_directory in session_directories.flatten() {
+                let Ok(files) = std::fs::read_dir(session_directory.path()) else {
+                    continue;
+                };
+                for file in files.flatten() {
+                    let path = file.path();
+                    if path.extension().is_some_and(|extension| extension == "txt") {
+                        log_paths.push(path);
+                    }
+                }
+            }
+            log_paths.sort();
+            excerpts.extend(log_paths.into_iter().filter_map(|path| {
+                let contents = std::fs::read_to_string(&path).ok()?;
+                let excerpt = contents.chars().rev().take(12000).collect::<String>();
+                let excerpt = excerpt.chars().rev().collect::<String>();
+                Some(format!("--- {} ---\n{excerpt}", path.display()))
+            }));
+        }
+        if excerpts.is_empty() {
+            return format!("no server logs found under {}", debug_root.display());
+        }
+        excerpts.join("\n")
+    }
     async fn cli(&self, args: &[&str]) -> serde_json::Value {
         let output = tokio::time::timeout(TIMEOUT, self.command().args(args).output())
             .await
             .unwrap()
             .unwrap();
-        assert!(
-            output.status.success(),
-            "command {args:?}: {} {}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
+        if !output.status.success() {
+            panic!(
+                "command {args:?}: {} {}\nserver startup logs:\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr),
+                self.server_log_excerpt()
+            );
+        }
         serde_json::from_slice(&output.stdout).unwrap_or(serde_json::Value::Null)
     }
     async fn connect(&self) -> SessionStream {
@@ -192,21 +228,25 @@ impl Drop for Sandbox {
 
 async fn event(
     stream: &mut SessionStream,
+    label: &str,
     predicate: impl Fn(&ServerEvent) -> bool,
 ) -> ServerEvent {
+    let mut observed = std::collections::VecDeque::new();
     tokio::time::timeout(TIMEOUT, async {
         loop {
             let event: ServerEvent = read_frame(stream).await.unwrap();
+            if observed.len() == 8 { observed.pop_front(); }
+            observed.push_back(format!("{:?}", std::mem::discriminant(&event)));
             if predicate(&event) {
                 return event;
             }
         }
     })
     .await
-    .expect("candidate server event")
+    .unwrap_or_else(|error| panic!("candidate server event {label}: {error}; recent event kinds: {observed:?}"))
 }
 async fn tree(stream: &mut SessionStream) -> Tree {
-    match event(stream, |event| {
+    match event(stream, "initial tree snapshot", |event| {
         matches!(event, ServerEvent::TreeSnapshot(_))
     })
     .await
@@ -287,7 +327,7 @@ async fn rpc(
         )
         .await
         .unwrap();
-        let ServerEvent::ResourceResult { result, .. } = event(stream, |event| {
+        let ServerEvent::ResourceResult { result, .. } = event(stream, "resource RPC response", |event| {
             matches!(
                 event,
                 ServerEvent::ResourceResult {
@@ -337,7 +377,7 @@ async fn spawn_agent(
     )
     .await
     .unwrap();
-    let pane = event(stream, |event| matches!(event, ServerEvent::PaneNodeChanged(node) if matches!(node.kind,NodeKind::Pane{status:PaneStatus::Agent(_),..}) && !existing.contains(&node.id) )).await;
+    let pane = event(stream, "new fake agent detection", |event| matches!(event, ServerEvent::PaneNodeChanged(node) if matches!(node.kind,NodeKind::Pane{status:PaneStatus::Agent(_),..}) && !existing.contains(&node.id) )).await;
     let ServerEvent::PaneNodeChanged(node) = pane else {
         unreachable!()
     };
@@ -352,7 +392,7 @@ async fn spawn_agent(
     )
     .await
     .unwrap();
-    event(stream, |event| matches!(event,ServerEvent::TreeSnapshot(tree) if tree.get(node.id).is_some_and(|node|node.name==name))).await;
+    event(stream, "fake agent rename snapshot", |event| matches!(event,ServerEvent::TreeSnapshot(tree) if tree.get(node.id).is_some_and(|node|node.name==name))).await;
     node.id
 }
 
@@ -827,7 +867,7 @@ async fn independent_usb_boards_and_interrupted_wait_keep_authority() {
         )
         .await
         .unwrap();
-        let ServerEvent::ProgressMonitorSetCompleted { result, .. } = event(&mut control, |event| matches!(event,ServerEvent::ProgressMonitorSetCompleted{request_id,..} if *request_id==800+index)).await else { unreachable!() };
+        let ServerEvent::ProgressMonitorSetCompleted { result, .. } = event(&mut control, "generic progress monitor registration", |event| matches!(event,ServerEvent::ProgressMonitorSetCompleted{request_id,..} if *request_id==800+index)).await else { unreachable!() };
         monitor_ids.push(
             result
                 .expect("all eight ordinary monitor slots remain supported")
@@ -851,7 +891,7 @@ async fn independent_usb_boards_and_interrupted_wait_keep_authority() {
         command.env(*key, value.to_string_lossy().into_owned())
     });
     let mut wait = PtySession::spawn(wait).unwrap();
-    event(&mut control, |event| matches!(event,ServerEvent::ResourceWaitChanged{pane_id,reservation_id:Some(id),..} if *pane_id==third&&*id==queued.id)).await;
+    event(&mut control, "queued wait registration", |event| matches!(event,ServerEvent::ResourceWaitChanged{pane_id,reservation_id:Some(id),..} if *pane_id==third&&*id==queued.id)).await;
     write_frame(
         &mut control,
         &ClientRequest::GetPaneProgressMonitorStatus {
@@ -861,7 +901,7 @@ async fn independent_usb_boards_and_interrupted_wait_keep_authority() {
     )
     .await
     .unwrap();
-    let ServerEvent::ProgressMonitorStatusReported { result, .. } = event(&mut control, |event| {
+    let ServerEvent::ProgressMonitorStatusReported { result, .. } = event(&mut control, "progress monitor status", |event| {
         matches!(
             event,
             ServerEvent::ProgressMonitorStatusReported {
@@ -1298,7 +1338,7 @@ async fn completed_wait(child: tokio::process::Child, expected_exit: i32) -> ser
     records.into_iter().next().unwrap()
 }
 async fn attached_wait(stream: &mut SessionStream, pane: NodeId, reservation: &str) {
-    event(stream, |message| matches!(message, ServerEvent::ResourceWaitChanged { pane_id, reservation_id: Some(id), .. } if *pane_id == pane && id.0 == reservation)).await;
+    event(stream, "blocking wait registration", |message| matches!(message, ServerEvent::ResourceWaitChanged { pane_id, reservation_id: Some(id), .. } if *pane_id == pane && id.0 == reservation)).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

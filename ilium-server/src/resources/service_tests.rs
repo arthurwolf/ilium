@@ -1464,3 +1464,33 @@ async fn resource_entry_futures_do_not_inflate_connection_stack() {
         "IPC request dispatch must be heap-backed, got {connection_handler_bytes} inline bytes"
     );
 }
+
+// Catalog reads must progress while unrelated logging/request results retain
+// general-client capacity. Sharing its full result allowance deadlocked attach.
+#[tokio::test]
+async fn catalog_io_progresses_with_retained_general_results() {
+    let fixture = fixture(None).await;
+    let execution = fixture.state.execution.get().unwrap();
+    let retained_general = execution
+        .client
+        .foundation
+        .try_reserve(
+            ilium_execution::Lane::Io,
+            ilium_execution::JobCost {
+                input_bytes: 0,
+                result_bytes: 64 * 1024,
+            },
+        )
+        .unwrap();
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        memory::io(&fixture.state, || Ok(PathBuf::from("synthetic-catalog-read"))),
+    )
+    .await
+    .expect("catalog I/O must not wait for unrelated general results to be dropped")
+    .unwrap();
+    assert_eq!(result.value, PathBuf::from("synthetic-catalog-read"));
+    assert!(execution.client.foundation.usage().result_bytes >= 64 * 1024);
+    drop(result);
+    drop(retained_general);
+}

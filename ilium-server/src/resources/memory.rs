@@ -86,6 +86,26 @@ impl ResourceBytes for ResourceReply {
             .saturating_add(self.active_waits.heap_bytes())
     }
 }
+/// A busy ledger is momentary mutex contention, not exhausted capacity.
+/// Retry only that condition: waiting for quota while retaining a catalog or
+/// worker payload could prevent the very release needed to satisfy the wait.
+pub(super) async fn reserve_after_contention(
+    state: &ServerState,
+    bytes: usize,
+    context: &str,
+) -> Result<Arc<StorageAdmission>, ResourceError> {
+    let client = &state.execution.get()
+        .ok_or_else(|| err("unavailable", "Execution unavailable"))?.client;
+    loop {
+        match client.try_reserve_storage(bytes) {
+            Ok(storage) => return Ok(storage),
+            Err(ilium_execution::RejectReason::Busy) => {
+                tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+            }
+            Err(error) => return Err(err("admission", format!("{context}: {error:?}"))),
+        }
+    }
+}
 pub(super) async fn io<T: ResourceBytes + Send + 'static>(
     state: &ServerState,
     action: impl FnOnce() -> Result<T, ResourceError> + Send + 'static,
@@ -95,6 +115,13 @@ pub(super) async fn io<T: ResourceBytes + Send + 'static>(
         .get()
         .ok_or_else(|| err("unavailable", "Execution service unavailable"))?
         .client;
+    // The catalog payload has its own allocation custody before the worker
+    // constructs it. Reserving the whole 128 MiB as a job result instead would
+    // wait forever while logging or an attaching request retains even 64 KiB
+    // of the general client's result allowance.
+    let payload_storage = reserve_after_contention(
+        state, RESULT_BYTES, "Resource worker allocation refused",
+    ).await?;
     let admission = client
         .reserve(
             ilium_execution::Lane::Io,
@@ -102,20 +129,42 @@ pub(super) async fn io<T: ResourceBytes + Send + 'static>(
                 input_bytes: store::MAX_CATALOG_RETAINED_BYTES
                     .saturating_mul(2)
                     .saturating_add(store::MAX_CATALOG_BYTES as usize),
-                result_bytes: RESULT_BYTES,
+                // Heap payload is covered by payload_storage; the execution
+                // result still admits its wrapper and bounded error envelope.
+                result_bytes: size_of::<ResourceMemory<Result<T, ResourceError>>>().saturating_add(ENVELOPE_BYTES),
             },
         )
         .await
         .map_err(|e| err("admission", format!("{e:?}")))?;
     let loaded = client
-        .run_reserved(admission, move |_| action())
+        .run_reserved(admission, move |_| {
+            let mut value = action();
+            let retained_bytes = match &value {
+                Ok(value) => value.resource_bytes(),
+                Err(error) => size_of::<ResourceError>()
+                    .saturating_add(error.code.capacity())
+                    .saturating_add(error.message.capacity()),
+            };
+            if retained_bytes.saturating_add(ENVELOPE_BYTES) > RESULT_BYTES {
+                value = Err(err(
+                    "capacity",
+                    "Resource result exceeds its admitted 128 MiB allocation envelope",
+                ));
+            }
+            // Errors retain the same lease too, including after cancellation
+            // when only the worker/result slot still owns the operation.
+            Ok::<_, std::convert::Infallible>(ResourceMemory {
+                value,
+                storage: payload_storage,
+            })
+        })
         .await
-        .map_err(|e| match e {
-            crate::execution::ExecutionError::Failed(error) => error.view().clone(),
-            other => err("worker", other),
-        })?;
+        .map_err(|error| err("worker", error))?;
     let bytes = loaded
         .view()
+        .value
+        .as_ref()
+        .map_err(Clone::clone)?
         .resource_bytes()
         .checked_add(ENVELOPE_BYTES)
         .filter(|n| *n <= RESULT_BYTES)
@@ -127,15 +176,15 @@ pub(super) async fn io<T: ResourceBytes + Send + 'static>(
         })?;
     // No payload crosses a charge gap. Refuse transient pressure rather than
     // awaiting another lease while retaining a complete worker reservation.
-    let storage = client.try_reserve_storage(bytes).map_err(|e| {
-        err(
-            "admission",
-            format!("Resource retained allocation refused: {e:?}"),
-        )
-    })?;
-    let (value, hold) = loaded.into_parts();
+    let storage = reserve_after_contention(
+        state, bytes, "Resource retained allocation refused",
+    ).await?;
+    let (payload, hold) = loaded.into_parts();
+    let (value, worker_storage) = payload.into_parts();
+    let value = value?;
     let retained = ResourceMemory { value, storage };
     drop(hold);
+    drop(worker_storage);
     Ok(retained)
 }
 pub(super) fn committed_catalog(
@@ -187,18 +236,9 @@ pub(super) async fn send(
 ) -> Result<(), ResourceError> {
     let bytes = DirectEventSender::required_storage_bytes(&event.value)
         .ok_or_else(|| err("capacity", "Resource reply envelope overflow"))?;
-    let storage = state
-        .execution
-        .get()
-        .ok_or_else(|| err("unavailable", "Execution unavailable"))?
-        .client
-        .try_reserve_storage(bytes)
-        .map_err(|e| {
-            err(
-                "admission",
-                format!("Resource reply custody refused: {e:?}"),
-            )
-        })?;
+    let storage = reserve_after_contention(
+        state, bytes, "Resource reply custody refused",
+    ).await?;
     let (event, producer) = event.into_parts();
     let result = replies
         .send_with_storage(event, Some(storage))
