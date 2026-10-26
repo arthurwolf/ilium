@@ -30136,7 +30136,7 @@ mod text_trigger_concurrency_tests {
             .commit_text_trigger(
                 editor.editing_id.as_deref(),
                 editor.editing_base.as_ref(),
-                editor.candidate()
+                editor.candidate().unwrap()
             )
             .is_err());
 
@@ -30179,7 +30179,7 @@ mod text_trigger_concurrency_tests {
         app.commit_text_trigger(
             editor.editing_id.as_deref(),
             editor.editing_base.as_ref(),
-            editor.candidate(),
+            editor.candidate().unwrap(),
         )
         .expect("save by stable ID");
         app.settle_filesystem_for_test();

@@ -400,7 +400,7 @@ impl App {
                                 dialog: Some(expected),
                             }) = &intent
                             {
-                                if matches!(&self.mode,Mode::TextTriggerDialog(state) if state.candidate()==*expected)
+                                if matches!(&self.mode,Mode::TextTriggerDialog(state) if state.candidate().as_ref()==Ok(expected))
                                 {
                                     self.pop_modal();
                                 }

@@ -1722,7 +1722,17 @@ fn handle_text_trigger_dialog_event(
             app.mode = Mode::TextTriggerDialog(state);
         }
         KeyCode::Enter if state.focus == TextTriggerFocus::Save => {
-            let trigger = state.candidate();
+            let trigger = match state.candidate() {
+                Ok(trigger) => trigger,
+                Err(error) => {
+                    state.focus = TextTriggerFocus::Delay;
+                    state.save_error = Some(error.clone());
+                    app.status_message = Some(error);
+                    app.mode = Mode::TextTriggerDialog(state);
+                    return;
+                }
+            };
+            state.save_error = None;
             let editing_id = state.editing_id.clone();
             let editing_base = state.editing_base.clone();
             app.mode = Mode::TextTriggerDialog(state);
@@ -2588,6 +2598,30 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
         }
         app.mode = Mode::Settings(Box::new(state));
         return;
+    }
+    if state.tab == SettingsTab::Padding && state.selected_row == crate::padding_ui::ROW_THRESHOLD {
+        match key.code {
+            KeyCode::Char('h' | 'l') => {
+                app.step_settings_number(
+                    crate::value_settings::SettingsNumber::PaddingThreshold,
+                    if key.code == KeyCode::Char('h') {
+                        -1
+                    } else {
+                        1
+                    },
+                );
+                app.mode = Mode::Settings(Box::new(state));
+                return;
+            }
+            KeyCode::Char(' ') => {
+                app.mode = Mode::Settings(Box::new(state));
+                app.begin_settings_number_dialog(
+                    crate::value_settings::SettingsNumber::PaddingThreshold,
+                );
+                return;
+            }
+            _ => {}
+        }
     }
     if state.tab == SettingsTab::Padding && crate::padding_ui::handle_key(app, &mut state, *key) {
         app.mode = Mode::Settings(Box::new(state));
@@ -5891,7 +5925,7 @@ mod text_trigger_retry_and_delete_tests {
         editor.regexp.buf = "synthetic-ready".to_owned();
         editor.message.buf = "synthetic-continue".to_owned();
         editor.focus = TextTriggerFocus::Save;
-        let expected_id = editor.candidate().id;
+        let expected_id = editor.candidate().unwrap().id;
         let original_box = std::ptr::from_ref(editor.as_ref());
         handle_event(
             &mut app,
@@ -5902,7 +5936,7 @@ mod text_trigger_retry_and_delete_tests {
             panic!("failed save closed draft");
         };
         assert_eq!(std::ptr::from_ref(editor.as_ref()), original_box);
-        assert_eq!(editor.candidate().id, expected_id);
+        assert_eq!(editor.candidate().unwrap().id, expected_id);
         assert!(app.take_outbound_requests().is_empty());
 
         for (width, height) in [(80, 24), (120, 40)] {
@@ -5944,6 +5978,46 @@ mod text_trigger_retry_and_delete_tests {
         assert_eq!(persisted.triggers[0].id, expected_id);
         assert!(matches!(app.take_outbound_requests().as_slice(),
             [ClientRequest::UpdateTextTriggers { settings }] if settings == &persisted));
+    }
+
+    #[test]
+    fn text_trigger_invalid_delay_retains_draft_and_never_saves_a_substitute() {
+        for invalid in ["86401", "99999999999999999999", "-1", "not a number"] {
+            let directory = tempfile::tempdir().unwrap();
+            let mut app = App::new("isolated".to_owned(), directory.path().to_path_buf());
+            app.config_dir = Some(directory.path().to_path_buf());
+            app.mode = Mode::Settings(Box::new(SettingsState {
+                tab: SettingsTab::TextTriggers,
+                ..SettingsState::default()
+            }));
+            app.open_text_trigger_dialog(None);
+            let Mode::TextTriggerDialog(editor) = &mut app.mode else {
+                panic!("editor did not open")
+            };
+            editor.regexp.buf = "synthetic-ready".into();
+            editor.message.buf = "synthetic-continue".into();
+            editor.delay.buf = invalid.into();
+            editor.focus = TextTriggerFocus::Save;
+            handle_event(
+                &mut app,
+                Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+            );
+            app.settle_filesystem_for_test();
+            let Mode::TextTriggerDialog(editor) = &app.mode else {
+                panic!("invalid delay closed draft: {invalid}")
+            };
+            assert_eq!(editor.delay.buf, invalid);
+            assert!(
+                editor.save_error.is_some(),
+                "invalid delay must have a visible validation error"
+            );
+            assert!(app.take_outbound_requests().is_empty());
+            assert!(crate::config::load(directory.path())
+                .unwrap()
+                .text_triggers
+                .triggers
+                .is_empty());
+        }
     }
 
     #[test]

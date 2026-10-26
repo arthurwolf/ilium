@@ -23,6 +23,7 @@ pub enum SettingsNumber {
     IdlePollSeconds,
     AttentionTurboConcurrency,
     AttentionExpirySeconds,
+    PaddingThreshold,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -146,6 +147,9 @@ impl SettingsNumber {
                 _ => None,
             },
             SettingsTab::Api if row == 0 => Some(Self::ApiPort),
+            SettingsTab::Padding if row == crate::padding_ui::ROW_THRESHOLD => {
+                Some(Self::PaddingThreshold)
+            }
             _ => None,
         }
     }
@@ -176,6 +180,7 @@ impl SettingsNumber {
             Self::ApiPort => "HTTP API port",
             Self::AttentionTurboConcurrency => "Turbo parallel calls",
             Self::AttentionExpirySeconds => "Forget stale items after",
+            Self::PaddingThreshold => "Terminal columns",
         }
     }
 
@@ -229,6 +234,14 @@ impl SettingsNumber {
                 };
                 (NumberSpec::Integer { minimum, maximum }, value.to_string())
             }
+
+            Self::PaddingThreshold => (
+                NumberSpec::Integer {
+                    minimum: i128::from(crate::padding::MIN_WIDTH_THRESHOLD),
+                    maximum: i128::from(crate::padding::MAX_WIDTH_THRESHOLD),
+                },
+                app.padding_settings.width_threshold.to_string(),
+            ),
 
             Self::WorkingPollSeconds => (
                 ScalarNumber::WorkingPollSeconds.spec(),
@@ -353,6 +366,7 @@ impl SettingsNumber {
                 .to_string());
         }
         let step = match self {
+            Self::PaddingThreshold => 1,
             Self::VoiceVolume => 5,
             Self::NotificationCoalesce => {
                 i128::from(ilium_sound::NotificationSettings::TASK_COALESCE_STEP_SECONDS)
@@ -576,12 +590,40 @@ impl App {
         }
         let result = (|| {
             let text = field.stepped(self, direction)?;
+            if field == SettingsNumber::PaddingThreshold && text == field.snapshot(self).1 {
+                return Ok(());
+            }
             let directory = self
                 .config_dir
                 .clone()
                 .ok_or_else(|| "The configuration directory is unavailable".to_owned())?;
             self.save_settings_number(field, &text, directory, None)
         })();
+        if let Err(error) = result {
+            self.status_message = Some(error);
+        }
+    }
+
+    pub(crate) fn step_padding_threshold_by(&mut self, delta: i32) {
+        let next = (i32::from(self.padding_settings.width_threshold) + delta).clamp(
+            i32::from(crate::padding::MIN_WIDTH_THRESHOLD),
+            i32::from(crate::padding::MAX_WIDTH_THRESHOLD),
+        );
+        if next as u16 == self.padding_settings.width_threshold {
+            return;
+        }
+        let result = self
+            .config_dir
+            .clone()
+            .ok_or_else(|| "The configuration directory is unavailable".to_owned())
+            .and_then(|directory| {
+                self.save_settings_number(
+                    SettingsNumber::PaddingThreshold,
+                    &next.to_string(),
+                    directory,
+                    None,
+                )
+            });
         if let Err(error) = result {
             self.status_message = Some(error);
         }
@@ -737,6 +779,16 @@ impl App {
                         .map_err(|_| "Duration exceeds storage range")?;
                 ConfigurationChange::Attention(settings)
             }
+            SettingsNumber::PaddingThreshold => {
+                let NumberValue::Integer(value) = field.snapshot(self).0.parse(text)? else {
+                    return Err("Enter a whole number of columns".into());
+                };
+                let mut settings = self.padding_settings;
+                settings.mode = crate::padding::PaddingMode::WidthDependent;
+                settings.width_threshold =
+                    u16::try_from(value).map_err(|_| "Terminal width exceeds storage range")?;
+                ConfigurationChange::Padding(settings)
+            }
         };
         let intent = match token {
             Some(token) => ConfigurationIntent::ValueDialog { token },
@@ -824,6 +876,14 @@ impl App {
                     intent,
                 )?;
                 self.apply_attention_settings(settings);
+            }
+            ConfigurationChange::Padding(settings) => {
+                self.enqueue_configuration(
+                    directory,
+                    ConfigurationChange::Padding(settings),
+                    intent,
+                )?;
+                self.apply_padding_settings(settings);
             }
             _ => return Err("Unsupported numeric settings destination".into()),
         }
@@ -1173,6 +1233,64 @@ mod tests {
         assert!(matches!(app.mode, Mode::Settings(_)));
         let config = crate::config::load(directory.path()).unwrap();
         assert_eq!(config.editor.autosave_delay_ms, 1101);
+        assert_eq!(config.api.port, 8873);
+    }
+
+    #[test]
+    fn padding_threshold_dialog_preserves_draft_after_failure_and_retries_atomically() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("config.toml");
+        std::fs::write(&path, "[padding\n").unwrap();
+        let mut app = App::new("padding-number-test".into(), directory.path().into());
+        app.config_dir = Some(directory.path().into());
+        app.mode = Mode::Settings(Box::new(SettingsState {
+            tab: SettingsTab::Padding,
+            selected_row: crate::padding_ui::ROW_THRESHOLD,
+            ..SettingsState::default()
+        }));
+        app.begin_settings_number_dialog(SettingsNumber::PaddingThreshold);
+        let Mode::ValueDialog(mut host) = std::mem::replace(&mut app.mode, Mode::Normal) else {
+            panic!("padding number editor");
+        };
+        let ValueDialogState::Number(number) = &mut host.dialog else {
+            panic!("number dialog");
+        };
+        number.draft = crate::text_prompt::TextPromptState::new("0153");
+        app.finish_value_dialog(host, DialogOutcome::CommitNumber("0153".into()));
+        app.settle_filesystem_for_test();
+        let Mode::ValueDialog(host) = &app.mode else {
+            panic!("failed write must keep the dialog open");
+        };
+        assert!(!host.is_saving());
+        let ValueDialogState::Number(number) = &host.dialog else {
+            panic!("number dialog");
+        };
+        assert_eq!(number.draft.buf, "0153");
+        assert!(number.error.is_some());
+        assert_eq!(
+            app.padding_settings.width_threshold, 153,
+            "the accepted write is applied locally even when durable storage later fails"
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "[padding\n");
+
+        std::fs::write(
+            &path,
+            "[api]\nport = 8873\n[padding]\nright_panels_shared = true\n",
+        )
+        .unwrap();
+        let Mode::ValueDialog(host) = std::mem::replace(&mut app.mode, Mode::Normal) else {
+            panic!("retry");
+        };
+        app.finish_value_dialog(host, DialogOutcome::CommitNumber("0153".into()));
+        app.settle_filesystem_for_test();
+        assert!(matches!(app.mode, Mode::Settings(_)));
+        let config = crate::config::load(directory.path()).unwrap();
+        assert_eq!(config.padding.width_threshold, 153);
+        assert_eq!(
+            config.padding.mode,
+            crate::padding::PaddingMode::WidthDependent
+        );
+        assert!(config.padding.right_panels_shared);
         assert_eq!(config.api.port, 8873);
     }
 

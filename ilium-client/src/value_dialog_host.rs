@@ -841,7 +841,7 @@ mod tests {
         parent.regexp.cursor = 3;
         parent.enabled = false;
         parent.focus = crate::text_trigger_dialog::TextTriggerFocus::Target;
-        let before = parent.candidate();
+        let before = parent.candidate().unwrap();
         let host = ValueDialogHost::trigger_scope(&parent).unwrap();
         let ValueDialogState::Choice(choice) = &host.dialog else {
             panic!("catalog");
@@ -854,7 +854,7 @@ mod tests {
             .unwrap();
         let mut expected = before.clone();
         expected.target = ilium_ipc::TextTriggerTarget::Agents;
-        assert_eq!(parent.candidate(), expected);
+        assert_eq!(parent.candidate().unwrap(), expected);
         assert_eq!(parent.regexp.cursor, 3);
         assert_eq!(
             parent.focus,
@@ -865,7 +865,7 @@ mod tests {
         assert!(host
             .apply_trigger_scope_choice(&mut replacement, "Terminals")
             .is_err());
-        assert_eq!(replacement.candidate(), before);
+        assert_eq!(replacement.candidate().unwrap(), before);
     }
 
     #[test]
