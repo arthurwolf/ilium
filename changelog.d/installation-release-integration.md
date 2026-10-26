@@ -6,3 +6,4 @@
 - Include the plugin host’s declared Unicode normalization dependency in the lockfile so locked release builds can resolve the integrated workspace.
 - Scope the Linux-only helper sandbox integration harness to its documented platform; retain its complete Linux behavior and security assertions.
 - Interpret recorded installation paths using the target operating system’s path syntax, including Linux receipts checked on Windows; remove duplicate test attributes and an unused presenter helper that blocked Clippy.
+- Restrict Unix mode-bit and umask assertions to Unix while retaining cross-platform key generation and unsafe-permission refusal checks, so the plugin user-flow harness compiles on Windows.
