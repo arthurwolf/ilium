@@ -267,7 +267,10 @@ fn cor_041_chat_init_creates_the_room_ignore_entries_and_both_hook_files() {
     let sandbox = Sandbox::new();
     let run = sandbox.ilium(&["chat", "init"]);
     assert_eq!(run.code, 0, "{}", run.stderr);
-    let room = sandbox.project.join("CHATROOM.md");
+    // Chat commands print the canonical project path, including macOS temp aliases.
+    let room = ilium_platform::paths::canonicalize(&sandbox.project)
+        .expect("canonical project path")
+        .join("CHATROOM.md");
     assert!(room.is_file());
     assert_eq!(
         run.stdout.trim_end(),
