@@ -224,6 +224,18 @@ pub struct LocationPickerState {
 }
 
 impl LocationPickerState {
+    pub(crate) fn diagnostic_text(&self) -> Option<&str> {
+        self.coordinate_dialog
+            .as_ref()
+            .and_then(|(_, dialog)| dialog.error.as_deref())
+            .or_else(|| {
+                self.entry_dialog
+                    .as_ref()
+                    .and_then(|dialog| dialog.notice.as_deref())
+            })
+            .or(self.status.as_deref())
+    }
+
     pub fn new(current: GeoLocation, search_client: Option<Client>) -> Self {
         Self::with_searcher_and_client(
             current,
@@ -1455,7 +1467,7 @@ pub fn render_cursor(
             },
         ),
     );
-    let hint = picker.status.clone().unwrap_or_else(|| {
+    let hint = picker.status.as_ref().map(|status| format!("F9 details · {status}")).unwrap_or_else(|| {
         "Tab switches field \u{b7} arrows move the crosshair (Shift: big steps) \u{b7} click the map"
             .to_owned()
     });
@@ -2534,10 +2546,10 @@ mod tests {
         let mut app = App::new("test".into(), project.path().to_path_buf());
         app.set_screen_area(SCREEN);
         app.animation_settings.kind = AnimationKind::Stars;
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::Animations,
             ..Default::default()
-        });
+        }));
         (app, project)
     }
 
@@ -2546,10 +2558,10 @@ mod tests {
         let mut app = App::new("osm-picker-test".into(), project.path().to_path_buf());
         app.set_screen_area(SCREEN);
         app.animation_settings.kind = AnimationKind::OpenStreetMap;
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::Animations,
             ..Default::default()
-        });
+        }));
         (app, project)
     }
 
@@ -2998,10 +3010,10 @@ mod tests {
                 home.path().to_path_buf(),
                 Ok(home_before.clone()),
             );
-            app.mode = Mode::Settings(SettingsState {
+            app.mode = Mode::Settings(Box::new(SettingsState {
                 tab: SettingsTab::Animations,
                 ..Default::default()
-            });
+            }));
             app.open_location_picker();
             let Mode::LocationPicker(picker) = &mut app.mode else {
                 panic!("location picker must open")

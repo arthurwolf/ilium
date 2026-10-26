@@ -1659,16 +1659,14 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     assert!(
         wait_until(
             || {
-                let text = tui.screen_text();
-                !text.contains("⚙ Settings") && text.contains("VOICE OFF") && text.contains("F8")
+                let screen = tui.screen_text();
+                !screen.contains("⚙ Settings")
+                    && screen.contains("VOICE OFF")
+                    && screen.contains("F8")
             },
-            WAIT_TIMEOUT
+            WAIT_TIMEOUT,
         )
         .await,
-        "expected mouse-opened Settings to close before continuing"
-    );
-    assert!(
-        tui.screen_text().contains("VOICE OFF") && tui.screen_text().contains("F8"),
         "expected the global voice control after Settings closed, got: {:?}",
         tui.screen_text()
     );
@@ -4203,6 +4201,8 @@ async fn existing_markdown_creates_populated_boards_from_tree_and_dialog() {
     let context_card_border = tui.with_screen(|screen| {
         let border_row = context_card_row.saturating_sub(1);
         let columns = screen.size().1;
+        // The theme draws rounded panel corners (`BorderType::Rounded`), so the
+        // card's top-left corner is `╭`, not the square `┌`.
         let border_start = (25..columns)
             .find(|column| {
                 screen

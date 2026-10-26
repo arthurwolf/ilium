@@ -40,6 +40,10 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 #[path = "ui_openstreetmap_tests.rs"]
 mod osm_attribution_tests;
 
+#[cfg(test)]
+#[path = "ui_polish_tests.rs"]
+mod polish_tests;
+
 /// Share the event loop's sampled animation time while retaining the public renderer.
 pub(crate) fn draw_at(frame: &mut Frame, app: &mut App, animation_elapsed: Duration) {
     draw_at_with_cursor(frame, app, animation_elapsed);
@@ -53,6 +57,10 @@ pub(crate) fn draw_at_with_cursor(
 ) -> Option<Position> {
     app.composed_tree_rows = None;
     app.composed_terminal_sources.clear();
+    // The attention button's row is part of the tree panel's geometry, so the
+    // reservation must match the mode before anything is measured or drawn.
+    tree_ui::set_attention_button_reserved(app.attention_enabled());
+    tree_ui::set_attention_button_large(app.attention_settings.large_buttons);
     app.reconcile_animation_presentation();
     app.composed_editor_sources.clear();
     let area = frame.area();
@@ -85,6 +93,8 @@ pub(crate) fn draw_at_with_cursor(
             || app.hovered_goal_resume.is_some()
             || app.hovered_tree_node.is_some()
             || app.stats_popover.is_some()
+            || app.recap_popover.is_some()
+            || app.hovered_recap_refresh.is_some()
             || popover_visible
         {
             // These late overlays own arbitrary blank pixels inside computed
@@ -96,6 +106,7 @@ pub(crate) fn draw_at_with_cursor(
         draw_goal_resume_tooltip(frame, app);
         draw_worktree_tooltip(frame, app);
         draw_stats_popover(frame, app);
+        draw_recap_tooltips(frame, app);
         if popover_visible {
             if let Some(popover) = &app.agent_popover {
                 if let Some(geometry) = crate::popover::layout(app.layout.tree_area, popover) {
@@ -148,6 +159,14 @@ pub(crate) fn draw_at_with_cursor(
     draw_startup_dialog(frame, area, app);
     skip_vs16_continuation_cells(frame.buffer_mut(), layout.tree_area);
     if app.onboarding.is_none() && app.draw_plugin_permission_review(frame) {
+        app.animation_frame.discard_composed_receipt();
+        if let Some(view) = &mut app.diagnostic_view {
+            crate::diagnostic::render(frame, view);
+        }
+        return None;
+    }
+    if let Some(view) = &mut app.diagnostic_view {
+        crate::diagnostic::render(frame, view);
         app.animation_frame.discard_composed_receipt();
         return None;
     }
@@ -417,8 +436,15 @@ fn draw_progress_tooltip(frame: &mut Frame, app: &App) {
     let Some(progress) = app.progress_monitor_at(pane_id, progress_area, anchor) else {
         return;
     };
-    let content = crate::progress_bar::details_tooltip(progress);
-    crate::status_icons::render_tooltip(frame, app.layout.screen_area, anchor, &content);
+    let owner = app.progress_owner_label(pane_id);
+    crate::progress_popover::render(
+        frame,
+        app.layout.screen_area,
+        anchor,
+        progress,
+        app.progress_display_now_unix_millis(),
+        owner.as_deref(),
+    );
 }
 
 fn draw_goal_resume_tooltip(frame: &mut Frame, app: &App) {
@@ -436,8 +462,7 @@ fn draw_goal_resume_tooltip(frame: &mut Frame, app: &App) {
     crate::status_icons::render_tooltip(frame, app.layout.screen_area, anchor, &content);
 }
 
-// The `return` is only redundant when the `cfg(test)` fallback below is compiled out.
-#[cfg_attr(not(test), allow(clippy::needless_return))]
+#[cfg_attr(not(test), allow(clippy::needless_return))] // The return guards the test-only fallback below.
 fn draw_worktree_tooltip(frame: &mut Frame, app: &App) {
     let Some(hit) = app.hovered_tree_node.filter(|hit| hit.line == 1) else {
         return;
@@ -447,23 +472,28 @@ fn draw_worktree_tooltip(frame: &mut Frame, app: &App) {
         if let Some(explanation) = app.emitted_worktree_tooltip(hit.id) {
             crate::status_icons::render_tooltip(frame, app.layout.screen_area, anchor, explanation);
         }
-        return;
     }
     #[cfg(test)]
-    if let Some(workspace) = app.tree.pane_workspace(hit.id) {
-        let explanation = crate::status_icons::workspace_explanation(
-            workspace,
-            app.workspace_git_statuses.get(&hit.id),
-        );
-        crate::status_icons::render_tooltip(frame, app.layout.screen_area, anchor, &explanation);
+    if app.emitted_geometry.is_none() {
+        if let Some(workspace) = app.tree.pane_workspace(hit.id) {
+            let explanation = crate::status_icons::workspace_explanation(
+                workspace,
+                app.workspace_git_statuses.get(&hit.id),
+            );
+            crate::status_icons::render_tooltip(
+                frame,
+                app.layout.screen_area,
+                anchor,
+                &explanation,
+            );
+        }
     }
 }
 
 /// Explains the tree-row state glyph under the pointer. The slot's signal is
 /// retained with the actually emitted row; newer server evidence cannot
 /// change its explanation until that row's next frame is acknowledged.
-// The `return` is only redundant when the `cfg(test)` fallback below is compiled out.
-#[cfg_attr(not(test), allow(clippy::needless_return))]
+#[cfg_attr(not(test), allow(clippy::needless_return))] // The return guards the test-only fallback below.
 fn draw_status_tooltip(frame: &mut Frame, app: &App) {
     let Some((node_id, slot, anchor)) = app.hovered_status_slot else {
         return;
@@ -472,11 +502,12 @@ fn draw_status_tooltip(frame: &mut Frame, app: &App) {
         if let Some(tooltip) = app.emitted_status_tooltip(node_id, slot) {
             crate::status_icons::render_tooltip(frame, app.layout.screen_area, anchor, tooltip);
         }
-        return;
     }
     #[cfg(test)]
-    if let Some(tooltip) = status_tooltip_content(app, node_id, slot) {
-        crate::status_icons::render_tooltip(frame, app.layout.screen_area, anchor, &tooltip);
+    if app.emitted_geometry.is_none() {
+        if let Some(tooltip) = status_tooltip_content(app, node_id, slot) {
+            crate::status_icons::render_tooltip(frame, app.layout.screen_area, anchor, &tooltip);
+        }
     }
 }
 fn status_tooltip_content(
@@ -547,6 +578,23 @@ fn status_tooltip_content(
     // The tree row shows one glyph for all of the pane's monitors; explain
     // the monitor that glyph represents.
     let progress = ilium_core::representative_progress(progress_monitors);
+    if slot == StatusSlot::Now {
+        if let Some(warning) = crate::status_icons::detection_freshness_warning(
+            status,
+            app.pane_detection_evidence.get(&node_id),
+            crate::scheduled_input::unix_millis_now(),
+        ) {
+            let last_activity = now_explanation(signals.now).map_or(
+                "Not shown by the current monitoring preference",
+                |explanation| explanation.title,
+            );
+            return Some(crate::status_icons::TooltipContent {
+                title: "Agent activity needs a fresh check".to_string(),
+                body: format!("{warning} Last known activity: {last_activity}."),
+                reason: Some("Why: observation freshness affects only this display; the server's activity, goal and unread completion are retained.".to_string()),
+            });
+        }
+    }
     let explanation = match slot {
         StatusSlot::Identity => Some(identity_explanation(status)),
         StatusSlot::Objective => objective_explanation(signals.objective),
@@ -680,6 +728,47 @@ fn draw_stats_popover(frame: &mut Frame, app: &mut App) {
     app.stats_popover = Some(popover);
 }
 
+/// Draws the recap popover and the refresh-icon tooltip. Both show cached
+/// text and the phase bar of a running recap.
+fn draw_recap_tooltips(frame: &mut Frame, app: &App) {
+    for (anchor, content) in [app.recap_popover_tooltip(), app.recap_refresh_tooltip()]
+        .into_iter()
+        .flatten()
+    {
+        crate::status_icons::render_tooltip(frame, app.layout.screen_area, anchor, &content);
+    }
+}
+
+/// Styles the third header dot of an agent pane as the recap handle: accent
+/// while a recap is cached or running, filled while its popover is open.
+fn draw_recap_icon(frame: &mut Frame, app: &App, viewport: crate::split_layout::PaneViewport) {
+    if viewport.outer_area.width < 12 || !app.is_known_agent_pane(viewport.pane_id) {
+        return;
+    }
+    let is_open = app
+        .recap_popover
+        .as_ref()
+        .is_some_and(|popover| popover.pane_id == viewport.pane_id);
+    let style = if is_open {
+        theme::selected_style().add_modifier(Modifier::BOLD)
+    } else {
+        Style::new()
+            .fg(theme::accent_bg())
+            .add_modifier(Modifier::BOLD)
+    };
+    let cell = theme::chrome_recap_cell(viewport.outer_area);
+    frame.render_widget(
+        Paragraph::new(Span::styled(
+            app.ui_settings
+                .icons
+                .glyph(IconTarget::ChromeRecap)
+                .to_string(),
+            style,
+        )),
+        Rect::new(cell.x, cell.y, 1, 1),
+    );
+}
+
 /// Styles the second header icon of an agent pane as the popover's handle:
 /// accent-coloured when idle, filled while its popover is open.
 fn draw_stats_icon(frame: &mut Frame, app: &App, viewport: crate::split_layout::PaneViewport) {
@@ -773,6 +862,7 @@ fn draw_base_layer(frame: &mut Frame, area: Rect, app: &mut App) -> Option<Posit
             },
             terminal_activity_elapsed_ms: app.started_at.elapsed().as_millis(),
             current_unix_millis: crate::scheduled_input::unix_millis_now(),
+            detection_evidence: Some(&app.pane_detection_evidence),
             project_name: app.project_name.as_deref(),
             project_icon: app.project_icon.as_deref(),
             is_project_name_loading: app.is_project_name_loading,
@@ -809,6 +899,17 @@ fn draw_base_layer(frame: &mut Frame, area: Rect, app: &mut App) -> Option<Posit
             panes: &app.panes,
         },
     );
+    if let Some(button_area) = app.attention_button_rect() {
+        let (main_area, plus_area) = crate::attention::dialog::split_button(button_area);
+        crate::attention::panel::render_button(frame, main_area, app.attention_count());
+        if let Some(plus_area) = plus_area {
+            crate::attention::dialog::render_plus(
+                frame,
+                plus_area,
+                app.is_attention_plus_hovered(),
+            );
+        }
+    }
     let values = painted_rows
         .node_ids()
         .map(|node_id| {
@@ -935,6 +1036,7 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) -> O
         Mode::AgentToolbarModelSubmenu(state) => draw_agent_toolbar_model_submenu(frame, state),
         Mode::SmartCopy => {}
         Mode::AgentDebugLog(_) => {}
+        Mode::LastPromptDialog(state) => draw_last_prompt_dialog(frame, area, state),
         Mode::AgentDebugSavePath(_, state) => {
             cursor = modal::render_text_prompt_cursor(
                 frame,
@@ -1141,6 +1243,17 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) -> O
                     frame,
                     crate::session_conversion::dialog_area(pane_area, area),
                     state,
+                );
+            }
+        }
+        Mode::AttentionOverview => {
+            if let Some(state) = &app.attention.dialog {
+                crate::attention::dialog::render(
+                    frame,
+                    area,
+                    state,
+                    &app.attention_overview_cards(),
+                    app.ui_settings.color_scheme,
                 );
             }
         }
@@ -2432,6 +2545,49 @@ fn draw_create_group(frame: &mut Frame, app: &App, state: &CreateGroupState) -> 
 fn draw_pane(frame: &mut Frame, area: Rect, app: &App) {
     let _ = draw_pane_sources(frame, area, app);
 }
+/// Centred dialog with the full, wrapped text of a pane's last prompt and
+/// Copy / Close buttons on its bottom border.
+fn draw_last_prompt_dialog(
+    frame: &mut Frame,
+    screen: Rect,
+    state: &crate::last_prompt_toolbar::LastPromptDialogState,
+) {
+    let dialog = crate::last_prompt_toolbar::dialog_area(screen);
+    frame.render_widget(Clear, dialog);
+    let block = theme::block(true).title(theme::chrome_title("Last prompt"));
+    let inner = block.inner(dialog);
+    frame.render_widget(block, dialog);
+    let total_lines = u16::try_from(
+        crate::last_prompt_banner::wrap_lines(&state.text, inner.width.saturating_sub(2)).len(),
+    )
+    .unwrap_or(u16::MAX);
+    let max_scroll = total_lines.saturating_sub(inner.height);
+    let text_area = Rect::new(
+        inner.x + 1,
+        inner.y,
+        inner.width.saturating_sub(2),
+        inner.height,
+    );
+    frame.render_widget(
+        Paragraph::new(state.text.as_str())
+            .wrap(ratatui::widgets::Wrap { trim: false })
+            .scroll((state.scroll.min(max_scroll), 0)),
+        text_area,
+    );
+    for (rect, label) in [
+        (
+            crate::last_prompt_toolbar::dialog_copy_button(dialog),
+            crate::last_prompt_toolbar::dialog_copy_label(),
+        ),
+        (
+            crate::last_prompt_toolbar::dialog_close_button(dialog),
+            crate::last_prompt_toolbar::dialog_close_label(),
+        ),
+    ] {
+        frame.render_widget(Paragraph::new(label), rect);
+    }
+}
+
 fn draw_pane_sources(
     frame: &mut Frame,
     area: Rect,
@@ -2446,6 +2602,16 @@ fn draw_pane_sources(
         crate::chatroom_ui::render(frame, area, app, *project_id);
         return Vec::new();
     }
+    if matches!(app.right_panel_target, RightPanelTarget::Attention) {
+        crate::attention::panel::render_panel(
+            frame,
+            area,
+            &app.attention_panel_rows(),
+            app.attention.panel_selected,
+            matches!(app.focus, FocusTarget::Pane),
+        );
+        return Vec::new();
+    }
     let viewports = app.pane_viewports();
     if viewports.is_empty() {
         let (title, message) = match app.right_panel_target {
@@ -2458,8 +2624,14 @@ fn draw_pane_sources(
             ),
             _ => ("Terminal", "no pane selected"),
         };
-        let placeholder =
-            Paragraph::new(message).block(theme::block(false).title(theme::chrome_title(title)));
+        // Placeholder copy gets the same inner breathing room as the pane frames.
+        let placeholder = Paragraph::new(message)
+            .block(
+                theme::block(false)
+                    .title(theme::chrome_title(title))
+                    .padding(ratatui::widgets::Padding::new(2, 1, 1, 0)),
+            )
+            .style(Style::new().add_modifier(Modifier::DIM));
         frame.render_widget(placeholder, area);
         return Vec::new();
     }
@@ -2735,6 +2907,7 @@ fn draw_pane_runtime(
     }
 
     draw_stats_icon(frame, app, viewport);
+    draw_recap_icon(frame, app, viewport);
 
     if let Some(toolbar_area) = viewport.toolbar_area {
         if matches!(runtime, PaneRuntime::Terminal(_)) {
@@ -2773,6 +2946,7 @@ fn draw_pane_runtime(
                             .unwrap_or_default(),
                         show_labels: app.ui_settings.show_toolbar_labels,
                         selection_enabled: app.ui_settings.terminal_text_selection_enabled,
+                        show_prompt_reopen: app.last_prompt_reopen_available(viewport.pane_id),
                     },
                     hovered,
                 );
@@ -2794,7 +2968,39 @@ fn draw_pane_runtime(
                 app.display_last_agent_prompt(viewport.pane_id),
                 app.ui_settings.last_prompt_max_lines.into(),
                 app.ui_settings.color_scheme,
+                crate::last_prompt_toolbar::has_toolbar(last_prompt_area.width)
+                    .then(|| app.last_prompt_toolbar_visibility(viewport.pane_id)),
+                app.hovered_last_prompt_button
+                    .and_then(|(pane_id, button)| (pane_id == viewport.pane_id).then_some(button)),
             );
+        }
+    }
+
+    if let Some(briefing_area) = viewport.briefing_area {
+        if matches!(runtime, PaneRuntime::Terminal(_)) {
+            if let Some(view) = app.briefing_view(viewport.pane_id) {
+                crate::attention::briefing::render(
+                    frame,
+                    briefing_area,
+                    &view,
+                    app.ui_settings.color_scheme,
+                    app.hovered_briefing_button(viewport.pane_id),
+                );
+            }
+        }
+    }
+
+    // A newly arrived attention item announces itself on the focused pane's
+    // rule beside the last-prompt banner; never over terminal content.
+    if pane_focused && matches!(runtime, PaneRuntime::Terminal(_)) {
+        if let (Some(rule), Some((kind, title, reason))) = (
+            viewport
+                .last_prompt_bottom_rule
+                .or(viewport.toolbar_rule)
+                .or(viewport.progress_rule),
+            app.attention_arrival_view(),
+        ) {
+            crate::attention::panel::render_arrival(frame, rule, kind, &title, &reason);
         }
     }
 
@@ -2808,6 +3014,7 @@ fn draw_pane_runtime(
                 &app.visible_progress_monitors(viewport.pane_id),
                 app.ui_settings.progress_max_lines.into(),
                 app.ui_settings.color_scheme,
+                app.progress_display_now_unix_millis(),
             );
         }
     }
@@ -2836,6 +3043,11 @@ fn draw_section_rules(
     }
     if let Some(rule) = viewport.last_prompt_bottom_rule {
         if prompt_shown {
+            crate::section_frame::render_rule(frame, rule, None, focused);
+        }
+    }
+    if let Some(rule) = viewport.briefing_bottom_rule {
+        if app.briefing_view(pane_id).is_some() {
             crate::section_frame::render_rule(frame, rule, None, focused);
         }
     }
@@ -3103,15 +3315,14 @@ fn draw_editor(frame: &mut Frame, area: Rect, editor: &EditorPane) {
                     editor.textarea.selection_range(),
                     current,
                 );
-                draw_source_scrollbar(frame, chrome.content_area, editor);
+                draw_source_scrollbar(frame, chrome.scrollbar_area, editor);
             } else {
                 frame.render_widget(
-                    Paragraph::new(
-                        editor
-                            .preparation_error
-                            .as_deref()
-                            .unwrap_or("Preparing source…"),
-                    ),
+                    Paragraph::new(editor.preparation_error.as_deref().map_or_else(
+                        || "Preparing source…".to_owned(),
+                        |error| format!("F9 details · {error}"),
+                    ))
+                    .wrap(ratatui::widgets::Wrap { trim: false }),
                     chrome.content_area,
                 );
             }
@@ -3125,11 +3336,21 @@ fn draw_editor(frame: &mut Frame, area: Rect, editor: &EditorPane) {
                     editor.rendered_scroll,
                     editor.line_display,
                 );
-                draw_rendered_scrollbar(frame, chrome.content_area, document, editor);
+                draw_rendered_scrollbar(
+                    frame,
+                    chrome.content_area,
+                    chrome.scrollbar_area,
+                    document,
+                    editor,
+                );
             }
             None => {
                 frame.render_widget(
-                    Paragraph::new(editor.preparation_error.as_deref().unwrap_or("Rendering…")),
+                    Paragraph::new(editor.preparation_error.as_deref().map_or_else(
+                        || "Rendering…".to_owned(),
+                        |error| format!("F9 details · {error}"),
+                    ))
+                    .wrap(ratatui::widgets::Wrap { trim: false }),
                     chrome.content_area,
                 );
             }
@@ -3189,12 +3410,14 @@ fn draw_source_scrollbar(frame: &mut Frame, area: Rect, editor: &EditorPane) {
 /// that already fits" rule.
 fn draw_rendered_scrollbar(
     frame: &mut Frame,
-    area: Rect,
+    text_area: Rect,
+    scrollbar_area: Rect,
     document: &markdown::render::RenderedDocument,
     editor: &EditorPane,
 ) {
-    let total_height = markdown::view::content_height(document, area.width, editor.line_display);
-    if total_height <= area.height {
+    let total_height =
+        markdown::view::content_height(document, text_area.width, editor.line_display);
+    if total_height <= text_area.height {
         return;
     }
     let mut scrollbar_state = ScrollbarState::new(usize::from(total_height))
@@ -3203,7 +3426,7 @@ fn draw_rendered_scrollbar(
         .begin_symbol(None)
         .end_symbol(None)
         .track_symbol(Some("│"));
-    frame.render_stateful_widget(scrollbar, area, &mut scrollbar_state);
+    frame.render_stateful_widget(scrollbar, scrollbar_area, &mut scrollbar_state);
 }
 
 /// The source line the minimap should mark as "you are here": the cursor
@@ -3309,6 +3532,7 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         Mode::AgentToolbarModelSubmenu(..) => "MODEL STRENGTH",
         Mode::SmartCopy => "SMART COPY",
         Mode::AgentDebugLog(..) => "AGENT DEBUG LOG",
+        Mode::LastPromptDialog(..) => "LAST PROMPT",
         Mode::AgentDebugSavePath(..) => "SAVE AGENT DEBUG LOG",
         Mode::SchedulePaneInput(..) => "SCHEDULE INPUT",
         Mode::QueuePrompt(..) => "QUEUE PROMPT",
@@ -3333,6 +3557,7 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         Mode::ConfirmClose(_) => "CONFIRM CLOSE",
         Mode::ConvertSession => "CONVERTING SESSION",
         Mode::RemoteCompaction => "REMOTE COMPACTION",
+        Mode::AttentionOverview => "NEEDS YOU",
         Mode::ConfirmRemoveWorkspace(_) => "REMOVE WORKTREE",
         Mode::ConfirmSessionRecovery { .. } => "SESSION RECOVERY",
         Mode::Search(_) => "SEARCH",
@@ -3381,10 +3606,10 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         // Borrow rather than `message.clone()` -- `app` outlives this
         // function's local `spans`, so there is no need to allocate a new
         // `String` copy of the status message on every render frame.
-        spans.push(Span::raw(message.as_str()));
+        spans.push(Span::raw(format!("F9 details · {message}")));
     } else if let Some(error) = app.semantic_animation_error() {
         spans.push(Span::raw("  —  "));
-        spans.push(Span::raw(error));
+        spans.push(Span::raw(format!("F9 details · {error}")));
     }
 
     let cap_style = theme::statusbar_cap_style();
@@ -3736,16 +3961,37 @@ mod tests {
             .tree
             .add_pane(group, "waiting agent", PaneContentKind::Terminal)
             .unwrap();
-        app.tree
-            .set_pane_status(
-                pane_id,
-                PaneStatus::from_activity(
-                    AgentClass::Codex,
-                    AgentActivity::WaitingApproval,
-                    Some(GoalState::Blocked),
-                ),
-            )
-            .unwrap();
+        let status = PaneStatus::from_activity(
+            AgentClass::Codex,
+            AgentActivity::WaitingApproval,
+            Some(GoalState::Blocked),
+        );
+        app.tree.set_pane_status(pane_id, status.clone()).unwrap();
+        // This test exercises the fresh approval projection; unchecked agents
+        // intentionally display a freshness warning instead of live approval.
+        app.pane_detection_evidence.insert(
+            pane_id,
+            ilium_ipc::PaneDetectionEvidence {
+                applied_status: status,
+                observed_at_unix_millis: crate::scheduled_input::unix_millis_now(),
+                stale_after_millis: 30_000,
+                identity: None,
+                activity: Some(ilium_ipc::DetectionReason {
+                    rule: "approval prompt".to_string(),
+                    observed: Some(
+                        include_str!(
+                            "../../ilium-detect/tests/fixtures/codex_awaiting_approval.txt"
+                        )
+                        .lines()
+                        .next()
+                        .unwrap()
+                        .to_string(),
+                    ),
+                    context: "Captured Codex approval fixture".to_string(),
+                }),
+                goal: None,
+            },
+        );
         app.ui_settings.agent_monitoring_mode =
             crate::agent_monitoring::AgentMonitoringMode::Attention;
         app.set_screen_area(Rect::new(0, 0, 100, 24));
@@ -3790,7 +4036,12 @@ mod tests {
         let rendered = rendered.split_whitespace().collect::<Vec<_>>().join(" ");
         assert!(rendered.contains("Needs your approval"));
         assert!(rendered.contains("Attention selection rule:"));
-        assert!(rendered.contains("Attention priority 1:"));
+        // Terminal wrapping can split a word inside the provenance text.
+        let unwrapped: String = rendered
+            .chars()
+            .filter(|ch| !ch.is_whitespace() && *ch != '│')
+            .collect();
+        assert!(unwrapped.contains("Attentionpriority1:"), "{rendered}");
     }
 
     #[test]
@@ -4398,11 +4649,11 @@ mod tests {
     fn stacked_voice_credential_prompt_renders_over_live_settings() {
         let mut app = App::new("test".to_owned(), std::env::temp_dir());
         app.set_screen_area(Rect::new(0, 0, 120, 40));
-        app.mode = Mode::Settings(crate::app::SettingsState {
+        app.mode = Mode::Settings(Box::new(crate::app::SettingsState {
             tab: crate::app::SettingsTab::VoiceControl,
             selected_row: 1,
             ..crate::app::SettingsState::default()
-        });
+        }));
         app.settings_adjust_voice_row(crate::voice_settings::VoiceRow::ApiKey, 1);
         let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
 
@@ -4921,7 +5172,14 @@ pub(crate) fn test_source_window_pixels(
     height: u16,
 ) -> ratatui::buffer::Buffer {
     editor.show_minimap = false;
-    let area = Rect::new(0, 0, width, height + crate::editor_chrome::TOOLBAR_HEIGHT);
+    // One extra column: the editor reserves it for the scrollbar, so the
+    // text window keeps the requested width.
+    let area = Rect::new(
+        0,
+        0,
+        width + 1,
+        height + crate::editor_chrome::TOOLBAR_HEIGHT,
+    );
     let content = crate::editor_chrome::compute(area, false).content_area;
     assert_eq!(content.width, width);
     assert_eq!(content.height, height);

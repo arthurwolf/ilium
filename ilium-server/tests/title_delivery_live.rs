@@ -63,6 +63,7 @@ async fn acknowledged_authored_enter_authorizes_title_before_request_history_flu
         &mut client,
         &ClientRequest::Attach {
             session: SESSION.into(),
+            hello: Default::default(),
         },
     )
     .await
@@ -97,6 +98,7 @@ async fn acknowledged_authored_enter_authorizes_title_before_request_history_flu
         &mut client,
         &ClientRequest::Attach {
             session: SESSION.into(),
+            hello: Default::default(),
         },
     )
     .await
@@ -172,6 +174,7 @@ async fn acknowledged_authored_enter_authorizes_title_before_request_history_flu
         &mut client,
         &ClientRequest::Attach {
             session: SESSION.into(),
+            hello: Default::default(),
         },
     )
     .await
@@ -226,6 +229,7 @@ async fn acknowledged_authored_enter_authorizes_title_before_request_history_flu
         &mut client,
         &ClientRequest::Attach {
             session: SESSION.into(),
+            hello: Default::default(),
         },
     )
     .await
@@ -249,6 +253,7 @@ async fn acknowledged_authored_enter_authorizes_title_before_request_history_flu
     )
     .await
     .unwrap();
+    // A single accepted title is published as a targeted node event.
     let accepted = expect_event(&mut client, WAIT, |event| {
         matches!(event, ServerEvent::TreeSnapshot(tree) if tree.get(pane_id).is_some_and(|node| node.name == "Authentication validation"))
             || matches!(event, ServerEvent::PaneNodeChanged(node) if node.id == pane_id && node.name == "Authentication validation")
@@ -279,6 +284,7 @@ async fn acknowledged_authored_enter_authorizes_title_before_request_history_flu
         &mut client,
         &ClientRequest::Attach {
             session: SESSION.into(),
+            hello: Default::default(),
         },
     )
     .await
@@ -348,6 +354,7 @@ async fn exited_agent_titles_require_verified_own_history_and_preserve_manual_na
         &mut client,
         &ClientRequest::Attach {
             session: RECOVERY_SESSION.into(),
+            hello: Default::default(),
         },
     )
     .await
@@ -396,6 +403,7 @@ async fn exited_agent_titles_require_verified_own_history_and_preserve_manual_na
         &mut client,
         &ClientRequest::Attach {
             session: RECOVERY_SESSION.into(),
+            hello: Default::default(),
         },
     )
     .await
@@ -450,6 +458,7 @@ async fn exited_agent_titles_require_verified_own_history_and_preserve_manual_na
             &mut client,
             &ClientRequest::Attach {
                 session: RECOVERY_SESSION.into(),
+                hello: Default::default(),
             },
         )
         .await
@@ -502,6 +511,7 @@ async fn exited_agent_titles_require_verified_own_history_and_preserve_manual_na
         &mut client,
         &ClientRequest::Attach {
             session: RECOVERY_SESSION.into(),
+            hello: Default::default(),
         },
     )
     .await
@@ -537,6 +547,7 @@ async fn exited_agent_titles_require_verified_own_history_and_preserve_manual_na
         &mut client,
         &ClientRequest::Attach {
             session: RECOVERY_SESSION.into(),
+            hello: Default::default(),
         },
     )
     .await

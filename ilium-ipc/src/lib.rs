@@ -15,6 +15,7 @@ mod allocation;
 mod bounded_decode;
 mod error;
 mod framing;
+pub mod plugin;
 mod protocol;
 mod startup;
 mod terminal_bytes;
@@ -32,17 +33,19 @@ pub use ilium_agent_debug::{
     AgentDebugEventMetadata, AgentDebugField, AgentDebugFieldPresentation, AgentDebugSeverity,
     AgentDebugSource, PaneDebugLog, PaneResizeCause,
 };
+pub use plugin::PLUGIN_PROTOCOL_VERSION;
 pub use protocol::{
     AgentDetectionSettings, AgentDetectionSettingsError, AntigravityStatuslineAction,
     BlockingError, ClientRequest, CustomAgentSignature, DetectionReason, MouseButton,
     MouseEventKind, MouseModifiers, NewPaneKind, NewPaneWorkingDirectory, PaneDetectionEvidence,
     PaneTitleObservation, ProgressMonitorAccepted, ProgressMonitorPreflight,
     ProgressMonitorRejection, ProgressMonitorRejectionCode, ProgressMonitorStatus, ProgressWaitEnd,
-    ProgressWaitOutcome, PromptSubmissionSource, RepoFacts, ServerEvent, WorkspaceClosePolicy,
-    WorkspaceCreateSpec, WorkspaceCreateStage, WorkspaceDisposition, WorkspaceGitStatus,
-    WorkspaceGitVersion, WorkspaceInventory, WorkspaceInventoryEntry, WorkspaceInventoryOwner,
-    WorkspacePruneBranchOutcome, WorkspacePruneBranchPolicy, WorkspacePruneMode,
-    WorkspacePruneOutcome, WorkspacePruneResult, WorkspacePruneTarget, WorkspaceWorktreeFact,
+    ProgressWaitOutcome, PromptSubmissionSource, RecapTrigger, RepoFacts, ServerEvent,
+    WorkspaceClosePolicy, WorkspaceCreateSpec, WorkspaceCreateStage, WorkspaceDisposition,
+    WorkspaceGitStatus, WorkspaceGitVersion, WorkspaceInventory, WorkspaceInventoryEntry,
+    WorkspaceInventoryOwner, WorkspacePruneBranchOutcome, WorkspacePruneBranchPolicy,
+    WorkspacePruneMode, WorkspacePruneOutcome, WorkspacePruneResult, WorkspacePruneTarget,
+    WorkspaceWorktreeFact,
 };
 pub use startup::{
     clear_startup_progress, publish_startup_progress, read_startup_progress, startup_progress_path,
@@ -167,6 +170,7 @@ mod tests {
         vec![
             ClientRequest::Attach {
                 session: "main".to_string(),
+                hello: Default::default(),
             },
             ClientRequest::NewPane {
                 request_id: 0,
@@ -470,6 +474,7 @@ mod tests {
             ClientRequest::RecordNodeActivity { node_id: NodeId(2) },
             ClientRequest::AttachInteractive {
                 session: "main".to_string(),
+                hello: Default::default(),
             },
             ClientRequest::SetVisiblePanes {
                 pane_ids: vec![NodeId(2), NodeId(3)],
@@ -517,6 +522,27 @@ mod tests {
                 monitor_id: 7,
             },
             ClientRequest::GetPaneRecapScreen { pane_id: NodeId(2) },
+            ClientRequest::ApplyRecap {
+                pane_id: NodeId(2),
+                session_id: "95fd0645".to_string(),
+                recap_generation: 7,
+                trigger: RecapTrigger::Manual,
+                short: "Fixing the login test.".to_string(),
+                long: Some("Long recap".to_string()),
+            },
+            ClientRequest::ApplyRecap {
+                pane_id: NodeId(2),
+                session_id: String::new(),
+                recap_generation: 8,
+                trigger: RecapTrigger::Batch,
+                short: "Short only".to_string(),
+                long: None,
+            },
+            ClientRequest::TerminalHistory {
+                pane_id: NodeId(2),
+                before_sequence: 42,
+                max_bytes: 1024 * 1024,
+            },
             ClientRequest::PasteTerminalText {
                 pane_id: NodeId(2),
                 text: "first line\nsecond line".to_string(),
@@ -743,6 +769,8 @@ mod tests {
                 detection_evidence: vec![(
                     NodeId(2),
                     PaneDetectionEvidence {
+                        observed_at_unix_millis: 1_700_000_000_000,
+                        stale_after_millis: 30_000,
                         applied_status: PaneStatus::PlainShell,
                         identity: Some(DetectionReason {
                             rule: "no registered agent process".into(),
@@ -765,6 +793,19 @@ mod tests {
                 through_sequence: 7,
                 bytes: b"hello from the pty".to_vec(),
                 is_complete: true,
+            },
+            ServerEvent::TerminalSnapshot {
+                pane_id: NodeId(2),
+                through_sequence: 7,
+                bytes: b"\x1b[H\x1b[Jhello from the pty".to_vec(),
+                is_complete: false,
+            },
+            ServerEvent::TerminalHistory {
+                pane_id: NodeId(2),
+                before_sequence: 7,
+                first_sequence: 3,
+                bytes: b"older output".to_vec(),
+                reaches_journal_start: true,
             },
             ServerEvent::PaneStatusChanged {
                 pane_id: NodeId(2),
@@ -809,6 +850,14 @@ mod tests {
             ServerEvent::PaneSessionTitleCleared {
                 pane_id: NodeId(2),
                 title_generation: 2,
+            },
+            ServerEvent::RecapUpdated {
+                pane_id: NodeId(2),
+                session_id: "95fd0645".to_string(),
+                recap_generation: 7,
+                trigger: RecapTrigger::Batch,
+                short: "Fixing the login test.".to_string(),
+                long: None,
             },
             ServerEvent::PaneEditorPathResolved {
                 pane_id: NodeId(2),
@@ -1042,6 +1091,8 @@ mod tests {
             ServerEvent::PaneDetectionEvidenceChanged {
                 pane_id: NodeId(2),
                 evidence: PaneDetectionEvidence {
+                    observed_at_unix_millis: 1_700_000_000_000,
+                    stale_after_millis: 30_000,
                     applied_status: PaneStatus::from_activity(
                         AgentClass::Codex,
                         AgentActivity::Idle,
@@ -1064,6 +1115,8 @@ mod tests {
                 pane_id: NodeId(2),
                 status: PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Working, None),
                 evidence: PaneDetectionEvidence {
+                    observed_at_unix_millis: 1_700_000_000_000,
+                    stale_after_millis: 30_000,
                     applied_status: PaneStatus::from_activity(
                         AgentClass::Codex,
                         AgentActivity::Working,
@@ -1586,5 +1639,78 @@ mod tests {
             result.is_err(),
             "decoding a ServerEvent frame as a ClientRequest should fail, got {result:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn attach_snapshot_and_history_frames_round_trip_exactly() {
+        let snapshot = ServerEvent::TerminalSnapshot {
+            pane_id: NodeId(9),
+            through_sequence: 41,
+            bytes: b"\x1b[H\x1b[2Jvisible screen".to_vec(),
+            is_complete: true,
+        };
+        let history = ServerEvent::TerminalHistory {
+            pane_id: NodeId(9),
+            before_sequence: 41,
+            first_sequence: 12,
+            bytes: b"older output".to_vec(),
+            reaches_journal_start: false,
+        };
+        let request = ClientRequest::TerminalHistory {
+            pane_id: NodeId(9),
+            before_sequence: 41,
+            max_bytes: 1024 * 1024,
+        };
+        for event in [snapshot, history] {
+            let mut buffer = Vec::new();
+            write_frame(&mut buffer, &event).await.unwrap();
+            let mut cursor = Cursor::new(buffer);
+            let decoded: ServerEvent = read_frame(&mut cursor).await.unwrap();
+            assert_eq!(decoded, event);
+        }
+        let mut buffer = Vec::new();
+        write_frame(&mut buffer, &request).await.unwrap();
+        let mut cursor = Cursor::new(buffer);
+        let decoded: ClientRequest = read_frame(&mut cursor).await.unwrap();
+        assert_eq!(decoded, request);
+    }
+
+    #[tokio::test]
+    async fn a_frame_from_a_different_protocol_schema_is_refused_loudly() {
+        // The schema tag lives in the top bits of the frame's length word. A
+        // peer built from another protocol generation writes a different tag,
+        // so the frame must be refused before any payload is decoded.
+        let mut buffer = Vec::new();
+        write_frame(
+            &mut buffer,
+            &ServerEvent::TerminalSnapshot {
+                pane_id: NodeId(9),
+                through_sequence: 1,
+                bytes: b"x".to_vec(),
+                is_complete: true,
+            },
+        )
+        .await
+        .unwrap();
+        buffer[..4].copy_from_slice(&0x0000_0001_u32.to_le_bytes());
+
+        let mut cursor = Cursor::new(buffer);
+        let result: Result<ServerEvent, IpcError> = read_frame(&mut cursor).await;
+        assert!(
+            result.is_err(),
+            "a frame with another schema tag must be refused, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn an_unknown_server_event_variant_fails_to_decode() {
+        // Variants are appended in bincode order, so a discriminant past the
+        // last variant must fail loudly instead of decoding as a neighbour.
+        let mut bytes = bincode::serialize(&ServerEvent::Error {
+            message: "probe".to_string(),
+        })
+        .unwrap();
+        bytes[..4].copy_from_slice(&u32::MAX.to_le_bytes());
+        assert!(bincode::deserialize::<ServerEvent>(&bytes).is_err());
     }
 }

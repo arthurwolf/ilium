@@ -181,6 +181,8 @@ pub struct PreparedFrame {
     pub frame_id: u64,
     pub layout_revision: u64,
     pub prepared_at: Instant,
+    /// Frozen content identities, captured during composition, never at acknowledgement.
+    pub terminal_sequences: [Option<(u64, u64)>; 4],
     animation: Option<ComposedPresentation>,
     _reservation: FrameReservation,
 }
@@ -240,6 +242,7 @@ impl PreparedFrame {
             frame_id,
             layout_revision,
             prepared_at: Instant::now(),
+            terminal_sequences: [None; 4],
             animation: None,
             _reservation: reservation,
         })

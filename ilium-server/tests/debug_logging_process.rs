@@ -105,6 +105,7 @@ async fn detached_server_process_logs_major_ipc_actions_and_errors() {
         &mut client,
         &ClientRequest::Attach {
             session: "debug-session".to_owned(),
+            hello: Default::default(),
         },
     )
     .await
@@ -136,6 +137,7 @@ async fn detached_server_process_logs_major_ipc_actions_and_errors() {
         &mut rejected_client,
         &ClientRequest::Attach {
             session: "wrong-session".to_owned(),
+            hello: Default::default(),
         },
     )
     .await

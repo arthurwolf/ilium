@@ -136,7 +136,7 @@ impl Link {
         let before = self.attached.tree.clone();
         if let Operation::Close { pane, worktree } = operation {
             if !matches!(worktree, WorktreeAction::Keep) {
-                Self::refuse_removal_from_inside_worktree(&before, *pane)?;
+                refuse_removal_from_inside_worktree(&before, *pane)?;
             }
         }
         let requests = operation.requests(&before, crate::next_progress_request_id())?;
@@ -169,8 +169,12 @@ impl Link {
                             return Err(CtlFailure::rejected(message))
                         }
                         ServerEvent::WorkspaceRemovalBlocked { reasons, .. } => {
-                            return Err(CtlFailure::rejected(Self::removal_refusal(&reasons)))
+                            return Err(CtlFailure::rejected(removal_refusal(&reasons)))
                         }
+                        ServerEvent::PaneFrozen {
+                            result: Err(message),
+                            ..
+                        } => return Err(CtlFailure::rejected(message)),
                         ServerEvent::TreeSnapshot(tree) => latest = tree,
                         _ => {}
                     }
@@ -184,41 +188,6 @@ impl Link {
                 Err(_quiet) => latest = self.fresh_tree().await?,
             }
         }
-    }
-
-    /// The server refuses a worktree removal while any same-user process has its
-    /// working directory inside the worktree, and the command asking for the
-    /// removal is such a process when it runs there. Refuse here with the reason
-    /// instead of sending a request that can only time out.
-    fn refuse_removal_from_inside_worktree(tree: &Tree, pane: u64) -> Result<(), CtlFailure> {
-        let Some(workspace) = tree.pane_workspace(NodeId(pane)) else {
-            return Ok(());
-        };
-        let Ok(current_directory) = std::env::current_dir() else {
-            return Ok(());
-        };
-        let current_directory =
-            std::fs::canonicalize(&current_directory).unwrap_or(current_directory);
-        let worktree_root = std::fs::canonicalize(&workspace.worktree_root)
-            .unwrap_or_else(|_| workspace.worktree_root.clone());
-        if current_directory.starts_with(&worktree_root) {
-            return Err(CtlFailure::rejected(format!(
-            "this command runs inside the worktree {} that it would remove; run it from another directory",
-            worktree_root.display()
-        )));
-        }
-        Ok(())
-    }
-
-    /// Turns the server's refusal reasons into the one message the user reads.
-    fn removal_refusal(reasons: &[String]) -> String {
-        if reasons.is_empty() {
-            return "the server refused the worktree removal without giving a reason".into();
-        }
-        format!(
-            "the server refused the worktree removal: {}",
-            reasons.join("; ")
-        )
     }
 
     /// Input requests change no tree; success means no error arrived shortly.
@@ -238,8 +207,12 @@ impl Link {
                             return Err(CtlFailure::rejected(message));
                         }
                         ServerEvent::WorkspaceRemovalBlocked { reasons, .. } => {
-                            return Err(CtlFailure::rejected(Self::removal_refusal(&reasons)));
+                            return Err(CtlFailure::rejected(removal_refusal(&reasons)));
                         }
+                        ServerEvent::PaneFrozen {
+                            result: Err(message),
+                            ..
+                        } => return Err(CtlFailure::rejected(message)),
                         _ => {}
                     }
                 }
@@ -259,4 +232,38 @@ pub(crate) fn owning_project(tree: &Tree, node: NodeId) -> Option<NodeId> {
         }
         current = parent;
     }
+}
+
+/// The server refuses a worktree removal while any same-user process has its
+/// working directory inside the worktree, and the command asking for the
+/// removal is such a process when it runs there. Refuse here with the reason
+/// instead of sending a request that can only time out.
+fn refuse_removal_from_inside_worktree(tree: &Tree, pane: u64) -> Result<(), CtlFailure> {
+    let Some(workspace) = tree.pane_workspace(NodeId(pane)) else {
+        return Ok(());
+    };
+    let Ok(current_directory) = std::env::current_dir() else {
+        return Ok(());
+    };
+    let current_directory = std::fs::canonicalize(&current_directory).unwrap_or(current_directory);
+    let worktree_root = std::fs::canonicalize(&workspace.worktree_root)
+        .unwrap_or_else(|_| workspace.worktree_root.clone());
+    if current_directory.starts_with(&worktree_root) {
+        return Err(CtlFailure::rejected(format!(
+            "this command runs inside the worktree {} that it would remove; run it from another directory",
+            worktree_root.display()
+        )));
+    }
+    Ok(())
+}
+
+/// Turns the server's refusal reasons into the one message the user reads.
+fn removal_refusal(reasons: &[String]) -> String {
+    if reasons.is_empty() {
+        return "the server refused the worktree removal without giving a reason".into();
+    }
+    format!(
+        "the server refused the worktree removal: {}",
+        reasons.join("; ")
+    )
 }

@@ -155,6 +155,52 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             }
             None
         }
+        event @ ServerEvent::TerminalSnapshot { .. } => {
+            #[cfg(test)]
+            if app.terminal_parsing.is_none() {
+                if let ServerEvent::TerminalSnapshot {
+                    pane_id,
+                    through_sequence,
+                    bytes,
+                    is_complete,
+                } = event
+                {
+                    if let Some(PaneRuntime::Terminal(view)) = app.panes.get_mut(&pane_id) {
+                        view.apply_replay(&bytes, through_sequence, is_complete);
+                        view.history_paging
+                            .snapshot_applied(through_sequence, bytes.len());
+                    }
+                }
+                return None;
+            }
+            if let Err(event) = app.submit_terminal_event(event) {
+                app.pending_terminal_events.push_front(
+                    crate::connection::Received::with_retention(
+                        *event,
+                        app.processing_event_retention.clone(),
+                    ),
+                );
+            }
+            None
+        }
+        event @ ServerEvent::TerminalHistory { .. } => {
+            if let ServerEvent::TerminalHistory { pane_id, .. } = &event {
+                if let Some(PaneRuntime::Terminal(view)) = app.panes.get_mut(pane_id) {
+                    view.history_paging.reply_arrived();
+                }
+            }
+            #[cfg(test)]
+            app.terminal_parsing.as_ref()?;
+            if let Err(event) = app.submit_terminal_event(event) {
+                app.pending_terminal_events.push_front(
+                    crate::connection::Received::with_retention(
+                        *event,
+                        app.processing_event_retention.clone(),
+                    ),
+                );
+            }
+            None
+        }
         event @ ServerEvent::TerminalReplay { .. } => {
             #[cfg(test)]
             if app.terminal_parsing.is_none() {
@@ -539,6 +585,7 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             pane_id,
             last_prompt,
         } => {
+            app.record_last_prompt(pane_id, last_prompt.as_deref());
             if let Err(error) = app.tree.set_last_prompt(pane_id, last_prompt) {
                 tracing::warn!("dropping PaneLastPromptChanged for pane {pane_id:?}: {error}");
             }
@@ -633,6 +680,28 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
         }
         // One-shot recap consumers own this direct reply; it is not UI state.
         ServerEvent::PaneRecapScreen { .. } => None,
+        ServerEvent::RecapUpdated {
+            pane_id,
+            session_id,
+            recap_generation,
+            trigger,
+            short,
+            long,
+        } => {
+            app.recap.observe_update(
+                pane_id,
+                crate::recap_state::StoredRecap {
+                    session_id,
+                    recap_generation,
+                    trigger,
+                    short,
+                    long,
+                },
+            );
+            None
+        }
+        // Plugin traffic is consumed by the client plugin host, not by the render cache.
+        ServerEvent::Plugin(_) | ServerEvent::Contributions(_) | ServerEvent::Rejected(_) => None,
         ServerEvent::AntigravityStatuslineCompleted { .. } => None,
         ServerEvent::VoiceTextOffered {
             request_id,
@@ -1034,6 +1103,8 @@ mod tests {
         let status = PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Idle, None);
         tree.set_pane_status(pane_id, status.clone()).unwrap();
         let evidence = |rule: &str| ilium_ipc::PaneDetectionEvidence {
+            observed_at_unix_millis: 1_700_000_000_000,
+            stale_after_millis: 30_000,
             applied_status: status.clone(),
             identity: Some(ilium_ipc::DetectionReason {
                 rule: rule.to_string(),
@@ -1064,6 +1135,17 @@ mod tests {
                 .unwrap()
                 .rule,
             "new process"
+        );
+        let received_evidence = &app.pane_detection_evidence[&pane_id];
+        assert_eq!(received_evidence.observed_at_unix_millis, 1_700_000_000_000);
+        assert!(
+            crate::status_icons::detection_freshness_warning(
+                &status,
+                Some(received_evidence),
+                1_700_000_030_001,
+            )
+            .is_some(),
+            "reattach must preserve the age of a stale server observation"
         );
         apply(
             &mut app,
@@ -1191,6 +1273,8 @@ mod tests {
         apply(&mut app, ServerEvent::TreeSnapshot(tree));
         let status = PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Working, None);
         let evidence = ilium_ipc::PaneDetectionEvidence {
+            observed_at_unix_millis: 1_700_000_000_000,
+            stale_after_millis: 30_000,
             applied_status: status.clone(),
             identity: Some(ilium_ipc::DetectionReason {
                 rule: "exact codex process".to_string(),

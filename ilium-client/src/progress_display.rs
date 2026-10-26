@@ -44,6 +44,8 @@ mod tests {
                 message: "retained result".into(),
                 details: String::new(),
                 error: (status == ProgressTaskStatus::Error).then(|| "task failed".into()),
+                eta_seconds: None,
+                indeterminate: false,
             },
             1000,
         )

@@ -1,0 +1,6 @@
+ 1 use std::fs;
+ 2
+ 3 fn main() {
+ 4     let n = 42;
+ 5     // run it
+ 6 }

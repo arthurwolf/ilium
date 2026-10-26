@@ -147,6 +147,7 @@ async fn live_worktree_status_refreshes_and_replays_after_head_changes() {
         &mut observer,
         &ClientRequest::Attach {
             session: "workspace".into(),
+            hello: Default::default(),
         },
     )
     .await
@@ -819,6 +820,7 @@ impl IsolatedWorkspaceServer {
             &mut stream,
             &ClientRequest::Attach {
                 session: "workspace".into(),
+                hello: Default::default(),
             },
         )
         .await
@@ -836,6 +838,7 @@ impl IsolatedWorkspaceServer {
             &mut stream,
             &ClientRequest::Attach {
                 session: "workspace".into(),
+                hello: Default::default(),
             },
         )
         .await
@@ -865,6 +868,7 @@ async fn repo_facts_and_invalid_branch_rejection_leave_no_pane_or_worktree() {
         &mut client,
         &ClientRequest::Attach {
             session: "workspace-ipc".into(),
+            hello: Default::default(),
         },
     )
     .await
@@ -938,6 +942,7 @@ async fn repo_facts_and_invalid_branch_rejection_leave_no_pane_or_worktree() {
         &mut observer,
         &ClientRequest::Attach {
             session: "workspace-ipc".into(),
+            hello: Default::default(),
         },
     )
     .await
@@ -978,6 +983,7 @@ async fn invalid_include_rolls_back_new_checkout_branch_and_pane() {
         &mut client,
         &ClientRequest::Attach {
             session: "workspace-include-rollback".into(),
+            hello: Default::default(),
         },
     )
     .await
@@ -1056,6 +1062,7 @@ async fn invalid_include_rolls_back_new_checkout_branch_and_pane() {
         &mut observer,
         &ClientRequest::Attach {
             session: "workspace-include-rollback".into(),
+            hello: Default::default(),
         },
     )
     .await
@@ -1087,6 +1094,7 @@ async fn partial_include_copy_retains_prior_files_and_worktree() {
         &mut client,
         &ClientRequest::Attach {
             session: "workspace-partial-include".into(),
+            hello: Default::default(),
         },
     )
     .await
@@ -1123,6 +1131,7 @@ async fn partial_include_copy_retains_prior_files_and_worktree() {
         &mut observer,
         &ClientRequest::Attach {
             session: "workspace-partial-include".into(),
+            hello: Default::default(),
         },
     )
     .await
@@ -1508,6 +1517,8 @@ async fn isolated_server_creates_attaches_and_removes_only_owned_worktree() {
         // manager. Force must fail closed when process custody is unknown.
         // Process inspection is implemented on Linux procfs only, so every
         // other platform reports it unavailable and must stay fail-closed.
+        // manager. Force must fail closed when process custody is unknown; the
+        // server reports that as a failed worktree process scan job.
         assert!(
             reasons.iter().any(|reason| {
                 reason.contains("process directory probe is unavailable")

@@ -1,0 +1,1235 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Events and intents | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details open><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/" aria-current="page">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Concepts</b></p>
+<h1>Events and intents</h1>
+
+<p>A plugin learns what happens through events and changes the world through intents. The kernel delivers events in batches of at most 256. The handler answers each batch with a list of submissions, each carrying one intent. The kernel checks the list against the plugin's grants, applies the accepted submissions in order, and reports each outcome as a <code>request-completed</code> event in a later batch.</p>
+<h2 id="you-will-need">You will need</h2>
+<ul>
+<li>The grants for each event and intent you use. The tables below name them. See <a href="/pages/capabilities/">Capabilities</a>.</li>
+<li>A server or client side. In Rust, <code>#[ilium_plugin(side = "server")]</code> or <code>side = "client"</code>. In TypeScript, <code>side: 'server'</code> or <code>side: 'client'</code> in <code>definePlugin</code>. A scene plugin exports <code>renderer</code> instead of <code>handler</code>.</li>
+<li>The <code>lifecycle</code> and <code>handler</code> exports. Both are required, so the manifest never lists them in <code>exports</code>.</li>
+<li>Rust stable 1.90 or later with the <code>wasm32-wasip2</code> target, or Bun 1.2 or later for TypeScript.</li>
+<li>Background from <a href="/pages/worlds-and-sides/">Worlds and sides</a>.</li>
+</ul>
+<h2 id="the-handler">The handler</h2>
+<p>The handler is the <code>Handler</code> trait in Rust and the <code>onEvents</code> function in TypeScript. The kernel calls it with one batch, and it returns the submissions to apply.</p>
+<table>
+<thead>
+<tr>
+<th>Language</th>
+<th>Signature</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>WIT</td>
+<td><code>on-events: func(batch: list&lt;event&gt;) -&gt; list&lt;submission&gt;;</code></td>
+</tr>
+<tr>
+<td>Rust</td>
+<td><code>fn on_events(&amp;mut self, batch: Vec&lt;Event&gt;) -&gt; Vec&lt;Submission&gt;</code> (required)</td>
+</tr>
+<tr>
+<td>TypeScript</td>
+<td><code>onEvents(batch: Event[]): Submission[]</code> inside <code>definePlugin</code></td>
+</tr>
+</tbody>
+</table>
+<p>An instance runs one call at a time, so a handler never re-enters itself.</p>
+<p>The <code>on-events</code> deadline is 20 ms by default for every tier. A manifest may request up to 50 ms, and only a T1 plugin gets above 20 ms (T2 and T3 ceiling: 20 ms). A breach traps the instance, which follows the <a href="/pages/reference-errors-and-limits/#restart-and-disable-rule">restart and disable rule</a>: restart after 1 s, then 5 s, and disable at the third failure within 10 minutes, with a notice in the tree footer. See <a href="/pages/errors-and-limits/">Errors and limits</a>.</p>
+<h2 id="event-catalogue">Event catalogue</h2>
+<p>An event reaches a plugin only when the plugin holds the listed grant. Lazily activated plugins receive events only after activation.</p>
+<table>
+<thead>
+<tr>
+<th>Event</th>
+<th>Payload</th>
+<th>Grant</th>
+<th>Delivery policy</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>tree-changed</code></td>
+<td><code>list&lt;node-id&gt;</code></td>
+<td><code>tree.read</code></td>
+<td>Coalesced; pending lists merge into one union</td>
+</tr>
+<tr>
+<td><code>node-removed</code></td>
+<td><code>node-id</code></td>
+<td><code>tree.read</code></td>
+<td>Never dropped</td>
+</tr>
+<tr>
+<td><code>pane-created</code></td>
+<td><code>pane-info</code></td>
+<td><code>panes.read</code></td>
+<td>Never dropped</td>
+</tr>
+<tr>
+<td><code>pane-exited</code></td>
+<td><code>node</code>, <code>status: option&lt;s32&gt;</code>, <code>signal: option&lt;string&gt;</code></td>
+<td><code>panes.read</code></td>
+<td>Never dropped</td>
+</tr>
+<tr>
+<td><code>pane-focused</code></td>
+<td><code>option&lt;node-id&gt;</code></td>
+<td><code>panes.read</code></td>
+<td>Coalesced</td>
+</tr>
+<tr>
+<td><code>pane-resized</code></td>
+<td><code>node</code>, <code>columns</code>, <code>rows</code></td>
+<td><code>panes.read</code></td>
+<td>Coalesced by node</td>
+</tr>
+<tr>
+<td><code>pane-title-changed</code></td>
+<td><code>node</code>, <code>title</code>, <code>source</code> (osc, manual, inferred)</td>
+<td><code>panes.read</code></td>
+<td>Coalesced by node</td>
+</tr>
+<tr>
+<td><code>agent-identified</code></td>
+<td><code>node</code>, <code>signature</code></td>
+<td><code>agent.read</code></td>
+<td>Never dropped</td>
+</tr>
+<tr>
+<td><code>agent-activity-changed</code></td>
+<td><code>node</code>, <code>previous</code>, <code>current</code>, <code>revision</code></td>
+<td><code>agent.read</code></td>
+<td>Never dropped</td>
+</tr>
+<tr>
+<td><code>agent-goal-changed</code></td>
+<td><code>node</code>, <code>goal: option&lt;string&gt;</code></td>
+<td><code>agent.read</code></td>
+<td>Coalesced by node</td>
+</tr>
+<tr>
+<td><code>input-submitted</code></td>
+<td><code>node</code>, <code>text</code>, <code>source</code> (user, plugin, scheduled, voice), <code>epoch: u64</code></td>
+<td><code>agent.read-prompts</code></td>
+<td>Never dropped</td>
+</tr>
+<tr>
+<td><code>output-matched</code></td>
+<td><code>node</code>, <code>filter-id</code>, <code>line</code>, <code>row</code></td>
+<td><code>terminal.output-filter</code></td>
+<td>Drop oldest, counted</td>
+</tr>
+<tr>
+<td><code>link-activated</code></td>
+<td><code>node</code>, <code>detector-id</code>, <code>text</code></td>
+<td>own <code>link_detectors</code></td>
+<td>Never dropped</td>
+</tr>
+<tr>
+<td><code>pointer</code></td>
+<td><code>node</code>, <code>row</code>, <code>column</code>, <code>kind</code> (down, up, drag, wheel), <code>button</code></td>
+<td><code>terminal.pointer</code>, while claimed</td>
+<td>Coalesced (drag)</td>
+</tr>
+<tr>
+<td><code>editor-opened</code>, <code>editor-closed</code></td>
+<td><code>buffer-ref</code></td>
+<td><code>editor.read</code></td>
+<td>Never dropped</td>
+</tr>
+<tr>
+<td><code>editor-changed</code></td>
+<td><code>buffer</code>, <code>revision</code>, <code>first-line</code>, <code>last-line</code></td>
+<td><code>editor.read</code></td>
+<td>Coalesced by buffer, debounced 100 ms</td>
+</tr>
+<tr>
+<td><code>editor-saved</code></td>
+<td><code>buffer</code>, <code>path</code></td>
+<td><code>editor.read</code></td>
+<td>Never dropped</td>
+</tr>
+<tr>
+<td><code>settings-changed</code></td>
+<td><code>settings-change { keys, origin, side }</code></td>
+<td>always (own)</td>
+<td>Coalesced</td>
+</tr>
+<tr>
+<td><code>timer-fired</code></td>
+<td><code>timer-id</code></td>
+<td>always (own)</td>
+<td>Coalesced by timer</td>
+</tr>
+<tr>
+<td><code>request-completed</code></td>
+<td><code>request-result</code></td>
+<td>always (own)</td>
+<td>Never dropped</td>
+</tr>
+<tr>
+<td><code>job-progress</code></td>
+<td><code>request-id</code>, <code>percent</code></td>
+<td>always (own)</td>
+<td>Coalesced by job</td>
+</tr>
+<tr>
+<td><code>message</code></td>
+<td><code>from</code>, <code>channel</code>, <code>payload</code></td>
+<td>own sides, or the sender's <code>messages.peer</code></td>
+<td>Never dropped</td>
+</tr>
+<tr>
+<td><code>topic-published</code></td>
+<td><code>topic</code>, <code>from</code>, <code>payload-json</code></td>
+<td><code>topics.subscribe</code></td>
+<td>Drop oldest, counted</td>
+</tr>
+<tr>
+<td><code>command-invoked</code></td>
+<td><code>command</code>, <code>arguments-json</code>, <code>origin</code>, <code>context</code></td>
+<td>own commands</td>
+<td>Never dropped</td>
+</tr>
+<tr>
+<td><code>ui-action</code></td>
+<td><code>view</code>, <code>key</code>, <code>action-id</code>, <code>kind</code>, <code>value</code></td>
+<td>own views</td>
+<td>Never dropped (<code>scrolled</code> coalesced)</td>
+</tr>
+<tr>
+<td><code>key-pressed</code>, <code>key-released</code></td>
+<td><code>grab</code>, <code>pane</code>, <code>chord</code>, <code>repeat</code></td>
+<td><code>keys.intercept</code> or <code>wants_keys</code></td>
+<td>Never dropped</td>
+</tr>
+<tr>
+<td><code>view-visibility</code></td>
+<td><code>view</code>, <code>visible: bool</code></td>
+<td>own views</td>
+<td>Coalesced</td>
+</tr>
+<tr>
+<td><code>fs-changed</code></td>
+<td><code>watch</code>, <code>paths: list&lt;string&gt;</code></td>
+<td><code>fs.watch</code></td>
+<td>Coalesced by watch</td>
+</tr>
+<tr>
+<td><code>audio-frames</code></td>
+<td><code>capture</code>, <code>samples: list&lt;s16&gt;</code></td>
+<td>audio grant</td>
+<td>Drop oldest, counted</td>
+</tr>
+<tr>
+<td><code>cli-invoked</code></td>
+<td><code>invocation</code>, <code>name</code>, <code>argv</code>, <code>cwd</code></td>
+<td><code>cli.contribute</code></td>
+<td>Never dropped</td>
+</tr>
+<tr>
+<td><code>cli-cancelled</code></td>
+<td><code>invocation</code></td>
+<td><code>cli.contribute</code></td>
+<td>Never dropped</td>
+</tr>
+<tr>
+<td><code>http-called</code></td>
+<td><code>call</code>, <code>method</code>, <code>path</code>, <code>headers</code>, <code>body</code></td>
+<td><code>http-api.route</code></td>
+<td>Never dropped</td>
+</tr>
+<tr>
+<td><code>client-attached</code>, <code>client-detached</code></td>
+<td><code>client-id</code></td>
+<td>server side, always</td>
+<td>Never dropped</td>
+</tr>
+<tr>
+<td><code>theme-changed</code></td>
+<td>none</td>
+<td>client side, always</td>
+<td>Coalesced</td>
+</tr>
+<tr>
+<td><code>events-dropped</code></td>
+<td><code>list&lt;dropped-count&gt;</code></td>
+<td>always (own)</td>
+<td>Coalesced by (event, source); never dropped</td>
+</tr>
+</tbody>
+</table>
+<p>In Rust the payload records live in <code>ilium_plugin_sdk::types::events</code>. In TypeScript an event is a tagged value such as <code>{ tag: 'pane-exited', val: { node, status, signal } }</code>.</p>
+<h3 id="delivery-policies">Delivery policies</h3>
+<table>
+<thead>
+<tr>
+<th>Policy</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Coalesced</td>
+<td>Pending events of one kind and key always merge into one, whatever the queue fill. The merged event keeps the newest payload at the position of its newest occurrence.</td>
+</tr>
+<tr>
+<td>Never dropped</td>
+<td>The event always arrives.</td>
+</tr>
+<tr>
+<td>Drop oldest, counted</td>
+<td>At a full queue the oldest pending drop-oldest event of any kind is removed and counted under its own event and source. If none is pending and the new event is drop-oldest, the new event is discarded and counted.</td>
+</tr>
+</tbody>
+</table>
+<p>When a never-dropped event cannot be queued, the plugin counts as stuck. The kernel restarts it, and the new instance receives a <code>tree-changed</code> for every node so that it can re-read its state.</p>
+<p>Dropped events are counted. The next batch starts with one <code>events-dropped</code> event. At most one is pending: a second drop before the next batch adds to the matching (event, source) count or appends a record, and the event is never dropped. <code>source</code> is the filter id, the topic name or the decimal capture id, and none for every other kind. The full rules are in <a href="/pages/api-events/">Events</a>.</p>
+<h2 id="extended-events">Extended events</h2>
+<p>The contract adds 18 events after <code>events-dropped</code>, so the catalogue holds 56 events. A plugin that does not match them is unaffected. The <code>ui-action</code> event gains 6 kinds (17 in total), and <code>pointer</code> and <code>command-invoked</code> gain fields.</p>
+<table>
+<thead>
+<tr>
+<th>Event</th>
+<th>Payload</th>
+<th>Grant</th>
+<th>Delivery policy</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>screen-changed</code></td>
+<td><code>pane</code>, <code>first-row</code>, <code>last-row</code>, <code>revision</code></td>
+<td><code>terminal.read-cells</code></td>
+<td>Coalesced by pane, 10 per second</td>
+</tr>
+<tr>
+<td><code>user-line-submitted</code></td>
+<td><code>pane</code>, <code>text</code>, <code>at</code></td>
+<td><code>agent.read-prompts</code></td>
+<td>Never dropped</td>
+</tr>
+<tr>
+<td><code>signal-changed</code></td>
+<td><code>pane</code>, <code>signal</code>, <code>value</code></td>
+<td><code>agent.read</code></td>
+<td>Coalesced by pane and signal</td>
+</tr>
+<tr>
+<td><code>agent-model-changed</code></td>
+<td><code>pane</code>, <code>model</code></td>
+<td><code>agent.read</code></td>
+<td>Coalesced by pane</td>
+</tr>
+<tr>
+<td><code>editor-pointer</code></td>
+<td><code>buffer</code>, <code>pane</code>, <code>position</code>, <code>pointer</code></td>
+<td><code>editor.read</code></td>
+<td>Coalesced (move)</td>
+</tr>
+<tr>
+<td><code>editor-viewport-changed</code></td>
+<td><code>editor-viewport</code></td>
+<td><code>editor.read</code></td>
+<td>Coalesced by pane, 100 ms</td>
+</tr>
+<tr>
+<td><code>http-stream-data</code>, <code>http-stream-closed</code></td>
+<td><code>stream</code>, <code>status</code>, <code>headers</code>, <code>chunk</code>, or <code>outcome</code></td>
+<td>the stream's <code>http</code> grant</td>
+<td>Never dropped, with back-pressure</td>
+</tr>
+<tr>
+<td><code>child-output</code>, <code>child-exited</code></td>
+<td><code>child</code>, <code>stream</code>, <code>bytes</code>, or <code>status</code>, <code>signal</code></td>
+<td><code>process.long-lived</code></td>
+<td>Never dropped</td>
+</tr>
+<tr>
+<td><code>pane-lifecycle-changed</code></td>
+<td><code>pane</code>, <code>state</code>, <code>by</code></td>
+<td><code>panes.read</code></td>
+<td>Never dropped</td>
+</tr>
+<tr>
+<td><code>attention-changed</code></td>
+<td><code>node</code>, <code>marked</code>, <code>reason</code>, <code>by</code></td>
+<td><code>tree.attention</code> or <code>tree.read</code></td>
+<td>Coalesced by node</td>
+</tr>
+<tr>
+<td><code>client-request</code></td>
+<td><code>call</code>, <code>kind</code>, <code>payload-json</code></td>
+<td>client side, own <code>client_requests</code></td>
+<td>Never dropped</td>
+</tr>
+<tr>
+<td><code>kernel-settings-changed</code></td>
+<td><code>tab</code>, <code>keys</code></td>
+<td><code>settings.read-kernel:&lt;tab&gt;</code></td>
+<td>Coalesced by tab</td>
+</tr>
+<tr>
+<td><code>keymap-changed</code></td>
+<td>none</td>
+<td><code>keymap.read</code></td>
+<td>Coalesced</td>
+</tr>
+<tr>
+<td><code>durable-timer-fired</code></td>
+<td><code>timer</code>, <code>name</code>, <code>late-by-millis</code></td>
+<td>always (own)</td>
+<td>Never dropped</td>
+</tr>
+<tr>
+<td><code>input-uncertain</code></td>
+<td><code>pane</code>, <code>dedup-key</code></td>
+<td>the grant of the original <code>send-input</code></td>
+<td>Never dropped</td>
+</tr>
+<tr>
+<td><code>display-mode-changed</code></td>
+<td><code>mode</code></td>
+<td>own <code>display_modes</code></td>
+<td>Coalesced</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">for event in batch {
+    match event {
+        Event::DurableTimerFired(fired) if fired.name == &quot;nightly-scan&quot; =&gt; {
+            log::log(Level::Info, &amp;format!(&quot;scan is {} ms late&quot;, fired.late_by_millis));
+        }
+        Event::InputUncertain(uncertain) =&gt; {
+            // The server restarted before the outcome of a send-input was recorded.
+            log::log(Level::Warn, &amp;format!(&quot;input to pane {} is uncertain&quot;, uncertain.pane));
+        }
+        _ =&gt; {}
+    }
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">for (const event of batch) {
+  if (event.tag === 'durable-timer-fired' &amp;&amp; event.val.name === 'nightly-scan') {
+    log('info', `scan is ${event.val.lateByMillis} ms late`);
+  } else if (event.tag === 'input-uncertain') {
+    // The server restarted before the outcome of a send-input was recorded.
+    log('warn', `input to pane ${event.val.pane} is uncertain`);
+  }
+}
+</code></pre>
+<h2 id="batches-order-and-queues">Batches, order and queues</h2>
+<ul>
+<li>A batch holds at most 256 events. The host splits larger backlogs.</li>
+<li>Each plugin has one queue. The queue holds 1,024 events by default. The ceiling of <code>event_queue</code> is 4,096 for T1 and 1,024 for T2 and T3. The host clamps a larger request to the ceiling and logs the clamp [API-043] [EVT-046]. The manifest key <code>event_queue</code> requests a value.</li>
+<li>Events arrive in kernel emission order across all kinds. For one node the order is <code>pane-created</code>, other pane events, <code>pane-exited</code>, then <code>node-removed</code>. <code>agent-identified</code> always precedes <code>agent-activity-changed</code> for the same pane.</li>
+<li>A handler may return at most 256 submissions. More than 256 traps the instance.</li>
+</ul>
+<p>The log below shows one batch under load: a counted drop, a refused submission and a trap.</p>
+<pre class="term"><span class="t-prompt">$</span> ilium plugin logs example.notes
+<span class="t-dim">2026-10-11 12:04:01</span> <span class="t-ok">ok</span>   batch: 14 events, 3 submissions
+<span class="t-dim">2026-10-11 12:04:01</span> <span class="t-warn">warn</span> events-dropped: output-matched 2 (drop oldest)
+<span class="t-dim">2026-10-11 12:04:02</span> <span class="t-err">err</span>  #2 refused(not-permitted): notify.desktop not granted
+<span class="t-dim">2026-10-11 12:04:02</span> <span class="t-err">err</span>  #3 refused(cancelled): batch refused: submission 2
+<span class="t-dim">2026-10-11 12:04:03</span> <span class="t-err">err</span>  trap: on-events took 23 ms (deadline 20 ms)
+<span class="t-dim">2026-10-11 12:04:03</span> <span class="t-warn">warn</span> restart in 1 s; tree-changed sent for every node
+</pre>
+
+<p>Illustrative, not generated. The lines show the log form of a refused batch, a counted drop and a deadline trap.</p>
+<h2 id="submissions-and-outcomes">Submissions and outcomes</h2>
+<p>A submission is <code>record submission { intent: intent, correlation: u64, dedup-key: option&lt;string&gt; }</code>.</p>
+<ul>
+<li><code>intent</code> is the change to make, such as <code>set-decoration</code> or <code>send-input</code>.</li>
+<li><code>correlation</code> matches the outcome with the plugin's request. Numbers below 2^63 belong to the plugin. The SDK allocates from 2^63 upward.</li>
+<li><code>dedup-key</code> is the optional key described below.</li>
+</ul>
+<p>Some intents are applied by the server and some by the client kernel. A client plugin's submission to the server is forwarded and its outcome comes back to that client only. The table is in <a href="/pages/api-intents/#which-side-applies-an-intent">Intents</a>.</p>
+<p>In Rust, <code>Submission::new(intent)</code> sets no key and <code>Submission::keyed(intent, key)</code> sets one. In TypeScript, write <code>{ intent, correlation, dedupKey }</code>, with <code>correlation</code> as a <code>bigint</code>.</p>
+<p>Every submission completes exactly once, as a <code>request-completed</code> event whose <code>request-ref</code> is <code>submission(&lt;correlation&gt;)</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Outcome</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ok</code></td>
+<td>Applied. For calls, the typed result is ready to take with a <code>take-*</code> function. It is held for 30 s or until taken.</td>
+</tr>
+<tr>
+<td><code>ok-node(node-id)</code></td>
+<td>Applied. Returns the node the intent created.</td>
+</tr>
+<tr>
+<td><code>duplicate(request-ref)</code></td>
+<td>The dedup key was already reserved. Nothing happened. The ref names the submission that reserved it.</td>
+</tr>
+<tr>
+<td><code>refused(plugin-error)</code></td>
+<td>An acceptance check failed. Nothing was applied, and the key was not reserved.</td>
+</tr>
+<tr>
+<td><code>failed(plugin-error)</code></td>
+<td>The kernel accepted the submission but could not apply it. The key stays reserved.</td>
+</tr>
+<tr>
+<td><code>cancelled</code></td>
+<td>Cancelled by the plugin, the user or a shutdown. A sibling of a refused submission in the same batch completes as <code>refused(cancelled)</code>, not as <code>cancelled</code> [ABI-009]. Submissions accepted but not yet applied at shutdown complete as <code>cancelled</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>A take of a slow-call result before completion, a second take, or a take of an unknown id returns <code>none</code> [ABI-014]. The table of every slow call and its take function is in <a href="/pages/requests-and-outcomes/#slow-calls">Requests and outcomes</a>. A result is held for 30 s [ABI-012]. Pending requests are limited to 64 per plugin by default and 4,096 per session, and a call over the limit fails with <code>busy</code> [ABI-013].</p>
+<h3 id="batch-checks">Batch checks</h3>
+<p>The kernel runs two batch-level checks over the whole list, in index order, before any effect. Check 1 is shape: a valid variant tag, required fields present, string and list lengths within the ABI caps, a <code>dedup-key</code> present where the intent requires one, and every key 1 to 128 characters from the documented set. Check 2 is the grant: requested in the manifest and currently granted. The lowest-index submission that fails (shape before grant inside one submission) completes as <code>refused(invalid-argument)</code> for shape or <code>refused(not-permitted)</code> for grant. Every other submission completes as <code>refused(cancelled)</code>. All of them carry the message <code>batch refused: submission &lt;index&gt;</code>, where <code>&lt;index&gt;</code> is the 0-based index of that offender. No effect runs and no dedup key is reserved [ABI-009]. All other checks are per submission and affect only that submission: target exists, pane ready, payload value valid (for example a text node id where a pane is needed), rate, quota, conflict and <code>if-current</code> [ABI-032]. Accepted submissions are applied in order, so a node removed by an earlier one gives <code>failed(not-found)</code> to a later one.</p>
+<figure>
+<svg viewBox="0 0 420 262" role="img" aria-label="Submission checks from handler return to outcome" width="630" height="393">
+  <defs>
+    <marker id="ev-arrow-checks" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <rect x="20" y="10" width="260" height="34" rx="6" fill="none" stroke="currentColor" stroke-width="2"/>
+  <text x="150" y="31" font-size="11" text-anchor="middle" fill="currentColor">Handler returns submissions</text>
+  <text x="296" y="31" font-size="10" fill="currentColor">up to 256</text>
+  <line x1="150" y1="44" x2="150" y2="62" stroke="currentColor" marker-end="url(#ev-arrow-checks)"/>
+  <rect x="20" y="62" width="260" height="34" rx="6" fill="none" stroke="currentColor"/>
+  <text x="150" y="83" font-size="11" text-anchor="middle" fill="currentColor">Batch check: shape and grants</text>
+  <text x="296" y="83" font-size="10" fill="currentColor">batch refused</text>
+  <line x1="150" y1="96" x2="150" y2="114" stroke="currentColor" marker-end="url(#ev-arrow-checks)"/>
+  <rect x="20" y="114" width="260" height="34" rx="6" fill="none" stroke="currentColor"/>
+  <text x="150" y="135" font-size="11" text-anchor="middle" fill="currentColor">Per submission: dedup-key</text>
+  <text x="296" y="135" font-size="10" fill="currentColor">duplicate(original)</text>
+  <line x1="150" y1="148" x2="150" y2="166" stroke="currentColor" marker-end="url(#ev-arrow-checks)"/>
+  <rect x="20" y="166" width="260" height="34" rx="6" fill="none" stroke="currentColor"/>
+  <text x="150" y="187" font-size="11" text-anchor="middle" fill="currentColor">Per submission: target checks</text>
+  <text x="296" y="187" font-size="10" fill="currentColor">refused or failed</text>
+  <line x1="150" y1="200" x2="150" y2="218" stroke="currentColor" marker-end="url(#ev-arrow-checks)"/>
+  <rect x="20" y="218" width="260" height="34" rx="6" fill="none" stroke="currentColor"/>
+  <text x="150" y="239" font-size="11" text-anchor="middle" fill="currentColor">Apply in order, report outcome</text>
+  <text x="296" y="239" font-size="10" fill="currentColor">request-completed</text>
+</svg>
+<figcaption>A batch is checked as a whole, then each submission passes its own checks. Only accepted submissions reach the application step.</figcaption>
+</figure>
+
+<h2 id="dedup-keys">Dedup keys</h2>
+<p>There is one key, <code>dedup-key</code> on the submission. The older <code>idempotency-key</code> field no longer exists in any intent.</p>
+<ul>
+<li>Format: 1 to 128 characters from <code>[A-Za-z0-9._:/-]</code>. Other characters make the submission malformed.</li>
+<li>Scope: the pair of plugin id and key, at the kernel that applies the intent. The server and each client keep separate tables.</li>
+<li>Window: 10 minutes after reservation. For <code>send-input</code> and <code>agent-action</code> the journal keeps 24 hours or 4,096 entries per session, whichever is smaller, and is written to the snapshot before the input reaches the pane. A server restart does not repeat input.</li>
+<li>Reservation: a key is reserved only after every acceptance check passes. A refused submission keeps its key free for a retry. An accepted one keeps it even if it later fails, so a retry of a failed action needs a new key.</li>
+</ul>
+<p>The SDK helper <code>dedup::key_for(parts: &amp;[&amp;str])</code> joins its parts with <code>:</code> and replaces disallowed characters with <code>-</code>. It returns a key such as <code>finish:42:7</code>.</p>
+<p>For <code>send-input</code>, two checks run at batch level before this list (see Batch checks): shape (key present, total text across all stages at most 65,536 bytes, otherwise <code>refused(invalid-argument)</code>) and the grant <code>terminal.write</code> (otherwise <code>refused(not-permitted)</code>). The kernel then checks each submission in this order. The first failing check decides the outcome.</p>
+<ol>
+<li>Dedup key already reserved. Then <code>duplicate(original)</code>.</li>
+<li>Pane exists and is a terminal pane. Otherwise <code>refused(not-found)</code> or <code>refused(unsupported)</code>.</li>
+<li>The pane is restored, which means its process has started. Otherwise <code>refused(pane-not-ready)</code>.</li>
+<li>The rate limit has room. Otherwise <code>refused(rate-limited)</code>.</li>
+<li><code>prompt-epoch</code>, when given, equals the pane's current epoch. Otherwise <code>refused(conflict)</code>.</li>
+<li><code>if-current</code>, when given, matches the pane (activity, screen revision and foreground command). Otherwise <code>refused(conflict)</code> with the message <code>precondition: &lt;field&gt;</code>.</li>
+<li>No other plugin holds the input lock of the pane. Otherwise <code>refused(conflict)</code> with the message <code>input-locked</code>.</li>
+<li>The input is accepted: the key is reserved, the rate token is taken and the text is written. A refused attempt never takes a rate token [EVT-050].</li>
+</ol>
+<h2 id="intent-catalogue">Intent catalogue</h2>
+<p>Every intent needs its grant. The outcome column lists the codes beyond <code>ok</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Intent</th>
+<th>Payload</th>
+<th>Grant</th>
+<th>Outcomes beyond <code>ok</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>rename-node</code></td>
+<td><code>node</code>, <code>title</code></td>
+<td><code>tree.write</code></td>
+<td><code>refused(not-found)</code>, <code>refused(conflict)</code> for a manually named node</td>
+</tr>
+<tr>
+<td><code>move-node</code></td>
+<td><code>node</code>, <code>target</code>, <code>placement</code> (before, after, inside-first, inside-last)</td>
+<td><code>tree.write</code></td>
+<td><code>refused(not-found)</code>, <code>refused(invalid-argument)</code> for a target inside the node</td>
+</tr>
+<tr>
+<td><code>close-node</code></td>
+<td><code>node</code></td>
+<td><code>tree.write</code></td>
+<td><code>refused(not-found)</code>, <code>refused(conflict)</code> for a locked node</td>
+</tr>
+<tr>
+<td><code>set-node-locked</code></td>
+<td><code>node</code>, <code>locked</code></td>
+<td><code>tree.write</code></td>
+<td><code>refused(not-found)</code></td>
+</tr>
+<tr>
+<td><code>create-pane</code></td>
+<td><code>parent</code>, <code>title</code>, <code>content-kind</code>, <code>cwd</code>, <code>command</code>, <code>initial-input</code></td>
+<td><code>panes.create</code> (and <code>terminal.write</code> for <code>initial-input</code>)</td>
+<td><code>ok-node</code>; <code>refused(not-found)</code>, <code>failed(io)</code></td>
+</tr>
+<tr>
+<td><code>signal-pane</code></td>
+<td><code>pane</code>, <code>signal</code> (interrupt, terminate, kill, hangup)</td>
+<td><code>panes.signal</code></td>
+<td><code>refused(not-found)</code>, <code>refused(pane-not-ready)</code></td>
+</tr>
+<tr>
+<td><code>send-input</code></td>
+<td><code>pane</code>, <code>text</code>, <code>delivery</code> (Typed, Submitted, Pasted), <code>prompt-epoch</code></td>
+<td><code>terminal.write</code></td>
+<td><code>refused(pane-not-ready)</code>, <code>refused(rate-limited)</code>, <code>refused(conflict)</code></td>
+</tr>
+<tr>
+<td><code>agent-action</code></td>
+<td><code>pane</code>, <code>action-id</code></td>
+<td><code>agent.control</code></td>
+<td><code>refused(unsupported)</code>, <code>refused(conflict)</code></td>
+</tr>
+<tr>
+<td><code>set-decoration</code></td>
+<td><code>node</code>, <code>slot</code>, <code>content</code>, <code>icon</code>, <code>sort-key</code>, <code>persist</code></td>
+<td><code>tree.decorate</code></td>
+<td><code>refused(not-found)</code>, <code>refused(invalid-argument)</code>, <code>refused(quota-exceeded)</code></td>
+</tr>
+<tr>
+<td><code>clear-decoration</code></td>
+<td><code>node</code>, <code>slot</code></td>
+<td><code>tree.decorate</code></td>
+<td>As <code>set-decoration</code></td>
+</tr>
+<tr>
+<td><code>set-virtual-rows</code></td>
+<td><code>row-kind</code>, <code>rows</code></td>
+<td><code>tree.decorate</code></td>
+<td><code>refused(invalid-argument)</code> for an undeclared row kind</td>
+</tr>
+<tr>
+<td><code>play-sound</code></td>
+<td>sound id</td>
+<td><code>sound.play</code></td>
+<td><code>refused(not-found)</code>, <code>refused(rate-limited)</code> (4 per second)</td>
+</tr>
+<tr>
+<td><code>notify</code></td>
+<td><code>title</code>, <code>body</code>, <code>urgency</code> (low, normal, high), <code>sound</code></td>
+<td><code>notify.desktop</code></td>
+<td><code>refused(not-found)</code>, <code>refused(rate-limited)</code> (6 per minute)</td>
+</tr>
+<tr>
+<td><code>open-view</code>, <code>close-view</code></td>
+<td><code>view-target</code>, <code>focus</code></td>
+<td><code>ui.panels</code></td>
+<td><code>refused(not-found)</code></td>
+</tr>
+<tr>
+<td><code>invoke-command</code></td>
+<td><code>command</code>, <code>arguments-json</code></td>
+<td><code>commands.invoke</code></td>
+<td><code>refused(not-found)</code>, <code>failed(timed-out)</code> after 30 s</td>
+</tr>
+<tr>
+<td><code>message</code></td>
+<td><code>to</code>, <code>channel</code>, <code>payload</code></td>
+<td><code>messages.peer:&lt;plugin-id&gt;</code></td>
+<td><code>refused(not-found)</code>, <code>refused(invalid-argument)</code> over 1 MiB</td>
+</tr>
+<tr>
+<td><code>editor-apply-edits</code></td>
+<td><code>buffer</code>, <code>base-revision</code>, <code>edits</code></td>
+<td><code>editor.edit</code></td>
+<td><code>refused(conflict)</code> for a stale revision, <code>refused(invalid-argument)</code> for overlapping edits</td>
+</tr>
+<tr>
+<td><code>editor-open</code></td>
+<td><code>path</code>, <code>line</code>, <code>placement</code> (new pane, split, replace)</td>
+<td><code>editor.edit</code></td>
+<td><code>ok-node</code>; <code>refused(not-permitted)</code>, <code>failed(not-found)</code>, <code>failed(io)</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="extended-intents">Extended intents</h2>
+<p>The contract adds 23 intents, so the catalogue holds 42. <code>send-input</code> and the <code>ok-epoch</code> outcome are described in <a href="/pages/requests-and-outcomes/">Requests and outcomes</a>. <code>restructure</code> is atomic: all operations apply or none does.</p>
+<table>
+<thead>
+<tr>
+<th>Family</th>
+<th>Intents</th>
+<th>Grant</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Pane lifecycle</td>
+<td><code>freeze-pane</code>, <code>unfreeze-pane</code>, <code>replace-pane-command</code>, <code>terminate-pane-process</code>, <code>resize-pane</code></td>
+<td><code>panes.lifecycle</code></td>
+</tr>
+<tr>
+<td>Tree structure</td>
+<td><code>create-group</code>, <code>create-folder</code>, <code>create-project</code>, <code>create-split</code>, <code>restructure</code>, <code>revert-restructure</code></td>
+<td><code>tree.restructure</code></td>
+</tr>
+<tr>
+<td>Tree state</td>
+<td><code>set-bookmarked</code>, <code>set-expanded</code></td>
+<td><code>tree.write</code>, or own <code>virtual_rows</code></td>
+</tr>
+<tr>
+<td>Tree decoration</td>
+<td><code>set-inferred-icon</code></td>
+<td><code>tree.decorate</code></td>
+</tr>
+<tr>
+<td>Attention</td>
+<td><code>mark-attention</code>, <code>ack-attention</code></td>
+<td><code>tree.attention</code></td>
+</tr>
+<tr>
+<td>Chrome</td>
+<td><code>set-status-segment</code>, <code>clear-status-segment</code>, <code>set-frame-slot</code>, <code>clear-frame-slot</code></td>
+<td><code>ui.chrome</code></td>
+</tr>
+<tr>
+<td>Notices</td>
+<td><code>toast</code>, <code>dismiss-toast</code></td>
+<td><code>notify.toast</code></td>
+</tr>
+<tr>
+<td>Desktop</td>
+<td><code>open-external</code></td>
+<td><code>open-external</code></td>
+</tr>
+</tbody>
+</table>
+<p>Five intents carry optional fields: <code>send-input</code>, <code>set-decoration</code>, <code>rename-node</code>, <code>notify</code> and <code>set-virtual-rows</code>. A missing field keeps the plain behaviour.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">let toast = ToastSpec {
+    id: Some(&quot;scan-done&quot;.into()),
+    tone: Tone::Success,
+    title: &quot;Scan finished&quot;.into(),
+    ..Default::default()
+};
+Submission::keyed(Intent::Toast(toast), &quot;toast:scan-done&quot;.to_string())
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">const submission: Submission = {
+  intent: { tag: 'toast', val: { id: 'scan-done', tone: 'success', title: 'Scan finished', actions: [] } },
+  correlation: 1n,
+  dedupKey: 'toast:scan-done',
+};
+</code></pre>
+<h2 id="worked-example-rust">Worked example: Rust</h2>
+<p>This server plugin puts a badge on each pane whose agent starts working. It needs the <code>agent.read</code> and <code>tree.decorate</code> grants and one decoration slot named <code>hello</code> in the manifest.</p>
+<pre><code class="language-rust">use ilium_plugin_sdk::prelude::*;
+use ilium_plugin_sdk::host::log::{self, Level};
+use ilium_plugin_sdk::types::events::AgentActivityEvent;
+use ilium_plugin_sdk::types::intents::SetDecorationSpec;
+use ilium_plugin_sdk::types::tree::AgentActivity;
+
+#[ilium_plugin(side = &quot;server&quot;)]
+#[derive(Default)]
+struct Hello;
+
+impl Lifecycle for Hello {
+    fn activate(&amp;mut self, context: Activation) -&gt; Result&lt;(), PluginError&gt; {
+        log::log(Level::Info, &amp;format!(&quot;hello from {}&quot;, context.plugin));
+        Ok(())
+    }
+}
+
+impl Handler for Hello {
+    fn on_events(&amp;mut self, batch: Vec&lt;Event&gt;) -&gt; Vec&lt;Submission&gt; {
+        let mut submissions = Vec::new();
+        for event in batch {
+            let Event::AgentActivityChanged(AgentActivityEvent { node, current, .. })
+                = event else { continue };
+            if current != AgentActivity::Working {
+                continue;
+            }
+            submissions.push(Submission::new(Intent::SetDecoration(SetDecorationSpec {
+                node,
+                slot: &quot;hello&quot;.into(),
+                content: vec![Span::plain(&quot;hi&quot;)],
+                icon: None,
+                sort_key: None,
+                persist: false,
+            })));
+        }
+        submissions
+    }
+}
+</code></pre>
+<p>The next snippet keys a <code>send-input</code> so that a repeated finish event types the command only once. <code>pane</code> comes from an earlier event.</p>
+<pre><code class="language-rust">let key = dedup::key_for(&amp;[&quot;finish&quot;, &quot;42&quot;, &quot;7&quot;]); // &quot;finish:42:7&quot;
+let submission = Submission::keyed(
+    Intent::SendInput(SendInputSpec {
+        pane,
+        text: &quot;/compact&quot;.into(),
+        delivery: Delivery::Submitted,
+        prompt_epoch: None,
+    }),
+    key,
+);
+</code></pre>
+<h2 id="worked-example-typescript">Worked example: TypeScript</h2>
+<p>This client plugin answers its own command with a desktop notice. It needs the <code>notify.desktop</code> grant. The <code>command-invoked</code> event is always delivered to the plugin's own commands.</p>
+<pre><code class="language-ts">import { definePlugin } from '@ilium/plugin-sdk';
+import type { Event, Submission } from '@ilium/plugin-sdk/types';
+import { log } from '@ilium/plugin-sdk/host/log';
+
+export const { lifecycle, handler } = definePlugin({
+  side: 'client',
+  activate(context) {
+    log('info', `hello from ${context.plugin}`);
+  },
+  onEvents(batch: Event[]): Submission[] {
+    const out: Submission[] = [];
+    for (const event of batch) {
+      if (event.tag !== 'command-invoked' || event.val.command !== 'com.example.hello/greet') {
+        continue;
+      }
+      out.push({
+        intent: {
+          tag: 'notify',
+          val: { title: 'Hello', body: 'from a plugin', urgency: 'normal', sound: undefined },
+        },
+        correlation: 1n,
+        dedupKey: undefined,
+      });
+    }
+    return out;
+  },
+});
+</code></pre>
+<p>The <code>correlation: 1n</code> value is below 2^63, so the plugin owns it. To suppress repeats for 10 minutes, set <code>dedupKey</code> to a string such as <code>'greet:1'</code>.</p>
+<h2 id="testing-a-handler">Testing a handler</h2>
+<p>Rust <code>FakeHost</code> (feature <code>testing</code>) and TypeScript <code>createFakeHost()</code> from <code>@ilium/plugin-sdk/testing</code> accept events with <code>deliver(events)</code> (a list of events in, <code>Vec&lt;Submission&gt;</code> out) and return the submissions. Outcomes come back as <code>request-completed</code> events when you call <code>settle()</code>. <code>ilium plugin test</code> runs every fixture against the built component, compares its expectation file, and exits 3 when one differs. Include a fixture that sends the same finish twice within the window. See <a href="/pages/testing/">Testing</a> and <a href="/pages/reference-test-harness/">Test harness reference</a>.</p>
+<h2 id="common-mistakes">Common mistakes</h2>
+<ul>
+<li>Treating an event as a command. Events report what happened. Submit an intent to change something, and expect a refusal when a check fails.</li>
+<li>Keeping state in local variables. An instance can restart at any time, so keep durable state in storage, node metadata or settings.</li>
+<li>Relying on a dropped event. Drop-oldest events can be lost under load. <code>events-dropped</code> tells you the count, not the contents.</li>
+<li>Reusing a key after a failure. An accepted key stays reserved, so retry a failed action with a new key.</li>
+</ul>
+<h2 id="see-also">See also</h2>
+<ul>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK</a> and <a href="/pages/typescript-sdk/">TypeScript SDK</a></li>
+<li><a href="/pages/reference-events-and-intents/">Reference: events and intents</a></li>
+</ul>
+<p>API version checked: <code>ilium:plugin@0.1.0</code>.</p>
+<p>Requirements for this page: <a href="/pages/reference-requirements-events-intents/">Events and intents requirements</a>.</p>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/errors-and-limits/"><small>Previous</small>Errors and limits</a><a class="next" href="/pages/file-access/"><small>Next</small>File access</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#you-will-need">You will need</a></li><li class="l2"><a href="#the-handler">The handler</a></li><li class="l2"><a href="#event-catalogue">Event catalogue</a></li><li class="l3"><a href="#delivery-policies">Delivery policies</a></li><li class="l2"><a href="#extended-events">Extended events</a></li><li class="l2"><a href="#batches-order-and-queues">Batches, order and queues</a></li><li class="l2"><a href="#submissions-and-outcomes">Submissions and outcomes</a></li><li class="l3"><a href="#batch-checks">Batch checks</a></li><li class="l2"><a href="#dedup-keys">Dedup keys</a></li><li class="l2"><a href="#intent-catalogue">Intent catalogue</a></li><li class="l2"><a href="#extended-intents">Extended intents</a></li><li class="l2"><a href="#worked-example-rust">Worked example: Rust</a></li><li class="l2"><a href="#worked-example-typescript">Worked example: TypeScript</a></li><li class="l2"><a href="#testing-a-handler">Testing a handler</a></li><li class="l2"><a href="#common-mistakes">Common mistakes</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

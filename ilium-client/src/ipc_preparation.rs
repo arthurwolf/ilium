@@ -206,7 +206,9 @@ pub(crate) fn request_retained_bytes(request: &ilium_ipc::ClientRequest) -> usiz
         visits: 0,
     };
     match request {
-        R::Attach { session } | R::AttachInteractive { session } => count.string(session),
+        R::Attach { session, .. } | R::AttachInteractive { session, .. } => count.string(session),
+        // Plugin envelopes are bounded by the plugin IPC limits (HST-104), not counted here.
+        R::Plugin(_) => {}
         R::KeyInput { bytes, .. } => count.add(bytes.capacity()),
         R::UserKeyInput {
             bytes,
@@ -490,6 +492,7 @@ pub(crate) fn request_retained_bytes(request: &ilium_ipc::ClientRequest) -> usiz
         | R::UpdateDebugLogging { .. }
         | R::UpdateAgentDebugMenu { .. }
         | R::GetPaneRecapScreen { .. }
+        | R::ApplyRecap { .. }
         | R::GetPaneDebugLog { .. }
         | R::SetNodeBookmarked { .. }
         | R::RecordNodeActivity { .. }
@@ -506,6 +509,7 @@ pub(crate) fn request_retained_bytes(request: &ilium_ipc::ClientRequest) -> usiz
         | R::QueryWorkspaceInventory { .. }
         | R::QueryWorkspaceCloseOffer { .. }
         | R::TerminatePaneProcess { .. }
+        | R::TerminalHistory { .. }
         | R::FreezePane { .. } => {}
     }
     count.bytes
@@ -1001,6 +1005,8 @@ impl IpcPreparation {
             &event.view().0,
             ilium_ipc::ServerEvent::ScreenUpdate { .. }
                 | ilium_ipc::ServerEvent::TerminalReplay { .. }
+                | ilium_ipc::ServerEvent::TerminalSnapshot { .. }
+                | ilium_ipc::ServerEvent::TerminalHistory { .. }
         );
         let bytes = event
             .view()

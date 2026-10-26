@@ -1,0 +1,15 @@
+{
+  "api": "ilium:plugin@0.1.0",
+  "id": "com.example.conf",
+  "name": "Conformance subject",
+  "version": "1.0.0",
+  "publisher": "Example Labs",
+  "categories": ["tools"],
+  "server": { "entry": "server.wasm", "world": "ilium:server/base@0.1.0" },
+  "capabilities": { "server": ["sound.play"] },
+  "colour": "red",
+  "activation": ["startup"],
+  "files": [
+    { "path": "server.wasm", "length": 8, "sha256": "0000000000000000000000000000000000000000000000000000000000000000" }
+  ]
+}

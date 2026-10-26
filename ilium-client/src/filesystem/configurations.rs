@@ -29,7 +29,10 @@ pub(crate) struct AnimationPickerSave {
     pub project_path: PathBuf,
     pub candidate: ilium_ambient::GeoLocation,
     // Last: the admitted candidate allocation is destroyed before its lease.
-    #[allow(dead_code)] // Held only for its Drop order; never read.
+    #[expect(
+        dead_code,
+        reason = "Held only so the storage admission is released when the result drops"
+    )]
     pub location_storage: Option<Arc<ilium_execution::StorageAdmission>>,
 }
 pub(crate) enum ConfigurationIntent {

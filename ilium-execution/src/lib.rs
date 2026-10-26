@@ -1,7 +1,9 @@
 //! Bounded, cooperative worker execution.
 //!
 //! Create one QuotaGroup at the process composition root and share it among
-//! every Execution that must share limits. Different groups and different
+//! every Execution that must share limits. Reserved partitions carve guaranteed
+//! subaccounts from that root and retain their parent lease through all debits.
+//! Independently constructed groups and different
 //! processes are NOT mutually accounted. Nothing here performs filesystem I/O.
 //!
 //! Execution::start and join_until_background are background/bootstrap APIs.

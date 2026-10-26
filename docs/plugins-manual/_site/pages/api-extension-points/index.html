@@ -1,0 +1,1290 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>extension points | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details open><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/" aria-current="page">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Host API</b></p>
+<h1>extension points</h1>
+
+<p>An extension point is a named slot that one plugin owns and other plugins fill. The owner decides what the slot means and when it is used. There are two kinds. A <strong>collect</strong> point holds data: contributors add entries and the owner reads the list when it needs it. A <strong>hook</strong> point holds code: contributors add handlers and the owner runs them at a fixed place in its own flow. Core plugins use the same mechanism as every other plugin, so a third-party plugin can extend a core plugin, and a third-party plugin can offer points of its own. The kernel checks the grants, the schemas and the deadlines on every use.</p>
+<p>Extension points do not replace services, topics or the kernel slots. A service has one provider and many callers. A topic has one publisher and many subscribers. An extension point has one owner and many contributors. <a href="/pages/services/">Services</a> explains the other choice. <a href="/pages/extending-core-plugins/">Extending core plugins</a> shows all five ways side by side.</p>
+<h3 id="what-you-need">What you need</h3>
+<ul>
+<li><strong>Grants.</strong> The owner needs <code>extensions.provide:&lt;plugin-id&gt;/&lt;point&gt;</code> for each point it owns. A contributor needs <code>extensions.contribute:&lt;plugin-id&gt;/&lt;point&gt;</code> for each point it fills. There is no wildcard and no "contribute to any" grant. See <a href="/pages/capability-extensions-provide/">extensions.provide</a> and <a href="/pages/capability-extensions-contribute/">extensions.contribute</a>.</li>
+<li><strong>Manifest.</strong> The owner lists its points in <code>contributes.extension_points</code>. A contributor lists its entries and handlers in <code>contributes.extensions</code>. Any side that has hook extensions lists <code>hook-handler</code> in <code>exports</code>. See <a href="/pages/reference-manifest/">reference: manifest</a>.</li>
+<li><strong>Worlds.</strong> The <code>extensions</code> import and the <code>hook-handler</code> export exist in <code>ilium:server/base</code> and <code>ilium:client/base</code>. The scene world has neither.</li>
+<li><strong>Toolchain.</strong> Rust: stable 1.90 or later with the <code>wasm32-wasip2</code> target and the <code>ilium-plugin-sdk</code> crate. TypeScript: Bun 1.2 or later and <code>@ilium/plugin-sdk</code>. Nothing is installed globally.</li>
+</ul>
+<h3 id="names-and-manifest-entries">Names and manifest entries</h3>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Form</th>
+<th>Example</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Point id</td>
+<td>1 to 64 characters from <code>a-z</code>, <code>0-9</code> and <code>-</code></td>
+<td><code>after-copy</code></td>
+</tr>
+<tr>
+<td>Global point name</td>
+<td><code>&lt;plugin-id&gt;/&lt;id&gt;</code>; the prefix is the owner's plugin id</td>
+<td><code>ilium.core.smart-copy/after-copy</code></td>
+</tr>
+<tr>
+<td>Owner grant</td>
+<td><code>extensions.provide:&lt;plugin-id&gt;/&lt;point&gt;</code></td>
+<td><code>extensions.provide:com.example.notes/before-export</code></td>
+</tr>
+<tr>
+<td>Contributor grant</td>
+<td><code>extensions.contribute:&lt;plugin-id&gt;/&lt;point&gt;</code></td>
+<td><code>extensions.contribute:com.example.notes/before-export</code></td>
+</tr>
+<tr>
+<td>Owner manifest entry</td>
+<td>object in <code>contributes.extension_points</code></td>
+<td>see below</td>
+</tr>
+<tr>
+<td>Contributor manifest entry</td>
+<td>object in <code>contributes.extensions</code></td>
+<td>see below</td>
+</tr>
+</tbody>
+</table>
+<p>A grant carries the bare global name, with no version and no wildcard. A plugin owns at most 16 points and contributes at most 64 extensions.</p>
+<p>The fields of an owner entry (<code>id</code>, <code>kind</code>, <code>title</code>, <code>mode</code>, the schemas, <code>risk</code>, <code>deadline_ms</code>, <code>max_handlers</code>, <code>max_entries</code>, <code>dynamic</code>, <code>version</code>, <code>on_failure</code>, <code>final_check</code>) and of a contributor entry (<code>point</code>, <code>id</code>, <code>priority</code>, <code>entry</code>, <code>handler</code>, <code>guard</code>) are defined once, in <a href="/pages/reference-manifest/#extension-points-and-replacement">Manifest reference, extension points</a>. The schemas use the keywords listed in <a href="/pages/reference-settings-schema/#data-schema-subset">Data schema subset</a>; any other keyword fails the install with <code>manifest.schema-keyword</code>.</p>
+<p>Owner manifest, with one collect point and one hook point:</p>
+<pre><code class="language-json">{
+  &quot;id&quot;: &quot;com.example.notes&quot;,
+  &quot;capabilities&quot;: {
+    &quot;server&quot;: [
+      &quot;extensions.provide:com.example.notes/recognisers&quot;,
+      &quot;extensions.provide:com.example.notes/before-export&quot;
+    ]
+  },
+  &quot;contributes&quot;: {
+    &quot;extension_points&quot;: [
+      { &quot;id&quot;: &quot;recognisers&quot;, &quot;kind&quot;: &quot;collect&quot;, &quot;title&quot;: &quot;Note recognisers&quot;,
+        &quot;entry_schema&quot;: { &quot;type&quot;: &quot;object&quot;, &quot;required&quot;: [&quot;id&quot;, &quot;regex&quot;],
+          &quot;properties&quot;: { &quot;id&quot;: { &quot;type&quot;: &quot;string&quot; },
+                          &quot;regex&quot;: { &quot;type&quot;: &quot;string&quot;, &quot;maxLength&quot;: 512 } } },
+        &quot;max_entries&quot;: 64, &quot;version&quot;: &quot;0.1.0&quot; },
+      { &quot;id&quot;: &quot;before-export&quot;, &quot;kind&quot;: &quot;hook&quot;, &quot;mode&quot;: &quot;transform&quot;,
+        &quot;title&quot;: &quot;Before export&quot;,
+        &quot;payload_schema&quot;: { &quot;type&quot;: &quot;object&quot;,
+          &quot;properties&quot;: { &quot;text&quot;: { &quot;type&quot;: &quot;string&quot;, &quot;maxLength&quot;: 65536 } } },
+        &quot;reply_schema&quot;: { &quot;type&quot;: &quot;object&quot;,
+          &quot;properties&quot;: { &quot;text&quot;: { &quot;type&quot;: &quot;string&quot;, &quot;maxLength&quot;: 65536 } } },
+        &quot;risk&quot;: &quot;standard&quot;, &quot;deadline_ms&quot;: 20, &quot;max_handlers&quot;: 8, &quot;version&quot;: &quot;0.1.0&quot; }
+    ]
+  }
+}
+</code></pre>
+<p>The owner does not export <code>hook-handler</code>, because it runs hooks and does not handle them. A plugin that also contributes hooks to other points adds the export.</p>
+<p>Contributor manifest:</p>
+<pre><code class="language-json">{
+  &quot;id&quot;: &quot;com.example.tickets&quot;,
+  &quot;exports&quot;: [&quot;hook-handler&quot;],
+  &quot;capabilities&quot;: {
+    &quot;server&quot;: [
+      &quot;extensions.contribute:com.example.notes/recognisers&quot;,
+      &quot;extensions.contribute:com.example.notes/before-export&quot;
+    ]
+  },
+  &quot;contributes&quot;: {
+    &quot;extensions&quot;: [
+      { &quot;point&quot;: &quot;com.example.notes/recognisers&quot;, &quot;id&quot;: &quot;jira-key&quot;, &quot;priority&quot;: 50,
+        &quot;entry&quot;: { &quot;id&quot;: &quot;jira&quot;, &quot;regex&quot;: &quot;[A-Z][A-Z0-9]+-[0-9]+&quot; } },
+      { &quot;point&quot;: &quot;com.example.notes/before-export@0.1.0&quot;, &quot;id&quot;: &quot;strip-tokens&quot;,
+        &quot;priority&quot;: 30, &quot;handler&quot;: &quot;strip_tokens&quot; }
+    ]
+  }
+}
+</code></pre>
+<h3 id="interface">Interface</h3>
+<pre><code class="language-wit">// ilium:host/extensions, imported by owners and contributors
+interface extensions {
+  record extension-entry {
+    extension: string,      // contributor-chosen id, unique per contributor and point
+    contributor: plugin-id,
+    priority: u8,
+    entry-json: string,     // the validated entry
+  }
+  enum extension-error {
+    unknown-point, not-granted, schema-mismatch, cap-exceeded,
+    reentrant, not-dynamic, not-found,
+  }
+
+  // owner side (needs extensions.provide:&lt;point&gt;)
+  list: func(point: string) -&gt; result&lt;list&lt;extension-entry&gt;, extension-error&gt;;
+  run-hook: func(point: string, payload-json: string) -&gt; result&lt;request-id, extension-error&gt;;
+  take-reply: func(request: request-id) -&gt; option&lt;string&gt;;
+
+  // contributor side, collect points with dynamic = true (needs extensions.contribute:&lt;point&gt;)
+  register: func(point: string, extension: string, priority: u8, entry-json: string)
+    -&gt; result&lt;_, extension-error&gt;;
+  unregister: func(point: string, extension: string) -&gt; result&lt;_, extension-error&gt;;
+}
+
+// export fragment `with-hook-handler`, listed as &quot;hook-handler&quot; in `exports`
+variant hook-reply { pass, replace(string), refuse(string), answer(string) }
+record hook-call { point: string, extension: string, call: u64, payload-json: string }
+handle-hook: func(call: hook-call) -&gt; hook-reply;
+</code></pre>
+<h3 id="functions">Functions</h3>
+<table>
+<thead>
+<tr>
+<th>Function</th>
+<th>Grant</th>
+<th>Rust</th>
+<th>TypeScript</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>list</code></td>
+<td><code>extensions.provide:&lt;point&gt;</code></td>
+<td><code>extensions::list(point)</code></td>
+<td><code>list(point)</code></td>
+<td>Returns the active entries of a point, sorted by the user's order, then tier band, priority, plugin id and extension id (see Order below). Dormant and disabled entries are left out.</td>
+</tr>
+<tr>
+<td><code>run-hook</code></td>
+<td><code>extensions.provide:&lt;point&gt;</code></td>
+<td><code>extensions::run_hook(point, payload_json).await</code></td>
+<td><code>await runHook(point, payloadJson)</code></td>
+<td>Runs the chain and resolves when it ends. The raw form returns a request id: <code>extensions::run_hook_request</code> and <code>runHookRequest</code>.</td>
+</tr>
+<tr>
+<td><code>take-reply</code></td>
+<td><code>extensions.provide:&lt;point&gt;</code></td>
+<td><code>extensions::take_reply(request)</code></td>
+<td><code>takeReply(request)</code></td>
+<td>Returns the final payload of a <code>transform</code> chain only when at least one <code>replace</code> was accepted, or the answer of a <code>first</code> chain. Returns nothing for <code>observe</code> and <code>veto</code>, for a <code>transform</code> chain in which every handler passed (the owner then uses its original payload), and on a second take.</td>
+</tr>
+<tr>
+<td><code>register</code></td>
+<td><code>extensions.contribute:&lt;point&gt;</code></td>
+<td><code>extensions::register(point, extension, priority, entry_json)</code></td>
+<td><code>register(point, extension, priority, entryJson)</code></td>
+<td>Adds or replaces an entry of a <code>dynamic</code> collect point. The entry is validated again.</td>
+</tr>
+<tr>
+<td><code>unregister</code></td>
+<td><code>extensions.contribute:&lt;point&gt;</code></td>
+<td><code>extensions::unregister(point, extension)</code></td>
+<td><code>unregister(point, extension)</code></td>
+<td>Removes an entry that this plugin registered.</td>
+</tr>
+<tr>
+<td><code>handle-hook</code></td>
+<td>export <code>hook-handler</code></td>
+<td><code>HookHandler::handle_hook</code></td>
+<td><code>handleHook</code> in <code>definePlugin</code></td>
+<td>Receives one hook call and returns one reply.</td>
+</tr>
+</tbody>
+</table>
+<p>The <code>HookHandler</code> trait, <code>HookCall</code> and <code>HookReply</code> are in <code>ilium_plugin_sdk::exports</code> in Rust. In TypeScript the types come from <code>@ilium/plugin-sdk</code> and the handler is the <code>handleHook</code> member of <code>definePlugin</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Field or case</th>
+<th>Type</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ExtensionEntry.extension</code></td>
+<td>string</td>
+<td>The id the contributor gave the entry in its manifest or in <code>register</code>. It is the identity of the entry. The owner shows and stores it as <code>&lt;contributor-id&gt;/&lt;id&gt;</code>, so equal ids from two plugins never collide.</td>
+</tr>
+<tr>
+<td><code>ExtensionEntry.contributor</code></td>
+<td>plugin id</td>
+<td>The plugin that contributed the entry.</td>
+</tr>
+<tr>
+<td><code>ExtensionEntry.priority</code></td>
+<td><code>u8</code></td>
+<td>The declared priority (0 to 100), unchanged by tier. The list is already in run order.</td>
+</tr>
+<tr>
+<td><code>ExtensionEntry.entry_json</code></td>
+<td>string</td>
+<td>The validated entry.</td>
+</tr>
+<tr>
+<td><code>HookCall.point</code></td>
+<td>string</td>
+<td>The global point name.</td>
+</tr>
+<tr>
+<td><code>HookCall.extension</code></td>
+<td>string</td>
+<td>The <code>handler</code> name from the manifest. Dispatch on it.</td>
+</tr>
+<tr>
+<td><code>HookCall.call</code></td>
+<td><code>u64</code> (<code>bigint</code> in TypeScript)</td>
+<td>The number of this call. Useful in log lines.</td>
+</tr>
+<tr>
+<td><code>HookCall.payload_json</code></td>
+<td>string</td>
+<td>The payload. For <code>transform</code> it is the output of the previous handler.</td>
+</tr>
+<tr>
+<td><code>HookReply::Pass</code></td>
+<td>none</td>
+<td>No opinion. Always allowed.</td>
+</tr>
+<tr>
+<td><code>HookReply::Replace(json)</code></td>
+<td>JSON string</td>
+<td>A new payload. Allowed in <code>transform</code> only.</td>
+</tr>
+<tr>
+<td><code>HookReply::Refuse(reason)</code></td>
+<td>string</td>
+<td>Stops the action. Allowed in <code>veto</code> only. The reason is shown in logs and notices.</td>
+</tr>
+<tr>
+<td><code>HookReply::Answer(json)</code></td>
+<td>JSON string</td>
+<td>The answer. Allowed in <code>first</code> only.</td>
+</tr>
+</tbody>
+</table>
+<p>In TypeScript the replies are <code>{ tag: 'pass' }</code>, <code>{ tag: 'replace', val }</code>, <code>{ tag: 'refuse', val }</code> and <code>{ tag: 'answer', val }</code>.</p>
+<p><code>register</code> takes a <code>u8</code> priority, but the manifest range is 0 to 100. A <code>register</code> with a priority above 100 fails with base code <code>invalid-argument</code> and a message that starts with <code>extension.schema-mismatch</code>.</p>
+<p><a id="hooks"></a></p>
+<h3 id="hook-modes">Hook modes</h3>
+<table>
+<thead>
+<tr>
+<th>Mode</th>
+<th>Handlers called</th>
+<th>Reply allowed</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>observe</code></td>
+<td>All, in priority order. Replies are ignored.</td>
+<td><code>pass</code></td>
+<td>Outcome <code>ok</code>. <code>take-reply</code> returns nothing.</td>
+</tr>
+<tr>
+<td><code>transform</code></td>
+<td>In run order. Each handler gets the output of the previous one.</td>
+<td><code>pass</code>, <code>replace(json)</code></td>
+<td>Outcome <code>ok</code>. <code>take-reply</code> returns the final payload when at least one replace was accepted, otherwise nothing.</td>
+</tr>
+<tr>
+<td><code>veto</code></td>
+<td>In priority order, until one refuses.</td>
+<td><code>pass</code>, <code>refuse(reason)</code></td>
+<td><code>refused</code> with code <code>extension.vetoed</code> on the first refusal, otherwise <code>ok</code>.</td>
+</tr>
+<tr>
+<td><code>first</code></td>
+<td>In priority order, until one answers.</td>
+<td><code>pass</code>, <code>answer(json)</code></td>
+<td>Outcome <code>ok</code>. <code>take-reply</code> returns the answer, or nothing when nobody answered.</td>
+</tr>
+<tr>
+<td><code>guard</code> (after a <code>transform</code> chain whose point sets <code>final_check</code>)</td>
+<td>Each contributor that declared <code>guard: true</code>, once, after the transform chain, with the final payload.</td>
+<td><code>pass</code>, <code>refuse(reason)</code></td>
+<td>Any <code>refuse</code> ends the chain as <code>refused(conflict)</code> with <code>extension.vetoed</code>. Otherwise the outcome is <code>ok</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>A reply that the mode does not allow counts as <code>pass</code> and is logged as <code>extension.reply-not-allowed</code>. An <code>answer</code> on a <code>first</code> point that fails <code>reply_schema</code> counts as <code>pass</code> and is logged as <code>extension.schema-mismatch</code>.</p>
+<p>For <code>transform</code>, a <code>replace</code> carries the whole payload. The host validates it against <code>payload_schema</code> and checks that every field not listed in <code>reply_schema.properties</code> equals its input value. Otherwise the reply counts as <code>pass</code> and is logged as <code>extension.schema-mismatch</code> (a breach). <code>reply_schema</code> on a <code>transform</code> point therefore lists the changeable fields only, and the next handler always gets the <code>payload_schema</code> shape. [EXT-014]</p>
+<p><strong>Guards and failure policy.</strong> A <code>transform</code> owner whose result drives a privileged action sets <code>final_check: true</code>. After the transform chain, the host calls once each contributor entry that has <code>guard: true</code> (it needs a <code>handler</code>) with the final payload. A guard replies <code>pass</code> or <code>refuse</code>. On a <code>high</code> point of mode <code>veto</code> or <code>transform</code>, the owner may set <code>on_failure</code> to <code>pass</code> or <code>refuse</code> (default <code>refuse</code>): with <code>refuse</code>, a handler that fails on a plugin-started action refuses it with <code>extension.vetoed</code> (reason <code>guard-failed</code>). [SEC-284] [SEC-287]</p>
+<p><strong>User override.</strong> A <code>veto</code> chain, or a guard, on an action the user started can be overridden by the user: see [SEC-291]. After an override the chain completes <code>ok</code> with no reply, and the owner's log gets <code>extension.veto-overridden</code> with the contributor and the point. The core points that allow it are marked in the <strong>User override</strong> column of <a href="/pages/reference-core-extension-points/">Core extension points</a>.</p>
+<h3 id="rules-for-payloads-deadlines-ordering-and-failure">Rules for payloads, deadlines, ordering and failure</h3>
+<ul>
+<li><strong>Payloads.</strong> A payload, a reply and a hook chain result are each capped at 64 KiB. An entry is capped at 16 KiB. The host checks the payload against <code>payload_schema</code> before the first handler runs. A failing payload returns <code>schema-mismatch</code> from <code>run-hook</code> and no handler runs.</li>
+<li><strong>What a contributor sees.</strong> A handler gets the payload of the owner's <code>payload_schema</code> and nothing else. It does not see the owner's state, the other handlers or the other contributors.</li>
+<li><strong>Deadlines.</strong> Each handler gets <code>deadline_ms</code>, between 5 and 50 milliseconds, 20 by default. The whole chain gets 100 milliseconds. Handlers that have not started when the chain reaches 100 ms are skipped and logged (see Chain cap).</li>
+<li><strong>Order.</strong> The user order is a stored list of (plugin id, extension id) per point. Items in it run first, in that order. Items not in it follow, sorted by tier band (T1 before T2 and T3), then priority (lower first), then plugin id, then extension id (byte-wise ASCII comparison). A contributor installed after the user reordered therefore lands after the stored items. An update keeps the stored position, and an uninstall removes it. The same order applies to <code>list</code> on collect points. Declared priorities are kept: <code>ExtensionEntry.priority</code> returns the declared value. [EXT-007] [EXT-008]</li>
+<li><strong>Fail open.</strong> A handler that times out, traps or errors counts as <code>pass</code>. A timeout never vetoes. A <strong>breach</strong> is a timeout, a trap, an error return, a reply over 64 KiB, a <code>replace</code> or <code>answer</code> that fails its schema, a CPU budget overrun, or a skip because the contributor's instance was busy. <code>reply-not-allowed</code> and a chain-cap skip are not breaches. The counter is per contributor, point and extension id. Any call that returns an accepted reply within its deadline resets it to 0. The third consecutive breach stops the extension. The stop ends when the contributor's instance restarts or the user presses Reset, and it is not persisted. The user sees a notice and a Reset button. [EXT-021]</li>
+<li><strong>Re-entry.</strong> A <code>run-hook</code> on any point that is already on the current chain stack, directly or indirectly (A runs B, and B's handler runs A), fails with <code>extension.reentrant</code>.</li>
+<li><strong>Other host calls.</strong> A handler may call other host functions that its grants allow. The calls must finish within its deadline, and they must be synchronous. A handler can only start an inner chain with <code>run-hook</code> (see Nested chains); it cannot wait for it.</li>
+<li><strong>Where handlers run.</strong> A handler runs in the contributor's own instance, in the process that hosts the owner's side. T1 handlers run in that process. T2 and T3 handlers cost one helper round trip, and that round trip counts inside the handler deadline (a 5 ms handler has about 4.5 ms for its own work). Do not put a hook on a path hotter than about 100 calls per second.</li>
+<li><strong>Asynchronous chain.</strong> <code>run-hook</code> does not block the owner's current call. It returns a request id at once, the chain runs on the host, and the result arrives as <code>request-completed</code>, where <code>take-reply</code> returns the reply. The SDK <code>await</code> form hides this. The 100 ms chain cap therefore does not conflict with the owner's 20 ms <code>on-events</code> deadline. An owner that needs the answer inside the same call cannot use a hook; it keeps its own default and applies the reply when it arrives.</li>
+<li><strong>Sequential.</strong> The handlers of one chain run strictly one after another in priority order, never in parallel. A handler that cannot start within its own deadline (its plugin is busy) is skipped as <code>pass</code> and counts a breach. A handler whose instance is still activating is skipped as <code>pass</code> and is not a breach.</li>
+<li><strong>Chain cap.</strong> The 100 ms cap is measured from the start of the first handler call. A handler that starts before 100 ms runs until its own <code>deadline_ms</code>, even if that ends after the cap. Handlers not started at 100 ms are skipped as <code>pass</code>, are logged <code>extension.chain-cap</code> and are not breaches. [EXT-005]</li>
+<li><strong>Does the action wait?</strong> For <code>veto</code>, <code>transform</code> and <code>first</code> points the owner holds that one action until the chain completes (at most the 100 ms cap plus one deadline) and keeps serving other events meanwhile. For <code>observe</code> points the action does not wait, and handlers may run after it. [EXT-029]</li>
+<li><strong>No process crossing.</strong> A hook runs only handlers hosted by the process that owns the point. A client-owned point runs only the handlers in that client, never in another client or in the server. A server-owned point runs only server handlers.</li>
+<li><strong>Nested chains.</strong> The outermost chain is depth 1. A <code>run-hook</code> from a handler at depth 3 fails at once with <code>extension-error</code> <code>reentrant</code>, base code <code>conflict</code> and a message that starts with <code>extension.depth-exceeded</code>. It counts as <code>pass</code> for that handler and not as a breach. The inner chain runs after the handler returns. Its completion arrives at the handler's plugin as <code>request-completed</code>, and its time does not count toward the outer deadline.</li>
+<li><strong>Side.</strong> A handler runs on the side that owns the call: server for a server-owned point, client for a client-owned point. A contributor declares its handler on the same side.</li>
+<li><strong>[HST-470]</strong> <code>run-hook</code> MUST NOT block the owner's current call. It MUST return a request id at once and complete as <code>request-completed</code>.</li>
+<li><strong>[HST-471]</strong> Handlers of one chain MUST run strictly one after another in priority order, and a handler that cannot start within its own deadline MUST be skipped as <code>pass</code> and count a breach.</li>
+<li><strong>[HST-472]</strong> The 100 ms chain cap MUST be measured from the start of the first handler, and handlers not started at the cap MUST be skipped and logged <code>extension.chain-cap</code>.</li>
+<li><strong>[HST-473]</strong> The helper round trip of a T2 or T3 handler MUST count inside the handler deadline.</li>
+<li><strong>[HST-474]</strong> A hook MUST run only the handlers hosted by the process that owns the point.</li>
+<li><strong>[HST-475]</strong> A chain started inside a handler MUST be limited to depth 3. The inner chain MUST run after the handler returns and MUST NOT count toward the outer deadline.</li>
+<li><strong>Contributions change.</strong> The kernel sends the topic <code>ilium.extensions/changed</code> to the owner once per point after any change to its active set: install, uninstall, update, enable or disable of a contributor, <code>register</code>, <code>unregister</code>, a user toggle or reorder, a breach stop, a Reset, or a dormant/active change. The payload is <code>{ "point": "&lt;global point name&gt;" }</code>. Changes within 50 ms are merged into one event. Nobody but the owner gets it. No <code>contributes.topics.subscribes</code> entry or grant is needed; listing it is allowed and has no effect. The owner calls <code>list</code> again. [EXT-026]</li>
+<li><strong>Dormant contributions.</strong> A contribution is dormant when its owner is not installed, is disabled, or does not satisfy its <code>@version</code>. An inactive owner does not make it dormant. A dormant contribution stays in the package and counts for nothing. It becomes active when the owner appears. Install never fails because an owner is missing.</li>
+<li><strong>Point full.</strong> Install never fails because a point is full. The active set is the first <code>max_handlers</code> handlers (or <code>max_entries</code> entries) in run order. The rest are dormant with the reason <code>point full (&lt;n&gt;)</code>. A reorder by the user or a removal recomputes the set and sends <code>ilium.extensions/changed</code>. [EXT-030]</li>
+</ul>
+<h3 id="diagram-owner-registry-and-contributors">Diagram: owner, registry and contributors</h3>
+<figure>
+<svg viewBox="0 0 440 210" role="img" aria-label="An owner reads a registry that holds contributions in run order" width="660" height="315">
+<title>Owner, registry and contributors</title>
+<desc>Three contributors send entries or handlers to the extension registry, each with a priority. The owner calls list or run-hook on the registry. The registry returns the entries, or runs the handlers in priority order from low to high.</desc>
+<defs>
+<marker id="api-ext-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+<path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+</marker>
+</defs>
+<rect x="8" y="14" width="120" height="36" rx="6" fill="none" stroke="currentColor" stroke-dasharray="6 4"/>
+<text x="68" y="36" font-size="11" text-anchor="middle" fill="currentColor">Contributor A (30)</text>
+<rect x="8" y="86" width="120" height="36" rx="6" fill="none" stroke="currentColor" stroke-dasharray="6 4"/>
+<text x="68" y="108" font-size="11" text-anchor="middle" fill="currentColor">Contributor B (50)</text>
+<rect x="8" y="158" width="120" height="36" rx="6" fill="none" stroke="currentColor" stroke-dasharray="6 4"/>
+<text x="68" y="180" font-size="11" text-anchor="middle" fill="currentColor">Contributor C (70)</text>
+<line x1="128" y1="32" x2="178" y2="84" stroke="currentColor" marker-end="url(#api-ext-arrow)"/>
+<line x1="128" y1="104" x2="178" y2="104" stroke="currentColor" marker-end="url(#api-ext-arrow)"/>
+<line x1="128" y1="176" x2="178" y2="124" stroke="currentColor" marker-end="url(#api-ext-arrow)"/>
+<rect x="178" y="62" width="124" height="84" rx="6" fill="none" stroke="currentColor" stroke-width="2"/>
+<text x="240" y="86" font-size="11" text-anchor="middle" fill="currentColor">Point registry</text>
+<text x="240" y="104" font-size="10" text-anchor="middle" fill="currentColor">checks grants</text>
+<text x="240" y="118" font-size="10" text-anchor="middle" fill="currentColor">checks schemas</text>
+<text x="240" y="132" font-size="10" text-anchor="middle" fill="currentColor">runs A, then B, then C</text>
+<line x1="302" y1="104" x2="342" y2="104" stroke="currentColor" marker-start="url(#api-ext-arrow)" marker-end="url(#api-ext-arrow)"/>
+<rect x="342" y="62" width="90" height="84" rx="6" fill="none" stroke="currentColor"/>
+<text x="387" y="96" font-size="11" text-anchor="middle" fill="currentColor">Owner</text>
+<text x="387" y="112" font-size="10" text-anchor="middle" fill="currentColor">list or</text>
+<text x="387" y="126" font-size="10" text-anchor="middle" fill="currentColor">run-hook</text>
+</svg>
+<figcaption>Contributors never talk to the owner. The registry orders them by the user's order, then priority, and it fails open when a handler is slow.</figcaption>
+</figure>
+
+<h3 id="example-rust-owner">Example: Rust owner</h3>
+<p>The owner <code>com.example.notes</code> has one collect point, <code>recognisers</code>, and one <code>transform</code> hook point, <code>before-export</code>. On a command it reads the recognisers and runs the hook over the note text. When the topic <code>ilium.extensions/changed</code> arrives, it reads the list again.</p>
+<p><code>src/lib.rs</code>:</p>
+<pre><code class="language-rust">use ilium_plugin_sdk::host::extensions;
+use ilium_plugin_sdk::host::log::{self, Level};
+use ilium_plugin_sdk::prelude::*;
+use ilium_plugin_sdk::task;
+
+const RECOGNISERS: &amp;str = &quot;com.example.notes/recognisers&quot;;
+const BEFORE_EXPORT: &amp;str = &quot;com.example.notes/before-export&quot;;
+
+#[ilium_plugin(side = &quot;server&quot;)]
+#[derive(Default)]
+struct Notes {
+    recogniser_entries: Vec&lt;String&gt;,
+}
+
+impl Lifecycle for Notes {
+    fn activate(&amp;mut self) {
+        self.reload_recognisers();
+    }
+}
+
+impl Notes {
+    fn reload_recognisers(&amp;mut self) {
+        match extensions::list(RECOGNISERS) {
+            Ok(entries) =&gt; {
+                self.recogniser_entries = entries.into_iter().map(|e| e.entry_json).collect();
+            }
+            Err(error) =&gt; log::log(Level::Warn, &amp;format!(&quot;list failed: {error:?}&quot;)),
+        }
+    }
+}
+
+impl Handler for Notes {
+    fn on_events(&amp;mut self, batch: Vec&lt;Event&gt;) -&gt; Vec&lt;Submission&gt; {
+        for event in batch {
+            match event {
+                Event::TopicPublished(published) if published.topic == &quot;ilium.extensions/changed&quot; =&gt; {
+                    self.reload_recognisers();
+                }
+                Event::CommandInvoked(invoked) if invoked.command == &quot;com.example.notes/export&quot; =&gt; {
+                    task::spawn(export_note(&quot;Release notes for Friday&quot;.to_string()));
+                }
+                _ =&gt; {}
+            }
+        }
+        Vec::new()
+    }
+}
+
+async fn export_note(text: String) {
+    // Escape the text with a JSON library in a real plugin.
+    let payload = format!(r#&quot;{{&quot;text&quot;:&quot;{text}&quot;}}&quot;#);
+    match extensions::run_hook(BEFORE_EXPORT, &amp;payload).await {
+        Ok(Some(final_payload)) =&gt; log::log(Level::Info, &amp;format!(&quot;export: {final_payload}&quot;)),
+        Ok(None) =&gt; log::log(Level::Info, &quot;export: no handler changed the text&quot;),
+        Err(error) =&gt; log::log(Level::Warn, &amp;format!(&quot;export failed: {}&quot;, error.message)),
+    }
+}
+</code></pre>
+<p><code>run_hook</code> resolves with <code>Some(json)</code> for <code>transform</code> and <code>first</code> chains, with <code>None</code> for <code>observe</code> and <code>veto</code>, and with <code>Err</code> when the chain ended in <code>refused</code> or <code>failed</code>. For a <code>veto</code> point the owner checks <code>error.extension_code() == Some("extension.vetoed")</code> and does not perform the action. For a <code>transform</code> point the owner uses the original text when <code>take_reply</code> finds nothing.</p>
+<h3 id="example-rust-contributor">Example: Rust contributor</h3>
+<p>The contributor <code>com.example.tickets</code> handles the hook by name. The <code>extension</code> field of the call is the <code>handler</code> value from the manifest.</p>
+<p><code>src/lib.rs</code>:</p>
+<pre><code class="language-rust">use ilium_plugin_sdk::exports::{HookCall, HookHandler, HookReply};
+use ilium_plugin_sdk::prelude::*;
+
+#[ilium_plugin(side = &quot;server&quot;, exports = [&quot;hook-handler&quot;])]
+#[derive(Default)]
+struct Tickets;
+
+impl Lifecycle for Tickets {}
+
+impl Handler for Tickets {
+    fn on_events(&amp;mut self, _batch: Vec&lt;Event&gt;) -&gt; Vec&lt;Submission&gt; {
+        Vec::new()
+    }
+}
+
+impl HookHandler for Tickets {
+    fn handle_hook(&amp;mut self, call: HookCall) -&gt; HookReply {
+        match call.extension.as_str() {
+            &quot;strip_tokens&quot; =&gt; strip_tokens(&amp;call.payload_json),
+            _ =&gt; HookReply::Pass,
+        }
+    }
+}
+
+fn strip_tokens(payload_json: &amp;str) -&gt; HookReply {
+    // Parse with a JSON library in a real plugin. This stand-in keeps the example short.
+    if !payload_json.contains(&quot;ghp_&quot;) {
+        return HookReply::Pass;
+    }
+    HookReply::Replace(payload_json.replace(&quot;ghp_&quot;, &quot;[removed]&quot;))
+}
+</code></pre>
+<p>The contributor's package needs the manifest shown above. A handler must stay under its deadline and must not block. Return <code>Pass</code> when you have nothing to change.</p>
+<h3 id="example-typescript-owner">Example: TypeScript owner</h3>
+<p>The same owner in TypeScript. <code>runHook</code> resolves with the final payload, or <code>undefined</code> when the mode returns none.</p>
+<p><code>src/index.ts</code>:</p>
+<pre><code class="language-ts">import { definePlugin, PluginError, type Event, type Submission } from '@ilium/plugin-sdk';
+import { list, runHook } from '@ilium/plugin-sdk/host/extensions';
+import { log } from '@ilium/plugin-sdk/host/log';
+
+const RECOGNISERS = 'com.example.notes/recognisers';
+const BEFORE_EXPORT = 'com.example.notes/before-export';
+
+let recogniserEntries: string[] = [];
+
+function reloadRecognisers(): void {
+  try {
+    recogniserEntries = list(RECOGNISERS).map((entry) =&gt; entry.entryJson);
+  } catch (error) {
+    log('warn', `list failed: ${String(error)}`);
+  }
+}
+
+async function exportNote(text: string): Promise&lt;void&gt; {
+  try {
+    const finalPayload = await runHook(BEFORE_EXPORT, JSON.stringify({ text }));
+    log('info', finalPayload === undefined ? 'export: unchanged' : `export: ${finalPayload}`);
+  } catch (error) {
+    if (error instanceof PluginError &amp;&amp; error.extensionCode === 'extension.vetoed') {
+      log('info', `export refused: ${error.message}`);
+      return;
+    }
+    log('warn', `export failed: ${String(error)}`);
+  }
+}
+
+export const { lifecycle, handler } = definePlugin({
+  side: 'server',
+  activate() {
+    reloadRecognisers();
+  },
+  onEvents(batch: Event[]): Submission[] {
+    for (const event of batch) {
+      if (event.tag === 'topic-published' &amp;&amp; event.val.topic === 'ilium.extensions/changed') {
+        reloadRecognisers();
+      }
+      if (event.tag === 'command-invoked' &amp;&amp; event.val.command === 'com.example.notes/export') {
+        void exportNote('Release notes for Friday');
+      }
+    }
+    return [];
+  },
+});
+</code></pre>
+<h3 id="example-typescript-contributor">Example: TypeScript contributor</h3>
+<p><code>src/index.ts</code>:</p>
+<pre><code class="language-ts">import { definePlugin, type HookCall, type HookReply } from '@ilium/plugin-sdk';
+
+export const { lifecycle, handler, hookHandler } = definePlugin({
+  side: 'server',
+  onEvents() {
+    return [];
+  },
+  handleHook(call: HookCall): HookReply {
+    if (call.extension !== 'strip_tokens') {
+      return { tag: 'pass' };
+    }
+    const payload = JSON.parse(call.payloadJson) as { text?: string };
+    const text = payload.text ?? '';
+    const cleaned = text.replace(/ghp_[A-Za-z0-9]{36}/g, '[removed]');
+    if (cleaned === text) {
+      return { tag: 'pass' };
+    }
+    return { tag: 'replace', val: JSON.stringify({ ...payload, text: cleaned }) };
+  },
+});
+</code></pre>
+<h3 id="entry-bound-services">Entry-bound services</h3>
+<p>Some collect entries carry a <code>service</code> field: <code>compaction/techniques</code>, <code>cost/quota-sources</code>, <code>notifications/channels</code>, <code>recap/fact-sources</code>, <code>scenes/scene-data-sources</code>, <code>scheduler/schedule-sources</code>, <code>search/sources</code>, <code>session-convert/formats</code>, <code>settings/config-importers</code>, <code>keys-and-help/help-sources</code> and <code>diagnostics/report-sections</code>.</p>
+<p>An entry field <code>service</code> names a service whose prefix is the contributor's own id and that the contributor provides, or the entry fails with <code>manifest.extension-entry-invalid</code>. The owner of the point may call it without its own <code>services.use</code> grant: the kernel admits the call because the entry is active. The normal 30 second timeout and the 1 MiB caps apply. The method, parameters and result of each point are fixed on the core plugin's page, in the row for that point. [EXT-043]</p>
+<h3 id="dynamic-collect-points">Dynamic collect points</h3>
+<p>A collect point with <code>"dynamic": true</code> lets a contributor add and remove entries at run time. A static point takes entries from the manifest only. The owner sees both kinds in <code>list</code>.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::host::extensions;
+
+// manifest: &quot;extensions.contribute:com.example.notes/recognisers&quot;
+fn add_project_key(key_prefix: &amp;str) -&gt; Result&lt;(), String&gt; {
+    let entry = format!(r#&quot;{{&quot;id&quot;:&quot;project&quot;,&quot;regex&quot;:&quot;{key_prefix}-[0-9]+&quot;}}&quot;#);
+    extensions::register(&quot;com.example.notes/recognisers&quot;, &quot;project-key&quot;, 50, &amp;entry)
+        .map_err(|error| format!(&quot;{error:?}&quot;))
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { register } from '@ilium/plugin-sdk/host/extensions';
+
+// manifest: &quot;extensions.contribute:com.example.notes/recognisers&quot;
+export function addProjectKey(keyPrefix: string): void {
+  const entry = JSON.stringify({ id: 'project', regex: `${keyPrefix}-[0-9]+` });
+  register('com.example.notes/recognisers', 'project-key', 50, entry);
+}
+</code></pre>
+<p>Dynamic is a property of the point, and the core points that allow it are marked in the <strong>Dynamic</strong> column of <a href="/pages/reference-core-extension-points/">Core extension points</a>. <code>register</code> with an id that the plugin already used replaces that entry. A plugin can only remove entries it registered. A call on a point that is not <code>dynamic</code> returns <code>not-dynamic</code>.</p>
+<h3 id="what-the-user-sees">What the user sees</h3>
+<p>The review dialog groups a package's extensions under <strong>Adds to other plugins</strong>. Each line names the owner, the point and what the handler can do. A high-risk point carries a warning.</p>
+<figure>
+<pre class="term">
+╭──────────────────────────────────────────────╮
+│ Review: com.example.tickets 0.1.0            │
+│                                              │
+│ Adds to other plugins                        │
+│   Smart Copy > Recognisers                   │
+│     adds a text pattern                      │
+│   Smart Copy > After copy                    │
+│     can change copied text                   │
+│   Text triggers > Before fire                │
+│     can stop a trigger from sending text     │
+│     (high risk)                              │
+│                                              │
+│   [allow]  [decline]                         │
+╰──────────────────────────────────────────────╯
+</pre>
+<figcaption>Rendered at 48 columns. Illustrative. The review dialog groups a package's contributions by owner. The high-risk line is unchecked until the user ticks it.</figcaption>
+</figure>
+
+<p>On Settings &gt; Plugins, the plugin page has an <strong>Extensions</strong> tab. For each point the plugin owns, it lists the contributors in run order, each with a toggle and move up and down buttons. For each extension the plugin contributes, it lists the point and a toggle. The user's order overrides the priority. The host stores the toggles, not the plugin.</p>
+<figure>
+<pre class="term">
+╭──────────────────────────────────────────────╮
+│ Smart Copy > Extensions                      │
+│                                              │
+│ After copy (transform)                       │
+│  1 [x] com.example.tickets    strip_tokens   │
+│  2 [x] com.example.redact     mask_emails    │
+│  3 [ ] com.example.legacy     old_filter     │
+│                                              │
+│ Recognisers (collect)                        │
+│    [x] com.example.tickets    jira-key       │
+╰──────────────────────────────────────────────╯
+</pre>
+<figcaption>Rendered at 48 columns. Illustrative. The Extensions tab of an owner. Arrows move a row, and the order replaces the priority.</figcaption>
+</figure>
+
+<p>Two states need a note.</p>
+<ul>
+<li><strong>Dormant.</strong> An extension that is dormant shows the reason <code>waiting for &lt;owner-id&gt;</code> (owner missing or disabled), <code>needs &lt;point&gt;@&lt;version&gt;, &lt;owner-id&gt; has &lt;version&gt;</code> (version mismatch) or <code>point full (&lt;n&gt; handlers)</code>. It does nothing, and the toggle stays as the user set it.</li>
+<li>
+<p><strong>Stopped.</strong> An extension that breached three times in a row, whatever the cause, shows <code>stopped after 3 failures</code> and a Reset button. The stop lasts until the instance restarts or Reset is pressed, and it is not saved to disk. [LIF-270]</p>
+</li>
+<li>
+<p>[LIF-270] A stop after three breaches MUST end at an instance restart of the contributor or Reset and MUST NOT be persisted. Test: stop an extension, restart the contributor, and call it.</p>
+</li>
+</ul>
+<figure>
+<pre class="term">
+╭──────────────────────────────────────────────╮
+│ com.example.tickets > Extensions             │
+│                                              │
+│ Smart Copy > After copy                      │
+│   [x] strip_tokens                           │
+│   stopped after 3 failures       [Reset]     │
+│                                              │
+│ Notes Plus > Export hook                     │
+│   [x] stamp_header                           │
+│   waiting for com.example.notes-plus         │
+╰──────────────────────────────────────────────╯
+</pre>
+<figcaption>Rendered at 48 columns. Illustrative. A stopped extension and a dormant one on the contributor's Extensions tab.</figcaption>
+</figure>
+
+<h3 id="edge-cases-and-error-codes">Edge cases and error codes</h3>
+<p>Extension codes do not add a case to the 15-case <code>error-code</code> enum. Each extension code is carried by a normal <code>plugin-error</code>: the <code>code</code> field holds the mapped base code from the table below, and the <code>message</code> field starts with the extension code, a colon and a space, for example <code>extension.vetoed: com.example.quiet-hours: quiet hours are on</code> [EXT-003]. The message names the contributor's plugin id; the user interface shows the display name instead (host prefix rule [SEC-292]). The SDKs parse this prefix and expose it as <code>error.extension_code()</code> in Rust and <code>error.extensionCode</code> in TypeScript, so a plugin never matches on free text. The prefix is the only part of <code>message</code> that is a contract.</p>
+<p>The WIT <code>extension-error</code> variant (7 cases) is the sync result of <code>list</code>, <code>run-hook</code>, <code>register</code> and <code>unregister</code>; the SDK converts each case to the mapped <code>plugin-error</code>. Codes found later arrive as <code>refused(...)</code> or <code>failed(...)</code> in the completion of the <code>run-hook</code> request, with the same mapping. Codes marked log-only never reach the caller; they are written to the log of the plugin that caused them.</p>
+<table>
+<thead>
+<tr>
+<th>Extension code</th>
+<th>Base <code>code</code></th>
+<th>Where it appears</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>extension.unknown-point</code></td>
+<td><code>not-found</code></td>
+<td>sync</td>
+</tr>
+<tr>
+<td><code>extension.not-granted</code></td>
+<td><code>not-permitted</code></td>
+<td>sync</td>
+</tr>
+<tr>
+<td><code>extension.schema-mismatch</code></td>
+<td><code>invalid-argument</code></td>
+<td>sync for a caller payload or entry; log-only for a bad handler reply</td>
+</tr>
+<tr>
+<td><code>extension.cap-exceeded</code></td>
+<td><code>invalid-argument</code> for a payload, reply or entry over its size cap; <code>quota-exceeded</code> when a point already holds <code>max_entries</code></td>
+<td>sync</td>
+</tr>
+<tr>
+<td><code>extension.reentrant</code></td>
+<td><code>conflict</code></td>
+<td>sync</td>
+</tr>
+<tr>
+<td><code>extension.not-dynamic</code></td>
+<td><code>unsupported</code></td>
+<td>sync</td>
+</tr>
+<tr>
+<td><code>extension.vetoed</code></td>
+<td><code>conflict</code></td>
+<td>completion <code>refused(conflict)</code></td>
+</tr>
+<tr>
+<td><code>extension.depth-exceeded</code></td>
+<td><code>conflict</code></td>
+<td>sync; travels as <code>reentrant</code></td>
+</tr>
+<tr>
+<td><code>extension.entry-rejected</code></td>
+<td><code>invalid-argument</code></td>
+<td>log-only, to the contributor's log and the owner's log</td>
+</tr>
+<tr>
+<td><code>rate-limited</code> (no extension prefix)</td>
+<td><code>rate-limited</code></td>
+<td>sync from <code>run-hook</code>, with <code>retry-after-ms</code>, above 200 calls per second per point</td>
+</tr>
+<tr>
+<td><code>extension.handler-timeout</code>, <code>extension.reply-not-allowed</code>, <code>extension.disabled</code>, <code>extension.chain-cap</code>, <code>extension.veto-overridden</code></td>
+<td>none</td>
+<td>log-only</td>
+</tr>
+</tbody>
+</table>
+<p>The 7-case <code>extension-error</code> enum is unchanged: <code>extension.depth-exceeded</code> travels as <code>reentrant</code>, and <code>rate-limited</code> is the base error code.</p>
+<p>A payload over 64 KiB is always <code>extension.cap-exceeded</code> (base <code>invalid-argument</code>), not <code>extension.schema-mismatch</code>; a payload that fits the size cap but fails <code>payload_schema</code> is <code>extension.schema-mismatch</code> [EXT-004]. When a chain reaches 100 ms, the handlers after the cap are skipped and each skipped handler is logged with <code>extension.chain-cap</code> [EXT-005].</p>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>When</th>
+<th>Retry</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>extension.unknown-point</code></td>
+<td>The point is not declared by an installed and enabled owner.</td>
+<td>No</td>
+</tr>
+<tr>
+<td><code>extension.not-granted</code></td>
+<td>The caller lacks <code>extensions.provide</code> or <code>extensions.contribute</code> for the point.</td>
+<td>No</td>
+</tr>
+<tr>
+<td><code>extension.schema-mismatch</code></td>
+<td>The payload or an entry fails its schema. A bad <code>replace</code> or <code>answer</code> is logged with this code and counts as <code>pass</code>.</td>
+<td>No, fix the data</td>
+</tr>
+<tr>
+<td><code>extension.cap-exceeded</code></td>
+<td>The point already holds <code>max_entries</code> entries, or the payload, reply or entry is over its size cap.</td>
+<td>No</td>
+</tr>
+<tr>
+<td><code>extension.reentrant</code></td>
+<td>A handler called <code>run-hook</code> on a point already on the current chain, or the chain is deeper than 3.</td>
+<td>No</td>
+</tr>
+<tr>
+<td><code>extension.depth-exceeded</code></td>
+<td>A <code>run-hook</code> from a handler at depth 3. Counts as <code>pass</code>, not as a breach.</td>
+<td>No</td>
+</tr>
+<tr>
+<td><code>extension.entry-rejected</code></td>
+<td>The owner refused an entry outside its allowlist ([SEC-283]).</td>
+<td>No, fix the entry</td>
+</tr>
+<tr>
+<td><code>rate-limited</code></td>
+<td>More than 200 <code>run-hook</code> calls per second on one point.</td>
+<td>After <code>retry-after-ms</code></td>
+</tr>
+<tr>
+<td><code>extension.not-dynamic</code></td>
+<td><code>register</code> or <code>unregister</code> on a point that is not <code>dynamic</code>.</td>
+<td>No</td>
+</tr>
+<tr>
+<td><code>not-found</code> (host error)</td>
+<td><code>unregister</code> for an entry this plugin did not register.</td>
+<td>No</td>
+</tr>
+<tr>
+<td><code>extension.handler-timeout</code></td>
+<td>A handler passed its deadline. Counts as <code>pass</code> and as one breach.</td>
+<td>No</td>
+</tr>
+<tr>
+<td><code>extension.reply-not-allowed</code></td>
+<td>The reply is not allowed in the point's mode. Counts as <code>pass</code>.</td>
+<td>No</td>
+</tr>
+<tr>
+<td><code>extension.vetoed</code></td>
+<td>A <code>veto</code> handler or a guard refused. The completion is <code>refused(conflict)</code>, the message is <code>extension.vetoed: &lt;contributor plugin id&gt;: &lt;reason&gt;</code>.</td>
+<td>Not by the owner, the action stays refused</td>
+</tr>
+<tr>
+<td><code>extension.disabled</code></td>
+<td>The extension was stopped after three breaches in a row or turned off by the user. Not called. Log-only.</td>
+<td>After the user presses Reset in Settings &gt; Plugins. A breach stop also ends when the plugin restarts. A user turn-off persists across restarts</td>
+</tr>
+</tbody>
+</table>
+<p>Install errors:</p>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>When</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>manifest.extension-point-duplicate</code></td>
+<td>Two points have the same id in one plugin.</td>
+</tr>
+<tr>
+<td><code>manifest.extension-point-invalid</code></td>
+<td>A bad id, kind, mode or schema.</td>
+</tr>
+<tr>
+<td><code>manifest.extension-entry-invalid</code></td>
+<td>An entry fails the point's <code>entry_schema</code>.</td>
+</tr>
+<tr>
+<td><code>manifest.extension-side</code></td>
+<td>A handler is declared on a different side from the owner's call.</td>
+</tr>
+<tr>
+<td><code>manifest.extension-limit</code></td>
+<td>More than 16 points or 64 extensions in one plugin.</td>
+</tr>
+<tr>
+<td><code>manifest.grant-missing-extension</code></td>
+<td>An extension has no <code>extensions.contribute</code> grant, or a point has no <code>extensions.provide</code> grant.</td>
+</tr>
+<tr>
+<td><code>manifest.exports-mismatch</code></td>
+<td>A plugin with hook extensions does not list <code>hook-handler</code> in <code>exports</code>.</td>
+</tr>
+<tr>
+<td><code>manifest.grant-wildcard</code></td>
+<td>A grant for a point ends in <code>*</code>.</td>
+</tr>
+<tr>
+<td><code>manifest.point-risk</code></td>
+<td>An owner declares <code>risk: "standard"</code> for a point that meets [SEC-280].</td>
+</tr>
+<tr>
+<td><code>manifest.grant-dependency</code></td>
+<td>A contributor to a point with a sensitive data class lacks the matching read grant ([SEC-282]), or a command-running entry lacks <code>process.run</code>.</td>
+</tr>
+<tr>
+<td><code>manifest.replaces-tier</code></td>
+<td>A T3 package, or a T2 package whose surface needs T1-only grants, replaces a core plugin.</td>
+</tr>
+<tr>
+<td><code>policy.replacement</code></td>
+<td>The admin policy <code>extensions.allow_replacement = false</code> refuses a replacement.</td>
+</tr>
+<tr>
+<td><code>manifest.schema-keyword</code></td>
+<td>A data schema uses a keyword outside the <a href="/pages/reference-settings-schema/#data-schema-subset">Data schema subset</a>.</td>
+</tr>
+</tbody>
+</table>
+<p>Further edge cases:</p>
+<ul>
+<li><strong>Owner disabled.</strong> The contributions to its points go dormant at once. Handlers in a running chain finish or time out.</li>
+<li><strong>Contributor removed while a chain runs.</strong> The chain skips its handler and logs <code>extension.disabled</code>.</li>
+<li><strong>Equal priority.</strong> Two extensions on one point with the same priority run in plugin id order, then in extension id order [EXT-007].</li>
+<li><strong>Two contributors, same id.</strong> The id is unique per contributor and point, so both stay. The user sees them as two rows.</li>
+<li><strong>Version mismatch.</strong> A contribution asks for <code>point@X.Y.Z</code>. The rule is the one for services: same major; minor at least the requested one; for major 0 the minor must be equal; patch is ignored. Otherwise it stays dormant and the Plugins screen says why. A contribution without <code>@version</code> matches any owner version. Examples with an owner at <code>1.2.0</code>: <code>@1.0.0</code> accepted, <code>@1.2.0</code> accepted, <code>@1.3.0</code> dormant, <code>@2.0.0</code> dormant. With an owner at <code>0.1.2</code>: <code>@0.1.0</code> and <code>@0.1.9</code> accepted, <code>@0.2.0</code> dormant [EXT-006].</li>
+<li><strong>Hook with no handlers.</strong> <code>run-hook</code> resolves at once with outcome <code>ok</code> and no reply. The owner continues with its original data.</li>
+<li><strong>Slow owner path.</strong> The owner pays for the chain. The action waits for a <code>veto</code>, <code>transform</code> or <code>first</code> chain, at most the 100 ms cap plus one deadline. A handler that is skipped at the cap counts as <code>pass</code>, so a <code>veto</code> chain that never reached a refusal lets the action go on.</li>
+<li><strong>No retry by the kernel.</strong> The kernel never re-runs a failed chain. The owner decides.</li>
+</ul>
+<h3 id="used-by">Used by</h3>
+<ul>
+<li>Every core plugin that has an <strong>Extension points</strong> section uses this mechanism for it. <a href="/pages/reference-core-extension-points/">Reference: core extension points</a> lists them all.</li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a> shows the quiet hours scenario: a <code>veto</code> hook on <code>ilium.core.notifications/before-notify</code>.</li>
+</ul>
+<p>The host pre-activates the inactive contributors of an active owner in the background, so the first call does not wait for a cold start. A handler skipped because its instance is still activating counts as <code>pass</code>, not as a breach. [LIF-274]</p>
+<ul>
+<li>[LIF-274] The host MUST activate inactive contributors of an active owner in the background. Test: owner activates, contributor is <code>active</code> without a call.</li>
+</ul>
+<p>Requirement ids for this page: [EXT-002], [EXT-003], [EXT-004], [EXT-005], [EXT-006], [EXT-007], [EXT-008], [EXT-010], [EXT-011], [EXT-012], [EXT-013], [EXT-014], [EXT-020], [EXT-021], [EXT-022], [EXT-024], [EXT-025], [EXT-026], [EXT-027], [EXT-028], [EXT-029], [EXT-030], [EXT-043]. See the <a href="/pages/reference-requirements/">requirements index</a>.</p>
+<h3 id="see-also">See also</h3>
+<ul>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a> for the concept guide and the decision table.</li>
+<li><a href="/pages/reference-core-extension-points/">Reference: core extension points</a> for the points of every core plugin.</li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a> and <a href="/pages/capability-extensions-contribute/">extensions.contribute</a> for the grant rules.</li>
+<li><a href="/pages/api-services/">services</a>, <a href="/pages/api-messages-and-topics/">messages and topics</a> and <a href="/pages/api-menu-provider/">menu provider</a> for the other ways plugins work together.</li>
+<li><a href="/pages/api-exports/">exports</a> for <code>hook-handler</code> and its <code>with-hook-handler</code> fragment.</li>
+<li><a href="/pages/requests-and-outcomes/">requests and outcomes</a> for <code>request-completed</code> and <code>refused</code>.</li>
+<li><a href="/pages/errors-and-limits/">errors and limits</a> and <a href="/pages/reference-errors-and-limits/">reference: errors and limits</a> for the full code table.</li>
+<li><a href="/pages/rust-sdk/">Rust SDK</a> and <a href="/pages/typescript-sdk/">TypeScript SDK</a> for the module layout of each language.</li>
+<li><a href="/pages/reference-manifest/">reference: manifest</a> for the manifest keys, and <a href="/pages/versioning/">versioning</a> for point versions.</li>
+</ul>
+<p>Checked against <code>ilium:plugin@0.1.0</code>.</p>
+<h3 id="security">Security</h3>
+<p>Hook failure policy, budgets and nesting: see <a href="/pages/reference-extension-security/">Extension security</a> ([SEC-284] to [SEC-290]).</p>
+<p>Requirements for this page: <a href="/pages/reference-requirements-extension-points/">Extension points requirements</a>.</p>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/api-services/"><small>Previous</small>services</a><a class="next" href="/pages/api-settings/"><small>Next</small>settings</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#what-you-need">What you need</a></li><li class="l2"><a href="#names-and-manifest-entries">Names and manifest entries</a></li><li class="l2"><a href="#interface">Interface</a></li><li class="l2"><a href="#functions">Functions</a></li><li class="l2"><a href="#hook-modes">Hook modes</a></li><li class="l2"><a href="#rules-for-payloads-deadlines-ordering-and-failure">Rules for payloads, deadlines, ordering and failure</a></li><li class="l2"><a href="#diagram-owner-registry-and-contributors">Diagram: owner, registry and contributors</a></li><li class="l2"><a href="#example-rust-owner">Example: Rust owner</a></li><li class="l2"><a href="#example-rust-contributor">Example: Rust contributor</a></li><li class="l2"><a href="#example-typescript-owner">Example: TypeScript owner</a></li><li class="l2"><a href="#example-typescript-contributor">Example: TypeScript contributor</a></li><li class="l2"><a href="#entry-bound-services">Entry-bound services</a></li><li class="l2"><a href="#dynamic-collect-points">Dynamic collect points</a></li><li class="l2"><a href="#what-the-user-sees">What the user sees</a></li><li class="l2"><a href="#edge-cases-and-error-codes">Edge cases and error codes</a></li><li class="l2"><a href="#used-by">Used by</a></li><li class="l2"><a href="#see-also">See also</a></li><li class="l2"><a href="#security">Security</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

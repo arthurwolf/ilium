@@ -31,6 +31,10 @@ vt100 = "0.16.2"
 # `cargo test --lib --bins` would run it directly with no behaviour sidecar and
 # it would panic on purpose. The normal (non-test) build still lands in the
 # profile root, where the integration tests and other crates' tests find it.
+# `test = false`: with the harness off, `cargo test` would still run this bin as
+# a test target, which executes the fixture's `main` with no behaviour file and
+# fails the run before the integration tests start. The bin has no unit tests,
+# so skipping it loses nothing; the integration tests still get it built.
 [[bin]]
 name = "ilium-fixture-agent"
 path = "src/bin/ilium_fixture_agent.rs"

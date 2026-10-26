@@ -68,6 +68,8 @@ fn prompt_and_progress_content_changes_do_not_resize_the_terminal() {
                 message,
                 details: String::new(),
                 error: None,
+                eta_seconds: None,
+                indeterminate: false,
             },
             1000,
         )
@@ -135,6 +137,8 @@ fn hiding_a_completed_footer_preserves_its_slot_and_result() {
             message: "finished marker".into(),
             details: String::new(),
             error: None,
+            eta_seconds: None,
+            indeterminate: false,
         },
         1000,
     )

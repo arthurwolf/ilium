@@ -388,6 +388,7 @@ fn credit_footer_rows(area: Rect, model: &RowModel) -> u16 {
         .max()
         .unwrap_or(0);
     if area.height < 16
+        || urls.is_empty()
         || area.width.saturating_sub(layout(area).panel.width) as usize >= longest.max(16)
         || urls.is_empty()
     {
@@ -1239,12 +1240,10 @@ fn render_plugin_editor(
     }
     if inner.height >= 2 {
         frame.render_widget(
-            Paragraph::new(
-                editor
-                    .error
-                    .as_deref()
-                    .unwrap_or("Enter applies · Esc cancels"),
-            )
+            Paragraph::new(editor.error.as_deref().map_or_else(
+                || "Enter applies · Esc cancels".to_owned(),
+                |error| format!("F9 details · {error}"),
+            ))
             .style(ink),
             Rect::new(inner.x, action_row.y.saturating_sub(1), inner.width, 1),
         );
@@ -1504,7 +1503,17 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
         .or(app.status_message.as_deref())
         .unwrap_or(generic_saved_status);
     frame.render_widget(
-        Paragraph::new(fit(status_message, usize::from(panel.width))).style(ink),
+        Paragraph::new(fit(
+            &if app.status_message.as_deref() == Some(status_message)
+                || semantic_error.as_deref() == Some(status_message)
+            {
+                format!("F9 details · {status_message}")
+            } else {
+                status_message.to_owned()
+            },
+            usize::from(panel.width),
+        ))
+        .style(ink),
         Rect::new(panel.x, status_y, panel.width, 1),
     );
     let instructions = if activity_visible {
@@ -3065,10 +3074,10 @@ mod tests {
         app.set_screen_area(Rect::new(0, 0, width, height));
         let probe = FakeProbe::new();
         *app.animation_frame.host_mut() = fake_host(&probe);
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::Animations,
             ..Default::default()
-        });
+        }));
         (app, probe, project)
     }
 
@@ -3253,9 +3262,14 @@ mod tests {
     fn semantic_scope_row_persists_through_real_project_configuration() {
         use crate::background_animation::SemanticScope;
         let (mut app, _probe, project) = settings_app(80, 24);
+        // Edits are refused while the project settings are still loading, so
+        // let that load finish before the first change.
+        app.settle_filesystem_for_test();
         let was_enabled = app.animation_settings.enabled;
         let semantic_row = row_index(&app, &AnimationRow::Scene(AnimationKind::Semantic));
         app.settings_adjust_animation_row(semantic_row, 1);
+        app.settle_filesystem_for_test();
+        assert_eq!(app.animation_settings.kind, AnimationKind::Semantic);
         assert_eq!(
             app.animation_settings.semantic_scope,
             SemanticScope::Project
@@ -3599,14 +3613,14 @@ mod tests {
             let panel = layout(area).panel;
             for row in 0..count {
                 let scroll = follow_selection(area, &model, row, Scrolls::default());
-                app.mode = Mode::Settings(SettingsState {
+                app.mode = Mode::Settings(Box::new(SettingsState {
                     tab: SettingsTab::Animations,
                     selected_row: row,
                     scroll: scroll.controls,
                     scene_scroll: scroll.scenes,
                     global_scroll: scroll.global,
                     ..Default::default()
-                });
+                }));
                 let y = row_y(area, &model, row, scroll).expect("row visible after scrolling");
                 let terminal = draw(&mut app, width, height);
                 let row_area = row_rect(area, &model, row, scroll).unwrap();
@@ -3836,14 +3850,14 @@ mod tests {
         let lightness = row_index(&app, &AnimationRow::Common("lightness"));
         let model = app.animation_row_model();
         let scroll = follow_selection(area, &model, lightness, Scrolls::default());
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::Animations,
             selected_row: lightness,
             scroll: scroll.controls,
             scene_scroll: scroll.scenes,
             global_scroll: scroll.global,
             ..Default::default()
-        });
+        }));
         let model = app.animation_row_model();
         let geometry = slider_geometry(area, &model, lightness, scroll).unwrap();
         let voice_enabled = app.voice_settings.enabled;

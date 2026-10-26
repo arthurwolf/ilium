@@ -23,6 +23,7 @@
 use ilium::session;
 
 mod broadcast;
+mod close_pane;
 mod ctl;
 mod pane_filter;
 mod pane_scan;
@@ -162,7 +163,11 @@ enum Command {
     /// Same as `ilium progress wait`: blocks until MONITOR_ID (or this pane's
     /// only running monitor) settles, then prints one JSONL line.
     Wait {
+        /// Monitor to wait for; defaults to the pane's only running monitor
+        /// (or its only monitor).
         monitor_id: Option<u64>,
+        /// Give up after this many seconds (exit 6). Omit to wait as long as
+        /// the task takes.
         #[arg(long)]
         timeout_seconds: Option<u64>,
     },
@@ -186,6 +191,10 @@ enum Command {
     /// "Send message to all" does. The pane running this command is skipped
     /// unless --include-self is given. Output is JSONL.
     Broadcast(broadcast::BroadcastArgs),
+    /// Close a pane of this session, by default the pane this command runs
+    /// in. `--worktree remove` also removes the pane's Ilium-created Git
+    /// worktree when it is clean, merged and unused. Output is JSONL.
+    ClosePane(close_pane::ClosePaneArgs),
     /// Full remote control of a running session for agents and scripts: read
     /// the tree, project or pane as JSON/YAML/Markdown; create, rename, move,
     /// close and drive panes; manage worktrees. Start with `ilium ctl guide`.
@@ -314,7 +323,9 @@ enum ProgressCommand {
     /// `.claude/settings.local.json`). Reads the hook payload on stdin and,
     /// inside an Ilium pane, refuses a foreground Bash call with a tool
     /// timeout above three minutes that is not an `ilium progress` command:
-    /// exit 0 with a deny decision on stdout. Otherwise exits 0. Listed in
+    /// exit 0 with a deny decision on stdout. A background Bash call in a
+    /// pane passes with a reminder (`additionalContext`) to register a monitor
+    /// for long tasks. Otherwise exits 0. Listed in
     /// help on purpose: the project hook runs it only when `ilium progress
     /// --help` names `guard`.
     Guard,
@@ -562,6 +573,7 @@ async fn dispatch(cli: Cli) -> Result<(), CliError> {
         Some(Command::Panes(args)) => panes::panes(args, &cli.cwd).await,
         Some(Command::Recap(args)) => recap::recap(args, &cli.cwd).await,
         Some(Command::Broadcast(args)) => broadcast::broadcast(args, &cli.cwd).await,
+        Some(Command::ClosePane(args)) => close_pane::close_pane(args).await,
         Some(Command::Ctl(args)) => ctl::ctl(args, &cli.cwd).await,
     }
 }
@@ -697,8 +709,14 @@ fn chatroom_project_root(cwd: &Path) -> PathBuf {
 
 fn default_chatroom_author() -> String {
     std::env::var("ILIUM_CHATROOM_AUTHOR")
-        .or_else(|_| std::env::var("AGENT_NAME"))
-        .unwrap_or_else(|_| "agent".to_string())
+        .ok()
+        .filter(|author| !author.trim().is_empty())
+        .or_else(|| {
+            std::env::var("AGENT_NAME")
+                .ok()
+                .filter(|author| !author.trim().is_empty())
+        })
+        .unwrap_or_else(|| "agent".to_string())
 }
 
 /// This pane's identity, as injected by `ilium-server` at spawn time (see
@@ -1499,20 +1517,85 @@ async fn attach_or_create(
         should_reset_session,
         "interactive session attach started"
     );
-    let exit_reason = ilium_client::run(ilium_client::RunOptions {
+    let run_result = ilium_client::run(ilium_client::RunOptions {
         session_name: project_session.name.clone(),
         session_cwd: project_session.project_root.clone(),
         socket_path: project_session.socket_path.clone(),
         log_path,
         onboarding,
     })
-    .await?;
+    .await;
+    let exit_reason = match run_result {
+        Ok(exit_reason) => exit_reason,
+        Err(ilium_client::error::ClientError::ServerConnectionLost(error)) => {
+            return recover_lost_server_connection(&client_executable, &project_session, error)
+                .await;
+        }
+        Err(error) => return Err(error.into()),
+    };
     match exit_reason {
         ilium_client::ClientExitReason::Quit => Ok(()),
         ilium_client::ClientExitReason::RestartRequested => {
-            restart_client_process(&client_executable, &project_session).await
+            restart_client_process(&client_executable, &project_session, None).await
         }
     }
+}
+
+/// Environment variable carrying `<attempts>:<first unix second>` across the
+/// client relaunches this module performs after a lost server connection.
+const CONNECTION_RECOVERY_ENV: &str = "ILIUM_CONNECTION_RECOVERY";
+/// A server that keeps dropping the window must not trap it in a relaunch
+/// loop: after this many relaunches inside the window the error is reported.
+const MAX_CONNECTION_RECOVERIES: u64 = 5;
+const CONNECTION_RECOVERY_WINDOW_SECONDS: u64 = 600;
+const CONNECTION_RECOVERY_DELAY: Duration = Duration::from_millis(500);
+
+/// Computes the recovery state for the next relaunch, or `None` when the
+/// relaunch budget of the current window is spent. Pure so the budget is
+/// testable without a process or a clock.
+fn next_connection_recovery_state(previous: Option<&str>, now_seconds: u64) -> Option<String> {
+    let (attempts, window_start) = previous
+        .and_then(|state| state.split_once(':'))
+        .and_then(|(attempts, start)| {
+            Some((attempts.parse::<u64>().ok()?, start.parse::<u64>().ok()?))
+        })
+        .filter(|(_, start)| {
+            now_seconds.saturating_sub(*start) < CONNECTION_RECOVERY_WINDOW_SECONDS
+        })
+        .unwrap_or((0, now_seconds));
+    let attempts = attempts.checked_add(1)?;
+    (attempts <= MAX_CONNECTION_RECOVERIES).then(|| format!("{attempts}:{window_start}"))
+}
+
+/// The server dropped this window while it was running (for example after a
+/// failed lag resynchronization) but is still serving its session: relaunch
+/// the window so it reattaches instead of leaving the user with a dead
+/// terminal. A server that is gone (killed session, crash) or a spent
+/// relaunch budget reports the original error unchanged, so a deliberate
+/// shutdown never resurrects the server.
+async fn recover_lost_server_connection(
+    executable_path: &Path,
+    project_session: &session::ProjectSession,
+    error: ilium_ipc::IpcError,
+) -> Result<(), CliError> {
+    tracing::warn!(%error, "lost the server connection while the window was running");
+    let lost = ilium_client::error::ClientError::ServerConnectionLost(error);
+    if !session::is_session_live(&project_session.socket_path) {
+        tracing::warn!("the session server is no longer live; not relaunching the window");
+        return Err(lost.into());
+    }
+    let now_seconds = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs());
+    let Some(recovery_state) = next_connection_recovery_state(
+        std::env::var(CONNECTION_RECOVERY_ENV).ok().as_deref(),
+        now_seconds,
+    ) else {
+        tracing::error!("the window lost its server connection too often; not relaunching");
+        return Err(lost.into());
+    };
+    tokio::time::sleep(CONNECTION_RECOVERY_DELAY).await;
+    restart_client_process(executable_path, project_session, Some(recovery_state)).await
 }
 
 /// Replaces this client process with the executable captured before the TUI
@@ -1521,14 +1604,20 @@ async fn attach_or_create(
 async fn restart_client_process(
     executable_path: &Path,
     project_session: &session::ProjectSession,
+    connection_recovery_state: Option<String>,
 ) -> Result<(), CliError> {
     tracing::info!("client process replacement requested");
     process_logging_barrier(false).await?;
-    let source = ilium_platform::process_control::replace_current_process(
-        ProcessCommand::new(executable_path)
-            .args(client_restart_args(project_session))
-            .current_dir(&project_session.project_root),
-    );
+    let mut command = ProcessCommand::new(executable_path);
+    command
+        .args(client_restart_args(project_session))
+        .current_dir(&project_session.project_root);
+    match connection_recovery_state {
+        Some(state) => command.env(CONNECTION_RECOVERY_ENV, state),
+        // A deliberate restart starts a fresh relaunch budget.
+        None => command.env_remove(CONNECTION_RECOVERY_ENV),
+    };
+    let source = ilium_platform::process_control::replace_current_process(&mut command);
     Err(CliError::RestartClient {
         path: executable_path.to_path_buf(),
         source,
@@ -2162,6 +2251,31 @@ mod tests {
     }
 
     #[test]
+    fn connection_recovery_budget_counts_relaunches_inside_one_window() {
+        use super::{next_connection_recovery_state as next, MAX_CONNECTION_RECOVERIES};
+        assert_eq!(next(None, 1_000).as_deref(), Some("1:1000"));
+        assert_eq!(next(Some("1:1000"), 1_030).as_deref(), Some("2:1000"));
+        let spent = format!("{MAX_CONNECTION_RECOVERIES}:1000");
+        assert_eq!(next(Some(&spent), 1_100), None);
+    }
+
+    #[test]
+    fn connection_recovery_budget_restarts_after_the_window_or_bad_state() {
+        use super::{
+            next_connection_recovery_state as next, CONNECTION_RECOVERY_WINDOW_SECONDS,
+            MAX_CONNECTION_RECOVERIES,
+        };
+        let spent = format!("{MAX_CONNECTION_RECOVERIES}:1000");
+        let later = 1_000 + CONNECTION_RECOVERY_WINDOW_SECONDS;
+        assert_eq!(
+            next(Some(&spent), later).as_deref(),
+            Some(&*format!("1:{later}"))
+        );
+        assert_eq!(next(Some("garbage"), 50).as_deref(), Some("1:50"));
+        assert_eq!(next(Some("x:y"), 50).as_deref(), Some("1:50"));
+    }
+
+    #[test]
     fn cmd_shell_keeps_backslash_and_short_name_paths_bare() {
         let path = r"C:\Users\RUNNER~1\x\codex.exe";
         assert!(super::is_shell_safe_bare_word(path, true));
@@ -2591,9 +2705,12 @@ mod tests {
                 message: String::new(),
                 details: String::new(),
                 error: None,
+                eta_seconds: None,
+                indeterminate: false,
             },
             monitor_health,
             last_observed_unix_millis: 0,
+            timing: Default::default(),
             attention: Default::default(),
         };
         let failed = ilium_core::ProgressMonitorHealth::Failed {

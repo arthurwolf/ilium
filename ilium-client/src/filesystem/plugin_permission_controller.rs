@@ -22,7 +22,6 @@ use std::{
     collections::BTreeMap,
     sync::{Arc, Mutex},
 };
-use tokio::sync::Notify;
 
 type Result<T> = std::result::Result<T, String>;
 type LoadedOutcome = Retained<std::result::Result<LedgerSnapshot, PersistenceError>>;
@@ -266,8 +265,13 @@ impl PluginPermissionController {
             .with_permission_review_state(instance_id, inspect)
             .map_err(|error| error.to_string())
     }
-    // Same unfinished plugin permission workflow as `notification`.
-    #[allow(dead_code)]
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "Read-only twin of package_instance_mut; only tests read it"
+        )
+    )]
     pub(crate) fn package_instance(&self) -> Option<&PackageInstance> {
         if self.finished && self.blocked.is_none() {
             self.instance.as_ref()

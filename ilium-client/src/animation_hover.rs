@@ -316,10 +316,10 @@ mod tests {
         let mut app = App::new("test".into(), project.path().to_path_buf());
         app.set_screen_area(Rect::new(0, 0, width, height));
         app.animation_settings.kind = AnimationKind::DitheredWaves;
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::Animations,
             ..Default::default()
-        });
+        }));
         (app, project)
     }
 

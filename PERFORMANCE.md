@@ -8,6 +8,14 @@ every accepted optimization, its isolated result, and the final installed
 runtime result. Values are interval averages or multi-sample medians; an
 instantaneous process sample is never used as evidence.
 
+## Fresh terminal startup qualification
+
+Fresh creation is measured separately from selecting an existing pane. Build matching release `ilium` and `ilium-server` binaries, then run `cargo test --release -p ilium --test pty_tui_smoke terminal_pool_runtime::fresh_terminal_startup_with_128_idle_and_busy_panes -- --ignored --nocapture` through ni-build in an isolated build folder. The existing 128-pane selection-recovery test and its five-second gate remain independent.
+
+The fresh-start harness uses 127 existing synthetic PTYs plus one newly created terminal, 32 trials each with idle and continuously busy background terminals. A real keyboard creation action starts the clock; a unique marker must appear inside the content viewport. Reports include successful p50/p95/p99/max and separately counted failures and censored trials. The two-second per-trial limit is an acceptance target, not a measured result.
+
+With isolated file logging enabled and `RUST_LOG=ilium_startup=debug`, numeric startup records cover creation intent/admission, server request receipt, process launch, first raw PTY read, first parsed publication and successful frame emission. A frame retains the terminal identities and output sequences captured during composition; rejected or uncertain output is excluded. These records contain no command or terminal text. Same-process intervals use monotonic clocks; cross-process intervals use wall clocks and require a stable host clock. Synthetic fixture performance does not establish the duration or cause of a user's real agent startup incident. Add parser workers only after these measurements identify parsing as the bottleneck.
+
 ## Environment and protocol
 
 - Host: `aquarelle`, Linux 7.0.0-29-generic, Intel Core i5-11600K, 6 cores / 12
@@ -471,117 +479,98 @@ the coordinator in isolation or the final release TUI. The same temporary
 repository test verifies dirty-count refresh, a mid-run branch switch, and
 status replay on attach.
 
-## Many-agent scale pass (2026-10-10)
+## Many-agent scale pass (2026-10-14)
 
-**Method.** `tools/scale-bench/scale_bench.py` ran the full pane set (`--panes N`)
-against isolated XDG directories and a controlled tmux session. Each run records
-client and server CPU, threads, read syscalls and context switches (per second),
-plus per-keystroke round-trip latency (p50/p95/max). Baseline binaries were the
-pre-pass builds in `/media/arthur/tmp/ilium-scale-bench/baseline-bin`. The new
-binaries are job `713d52e9e5ff4408967a210b33aba4d7` (ni-build receipt, `make install`
-verified: `ilium` `609f3e6d…`, `ilium-server` `34efacc3…`, `ilium-animation-helper`
-`68ebb28c…`, installed to `~/.cargo/bin`). Baseline and new runs were interleaved
-(baseline first, then new, one pair per pane count). Raw records:
-`series-r4.jsonl` and `series-r5.jsonl`.
+**Method.** `tools/scale-bench/scale_bench.py` ran 50, 100 and 200 panes, each in an
+isolated XDG directory and a controlled tmux session. Each run takes 3 samples,
+10 s apart, of server and client CPU, threads, resident memory, read and write
+syscalls, context switches, and per-keystroke round-trip latency (p50, p95, max).
+Two release builds were made through ni-build from git snapshots:
 
-**Caveat: host load.** The 12-core machine ran other agents' jobs during the bench
-(load average 16 to 28). The bench is not a quiet-machine measurement. Two of the
-200-pane baseline attempts, and one new-200 attempt (r4), aborted with
-`new-pane N of 200 failed: no confirmation received from the server`. Those runs
-are superseded by the `new-pane` fix below, which explains the failures.
+- master `f8e59c6`: ni-build job `9df5a8fc34b44922b2d1ae7058c9a0a1`, exit 0.
+- branch `c54621f`, which contains all of master plus this branch's changes: ni-build
+  job `364efa1405f542fdbc086f7df4cae0fa`, exit 0.
 
-**Comparison** (latency in ms; CPU in percent of one core; read syscalls and
-context switches per second, server only):
+Both builds used `NI_BUILD_CACHE=off`, which ni-build required on this host. The
+binaries were not installed. SHA-256 prefixes: master `ilium` `9c910c49`, `ilium-server`
+`bef7af05`; branch `ilium` `f236e9e1`, `ilium-server` `753c8f92`. Runs were
+interleaved, master then branch, per pane count.
 
-| Run | Panes | p50 | p95 | max | Server CPU | Client CPU | Server read syscalls/s | Server ctx switches/s |
-|---|---|---|---|---|---|---|---|---|
-| baseline | 50 | 11.3 | 53.1 | 167.8 | 40.2 | 2.9 | 58 111 | 8 965 |
-| new | 50 | 9.0 | 14.7 | 16.6 | 5.2 | 3.8 | 1 192 | 3 247 |
-| baseline | 100 | 17.3 | 93.1 | 117.3 | 49.1 | 2.9 | 61 483 | 17 542 |
-| new | 100 | 14.6 (r4) / 8.4 (r5) | 30.0 / 10.8 | 32.3 / 11.9 | 8.4 / 7.9 | 4.2 / 4.1 | 1 463 / 1 455 | 5 375 / 5 321 |
-| new (r5, before the `new-pane` fix) | 200 | 8.3 | 37.9 | 171.1 | 13.2 | 4.2 | 2 073 | 10 416 |
-| baseline (HEAD 586f6ed) | 200 | not measured | not measured | not measured | not measured | not measured | not measured | not measured |
-| candidate (HEAD plus `new-pane` fix, job 430603704c0649c682a6498b2c4b1c31) | 200 | 11.0 | 25.7 | 36.0 | 15.3 | 4.9 | 1 560 | 9 661 |
+**Caveat.** One run per configuration, 3 samples per run, on a shared host with other
+agents' jobs. Treat differences under roughly 20 percent as noise.
 
-The baseline has no 200-pane result. Its `new-pane` loop stopped at pane 71 in one
-interleaved run and at pane 169 in a clean retry (168 panes created), both with the
-5 s confirmation timeout. The candidate ran all 200 panes with no failures and one
-latency timeout. Its `timeouts: 1` is the same open item as above.
+**Results** (latency in ms; CPU in percent of one core; syscalls and context switches
+per second; server side unless marked client):
 
-Server threads were 260, 510 and 1010 for 50, 100 and 200 panes, in both baseline
-and new. The pass did not change per-pane thread count. Every run recorded one
-harness timeout (`timeouts: 1`). I did not trace its source, so treat it as an
-open question.
+| Panes | Build | p50 | p95 | max | Timeouts | Server CPU | Server threads | Server RSS (MiB) | Server read syscalls/s | Server write syscalls/s | Server ctx switches/s | Client CPU |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 50 | master | 63.3 | 124.3 | 172.9 | 1 | 8.4 | 260 | 39.0 | 1 771 | 336 | 2 395 | 22.8 |
+| 50 | branch | 76.8 | 144.6 | 165.3 | 1 | 7.8 | 260 | 38.4 | 1 536 | 315 | 2 433 | 24.4 |
+| 100 | master | 61.1 | 143.7 | 171.3 | 1 | 13.0 | 510 | 57.4 | 1 939 | 475 | 4 173 | 21.5 |
+| 100 | branch | 42.9 | 99.9 | 107.9 | 1 | 12.4 | 510 | 56.7 | 1 885 | 583 | 4 652 | 19.0 |
+| 200 | master | 55.9 | 103.7 | 124.1 | 1 | 20.4 | 1010 | 95.4 | 2 320 | 607 | 6 807 | 6.8 |
+| 200 | branch | 52.7 | 93.6 | 108.1 | 1 | 19.6 | 1010 | 96.0 | 2 392 | 720 | 7 541 | 7.4 |
 
-**Reading.** Server read syscalls fell by about 40 times at 50 and 100 panes
-(about 60 000/s to about 1 400/s). Server CPU fell from 40 to 49 percent to 5 to 8
-percent, which is about 6 times lower. p95 latency dropped from 53 to 15 ms at 50
-panes and from 93 to 11 ms at 100 panes. Client CPU stayed at 3 to 4 percent. The
-gain is almost all server-side, from the pane-only broadcast change and the
-detection and owner fixes below. This is two interleaved pairs, not a statistical
-study. Repeat with a quiet host before quoting a multiplier as a fact.
+Every run recorded one latency timeout (`timeouts: 1`). Its source is not traced.
 
-**`new-pane` confirmation fix (2026-10-10).** Earlier 200-pane runs failed with
-`no confirmation received`. The cause was in the CLI, not server load. `new-pane`
-waited for a `TreeSnapshot` after attach, but the attach reply is a
-`PaneStateSnapshot`, so every call waited the full 5 s before sending. Under load a
-spawn could also exceed the 5 s confirmation budget. The fix accepts the attach
-`PaneStateSnapshot` in the baseline wait and gives the `NewPane` confirmation a
-30 s budget (`NEW_PANE_CONFIRMATION_TIMEOUT`, `ilium/src/main.rs`).
+**Reading.**
 
-Measured: per-pane `new-pane` median 5.04 s before the fix (157 panes, baseline).
-After the fix, the candidate median is 75 ms, p95 227 ms, max 7.75 s over 200 panes
-at load about 24. Three isolated calls took 17 to 126 ms. The candidate is
-HEAD plus only the two `main.rs` hunks, built as ni-build job
-`430603704c0649c682a6498b2c4b1c31`, installed to a scratch bin dir with
-`tools/install-from-receipt.py`.
+- At 100 and 200 panes the branch has lower p50, p95 and max latency than master. At
+  50 panes the branch is slower on p50 and p95. With 3 samples per run, only the
+  100-pane p95 gap is clearly larger than the stated noise band.
+- Server CPU, threads and memory are the same within a few percent for both builds.
+- Read syscall rates match within about 10 percent. Write syscalls and context switches
+  are about 10 to 20 percent higher on the branch at 100 and 200 panes.
+- The 2026-10-10 section reported a roughly 40-fold drop in server read syscalls.
+  That comparison used a different baseline, not `f8e59c6`. This run does not
+  reproduce it against current master.
 
-Clippy on that candidate: `cargo clippy --workspace --all-targets` exit 0 (ni-build job
-`87c01c641f0b4696881eed8f1a77bc68`), 272 warning lines, none in `ilium/src/main.rs`.
-`rustfmt --check` on `ilium/src/main.rs` passes.
-
-**Changes in this pass.**
-- Queued-prompt acknowledgement and scheduled-input countdown clearing send one
-  `PaneNodeChanged` for their own pane instead of a full-tree snapshot
-  (`ilium-server/src/prompt_queue.rs`, `ilium-server/src/scheduled_input.rs`).
-  This is the main source of the read-syscall drop.
-- Detection: when two processes claim one session, both claims are invalidated
-  (no arbitrary winner). The phase-3 ambiguity check now includes the current
-  ambiguous set as well as the captured one (`ilium-server/src/detection.rs`).
-- PTY owner tests: the harness writer now uses the production completion wake, and
-  the replay-prefix tests model truncation with a discarded oldest chunk
-  (`ilium-pty/src/owner_tests.rs`, `ilium-pty/src/session.rs`).
-- Chatroom maintenance (`ilium-client/src/app.rs`): full reconcile runs only when the
-  15 s repair interval is due or the visible chatroom file stamp changes. Structural
-  requests reset the interval. Test:
-  `chatroom_full_repairs_are_throttled_between_structural_requests`.
-
-**Verification.** `ilium-detect` and `ilium-server` detection tests: 34 passed,
-0 failed. `ilium-pty`: 61 + 2 + 12 passed, 0 failed. `ilium-client` chatroom
-filter: 21 passed, 0 failed (includes the throttle test). Workspace `cargo clippy`
-and `cargo fmt --check` were not clean for reasons outside this pass; see the
-blocker list below.
-
-**Design targets: outcome.**
+**Design targets: outcome.** Carried over from the 2026-10-10 pass. These were not
+re-measured in this run.
 
 | Target | Outcome | Reason |
 |---|---|---|
-| Sidebar row cache (P07, P09) | Not done | Client CPU was 2.9 to 4.2 percent at 50 to 200 panes. No client hotspot was measured, so there was nothing to cache. |
-| Chatroom mtime-gated maintenance | Done (unmeasured) | Implemented and unit-tested. The bench does not run a chatroom, so its cost is not in the table. |
-| Remaining `broadcast_and_persist` callers | Partly done | Two callers that mutate one pane now send one pane node. Structural callers (add, close, move, rename) change the tree shape and keep the full snapshot. |
-| Codex transcript path caching | Not done | The bench loop does not exercise the transcript stat path, so there is no measured cost. |
-| Cost tracking above 1024 panes | Not done | `MAX_PANES` (`ilium-client/src/cost_tracker/preparation.rs`) is a capacity gate. It stays at 1024. Measured targets stop at 200. Raise it only with a measured need. |
+| Sidebar row cache | Not done | Client CPU was 7 to 24 percent in this run, with no measured client hotspot to cache. |
+| Chatroom maintenance gated on file change | Done, unmeasured | Implemented with a unit test. The bench does not run a chatroom. |
+| Pane-only broadcasts for single-pane mutations | Partly done | Queued-prompt acknowledgement and scheduled-input countdown send one pane update. Structural changes (add, close, move, rename) keep the full snapshot. |
+| Codex transcript path caching | Not done | The bench does not exercise the transcript path, so there is no measured cost. |
+| Cost tracking above 1024 panes | Not done | `MAX_PANES` in `ilium-client/src/cost_tracker/preparation.rs` is a capacity gate and stays at 1024. Measured targets stop at 200. |
 
-**Blockers (not fixed here).**
-- Workspace clippy: `ilium-client/src/semantic_animation_tui.rs` (E0433) and
-  `preview_tests.rs` (`invalid_regex` deny lint) fail. Owners outside this pass.
-- Workspace `cargo fmt --check`: other owners' unformatted sections.
-- The 200-pane baseline has no completed run; its `new-pane` loop stops at pane 71 or
-  169 (see the table). The fix above removes the 5 s wait that caused it.
-- The working-tree `ilium-server` (uncommitted changes in `ilium-server/src/ipc/`,
-  owned by other agents) closes the IPC connection on `new-pane`
-  (`no confirmation received`, at pane 1, with the HEAD CLI too). Those edits are not
-  in the candidate. Reported to the owners in the chatroom.
-- The live `ilium-server` PID 255418 is no longer present. Another agent's
-  `ilium --restart-server` (PID 1218448, started 06:00) is in the process list.
-  The running server, if any, may still be an old binary. The user owns restart.
+**Not verified in this pass.**
+
+- Verified on the branch source (identical to `c54621f`) through ni-build: strict
+  `cargo clippy --workspace --all-targets` exited 0; `rustfmt --check` on the three
+  changed Rust files exited 0; `ilium-pty` library and integration tests passed
+  (79 tests, 0 failed; doc-tests excluded); `ilium-detect` tests passed (74 unit
+  tests, plus the integration tests, including the one that spawns the fixture
+  agent binary; all passed when the fixture package was built in the same run).
+- `ilium-server` library and integration tests, run through ni-build on the branch
+  and on master (`f8e59c6`): both show 583 passed and 12 failed. The 12 failing
+  tests are the same on both builds, so the branch adds no failures. These are
+  pre-existing master failures in the chatroom router, IPC connection and
+  registry, direct-event, notification and state-subscriber tests; they are not
+  fixed in this pass.
+- The `ilium-server` IPC changes that the earlier pass flagged as breaking `new-pane`
+  have not been re-checked against this build.
+- The earlier 200-pane baseline problem (`new-pane` timing out at 5 s) was not
+  re-tested on these builds.
+
+
+The 2026-10-22 remote qualification used synthetic shell terminals on ni-vm,
+127 existing panes plus each fresh pane, and 32 trials per workload:
+
+| Workload | Median | 95th percentile | Maximum | Failed / censored |
+| --- | ---: | ---: | ---: | ---: |
+| Idle | 152.720 ms | 198.775 ms | 274.881 ms | 0 / 0 |
+| Continuously busy | 200.661 ms | 281.910 ms | 309.655 ms | 0 / 0 |
+
+Every trial had a complete correlated stage chain, preserved input echo, and
+retained its final marker. The existing 128-pane selection gate also passed.
+Remote runtime receipt: `14dd40ad34874a62baf5fe79af8932da` (exit 0, stable
+source, verified cleanup). Server raw-read-to-publication parsing was at most
+6.254 ms; client parsing is included in the later delivery-to-frame interval
+and was not separately timed. These measurements do not identify parser
+service as the bottleneck, so parser worker count remains unchanged. The
+keyboard shortcut exercises the same New Terminal action as its toolbar
+button; this is not a mouse-menu timing or a real-agent CLI startup measurement,
+and it does not establish the cause or resolution of the user's live incident.

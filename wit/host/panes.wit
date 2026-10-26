@@ -1,0 +1,8 @@
+package ilium:host@0.1.0;
+
+interface panes {
+  use ilium:types/ids@0.1.0.{node-id};
+  use ilium:types/tree@0.1.0.{pane-info};
+  info: func(pane: node-id) -> option<pane-info>;
+  focused: func() -> option<node-id>;
+}

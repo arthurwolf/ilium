@@ -56,6 +56,7 @@ pub mod file_lock;
 pub mod flatpak_host;
 #[cfg(unix)]
 pub mod interruptible_reader;
+pub mod local_time;
 pub mod minecraft;
 #[cfg(windows)]
 mod nofollow_windows;
@@ -68,4 +69,5 @@ pub mod provider_admission; // Native-account finite-provider slot ownership.
 pub mod pty_io;
 pub mod runtime_dir;
 pub mod secure_fs;
+pub mod startup_timing;
 pub mod thread_priority;

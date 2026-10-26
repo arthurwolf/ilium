@@ -385,6 +385,9 @@ pub struct TerminalPaneRuntime {
     /// owner. Keep across child replacements; detection prunes exact old births.
     pub agent_launcher_ancestors: Vec<AgentProcessKey>,
     pub agent_generation: u64,
+    /// At most one actor and one coalescing mailbox for detection follow-ups.
+    detection_effects: Option<crate::detection_effects::DetectionEffects>,
+    pub(crate) detection_completion: crate::detection_effects::CompletionEpoch,
     pub agent_input_available: bool,
     /// Invalidates admitted automated delivery when this invocation exits or
     /// is replaced. Manual input still awaits its receipt for recovery.
@@ -488,6 +491,8 @@ impl TerminalPaneRuntime {
             agent_process_key: None,
             agent_launcher_ancestors: Vec::new(),
             agent_generation: 0,
+            detection_effects: None,
+            detection_completion: crate::detection_effects::CompletionEpoch::default(),
             agent_input_available: false,
             agent_input_cancel: watch::channel(0).0,
             verified_agent_exit: None,
@@ -585,7 +590,51 @@ impl TerminalPaneRuntime {
         true
     }
 
+    /// Queue bounded follow-up work without awaiting shared execution or
+    /// persistence capacity inside the all-pane detection sweep.
+    pub(crate) fn request_detection_effects(
+        &mut self,
+        state: &std::sync::Arc<crate::state::ServerState>,
+        pane_id: NodeId,
+        check_title: bool,
+        deliver_prompt: bool,
+    ) {
+        if !check_title && !deliver_prompt {
+            return;
+        }
+        let input = self.session.input_handle();
+        if !self
+            .detection_effects
+            .as_ref()
+            .is_some_and(|effects| effects.matches(self.agent_generation, &input))
+        {
+            self.detection_effects = Some(crate::detection_effects::DetectionEffects::start(
+                state,
+                pane_id,
+                self.agent_generation,
+                input,
+            ));
+        }
+        if let Some(effects) = &self.detection_effects {
+            effects.request(
+                check_title,
+                deliver_prompt,
+                self.detection_completion.current(),
+            );
+        }
+    }
+
+    pub(crate) fn invalidate_detection_completion(&mut self) {
+        self.detection_completion.invalidate();
+    }
+
+    pub(crate) fn retire_detection_completion(&mut self) {
+        self.detection_completion.retire_submission();
+    }
+
     pub(crate) fn cancel_agent_owned_delivery(&mut self) {
+        self.invalidate_detection_completion();
+        self.detection_effects = None;
         self.cancel_initial_prompt_delivery();
         self.cancel_progress_delivery_tasks();
         self.cancel_auto_answer_task();
@@ -1148,6 +1197,7 @@ impl TerminalPaneRuntime {
     /// `session.kill()`, since a pane can also be torn down after its
     /// child already exited on its own).
     pub fn abort_background_tasks(&mut self) {
+        self.detection_effects = None;
         if let Some(forward_task) = self.forward_task.take() {
             forward_task.abort();
         }

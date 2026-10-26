@@ -1135,6 +1135,23 @@ fn current_status_text<'screen>(
     if !matches!(class, None | Some(AgentClass::Claude)) {
         return screen_text;
     }
+    // The composer is separated from conversation/status rows by a horizontal
+    // rule. Rows below it are configurable footer content, not live activity.
+    // Requiring that separator avoids treating an approval menu's cursor as
+    // the composer. Approval recognition still receives the complete screen.
+    let mut previous_was_separator = false;
+    let mut offset = 0;
+    let mut footer_start = None;
+    for line in screen_text.split_inclusive('\n') {
+        if previous_was_separator && line.trim_start().starts_with('❯') {
+            footer_start = Some(offset);
+        }
+        let trimmed = line.trim();
+        previous_was_separator =
+            trimmed.chars().count() >= 3 && trimmed.chars().all(|character| character == '─');
+        offset += line.len();
+    }
+    let screen_text = &screen_text[..footer_start.unwrap_or(screen_text.len())];
     let mut start = screen_text.len();
     for line in screen_text.split_inclusive('\n').rev() {
         start -= line.len();
@@ -1281,9 +1298,9 @@ fn is_background_task_wait_line(line: &str) -> bool {
             .any(|token| !token.is_empty() && token.bytes().all(|byte| byte.is_ascii_digit()))
 }
 
-/// True if any line looks like an in-progress status line: contains an
-/// ellipsis ('…') *and* an elapsed-time token (digits immediately
-/// followed by 's' or 'm', e.g. "6s", "12m"). This is the structural
+/// True if any line looks like an in-progress Claude status line: a spinner
+/// glyph, an activity label ending in an ellipsis, and parenthesized metadata
+/// containing an elapsed-time token (e.g. "6s", "12m"). This is the structural
 /// convention observed in real Claude Code output -- a present-tense
 /// whimsical verb ending in '…' plus a live elapsed-time counter, e.g.
 /// `"✢ Moonwalking… (running stop hooks… 1/2 · 6s · ↓ 4 tokens)"` -- and
@@ -1298,8 +1315,30 @@ fn looks_like_live_status_line(screen_text: &str) -> bool {
 
 /// The single-line rule behind [`looks_like_live_status_line`].
 fn is_live_status_line(line: &str) -> bool {
-    line.contains('…')
-        && line
+    // Claude's spinner is terminal chrome, not an arbitrary prose ellipsis.
+    // In particular, custom status footers can contain both truncated text
+    // and ages such as `first seen 4m …` while the composer is idle.
+    let mut characters = line.trim().chars();
+    if !characters
+        .next()
+        .is_some_and(|character| matches!(character, '·' | '✢' | '✳' | '∗' | '✻' | '✽'))
+    {
+        return false;
+    }
+    let body = characters.as_str();
+    if !body.starts_with(char::is_whitespace) {
+        return false;
+    }
+    let Some((label, metadata)) = body.trim_start().split_once('…') else {
+        return false;
+    };
+    let metadata = metadata.trim();
+    !label.is_empty()
+        && label
+            .chars()
+            .all(|character| character.is_alphabetic() || character == ' ')
+        && metadata.starts_with('(')
+        && metadata
             .split(|character: char| character.is_whitespace() || character == '·')
             .any(is_elapsed_time_token)
 }
@@ -2487,6 +2526,61 @@ mod tests {
             classify_activity(&fixture("claude_code_idle.txt")),
             AgentTurn::Idle
         );
+    }
+
+    #[test]
+    fn claude_idle_truncated_custom_footer_is_not_live_activity() {
+        // Captured read-only from a completed live Claude pane, 2026-10-17;
+        // account information is redacted in the fixture.
+        let screen = fixture("claude_idle_truncated_custom_footer.txt");
+        let classification = classify_activity_for_agent_detailed(&AgentClass::Claude, &screen);
+        assert_eq!(classification.turn, AgentTurn::Idle);
+        assert_eq!(classification.evidence, ActivityEvidence::NoActiveMarker);
+        assert_eq!(classification.matched_line, None);
+        assert_eq!(classify_activity(&screen), AgentTurn::Idle);
+    }
+
+    #[test]
+    fn claude_live_status_requires_terminal_chrome() {
+        for line in [
+            "Session: shared observation (first seen 4m …",
+            "The operation took 6s … and is complete.",
+            "● The operation… (6s) finished successfully.",
+            "✻ The operation took 6s … and is complete.",
+            "✻ Thinking… yesterday took 6s",
+        ] {
+            assert_eq!(
+                classify_activity_for_agent(&AgentClass::Claude, line),
+                AgentTurn::Idle,
+                "{line}"
+            );
+        }
+    }
+
+    #[test]
+    fn claude_custom_footer_cannot_supply_live_activity_chrome() {
+        let screen =
+            "✻ Cogitated for 29s · done 8:27 AM\n────────\n❯\n────────\n✻ Observing… (4m)\n";
+        assert_eq!(
+            classify_activity_for_agent(&AgentClass::Claude, screen),
+            AgentTurn::Idle
+        );
+    }
+
+    #[test]
+    fn claude_spinner_frames_preserve_live_status_after_summary() {
+        for spinner in ['·', '✢', '✳', '∗', '✻', '✽'] {
+            let live_line =
+                format!("{spinner} Moonwalking… (running stop hooks… 1/2 · 6s · ↓ 4 tokens)");
+            let screen = format!("✻ Cogitated for 29s · done 8:27 AM\n{live_line}\n❯");
+            let classification = classify_activity_for_agent_detailed(&AgentClass::Claude, &screen);
+            assert_eq!(classification.turn, AgentTurn::Working);
+            assert_eq!(classification.evidence, ActivityEvidence::ClaudeLiveStatus);
+            assert_eq!(
+                classification.matched_line.as_deref(),
+                Some(live_line.as_str())
+            );
+        }
     }
 
     #[test]

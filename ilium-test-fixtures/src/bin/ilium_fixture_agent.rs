@@ -39,6 +39,11 @@ fn main() {
     let behavior = load_behavior();
     match behavior {
         FixtureBehavior::Idle => linger(),
+        FixtureBehavior::StaticScreen { text } => {
+            emit("\x1b[2J\x1b[H");
+            emit(&text);
+            linger();
+        }
         FixtureBehavior::WorkingThenIdle { working_seconds } => {
             run_working_then_idle(working_seconds)
         }

@@ -93,6 +93,7 @@ ilium --reset-session new-session review
 | `ilium voice say <sentence>...` | Type sentences into the live voice session. | JSONL |
 | `ilium panes [selection]` | List panes across every running session. | JSONL |
 | `ilium broadcast [selection] <message>...` | Send a message to every selected agent. | JSONL |
+| `ilium close-pane [--worktree keep\|remove\|remove-and-branch]` | Close this pane, optionally removing its Ilium-created worktree. | JSONL |
 | `ilium ctl <command>` | Full remote control: read the tree, create, move, rename, close and drive panes. | JSON, YAML, Markdown or JSONL |
 | `ilium recap [selection]` | Short and long factual recaps of selected agent and shell panes. | JSONL or Markdown |
 
@@ -301,6 +302,7 @@ The probe is a shell command line (at most 16 KiB). It must print exactly one JS
 | `percent` | yes | A finite number from 0 to 100. `done` is shown as exactly 100; any other value for `done` is rejected. |
 | `message` | recommended | One line, at most 2048 bytes, always visible in the pane footer. It should make sense to someone who has not read the agent's session. |
 | `details` | optional | Multi-line text, at most 8192 bytes, shown when the user hovers the footer. |
+| `eta_seconds` | optional | Whole seconds the task still needs (at most 315360000). Replaces the pace-based ETA in the footer when present. |
 | `error` | required when `status` is `error`, forbidden otherwise | Text, at most 4096 bytes. |
 
 Limits: the probe may run for at most 30 seconds, produce at most 64 KiB on stdout and 16 KiB on stderr, and must exit successfully. A task that reports `error` is a task failure; a probe that cannot be run or read is a monitor failure, and the two are reported separately. After repeated consecutive observation failures (up to three) the monitor is marked failed rather than the task.
@@ -550,6 +552,43 @@ Output is JSONL: a `progress` record, a `warning` per session that could not be 
 
 Exit status: 0 when at least one agent was reached (or planned) and nothing failed; 1 when nothing was selected, any delivery failed, or any running session could not be read; 2 for an invalid selection or an empty message.
 
+## ilium close-pane
+
+```sh
+ilium close-pane [--pane <id>] [--worktree keep|remove|remove-and-branch] [--timeout-seconds <n>]
+ilium close-pane --worktree remove
+```
+
+Closes a pane of the running session. With no `--pane`, it closes the pane the command runs in, from the `ILIUM_PANE_ID` variable Ilium sets in every pane. This is how a worktree agent wraps up: commit, merge into the base branch, then run `ilium close-pane --worktree remove` as the last step.
+
+| Argument or option | Default | Meaning |
+| --- | --- | --- |
+| `--pane <id>` | this pane | Close another pane of the same session instead. |
+| `--worktree keep` | keep | Close the pane and leave its worktree on disk. |
+| `--worktree remove` | | Close the pane, then remove its worktree when it is clean, merged into its recorded base branch, has no running process, and was created by Ilium. The branch is kept. |
+| `--worktree remove-and-branch` | | As `remove`, and also delete the creation branch when that is safe. |
+| `--timeout-seconds <n>` | 120 | How long to wait for the server's answer. |
+
+The server runs the same checks as **Safe remove** in the worktree manager (see [Worktrees](worktrees.md#clean-up-worktrees)). The server stops the pane's processes, checks for running processes and custody tickets, removes the worktree, and closes the pane. The worktree is removed only when every check passes. A refusal keeps the worktree and reports the reasons. A refusal that comes after the pane's processes have stopped also closes the pane; a refusal before that point (for example uncommitted or untracked files) leaves the pane open. Ilium never removes a worktree it did not create; such a request is blocked.
+
+Closing a pane stops every process in it, including this command. The server still completes the request, but the lines printed after the pane stops may not reach the calling agent. Confirm the result with `git worktree list` and `git branch --list <branch>` in the main checkout.
+
+Output is JSONL: a `progress` record, then exactly one answer:
+
+```text
+{"type":"progress","command":"close-pane","request_id":1783428455846,"pane_id":12,"worktree":"remove","stage":"requesting-close"}
+{"type":"result","command":"close-pane","request_id":1783428455846,"pane_id":12,"worktree":"remove","outcome":"removed","reasons":[]}
+```
+
+| Record | Meaning |
+| --- | --- |
+| `result` with `outcome` `closed` | The pane closed; the worktree was kept (`keep`). |
+| `result` with `outcome` `removed` | The pane closed and its worktree was removed. |
+| `blocked` | The server refused. `reasons` says why (uncommitted changes, not merged, running process, foreign worktree, and so on). Nothing was removed. |
+| `uncertain` | The server did not confirm in time, or a removal reported a failure partway. Inspect the worktree before retrying; do not assume it is gone or intact. |
+| `error` | The request never ran. `code` is `not-inside-ilium-pane`, `pane-not-found`, `session-unreachable`, `connection-closed` or `server-error`. |
+
+Exit status: 0 for `result`; 1 for `blocked` or `uncertain`; 2 for `error`.
 ## ilium recap
 
 ```sh
@@ -627,7 +666,9 @@ Global options: `--session NAME` (session of the `--cwd` project), `--socket PAT
 | `ctl wait ID [--state idle,done] [--timeout S]` | Block until an agent reaches a state or the pane closes. |
 | `ctl whoami`, `ctl sessions` | The calling pane; live sessions. |
 | `ctl new-pane [--project P \| --parent ID] [--workdir DIR] [--agent claude\|codex\|agy [--prompt T]] [--worktree --branch B [--base REF]] [--editor FILE] [--keep-open] [-- CMD]` | Create a shell, command, editor or agent pane; a worktree pane creates the Git worktree first. |
-| `ctl new-project DIR`, `new-group NAME`, `new-folder DIR`, `change-folder P DIR` | Create and re-point containers. |
+| `ctl new-project DIR`, `new-group NAME`, `new-folder DIR`, `new-split-view NAME ID ID...`, `change-folder P DIR` | Create and re-point containers and split views. |
+| `ctl replace-command ID COMMAND` | Replace the process of a pane with a shell command line. |
+| `ctl new-board NAME PATH [--markdown]`, `freeze ID RESUME`, `unfreeze ID` | Open a kanban board pane; park a pane as a frozen placeholder and restart it. |
 | `ctl rename ID TITLE`, `close ID [--worktree keep\|remove\|remove-and-branch]`, `move ID (--up \| --down \| --to PARENT [--index N])` | Rename, close and arrange. |
 | `ctl send ID TEXT [--no-enter]`, `keys ID KEY...`, `schedule ID --in S TEXT`, `queue ID TEXT [--times N \| --forever]`, `queue-clear ID`, `terminate ID` | Drive a pane. |
 | `ctl bookmark ID [--off]`, `expand ID`, `collapse ID`, `lock-closed ID [--off]` | Sidebar state. |

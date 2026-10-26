@@ -479,9 +479,11 @@ pub enum AntigravityStatuslineAction {
 /// carry data the server can forward opaquely.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ClientRequest {
-    /// Attach this client connection to the named session.
+    /// Attach this client connection to the named session. `hello` is the plugin handshake
+    /// record (reference-host-ipc.md HST-103).
     Attach {
         session: String,
+        hello: crate::plugin::PluginHello,
     },
     /// Create a new pane as a child of `parent_group`.
     NewPane {
@@ -763,6 +765,7 @@ pub enum ClientRequest {
     /// contract for diagnostics and older one-shot consumers.
     AttachInteractive {
         session: String,
+        hello: crate::plugin::PluginHello,
     },
     /// Replaces this connection's terminal-output subscription. Only panes
     /// occupying the right panel need live raw bytes; hidden panes remain
@@ -1033,6 +1036,43 @@ pub enum ClientRequest {
     GetPaneRecapScreen {
         pane_id: NodeId,
     },
+    /// Stores a recap a client produced for `pane_id`. The server never calls
+    /// a model: it only fences the result (same live `session_id`, newest
+    /// `recap_generation`) and keeps it. A `Batch` result replaces the stored
+    /// short recap and keeps the stored long one; a `Manual` result replaces
+    /// both (`long` must then be present).
+    /// Appended to preserve all prior request discriminants.
+    ApplyRecap {
+        pane_id: NodeId,
+        session_id: String,
+        recap_generation: u64,
+        trigger: RecapTrigger,
+        short: String,
+        long: Option<String>,
+    },
+    /// One envelope of plugin traffic from the client half (reference-host-ipc.md HST-100).
+    /// Appended to preserve all prior request discriminants.
+    Plugin(crate::plugin::PluginEnvelope),
+    /// Asks for up to `max_bytes` of retained raw PTY output for `pane_id`
+    /// whose journal sequences are below `before_sequence`, newest chunks
+    /// first. Scrollback above a client's snapshot is loaded only when the
+    /// user scrolls past what the client already holds, so attach never pays
+    /// for it. The server answers with `TerminalHistory`.
+    /// Appended to preserve all prior request discriminants.
+    TerminalHistory {
+        pane_id: NodeId,
+        before_sequence: u64,
+        max_bytes: u32,
+    },
+}
+
+/// Which client path produced a stored recap.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RecapTrigger {
+    /// Short recap that rode in the project restructure call.
+    Batch,
+    /// Dedicated per-pane call (refresh click or recap popover) with both lengths.
+    Manual,
 }
 
 impl ClientRequest {
@@ -1041,7 +1081,10 @@ impl ClientRequest {
     /// decision instead of silently disappearing from the major-action trail.
     pub const fn diagnostic_name(&self) -> &'static str {
         match self {
+            Self::Plugin(_) => "plugin",
+            Self::TerminalHistory { .. } => "terminal_history",
             Self::GetPaneRecapScreen { .. } => "get_pane_recap_screen",
+            Self::ApplyRecap { .. } => "apply_recap",
             Self::Attach { .. } => "attach",
             Self::UserKeyInput { .. } => "user_key_input",
             Self::ReportAgentPromptFromTranscript { .. } => "report_agent_prompt_from_transcript",
@@ -1164,6 +1207,10 @@ pub struct DetectionReason {
 /// state while an incremental status event and its evidence cross IPC.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PaneDetectionEvidence {
+    /// Time of the last successful server-applied classification, not receipt time.
+    pub observed_at_unix_millis: u64,
+    /// Maximum age for presenting this observation as current.
+    pub stale_after_millis: u64,
     pub applied_status: PaneStatus,
     pub identity: Option<DetectionReason>,
     pub activity: Option<DetectionReason>,
@@ -1550,5 +1597,52 @@ pub enum ServerEvent {
     PaneCreateFinished {
         request_id: u64,
         result: Result<NodeId, String>,
+    },
+    /// A recap was stored (or replayed on attach). Carries the fence the
+    /// server accepted it under and the texts now held, so every client
+    /// shows the same recap. `long` is `None` until a manual recap exists.
+    /// Appended to preserve all prior event discriminants.
+    RecapUpdated {
+        pane_id: NodeId,
+        session_id: String,
+        recap_generation: u64,
+        trigger: RecapTrigger,
+        short: String,
+        long: Option<String>,
+    },
+    /// One envelope of plugin traffic from the server half (reference-host-ipc.md HST-100).
+    /// Appended to preserve all prior event discriminants.
+    Plugin(crate::plugin::PluginEnvelope),
+    /// A contribution snapshot or increment (reference-host-ipc.md HST-107).
+    Contributions(crate::plugin::ContributionDelta),
+    /// The server refused the connection or an envelope (reference-host-ipc.md HST-103).
+    Rejected(crate::plugin::Rejection),
+    /// The current screen of a pane at `through_sequence`, rebuilt as escape
+    /// bytes (see `ilium-pty`'s snapshot encoding). Sent on attach instead of
+    /// the whole retained journal: the client applies it at once and renders
+    /// the pane, and live `ScreenUpdate`s with `sequence <= through_sequence`
+    /// are duplicates to ignore. `is_complete` is false when output older than
+    /// this screen was dropped by the server's retention cap.
+    /// Appended to preserve all prior event discriminants.
+    TerminalSnapshot {
+        pane_id: NodeId,
+        through_sequence: u64,
+        #[serde(with = "crate::terminal_bytes")]
+        bytes: Vec<u8>,
+        is_complete: bool,
+    },
+    /// Raw retained output answering `ClientRequest::TerminalHistory`:
+    /// chunks `first_sequence..before_sequence` concatenated oldest first.
+    /// `reaches_journal_start` is true when nothing older than `first_sequence`
+    /// was ever dropped, so the client can stop asking. An empty `bytes` with
+    /// `reaches_journal_start` also covers a pane that no longer exists.
+    /// Appended to preserve all prior event discriminants.
+    TerminalHistory {
+        pane_id: NodeId,
+        first_sequence: u64,
+        before_sequence: u64,
+        #[serde(with = "crate::terminal_bytes")]
+        bytes: Vec<u8>,
+        reaches_journal_start: bool,
     },
 }

@@ -145,6 +145,7 @@ async fn recovery_after_unflushed_crash(
         &mut client,
         &ClientRequest::Attach {
             session: session_name.clone(),
+            hello: Default::default(),
         },
     )
     .await
@@ -404,6 +405,7 @@ async fn recovery_after_unflushed_crash(
         &mut observer,
         &ClientRequest::Attach {
             session: session_name,
+            hello: Default::default(),
         },
     )
     .await
@@ -519,6 +521,7 @@ async fn recovery_after_unflushed_crash(
             &mut observer,
             &ClientRequest::Attach {
                 session: format!("crash-{provider}-{nested_shell}-{interpreted_launcher}"),
+                hello: Default::default(),
             },
         )
         .await
@@ -581,6 +584,7 @@ async fn recovery_after_unflushed_crash(
             &mut client,
             &ClientRequest::Attach {
                 session: format!("crash-{provider}-{nested_shell}-{interpreted_launcher}"),
+                hello: Default::default(),
             },
         )
         .await
@@ -784,6 +788,7 @@ async fn in_flight_automated_receipt_cancels_without_enter_or_replay_after_provi
         &mut stalled_client,
         &ClientRequest::Attach {
             session: session_name.to_string(),
+            hello: Default::default(),
         },
     )
     .await
@@ -843,6 +848,7 @@ async fn in_flight_automated_receipt_cancels_without_enter_or_replay_after_provi
         &mut responsive_client,
         &ClientRequest::Attach {
             session: session_name.to_string(),
+            hello: Default::default(),
         },
     )
     .await
@@ -969,6 +975,7 @@ async fn in_flight_automated_receipt_cancels_without_enter_or_replay_after_provi
         &mut stalled_client,
         &ClientRequest::Attach {
             session: session_name.to_string(),
+            hello: Default::default(),
         },
     )
     .await

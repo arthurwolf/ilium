@@ -31,6 +31,7 @@ pub fn on_tick(
     // spinners/pulses below share this same "still active as of the start
     // of this tick" contract.
     app.tick_layout_animation(now);
+    app.sync_last_prompt_histories();
     let tree_transition_changed = app.tick_tree_transitions(now);
     let terminal_activity_changed = app.tick_terminal_activity(now);
     let autosave_wrote = app.tick_autosave();
@@ -39,6 +40,7 @@ pub fn on_tick(
         | app.tick_remote_compaction_save(now);
     let workspace_search_started = app.tick_workspace_search(now, search_workers);
     let chatroom_changed = app.tick_chatroom_projects(now);
+    let attention_changed = app.tick_attention() | app.tick_attention_dialog();
     let session_stats_changed = app.tick_session_stats(now);
     let session_models_changed = app.tick_session_models(now);
     let remote_compaction_started = app.tick_remote_compaction_monitor(now);
@@ -66,6 +68,7 @@ pub fn on_tick(
         || budget_saved
         || workspace_search_started
         || chatroom_changed
+        || attention_changed
         || session_stats_changed
         || session_models_changed
         || remote_compaction_started
@@ -475,6 +478,7 @@ pub fn apply_naming_worker_event(
                 result.map_err(|error| error.to_string()),
             );
         }
+        NamingWorkerEvent::Recap(outcome) => app.finish_recap_worker(outcome),
         NamingWorkerEvent::Restructure(outcome) => {
             let crate::naming_workers::RestructureWorkerResult {
                 project_id,
@@ -482,6 +486,9 @@ pub fn apply_naming_worker_event(
                 title_observations,
                 automatic_ai_decision,
                 result,
+                recaps,
+                recap_stamps,
+                attention,
             } = outcome;
             workers.restructure_worker_finished(project_id);
             if app.onboarding.is_some()
@@ -502,13 +509,27 @@ pub fn apply_naming_worker_event(
             if let Err(error) = &result {
                 tracing::debug!(?project_id, error = %error, error_debug = ?error, "project restructure inference failure details");
             }
+            let is_plan_ready = result.is_ok();
+            // The attention list is applied first and never gates the sort: a
+            // failed call carries none, and a bad list was already split off.
+            let outcome = match &result {
+                Ok(_) => crate::attention::runtime::SharedOutcome::Replied(attention),
+                Err(_) => crate::attention::runtime::SharedOutcome::Failed,
+            };
+            if !app.complete_shared_attention(project_id, outcome) {
+                return;
+            }
             app.finish_project_restructure(
                 project_id,
                 &inference_activity_revisions,
                 &title_observations,
                 result,
             );
+            if is_plan_ready {
+                app.apply_batch_recaps(recaps, &recap_stamps);
+            }
         }
+        NamingWorkerEvent::Attention(reply) => app.apply_attention_reply(reply),
         NamingWorkerEvent::ExactPrepared {
             result,
             source_hold,
@@ -690,12 +711,12 @@ mod tests {
         let config = tempfile::tempdir().unwrap();
         let mut app = App::new("budget-receipt-test".into(), project.path().to_path_buf());
         app.config_dir = Some(config.path().to_path_buf());
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::Inference,
             selected_row: 2,
             scroll: 3,
             ..SettingsState::default()
-        });
+        }));
         app.settings_open_inference_field(InferenceSettingField::RestructurePromptTokenLimit);
         if let Mode::InferenceSettingPrompt(_, state) = &mut app.mode {
             state.buf = "234567".into();

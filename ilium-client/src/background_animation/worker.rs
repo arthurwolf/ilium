@@ -1046,6 +1046,18 @@ impl AnimationService {
         self.shared.mailbox.try_lock().ok()?.output.take()
     }
 
+    /// One mailbox lock for the UI's per-tick collection: the status and the
+    /// completed frame together, so the worker cannot slip in between the two
+    /// reads and leave the UI with a status but no frame this tick.
+    pub fn try_collect(&self) -> Option<(ServiceStatus, Option<Arc<FrameSnapshot>>)> {
+        let mut mailbox = self.shared.mailbox.try_lock().ok()?;
+        let mut status = mailbox.status.clone();
+        status.retained_frames = self.shared.frames.load(Ordering::Acquire);
+        status.is_accepting = self.shared.is_accepting();
+        let frame = mailbox.output.take();
+        Some((status, frame))
+    }
+
     pub fn try_status(&self) -> Option<ServiceStatus> {
         let mut status = self.shared.mailbox.try_lock().ok()?.status.clone();
         status.retained_frames = self.shared.frames.load(Ordering::Acquire);
@@ -1811,7 +1823,7 @@ fn render_plugin_request(
             mailbox.output = Some(Arc::new(snapshot));
         }
         Ok(None) => {}
-        Err(error) => mailbox.status.error = Some(error.chars().take(240).collect()),
+        Err(error) => mailbox.status.error = Some(error),
     }
 }
 

@@ -367,10 +367,9 @@ pub(crate) fn draw_save_error(frame: &mut ratatui::Frame<'_>, app: &crate::app::
     );
     frame.render_widget(
         ratatui::widgets::Paragraph::new(text)
-            .block(
-                crate::theme::block(true)
-                    .title(crate::theme::chrome_title("Text Trigger not saved")),
-            )
+            .block(crate::theme::block(true).title(crate::theme::chrome_title(
+                "Text Trigger not saved · F9 details",
+            )))
             .wrap(ratatui::widgets::Wrap { trim: false }),
         area,
     );

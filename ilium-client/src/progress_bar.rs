@@ -47,6 +47,7 @@ pub fn render(
     progress: Option<&PaneProgress>,
     max_detail_lines: u16,
     scheme: ColorScheme,
+    now_unix_millis: u64,
 ) {
     let Some(progress) = progress else {
         return;
@@ -64,7 +65,7 @@ pub fn render(
         .constraints([Constraint::Length(1), Constraint::Min(0)])
         .areas(area);
 
-    render_gauge(frame, gauge_area, progress, None, scheme);
+    render_gauge(frame, gauge_area, progress, None, scheme, now_unix_millis);
 
     // Details sit under the gauge's label, behind a dotted gutter, with the
     // same side padding as the gauge row.
@@ -118,11 +119,19 @@ pub fn render_monitors(
     monitors: &[&PaneProgress],
     max_detail_lines: u16,
     scheme: ColorScheme,
+    now_unix_millis: u64,
 ) {
     match monitors {
         [] => {}
-        [only] => render(frame, area, Some(only), max_detail_lines, scheme),
-        _ => render_several(frame, area, monitors, scheme),
+        [only] => render(
+            frame,
+            area,
+            Some(only),
+            max_detail_lines,
+            scheme,
+            now_unix_millis,
+        ),
+        _ => render_several(frame, area, monitors, scheme, now_unix_millis),
     }
 }
 
@@ -158,7 +167,13 @@ pub fn monitor_at_row(count: usize, height: u16, row_offset: u16) -> Option<usiz
     (message_index < count).then_some(message_index)
 }
 
-fn render_several(frame: &mut Frame, area: Rect, monitors: &[&PaneProgress], scheme: ColorScheme) {
+fn render_several(
+    frame: &mut Frame,
+    area: Rect,
+    monitors: &[&PaneProgress],
+    scheme: ColorScheme,
+    now_unix_millis: u64,
+) {
     if area.height == 0 {
         return;
     }
@@ -175,7 +190,14 @@ fn render_several(frame: &mut Frame, area: Rect, monitors: &[&PaneProgress], sch
             Some(hidden) => format!("{} \u{b7} +{hidden} more", progress.report.job_id),
             None => progress.report.job_id.clone(),
         };
-        render_gauge(frame, row_area, progress, Some(&identity), scheme);
+        render_gauge(
+            frame,
+            row_area,
+            progress,
+            Some(&identity),
+            scheme,
+            now_unix_millis,
+        );
     }
     if has_more_row && area.height > 1 {
         let row_area = Rect::new(area.x, area.y + gauges as u16, area.width, 1);
@@ -243,6 +265,10 @@ const EIGHTH_BLOCKS: [&str; 7] = [
     "\u{258f}", "\u{258e}", "\u{258d}", "\u{258c}", "\u{258b}", "\u{258a}", "\u{2589}",
 ];
 const LONGEST_IDENTITY_WIDTH: usize = 22;
+/// The bar keeps at least this many cells when the timing box is shown.
+const MIN_BAR_WIDTH_WITH_TIME_BOX: usize = 10;
+/// Cells of the ` │ ` divider between the percent and the timing box.
+const TIME_BOX_DIVIDER_WIDTH: usize = 3;
 
 /// The gauge bar as `(symbol, is_partial)` cells: whole blocks, at most one
 /// eighth-block edge cell, then empty track. `bar_width * 8` steps give the
@@ -273,6 +299,7 @@ fn render_gauge(
     progress: &PaneProgress,
     identity: Option<&str>,
     scheme: ColorScheme,
+    now_unix_millis: u64,
 ) {
     if area.width == 0 || area.height == 0 {
         return;
@@ -318,6 +345,21 @@ fn render_gauge(
         (0, "")
     };
 
+    // The timing box takes the bar's slack to the right of the percent, but
+    // never shrinks the bar under MIN_BAR_WIDTH_WITH_TIME_BOX cells.
+    let time_box = if bar_width > MIN_BAR_WIDTH_WITH_TIME_BOX + TIME_BOX_DIVIDER_WIDTH {
+        crate::progress_time::fit_time_box(
+            crate::progress_time::time_box_variants(progress, now_unix_millis),
+            bar_width - MIN_BAR_WIDTH_WITH_TIME_BOX - TIME_BOX_DIVIDER_WIDTH,
+        )
+    } else {
+        None
+    };
+    let bar_width = match &time_box {
+        Some((_, box_width)) => bar_width - box_width - TIME_BOX_DIVIDER_WIDTH,
+        None => bar_width,
+    };
+
     let base = Style::new().bg(theme::muted_accent_bg(scheme));
     let strong = base.fg(status_color).add_modifier(Modifier::BOLD);
     let mut spans = vec![
@@ -345,6 +387,28 @@ fn render_gauge(
     if !unread.is_empty() {
         spans.push(Span::styled(unread, base.fg(status_color)));
     }
+    if let Some((segments, box_width)) = time_box {
+        let used = crate::progress_time::segments_text_width(&segments);
+        let dim = base.add_modifier(Modifier::DIM);
+        spans.push(Span::styled(" \u{2502} ", dim));
+        // Right-align inside the quantised width so the text hugs the edge.
+        spans.push(Span::styled(
+            " ".repeat(box_width.saturating_sub(used)),
+            base,
+        ));
+        for (index, segment) in segments.iter().enumerate() {
+            if index > 0 {
+                spans.push(Span::styled(crate::progress_time::segment_separator(), dim));
+            }
+            let style = if segment.warn {
+                base.fg(tone_color(DetailTone::Warning, scheme))
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                dim
+            };
+            spans.push(Span::styled(segment.text.clone(), style));
+        }
+    }
     frame.render_widget(Paragraph::new(Line::from(spans)).style(base), area);
 }
 
@@ -370,18 +434,56 @@ fn truncate_to_width(text: &str, width: usize) -> String {
 /// Hover content for a report's long description: the compact message as the
 /// header, the multi-line details as the body, and the machine identity as
 /// the dim reason line.
-pub fn details_tooltip(progress: &PaneProgress) -> crate::status_icons::TooltipContent {
+/// Complete text for the scrollable F9 diagnostic view, including all retained check data.
+pub fn details_tooltip(
+    progress: &PaneProgress,
+    now_unix_millis: u64,
+    owner: Option<&str>,
+) -> crate::status_icons::TooltipContent {
+    let mut content = summary_tooltip(progress, now_unix_millis, owner);
+    content.body.push_str("\n\nLatest successful check data\n");
+    content
+        .body
+        .push_str(&crate::progress_popover::report_lines(progress).join("\n"));
+    content.body.push_str("\n\n");
+    content.body.push_str(
+        &crate::progress_popover::timeline_lines(progress, now_unix_millis, 60).join("\n"),
+    );
+    content
+}
+
+pub fn summary_tooltip(
+    progress: &PaneProgress,
+    now_unix_millis: u64,
+    owner: Option<&str>,
+) -> crate::status_icons::TooltipContent {
     let (_, status_label, _) = status_presentation(progress);
     let title = if progress.report.message.is_empty() {
         format!("{status_label}  {:.0}%", progress.report.percent)
     } else {
         progress.report.message.clone()
     };
+    let timing = crate::progress_time::popover_lines(progress, now_unix_millis, owner).join("\n");
+    let mut body = if progress.report.details.is_empty() {
+        timing
+    } else {
+        format!("{}\n\n{timing}", progress.report.details)
+    };
+    if let Some(error) = &progress.report.error {
+        body.push_str(&format!("\nTask error: {error}"));
+    }
+    match &progress.monitor_health {
+        ProgressMonitorHealth::Healthy => {}
+        ProgressMonitorHealth::Degraded { last_error, .. }
+        | ProgressMonitorHealth::Failed { last_error, .. } => {
+            body.push_str(&format!("\nMonitor error: {last_error}"))
+        }
+    }
     crate::status_icons::TooltipContent {
         title,
-        body: progress.report.details.clone(),
+        body,
         reason: Some(format!(
-            "{status_label} {:.0}% · job {} · monitor #{}",
+            "{status_label} {:.0}% \u{b7} job {} \u{b7} monitor #{}",
             progress.report.percent, progress.report.job_id, progress.monitor_id
         )),
     }
@@ -554,6 +656,7 @@ mod tests {
                     Some(progress),
                     height.saturating_sub(1),
                     ColorScheme::Dark,
+                    TEST_NOW,
                 );
             })
             .unwrap();
@@ -577,6 +680,7 @@ mod tests {
                     monitors,
                     height.saturating_sub(1),
                     ColorScheme::Dark,
+                    TEST_NOW,
                 );
             })
             .unwrap();
@@ -644,7 +748,7 @@ mod tests {
         terminal
             .draw(|frame| {
                 let area = frame.area();
-                render(frame, area, Some(&progress), 4, ColorScheme::Dark);
+                render(frame, area, Some(&progress), 4, ColorScheme::Dark, TEST_NOW);
             })
             .unwrap();
         let text = terminal
@@ -796,22 +900,47 @@ mod tests {
     }
 
     #[test]
+    fn full_progress_details_keep_task_and_monitor_errors() {
+        let message = format!("{} FINALDETAIL", "failure ".repeat(100));
+        let mut progress = progress(
+            ProgressTaskStatus::Error,
+            50.0,
+            "Task failed",
+            Some(&message),
+        )
+        .unwrap();
+        progress.monitor_health = ProgressMonitorHealth::Failed {
+            consecutive_failures: 3,
+            last_error: "probe unavailable FINALPROBE".into(),
+        };
+        let tooltip = details_tooltip(&progress, TEST_NOW, None);
+        assert!(tooltip.body.contains(&message));
+        assert!(tooltip.body.contains("FINALPROBE"));
+    }
+
+    #[test]
     fn hover_tooltip_carries_message_details_and_identity() {
         let progress = progress_with_details(
             "Building the app - crate 4 of 10",
             "What: build\nWhy: release\nNow: crate 4 of 10",
         );
-        let tooltip = details_tooltip(&progress);
+        let tooltip = details_tooltip(&progress, TEST_NOW, Some("Codex in pane \"api\""));
         assert_eq!(tooltip.title, "Building the app - crate 4 of 10");
-        assert_eq!(
-            tooltip.body,
-            "What: build\nWhy: release\nNow: crate 4 of 10"
+        assert!(
+            tooltip
+                .body
+                .starts_with("What: build\nWhy: release\nNow: crate 4 of 10\n\nStarted: "),
+            "{}",
+            tooltip.body
         );
+        assert!(tooltip.body.contains("Owner: Codex in pane \"api\""));
         let reason = tooltip.reason.unwrap();
         assert!(reason.contains("job render-42") && reason.contains("monitor #17"));
 
         let empty = progress_with_details("", "What: x");
-        assert!(details_tooltip(&empty).title.contains("RUNNING"));
+        assert!(details_tooltip(&empty, TEST_NOW, None)
+            .title
+            .contains("RUNNING"));
     }
 
     #[test]
@@ -821,4 +950,89 @@ mod tests {
         assert!(rows[0].contains('\u{2588}'));
         assert!(rows[0].contains(" 50%"));
     }
+
+    #[test]
+    fn wide_gauge_row_shows_started_and_eta_beside_the_bar() {
+        let mut progress = monitor(1, "build", 40.0);
+        progress.timing = steady_timing();
+        let mut terminal = Terminal::new(TestBackend::new(100, 2)).unwrap();
+        terminal
+            .draw(|frame| {
+                render(
+                    frame,
+                    frame.area(),
+                    Some(&progress),
+                    1,
+                    ColorScheme::Dark,
+                    8 * 60_000,
+                );
+            })
+            .unwrap();
+        let row: String = (0..100)
+            .map(|x| terminal.backend().buffer()[(x, 0)].symbol())
+            .collect();
+        assert!(row.contains("\u{2502}"), "{row}");
+        assert!(row.contains("started 8 minutes ago"), "{row}");
+        assert!(row.contains("ETA in 12 minutes"), "{row}");
+        assert!(row.contains("40%"), "{row}");
+    }
+
+    #[test]
+    fn narrow_gauge_row_drops_the_time_box_before_the_bar() {
+        let mut progress = monitor(1, "build", 40.0);
+        progress.timing = steady_timing();
+        let mut terminal = Terminal::new(TestBackend::new(30, 2)).unwrap();
+        terminal
+            .draw(|frame| {
+                render(
+                    frame,
+                    frame.area(),
+                    Some(&progress),
+                    1,
+                    ColorScheme::Dark,
+                    8 * 60_000,
+                );
+            })
+            .unwrap();
+        let row: String = (0..30)
+            .map(|x| terminal.backend().buffer()[(x, 0)].symbol())
+            .collect();
+        assert!(!row.contains("started"), "{row}");
+        assert!(row.contains('\u{2588}') || row.contains("40%"), "{row}");
+    }
+
+    #[test]
+    fn stalled_monitor_shows_the_warning_marker_in_the_box() {
+        let mut progress = monitor(1, "build", 40.0);
+        progress.timing = steady_timing();
+        let mut terminal = Terminal::new(TestBackend::new(100, 2)).unwrap();
+        terminal
+            .draw(|frame| {
+                render(
+                    frame,
+                    frame.area(),
+                    Some(&progress),
+                    1,
+                    ColorScheme::Dark,
+                    40 * 60_000,
+                );
+            })
+            .unwrap();
+        let row: String = (0..100)
+            .map(|x| terminal.backend().buffer()[(x, 0)].symbol())
+            .collect();
+        assert!(row.contains("no probe report"), "{row}");
+        assert!(!row.contains("ETA"), "{row}");
+    }
+
+    fn steady_timing() -> ilium_core::ProgressTiming {
+        let mut timing = ilium_core::ProgressTiming::started(0, 0.0);
+        timing.probe_interval_millis = Some(30_000);
+        for minute in 1..=8_u64 {
+            timing.observe(minute * 60_000, 5.0 * minute as f32, false);
+        }
+        timing
+    }
+
+    const TEST_NOW: u64 = 123;
 }

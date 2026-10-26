@@ -109,6 +109,8 @@ impl ServerEvent {
 impl HeapBytes for PaneDetectionEvidence {
     fn heap_bytes(&self) -> usize {
         let PaneDetectionEvidence {
+            observed_at_unix_millis: _,
+            stale_after_millis: _,
             applied_status,
             identity,
             activity,
@@ -581,6 +583,28 @@ impl HeapBytes for ServerEvent {
                 .saturating_add(through_sequence.heap_bytes())
                 .saturating_add(bytes.heap_bytes())
                 .saturating_add(is_complete.heap_bytes()),
+            Self::TerminalSnapshot {
+                pane_id,
+                through_sequence,
+                bytes,
+                is_complete,
+            } => 0usize
+                .saturating_add(pane_id.heap_bytes())
+                .saturating_add(through_sequence.heap_bytes())
+                .saturating_add(bytes.heap_bytes())
+                .saturating_add(is_complete.heap_bytes()),
+            Self::TerminalHistory {
+                pane_id,
+                first_sequence,
+                before_sequence,
+                bytes,
+                reaches_journal_start,
+            } => 0usize
+                .saturating_add(pane_id.heap_bytes())
+                .saturating_add(first_sequence.heap_bytes())
+                .saturating_add(before_sequence.heap_bytes())
+                .saturating_add(bytes.heap_bytes())
+                .saturating_add(reaches_journal_start.heap_bytes()),
             Self::PaneSessionTitleCleared {
                 pane_id,
                 title_generation,
@@ -799,6 +823,22 @@ impl HeapBytes for ServerEvent {
             }
             Self::PaneNodeChanged(node) => 0usize.saturating_add(node.heap_bytes()),
             Self::PaneRecapScreen { result, .. } => result.heap_bytes(),
+            Self::RecapUpdated {
+                session_id,
+                short,
+                long,
+                ..
+            } => session_id
+                .heap_bytes()
+                .saturating_add(short.heap_bytes())
+                .saturating_add(long.heap_bytes()),
+            // Plugin traffic is bounded by the plugin IPC limits (HST-104, HST-109); its exact
+            // heap accounting is added with the implementation.
+            Self::Plugin(_) | Self::Contributions(_) => 0,
+            Self::Rejected(rejection) => rejection
+                .code
+                .heap_bytes()
+                .saturating_add(rejection.message.heap_bytes()),
         }
     }
 }

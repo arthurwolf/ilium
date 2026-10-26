@@ -1,0 +1,1082 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>19. Stop core actions with hooks: quiet hours | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details open><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/" aria-current="page">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Tutorials</b></p>
+<h1>19. Stop core actions with hooks: quiet hours</h1>
+
+<p>This step writes the handler side of extension points. The plugin is <code>example.quiet-hours</code>. It adds three handlers to core plugins. A <strong>veto</strong> handler on <code>ilium.core.notifications/before-notify</code> refuses low-urgency notices between 22:00 and 07:00. A <strong>veto</strong> handler on <code>ilium.core.text-triggers/before-fire</code> refuses office rules outside 09:00 to 18:00. A <strong>transform</strong> handler on <code>ilium.core.smart-copy/after-copy</code> removes secret keys from copied text. The three handlers show what a hook can change, how a handler fails safely, and why one of the grants is high risk.</p>
+<p>You start a fresh plugin. You have finished tutorials 1 to 9 and read <a href="/pages/api-extension-points/">Extension points</a>. The points of the core plugins are listed in <a href="/pages/reference-core-extension-points/">Reference: core extension points</a>, and <a href="/pages/extending-core-plugins/">Extending core plugins</a> compares the five ways to work with a core feature. <a href="/pages/tutorial-18-add-an-extension-point/">Tutorial 18</a> shows the owner side. This page does not repeat the reference tables.</p>
+<p>Tutorial plugin: <code>example.quiet-hours</code>, version 0.1.0, API <code>ilium:plugin@0.1.0</code>. Rust and TypeScript behave the same in every step.</p>
+<h3 id="you-will-need">You will need</h3>
+<ul>
+<li>Rust: stable 1.90 or later with the <code>wasm32-wasip2</code> target, and the crates <code>ilium-plugin-sdk</code>, <code>serde_json</code> and <code>regex-lite</code>. TypeScript: Bun 1.2 or later and <code>@ilium/plugin-sdk</code>.</li>
+<li>Three grants: <code>extensions.contribute:ilium.core.notifications/before-notify</code>, <code>extensions.contribute:ilium.core.smart-copy/after-copy</code> and <code>extensions.contribute:ilium.core.text-triggers/before-fire</code>. The last one is high risk, because that point declares <code>risk: "high"</code>. A trigger sends text into a terminal, so a handler there can stop a command from reaching an agent.</li>
+<li>A scratch folder for package inspection: <code>/media/arthur/tmp/quiet-hours/</code> with a <code>.scratch-reaper</code> file in it.</li>
+</ul>
+<h3 id="the-surface-this-step-uses">The surface this step uses</h3>
+<table>
+<thead>
+<tr>
+<th>Area</th>
+<th>Name</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Manifest</td>
+<td><code>contributes.extensions[]</code></td>
+<td>Entries with <code>point</code>, <code>id</code>, <code>priority</code> and <code>handler</code>.</td>
+</tr>
+<tr>
+<td>Manifest</td>
+<td><code>exports: ["handler", "hook-handler"]</code></td>
+<td>A package with a hook extension must list <code>hook-handler</code>, or the install fails with <code>manifest.exports-mismatch</code>.</td>
+</tr>
+<tr>
+<td>Export</td>
+<td><code>hook-handler</code></td>
+<td>Rust: <code>HookHandler::handle_hook(&amp;mut self, call: HookCall) -&gt; HookReply</code>. TypeScript: <code>handleHook(call)</code> in <code>definePlugin</code>.</td>
+</tr>
+<tr>
+<td>Call</td>
+<td><code>HookCall</code></td>
+<td><code>point</code>, <code>extension</code> (the <code>handler</code> name), <code>call</code> (a number for log lines) and <code>payload_json</code>.</td>
+</tr>
+<tr>
+<td>Replies</td>
+<td><code>pass</code>, <code>replace(json)</code>, <code>refuse(reason)</code>, <code>answer(json)</code></td>
+<td>Allowed by mode: <code>transform</code> allows <code>replace</code>, <code>veto</code> allows <code>refuse</code>, <code>first</code> allows <code>answer</code>.</td>
+</tr>
+<tr>
+<td>Core points</td>
+<td><code>before-notify</code> (veto), <code>before-fire</code> (veto, high), <code>after-copy</code> (transform)</td>
+<td>Payload fields are in the reference page and in the code below.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="the-flow">The flow</h3>
+<p>The core plugin runs the chain. Your handler sees one payload and answers with one reply. The kernel stops the chain at the first refusal.</p>
+<figure>
+<svg viewBox="0 0 480 300" role="img" aria-label="Sequence of a vetoed notice" width="720" height="450">
+  <title>A veto chain</title>
+  <desc>A core plugin raises a notice. The registry calls the quiet hours handler within 20 milliseconds. The handler refuses. The registry returns the refusal to the core plugin, which drops the notice.</desc>
+  <defs>
+    <marker id="t19-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <rect x="10" y="8" width="100" height="26" rx="4" fill="none" stroke="currentColor"/>
+  <text x="60" y="25" font-size="11" text-anchor="middle" fill="currentColor">Notifications</text>
+  <rect x="190" y="8" width="90" height="26" rx="4" fill="none" stroke="currentColor"/>
+  <text x="235" y="25" font-size="11" text-anchor="middle" fill="currentColor">Registry</text>
+  <rect x="360" y="8" width="110" height="26" rx="4" fill="none" stroke="currentColor"/>
+  <text x="415" y="25" font-size="11" text-anchor="middle" fill="currentColor">Quiet hours</text>
+  <line x1="60" y1="34" x2="60" y2="290" stroke="currentColor" stroke-dasharray="3 4"/>
+  <line x1="235" y1="34" x2="235" y2="290" stroke="currentColor" stroke-dasharray="3 4"/>
+  <line x1="415" y1="34" x2="415" y2="290" stroke="currentColor" stroke-dasharray="3 4"/>
+  <line x1="60" y1="62" x2="235" y2="62" stroke="currentColor" marker-end="url(#t19-arrow)"/>
+  <text x="148" y="56" font-size="10" text-anchor="middle" fill="currentColor">run-hook(before-notify)</text>
+  <line x1="235" y1="100" x2="415" y2="100" stroke="currentColor" marker-end="url(#t19-arrow)"/>
+  <text x="325" y="94" font-size="10" text-anchor="middle" fill="currentColor">handle-hook (20 ms)</text>
+  <line x1="415" y1="140" x2="235" y2="140" stroke="currentColor" marker-end="url(#t19-arrow)"/>
+  <text x="325" y="134" font-size="10" text-anchor="middle" fill="currentColor">refuse("quiet hours")</text>
+  <line x1="235" y1="190" x2="60" y2="190" stroke="currentColor" marker-end="url(#t19-arrow)"/>
+  <text x="148" y="184" font-size="10" text-anchor="middle" fill="currentColor">refused: extension.vetoed</text>
+  <text x="148" y="232" font-size="10" text-anchor="middle" fill="currentColor">notice is dropped</text>
+  <line x1="415" y1="262" x2="235" y2="262" stroke="currentColor" stroke-dasharray="5 3" marker-end="url(#t19-arrow)"/>
+  <text x="325" y="256" font-size="10" text-anchor="middle" fill="currentColor">timeout counts as pass</text>
+</svg>
+<figcaption>The dashed arrow is the fail-open path. A handler that is late, traps or errors counts as <code>pass</code>, and the notice goes through.</figcaption>
+</figure>
+
+<h3 id="step-1-the-manifest">Step 1: the manifest</h3>
+<p>The package has one server side, three extensions and the <code>hook-handler</code> export. All three handlers run on the server, because all three points belong to server-side core plugins. A handler on the other side fails the install with <code>manifest.extension-side</code>.</p>
+<pre><code class="language-json">{
+  &quot;api&quot;: &quot;ilium:plugin@0.1.0&quot;,
+  &quot;id&quot;: &quot;example.quiet-hours&quot;,
+  &quot;name&quot;: &quot;Quiet hours&quot;,
+  &quot;version&quot;: &quot;0.1.0&quot;,
+  &quot;publisher&quot;: &quot;Example Developer&quot;,
+  &quot;description&quot;: &quot;Mutes low notices at night, holds office rules after hours and removes keys from copies.&quot;,
+  &quot;icon&quot;: &quot;moon&quot;,
+  &quot;server&quot;: {
+    &quot;entry&quot;: &quot;server.wasm&quot;,
+    &quot;world&quot;: &quot;ilium:server/base@0.1.0&quot;,
+    &quot;exports&quot;: [&quot;hook-handler&quot;]
+  },
+  &quot;capabilities&quot;: {
+    &quot;server&quot;: [
+      &quot;extensions.contribute:ilium.core.notifications/before-notify&quot;,
+      &quot;extensions.contribute:ilium.core.text-triggers/before-fire&quot;,
+      &quot;extensions.contribute:ilium.core.smart-copy/after-copy&quot;
+    ]
+  },
+  &quot;activation&quot;: [&quot;startup&quot;],
+  &quot;contributes&quot;: {
+    &quot;extensions&quot;: [
+      { &quot;point&quot;: &quot;ilium.core.notifications/before-notify@0.1.0&quot;, &quot;id&quot;: &quot;quiet-night&quot;,
+        &quot;priority&quot;: 20, &quot;handler&quot;: &quot;quiet_night&quot; },
+      { &quot;point&quot;: &quot;ilium.core.text-triggers/before-fire@0.1.0&quot;, &quot;id&quot;: &quot;office-hours&quot;,
+        &quot;priority&quot;: 50, &quot;handler&quot;: &quot;office_hours&quot; },
+      { &quot;point&quot;: &quot;ilium.core.smart-copy/after-copy@0.1.0&quot;, &quot;id&quot;: &quot;strip-keys&quot;,
+        &quot;priority&quot;: 70, &quot;handler&quot;: &quot;strip_keys&quot; }
+    ]
+  }
+}
+</code></pre>
+<p>Points to notice:</p>
+<ul>
+<li><code>exports</code> must list <code>hook-handler</code> next to <code>handler</code>. A package that lists hook extensions without it fails with <code>manifest.exports-mismatch</code>.</li>
+<li><code>handler</code> is a name that your code dispatches on. It reaches you as <code>call.extension</code>. The <code>id</code> is for the user: it is shown on the Extensions tab and is unique per contributor and point.</li>
+<li><code>priority</code> runs from 0 to 100. Lower runs first, and ties go in plugin id order. Quiet night runs at 20 so that it refuses before other handlers spend their time. The user can override the order, as step 5 shows.</li>
+<li>Each grant names one point. There is no wildcard, and no grant that covers every point. A wildcard fails with <code>manifest.grant-wildcard</code>.</li>
+<li><code>@0.1.0</code> asks for a minimum version of the point. The core plugin's point is at that version or newer in the same major. Otherwise the extension is dormant.</li>
+<li><code>activation: ["startup"]</code> keeps the plugin loaded so that the first call does not pay a start. A lazy plugin would start on the first hook call, and that call would count against its 20 ms.</li>
+</ul>
+<h3 id="step-2-the-handlers">Step 2: the handlers</h3>
+<p>A hook handler is a plain function from one call to one reply. It runs synchronously on the contributor's own instance, within <code>deadline_ms</code> of the point (20 ms for these three). It may call other host functions that its grants allow, such as <code>clock</code>, but each call must finish inside the deadline. It cannot wait for a reply from another plugin.</p>
+<p>Each handler does three things. It parses its payload and passes at once when the payload is not what it expected. It decides. It returns one reply. Parsing errors are <code>pass</code>, never <code>refuse</code>. A broken payload must not stop a notice.</p>
+<p>The code keeps the time rules in two small pure functions, so the tests in step 6 can drive them with fixed times. Ilium gives plugins the clock in UTC. The sketch uses a fixed offset constant of 120 minutes. A real plugin reads the offset from a setting, as <a href="/pages/tutorial-10-settings-new-tab/">tutorial 10</a> shows.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">// src/lib.rs
+use ilium_plugin_sdk::exports::{HookCall, HookHandler, HookReply};
+use ilium_plugin_sdk::host::clock;
+use ilium_plugin_sdk::host::log::{self, Level};
+use ilium_plugin_sdk::prelude::*;
+use regex_lite::Regex;
+use serde_json::{json, Value};
+
+const UTC_OFFSET_MINUTES: u64 = 120;
+const NIGHT_START: u64 = 22 * 60;
+const NIGHT_END: u64 = 7 * 60;
+const OFFICE_START: u64 = 9 * 60;
+const OFFICE_END: u64 = 18 * 60;
+
+#[ilium_plugin(side = &quot;server&quot;, exports = [&quot;hook-handler&quot;])]
+#[derive(Default)]
+struct QuietHours {
+    refused: u32,
+}
+
+impl Lifecycle for QuietHours {}
+
+impl Handler for QuietHours {
+    fn on_events(&amp;mut self, _batch: Vec&lt;Event&gt;) -&gt; Vec&lt;Submission&gt; {
+        Vec::new()
+    }
+}
+
+fn minute_of_day(now_unix_millis: u64) -&gt; u64 {
+    (now_unix_millis / 60_000 + UTC_OFFSET_MINUTES) % 1440
+}
+
+fn is_night(minute: u64) -&gt; bool {
+    minute &gt;= NIGHT_START || minute &lt; NIGHT_END
+}
+
+fn is_office(minute: u64) -&gt; bool {
+    (OFFICE_START..OFFICE_END).contains(&amp;minute)
+}
+
+fn pass() -&gt; HookReply {
+    HookReply::Pass
+}
+
+impl HookHandler for QuietHours {
+    fn handle_hook(&amp;mut self, call: HookCall) -&gt; HookReply {
+        let payload: Value = match serde_json::from_str(&amp;call.payload_json) {
+            Ok(value) =&gt; value,
+            Err(_) =&gt; return pass(),
+        };
+        let reply = match call.extension.as_str() {
+            &quot;quiet_night&quot; =&gt; quiet_night(&amp;payload, clock::now_unix_millis()),
+            &quot;office_hours&quot; =&gt; office_hours(&amp;payload, clock::now_unix_millis()),
+            &quot;strip_keys&quot; =&gt; strip_keys(&amp;payload),
+            _ =&gt; pass(),
+        };
+        if matches!(reply, HookReply::Refuse(_)) {
+            self.refused += 1;
+            log::log(Level::Info, &amp;format!(&quot;call {} refused ({} so far)&quot;, call.call, self.refused));
+        }
+        reply
+    }
+}
+
+fn quiet_night(payload: &amp;Value, now: u64) -&gt; HookReply {
+    if payload[&quot;urgency&quot;] != &quot;low&quot; || !is_night(minute_of_day(now)) {
+        return pass();
+    }
+    HookReply::Refuse(&quot;quiet hours until 07:00&quot;.to_string())
+}
+
+fn office_hours(payload: &amp;Value, now: u64) -&gt; HookReply {
+    let is_office_rule = payload[&quot;rule&quot;].as_str().is_some_and(|rule| rule.starts_with(&quot;office-&quot;));
+    if !is_office_rule || is_office(minute_of_day(now)) {
+        return pass();
+    }
+    HookReply::Refuse(&quot;office rule outside 09:00 to 18:00&quot;.to_string())
+}
+
+fn strip_keys(payload: &amp;Value) -&gt; HookReply {
+    let Some(text) = payload[&quot;text&quot;].as_str() else { return pass() };
+    let Ok(pattern) = Regex::new(r&quot;sk-[A-Za-z0-9]{20,}&quot;) else { return pass() };
+    let cleaned = pattern.replace_all(text, &quot;[removed]&quot;);
+    if cleaned == text {
+        return pass();
+    }
+    HookReply::Replace(json!({ &quot;text&quot;: cleaned }).to_string())
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">// src/index.ts
+import { definePlugin, type HookCall, type HookReply } from '@ilium/plugin-sdk';
+import { nowUnixMillis } from '@ilium/plugin-sdk/host/clock';
+import { log } from '@ilium/plugin-sdk/host/log';
+
+const UTC_OFFSET_MINUTES = 120;
+const NIGHT_START = 22 * 60;
+const NIGHT_END = 7 * 60;
+const OFFICE_START = 9 * 60;
+const OFFICE_END = 18 * 60;
+
+export function minuteOfDay(nowMillis: bigint): number {
+  return (Number(nowMillis / 60000n) + UTC_OFFSET_MINUTES) % 1440;
+}
+const isNight = (minute: number): boolean =&gt; minute &gt;= NIGHT_START || minute &lt; NIGHT_END;
+const isOffice = (minute: number): boolean =&gt; minute &gt;= OFFICE_START &amp;&amp; minute &lt; OFFICE_END;
+
+const pass = (): HookReply =&gt; ({ tag: 'pass' });
+const refuse = (reason: string): HookReply =&gt; ({ tag: 'refuse', val: reason });
+const replace = (payload: unknown): HookReply =&gt; ({ tag: 'replace', val: JSON.stringify(payload) });
+
+function quietNight(payload: { urgency?: string }, now: bigint): HookReply {
+  if (payload.urgency !== 'low' || !isNight(minuteOfDay(now))) return pass();
+  return refuse('quiet hours until 07:00');
+}
+
+function officeHours(payload: { rule?: string }, now: bigint): HookReply {
+  const isOfficeRule = typeof payload.rule === 'string' &amp;&amp; payload.rule.startsWith('office-');
+  if (!isOfficeRule || isOffice(minuteOfDay(now))) return pass();
+  return refuse('office rule outside 09:00 to 18:00');
+}
+
+function stripKeys(payload: { text?: string }): HookReply {
+  if (typeof payload.text !== 'string') return pass();
+  const cleaned = payload.text.replace(/sk-[A-Za-z0-9]{20,}/g, '[removed]');
+  return cleaned === payload.text ? pass() : replace({ text: cleaned });
+}
+
+let refused = 0;
+
+export function onHook(call: HookCall): HookReply {
+    let payload: Record&lt;string, unknown&gt;;
+    try {
+      payload = JSON.parse(call.payloadJson) as Record&lt;string, unknown&gt;;
+    } catch {
+      return pass();
+    }
+    const now = nowUnixMillis();
+    let reply: HookReply;
+    switch (call.extension) {
+      case 'quiet_night': reply = quietNight(payload, now); break;
+      case 'office_hours': reply = officeHours(payload, now); break;
+      case 'strip_keys': reply = stripKeys(payload); break;
+      default: reply = pass();
+    }
+    if (reply.tag === 'refuse') {
+      refused += 1;
+      log('info', `call ${call.call} refused (${refused} so far)`);
+    }
+    return reply;
+}
+
+export const { lifecycle, handler, hookHandler } = definePlugin({
+  side: 'server',
+  onEvents() {
+    return [];
+  },
+  handleHook: onHook,
+});
+</code></pre>
+<p>Points to notice:</p>
+<ul>
+<li>The reply constructors are tiny local functions. They keep the three handlers free of repeated enum syntax and make a wrong reply easy to see in review.</li>
+<li><code>strip_keys</code> is a <code>transform</code> handler. It returns <code>Replace</code> with a complete payload that matches the point's <code>reply_schema</code> (an object with <code>text</code>). A reply that fails the schema counts as <code>pass</code> and is logged as <code>extension.schema-mismatch</code>.</li>
+<li>A reply that the mode does not allow also counts as <code>pass</code>. <code>Refuse</code> on <code>after-copy</code> would log <code>extension.reply-not-allowed</code> and change nothing.</li>
+<li>The handlers touch only their payload and the clock. They do no I/O, no file read and no service call. That keeps them far below 20 ms.</li>
+<li>The state is a counter. A handler keeps state only for its own use. It cannot see the owner's state or the other handlers.</li>
+<li><code>refuse</code> carries a short reason. The owner sees it as <code>example.quiet-hours: quiet hours until 07:00</code>, and the user sees it in logs and notices. Do not put secrets in a reason.</li>
+<li>The regular expression is compiled for every call in the sketch. Compile it once in a <code>static</code> for a hot point. <code>after-copy</code> runs on every copy, so keep it cheap.</li>
+</ul>
+<h3 id="step-3-how-a-chain-ends">Step 3: how a chain ends</h3>
+<p>The mode of the point decides what a chain does with your reply.</p>
+<table>
+<thead>
+<tr>
+<th>Point</th>
+<th>Mode</th>
+<th>Your reply</th>
+<th>Result for the core plugin</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>before-notify</code></td>
+<td>veto</td>
+<td><code>refuse(reason)</code></td>
+<td>The chain stops. The completion is <code>refused</code> with code <code>extension.vetoed</code>. The notice is dropped.</td>
+</tr>
+<tr>
+<td><code>before-notify</code></td>
+<td>veto</td>
+<td><code>pass</code></td>
+<td>The next handler runs. When all pass, the notice goes on.</td>
+</tr>
+<tr>
+<td><code>before-fire</code></td>
+<td>veto</td>
+<td><code>refuse(reason)</code></td>
+<td>The trigger does not send its reply. The rule is logged as vetoed.</td>
+</tr>
+<tr>
+<td><code>after-copy</code></td>
+<td>transform</td>
+<td><code>replace(json)</code></td>
+<td>The next handler gets your payload as its input. The last payload becomes the copied text.</td>
+</tr>
+<tr>
+<td><code>after-copy</code></td>
+<td>transform</td>
+<td><code>pass</code></td>
+<td>The payload goes on unchanged.</td>
+</tr>
+</tbody>
+</table>
+<p>Three rules limit the damage that a handler can do.</p>
+<ol>
+<li><strong>Fail open.</strong> A timeout, a trap or an error counts as <code>pass</code>. A slow handler never blocks a notice. It is logged as <code>extension.handler-timeout</code>.</li>
+<li><strong>Three strikes.</strong> Three breaches in a row disable that extension until the plugin restarts. The Plugins screen shows <code>stopped after 3 timeouts</code> and a Reset button. The other two extensions of the package keep running.</li>
+<li><strong>A 100 ms chain.</strong> The whole chain has a cap of 100 ms. Handlers after the cap are skipped and logged, so the action goes on.</li>
+</ol>
+<p>A handler runs in the contributor's own instance. A T1 plugin shares the Ilium process, so a call is cheap. A T2 or T3 plugin costs one helper round trip per call, so do not use a hook on a path hotter than about 100 calls per second.</p>
+<h3 id="step-4-grants-risk-and-the-review-dialog">Step 4: grants, risk and the review dialog</h3>
+<p>Two of the grants are normal risk and one is high.</p>
+<table>
+<thead>
+<tr>
+<th>Grant</th>
+<th>Risk</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>extensions.contribute:ilium.core.notifications/before-notify</code></td>
+<td>normal</td>
+<td>A handler can only hide a notice.</td>
+</tr>
+<tr>
+<td><code>extensions.contribute:ilium.core.smart-copy/after-copy</code></td>
+<td>normal</td>
+<td>A handler can change copied text. It cannot see more than the text, its kind and the pane.</td>
+</tr>
+<tr>
+<td><code>extensions.contribute:ilium.core.text-triggers/before-fire</code></td>
+<td><strong>high</strong></td>
+<td>A handler can stop a trigger from sending text into a terminal. The point declares <code>risk: "high"</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>The review dialog shows the high-risk grant unchecked. If the user leaves it unchecked, the package installs, but the <code>office-hours</code> extension is not granted and does nothing. The other two extensions work. Check <code>ilium plugin grants example.quiet-hours</code> to see the state. The user can revoke a grant later with <code>ilium plugin grants example.quiet-hours --revoke extensions.contribute:ilium.core.text-triggers/before-fire</code>.</p>
+<p>A veto hook is a power. Keep the reason honest, keep the rule narrow, and put the rule in the description so the user knows what the package does. A <code>high</code> risk point means that a bundled T1 plugin is also asked for the grant at its first activation.</p>
+<h3 id="step-5-priority-and-the-users-order">Step 5: priority and the user's order</h3>
+<p>Priority is the order you suggest. The user's order wins. On the owner's Extensions tab, each contributor has a toggle and a move up and down. If the user moves <code>quiet-night</code> below another veto handler, the new order applies from then on, and the priority in your manifest is ignored for that point. If the user turns a toggle off, the extension is not called, and its log line is <code>extension.disabled</code>.</p>
+<p>Write handlers that work in any order. A veto handler is order-independent when each handler judges only its own rule. A transform handler is not: the output of one is the input of the next. Make a transform handler accept the payload shape of the point, not the shape of your own previous output, and always return a payload that fits <code>reply_schema</code>.</p>
+<h3 id="step-6-test-the-handlers">Step 6: test the handlers</h3>
+<p>The fake host described in <a href="/pages/testing/">Testing</a> delivers events and records submissions. <code>host.run_hook</code> drives a hook handler with a <code>HookCall</code> and returns the <code>HookReply</code>, and <code>FakeSession.install_core</code> adds a stub of the core plugin that owns the point. Test the pure time functions and the three handlers. The 20 ms deadline is enforced in component mode (<code>ilium plugin test --component</code>), not in native mode. Check it in the app with the log as well, as step 7 shows. See <a href="/pages/reference-test-harness/">Test harness reference</a>.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const NIGHT: u64 = 24 * 3_600_000 - UTC_OFFSET_MINUTES * 60_000; // 00:00 local
+    const NOON: u64 = 12 * 3_600_000 - UTC_OFFSET_MINUTES * 60_000;
+
+    fn call(extension: &amp;str, payload: serde_json::Value) -&gt; HookCall {
+        HookCall {
+            point: &quot;test/point&quot;.to_string(),
+            extension: extension.to_string(),
+            call: 1,
+            payload_json: payload.to_string(),
+        }
+    }
+
+    #[test]
+    fn low_notice_is_refused_at_night() {
+        let payload = json!({ &quot;urgency&quot;: &quot;low&quot; });
+        assert!(matches!(quiet_night(&amp;payload, NIGHT), HookReply::Refuse(_)));
+    }
+
+    #[test]
+    fn high_notice_is_never_refused() {
+        let payload = json!({ &quot;urgency&quot;: &quot;high&quot; });
+        assert!(matches!(quiet_night(&amp;payload, NIGHT), HookReply::Pass));
+    }
+
+    #[test]
+    fn low_notice_passes_at_noon() {
+        let payload = json!({ &quot;urgency&quot;: &quot;low&quot; });
+        assert!(matches!(quiet_night(&amp;payload, NOON), HookReply::Pass));
+    }
+
+    #[test]
+    fn office_rule_is_held_at_night_only() {
+        let payload = json!({ &quot;rule&quot;: &quot;office-standup&quot; });
+        assert!(matches!(office_hours(&amp;payload, NIGHT), HookReply::Refuse(_)));
+        assert!(matches!(office_hours(&amp;payload, NOON), HookReply::Pass));
+        assert!(matches!(office_hours(&amp;json!({ &quot;rule&quot;: &quot;retry&quot; }), NIGHT), HookReply::Pass));
+    }
+
+    #[test]
+    fn copied_key_is_removed() {
+        let mut plugin = QuietHours::default();
+        let reply = plugin.handle_hook(call(&quot;strip_keys&quot;, json!({ &quot;text&quot;: &quot;key sk-abcdefghijklmnopqrstu end&quot; })));
+        match reply {
+            HookReply::Replace(text) =&gt; assert!(text.contains(&quot;[removed]&quot;)),
+            _ =&gt; panic!(&quot;expected replace&quot;),
+        }
+    }
+
+    #[test]
+    fn garbage_payload_and_unknown_handler_pass() {
+        let mut plugin = QuietHours::default();
+        let mut bad = call(&quot;quiet_night&quot;, json!({}));
+        bad.payload_json = &quot;not json&quot;.to_string();
+        assert!(matches!(plugin.handle_hook(bad), HookReply::Pass));
+        assert!(matches!(plugin.handle_hook(call(&quot;nobody&quot;, json!({}))), HookReply::Pass));
+    }
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">// src/index.test.ts
+import { expect, test } from 'bun:test';
+import type { HookCall } from '@ilium/plugin-sdk';
+import { minuteOfDay, onHook } from './index';
+
+const MIDNIGHT_LOCAL = BigInt((24 * 60 - 120) * 60000); // 00:00 at offset 120
+const NOON_LOCAL = BigInt((12 * 60 - 120) * 60000);
+
+function call(extension: string, payload: unknown): HookCall {
+  return { point: 'test/point', extension, call: 1n, payloadJson: JSON.stringify(payload) };
+}
+
+test('time of day uses the offset', () =&gt; {
+  expect(minuteOfDay(MIDNIGHT_LOCAL)).toBe(0);
+  expect(minuteOfDay(NOON_LOCAL)).toBe(720);
+});
+
+test('copied key is removed', () =&gt; {
+  const reply = onHook(call('strip_keys', { text: 'key sk-abcdefghijklmnopqrstu end' }));
+  expect(reply.tag).toBe('replace');
+});
+
+test('garbage payload and unknown handler pass', () =&gt; {
+  const bad: HookCall = { ...call('quiet_night', {}), payloadJson: 'not json' };
+  expect(onHook(bad).tag).toBe('pass');
+  expect(onHook(call('nobody', {})).tag).toBe('pass');
+});
+</code></pre>
+<p>Export <code>quietNight</code> and <code>officeHours</code> as well and add the same cases as in the Rust tests: a low notice at night is refused, a high notice never is, and an office rule is held at midnight but not at noon. Run <code>cargo test</code> or <code>bun test</code>. Then run the plugin against a fixture with <code>ilium plugin test . --fixture tests/fixtures/idle.json</code> to check that it activates and does nothing else.</p>
+<p>The handler functions take the time as an argument for this reason. A test that reads the real clock would pass in the daytime and fail at night.</p>
+<h3 id="step-7-pack-install-and-see-it-work">Step 7: pack, install and see it work</h3>
+<p>Build and pack as in <a href="/pages/tutorial-09-package-and-share/">tutorial 9</a>: <code>ilium plugin build</code>, <code>ilium plugin pack</code>, then <code>ilium plugin keygen</code>, <code>ilium plugin sign</code> and <code>ilium plugin trust add</code> once. Install <code>dist/example.quiet-hours-0.1.0.iliumpkg</code>. An unsigned package is T3 and needs <code>--allow-unsigned</code>.</p>
+<h4 id="what-you-see">What you see</h4>
+<p>The review dialog groups the three extensions under <strong>Adds to other plugins</strong>. The high-risk line is unchecked and shown in the warning colour.</p>
+<figure>
+<pre class="term">
+╭──────────────────────────────────────────────╮
+│ Review: example.quiet-hours 0.1.0            │
+│                                              │
+│ Adds to other plugins                        │
+│   Notifications > Before notify              │
+│     can stop a notice                        │
+│   Smart Copy > After copy                    │
+│     can change copied text                   │
+│   Text triggers > Before fire                │
+│     can stop a trigger from sending text     │
+│                                              │
+│ Grants                                       │
+│   [x] extensions.contribute: before notify   │
+│   [x] extensions.contribute: after copy      │
+│<span class="t-warn">   [ ] extensions.contribute: fire   HIGH</span>     │
+│                                              │
+│   [allow]  [decline]                         │
+╰──────────────────────────────────────────────╯
+</pre>
+<figcaption>Rendered at 48 columns. Illustrative. The high-risk grant is unchecked until the user ticks it.</figcaption>
+</figure>
+
+<p>On Settings &gt; Notifications &gt; Extensions the user sees the contributor in run order and can move it.</p>
+<figure>
+<pre class="term">
+╭──────────────────────────────────────────────╮
+│ Notifications > Extensions                   │
+│                                              │
+│ Before notify (veto)                         │
+│  1 [x] example.quiet-hours    quiet-night    │
+│  2 [x] example.webhook-mute   mute-bots      │
+│                                              │
+│ Channels (collect)                           │
+│    [x] example.chat-relay     relay          │
+╰──────────────────────────────────────────────╯
+</pre>
+<figcaption>Rendered at 48 columns. Illustrative. The arrows on a row move it. The order shown replaces the priority.</figcaption>
+</figure>
+
+<p>At 00:10 local time a low notice reaches the hook. The log of the plugin shows the refusal. Run <code>ilium plugin logs example.quiet-hours --tail 5</code>:</p>
+<figure>
+<pre class="term">
+<span class="t-dim">2026-10-12 00:10:04 info example.quiet-hours</span>
+<span class="t-ok">call 41 refused (1 so far)</span>
+<span class="t-dim">2026-10-12 00:10:09 info example.quiet-hours</span>
+<span class="t-ok">call 42 refused (2 so far)</span>
+</pre>
+<figcaption>Rendered at 48 columns. Illustrative. Each line is one refused notice. A passing call writes no line.</figcaption>
+</figure>
+
+<p>If a handler became slow, for example by reading a file, the log would show the breach and the third one stops the extension:</p>
+<figure>
+<pre class="term">
+<span class="t-dim">2026-10-12 00:12:11 warn example.quiet-hours</span>
+<span class="t-warn">deadline breach in hook-handler: limit 20 ms</span>
+<span class="t-dim">2026-10-12 00:12:15 warn example.quiet-hours</span>
+<span class="t-warn">deadline breach in hook-handler: limit 20 ms</span>
+<span class="t-dim">2026-10-12 00:12:19 warn example.quiet-hours</span>
+<span class="t-err">quiet-night stopped after 3 timeouts</span>
+</pre>
+<figcaption>Rendered at 48 columns. Illustrative. Notices went through during these breaches, because a timeout counts as pass. The user presses Reset to turn the extension on again.</figcaption>
+</figure>
+
+<h3 id="security-and-consent">Security and consent</h3>
+<table>
+<thead>
+<tr>
+<th>Concern</th>
+<th>What the plugin does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>What the handlers see</td>
+<td>The payload of one call. <code>before-notify</code> shows the title and the pane, so the plugin sees what a notice says. Say so in the description.</td>
+</tr>
+<tr>
+<td>What the handlers can change</td>
+<td>A veto can hide a notice or hold a trigger. A transform can edit copied text. Nothing else.</td>
+</tr>
+<tr>
+<td>High-risk grant</td>
+<td><code>before-fire</code> is high risk. The user opts in. A refused grant leaves the other two handlers working.</td>
+</tr>
+<tr>
+<td>Reasons</td>
+<td>A refusal reason is shown in logs. It holds no secret and no text from the payload.</td>
+</tr>
+<tr>
+<td>Fail open</td>
+<td>A bug in the plugin cannot silence the product. It can only fail to help.</td>
+</tr>
+<tr>
+<td>Copy edits</td>
+<td><code>strip_keys</code> removes text. It never adds text. Test it, because a bad pattern can corrupt a copy.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="edge-cases-and-errors-what-can-go-wrong">Edge cases and errors: what can go wrong</h3>
+<table>
+<thead>
+<tr>
+<th>Code or symptom</th>
+<th>Cause</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>manifest.exports-mismatch</code></td>
+<td>Hook extensions without <code>hook-handler</code> in <code>exports</code>.</td>
+<td>Add the export.</td>
+</tr>
+<tr>
+<td><code>manifest.extension-side</code></td>
+<td>The handler is declared on a different side from the point's calls.</td>
+<td>Declare it on the side that owns the call.</td>
+</tr>
+<tr>
+<td><code>manifest.grant-missing-extension</code></td>
+<td>An extension has no matching <code>extensions.contribute</code> grant.</td>
+<td>Add the exact grant.</td>
+</tr>
+<tr>
+<td><code>manifest.grant-wildcard</code></td>
+<td>A grant ends in <code>*</code>.</td>
+<td>Name one point.</td>
+</tr>
+<tr>
+<td><code>manifest.extension-limit</code></td>
+<td>More than 64 extensions in one plugin.</td>
+<td>Merge handlers.</td>
+</tr>
+<tr>
+<td>Extension is dormant</td>
+<td>The owner is missing, or the point version is older than <code>@0.1.0</code>.</td>
+<td>Install the owner, or lower the version.</td>
+</tr>
+<tr>
+<td><code>extension.handler-timeout</code></td>
+<td>The handler took over 20 ms. It counts as pass.</td>
+<td>Remove I/O. Precompile patterns.</td>
+</tr>
+<tr>
+<td><code>extension.disabled</code></td>
+<td>Three breaches, or the user turned it off.</td>
+<td>Fix the cause, then Reset.</td>
+</tr>
+<tr>
+<td><code>extension.reply-not-allowed</code></td>
+<td>A reply that the mode does not allow, for example <code>refuse</code> on a transform.</td>
+<td>Use the reply of the mode.</td>
+</tr>
+<tr>
+<td><code>extension.schema-mismatch</code></td>
+<td>A <code>replace</code> that fails the <code>reply_schema</code>.</td>
+<td>Return a complete object.</td>
+</tr>
+<tr>
+<td><code>extension.vetoed</code></td>
+<td>Your own refusal, as the core plugin sees it.</td>
+<td>Not an error of yours.</td>
+</tr>
+<tr>
+<td>A refusal has no effect</td>
+<td>Another handler runs first, or the extension is toggled off.</td>
+<td>Check the Extensions tab.</td>
+</tr>
+<tr>
+<td>Wrong hour</td>
+<td>The clock is in UTC and the offset is wrong.</td>
+<td>Fix the offset constant.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="see-also">See also</h3>
+<ul>
+<li><a href="/pages/api-extension-points/">Extension points</a> for hook modes, replies and the error codes.</li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a> for the quiet hours scenario and the other ways to extend.</li>
+<li><a href="/pages/reference-core-extension-points/">Reference: core extension points</a> for the payload of every core hook.</li>
+<li><a href="/pages/core-plugin-notifications/">Core plugin: notifications</a>, <a href="/pages/core-plugin-text-triggers/">text triggers</a> and <a href="/pages/core-plugin-smart-copy/">smart copy</a>.</li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">Tutorial 18: offer an extension point</a> for the owner side.</li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">Tutorial 20: extend six core plugins</a> for collect points.</li>
+<li><a href="/pages/testing/">Testing</a> and <a href="/pages/debugging/">Debugging</a>.</li>
+</ul>
+<p>API checked against <code>ilium:plugin@0.1.0</code>.</p>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/tutorial-18-add-an-extension-point/"><small>Previous</small>18. Offer an extension point: a link preview plugin</a><a class="next" href="/pages/tutorial-20-extend-six-core-plugins/"><small>Next</small>20. Extend six core plugins from one package: a team pack</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#you-will-need">You will need</a></li><li class="l2"><a href="#the-surface-this-step-uses">The surface this step uses</a></li><li class="l2"><a href="#the-flow">The flow</a></li><li class="l2"><a href="#step-1-the-manifest">Step 1: the manifest</a></li><li class="l2"><a href="#step-2-the-handlers">Step 2: the handlers</a></li><li class="l2"><a href="#step-3-how-a-chain-ends">Step 3: how a chain ends</a></li><li class="l2"><a href="#step-4-grants-risk-and-the-review-dialog">Step 4: grants, risk and the review dialog</a></li><li class="l2"><a href="#step-5-priority-and-the-users-order">Step 5: priority and the user&#x27;s order</a></li><li class="l2"><a href="#step-6-test-the-handlers">Step 6: test the handlers</a></li><li class="l2"><a href="#step-7-pack-install-and-see-it-work">Step 7: pack, install and see it work</a></li><li class="l3"><a href="#what-you-see">What you see</a></li><li class="l2"><a href="#security-and-consent">Security and consent</a></li><li class="l2"><a href="#edge-cases-and-errors-what-can-go-wrong">Edge cases and errors: what can go wrong</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

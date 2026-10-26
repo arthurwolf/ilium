@@ -78,11 +78,11 @@ fn capture_all_animation_settings_frames() {
                 kind,
                 ..AnimationSettings::default()
             };
-            app.mode = Mode::Settings(SettingsState {
+            app.mode = Mode::Settings(Box::new(SettingsState {
                 tab: SettingsTab::Animations,
                 selected_row: index,
                 ..Default::default()
-            });
+            }));
             let mut terminal = Terminal::new(TestBackend::new(160, 50)).unwrap();
             terminal
                 .draw(|frame| crate::ui::draw(frame, &mut app))
@@ -122,10 +122,10 @@ fn default_preview_dots_are_discrete_neutral_grey() {
     let project = tempfile::tempdir().unwrap();
     let mut app = App::new("grey regression".into(), project.path().to_path_buf());
     app.set_screen_area(Rect::new(0, 0, 140, 40));
-    app.mode = Mode::Settings(SettingsState {
+    app.mode = Mode::Settings(Box::new(SettingsState {
         tab: SettingsTab::Animations,
         ..Default::default()
-    });
+    }));
     let mut terminal = Terminal::new(TestBackend::new(140, 40)).unwrap();
     draw_ready(&mut terminal, &mut app);
     let mut count = 0;
@@ -187,11 +187,11 @@ fn colour_slider_keyboard_changes_saved_lightness_without_changing_scene() {
     app.set_screen_area(Rect::new(0, 0, 80, 24));
     app.animation_settings.appearance.mode = ilium_ambient::style::ColorMode::Monotone;
     let lightness_row = lightness_row(&app);
-    app.mode = Mode::Settings(SettingsState {
+    app.mode = Mode::Settings(Box::new(SettingsState {
         tab: SettingsTab::Animations,
         selected_row: lightness_row,
         ..Default::default()
-    });
+    }));
     let expected_lightness = app.animation_settings.lightness_percent + 1;
     crate::keys::handle_event(
         &mut app,

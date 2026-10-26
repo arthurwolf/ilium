@@ -35,7 +35,10 @@ pub fn open_regular_file(path: &Path) -> io::Result<std::fs::File> {
     }
     let file = options.open(path)?;
     if !file.metadata()?.is_file() {
-        return Err(io::Error::other("read source is not a regular file"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "read source is not a regular file",
+        ));
     }
     Ok(file)
 }
@@ -288,6 +291,35 @@ pub fn restrict_open_file_to_owner(file: &std::fs::File) -> io::Result<()> {
     file.set_permissions(std::fs::Permissions::from_mode(0o600))
 }
 
+/// Validates existing handle ownership and owner-only access without modifying
+/// permissions, ACLs or contents. The caller separately validates the object
+/// type and its no-follow path admission; directory handles are also accepted.
+#[cfg(unix)]
+pub fn validate_private_open_file(file: &std::fs::File) -> io::Result<()> {
+    use std::os::unix::fs::MetadataExt;
+
+    let metadata = file.metadata()?;
+    // SAFETY: geteuid has no arguments or memory preconditions.
+    let current_user = unsafe { libc::geteuid() };
+    if metadata.uid() != current_user || metadata.mode() & 0o077 != 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "handle must be owned by the current user with no group or other permissions",
+        ));
+    }
+    Ok(())
+}
+
+/// No read-only owner/ACL proof is implemented on these platforms. Inherited
+/// profile permissions are not sufficient evidence about an arbitrary handle.
+#[cfg(not(unix))]
+pub fn validate_private_open_file(_file: &std::fs::File) -> io::Result<()> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "read-only handle ownership and ACL validation is unavailable",
+    ))
+}
+
 /// See [`restrict_directory_to_owner`] for why Windows relies on inheritance.
 #[cfg(not(unix))]
 pub fn restrict_open_file_to_owner(file: &std::fs::File) -> io::Result<()> {
@@ -360,6 +392,68 @@ pub struct NoFollowDirectory {
 
 #[cfg(windows)]
 pub use crate::nofollow_windows::NoFollowDirectory;
+
+impl NoFollowDirectory {
+    /// Enumerates names against this held directory, even after its pathname
+    /// is renamed or replaced. Names are observations, not an atomic snapshot;
+    /// callers must still open each selected child relative to this handle.
+    #[cfg(target_os = "linux")]
+    pub fn entry_names(&self) -> io::Result<Vec<std::ffi::OsString>> {
+        use std::os::{fd::AsRawFd, unix::ffi::OsStringExt};
+
+        // A fresh open description avoids sharing a directory iteration offset
+        // with this handle or any other reader. Dot is a fixed relative name.
+        // SAFETY: the held descriptor and fixed NUL-terminated name are valid.
+        let descriptor = unsafe {
+            libc::openat(self.file.as_raw_fd(), c".".as_ptr(),
+                libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC | libc::O_NOFOLLOW)
+        };
+        if descriptor < 0 { return Err(io::Error::last_os_error()); }
+        // SAFETY: descriptor is a freshly owned readable directory descriptor.
+        let pointer = unsafe { libc::fdopendir(descriptor) };
+        if pointer.is_null() {
+            let error = io::Error::last_os_error();
+            // SAFETY: fdopendir failed, so ownership remains with this function.
+            unsafe { libc::close(descriptor); }
+            return Err(error);
+        }
+        struct Stream(*mut libc::DIR);
+        impl Drop for Stream {
+            fn drop(&mut self) {
+                // SAFETY: this stream exclusively owns the fdopendir result.
+                unsafe { libc::closedir(self.0); }
+            }
+        }
+        let stream = Stream(pointer);
+        let mut names = Vec::new();
+        loop {
+            // SAFETY: Linux errno is thread-local. Clearing it distinguishes
+            // end-of-directory from a readdir error without stale errno.
+            unsafe { *libc::__errno_location() = 0; }
+            // SAFETY: stream is valid and exclusively iterated in this scope.
+            let entry = unsafe { libc::readdir(stream.0) };
+            if entry.is_null() {
+                let error = io::Error::last_os_error();
+                if error.raw_os_error() != Some(0) { return Err(error); }
+                break;
+            }
+            // SAFETY: readdir supplies a NUL-terminated name, valid until the
+            // next call; copy the bytes now and preserve non-UTF-8 names.
+            let name = unsafe { std::ffi::CStr::from_ptr((*entry).d_name.as_ptr()) }.to_bytes();
+            if name != b"." && name != b".." {
+                names.push(std::ffi::OsString::from_vec(name.to_vec()));
+            }
+        }
+        names.sort();
+        Ok(names)
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    pub fn entry_names(&self) -> io::Result<Vec<std::ffi::OsString>> {
+        Err(io::Error::new(io::ErrorKind::Unsupported,
+            "anchored directory enumeration is unavailable on this platform"))
+    }
+}
 
 #[cfg(not(any(unix, windows)))]
 pub struct NoFollowDirectory;
@@ -861,6 +955,72 @@ impl NoFollowDirectory {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn anchored_names_survive_path_replacement_and_independent_iterations() {
+        use std::os::unix::ffi::OsStringExt;
+        let root = tempfile::tempdir().expect("temporary directory");
+        let selected = root.path().join("selected");
+        std::fs::create_dir(&selected).expect("selected directory");
+        std::fs::write(selected.join("original"), b"selected").expect("original");
+        let unusual = std::ffi::OsString::from_vec(vec![b'n', 0xff]);
+        std::fs::write(selected.join(&unusual), b"unusual name").expect("non-UTF-8 name");
+        let held = super::NoFollowDirectory::open_root(&selected).expect("held directory");
+        std::fs::rename(&selected, root.path().join("moved")).expect("rename directory");
+        std::fs::create_dir(&selected).expect("replacement directory");
+        std::fs::write(selected.join("replacement"), b"not selected").expect("replacement");
+        let mut expected = vec![std::ffi::OsString::from("original"), unusual];
+        expected.sort();
+        assert_eq!(held.entry_names().expect("held names"), expected);
+        assert_eq!(held.entry_names().expect("fresh iteration"), expected);
+        assert_eq!(std::fs::read(selected.join("replacement")).expect("unchanged replacement"), b"not selected");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn private_handle_validation_refuses_public_modes_without_changing_them() {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let path = directory.path().join("audit.jsonl");
+        std::fs::write(&path, b"preserved audit bytes").expect("fixture file");
+        let file = std::fs::File::open(&path).expect("open fixture");
+        for mode in [0o640, 0o604, 0o601, 0o620, 0o660] {
+            file.set_permissions(std::fs::Permissions::from_mode(mode)).expect("fixture mode");
+            let before = file.metadata().expect("metadata");
+            assert_eq!(super::validate_private_open_file(&file).expect_err("public file").kind(), std::io::ErrorKind::PermissionDenied);
+            let after = file.metadata().expect("metadata");
+            assert_eq!(before.mode(), after.mode());
+            assert_eq!(before.uid(), after.uid());
+            assert_eq!(before.ctime(), after.ctime());
+            assert_eq!(before.ctime_nsec(), after.ctime_nsec());
+        }
+        for mode in [0o400, 0o600, 0o700] {
+            file.set_permissions(std::fs::Permissions::from_mode(mode)).expect("fixture mode");
+            super::validate_private_open_file(&file).expect("private file");
+            assert_eq!(file.metadata().expect("metadata").mode() & 0o777, mode);
+        }
+        assert_eq!(std::fs::read(path).expect("read back"), b"preserved audit bytes");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn private_handle_validation_accepts_directory_and_follows_held_object() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().expect("temporary directory");
+        std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o700)).expect("private directory");
+        let directory = std::fs::File::open(root.path()).expect("directory handle");
+        super::validate_private_open_file(&directory).expect("private directory handle");
+        let path = root.path().join("original");
+        std::fs::write(&path, b"held").expect("original");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).expect("private original");
+        let held = std::fs::File::open(&path).expect("held original");
+        std::fs::rename(&path, root.path().join("moved")).expect("rename held object");
+        std::fs::write(&path, b"replacement").expect("replacement");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).expect("public replacement");
+        super::validate_private_open_file(&held).expect("validates held original");
+        assert!(super::validate_private_open_file(&std::fs::File::open(&path).expect("replacement handle")).is_err());
+    }
+
     #[test]
     fn durable_replacement_preserves_flushed_contents_on_readback() {
         let directory = tempfile::tempdir().expect("temporary directory");

@@ -92,6 +92,7 @@ async fn attach_returns_a_tree_snapshot_with_an_empty_launch_project() {
         &mut client,
         &ClientRequest::Attach {
             session: "attach-test".to_string(),
+            hello: Default::default(),
         },
     )
     .await
@@ -136,6 +137,7 @@ async fn attach_to_the_wrong_session_name_gets_an_error() {
         &mut client,
         &ClientRequest::Attach {
             session: "wrong-session".to_string(),
+            hello: Default::default(),
         },
     )
     .await
@@ -168,6 +170,7 @@ async fn new_pane_creates_a_shell_and_broadcasts_a_tree_snapshot_containing_it()
         &mut client,
         &ClientRequest::Attach {
             session: "new-pane-test".to_string(),
+            hello: Default::default(),
         },
     )
     .await
@@ -219,6 +222,7 @@ async fn keyboard_submission_is_broadcast_only_after_the_pty_accepts_enter() {
         &mut client,
         &ClientRequest::Attach {
             session: "keyboard-submission-test".to_owned(),
+            hello: Default::default(),
         },
     )
     .await
@@ -295,6 +299,7 @@ async fn voice_submission_unblocks_a_real_pty_reader_with_enter() {
         &mut client,
         &ClientRequest::Attach {
             session: "voice-submission-test".to_owned(),
+            hello: Default::default(),
         },
     )
     .await
@@ -377,6 +382,7 @@ async fn named_chatroom_reference_submits_each_forwarded_line_to_the_named_pane(
         &mut client,
         &ClientRequest::Attach {
             session: "named-reference-test".to_owned(),
+            hello: Default::default(),
         },
     )
     .await
@@ -469,6 +475,7 @@ async fn command_with_initial_input_waits_for_agent_composer_then_submits_enter(
         &mut client,
         &ClientRequest::Attach {
             session: "initial-input-test".to_string(),
+            hello: Default::default(),
         },
     )
     .await
@@ -575,6 +582,7 @@ async fn manual_input_cancels_an_initial_agent_prompt_while_it_is_still_waiting(
         &mut client,
         &ClientRequest::Attach {
             session: "initial-input-cancel-test".to_string(),
+            hello: Default::default(),
         },
     )
     .await
@@ -662,6 +670,7 @@ async fn scheduled_input_executes_after_client_detaches_and_clears_its_countdown
         &mut client,
         &ClientRequest::Attach {
             session: "scheduled-input-test".to_string(),
+            hello: Default::default(),
         },
     )
     .await
@@ -716,6 +725,7 @@ async fn scheduled_input_executes_after_client_detaches_and_clears_its_countdown
         &mut reattached,
         &ClientRequest::Attach {
             session: "scheduled-input-test".to_string(),
+            hello: Default::default(),
         },
     )
     .await
@@ -727,12 +737,12 @@ async fn scheduled_input_executes_after_client_detaches_and_clears_its_countdown
         initial_events.iter().any(|event| {
             matches!(
                 event,
-                ServerEvent::TerminalReplay { pane_id: event_pane_id, bytes, .. }
+                ServerEvent::TerminalSnapshot { pane_id: event_pane_id, bytes, .. }
                     if *event_pane_id == pane_id
                         && String::from_utf8_lossy(bytes).contains("scheduled:<detached payload>")
             )
         }),
-        "initial replay must contain the detached scheduled input"
+        "initial snapshot must show the detached scheduled input"
     );
 
     write_frame(&mut reattached, &ClientRequest::KillSession)
@@ -749,6 +759,7 @@ async fn create_split_view_atomically_moves_panes_and_persists_orientation() {
         &mut client,
         &ClientRequest::Attach {
             session: "split-view-test".to_string(),
+            hello: Default::default(),
         },
     )
     .await
@@ -834,6 +845,7 @@ async fn invalid_split_request_returns_an_error_without_mutating_the_tree() {
         &mut client,
         &ClientRequest::Attach {
             session: "invalid-split-view-test".to_string(),
+            hello: Default::default(),
         },
     )
     .await
@@ -890,6 +902,7 @@ async fn invalid_split_request_returns_an_error_without_mutating_the_tree() {
         &mut client,
         &ClientRequest::Attach {
             session: "invalid-split-view-test".to_string(),
+            hello: Default::default(),
         },
     )
     .await
@@ -932,6 +945,7 @@ async fn reattached_client_receives_terminal_output_produced_before_it_connected
         &mut first_client,
         &ClientRequest::Attach {
             session: "terminal-replay-test".to_string(),
+            hello: Default::default(),
         },
     )
     .await
@@ -976,27 +990,27 @@ async fn reattached_client_receives_terminal_output_produced_before_it_connected
         &mut reattached_client,
         &ClientRequest::Attach {
             session: "terminal-replay-test".to_string(),
+            hello: Default::default(),
         },
     )
     .await
     .expect("attach second client");
-    let replay_event = expect_event(&mut reattached_client, Duration::from_secs(5), |event| {
+    let snapshot_event = expect_event(&mut reattached_client, Duration::from_secs(5), |event| {
         matches!(
             event,
-            ServerEvent::TerminalReplay { pane_id: event_pane_id, bytes, .. }
+            ServerEvent::TerminalSnapshot { pane_id: event_pane_id, bytes, .. }
                 if *event_pane_id == pane_id
-                    && String::from_utf8_lossy(bytes).contains("replay-line-001")
                     && String::from_utf8_lossy(bytes).contains("replay-line-160")
         )
     })
     .await;
-    let ServerEvent::TerminalReplay {
+    let ServerEvent::TerminalSnapshot {
         through_sequence,
         is_complete,
         ..
-    } = replay_event
+    } = snapshot_event
     else {
-        unreachable!("predicate only returns a terminal replay");
+        unreachable!("predicate only returns a terminal snapshot");
     };
     assert!(
         is_complete,
@@ -1004,7 +1018,39 @@ async fn reattached_client_receives_terminal_output_produced_before_it_connected
     );
     assert!(
         through_sequence > 0,
-        "replay must carry a live-output watermark"
+        "snapshot must carry a live-output watermark"
+    );
+
+    // Attach shows only the visible screen; older output is paged in on demand.
+    write_frame(
+        &mut reattached_client,
+        &ClientRequest::TerminalHistory {
+            pane_id,
+            before_sequence: through_sequence + 1,
+            max_bytes: 1024 * 1024,
+        },
+    )
+    .await
+    .expect("request the older transcript");
+    let history_event = expect_event(&mut reattached_client, Duration::from_secs(5), |event| {
+        matches!(
+            event,
+            ServerEvent::TerminalHistory { pane_id: event_pane_id, bytes, .. }
+                if *event_pane_id == pane_id
+                    && String::from_utf8_lossy(bytes).contains("replay-line-001")
+        )
+    })
+    .await;
+    let ServerEvent::TerminalHistory {
+        reaches_journal_start,
+        ..
+    } = history_event
+    else {
+        unreachable!("predicate only returns a terminal history");
+    };
+    assert!(
+        reaches_journal_start,
+        "small text transcript is wholly retained, so history reaches the journal start"
     );
 
     write_frame(&mut reattached_client, &ClientRequest::KillSession)
@@ -1051,6 +1097,7 @@ async fn resize_on_an_unknown_pane_returns_an_error_not_a_dropped_connection() {
         &mut client,
         &ClientRequest::Attach {
             session: "resize-error-test".to_string(),
+            hello: Default::default(),
         },
     )
     .await
@@ -1076,6 +1123,7 @@ async fn successful_resize_records_its_typed_client_cause_in_the_debug_journal()
         &mut client,
         &ClientRequest::Attach {
             session: "resize-debug-cause-test".to_string(),
+            hello: Default::default(),
         },
     )
     .await
@@ -1309,6 +1357,7 @@ async fn command_pane_closing_on_exit_disappears_after_its_command_ends() {
         &mut client,
         &ClientRequest::Attach {
             session: "close-on-exit-test".to_string(),
+            hello: Default::default(),
         },
     )
     .await
@@ -1347,6 +1396,7 @@ async fn plain_command_pane_stays_after_its_command_exits() {
         &mut client,
         &ClientRequest::Attach {
             session: "keep-open-test".to_string(),
+            hello: Default::default(),
         },
     )
     .await
@@ -1363,6 +1413,7 @@ async fn plain_command_pane_stays_after_its_command_exits() {
         &mut observer,
         &ClientRequest::Attach {
             session: "keep-open-test".to_string(),
+            hello: Default::default(),
         },
     )
     .await

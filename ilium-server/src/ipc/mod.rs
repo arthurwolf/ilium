@@ -10,6 +10,7 @@ pub(crate) use direct_events::EventReply;
 // same function `handle_new_pane` uses for a live client's `NewPane`
 // request -- see that function's doc comment for why the two share it.
 pub(crate) mod handlers;
+mod recaps;
 
 use std::future::Future;
 use std::pin::Pin;
@@ -239,6 +240,7 @@ mod tests {
             stream,
             &ClientRequest::Attach {
                 session: "admission-test".to_string(),
+                hello: Default::default(),
             },
         )
         .await
@@ -280,6 +282,7 @@ mod tests {
                 &mut queued,
                 &ClientRequest::Attach {
                     session: wrong_session.clone(),
+                    hello: Default::default(),
                 },
             )
             .await
@@ -288,6 +291,7 @@ mod tests {
                 &mut queued,
                 &ClientRequest::Attach {
                     session: "admission-test".to_string(),
+                    hello: Default::default(),
                 },
             )
             .await
@@ -337,15 +341,27 @@ mod tests {
                 matches!(first_reply, ServerEvent::Error { message } if message.contains(wrong_session.as_str())),
                 "cycle {cycle} lost or reordered its first request"
             );
-            let remaining: Vec<ServerEvent> = read_attach_events(&mut queued)
-                .await
-                .into_iter()
-                .filter(|event| !matches!(event, ServerEvent::BlockingErrorsSnapshot { .. }))
-                .collect();
-            assert!(matches!(
-                remaining.first(),
-                Some(ServerEvent::PaneStateSnapshot { .. })
-            ));
+            let remaining = read_attach_events(&mut queued).await;
+            // The rejected first request also broadcasts retained session
+            // feedback. It may precede the subsequent valid attach snapshot.
+            let snapshot_index = remaining
+                .iter()
+                .position(|event| matches!(event, ServerEvent::PaneStateSnapshot { .. }))
+                .expect("valid attach must establish its authoritative tree");
+            assert!(
+                remaining[..snapshot_index].iter().all(
+                    |event| matches!(event, ServerEvent::BlockingErrorsSnapshot { errors }
+                    if errors.iter().any(|error| error.message.contains(wrong_session.as_str())))
+                ),
+                "only visible feedback for the refused request may precede attachment"
+            );
+            assert!(
+                remaining[snapshot_index..].iter().any(
+                    |event| matches!(event, ServerEvent::BlockingErrorsSnapshot { errors }
+                    if errors.iter().any(|error| error.message.contains(wrong_session.as_str())))
+                ),
+                "attachment must replay the retained request failure"
+            );
             assert_eq!(
                 listener.tracked_count(),
                 1,
@@ -369,6 +385,7 @@ mod tests {
             &mut queued,
             &ClientRequest::Attach {
                 session: "admission-test".to_string(),
+                hello: Default::default(),
             },
         )
         .await
@@ -380,7 +397,12 @@ mod tests {
             .await
             .expect("shutdown did not cancel saturated accept")
             .expect("accept task panicked");
-        listener.state.abort_all_connection_tasks();
+        // Abort the handles directly: `abort_all_connection_tasks` also closes
+        // the ordered event journal, which this test reuses for the fresh
+        // connection that must be admitted after the aborted handle is reaped.
+        for task in listener.state.connection_tasks.lock().unwrap().iter() {
+            task.abort();
+        }
         let admitted_end =
             tokio::time::timeout(TEST_DEADLINE, read_frame::<ServerEvent, _>(&mut admitted))
                 .await

@@ -288,6 +288,21 @@ pub(crate) enum PaneCommand {
         bytes: Vec<u8>,
         complete: bool,
     },
+    /// A complete screen at `sequence`, from attach. Applied like a replay, but
+    /// it also starts the older-history chain that `PrependHistory` extends.
+    Snapshot {
+        sequence: u64,
+        bytes: Vec<u8>,
+        complete: bool,
+    },
+    /// Older journal output that continues the engine's history exactly where
+    /// `before_sequence` points. Stale replies are ignored by the engine.
+    PrependHistory {
+        before_sequence: u64,
+        first_sequence: u64,
+        bytes: Vec<u8>,
+        reaches_journal_start: bool,
+    },
     Resize(u16, u16),
     Budget(u16),
     ScrollUp(u16),
@@ -299,6 +314,8 @@ pub(crate) enum PaneCommand {
         origin: Arc<()>,
     },
     Fingerprint,
+    #[cfg(test)]
+    SeedRetainedHistory(usize),
     // Production captures use the exact acknowledged immutable source.
     // Keep the parser-copy path only for its allocation/ordering regressions.
     #[cfg(test)]
@@ -312,7 +329,10 @@ pub(crate) enum PaneCommand {
 impl PaneCommand {
     fn bytes(&self) -> usize {
         match self {
-            Self::Output { bytes, .. } | Self::Replay { bytes, .. } => bytes.capacity(),
+            Self::Output { bytes, .. }
+            | Self::Replay { bytes, .. }
+            | Self::Snapshot { bytes, .. }
+            | Self::PrependHistory { bytes, .. } => bytes.capacity(),
             _ => std::mem::size_of::<Self>(),
         }
     }
@@ -697,7 +717,10 @@ impl PaneFrontend {
     pub(crate) fn submit(&mut self, body: PaneCommand) -> Result<u64, PaneCommand> {
         let output = matches!(
             body,
-            PaneCommand::Output { .. } | PaneCommand::Replay { .. }
+            PaneCommand::Output { .. }
+                | PaneCommand::Replay { .. }
+                | PaneCommand::Snapshot { .. }
+                | PaneCommand::PrependHistory { .. }
         );
         if !(self.pending.is_empty()
             || output && self.output_backpressure && self.older_intents == 0)
@@ -1177,21 +1200,11 @@ impl Job for ParserJob {
                 queue.active_commands -= 1;
                 continue;
             }
-            if command.reported_blocked == Some(ParserPressure::PaneLimit)
-                && !matches!(
-                    &command.body,
-                    PaneCommand::Output { .. } | PaneCommand::Replay { .. }
-                )
-            {
-                // Output copy-on-write peaks can improve when retained history owners release.
-                deferred.push_back(command); // Other fenced operations have unchanged geometry and allocation peaks until cancellation.
-                continue;
-            }
             let mut evidence = None;
             let result: Result<(), String> = (|| {
                 if command.publication_pending {
                     // A completed mutation must only retry immutable publication.
-                    return publish_command(&shared, &engines, &mut command, &context);
+                    return publish_command(&shared, &mut engines, &mut command, &context);
                     // Preserve its exact ordinal, cursor, and saved semantic evidence.
                 }
                 if let PaneCommand::Register { rows, cols, budget } = &command.body {
@@ -1242,6 +1255,12 @@ impl Job for ParserJob {
                                                     .into(),
                                             );
                                         }
+                                        let available = state_operation_allowance(
+                                            &mut engines,
+                                            &shared,
+                                            state.input_peak_bytes(chunk),
+                                        );
+                                        state.prepare_input(chunk, available);
                                         try_state_budget(
                                             &mut engines,
                                             state.input_peak_bytes(chunk),
@@ -1257,23 +1276,12 @@ impl Job for ParserJob {
                             }
                             PaneCommand::Replay {
                                 sequence, bytes, ..
+                            }
+                            | PaneCommand::Snapshot {
+                                sequence, bytes, ..
                             } => {
-                                if !command.cursor.replay_started
-                                    && *sequence > engine.state.output_sequence()
-                                {
-                                    let (rows, columns) = engine.state.live_size();
-                                    try_state_budget(
-                                        &mut engines,
-                                        engine
-                                            .state
-                                            .retained_allocation_bytes()
-                                            .saturating_add(geometry_peak(rows, columns)),
-                                        &shared,
-                                        &context,
-                                        &command.target,
-                                        &mut command.blocked,
-                                    )?;
-                                }
+                                let is_snapshot =
+                                    matches!(&command.body, PaneCommand::Snapshot { .. });
                                 engine.state.apply_ordered_replay(
                                     bytes,
                                     *sequence,
@@ -1286,6 +1294,12 @@ impl Job for ParserJob {
                                                     .into(),
                                             );
                                         }
+                                        let available = state_operation_allowance(
+                                            &mut engines,
+                                            &shared,
+                                            state.input_peak_bytes(chunk),
+                                        );
+                                        state.prepare_input(chunk, available);
                                         try_state_budget(
                                             &mut engines,
                                             state.input_peak_bytes(chunk),
@@ -1298,9 +1312,44 @@ impl Job for ParserJob {
                                         Ok(())
                                     },
                                 )?;
+                                engine.state.set_history_base(
+                                    is_snapshot.then(|| sequence.saturating_add(1)),
+                                );
+                            }
+                            PaneCommand::PrependHistory {
+                                before_sequence,
+                                first_sequence,
+                                bytes,
+                                ..
+                            } => {
+                                // Stale replies (base moved since the request) are dropped here.
+                                if engine.state.history_base_sequence() == Some(*before_sequence) {
+                                    let peak = engine.state.prepend_peak_bytes(bytes.len());
+                                    try_state_budget(
+                                        &mut engines,
+                                        peak,
+                                        &shared,
+                                        &context,
+                                        &command.target,
+                                        &mut command.blocked,
+                                    )?;
+                                    engine.state.prepend_history(bytes, *first_sequence);
+                                }
                             }
                             PaneCommand::Resize(rows, cols) => {
                                 validate_geometry(*rows, *cols)?;
+                                let extra = engine
+                                    .state
+                                    .resize_peak_bytes(*rows, *cols)
+                                    .saturating_sub(engine.state.retained_allocation_bytes());
+                                let available = state_operation_allowance(
+                                    &mut engines,
+                                    &shared,
+                                    engine.state.resize_peak_bytes(*rows, *cols),
+                                );
+                                engine
+                                    .state
+                                    .fit_to_allocation_limit(available.saturating_sub(extra));
                                 let peak = engine.state.resize_peak_bytes(*rows, *cols);
                                 try_state_budget(
                                     &mut engines,
@@ -1316,6 +1365,7 @@ impl Job for ParserJob {
                                 engine.state.set_scrollback_budget_mib(*budget)
                             }
                             PaneCommand::ScrollUp(lines) => {
+                                engine.state.fit_to_allocation_limit(MAX_STATE_BYTES / 2);
                                 try_state_budget(
                                     &mut engines,
                                     engine.state.retained_allocation_bytes().saturating_mul(2),
@@ -1344,6 +1394,13 @@ impl Job for ParserJob {
                                     &mut command.blocked,
                                 )?;
                                 engine.state.jump_to_history_byte(*byte);
+                            }
+                            #[cfg(test)]
+                            PaneCommand::SeedRetainedHistory(bytes) => {
+                                let chunk = [0u8; 65536];
+                                for _ in 0..bytes.div_ceil(chunk.len()) {
+                                    engine.state.append_history_for_benchmark(&chunk);
+                                }
                             }
                             PaneCommand::Fingerprint => {
                                 engine.state.synchronize_visible_text_fingerprint()
@@ -1399,6 +1456,8 @@ impl Job for ParserJob {
                 let has_separate_result = match command.body {
                     PaneCommand::InputBarrier { .. } => true,
                     #[cfg(test)]
+                    PaneCommand::SeedRetainedHistory(_) => true,
+                    #[cfg(test)]
                     PaneCommand::Capture { .. } => true,
                     _ => false,
                 };
@@ -1416,7 +1475,7 @@ impl Job for ParserJob {
                 }
                 command.evidence = evidence; // Keep the completed operation's bounded semantic samples while its snapshot waits.
                 command.publication_pending = true; // Every retry after this point must skip all mutable terminal operations.
-                publish_command(&shared, &engines, &mut command, &context) // Attempt publication once and return control to the owner on pressure.
+                publish_command(&shared, &mut engines, &mut command, &context) // Attempt publication once and return control to the owner on pressure.
             })();
             if voluntarily_yielded {
                 // A consumed byte quantum retains its original command without reporting memory pressure.
@@ -1428,7 +1487,9 @@ impl Job for ParserJob {
                     .store(true, Ordering::Release);
                 if matches!(
                     &command.body,
-                    PaneCommand::Replay { .. } | PaneCommand::Output { .. }
+                    PaneCommand::Replay { .. }
+                        | PaneCommand::Snapshot { .. }
+                        | PaneCommand::Output { .. }
                 ) && (command.previewed_bytes == 0
                     || command
                         .cursor
@@ -1450,6 +1511,20 @@ impl Job for ParserJob {
                 }
                 continue; // Return to retirement and cross-pane scheduling without publishing partial output.
             }
+            if command
+                .blocked
+                .is_some_and(|blocked| blocked.pressure == ParserPressure::PaneLimit)
+                && !matches!(
+                    command.body,
+                    PaneCommand::Output { .. }
+                        | PaneCommand::Replay { .. }
+                        | PaneCommand::Snapshot { .. }
+                        | PaneCommand::PrependHistory { .. }
+                        | PaneCommand::Resize(..)
+                )
+            {
+                command.blocked = None;
+            }
             if let Some(blocked) = command.blocked {
                 command
                     .target
@@ -1457,7 +1532,9 @@ impl Job for ParserJob {
                     .store(blocked.pressure as usize, Ordering::Release);
                 if matches!(
                     command.body,
-                    PaneCommand::Output { .. } | PaneCommand::Replay { .. }
+                    PaneCommand::Output { .. }
+                        | PaneCommand::Replay { .. }
+                        | PaneCommand::Snapshot { .. }
                 ) {
                     command
                         .target
@@ -1568,7 +1645,7 @@ fn publish_progress_preview(shared: &Shared, engine: &Engine, target: &PaneTarge
 }
 fn publish_command(
     shared: &Shared,
-    engines: &HashMap<NodeId, Engine>,
+    engines: &mut HashMap<NodeId, Engine>,
     command: &mut Command,
     context: &JobContext,
 ) -> Result<(), String> {
@@ -1577,8 +1654,10 @@ fn publish_command(
         return Err("terminal publication cancelled before acknowledgement".into());
     }
     let engine = engines
-        .get(&command.target.pane_id)
+        .get_mut(&command.target.pane_id)
         .ok_or("terminal state disappeared")?; // The deferred command fences later mutations of this engine.
+    engine.state.fit_to_allocation_limit(MAX_STATE_BYTES); // Shed oldest history now: a deferral is never retried and would stall every pane.
+    let engine = &*engine;
     let bytes = engine.state.retained_allocation_bytes(); // Charge the conservative immutable allocation before cloning it.
     if bytes > MAX_STATE_BYTES {
         // Preserve the independent per-generation bound in both parser modes.
@@ -1722,6 +1801,52 @@ fn push_result(shared: &Shared, result: ParseResult, context: &JobContext) -> Re
     }
 }
 
+/// Compute this engine's actual share of the aggregate pool. When optional
+/// retention consumes the remaining share, reclaim it in one bounded pass
+/// rather than waiting for idle panes to produce output of their own.
+fn state_operation_allowance(
+    engines: &mut HashMap<NodeId, Engine>,
+    shared: &Shared,
+    peak: usize,
+) -> usize {
+    let limit = shared.state_limit.load(Ordering::Acquire);
+    if limit == 0 {
+        return MAX_STATE_BYTES;
+    }
+    retire_dropped_engines(engines, shared);
+    let mut used = engines
+        .values()
+        .map(|engine| engine.state.retained_allocation_bytes())
+        .sum::<usize>();
+    if used.saturating_add(peak) > limit {
+        let mut candidates: Vec<_> = engines
+            .iter()
+            .map(|(pane_id, engine)| {
+                let displayed = engine.target.displayed.load(Ordering::Acquire);
+                let focused = engine.target.focused.load(Ordering::Acquire);
+                (*pane_id, displayed || focused, focused)
+            })
+            .collect();
+        candidates.sort_by_key(|(pane_id, displayed, focused)| (*displayed, *focused, pane_id.0));
+        for (pane_id, _, _) in candidates {
+            let Some(engine) = engines.get_mut(&pane_id) else {
+                continue;
+            };
+            let before = engine.state.retained_allocation_bytes();
+            // Stop as soon as one peer releases enough optional retention;
+            // unaffected panes keep their journals and frozen history intact.
+            engine.state.fit_to_allocation_limit(0);
+            used = used
+                .saturating_sub(before)
+                .saturating_add(engine.state.retained_allocation_bytes());
+            if used.saturating_add(peak) <= limit {
+                break;
+            }
+        }
+    }
+    MAX_STATE_BYTES.min(limit.saturating_sub(used))
+}
+
 fn try_state_budget(
     engines: &mut HashMap<NodeId, Engine>,
     peak: usize,
@@ -1748,6 +1873,7 @@ fn try_state_budget(
         return Ok(());
     }
     retire_dropped_engines(engines, shared); // Pooled admission retires stale engines; unpooled retirement already runs once per owner quantum.
+    state_operation_allowance(engines, shared, peak);
     let used = engines
         .values()
         .map(|engine| engine.state.retained_allocation_bytes())
@@ -2187,7 +2313,7 @@ mod tests {
     }
 
     #[test]
-    fn osc_pressure_retains_original_cursor_and_other_panes_continue() {
+    fn oversized_osc_remains_bounded_and_other_panes_continue() {
         let (_bank, parsing) = Bank::start();
         let mut first = TerminalView::new(4, 40);
         let mut second = TerminalView::new(4, 40);
@@ -2225,7 +2351,6 @@ mod tests {
         let mut bytes = b"\x1b]0;".to_vec();
         bytes.extend(std::iter::repeat_n(b'x', 512 * 1024));
         bytes.push(7);
-        let expected_bytes = bytes.clone();
         offer(
             &mut first,
             PaneCommand::Output {
@@ -2235,19 +2360,10 @@ mod tests {
                 track: false,
             },
         );
-        result(
-            &parsing,
-            |result| matches!(result, ParseResult::Error { target, message } if target.pane_id == NodeId(101) && message.contains("cursor")),
-        );
-        offer(
-            &mut first,
-            PaneCommand::Output {
-                first: 3,
-                sequence: 3,
-                bytes: b"after".to_vec(),
-                track: false,
-            },
-        );
+        result(&parsing, |result| {
+            matches!(result, ParseResult::Published { target, snapshot, .. }
+                if target.pane_id == NodeId(101) && snapshot.sequence == 2)
+        });
         offer(
             &mut second,
             PaneCommand::Output {
@@ -2265,21 +2381,15 @@ mod tests {
             unreachable!()
         };
         assert!(snapshot.visible.contents().contains("independent pane"));
-        let deadline = Instant::now() + Duration::from_secs(5);
-        let (pending, bytes) = loop {
-            if let Some(work) = parsing.pending_work() {
-                break work;
-            }
-            assert!(Instant::now() < deadline, "parser queue read stayed busy");
-            std::thread::yield_now();
-        };
-        assert!(pending >= 2);
-        assert!(bytes >= expected_bytes.len());
-        parsing
-            .shared
-            .state_limit
-            .store(MAX_STATE_BYTES, Ordering::Release);
-        parsing.shared.changed.notify_one();
+        offer(
+            &mut first,
+            PaneCommand::Output {
+                first: 3,
+                sequence: 3,
+                bytes: b"after".to_vec(),
+                track: false,
+            },
+        );
         let resumed = result(
             &parsing,
             |result| matches!(result, ParseResult::Published { target, snapshot, .. } if target.pane_id == NodeId(101) && snapshot.sequence == 3),
@@ -2287,10 +2397,8 @@ mod tests {
         let ParseResult::Published { snapshot, .. } = resumed else {
             unreachable!()
         };
-        let mut expected = b"ready".to_vec();
-        expected.extend_from_slice(&expected_bytes);
-        expected.extend_from_slice(b"after");
-        assert_eq!(snapshot.history.to_vec(), expected);
+        assert!(snapshot.history.to_vec().ends_with(b"after"));
+        assert!(snapshot.history.len() <= MIB);
         assert!(snapshot.visible.contents().contains("after"));
     }
     #[test]
@@ -2340,7 +2448,9 @@ mod tests {
             &parsing,
             |result| matches!(result, ParseResult::Published { target, snapshot, .. } if target.pane_id == second_id && snapshot.sequence == 1),
         );
-        parsing.shared.state_limit.store(MIB, Ordering::Release);
+        // Force genuine fixed-state exhaustion; OSC accumulation is bounded
+        // and optional raw history now reclaims itself instead of suspending.
+        parsing.shared.state_limit.store(1, Ordering::Release);
         let mut source = b"\x1b]0;".to_vec();
         source.extend(std::iter::repeat_n(b'x', 512 * 1024));
         offer(
@@ -2670,6 +2780,81 @@ mod tests {
         };
         assert!(snapshot.screen.contents().contains("hello red"));
     }
+    #[test]
+    fn snapshot_cutover_keeps_live_output_and_rejects_duplicate_history_page() {
+        let (_bank, parsing) = Bank::start();
+        let pane_id = NodeId(209);
+        let mut view = TerminalView::new(4, 30);
+        attach(&parsing, pane_id, &mut view);
+        offer(
+            &mut view,
+            PaneCommand::Snapshot {
+                sequence: 10,
+                bytes: b"\x1b[2J\x1b[Hcurrent".to_vec(),
+                complete: true,
+            },
+        );
+        offer(
+            &mut view,
+            PaneCommand::Output {
+                first: 10,
+                sequence: 10,
+                bytes: b"DUPLICATE".to_vec(),
+                track: false,
+            },
+        );
+        offer(
+            &mut view,
+            PaneCommand::Output {
+                first: 11,
+                sequence: 11,
+                bytes: b"\r\nlive".to_vec(),
+                track: false,
+            },
+        );
+        offer(
+            &mut view,
+            PaneCommand::PrependHistory {
+                before_sequence: 11,
+                first_sequence: 1,
+                bytes: b"old\r\n".to_vec(),
+                reaches_journal_start: true,
+            },
+        );
+        offer(
+            &mut view,
+            PaneCommand::PrependHistory {
+                before_sequence: 11,
+                first_sequence: 1,
+                bytes: b"STALE".to_vec(),
+                reaches_journal_start: true,
+            },
+        );
+        offer(
+            &mut view,
+            PaneCommand::Output {
+                first: 12,
+                sequence: 12,
+                bytes: b"\r\ntail".to_vec(),
+                track: false,
+            },
+        );
+        let publication = result(&parsing, |result| {
+            matches!(result, ParseResult::Published { target, snapshot, .. }
+                if target.pane_id == pane_id && snapshot.sequence == 12)
+        });
+        let ParseResult::Published { snapshot, .. } = publication else {
+            unreachable!()
+        };
+        assert_eq!(
+            snapshot.history.to_vec(),
+            b"old\r\n\x1b[2J\x1b[Hcurrent\r\nlive\r\ntail"
+        );
+        assert!(snapshot.visible.contents().contains("current"));
+        assert!(snapshot.visible.contents().contains("live"));
+        assert!(snapshot.visible.contents().contains("tail"));
+    }
+
     #[test]
     fn replay_resize_and_historical_capture_keep_exact_order() {
         let (_bank, parsing) = Bank::start();
@@ -3236,6 +3421,258 @@ mod tests {
     }
 
     #[test]
+    fn aggregate_reclamation_stops_after_one_hidden_peer_frees_enough() {
+        let (_bank, parsing) =
+            Bank::start_with_storage(64, crate::execution::terminal_storage_quota());
+        let mut panes = [
+            (NodeId(1), TerminalView::new(4, 80)),
+            (NodeId(2), TerminalView::new(4, 80)),
+            (NodeId(3), TerminalView::new(4, 80)),
+        ];
+        for (id, view) in &mut panes {
+            attach(&parsing, *id, view);
+        }
+        wait_installed(&parsing, &mut panes);
+        let mut engines = HashMap::new();
+        for (id, view) in &panes {
+            let target = view.frontend.as_ref().unwrap().target.clone();
+            target.displayed.store(id.0 != 1, Ordering::Release);
+            let mut state = TerminalState::with_scrollback_budget_mib(4, 80, 16);
+            for _ in 0..20 {
+                state.feed(b"frozen historical row\r\n");
+            }
+            state.scroll_up(5);
+            for _ in 0..128 {
+                state.append_history_for_benchmark(&[0; 65536]);
+            }
+            engines.insert(*id, Engine { target, state });
+        }
+        let before: Vec<_> = [NodeId(2), NodeId(3)]
+            .iter()
+            .map(|id| {
+                let state = &engines[id].state;
+                (
+                    state.retained_allocation_bytes(),
+                    state.searchable_history_snapshot().to_vec(),
+                    state.with_screen(vt100::Screen::contents),
+                    state.scrollback_position(),
+                )
+            })
+            .collect();
+        let used = engines
+            .values()
+            .map(|engine| engine.state.retained_allocation_bytes())
+            .sum::<usize>();
+        let peak = 8 * MIB;
+        parsing
+            .shared
+            .state_limit
+            .store(used + peak - 4 * MIB, Ordering::Release);
+        assert!(state_operation_allowance(&mut engines, &parsing.shared, peak) >= peak);
+        assert!(engines[&NodeId(1)]
+            .state
+            .searchable_history_snapshot()
+            .is_empty());
+        for (index, id) in [NodeId(2), NodeId(3)].iter().enumerate() {
+            let state = &engines[id].state;
+            assert_eq!(state.retained_allocation_bytes(), before[index].0);
+            assert_eq!(
+                state.searchable_history_snapshot().to_vec(),
+                before[index].1
+            );
+            assert_eq!(state.with_screen(vt100::Screen::contents), before[index].2);
+            assert_eq!(state.scrollback_position(), before[index].3);
+        }
+    }
+
+    #[test]
+    fn pooled_output_reclaims_idle_other_pane_history_without_waiting_for_owner_activity() {
+        let (_bank, parsing) =
+            Bank::start_with_storage(64, crate::execution::terminal_storage_quota());
+        let mut panes = [
+            (
+                NodeId(1),
+                TerminalView::with_scrollback_budget_mib(4, 80, 96),
+            ),
+            (
+                NodeId(2),
+                TerminalView::with_scrollback_budget_mib(4, 80, 96),
+            ),
+        ];
+        for (id, view) in &mut panes {
+            attach(&parsing, *id, view);
+        }
+        wait_installed(&parsing, &mut panes);
+        offer(&mut panes[0].1, PaneCommand::SeedRetainedHistory(48 * MIB));
+        offer(&mut panes[1].1, PaneCommand::SeedRetainedHistory(48 * MIB));
+        offer(
+            &mut panes[0].1,
+            PaneCommand::Output {
+                first: 1,
+                sequence: 1,
+                bytes: b"active pane remains usable".to_vec(),
+                track: false,
+            },
+        );
+        offer(
+            &mut panes[0].1,
+            PaneCommand::InputBarrier { generation: 993 },
+        );
+        let deadline = Instant::now() + Duration::from_secs(15);
+        let mut ready = false;
+        while !ready {
+            for result in parsing.collect() {
+                match result {
+                    ParseResult::Error { message, .. } => {
+                        panic!("optional idle history blocked progress: {message}")
+                    }
+                    ParseResult::InputBarrier {
+                        generation: 993,
+                        sequence,
+                        ..
+                    } => {
+                        assert_eq!(sequence, 1);
+                        ready = true;
+                    }
+                    _ => {}
+                }
+            }
+            assert!(
+                Instant::now() < deadline,
+                "pooled retention deadlocked active output"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+
+    #[test]
+    fn saturated_history_is_reclaimed_by_worker_before_output_and_input_admission() {
+        for budget in [0, 512] {
+            let (_bank, parsing) =
+                Bank::start_with_storage(budget, crate::execution::terminal_storage_quota());
+            let mut panes = [(
+                NodeId(1),
+                TerminalView::with_scrollback_budget_mib(4, 80, 192),
+            )];
+            attach(&parsing, panes[0].0, &mut panes[0].1);
+            wait_installed(&parsing, &mut panes);
+            // Populate only retention, bypassing publication's own recovery so
+            // the next ordinary output must execute the real admission repair.
+            offer(
+                &mut panes[0].1,
+                PaneCommand::SeedRetainedHistory(MAX_STATE_BYTES),
+            );
+            offer(
+                &mut panes[0].1,
+                PaneCommand::Output {
+                    first: 1,
+                    sequence: 1,
+                    bytes: b"\x1b[999999".to_vec(),
+                    track: false,
+                },
+            );
+            offer(
+                &mut panes[0].1,
+                PaneCommand::Output {
+                    first: 2,
+                    sequence: 2,
+                    bytes: b"S\x1b[?2004h\xe2\x82".to_vec(),
+                    track: false,
+                },
+            );
+            offer(
+                &mut panes[0].1,
+                PaneCommand::Output {
+                    first: 3,
+                    sequence: 3,
+                    bytes: b"\xacstill usable".to_vec(),
+                    track: false,
+                },
+            );
+            offer(
+                &mut panes[0].1,
+                PaneCommand::InputBarrier { generation: 992 },
+            );
+            let deadline = Instant::now() + Duration::from_secs(15);
+            let mut ready = false;
+            while !ready {
+                for result in parsing.collect() {
+                    match result {
+                        ParseResult::Error { message, .. } => {
+                            panic!("history saturation rejected output: {message}")
+                        }
+                        ParseResult::Published { snapshot, .. } if snapshot.sequence == 3 => {
+                            assert!(snapshot.visible.contents().contains("€still usable"));
+                            assert!(snapshot.paste);
+                        }
+                        ParseResult::InputBarrier {
+                            generation: 992,
+                            sequence,
+                            paste,
+                            ..
+                        } => {
+                            assert_eq!(sequence, 3);
+                            assert!(paste);
+                            ready = true;
+                        }
+                        _ => {}
+                    }
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "retention saturation fenced subsequent input"
+                );
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
+    }
+
+    #[test]
+    fn impossible_resize_completes_and_does_not_fence_later_output_or_input() {
+        for budget in [0, 512] {
+            let (_bank, parsing) =
+                Bank::start_with_storage(budget, crate::execution::terminal_storage_quota());
+            let mut panes = [(NodeId(1), TerminalView::new(4, 80))];
+            attach(&parsing, panes[0].0, &mut panes[0].1);
+            wait_installed(&parsing, &mut panes);
+            offer(&mut panes[0].1, PaneCommand::Resize(255, 4096));
+            offer(
+                &mut panes[0].1,
+                PaneCommand::Output {
+                    first: 1,
+                    sequence: 1,
+                    bytes: b"still usable".to_vec(),
+                    track: false,
+                },
+            );
+            offer(
+                &mut panes[0].1,
+                PaneCommand::InputBarrier { generation: 991 },
+            );
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let mut ready = false;
+            while !ready {
+                for result in parsing.collect() {
+                    if let ParseResult::InputBarrier {
+                        generation: 991,
+                        sequence,
+                        ..
+                    } = result
+                    {
+                        assert_eq!(sequence, 1);
+                        ready = true;
+                    }
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "impossible resize fenced subsequent input"
+                );
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
+    }
+
+    #[test]
     fn retiring_an_engine_wakes_the_client_loop() {
         let (_bank, parsing) = Bank::start();
         let mut panes = [(NodeId(1), TerminalView::new(24, 80))];
@@ -3506,7 +3943,7 @@ mod tests {
         let mut panes = [(NodeId(9), TerminalView::new(3, 20))];
         attach(&parsing, panes[0].0, &mut panes[0].1);
         let mut initial = b"original\x1b]0;".to_vec();
-        initial.extend(std::iter::repeat_n(b'x', 256 * 1024));
+        initial.extend(std::iter::repeat_n(b'x', 2 * MIB));
         initial.push(7);
         offer(
             &mut panes[0].1,

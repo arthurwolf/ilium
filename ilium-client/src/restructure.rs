@@ -33,7 +33,7 @@ use ilium_core::animation_recommendation::RecommendedRestructurePlan;
 #[path = "restructure_recommendations.rs"]
 mod recommendations;
 pub use recommendations::{
-    infer_project_restructure, RecommendationContext, RecommendationSnapshot,
+    infer_project_restructure_with_attention, RecommendationContext, RecommendationSnapshot,
 };
 
 #[cfg(test)]
@@ -67,6 +67,9 @@ const MAXIMUM_STRUCTURE_EVIDENCE_CHARACTERS: usize = 4_000;
 /// unbounded-prompt behavior.
 const MAXIMUM_CONTENT_CHARACTERS_PER_ITEM: usize = 2_000;
 
+/// Per-agent ceiling for the batch recap evidence block.
+const MAXIMUM_RECAP_EVIDENCE_CHARACTERS_PER_ITEM: usize = 1_700;
+
 /// How many lines of a content extract to keep from the start/end when it
 /// exceeds `HEAD_LINES + TAIL_LINES` -- mirrors `terminal_naming`'s
 /// character-based clip, but line-based here. Kept generous, same rationale
@@ -96,6 +99,9 @@ pub struct LeafContext {
     /// reads an agent transcript. It lets automatic retry policy recognize
     /// new visible work without putting disk I/O on the UI event loop.
     automatic_content_fingerprint: u64,
+    /// Compact goal-aware evidence for the batch short recap; empty unless
+    /// the worker read this agent's transcript (`resolve_content_extracts`).
+    pub recap_evidence: String,
     #[serde(skip)]
     agent_lookup: Option<(AgentClass, String, PathBuf)>,
 }
@@ -108,7 +114,8 @@ impl LeafContext {
             .kind_label
             .capacity()
             .saturating_add(self.current_title.capacity())
-            .saturating_add(self.content_extract.capacity());
+            .saturating_add(self.content_extract.capacity())
+            .saturating_add(self.recap_evidence.capacity());
         for value in [
             &self.current_short_title,
             &self.current_icon,
@@ -217,6 +224,7 @@ pub fn gather_leaf_contexts(
             filename: None,
             content_extract: String::new(),
             automatic_content_fingerprint: 0,
+            recap_evidence: String::new(),
             agent_lookup: None,
         };
         if let Some(agent) = status.known_agent_state() {
@@ -270,6 +278,7 @@ pub fn gather_leaf_contexts(
                 filename: None,
                 content_extract: String::new(),
                 automatic_content_fingerprint: 0,
+                recap_evidence: String::new(),
                 agent_lookup: None,
             });
         }
@@ -495,12 +504,12 @@ pub fn resolve_content_extracts(contexts: &mut [LeafContext], home: &Path) {
             locator.genuine_request_evidence(&class, &session_id),
             Ok(ilium_agent_session::GenuineRequestEvidence::Present { .. })
         );
-        let entries = has_request
+        let transcript = has_request
             .then(|| locator.transcript_for_session(&class, &session_id))
-            .flatten()
-            .and_then(|transcript| {
-                crate::transcript_context::recent_transcript_entries(&class, &transcript.path).ok()
-            });
+            .flatten();
+        let entries = transcript.as_ref().and_then(|transcript| {
+            crate::transcript_context::recent_transcript_entries(&class, &transcript.path).ok()
+        });
         context.is_title_eligible = entries.as_ref().is_some_and(|entries| {
             entries
                 .iter()
@@ -512,7 +521,28 @@ pub fn resolve_content_extracts(contexts: &mut [LeafContext], home: &Path) {
             }
             _ => ilium_prompts::naming::UNAVAILABLE_TRANSCRIPT.to_string(),
         };
+        context.recap_evidence = transcript
+            .as_ref()
+            .map(|transcript| batch_recap_evidence(&class, &transcript.path))
+            .unwrap_or_default();
     }
+}
+
+/// Goal-aware batch evidence for one agent transcript. Any read failure yields
+/// empty evidence, which simply means no recap is requested for that pane.
+fn batch_recap_evidence(class: &AgentClass, path: &Path) -> String {
+    use crate::recap::evidence::{
+        build_agent_digest, read_transcript_window, HEAD_WINDOW_BYTES, MAX_LINE_BYTES,
+        TAIL_WINDOW_BYTES,
+    };
+    if !matches!(class, AgentClass::Claude | AgentClass::Codex) {
+        return String::new();
+    }
+    read_transcript_window(path, HEAD_WINDOW_BYTES, TAIL_WINDOW_BYTES, MAX_LINE_BYTES)
+        .map(|window| {
+            crate::recap::batch::batch_agent_evidence(&build_agent_digest(class, &window))
+        })
+        .unwrap_or_default()
 }
 
 /// Renders typed transcript entries as `[role] content` lines, one entry per
@@ -592,6 +622,7 @@ struct RestructurePromptContext {
     naming_and_organization: String,
     title_instructions: &'static str,
     output_example: &'static str,
+    attention_enabled: bool,
     items: Vec<PromptLeafContext>,
     current_structure: String,
     protected_split_views: Vec<PromptProtectedSplitViewContext>,
@@ -607,6 +638,7 @@ struct PromptLeafContext {
     is_name_fixed: bool,
     filename: Option<String>,
     content_extract: String,
+    recap_evidence: String,
 }
 
 #[derive(Serialize)]
@@ -635,6 +667,7 @@ impl RestructurePromptContext {
             entry_naming: String::new(),
             organization: String::new(),
             naming_and_organization: String::new(),
+            attention_enabled: false,
             title_instructions: match title_style {
                 TitleStyle::Labeling => crate::session_naming::LABEL_INSTRUCTIONS,
                 TitleStyle::Summarization => ilium_prompts::naming::RESTRUCTURE_SUMMARY,
@@ -714,6 +747,7 @@ impl PromptLeafContext {
                 ))
             }),
             content_extract: String::new(),
+            recap_evidence: String::new(),
         };
         // Charge the metadata actually retained, rather than every field's
         // maximum allowance: short titles and absent filenames should leave
@@ -728,8 +762,16 @@ impl PromptLeafContext {
                 .filename
                 .as_deref()
                 .map_or(0, |text| text.chars().count());
+        // Batch recap evidence is bounded per agent and charged first, so a
+        // long transcript extract cannot crowd it out.
+        let recap_budget = (evidence_budget / 2).min(MAXIMUM_RECAP_EVIDENCE_CHARACTERS_PER_ITEM);
+        context.recap_evidence = crate::naming::encode_untrusted_context(
+            &clip_restructure_evidence(&item.recap_evidence, recap_budget),
+        );
+        let recap_characters = context.recap_evidence.chars().count();
         let content_budget = evidence_budget
             .saturating_sub(metadata_characters)
+            .saturating_sub(recap_characters)
             .min(MAXIMUM_CONTENT_CHARACTERS_PER_ITEM);
         context.content_extract = crate::naming::encode_untrusted_context(
             &clip_restructure_evidence(&item.content_extract, content_budget),
@@ -786,6 +828,7 @@ fn render_restructure_prompt(
         RestructurePromptPolicy {
             instructions: &ilium_inference::PromptInstructions::default(),
             prompt_token_limit: ilium_inference::DEFAULT_RESTRUCTURE_PROMPT_TOKEN_LIMIT,
+            include_attention: false,
         },
         items,
         current_structure,
@@ -799,6 +842,8 @@ fn render_restructure_prompt(
 struct RestructurePromptPolicy<'a> {
     instructions: &'a ilium_inference::PromptInstructions,
     prompt_token_limit: u32,
+    /// Asks the model for the optional `attention` list (shared attention mode).
+    include_attention: bool,
 }
 
 fn render_restructure_prompt_with_instructions(
@@ -813,8 +858,16 @@ fn render_restructure_prompt_with_instructions(
     let RestructurePromptPolicy {
         instructions,
         prompt_token_limit,
+        include_attention,
     } = policy;
-    let mut item_evidence_budget = MAXIMUM_ITEM_EVIDENCE_CHARACTERS;
+    // Agents with recap evidence scale the shared budget with their count.
+    let recap_agent_count = items
+        .iter()
+        .filter(|item| !item.recap_evidence.is_empty())
+        .count();
+    let mut item_evidence_budget = MAXIMUM_ITEM_EVIDENCE_CHARACTERS.max(
+        crate::recap::batch::batch_evidence_budget(recap_agent_count),
+    );
     let mut structure_evidence_budget = MAXIMUM_STRUCTURE_EVIDENCE_CHARACTERS;
 
     let mut prompt_tokens = 0;
@@ -835,6 +888,7 @@ fn render_restructure_prompt_with_instructions(
         prompt_context.resource_capabilities =
             crate::semantic_animation::authored_capabilities(&recommendation_context.authored)
                 .to_string();
+        prompt_context.attention_enabled = include_attention;
         prompt_context.organization = instructions.organization.trim().to_owned();
         prompt_context.naming_and_organization =
             instructions.naming_and_organization.trim().to_owned();
@@ -875,6 +929,10 @@ enum LlmRestructureNode {
         /// `ilium_core::RestructureNode`, which has no field for it.
         #[serde(default)]
         command_hint: Option<String>,
+        /// Optional batch short recap. Kept as a raw value so a wrong-shape
+        /// recap can never fail the plan; `sanitize_batch_recap` validates it.
+        #[serde(default)]
+        recap: Option<serde_json::Value>,
     },
     Folder {
         id: NodeId,
@@ -969,6 +1027,48 @@ pub fn infer_restructure_plan_with_protected_splits<G: RestructureCompletionClie
     protected_split_views: &[ProtectedSplitViewContext],
     recommendation_context: &RecommendationContext,
 ) -> anyhow::Result<RecommendedRestructurePlan> {
+    infer_restructure_with_recaps(
+        generator,
+        contexts,
+        current_structure,
+        protected_split_views,
+        recommendation_context,
+        false,
+    )
+    .map(|inference| inference.plan)
+}
+
+/// One validated batch short recap for an agent pane.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BatchRecap {
+    pub pane_id: NodeId,
+    pub short: String,
+}
+
+/// A restructure plan plus the optional per-pane short recaps that rode in
+/// the same model reply. Recaps are a sidecar so the plan type stays unchanged.
+#[derive(Debug, Clone)]
+pub struct RestructureInference {
+    pub plan: RecommendedRestructurePlan,
+    pub recaps: Vec<BatchRecap>,
+    /// The raw optional `attention` list of the same reply, if requested.
+    pub attention: Option<serde_json::Value>,
+}
+
+/// Same contract as `infer_restructure_plan_with_protected_splits`, also
+/// returning the batch recaps of panes that supplied recap evidence. When
+/// `include_attention` is set the prompt also asks for the optional
+/// `attention` list, returned raw and unparsed (parsing needs live pane
+/// fingerprints, see `attention::parse_attention`); it is split off before
+/// the strict plan parse, so a bad list can never fail the sort or retry.
+pub fn infer_restructure_with_recaps<G: RestructureCompletionClient>(
+    generator: &G,
+    contexts: &[LeafContext],
+    current_structure: &str,
+    protected_split_views: &[ProtectedSplitViewContext],
+    recommendation_context: &RecommendationContext,
+    include_attention: bool,
+) -> anyhow::Result<RestructureInference> {
     if contexts.is_empty() {
         anyhow::bail!(ilium_prompts::naming::NAMING_RESTRUCTURE_NO_PANES_OR_FOLDERS_TO_RESTRUCTURE);
     }
@@ -983,6 +1083,7 @@ pub fn infer_restructure_plan_with_protected_splits<G: RestructureCompletionClie
             RestructurePromptPolicy {
                 instructions: &generator.prompt_instructions(),
                 prompt_token_limit: generator.restructure_prompt_token_limit(),
+                include_attention,
             },
             contexts,
             current_structure,
@@ -1031,13 +1132,14 @@ pub fn infer_restructure_plan_with_protected_splits<G: RestructureCompletionClie
             generator.title_style(),
             recommendation_context,
         ) {
-            Ok(plan) => {
+            Ok(inference) => {
                 tracing::info!(
                     operation_id,
                     attempt,
+                    recap_count = inference.recaps.len(),
                     "restructure inference response parsed"
                 );
-                return Ok(plan);
+                return Ok(inference);
             }
             Err(error) => {
                 tracing::error!(
@@ -1067,8 +1169,9 @@ fn parse_restructure_response(
     protected_split_views: &[ProtectedSplitViewContext],
     title_style: TitleStyle,
     recommendation_context: &RecommendationContext,
-) -> anyhow::Result<RecommendedRestructurePlan> {
-    let candidate = crate::naming::parse_structured_json_object(response, "restructure")?;
+) -> anyhow::Result<RestructureInference> {
+    let mut candidate = crate::naming::parse_structured_json_object(response, "restructure")?;
+    let attention = crate::attention::take_attention_value(&mut candidate);
     let mut parsed: LlmRestructurePlan =
         serde_json::from_value(candidate.clone()).map_err(|error| {
             anyhow::anyhow!(ilium_prompts::render_value(
@@ -1176,6 +1279,14 @@ fn parse_restructure_response(
         .collect();
     let (project, entries) =
         recommendations::parse_pointers(&candidate, &parsed.animations, recommendation_context)?;
+    // Only panes that were offered recap evidence may carry a recap.
+    let recap_pane_ids: HashSet<NodeId> = contexts
+        .iter()
+        .filter(|context| !context.recap_evidence.is_empty())
+        .map(|context| context.id)
+        .collect();
+    let mut recaps = Vec::new();
+    collect_batch_recaps(&parsed.children, &recap_pane_ids, &mut recaps);
     let mut plan = RecommendedRestructurePlan {
         structure: RestructurePlan {
             children: parsed
@@ -1192,7 +1303,58 @@ fn parse_restructure_response(
     };
     preserve_protected_leaf_titles(&mut plan.structure.children, contexts);
     plan.validate_assignments()?;
-    Ok(plan)
+    Ok(RestructureInference {
+        plan,
+        recaps,
+        attention,
+    })
+}
+
+/// Logs how many title words the batch recap restates. This is measurement
+/// only: the title is unchanged, because adopting the goal-aware digest for
+/// titles waits on these results (plan section 11, step 7).
+fn log_title_recap_comparison(pane_id: NodeId, title: &str, recap_short: &str) {
+    let comparison = crate::recap::comparison::compare_title_with_recap(title, recap_short);
+    tracing::debug!(
+        pane_id = ?pane_id,
+        title_terms = comparison.title_terms.len(),
+        shared_terms = comparison.shared_terms.len(),
+        coverage = ?comparison.coverage,
+        "title versus batch recap comparison"
+    );
+}
+
+/// Walks the reply in order and keeps each valid, first-seen pane recap.
+fn collect_batch_recaps(
+    nodes: &[LlmRestructureNode],
+    allowed: &HashSet<NodeId>,
+    out: &mut Vec<BatchRecap>,
+) {
+    for node in nodes {
+        match node {
+            LlmRestructureNode::Pane {
+                id, title, recap, ..
+            } => {
+                if let Some(short) = allowed
+                    .contains(id)
+                    .then(|| crate::recap::batch::sanitize_batch_recap(recap.as_ref()))
+                    .flatten()
+                {
+                    log_title_recap_comparison(*id, title, &short);
+                    out.push(BatchRecap {
+                        pane_id: *id,
+                        short,
+                    });
+                }
+            }
+            LlmRestructureNode::Group { children, .. }
+            | LlmRestructureNode::ExistingGroup { children, .. }
+            | LlmRestructureNode::SplitView { children, .. } => {
+                collect_batch_recaps(children, allowed, out)
+            }
+            LlmRestructureNode::Folder { .. } => {}
+        }
+    }
 }
 
 /// Restore exact bundles after normalization, including empty short names and icons.
@@ -1557,6 +1719,7 @@ fn convert_node(
             short_title,
             icon,
             command_hint,
+            recap: _,
         } => {
             let command_hint = terminal_pane_ids
                 .contains(&id)
@@ -1750,6 +1913,7 @@ mod tests {
                 RestructurePromptPolicy {
                     instructions: &instructions,
                     prompt_token_limit: limit,
+                    include_attention: false,
                 },
                 std::slice::from_ref(&item),
                 "",
@@ -1881,6 +2045,7 @@ mod tests {
             filename: None,
             content_extract: "$ cargo build".to_string(),
             automatic_content_fingerprint: 0,
+            recap_evidence: String::new(),
             agent_lookup: None,
         }
     }
@@ -2675,6 +2840,7 @@ mod tests {
             filename: None,
             content_extract: String::new(),
             automatic_content_fingerprint: 0,
+            recap_evidence: String::new(),
             agent_lookup: Some((
                 AgentClass::Claude,
                 "00000000-0000-4000-8000-000000000000".to_string(),
@@ -2843,6 +3009,84 @@ mod tests {
             assert!(prompt.contains("Organize by feature"));
             assert!(prompt.contains("Shared vocabulary"));
             assert!(!prompt.contains("Project only"));
+        }
+    }
+
+    const ATTENTION_SORT_REPLY: &str = r#"{"children":[{"kind":"pane","id":1,"title":"Backend Agent","short_title":null,"icon":"🔧"},{"kind":"pane","id":2,"title":"Frontend Shell","short_title":"Frontend","icon":"🖥️"}]"#;
+
+    fn attention_sort_reply(attention_json: Option<&str>) -> String {
+        match attention_json {
+            Some(list) => format!("{ATTENTION_SORT_REPLY},\"attention\":{list}}}"),
+            None => format!("{ATTENTION_SORT_REPLY}}}"),
+        }
+    }
+
+    fn infer_with_attention(
+        reply: String,
+        include_attention: bool,
+    ) -> (
+        anyhow::Result<(RecommendedRestructurePlan, Option<serde_json::Value>)>,
+        u8,
+        String,
+    ) {
+        let generator = FakeGenerator::new(reply);
+        let contexts = vec![leaf(1, "shell-a"), leaf(2, "shell-b")];
+        let outcome = infer_restructure_with_recaps(
+            &generator,
+            &contexts,
+            "",
+            &[],
+            &RecommendationContext::default(),
+            include_attention,
+        )
+        .map(|inference| (inference.plan, inference.attention));
+        let prompt = generator.last_prompt.borrow().clone().unwrap_or_default();
+        (outcome, generator.calls.get(), prompt)
+    }
+
+    #[test]
+    fn the_attention_list_rides_along_without_changing_the_sort() {
+        let plain = infer_with_attention(attention_sort_reply(None), false);
+        let list = r#"[{"id":1,"kind":"stuck","reason":"loops on a failing test"}]"#;
+        let shared = infer_with_attention(attention_sort_reply(Some(list)), true);
+
+        let (plain_plan, plain_attention) = plain.0.unwrap();
+        let (shared_plan, shared_attention) = shared.0.unwrap();
+        assert_eq!(plain_plan.structure, shared_plan.structure);
+        assert!(plain_attention.is_none());
+        assert_eq!(shared_attention.unwrap().as_array().map(Vec::len), Some(1));
+        assert_eq!(shared.1, 1, "one call serves both the sort and the list");
+    }
+
+    #[test]
+    fn off_and_instant_only_never_put_the_attention_section_in_the_prompt() {
+        let (_, _, without) = infer_with_attention(attention_sort_reply(None), false);
+        let (_, _, with) = infer_with_attention(attention_sort_reply(None), true);
+        assert!(!without.contains("<attention-queue>"), "{without}");
+        assert!(with.contains("<attention-queue>"));
+        for field in ["status_summary", "why_here", "suggested_action"] {
+            assert!(with.contains(field), "{field}");
+            assert!(!without.contains(field), "{field}");
+        }
+    }
+
+    #[test]
+    fn a_malformed_attention_list_never_fails_or_retries_the_sort() {
+        let plain = infer_with_attention(attention_sort_reply(None), false);
+        for bad in [
+            r#""not a list""#,
+            r#"[1,"x",{"id":"nope"}]"#,
+            "null",
+            r#"{"id":1}"#,
+        ] {
+            let shared = infer_with_attention(attention_sort_reply(Some(bad)), true);
+            let (plan, _) = shared.0.unwrap_or_else(|error| panic!("{bad}: {error}"));
+            assert_eq!(
+                plan.structure,
+                plain.0.as_ref().unwrap().0.structure,
+                "{bad}"
+            );
+            assert_eq!(shared.1, 1, "{bad}: no corrective retry");
         }
     }
 }

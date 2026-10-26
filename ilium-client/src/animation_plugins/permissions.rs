@@ -11,6 +11,7 @@ use ratatui::{
     Frame,
 };
 use serde::{Deserialize, Serialize};
+#[cfg(test)]
 use serde_json::Value;
 use std::collections::BTreeSet;
 
@@ -81,6 +82,7 @@ pub enum PackageOrigin {
     Unverified,
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 // Remembered-decision persistence for plugin permissions is not wired in yet (feature in progress).
@@ -93,6 +95,7 @@ pub struct RememberedDecision {
     pub allowed: bool,
 }
 
+#[cfg(test)]
 impl RememberedDecision {
     #[allow(dead_code)]
     pub fn matches(&self, identity: &ReviewIdentity, request: &PermissionRequest) -> bool {
@@ -105,8 +108,10 @@ impl RememberedDecision {
 #[derive(Debug, Clone)]
 pub struct PermissionDecision {
     pub request_id: String,
-    // Only read by the permission tests until the broker consumes decisions (feature in progress).
-    #[allow(dead_code)]
+    #[expect(
+        dead_code,
+        reason = "Recorded with the decision for the future permission-audit consumer"
+    )]
     pub capability: Capability,
     pub choice: PermissionChoice,
 }
@@ -198,8 +203,7 @@ impl PermissionReview {
         self.reviewed.iter().all(|reviewed| *reviewed)
     }
 
-    // Only exercised by tests until the permission review dialog is wired in (feature in progress).
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn required_denied(&self) -> bool {
         self.requests
             .iter()

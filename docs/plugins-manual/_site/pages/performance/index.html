@@ -1,0 +1,1430 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Performance | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details open><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/" aria-current="page">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Guides</b></p>
+<h1>Performance</h1>
+
+<p>Every plugin call runs under a deadline, and every plugin has a memory, queue and I/O budget. A call that exceeds its deadline traps the instance, and the host restarts the plugin. Keeping each call short is the only way to keep a plugin responsive. This page lists the deadlines and budgets, the performance targets the host checks, where time is charged, and how to move slow work into a job.</p>
+<h3 id="you-need">You need</h3>
+<ul>
+<li>A plugin that builds and runs, so you can measure where its time goes. The toolchain is in <a href="/pages/getting-started-toolchain/">Getting started: toolchain</a>.</li>
+<li>The <code>jobs.run</code> grant for any background work, and <code>fs.read:project</code> for the example in this page. Grants are listed in <a href="/pages/reference-capabilities/">Capability table</a>.</li>
+<li>Rust with <code>ilium-plugin-sdk</code>, or TypeScript with <code>@ilium/plugin-sdk</code>. Both examples target the API version <code>ilium:plugin@0.1.0</code>.</li>
+<li>For the extended-widget costs below: knowledge of the widgets in <a href="/pages/widgets-index/">Widget catalogue</a>.</li>
+</ul>
+<h2 id="deadlines-and-budgets">Deadlines and budgets</h2>
+<p>The values below are the defaults, copied from the single table in <a href="/pages/reference-host-scheduling/#call-classes">Scheduling, deadlines and cancellation</a>. The manifest <code>limits</code> block can ask for a smaller value, or a larger one up to the ceiling for the plugin's tier (see <a href="#limits-you-can-change">Limits you can change</a>).</p>
+<table>
+<thead>
+<tr>
+<th>Call</th>
+<th>Default deadline</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>on-events</code></td>
+<td>20 ms</td>
+<td>One batch of up to 256 events. The host splits a larger batch.</td>
+</tr>
+<tr>
+<td><code>on-events</code> with a command</td>
+<td>50 ms</td>
+<td>A batch that contains a <code>command-invoked</code> event runs under <code>command_deadline_ms</code> instead of 20 ms.</td>
+</tr>
+<tr>
+<td><code>views.render</code></td>
+<td>10 ms</td>
+<td>Called on open, on <code>ui.invalidate</code> and on resize only.</td>
+</tr>
+<tr>
+<td><code>annotate</code></td>
+<td>10 ms</td>
+<td>At most once per 100 ms per buffer. A breach skips the annotation; the third in a row traps.</td>
+</tr>
+<tr>
+<td><code>activate</code></td>
+<td>2 s</td>
+<td>May yield.</td>
+</tr>
+<tr>
+<td><code>deactivate</code></td>
+<td>500 ms</td>
+<td>Returned bytes are kept, up to 1 MiB. A breach drops the instance and the bytes, and does not count as a failure.</td>
+</tr>
+<tr>
+<td>Scene <code>render</code> (frame)</td>
+<td>The frame budget, at most 50 ms</td>
+<td>Breached frames are skipped.</td>
+</tr>
+<tr>
+<td>Job, CPU time</td>
+<td>2 s</td>
+<td>Runs on a worker, not in a handler.</td>
+</tr>
+<tr>
+<td>Job, wall time</td>
+<td>20 s</td>
+<td>Includes time spent waiting for I/O.</td>
+</tr>
+<tr>
+<td>Job, memory</td>
+<td>64 MiB</td>
+<td>Concurrent jobs per plugin: 2.</td>
+</tr>
+</tbody>
+</table>
+<p>A breach of a hard handler deadline is logged, the instance is trapped and the plugin restarts. A soft deadline (<code>annotate</code>, scene frames, providers) discards the late result and traps only after the streak or a 100 ms grace in the scheduling table. A <code>deactivate</code> breach never counts as a failure. The first restart waits 1 s and the second 5 s. A third failure inside 10 minutes disables the plugin on that side until the user turns it on again. A job failure never counts toward this rule.</p>
+<pre class="term"><span class="t-dim">2026-10-11 10:02:17</span> <span class="t-err">error</span> deadline breach in on-events: limit 20 ms
+<span class="t-dim">2026-10-11 10:02:17</span> <span class="t-warn">warn</span>  restarting in 1 s (failure 1 of 3 in 10 minutes)
+<span class="t-dim">2026-10-11 10:02:18</span> <span class="t-ok">ok</span>    example.notes is running again
+<span class="t-dim">2026-10-11 10:09:02</span> <span class="t-err">error</span> deadline breach in on-events: limit 20 ms
+<span class="t-dim">2026-10-11 10:09:02</span> <span class="t-warn">warn</span>  plugin example.notes is now disabled (failure 3 of 3)
+</pre>
+
+<p>Illustrative, not generated. The first breach restarts the plugin after 1 s. The third breach inside 10 minutes disables it.</p>
+<h2 id="limits-you-can-change">Limits you can change</h2>
+<p>The manifest <code>limits</code> block sets a value per plugin and side. The host clamps a request above the ceiling to the ceiling and logs the clamp. It never refuses the manifest for that reason. The user can set the same keys under <code>[plugins.limits]</code> in <code>config.toml</code>, for every plugin or for the whole session.</p>
+<pre><code class="language-json">{
+  &quot;limits&quot;: { &quot;event_deadline_ms&quot;: 40, &quot;job_wall_ms&quot;: 60000 }
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Default</th>
+<th>Ceiling, T1</th>
+<th>Ceiling, T2 and T3</th>
+<th>Effect when breached</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>event_deadline_ms</code></td>
+<td>20</td>
+<td>50</td>
+<td>20</td>
+<td>Trap</td>
+</tr>
+<tr>
+<td><code>command_deadline_ms</code></td>
+<td>50</td>
+<td>100</td>
+<td>50</td>
+<td>Trap</td>
+</tr>
+<tr>
+<td><code>render_deadline_ms</code></td>
+<td>10</td>
+<td>20</td>
+<td>10</td>
+<td>Trap</td>
+</tr>
+<tr>
+<td><code>activate_deadline_ms</code></td>
+<td>2000</td>
+<td>5000</td>
+<td>2000</td>
+<td>Trap</td>
+</tr>
+<tr>
+<td><code>job_deadline_ms</code> (CPU)</td>
+<td>2000</td>
+<td>60000</td>
+<td>10000</td>
+<td><code>failed(timed-out)</code></td>
+</tr>
+<tr>
+<td><code>job_wall_ms</code></td>
+<td>20000</td>
+<td>600000</td>
+<td>100000</td>
+<td><code>failed(timed-out)</code></td>
+</tr>
+<tr>
+<td><code>job_memory_mib</code></td>
+<td>64</td>
+<td>512</td>
+<td>256</td>
+<td><code>failed(quota-exceeded)</code></td>
+</tr>
+<tr>
+<td><code>job_io_mib</code> (input and output, each)</td>
+<td>16</td>
+<td>64</td>
+<td>16</td>
+<td><code>invalid-argument</code></td>
+</tr>
+<tr>
+<td><code>concurrent_jobs</code></td>
+<td>2</td>
+<td>8</td>
+<td>2</td>
+<td>Further jobs queue</td>
+</tr>
+<tr>
+<td><code>job_queue</code></td>
+<td>16</td>
+<td>64</td>
+<td>16</td>
+<td><code>busy</code></td>
+</tr>
+</tbody>
+</table>
+<p>The contract also has nine requestable limits in the same form. They bound the host services that cost the most.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Default</th>
+<th>Ceiling, T1</th>
+<th>Ceiling, T2 and T3</th>
+<th>Effect when breached</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>http_streams</code> (open streams)</td>
+<td>4</td>
+<td>16</td>
+<td>4</td>
+<td><code>quota-exceeded</code></td>
+</tr>
+<tr>
+<td><code>children</code> (spawned child processes)</td>
+<td>2</td>
+<td>8</td>
+<td>2</td>
+<td><code>quota-exceeded</code></td>
+</tr>
+<tr>
+<td><code>durable_timers</code></td>
+<td>64</td>
+<td>256</td>
+<td>64</td>
+<td><code>quota-exceeded</code></td>
+</tr>
+<tr>
+<td><code>vector_indexes</code></td>
+<td>4</td>
+<td>16</td>
+<td>4</td>
+<td><code>quota-exceeded</code></td>
+</tr>
+<tr>
+<td><code>vector_entries</code> (all indexes)</td>
+<td>10,000</td>
+<td>200,000</td>
+<td>50,000</td>
+<td><code>quota-exceeded</code></td>
+</tr>
+<tr>
+<td><code>shared_cache_mib</code></td>
+<td>64</td>
+<td>256</td>
+<td>128</td>
+<td>Oldest entries evicted</td>
+</tr>
+<tr>
+<td><code>journal_entries</code> (per pane)</td>
+<td>5,000</td>
+<td>20,000</td>
+<td>5,000</td>
+<td>Oldest trimmed</td>
+</tr>
+<tr>
+<td><code>toasts_pending</code></td>
+<td>3</td>
+<td>3</td>
+<td>3</td>
+<td>Oldest replaced</td>
+</tr>
+<tr>
+<td><code>package_assets_mib</code></td>
+<td>64</td>
+<td>256</td>
+<td>64</td>
+<td><code>manifest.asset-size</code></td>
+</tr>
+</tbody>
+</table>
+<p>A bundled plugin with the top-level manifest key <code>limits_tier: "first-party"</code> also lifts the settings caps and the <code>list-editor</code> cap. That tier is for bundled <code>ilium.</code> plugins only.</p>
+<p>Tier T1 is a bundled plugin. T2 is signed by a publisher key the user trusts. T3 is an unsigned local package. A per-kind <code>deadline_ms</code> or <code>memory_mib</code> in <code>contributes.jobs</code> overrides the job defaults for that kind, within the same ceilings.</p>
+<h2 id="fixed-caps">Fixed caps</h2>
+<p>These caps do not change. A value over a per-call cap that the plugin can know in advance is refused with <code>invalid-argument</code>, and nothing is written or sent.</p>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Cap</th>
+<th>Error when exceeded</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Storage key / value</td>
+<td>256 bytes / 1 MiB</td>
+<td><code>invalid-argument</code></td>
+</tr>
+<tr>
+<td>Storage bucket (default quota)</td>
+<td>16 MiB</td>
+<td><code>quota-exceeded</code></td>
+</tr>
+<tr>
+<td>Node metadata value</td>
+<td>64 KiB per node</td>
+<td><code>quota-exceeded</code></td>
+</tr>
+<tr>
+<td><code>fs.read</code> per call</td>
+<td><code>max-bytes</code> up to 1 MiB, <code>max-entries</code> up to 4,096</td>
+<td><code>invalid-argument</code></td>
+</tr>
+<tr>
+<td><code>fs.read-all</code> file (default limit)</td>
+<td>64 MiB</td>
+<td><code>failed(quota-exceeded)</code></td>
+</tr>
+<tr>
+<td>HTTP response (default limit)</td>
+<td>8 MiB</td>
+<td><code>failed(quota-exceeded)</code></td>
+</tr>
+<tr>
+<td>Topic payload</td>
+<td>64 KiB</td>
+<td><code>invalid-argument</code></td>
+</tr>
+<tr>
+<td>Log line</td>
+<td>16 KiB, cut and marked</td>
+<td>Line cut, not refused</td>
+</tr>
+<tr>
+<td>Log lines per second, third-party</td>
+<td>200</td>
+<td>Dropped and counted</td>
+</tr>
+<tr>
+<td>Dedup window for <code>dedup-key</code></td>
+<td>10 minutes</td>
+<td>A retry after the window is a new submission</td>
+</tr>
+<tr>
+<td><code>check-list</code> items / <code>list-editor</code> items</td>
+<td>256 / 64</td>
+<td><code>invalid-argument</code> on render</td>
+</tr>
+<tr>
+<td>Popups per view</td>
+<td>4</td>
+<td><code>quota-exceeded</code></td>
+</tr>
+<tr>
+<td>Minimap marks per layer, meter segments</td>
+<td>4,096 / 8</td>
+<td><code>invalid-argument</code></td>
+</tr>
+<tr>
+<td>Catalogue page</td>
+<td>256 items</td>
+<td>Clamped</td>
+</tr>
+<tr>
+<td><code>read-cells</code> rows per call</td>
+<td>1,000</td>
+<td><code>quota-exceeded</code></td>
+</tr>
+<tr>
+<td><code>history-text</code></td>
+<td>4 MiB, newest kept</td>
+<td>Truncated</td>
+</tr>
+<tr>
+<td><code>write-glyphs</code> cells per frame</td>
+<td>131,072</td>
+<td><code>quota-exceeded</code></td>
+</tr>
+<tr>
+<td>Pre-rendered scene loop</td>
+<td>30 fps, 3,600 frames, 128 MiB</td>
+<td><code>manifest.scene-prerender</code></td>
+</tr>
+<tr>
+<td>HTTP stream chunk</td>
+<td>1 MiB</td>
+<td>Split</td>
+</tr>
+<tr>
+<td><code>vector.embed</code></td>
+<td>256 texts of at most 8 KiB</td>
+<td><code>invalid-argument</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="further-deadlines-and-rates">Further deadlines and rates</h2>
+<p>New provider exports run under short deadlines. A breach counts like any other deadline breach, except that <code>menu-items</code> and <code>tokens</code> fall back to static content instead of failing the user action.</p>
+<table>
+<thead>
+<tr>
+<th>Call</th>
+<th>Deadline</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>catalog-provider.query-catalog</code>, <code>menu-provider.menu-items</code>, <code>virtual-rows-provider.list-virtual-children</code></td>
+<td>20 ms</td>
+</tr>
+<tr>
+<td><code>token-provider.tokens</code></td>
+<td>10 ms per call</td>
+</tr>
+<tr>
+<td><code>client-requests.request</code> timeout</td>
+<td>1 to 30,000 ms, set per request</td>
+</tr>
+</tbody>
+</table>
+<p>The host also limits how often a plugin may call some imports. A call over the rate is refused with <code>rate-limited</code> and <code>retry-after-ms</code>, so a plugin that updates a widget in a loop spends nothing on the refused calls.</p>
+<table>
+<thead>
+<tr>
+<th>Rate</th>
+<th>Limit</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>toast</code></td>
+<td>3 per 10 s per plugin</td>
+</tr>
+<tr>
+<td><code>geocode</code></td>
+<td>1 request per second per plugin</td>
+</tr>
+<tr>
+<td><code>set-status-segment</code>, <code>set-frame-slot</code></td>
+<td>10 per second per slot</td>
+</tr>
+<tr>
+<td><code>set-row-state</code>, <code>set-item-states</code>, <code>set-choice-items</code>, <code>set-info-rich</code>, <code>set-meter</code>, <code>set-info</code></td>
+<td>10 per second per plugin, together</td>
+</tr>
+<tr>
+<td><code>journal.log-event</code></td>
+<td>20 per second per plugin</td>
+</tr>
+<tr>
+<td><code>screen-changed</code> delivery</td>
+<td>At most 10 per second per pane</td>
+</tr>
+</tbody>
+</table>
+<p>Session-wide, at most 64 HTTP streams and 16 spawned children are open across all plugins, and a pane has one input lock at a time.</p>
+<h2 id="what-the-new-widgets-and-services-cost">What the new widgets and services cost</h2>
+<p>Most of the 51 widgets cost nothing between renders, because the host draws the tree. The table lists where a plugin does pay.</p>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Where the cost lands</th>
+<th>Advice</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>spinner</code>, decoration frame animation</td>
+<td>The host steps frames. The plugin is not called per frame.</td>
+<td>Use them instead of a timer that calls <code>ui.invalidate</code> every 100 ms.</td>
+</tr>
+<tr>
+<td><code>chart</code> with many points</td>
+<td>Render size: the tree limit is 4,096 nodes or 1,024 KiB.</td>
+<td>Send a series with <code>resample: min-max</code> and let the host reduce it to the width of the chart.</td>
+</tr>
+<tr>
+<td><code>check-list</code>, <code>list-editor</code>, <code>%list</code></td>
+<td>Items are part of the tree.</td>
+<td><code>check-list</code> is capped at 256 items and <code>list-editor</code> at 64; a larger one fails at render time with <code>invalid-argument</code>. A <code>%list</code> has no item cap, but the whole tree is limited to 4,096 nodes and 1,024 KiB by default. Render a window of rows from the host-owned <code>offset</code> (read through <code>ui.widget-state</code>) and add a Load more row. Virtual-row providers are for sidebar rows of the tree only. See recipe 4 of the <a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a>.</td>
+</tr>
+<tr>
+<td><code>choice</code> with a catalogue <code>source</code></td>
+<td>The host pages the catalogue, 256 items per page, with a 20 ms provider deadline.</td>
+<td>Return one page per call. Never build the whole catalogue in <code>query-catalog</code>.</td>
+</tr>
+<tr>
+<td><code>terminal-view</code>, <code>video</code>, <code>surface</code></td>
+<td>Native decode and frame pacing. The plugin pays only for the frames it writes.</td>
+<td>Prefer <code>prerender</code> for a scene that loops, so <code>render</code> is called once per frame and then never again.</td>
+</tr>
+<tr>
+<td><code>screen-changed</code>, <code>http-stream-data</code>, <code>child-output</code></td>
+<td>Event volume.</td>
+<td>Read only the rows in <code>first-row</code> to <code>last-row</code>. Handle a whole batch in one call.</td>
+</tr>
+<tr>
+<td><code>set-meter</code>, <code>set-row-state</code> and friends</td>
+<td>Rate limit, 10 per second together.</td>
+<td>Update when a value changes by a visible step, not on every sample.</td>
+</tr>
+<tr>
+<td><code>vector</code> index</td>
+<td>The host does the exact cosine search.</td>
+<td>Stay under the <code>vector_entries</code> limit. Call <code>embed</code> with up to 256 texts at once.</td>
+</tr>
+<tr>
+<td><code>process.spawn</code></td>
+<td>Low priority under the plugin CPU quota.</td>
+<td>Use <code>line-mode</code> so the plugin gets whole lines.</td>
+</tr>
+</tbody>
+</table>
+<div class="note">
+<p>The deadline is wall time from the start of your call to its return. Host work that runs inside a synchronous import counts, because your code is waiting for it. Host work that finishes after your call returned does not count: the rendering of a <code>surface</code> frame, a <code>chart</code> resample, a <code>video</code> decode, an HTTP request and the application of your submissions. A call that returns a request id costs you only the call. See <a href="/pages/reference-host-scheduling/">Host scheduling</a>.</p>
+</div>
+
+<h2 id="one-table-of-budgets">One table of budgets</h2>
+<p>The limits of a plugin are spread over several pages. This table puts the ones that decide whether a plugin stays alive in one place, with the action the host takes. The values are defined in <a href="/pages/reference-errors-and-limits/">Errors and limits reference</a> and repeated here only so that you can compare them. When the two pages differ, the reference wins.</p>
+<table>
+<thead>
+<tr>
+<th>Budget</th>
+<th>Default</th>
+<th>Ceiling, T1</th>
+<th>Ceiling, T2 and T3</th>
+<th>When exceeded</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>memory_mib</code> (one instance)</td>
+<td>32</td>
+<td>256</td>
+<td>128</td>
+<td>Trap, counts as a failure</td>
+</tr>
+<tr>
+<td>Session memory pool (all instances)</td>
+<td>1,024 MiB</td>
+<td>4,096 MiB, all tiers (user config only)</td>
+<td>same, no per-tier ceiling</td>
+<td>The new instance is refused with <code>session.memory-exceeded</code>; no failure. Each instance reserves its <code>memory_mib</code> at activation</td>
+</tr>
+<tr>
+<td><code>storage_bucket_mib</code> (one bucket)</td>
+<td>16</td>
+<td>256</td>
+<td>16</td>
+<td><code>put</code> fails with <code>quota-exceeded</code></td>
+</tr>
+<tr>
+<td>Restore bytes from <code>deactivate</code></td>
+<td>1 MiB</td>
+<td>1 MiB</td>
+<td>1 MiB</td>
+<td>Dropped, one warn line</td>
+</tr>
+<tr>
+<td><code>deactivate_deadline_ms</code></td>
+<td>500</td>
+<td>1,000</td>
+<td>500</td>
+<td>Instance dropped, no restore bytes</td>
+</tr>
+<tr>
+<td><code>ilium-execution</code> quota group</td>
+<td>shared</td>
+<td>shared</td>
+<td>shared</td>
+<td>Submissions return <code>quota-exceeded</code> with <code>retry-after-ms</code></td>
+</tr>
+</tbody>
+</table>
+<p>A plugin may ask for more in its manifest, and the host clamps the request to the ceiling of its tier (see <a href="#limits-you-can-change">Limits you can change</a>). A plugin MUST be designed to run within the default of its tier, not within the ceiling. [AUT-101]</p>
+<p>A plugin SHOULD stay under half of each default budget in normal use, so that a bad input does not trap it. [AUT-102]</p>
+<h2 id="caching-where-to-keep-rebuildable-data">Caching: where to keep rebuildable data</h2>
+<p>Storage has three durable buckets (<code>global</code>, <code>project</code>, <code>session</code>), one cache bucket (<code>shared</code>) and the <code>/cache</code> folder of the <code>fs</code> scope. They differ in who clears them and what they count against.</p>
+<table>
+<thead>
+<tr>
+<th>Place</th>
+<th>Cleared by the host</th>
+<th>Counts against</th>
+<th>Use for</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>global</code>, <code>project</code>, <code>session</code></td>
+<td>Never</td>
+<td><code>storage_bucket_mib</code></td>
+<td>Data you cannot rebuild</td>
+</tr>
+<tr>
+<td><code>shared</code> bucket</td>
+<td>At any time, oldest first</td>
+<td><code>shared_cache_mib</code></td>
+<td>Small rebuildable values shared by all sessions</td>
+</tr>
+<tr>
+<td><code>/cache</code> in <code>fs</code></td>
+<td>At any time</td>
+<td><code>disk_mib</code>, with <code>data</code></td>
+<td>Large rebuildable files</td>
+</tr>
+<tr>
+<td>Memory</td>
+<td>On restart</td>
+<td><code>memory_mib</code></td>
+<td>Data rebuilt per run</td>
+</tr>
+</tbody>
+</table>
+<p>Rebuildable data MUST NOT go into a durable bucket, as rule AUT-008 of the cookbook also requires, because it uses up the 16 MiB that user data needs. [AUT-103] The recipe with the lease and the time limit is in the <a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a>.</p>
+<h2 id="measuring-from-outside-the-plugin">Measuring from outside the plugin</h2>
+<p>The host and the command line give four ways to see where time and memory go. They are specified in <a href="/pages/reference-plugin-cli/">Plugin command-line reference</a> and <a href="/pages/reference-resource-accounting/">Resource accounting</a>.</p>
+<table>
+<thead>
+<tr>
+<th>What you want</th>
+<th>Command or call</th>
+<th>What it shows</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Time of one handler while you build</td>
+<td><code>clock.monotonic-millis</code> around the work, shown in a <code>meter</code> or written to the log</td>
+<td>Your own number, available in every build</td>
+</tr>
+<tr>
+<td>Timings while you edit</td>
+<td><code>ilium plugin dev --timings</code></td>
+<td>Time per export call during a development session</td>
+</tr>
+<tr>
+<td>A profile of a running plugin</td>
+<td><code>ilium plugin profile &lt;id&gt; --duration &lt;seconds&gt;</code></td>
+<td>One timing record per export that ran</td>
+</tr>
+<tr>
+<td>Use against the limits</td>
+<td><code>ilium plugin stats &lt;id&gt;</code></td>
+<td>Current use and the effective limit of each resource</td>
+</tr>
+<tr>
+<td>Static weak spots</td>
+<td><code>ilium plugin lint</code></td>
+<td>Rules such as <code>lint.limit-above-ceiling</code> and <code>lint.activation-startup</code></td>
+</tr>
+</tbody>
+</table>
+<p>A debug build (<code>ilium plugin build --debug</code>) is slower than a release build. Timings for comparison with the targets MUST come from a release build. [AUT-105]</p>
+<p>A plugin that reports its own timing SHOULD read it with <code>monotonic-millis</code> and SHOULD NOT depend on a host tool being installed in the user's setup. [AUT-104]</p>
+<h2 id="measuring-a-handler">Measuring a handler</h2>
+<p>The <code>clock</code> import gives a monotonic millisecond counter. A plugin can time its own work and show the result in a <code>meter</code>, so a slow handler is visible long before it breaches the 20 ms deadline. The panel below shows the share of the event deadline that the last batch used.</p>
+<figure>
+<pre class="term">╭  ≡ ● · Handler budget ───────────────────────╮
+│ Last batch ………………………………………………………………………… <span class="t-ok">8 ms</span> │
+│ <span class="t-ok">█████</span><span class="t-dim">░░░░░░░░░░░░░░░░░░░░</span>   8 of 20 ms       │
+╰──────────────────────────────────────────────╯</pre>
+<figcaption>Illustrative, not generated. A plugin panel that shows how much of the 20 ms event deadline the last batch used. The bar turns to the warning colour above half the deadline.</figcaption>
+</figure>
+
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::host::clock;
+use ilium_plugin_sdk::types::ui::MeterSegment;
+use ilium_plugin_sdk::types::text::Tone;
+
+const EVENT_DEADLINE_MS: u64 = 20;
+
+impl Handler for Notes {
+    fn on_events(&amp;mut self, batch: Vec&lt;Event&gt;) -&gt; Vec&lt;Submission&gt; {
+        let started = clock::monotonic_millis();
+        let submissions = self.handle_batch(batch);
+        self.last_batch_ms = clock::monotonic_millis() - started;
+        submissions
+    }
+}
+
+fn budget_segments(used_ms: u64) -&gt; Vec&lt;MeterSegment&gt; {
+    let tone = if used_ms * 2 &gt; EVENT_DEADLINE_MS { Tone::Warning } else { Tone::Success };
+    vec![MeterSegment { label: &quot;batch&quot;.into(), value: used_ms as f64, tone }]
+}
+// In render: tree.meter(budget_segments(self.last_batch_ms)).max(EVENT_DEADLINE_MS as f64).show_values(true)
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { monotonicMillis } from '@ilium/plugin-sdk/host/clock';
+import { meter } from '@ilium/plugin-sdk/ui/build';
+
+const EVENT_DEADLINE_MS = 20;
+let lastBatchMs = 0;
+
+// inside onEvents(batch)
+const started = monotonicMillis();
+const submissions = handleBatch(batch);
+lastBatchMs = Number(monotonicMillis() - started);
+
+// inside render
+const tone = lastBatchMs * 2 &gt; EVENT_DEADLINE_MS ? 'warning' : 'success';
+const budget = meter([{ label: 'batch', value: lastBatchMs, tone }], { max: EVENT_DEADLINE_MS, showValues: true });
+</code></pre>
+<h2 id="performance-targets">Performance targets</h2>
+<p>The host has a fixed set of budgets and a benchmark for each. They are not rules for your plugin, but they show what the host promises: an empty host call under 1 µs, an event batch to 30 plugins under 2 ms, a cold start of 40 bundled plugins under 150 ms, and a key press to the terminal in 5 ms. The list, the method and the thresholds are in <a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a>. The detector budget is in the <a href="/pages/capability-agent-signatures/#detection-loop">detection loop</a>.</p>
+<h3 id="costs-by-tier-and-language">Costs by tier and language</h3>
+<table>
+<thead>
+<tr>
+<th>Choice</th>
+<th>Cost</th>
+<th>What to do</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>T1 plugin</td>
+<td>A host call is a function call inside the process: about 1 µs.</td>
+<td>Nothing special.</td>
+</tr>
+<tr>
+<td>T2 or T3 plugin</td>
+<td>Each host call that has an effect, such as <code>storage.set</code> or a submission, is one round trip to the host: 0.2 ms median and 0.5 ms at the 99th percentile. Pure imports such as <code>codec</code> and <code>vector</code> run inside the helper with no round trip.</td>
+<td>Batch work. In a 20 ms batch, 20 forwarded calls can use half of the budget. Read once, write once.</td>
+</tr>
+<tr>
+<td>T2 or T3 start</td>
+<td>A helper process starts at the first activation: record 20 to 80 ms.</td>
+<td>Use lazy activation triggers; do not activate at startup without need.</td>
+</tr>
+<tr>
+<td>Rust component</td>
+<td>Instance about 4 MiB, start under 5 ms.</td>
+<td>The default choice for scenes and detectors.</td>
+</tr>
+<tr>
+<td>TypeScript component</td>
+<td>Includes a JavaScript engine: a larger component and instance, and slower code than Rust. Budget it at several times the memory of a Rust plugin and measure your handlers.</td>
+<td>Keep TypeScript handlers short. Put heavy loops in a job, or write them in Rust. Measure a TypeScript scene against its frame budget.</td>
+</tr>
+</tbody>
+</table>
+<p>Memory counts against <code>memory_mib</code> for the plugin and, for T2 and T3, <code>memory_mib</code> plus 32 MiB against the session. See <a href="/pages/reference-host-helper/">Sandbox helper protocol</a>.</p>
+<p>These are the targets for the tools in <a href="/pages/reference-debugging-tools/">Debugging tools</a> and <a href="/pages/reference-test-harness/">Test harness reference</a>. They apply to the test and profile tooling, not to a plugin.</p>
+<ul>
+<li><strong>[DEV-850]</strong> Tracing MUST add no more than 5 percent to the time of an event batch, and profiling MUST NOT change call time by more than 5 percent.</li>
+<li><strong>[DEV-851]</strong> A native-mode harness test of one event batch SHOULD finish in under 10 ms, and a component-mode test in under 100 ms, on the build host, excluding the one-time load of the component.</li>
+<li><strong>[DEV-852]</strong> <code>ilium plugin check</code> SHOULD finish in under 2 s for a package of 10 MiB or less, and <code>ilium plugin lint</code> in under 5 s.</li>
+<li><strong>[DEV-853]</strong> <code>ilium plugin dev</code> SHOULD reload a plugin within 1 s after the build finishes, and the debounce of a change is 300 ms.</li>
+</ul>
+<h2 id="where-time-is-charged">Where time is charged</h2>
+<figure>
+<svg viewBox="0 0 400 200" role="img" aria-label="Three independent paths, each with its own deadline" width="600" height="300">
+  <defs>
+    <marker id="perf-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <rect x="8" y="20" width="100" height="36" rx="6" fill="none" stroke="currentColor"/>
+  <text x="58" y="42" text-anchor="middle" font-size="11" fill="currentColor">Event batch</text>
+  <rect x="150" y="20" width="110" height="36" rx="6" fill="none" stroke="currentColor"/>
+  <text x="205" y="34" text-anchor="middle" font-size="11" fill="currentColor">on-events</text>
+  <text x="205" y="48" text-anchor="middle" font-size="10" fill="currentColor">20 ms deadline</text>
+  <rect x="280" y="20" width="112" height="36" rx="6" fill="none" stroke="currentColor"/>
+  <text x="336" y="42" text-anchor="middle" font-size="11" fill="currentColor">Kernel applies</text>
+  <path d="M108 38 L148 38" stroke="currentColor" fill="none" marker-end="url(#perf-arrow)"/>
+  <path d="M260 38 L278 38" stroke="currentColor" fill="none" marker-end="url(#perf-arrow)"/>
+  <rect x="150" y="88" width="110" height="40" rx="6" fill="none" stroke="currentColor" stroke-dasharray="4 3"/>
+  <text x="205" y="104" text-anchor="middle" font-size="10" fill="currentColor">views.render</text>
+  <text x="205" y="118" text-anchor="middle" font-size="10" fill="currentColor">10 ms deadline</text>
+  <rect x="280" y="88" width="112" height="40" rx="6" fill="none" stroke="currentColor"/>
+  <text x="336" y="104" text-anchor="middle" font-size="10" fill="currentColor">Host draws tree</text>
+  <text x="336" y="118" text-anchor="middle" font-size="10" fill="currentColor">no plugin call</text>
+  <path d="M260 108 L278 108" stroke="currentColor" fill="none" marker-end="url(#perf-arrow)"/>
+  <rect x="150" y="150" width="110" height="40" rx="6" fill="none" stroke="currentColor" stroke-dasharray="4 3"/>
+  <text x="205" y="166" text-anchor="middle" font-size="10" fill="currentColor">job-runner.run</text>
+  <text x="205" y="180" text-anchor="middle" font-size="10" fill="currentColor">2 s CPU deadline</text>
+</svg>
+<figcaption>The event path, the render path and the job path each have their own deadline. A slow render or job does not hold up the event batch that started it.</figcaption>
+</figure>
+
+<p>A handler that finishes its batch within 20 ms charges almost nothing to the frame. A render does not run per frame. The host draws the tree itself, and the plugin pays only when it calls <code>ui.invalidate</code>.</p>
+<h2 id="moving-slow-work-into-a-job">Moving slow work into a job</h2>
+<p>A handler that reads a large file with <code>fs.read</code> and decompresses it inside <code>on-events</code> breaches the 20 ms deadline. The fix has three parts:</p>
+<ol>
+<li>The handler starts the read with the async <code>fs.read-all</code> and returns at once.</li>
+<li>When the bytes arrive, a task starts a job of a declared kind with <code>jobs.start</code>.</li>
+<li>The job runs <code>job-runner.run</code> on a worker, reports progress with <code>report-progress</code> and returns its output.</li>
+</ol>
+<p>The job kind is declared in the manifest:</p>
+<pre><code class="language-json">{
+  &quot;capabilities&quot;: { &quot;server&quot;: [&quot;fs.read:project&quot;, &quot;jobs.run&quot;] },
+  &quot;contributes&quot;: {
+    &quot;jobs&quot;: [
+      { &quot;kind&quot;: &quot;parse-report&quot;, &quot;deadline_ms&quot;: 2000, &quot;memory_mib&quot;: 64 }
+    ]
+  }
+}
+</code></pre>
+<p>The WIT calls behind the SDK wrappers are exact:</p>
+<pre><code class="language-wit">read-all: func(path: fs-path) -&gt; result&lt;request-id, plugin-error&gt;;
+start: func(kind: string, input: list&lt;u8&gt;) -&gt; result&lt;request-id, plugin-error&gt;;
+take-bytes: func(request: request-id) -&gt; option&lt;list&lt;u8&gt;&gt;;
+take-output: func(job: request-id) -&gt; option&lt;list&lt;u8&gt;&gt;;
+</code></pre>
+<p>The SDK wrappers hide the <code>request-id</code> and the <code>take-*</code> calls. In Rust, <code>fs::read_all(path).await</code> and <code>jobs::start(kind, input).await</code> return the bytes and the output. In TypeScript, <code>readAll</code> and <code>start</code> return promises of <code>Uint8Array</code>.</p>
+<h3 id="worked-example-slow-work-in-a-job">Worked example: slow work in a job</h3>
+<p>The handler starts the work in a task and returns. The job runner decodes the input in 64 KiB chunks and reports progress after each chunk.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::host::fs;
+use ilium_plugin_sdk::host::jobs;
+use ilium_plugin_sdk::host::log::{self, Level};
+use ilium_plugin_sdk::prelude::*;
+use ilium_plugin_sdk::task;
+use ilium_plugin_sdk::types::paths::FsPath;
+
+const PARSE_KIND: &amp;str = &quot;parse-report&quot;;
+const CHUNK_BYTES: usize = 64 * 1024;
+
+#[ilium_plugin(side = &quot;server&quot;, exports = [&quot;job-runner&quot;])]
+#[derive(Default)]
+struct ReportNotes;
+
+impl ReportNotes {
+    /// Starts the work and returns at once. The task runs after the handler returns.
+    fn parse_in_background(&amp;mut self, path: FsPath) {
+        task::spawn(async move {
+            let bytes = match fs::read_all(path).await {
+                Ok(bytes) =&gt; bytes,
+                Err(error) =&gt; {
+                    log::log(Level::Warn, &amp;format!(&quot;read failed: {}&quot;, error.message));
+                    return;
+                }
+            };
+            match jobs::start(PARSE_KIND, bytes).await {
+                Ok(report) =&gt; log::log(Level::Info, &amp;format!(&quot;parsed {} bytes&quot;, report.len())),
+                Err(error) =&gt; log::log(Level::Warn, &amp;format!(&quot;parse failed: {}&quot;, error.message)),
+            }
+        });
+    }
+}
+
+impl Handler for ReportNotes {
+    fn on_events(&amp;mut self, _batch: Vec&lt;Event&gt;) -&gt; Vec&lt;Submission&gt; {
+        // Your trigger calls parse_in_background(path), for example from a command.
+        Vec::new()
+    }
+}
+
+impl JobRunner for ReportNotes {
+    fn run(&amp;mut self, kind: String, input: Vec&lt;u8&gt;) -&gt; Result&lt;Vec&lt;u8&gt;, PluginError&gt; {
+        if kind != PARSE_KIND {
+            return Err(PluginError {
+                code: ErrorCode::InvalidArgument,
+                message: format!(&quot;unknown job kind {kind}&quot;),
+                retry_after_ms: None,
+            });
+        }
+        let chunk_count = input.len().div_ceil(CHUNK_BYTES).max(1);
+        let mut output = Vec::with_capacity(input.len() / 4);
+        for (index, chunk) in input.chunks(CHUNK_BYTES).enumerate() {
+            if jobs::is_cancelled() {
+                break;
+            }
+            output.extend_from_slice(&amp;decompress_chunk(chunk));
+            jobs::report_progress(((index + 1) * 100 / chunk_count) as f32);
+        }
+        Ok(output)
+    }
+}
+</code></pre>
+<p><code>decompress_chunk</code> stands for your own decoder. A job never shares memory with the instance that started it.</p>
+<p><strong>TypeScript</strong></p>
+<p>The TypeScript version uses an async function for the same flow. <code>definePlugin</code> drains the microtask queue before it returns from each export call, so the function runs to its first <code>await</code> before the handler returns.</p>
+<pre><code class="language-ts">import { definePlugin } from '@ilium/plugin-sdk';
+import { readAll } from '@ilium/plugin-sdk/host/fs';
+import { isCancelled, reportProgress, start } from '@ilium/plugin-sdk/host/jobs';
+import { log } from '@ilium/plugin-sdk/host/log';
+import { PluginError } from '@ilium/plugin-sdk';
+import type { FsPath } from '@ilium/plugin-sdk/types';
+
+const PARSE_KIND = 'parse-report';
+const CHUNK_BYTES = 64 * 1024;
+
+async function parseInBackground(path: FsPath): Promise&lt;void&gt; {
+  try {
+    const bytes = await readAll(path);
+    const report = await start(PARSE_KIND, bytes);
+    log('info', `parsed ${report.byteLength} bytes`);
+  } catch (error) {
+    const message = error instanceof PluginError ? error.message : String(error);
+    log('warn', `parse failed: ${message}`);
+  }
+}
+
+export const { lifecycle, handler, jobRunner } = definePlugin({
+  side: 'server',
+  onEvents(batch) {
+    // Your trigger calls parseInBackground(path), for example from a command.
+    return [];
+  },
+  run(kind, input) {
+    if (kind !== PARSE_KIND) {
+      throw new PluginError('invalid-argument', `unknown job kind ${kind}`);
+    }
+    const chunkCount = Math.max(1, Math.ceil(input.byteLength / CHUNK_BYTES));
+    const parts: Uint8Array[] = [];
+    for (let offset = 0; offset &lt; input.byteLength; offset += CHUNK_BYTES) {
+      if (isCancelled()) {
+        break;
+      }
+      parts.push(decompressChunk(input.subarray(offset, offset + CHUNK_BYTES)));
+      reportProgress(Math.floor(((offset / CHUNK_BYTES + 1) * 100) / chunkCount));
+    }
+    return concatenate(parts);
+  },
+});
+</code></pre>
+<p><code>decompressChunk</code> and <code>concatenate</code> are your own helpers. The <code>parseInBackground</code> function is what your trigger calls.</p>
+<p>The user sees a job only through what the plugin draws. A <code>progress-row</code> fed from <code>job-progress</code> events is the usual form:</p>
+<figure>
+<pre class="term">╭  ≡ ● · Replay ───────────────────────────────╮
+│ <span class="t-ok">▶ RUNNING</span>  37%  <span class="t-hi">██████████</span><span class="t-dim">░░░░░░░░░░░░░░░░░░</span> │
+│ <span class="t-dim">session 152 of 412</span>                           │
+│ <span class="t-ok"><span class="w2">✓</span> DONE</span>  100%  <span class="t-ok">████████████████████████████</span>   │
+╰──────────────────────────────────────────────╯</pre>
+<figcaption>Illustrative, not generated. A progress row while a job runs, and the same row after the job completes.</figcaption>
+</figure>
+
+<div class="note">
+
+A job's CPU deadline counts CPU time, not wall time. A job that waits on I/O with `jobs.wait-request` does not use its CPU budget, but its wall time counts against `job_wall_ms`. Keep waits short and report progress, so the user can see the work move.
+
+</div>
+
+<h3 id="job-surface">Job surface</h3>
+<table>
+<thead>
+<tr>
+<th>Function or field</th>
+<th>Side</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>jobs.start(kind, input)</code></td>
+<td>Handler, task</td>
+<td>Starts a declared job. Returns a <code>request-id</code>, or the output as an awaited call.</td>
+</tr>
+<tr>
+<td><code>jobs.cancel(job)</code></td>
+<td>Handler, task</td>
+<td>Requests cancellation. The outcome is <code>cancelled</code>, whatever the job returns.</td>
+</tr>
+<tr>
+<td><code>jobs.report-progress(percent)</code></td>
+<td>Job only</td>
+<td>Sets progress from 0 to 100. Values are clamped and NaN is ignored.</td>
+</tr>
+<tr>
+<td><code>jobs.is-cancelled()</code></td>
+<td>Job only</td>
+<td>Returns true after <code>jobs.cancel</code> was requested. The job should stop early.</td>
+</tr>
+<tr>
+<td><code>jobs.wait-request(request, timeout-millis)</code></td>
+<td>Job only</td>
+<td>Blocks the job until a slow call completes, for example <code>fs.read-all</code>.</td>
+</tr>
+<tr>
+<td><code>job-runner.run(kind, input)</code></td>
+<td>Export</td>
+<td>Runs the job. Returns output bytes or a <code>plugin-error</code>.</td>
+</tr>
+<tr>
+<td><code>contributes.jobs</code></td>
+<td>Manifest</td>
+<td>Declares each job kind, with optional <code>deadline_ms</code> and <code>memory_mib</code>.</td>
+</tr>
+<tr>
+<td><code>limits.job_io_mib</code></td>
+<td>Manifest</td>
+<td>Caps the input and the output of each job.</td>
+</tr>
+</tbody>
+</table>
+<p>Rust names are the snake_case form of these, for example <code>jobs::report_progress</code>, <code>jobs::is_cancelled</code> and <code>jobs::cancel</code>. TypeScript uses the camelCase form, for example <code>reportProgress</code>, <code>isCancelled</code> and <code>cancel</code>. Inside a job, only the job-side functions and <code>log</code>, <code>clock</code>, <code>codec</code>, <code>fs</code>, <code>http</code>, <code>process</code>, <code>inference</code> and <code>storage</code> reads are available. Any other import returns <code>unsupported</code>.</p>
+<h2 id="errors-and-edge-cases">Errors and edge cases</h2>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Where it comes from</th>
+<th>Meaning and fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>timed-out</code></td>
+<td>Job CPU or wall deadline</td>
+<td>Split the work into smaller jobs, or raise the kind's <code>deadline_ms</code> within the ceiling.</td>
+</tr>
+<tr>
+<td><code>quota-exceeded</code></td>
+<td>Job memory, <code>fs.read-all</code> size, job output</td>
+<td>Read in parts with <code>fs.read</code> or lower the data per job.</td>
+</tr>
+<tr>
+<td><code>busy</code></td>
+<td><code>jobs.start</code> when the queue is full, or 64 pending requests</td>
+<td>Retry later, or wait for an existing request to complete.</td>
+</tr>
+<tr>
+<td><code>invalid-argument</code></td>
+<td>Unknown job kind, or input over <code>job_io_mib</code></td>
+<td>Check the kind against <code>contributes.jobs</code>.</td>
+</tr>
+<tr>
+<td><code>cancelled</code></td>
+<td><code>jobs.cancel</code>, or a shutdown</td>
+<td>Stop and clean up. The output is dropped.</td>
+</tr>
+<tr>
+<td><code>internal</code></td>
+<td>A trap inside a job instance</td>
+<td>Read the trap text in the log. The job does not count toward the restart rule.</td>
+</tr>
+</tbody>
+</table>
+<p>Edge cases the host handles for you:</p>
+<ul>
+<li>A queued job never starts after <code>jobs.cancel</code>.</li>
+<li>A job's output over <code>job_io_mib</code> completes as <code>failed(invalid-argument)</code>.</li>
+<li>An event batch over 256 events is split by the host into batches of at most 256.</li>
+<li>Output-match, topic and audio-frame events that overflow their queue are dropped oldest first. The next batch starts with one <code>events-dropped</code> event that gives the count per source.</li>
+</ul>
+<h2 id="what-the-user-sees">What the user sees</h2>
+<p>A breach and each restart appear in the plugin log with the export name and the limit. After the third failure in 10 minutes, the tree footer and Settings &gt; Plugins show notice N14, defined in <a href="/pages/lifecycle/#failure-counting-and-restart">Lifecycle</a>. The user turns the plugin on again there. Job progress is visible only when the job calls <code>report-progress</code>.</p>
+<h2 id="practical-rules">Practical rules</h2>
+<ul>
+<li>Handle a whole batch in one call. One call that handles up to 256 events is cheaper than one call per event, and the deadline covers the whole batch.</li>
+<li>Keep each storage value below 1 MiB, and each node metadata value below 64 KiB. A value over the bucket quota fails with <code>quota-exceeded</code>.</li>
+<li>Pass <code>max-bytes</code> or <code>max-entries</code> to every read or listing, so a single call cannot read an unbounded amount.</li>
+<li>Use a <code>dedup-key</code> on any send that might be retried. The host keeps the key for 10 minutes, so a retry does not repeat the effect.</li>
+</ul>
+<h3 id="see-also">See also</h3>
+<ul>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Reference: errors and limits</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/api-jobs/">Jobs API</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/api-fs/">File access</a></li>
+</ul>
+<p>Checked against the API version <code>ilium:plugin@0.1.0</code>.</p>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/accessibility-and-theming/"><small>Previous</small>Theming and readable output</a><a class="next" href="/pages/porting-iliumanim/"><small>Next</small>Moving from .iliumanim to .iliumpkg</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#you-need">You need</a></li><li class="l2"><a href="#deadlines-and-budgets">Deadlines and budgets</a></li><li class="l2"><a href="#limits-you-can-change">Limits you can change</a></li><li class="l2"><a href="#fixed-caps">Fixed caps</a></li><li class="l2"><a href="#further-deadlines-and-rates">Further deadlines and rates</a></li><li class="l2"><a href="#what-the-new-widgets-and-services-cost">What the new widgets and services cost</a></li><li class="l2"><a href="#one-table-of-budgets">One table of budgets</a></li><li class="l2"><a href="#caching-where-to-keep-rebuildable-data">Caching: where to keep rebuildable data</a></li><li class="l2"><a href="#measuring-from-outside-the-plugin">Measuring from outside the plugin</a></li><li class="l2"><a href="#measuring-a-handler">Measuring a handler</a></li><li class="l2"><a href="#performance-targets">Performance targets</a></li><li class="l3"><a href="#costs-by-tier-and-language">Costs by tier and language</a></li><li class="l2"><a href="#where-time-is-charged">Where time is charged</a></li><li class="l2"><a href="#moving-slow-work-into-a-job">Moving slow work into a job</a></li><li class="l3"><a href="#worked-example-slow-work-in-a-job">Worked example: slow work in a job</a></li><li class="l3"><a href="#job-surface">Job surface</a></li><li class="l2"><a href="#errors-and-edge-cases">Errors and edge cases</a></li><li class="l2"><a href="#what-the-user-sees">What the user sees</a></li><li class="l2"><a href="#practical-rules">Practical rules</a></li><li class="l3"><a href="#see-also">See also</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

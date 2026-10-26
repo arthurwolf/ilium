@@ -143,6 +143,48 @@ pub enum Operation {
     NewProject { path: PathBuf },
     /// Add a group under a project or group.
     NewGroup { parent: u64, name: String },
+    /// Show several panes of one container side by side as a split view.
+    NewSplitView {
+        parent: u64,
+        name: String,
+        panes: Vec<u64>,
+        /// Stack the panes top to bottom instead of left to right.
+        #[serde(default)]
+        horizontal: bool,
+    },
+    /// Replace the process of a pane with a shell command line.
+    ReplaceCommand { pane: u64, command: String },
+    /// Open a kanban board pane backed by a folder (one column per
+    /// sub-folder) or, with `markdown_file`, by one Markdown file.
+    NewBoard {
+        parent: u64,
+        name: String,
+        path: PathBuf,
+        #[serde(default)]
+        markdown_file: bool,
+    },
+    /// Stop a pane's agent and keep the pane as a frozen placeholder that
+    /// `resume_command` can restart later.
+    Freeze { pane: u64, resume_command: String },
+    /// Restart a frozen pane with its resume command.
+    Unfreeze { pane: u64 },
+    /// Replace the session's sound settings (the `[sound]` config table).
+    /// The running client may push its own copy again later.
+    UpdateSoundSettings {
+        settings: ilium_sound::SoundSettings,
+    },
+    /// Replace the agent detection intervals and custom signatures.
+    UpdateDetectionSettings {
+        settings: ilium_ipc::AgentDetectionSettings,
+    },
+    /// Replace the text triggers (the `[text_triggers]` config table).
+    UpdateTextTriggers {
+        settings: ilium_ipc::TextTriggerSettings,
+    },
+    /// Turn the server's debug logging on or off.
+    SetDebugLogging { enabled: bool },
+    /// Turn the progress-monitor feature on or off for the session.
+    SetProgressMonitors { enabled: bool },
     /// Add a file-browser folder root under a container.
     NewFolder { parent: u64, path: PathBuf },
     /// Change the directory new entries of a project start in.
@@ -168,6 +210,17 @@ pub enum Operation {
     },
     /// Write named keys (`enter`, `esc`, `ctrl-c`, `up`, `text:abc`) to a pane.
     SendKeys { pane: u64, keys: Vec<String> },
+    /// Forward one mouse event at a pane cell; the server encodes it for the
+    /// pane's negotiated mouse protocol. `kind` is for example
+    /// `{"Down":"Left"}`, `"ScrollUp"` or `"Moved"`.
+    Mouse {
+        pane: u64,
+        kind: ilium_ipc::MouseEventKind,
+        column: u16,
+        row: u16,
+        #[serde(default)]
+        modifiers: ilium_ipc::MouseModifiers,
+    },
     /// Type text into a pane after a delay.
     Schedule {
         pane: u64,
@@ -342,11 +395,22 @@ impl Operation {
             Self::Reparent { .. } => "reparent",
             Self::NewProject { .. } => "new_project",
             Self::NewGroup { .. } => "new_group",
+            Self::NewSplitView { .. } => "new_split_view",
+            Self::ReplaceCommand { .. } => "replace_command",
+            Self::NewBoard { .. } => "new_board",
+            Self::Freeze { .. } => "freeze",
+            Self::Unfreeze { .. } => "unfreeze",
+            Self::UpdateSoundSettings { .. } => "update_sound_settings",
+            Self::UpdateDetectionSettings { .. } => "update_detection_settings",
+            Self::UpdateTextTriggers { .. } => "update_text_triggers",
+            Self::SetDebugLogging { .. } => "set_debug_logging",
+            Self::SetProgressMonitors { .. } => "set_progress_monitors",
             Self::NewFolder { .. } => "new_folder",
             Self::ChangeProjectFolder { .. } => "change_project_folder",
             Self::NewPane { .. } => "new_pane",
             Self::SendText { .. } => "send_text",
             Self::SendKeys { .. } => "send_keys",
+            Self::Mouse { .. } => "mouse",
             Self::Schedule { .. } => "schedule",
             Self::Enqueue { .. } => "enqueue",
             Self::ClearQueue { .. } => "clear_queue",
@@ -455,6 +519,99 @@ impl Operation {
                     name: name.clone(),
                 }
             }
+            Self::NewSplitView {
+                parent,
+                name,
+                panes,
+                horizontal,
+            } => {
+                if name.trim().is_empty() {
+                    return Err(OperationError::Invalid("name must not be empty".into()));
+                }
+                if panes.len() < 2 {
+                    return Err(OperationError::Invalid(
+                        "a split view needs at least two panes".into(),
+                    ));
+                }
+                let pane_ids = panes
+                    .iter()
+                    .map(|pane| require_pane(tree, *pane))
+                    .collect::<Result<Vec<_>, _>>()?;
+                ClientRequest::CreateSplitView {
+                    parent_group: require_container(tree, *parent)?,
+                    name: name.clone(),
+                    orientation: if *horizontal {
+                        ilium_core::SplitOrientation::Horizontal
+                    } else {
+                        ilium_core::SplitOrientation::Vertical
+                    },
+                    pane_ids,
+                }
+            }
+            Self::NewBoard {
+                parent,
+                name,
+                path,
+                markdown_file,
+            } => {
+                if name.trim().is_empty() {
+                    return Err(OperationError::Invalid("name must not be empty".into()));
+                }
+                require_absolute(path)?;
+                ClientRequest::NewBoard {
+                    parent_group: require_container(tree, *parent)?,
+                    name: name.clone(),
+                    storage: if *markdown_file {
+                        ilium_core::BoardStorage::MarkdownFile { path: path.clone() }
+                    } else {
+                        ilium_core::BoardStorage::Folder { path: path.clone() }
+                    },
+                }
+            }
+            Self::Freeze {
+                pane,
+                resume_command,
+            } => {
+                if resume_command.trim().is_empty() {
+                    return Err(OperationError::Invalid(
+                        "resume_command must not be empty".into(),
+                    ));
+                }
+                ClientRequest::FreezePane {
+                    pane_id: require_pane(tree, *pane)?,
+                    resume_command: resume_command.clone(),
+                }
+            }
+            Self::UpdateSoundSettings { settings } => ClientRequest::UpdateSoundSettings {
+                settings: settings.clone(),
+            },
+            Self::UpdateDetectionSettings { settings } => {
+                ClientRequest::UpdateAgentDetectionSettings {
+                    request_id: None,
+                    settings: settings.clone(),
+                }
+            }
+            Self::UpdateTextTriggers { settings } => ClientRequest::UpdateTextTriggers {
+                settings: settings.clone(),
+            },
+            Self::SetDebugLogging { enabled } => {
+                ClientRequest::UpdateDebugLogging { enabled: *enabled }
+            }
+            Self::SetProgressMonitors { enabled } => {
+                ClientRequest::UpdateProgressMonitorEnabled { enabled: *enabled }
+            }
+            Self::Unfreeze { pane } => ClientRequest::UnfreezePane {
+                pane_id: require_pane(tree, *pane)?,
+            },
+            Self::ReplaceCommand { pane, command } => {
+                if command.trim().is_empty() {
+                    return Err(OperationError::Invalid("command must not be empty".into()));
+                }
+                ClientRequest::ReplacePaneWithCommand {
+                    pane_id: require_pane(tree, *pane)?,
+                    command_line: command.clone(),
+                }
+            }
             Self::NewFolder { parent, path } => {
                 require_absolute(path)?;
                 ClientRequest::NewFolder {
@@ -531,6 +688,19 @@ impl Operation {
                     }
                 }
             }
+            Self::Mouse {
+                pane,
+                kind,
+                column,
+                row,
+                modifiers,
+            } => ClientRequest::MouseInput {
+                pane_id: require_pane(tree, *pane)?,
+                kind: *kind,
+                column: *column,
+                row: *row,
+                modifiers: *modifiers,
+            },
             Self::SendKeys { pane, keys } => {
                 let pane_id = require_pane(tree, *pane)?;
                 if keys.is_empty() {
@@ -625,10 +795,19 @@ impl Operation {
             self,
             Self::SendText { .. }
                 | Self::SendKeys { .. }
+                | Self::Mouse { .. }
                 | Self::Schedule { .. }
                 | Self::Enqueue { .. }
                 | Self::ClearQueue { .. }
                 | Self::Terminate { .. }
+                | Self::ReplaceCommand { .. }
+                | Self::Freeze { .. }
+                | Self::Unfreeze { .. }
+                | Self::UpdateSoundSettings { .. }
+                | Self::UpdateDetectionSettings { .. }
+                | Self::UpdateTextTriggers { .. }
+                | Self::SetDebugLogging { .. }
+                | Self::SetProgressMonitors { .. }
                 | Self::KillSession
         )
     }
@@ -680,6 +859,8 @@ impl Operation {
             Self::NewProject { .. } => created(Some("project")),
             Self::NewGroup { .. } => created(Some("group")),
             Self::NewFolder { .. } => created(Some("folder")),
+            Self::NewSplitView { .. } => created(Some("split_view")),
+            Self::NewBoard { .. } => created(None),
             Self::NewPane { .. } => created(Some("pane")),
             Self::ChangeProjectFolder { project, path } => {
                 let changed = match &after.get(NodeId(*project))?.kind {
@@ -715,10 +896,19 @@ impl Operation {
             }
             Self::SendText { .. }
             | Self::SendKeys { .. }
+            | Self::Mouse { .. }
             | Self::Schedule { .. }
             | Self::Enqueue { .. }
             | Self::ClearQueue { .. }
             | Self::Terminate { .. }
+            | Self::ReplaceCommand { .. }
+            | Self::Freeze { .. }
+            | Self::Unfreeze { .. }
+            | Self::UpdateSoundSettings { .. }
+            | Self::UpdateDetectionSettings { .. }
+            | Self::UpdateTextTriggers { .. }
+            | Self::SetDebugLogging { .. }
+            | Self::SetProgressMonitors { .. }
             | Self::KillSession => None,
         }
     }
@@ -752,6 +942,32 @@ pub fn examples() -> Vec<Operation> {
             parent: 5,
             name: "Experiments".into(),
         },
+        Operation::NewSplitView {
+            parent: 5,
+            name: "Side by side".into(),
+            panes: vec![12, 13],
+            horizontal: false,
+        },
+        Operation::ReplaceCommand {
+            pane: 12,
+            command: "htop".into(),
+        },
+        Operation::NewBoard {
+            parent: 5,
+            name: "Tasks".into(),
+            path: PathBuf::from("/abs/path/to/board-folder"),
+            markdown_file: false,
+        },
+        Operation::Freeze {
+            pane: 12,
+            resume_command: "claude --resume SESSION".into(),
+        },
+        Operation::Unfreeze { pane: 12 },
+        Operation::UpdateSoundSettings {
+            settings: ilium_sound::SoundSettings::default(),
+        },
+        Operation::SetDebugLogging { enabled: true },
+        Operation::SetProgressMonitors { enabled: true },
         Operation::NewFolder {
             parent: 5,
             path: PathBuf::from("/abs/path/to/folder"),
@@ -773,6 +989,13 @@ pub fn examples() -> Vec<Operation> {
             pane: 12,
             text: "run the tests".into(),
             enter: true,
+        },
+        Operation::Mouse {
+            pane: 12,
+            kind: ilium_ipc::MouseEventKind::ScrollUp,
+            column: 10,
+            row: 4,
+            modifiers: ilium_ipc::MouseModifiers::default(),
         },
         Operation::SendKeys {
             pane: 12,

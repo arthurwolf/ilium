@@ -698,9 +698,7 @@ fn fetch_cached_with(
     )
 }
 
-// Every argument is an independent policy input (cache, admission, limits, injected
-// fetcher); the injected `fetch` lets tests exercise admission without a network.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)] // Same explicit cache limits as fetch_cached_with, plus the admission directory tests inject.
 fn fetch_cached_with_admission(
     cache_dir: &Path,
     admission_dir: &Path,

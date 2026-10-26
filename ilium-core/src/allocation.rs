@@ -273,6 +273,7 @@ impl AllocationSize for PaneProgress {
             report,
             monitor_health,
             last_observed_unix_millis,
+            timing,
             attention,
         } = self;
         0usize
@@ -280,6 +281,12 @@ impl AllocationSize for PaneProgress {
             .saturating_add(report.heap_bytes())
             .saturating_add(monitor_health.heap_bytes())
             .saturating_add(last_observed_unix_millis.heap_bytes())
+            .saturating_add(
+                timing
+                    .samples
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<ProgressSample>()),
+            )
             .saturating_add(attention.heap_bytes())
     }
 }
@@ -293,8 +300,12 @@ impl AllocationSize for ProgressTaskReport {
             message,
             details,
             error,
+            eta_seconds,
+            indeterminate,
         } = self;
         0usize
+            .saturating_add(eta_seconds.heap_bytes())
+            .saturating_add(indeterminate.heap_bytes())
             .saturating_add(job_id.heap_bytes())
             .saturating_add(status.heap_bytes())
             .saturating_add(percent.heap_bytes())

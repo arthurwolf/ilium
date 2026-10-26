@@ -1,0 +1,21 @@
+[package]
+name = "ilium-plugin-core-recap"
+description = "Core plugin ilium.core.recap of Ilium (manual page core-plugin-recap.md)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+# cdylib is the component build; rlib lets the FakeHost tests under tests/ link the plugin.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+ilium-plugin-sdk = { version = "0.1.1", path = "../../../ilium-plugin-sdk" }
+
+[dev-dependencies]
+ilium-plugin-sdk = { version = "0.1.1", path = "../../../ilium-plugin-sdk", features = ["testing"] }
+serde_json = "1.0.151"
+proptest = "1"

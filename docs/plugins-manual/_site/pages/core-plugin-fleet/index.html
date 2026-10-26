@@ -1,0 +1,1074 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Fleet | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details open><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/" aria-current="page">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Core plugins</b></p>
+<h1>Fleet</h1>
+
+<p>The Fleet plugin has the id <code>ilium.core.fleet</code> and runs on both sides. It owns work with many agents at once: messaging one agent or all of them, Ask for update, <code>ilium panes</code>, <code>ilium broadcast</code>, <code>ilium new-pane</code> and the local HTTP API route <code>POST /create_agent</code>. It reaches other sessions on the same machine, and it reads cost figures from the service that the <a href="/pages/core-plugin-cost/">Cost</a> plugin provides. The client side only draws the Ask for update dialog.</p>
+<p>Spawning a PTY and typing into it are kernel-native. Fleet drives them through the <code>create-pane</code> and <code>send-input</code> intents and never touches a terminal directly.</p>
+<h3 id="what-it-covers">What it covers</h3>
+<ul>
+<li>Agent messaging and Ask for update (see Automation, "Ask for update").</li>
+<li>The local HTTP API <code>POST /create_agent</code> (see Automation, "Local HTTP API", and Settings, "API").</li>
+<li><code>ilium new-pane</code> (see CLI reference, "ilium new-pane").</li>
+<li><code>ilium panes</code> (see CLI reference, "ilium panes").</li>
+<li><code>ilium broadcast</code> (see CLI reference, "ilium broadcast").</li>
+</ul>
+<h3 id="see-it">See it</h3>
+<figure><img src="/assets/demos/05-ask-for-update.gif" alt="A dialog asks for a status update and sends it to every agent" loading="lazy"><figcaption>Ask for update: one short message goes to one agent or to all of them.</figcaption></figure>
+
+<h3 id="what-the-user-sees">What the user sees</h3>
+<figure>
+<pre class="term"><span class="t-prompt">$</span> ilium panes
+<span class="t-hi">SESSION  PANE  AGENT   STATE      COST</span>
+default  3     claude  <span class="t-ok">working</span>    $1.42
+default  5     codex   <span class="t-dim">idle</span>       $0.31
+review   2     claude  <span class="t-warn">approval</span>   $0.87
+review   4     shell   <span class="t-dim">-</span>          <span class="t-dim">-</span></pre>
+<figcaption>Rendered at 48 columns. Illustrative. <code>ilium panes</code> across two sessions, with the state column and the cost column that comes from the Cost plugin. The command prints JSONL when it is not on a terminal.</figcaption>
+</figure>
+
+<figure>
+<pre class="term"><span class="t-dim">╭ Ask for update ─────────────────────────────╮</span>
+<span class="t-dim">│</span> To……………………………………………………… <span class="t-hi">All agents (3)</span>      <span class="t-dim">│</span>
+<span class="t-dim">│</span> Message…… What is your status in one line? <span class="t-dim"> │</span>
+<span class="t-dim">│</span>                                             <span class="t-dim">│</span>
+<span class="t-dim">│</span>                  [ Send ]   [ Cancel ]      <span class="t-dim">│</span>
+<span class="t-dim">╰─────────────────────────────────────────────╯</span></pre>
+<figcaption>Rendered at 48 columns. Illustrative. The Ask for update dialog with a message field and Send and Cancel buttons.</figcaption>
+</figure>
+
+<h3 id="manifest">Manifest</h3>
+<p>This block is a fragment. It lists the contributions. The whole manifest is in <a href="#complete-manifest">Complete manifest</a>.</p>
+<pre><code class="language-json">{
+  &quot;api&quot;: &quot;ilium:plugin@0.1.0&quot;,
+  &quot;id&quot;: &quot;ilium.core.fleet&quot;,
+  &quot;server&quot;: { &quot;entry&quot;: &quot;server.wasm&quot;, &quot;world&quot;: &quot;ilium:server/base@0.1.0&quot; },
+  &quot;client&quot;: { &quot;entry&quot;: &quot;client.wasm&quot;, &quot;world&quot;: &quot;ilium:client/base@0.1.0&quot; },
+  &quot;contributes&quot;: {
+    &quot;cli&quot;: [
+      { &quot;name&quot;: &quot;panes&quot;, &quot;summary&quot;: &quot;List panes in every session&quot;, &quot;output&quot;: &quot;jsonl&quot;,
+        &quot;requires_server&quot;: false },
+      { &quot;name&quot;: &quot;broadcast&quot;, &quot;summary&quot;: &quot;Send a line to agents&quot;, &quot;output&quot;: &quot;jsonl&quot;,
+        &quot;requires_server&quot;: false, &quot;argument_groups&quot;: [&quot;pane-selector&quot;] },
+      { &quot;name&quot;: &quot;new-pane&quot;, &quot;summary&quot;: &quot;Create a pane&quot;, &quot;output&quot;: &quot;jsonl&quot;,
+        &quot;requires_server&quot;: true }
+    ],
+    &quot;http_routes&quot;: [ { &quot;method&quot;: &quot;POST&quot;, &quot;path&quot;: &quot;/create_agent&quot; } ],
+    &quot;commands&quot;: [ { &quot;id&quot;: &quot;ask-for-update&quot;, &quot;title&quot;: &quot;Ask for update&quot; } ]
+  },
+  &quot;capabilities&quot;: {
+    &quot;server&quot;: [
+      &quot;cli.contribute&quot;, &quot;sessions.cross&quot;, &quot;http-api.route:/create_agent&quot;,
+      &quot;terminal.write&quot;, &quot;panes.create&quot;, &quot;panes.read&quot;, &quot;agent.read&quot;,
+      &quot;messages.peer:ilium.core.notifications&quot;,
+      &quot;services.use:ilium.core.cost/usage&quot;
+    ],
+    &quot;client&quot;: [&quot;ui.panels&quot;]
+  }
+}
+</code></pre>
+<h3 id="complete-manifest">Complete manifest</h3>
+<p>This is the whole manifest of the plugin at <code>ilium:plugin@0.1.0</code>. The Manifest section above shows the contributions in detail; here the required keys, the sides, the <code>capabilities</code> per side and the <code>activation</code> triggers are all present. Activation follows <a href="/pages/reference-kernel-and-boot/#startup-and-lazy-activation-of-the-30-core-plugins">startup and lazy activation</a>. [COR-050]</p>
+<pre><code class="language-json">{
+  &quot;api&quot;: &quot;ilium:plugin@0.1.0&quot;,
+  &quot;id&quot;: &quot;ilium.core.fleet&quot;,
+  &quot;name&quot;: &quot;Fleet&quot;,
+  &quot;version&quot;: &quot;0.1.0&quot;,
+  &quot;publisher&quot;: &quot;Ilium&quot;,
+  &quot;description&quot;: &quot;The Fleet plugin has the id ilium.core.fleet and runs on both sides.&quot;,
+  &quot;license&quot;: &quot;MIT&quot;,
+  &quot;server&quot;: {
+    &quot;entry&quot;: &quot;server.wasm&quot;,
+    &quot;world&quot;: &quot;ilium:server/base@0.1.0&quot;
+  },
+  &quot;client&quot;: {
+    &quot;entry&quot;: &quot;client.wasm&quot;,
+    &quot;world&quot;: &quot;ilium:client/base@0.1.0&quot;
+  },
+  &quot;capabilities&quot;: {
+    &quot;server&quot;: [
+      &quot;cli.contribute&quot;,
+      &quot;sessions.cross&quot;,
+      &quot;http-api.route:/create_agent&quot;,
+      &quot;terminal.write&quot;,
+      &quot;panes.create&quot;,
+      &quot;panes.read&quot;,
+      &quot;agent.read&quot;,
+      &quot;messages.peer:ilium.core.notifications&quot;,
+      &quot;services.use:ilium.core.cost/usage&quot;
+    ],
+    &quot;client&quot;: [
+      &quot;ui.panels&quot;,
+      &quot;settings.write-kernel:api&quot;
+    ]
+  },
+  &quot;activation&quot;: [
+    &quot;cli:panes&quot;,
+    &quot;cli:broadcast&quot;,
+    &quot;http:/create_agent&quot;,
+    &quot;service:broadcast&quot;,
+    &quot;command:ask-for-update&quot;
+  ],
+  &quot;contributes&quot;: {
+    &quot;cli&quot;: [
+      {
+        &quot;name&quot;: &quot;panes&quot;,
+        &quot;summary&quot;: &quot;List panes in every session&quot;,
+        &quot;output&quot;: &quot;jsonl&quot;,
+        &quot;requires_server&quot;: false
+      },
+      {
+        &quot;name&quot;: &quot;broadcast&quot;,
+        &quot;summary&quot;: &quot;Send a line to agents&quot;,
+        &quot;output&quot;: &quot;jsonl&quot;,
+        &quot;requires_server&quot;: false,
+        &quot;argument_groups&quot;: [
+          &quot;pane-selector&quot;
+        ]
+      },
+      {
+        &quot;name&quot;: &quot;new-pane&quot;,
+        &quot;summary&quot;: &quot;Create a pane&quot;,
+        &quot;output&quot;: &quot;mixed&quot;,
+        &quot;requires_server&quot;: true
+      }
+    ],
+    &quot;http_routes&quot;: [
+      {
+        &quot;method&quot;: &quot;POST&quot;,
+        &quot;path&quot;: &quot;/create_agent&quot;
+      }
+    ],
+    &quot;commands&quot;: [
+      {
+        &quot;id&quot;: &quot;ask-for-update&quot;,
+        &quot;title&quot;: &quot;Ask for update&quot;
+      }
+    ]
+  },
+  &quot;limits_tier&quot;: &quot;first-party&quot;
+}
+</code></pre>
+<h3 id="kernel-tabs-this-plugin-owns">Kernel tabs this plugin owns</h3>
+<p>This plugin is the single owner of the following built-in Settings tabs. It holds <code>settings.write-kernel:&lt;tab&gt;</code> for each one (T1 only, one holder per tab, see <a href="/pages/api-kernel-settings-and-keymap/#writing-a-kernel-tab">kernel settings</a>). The values stay in the same <code>config.toml</code> tables as before, so no user setting moves. [COR-030] [COR-033]</p>
+<table>
+<thead>
+<tr>
+<th>Tab id</th>
+<th>Label</th>
+<th>Config table</th>
+<th>Readers</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>api</code></td>
+<td>API</td>
+<td><code>[api]</code></td>
+<td>none</td>
+</tr>
+</tbody>
+</table>
+<p>If the plugin is disabled, the tab stays in the rail with its stored values shown read-only and the notice "Fleet is disabled. Values are kept." The kernel keeps reading the keys it consumes itself (listed in the Consumer column of the key table in <a href="/pages/reference-config-and-data-migration/">config and data migration</a>). Behaviour that only this plugin provides is off. The exact result for this plugin is its row in <a href="/pages/reference-kernel-and-boot/">kernel and boot</a>. [COR-022]</p>
+<h3 id="samples">Samples</h3>
+<h4 id="ilium-panes">ilium panes</h4>
+<p>A CLI subcommand lists panes across every running session. The plugin declares <code>panes</code> under <a href="/pages/capability-cli-contribute/">cli.contribute</a> (<a href="/pages/api-cli/">the cli API</a>) and reads sessions under <a href="/pages/capability-sessions-cross/">sessions.cross</a> (<a href="/pages/api-sessions/">the sessions API</a>). On <code>cli-invoked</code> (<a href="/pages/api-events/">events</a>) it lists the sessions, asks each one for its panes and prints one JSONL line per pane.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use std::collections::HashMap;
+
+use ilium_plugin_sdk::host::sessions::{self, CrossRequest};
+use ilium_plugin_sdk::host::cli;
+use ilium_plugin_sdk::prelude::*;
+use ilium_plugin_sdk::types::events::CliInvokedEvent;
+
+#[ilium_plugin(side = &quot;server&quot;)]
+#[derive(Default)]
+struct Fleet {
+    /// Request id to (invocation, session name).
+    waiting: HashMap&lt;RequestId, (u64, String)&gt;,
+    /// Invocation to the number of replies still expected.
+    remaining: HashMap&lt;u64, usize&gt;,
+}
+
+impl Lifecycle for Fleet {}
+
+impl Fleet {
+    fn start_panes(&amp;mut self, invocation: u64) {
+        let live = sessions::list_live();
+        let mut sent = 0;
+        for session in &amp;live {
+            let request = CrossRequest {
+                session: session.name.clone(),
+                command: &quot;list-panes&quot;.into(),
+                arguments_json: &quot;{}&quot;.into(),
+            };
+            if let Ok(id) = sessions::send(request) {
+                self.waiting.insert(id, (invocation, session.name.clone()));
+                sent += 1;
+            }
+        }
+        self.remaining.insert(invocation, sent);
+        if sent == 0 {
+            cli::finish(invocation, 1);
+        }
+    }
+
+    fn on_reply(&amp;mut self, id: RequestId, is_ok: bool) {
+        let Some((invocation, name)) = self.waiting.remove(&amp;id) else { return };
+        if let Some(text) = sessions::take_reply(id).filter(|_| is_ok) {
+            let line = format!(r#&quot;{{&quot;type&quot;:&quot;pane&quot;,&quot;session&quot;:&quot;{name}&quot;,&quot;panes&quot;:{text}}}&quot;#);
+            let _ = cli::write_line(invocation, &amp;line);
+        }
+        let Some(left) = self.remaining.get_mut(&amp;invocation) else { return };
+        *left -= 1;
+        if *left == 0 {
+            self.remaining.remove(&amp;invocation);
+            cli::finish(invocation, 0);
+        }
+    }
+}
+
+impl Handler for Fleet {
+    fn on_events(&amp;mut self, batch: Vec&lt;Event&gt;) -&gt; Vec&lt;Submission&gt; {
+        for event in batch {
+            match event {
+                Event::CliInvoked(CliInvokedEvent { invocation, name, .. }) if name == &quot;panes&quot; =&gt; {
+                    self.start_panes(invocation);
+                }
+                Event::RequestCompleted(done) =&gt; self.on_reply(done.request, done.outcome.is_ok()),
+                _ =&gt; {}
+            }
+        }
+        Vec::new()
+    }
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { definePlugin, type Event, type Submission } from '@ilium/plugin-sdk';
+import * as cli from '@ilium/plugin-sdk/host/cli';
+import * as sessions from '@ilium/plugin-sdk/host/sessions';
+
+const waiting = new Map&lt;bigint, { invocation: bigint; name: string }&gt;();
+const remaining = new Map&lt;bigint, number&gt;();
+
+function startPanes(invocation: bigint): void {
+  let sent = 0;
+  for (const session of sessions.listLive()) {
+    try {
+      const id = sessions.send({ session: session.name, command: 'list-panes', argumentsJson: '{}' });
+      waiting.set(id, { invocation, name: session.name });
+      sent += 1;
+    } catch {
+      // A session that went away is skipped.
+    }
+  }
+  remaining.set(invocation, sent);
+  if (sent === 0) cli.finish(invocation, 1);
+}
+
+function onReply(id: bigint, isOk: boolean): void {
+  const entry = waiting.get(id);
+  if (entry === undefined) return;
+  waiting.delete(id);
+  const text = isOk ? sessions.takeReply(id) : undefined;
+  if (text !== undefined) {
+    cli.writeLine(entry.invocation, JSON.stringify({ type: 'pane', session: entry.name, panes: JSON.parse(text) }));
+  }
+  const left = (remaining.get(entry.invocation) ?? 1) - 1;
+  remaining.set(entry.invocation, left);
+  if (left === 0) {
+    remaining.delete(entry.invocation);
+    cli.finish(entry.invocation, 0);
+  }
+}
+
+export const { handler } = definePlugin({
+  side: 'server',
+  onEvents(batch: Event[]): Submission[] {
+    for (const event of batch) {
+      if (event.tag === 'cli-invoked' &amp;&amp; event.val.name === 'panes') startPanes(event.val.invocation);
+      else if (event.tag === 'request-completed') onReply(event.val.request, event.val.outcome.tag === 'ok');
+    }
+    return [];
+  },
+});
+</code></pre>
+<h4 id="ilium-broadcast">ilium broadcast</h4>
+<p>A message goes to agents in every matching session. For other sessions the plugin calls <code>sessions.send</code> (<a href="/pages/api-sessions/">sessions API</a>, <a href="/pages/capability-sessions-cross/">sessions.cross</a>). In the current session it submits <code>send-input</code> with <code>delivery: submitted</code> (<a href="/pages/api-intent-send-input/">send-input</a>). The trigger is <code>cli-invoked</code> (<a href="/pages/api-events/">events</a>).</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::host::sessions::{self, CrossRequest};
+use ilium_plugin_sdk::prelude::*;
+use ilium_plugin_sdk::primitives::agent;
+use ilium_plugin_sdk::types::intents::{Intent, SendInputSpec};
+use ilium_plugin_sdk::types::intents::Delivery;
+
+fn broadcast(text: &amp;str) -&gt; Vec&lt;Submission&gt; {
+    // Other sessions: ask each one to run its own broadcast.
+    for session in sessions::list_live().into_iter().filter(|session| !session.is_self) {
+        let request = CrossRequest {
+            session: session.name,
+            command: &quot;broadcast&quot;.into(),
+            arguments_json: serde_json::json!({ &quot;text&quot;: text }).to_string(),
+        };
+        let _ = sessions::send(request);
+    }
+    // This session: one send-input per agent pane.
+    agent::agents()
+        .into_iter()
+        .map(|pane| {
+            let spec = SendInputSpec {
+                pane: pane.pane,
+                text: text.to_string(),
+                delivery: Delivery::Submitted,
+                prompt_epoch: None,
+                stages: Vec::new(),
+                raw: None,
+                mouse: None,
+                if_current: None,
+                lock_user_input: false,
+                journal: true,
+            };
+            Submission::keyed(Intent::SendInput(spec), format!(&quot;broadcast-{}-{}&quot;, pane.pane, text.len()))
+        })
+        .collect()
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import * as sessions from '@ilium/plugin-sdk/host/sessions';
+import { agents } from '@ilium/plugin-sdk/primitives/agent';
+import type { Submission } from '@ilium/plugin-sdk/types';
+
+export function broadcast(text: string): Submission[] {
+  for (const session of sessions.listLive().filter((entry) =&gt; !entry.isSelf)) {
+    try {
+      sessions.send({ session: session.name, command: 'broadcast', argumentsJson: JSON.stringify({ text }) });
+    } catch {
+      // The session went away; nothing to send.
+    }
+  }
+  return agents().map((agent) =&gt; ({
+    intent: {
+      tag: 'send-input',
+      val: {
+        pane: agent.pane, text, delivery: 'submitted', promptEpoch: undefined, stages: [],
+        raw: undefined, mouse: undefined, ifCurrent: undefined, lockUserInput: false, journal: true,
+      },
+    },
+    correlation: 1n,
+    dedupKey: `broadcast-${agent.pane}-${text.length}`,
+  }));
+}
+</code></pre>
+<h4 id="ask-for-update">Ask for update</h4>
+<p>A dialog sends a short request to one agent or to all of them. The client side shows a <code>dialog</code> (<a href="/pages/widgets-layout-and-containers/">layout and containers</a>) with a <code>text-input</code> and buttons (<a href="/pages/widgets-input/">input widgets</a>) under <a href="/pages/capability-ui-panels/">ui.panels</a>. On Send it submits a <code>message</code> to the server side (<a href="/pages/api-messages-and-topics/">messages and topics</a>), which submits <code>send-input</code> to each target (<a href="/pages/api-intent-send-input/">send-input</a>).</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::prelude::*;
+use ilium_plugin_sdk::types::ui::{ActionKind, ActionValue};
+use ilium_plugin_sdk::types::intents::{Intent, MessageSpec, MessageTarget, PluginSide};
+
+fn render_dialog(tree: &amp;mut Tree, text: &amp;str) -&gt; NodeRef {
+    let message = tree.text_input(&quot;Message&quot;, text.to_string()).key(&quot;update-text&quot;);
+    let send = tree.button(&quot;Send&quot;).key(&quot;update-send&quot;).role(ButtonRole::Primary);
+    let cancel = tree.button(&quot;Cancel&quot;).key(&quot;update-cancel&quot;);
+    tree.dialog(&quot;ask-for-update&quot;, &quot;Ask for update&quot;)
+        .child(message).child(send).child(cancel)
+        .into_node()
+}
+
+fn on_action(key: &amp;str, kind: ActionKind, value: ActionValue, text: &amp;mut String) -&gt; Vec&lt;Submission&gt; {
+    match (key, kind, value) {
+        (&quot;update-text&quot;, ActionKind::Changed, ActionValue::Text(next)) =&gt; *text = next,
+        (&quot;update-send&quot;, ActionKind::Activated, _) if !text.trim().is_empty() =&gt; {
+            return vec![Submission::new(Intent::Message(MessageSpec {
+                to: MessageTarget { plugin: &quot;ilium.core.fleet&quot;.into(), side: PluginSide::Server, client: None },
+                channel: &quot;ask-for-update&quot;.into(),
+                payload: text.clone().into_bytes(),
+            }))];
+        }
+        _ =&gt; {}
+    }
+    Vec::new()
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { button, dialog, textInput } from '@ilium/plugin-sdk/ui/build';
+import type { Event, Submission } from '@ilium/plugin-sdk/types';
+
+let text = '';
+
+export const renderDialog = () =&gt;
+  dialog('ask-for-update', {
+    title: 'Ask for update',
+    children: [
+      textInput('Message', text, { key: 'update-text' }),
+      button('Send', { key: 'update-send', role: 'primary' }),
+      button('Cancel', { key: 'update-cancel' }),
+    ],
+  });
+
+export function onAction(event: Extract&lt;Event, { tag: 'ui-action' }&gt;): Submission[] {
+  const { key, kind, value } = event.val;
+  if (key === 'update-text' &amp;&amp; kind === 'changed' &amp;&amp; value.tag === 'text') text = value.val;
+  if (key === 'update-send' &amp;&amp; kind === 'activated' &amp;&amp; text.trim() !== '') {
+    return [{
+      intent: {
+        tag: 'message',
+        val: {
+          to: { plugin: 'ilium.core.fleet', side: 'server', client: undefined },
+          channel: 'ask-for-update',
+          payload: new TextEncoder().encode(text),
+        },
+      },
+      correlation: 1n,
+      dedupKey: undefined,
+    }];
+  }
+  return [];
+}
+</code></pre>
+<h4 id="hand-a-request-to-the-notifications-plugin">Hand a request to the notifications plugin</h4>
+<p>When an agent asks for a user decision, the fleet plugin sends a one-way message to the notifications plugin so it raises a desktop notification. The fleet plugin needs <code>messages.peer:ilium.core.notifications</code> for that. The notifications plugin needs no grant to receive it.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::prelude::*;
+use ilium_plugin_sdk::types::intents::{Intent, MessageSpec, MessageTarget, PluginSide};
+
+fn ask_user(pane_label: &amp;str, question: &amp;str) -&gt; Submission {
+    let payload = format!(&quot;{pane_label}: {question}&quot;).into_bytes();
+    Submission::new(Intent::Message(MessageSpec {
+        to: MessageTarget {
+            plugin: &quot;ilium.core.notifications&quot;.into(),
+            side: PluginSide::Server,
+            client: None,
+        },
+        channel: &quot;agent-question&quot;.into(),
+        payload,
+    }))
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import type { Submission } from '@ilium/plugin-sdk/types';
+
+export function askUser(paneLabel: string, question: string): Submission {
+  return {
+    intent: {
+      tag: 'message',
+      val: {
+        to: { plugin: 'ilium.core.notifications', side: 'server', client: undefined },
+        channel: 'agent-question',
+        payload: new TextEncoder().encode(`${paneLabel}: ${question}`),
+      },
+    },
+    correlation: 2n,
+    dedupKey: undefined,
+  };
+}
+</code></pre>
+<hr />
+<h4 id="post-create_agent">POST /create_agent</h4>
+<p>The kernel owns the HTTP listener, its port and its on/off setting (Settings, API tab). The fleet plugin owns only the route: it registers <code>POST /create_agent</code> with <code>http-api.route</code>, and the kernel returns 404 for the route while the plugin is disabled. [COR-010]</p>
+<p>The local HTTP API creates an agent pane. The plugin routes <code>POST /create_agent</code> (<a href="/pages/api-http-api/">HTTP API</a>, <a href="/pages/capability-http-api-route/">http-api.route</a>). On <code>http-called</code> (<a href="/pages/api-events/">events</a>) it validates the JSON body and submits <code>create-pane</code> (<a href="/pages/api-intents/">intents</a>). When the <code>request-completed</code> event carries the new node, it replies with the pane id.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::host::http_api;
+use ilium_plugin_sdk::prelude::*;
+use ilium_plugin_sdk::types::events::HttpCalledEvent;
+use ilium_plugin_sdk::types::intents::{CreatePaneSpec, Intent};
+
+#[derive(serde::Deserialize)]
+struct CreateAgent {
+    title: String,
+    command: Vec&lt;String&gt;,
+}
+
+fn answer(request: &amp;HttpCalledEvent, pending: &amp;mut std::collections::HashMap&lt;u64, u64&gt;) -&gt; Vec&lt;Submission&gt; {
+    let route_path = request.path.split('?').next().unwrap_or(&quot;&quot;);
+    if request.method != &quot;POST&quot; || route_path != &quot;/create_agent&quot; {
+        let _ = http_api::respond(request.call, 404, &amp;[], &amp;[]);
+        return Vec::new();
+    }
+    let Ok(body) = serde_json::from_slice::&lt;CreateAgent&gt;(&amp;request.body) else {
+        let _ = http_api::respond(request.call, 400, &amp;[], br#&quot;{&quot;error&quot;:&quot;invalid json&quot;}&quot;#);
+        return Vec::new();
+    };
+    let spec = CreatePaneSpec {
+        parent: None,
+        title: body.title,
+        content_kind: &quot;ilium.terminal&quot;.into(),
+        cwd: None,
+        command: Some(body.command),
+        initial_input: None,
+    };
+    let submission = Submission::keyed(Intent::CreatePane(spec), format!(&quot;http-{}&quot;, request.call));
+    pending.insert(submission.correlation, request.call);
+    vec![submission]
+}
+
+fn on_created(call: u64, node: NodeId) {
+    let headers = vec![(&quot;content-type&quot;.to_string(), &quot;application/json&quot;.to_string())];
+    let body = format!(r#&quot;{{&quot;pane_id&quot;:{node}}}&quot;#);
+    let _ = http_api::respond(call, 201, &amp;headers, body.as_bytes());
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { respond } from '@ilium/plugin-sdk/host/http-api';
+import type { HttpCalledEvent, Submission } from '@ilium/plugin-sdk/types';
+
+const pending = new Map&lt;bigint, bigint&gt;(); // correlation to http call
+let nextCorrelation = 1n;
+
+export function answer(request: HttpCalledEvent): Submission[] {
+  const routePath = request.path.split('?')[0];
+  if (request.method !== 'POST' || routePath !== '/create_agent') {
+    respond(request.call, 404, [], new Uint8Array());
+    return [];
+  }
+  let body: { title: string; command: string[] };
+  try {
+    body = JSON.parse(new TextDecoder().decode(request.body));
+  } catch {
+    respond(request.call, 400, [], new TextEncoder().encode('{&quot;error&quot;:&quot;invalid json&quot;}'));
+    return [];
+  }
+  const correlation = nextCorrelation++;
+  pending.set(correlation, request.call);
+  return [{
+    intent: {
+      tag: 'create-pane',
+      val: { parent: undefined, title: body.title, contentKind: 'ilium.terminal',
+             cwd: undefined, command: body.command, initialInput: undefined },
+    },
+    correlation,
+    dedupKey: `http-${request.call}`,
+  }];
+}
+
+export function onCreated(correlation: bigint, node: bigint): void {
+  const call = pending.get(correlation);
+  if (call === undefined) return;
+  pending.delete(correlation);
+  respond(call, 201, [['content-type', 'application/json']],
+    new TextEncoder().encode(JSON.stringify({ pane_id: Number(node) })));
+}
+</code></pre>
+<h4 id="cost-column-from-a-service">Cost column from a service</h4>
+<p><code>ilium panes</code> asks the Cost plugin for the spend per pane. The plugin holds <code>services.use:ilium.core.cost/usage</code> (<a href="/pages/capability-services/">services</a>) and calls it with <code>services::call</code> (<a href="/pages/api-services/">services API</a>). When the reply is ready (the <code>request-completed</code> event), the SDK future resolves with the reply text. The plugin merges the figures into the JSONL lines.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::host::log::{self, Level};
+use ilium_plugin_sdk::host::services;
+use ilium_plugin_sdk::prelude::*;
+
+async fn cost_by_pane() -&gt; std::collections::HashMap&lt;u64, f64&gt; {
+    let payload = r#&quot;{&quot;window&quot;:&quot;session&quot;}&quot;#;
+    match services::call(&quot;ilium.core.cost/usage&quot;, &quot;usage&quot;, payload).await {
+        Ok(reply) =&gt; {
+            let parsed: serde_json::Value = serde_json::from_str(&amp;reply).unwrap_or_default();
+            parsed[&quot;panes&quot;]
+                .as_object()
+                .map(|panes| {
+                    panes.iter()
+                        .filter_map(|(pane, cost)| Some((pane.parse().ok()?, cost.as_f64()?)))
+                        .collect()
+                })
+                .unwrap_or_default()
+        }
+        Err(error) =&gt; {
+            log::log(Level::Warn, &amp;format!(&quot;cost service failed: {}&quot;, error.message));
+            Default::default()
+        }
+    }
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { call } from '@ilium/plugin-sdk/host/services';
+import { log } from '@ilium/plugin-sdk/host/log';
+
+export async function costByPane(): Promise&lt;Map&lt;number, number&gt;&gt; {
+  const costs = new Map&lt;number, number&gt;();
+  try {
+    const reply = await call('ilium.core.cost/usage', 'usage', JSON.stringify({ window: 'session' }));
+    const panes = (JSON.parse(reply) as { panes?: Record&lt;string, number&gt; }).panes ?? {};
+    for (const [pane, cost] of Object.entries(panes)) costs.set(Number(pane), cost);
+  } catch (error) {
+    log('warn', `cost service failed: ${String(error)}`);
+  }
+  return costs;
+}
+</code></pre>
+<h3 id="extension-points">Extension points</h3>
+<p>Other plugins change what <code>ilium.core.fleet</code> does through the points below. The plugin owns each point (grant <code>extensions.provide:ilium.core.fleet/&lt;point&gt;</code>). Contributors need <code>extensions.contribute:ilium.core.fleet/&lt;point&gt;</code>. See <a href="/pages/api-extension-points/">Extension points</a> for the mechanism and <a href="/pages/extending-core-plugins/">Extending core plugins</a> for the five ways to work with a core feature.</p>
+<table>
+<thead>
+<tr>
+<th>Point</th>
+<th>Kind</th>
+<th>What it does</th>
+<th>Payload</th>
+<th>Risk</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>selectors</code></td>
+<td>collect</td>
+<td>Add a named selector to <code>ilium panes</code>, <code>ilium broadcast</code> and the dialogs.</td>
+<td>entry: id, title, rule (JSON rule over signature, state, session and tags)</td>
+<td>standard</td>
+</tr>
+<tr>
+<td><code>before-broadcast</code></td>
+<td>hook (transform)</td>
+<td>Change or end a message before it goes to many agents.</td>
+<td>message, targets, source; reply: message</td>
+<td>high</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Services</strong> (grant <code>services.use:&lt;name&gt;</code>):</p>
+<ul>
+<li><code>ilium.core.fleet/broadcast</code>: send: send a message to a selection</li>
+<li><code>ilium.core.fleet/panes</code>: list: list panes of every session</li>
+</ul>
+<p><strong>Topics</strong> (list under <code>contributes.topics.subscribes</code>):</p>
+<ul>
+<li><code>ilium.core.fleet/broadcast-sent</code>: { targets, length }</li>
+</ul>
+<p>Calls <code>ilium.core.cost/usage</code> for the cost column.</p>
+<p><strong>Replaceable:</strong> yes. A replacement lists <code>"replaces": ["ilium.core.fleet"]</code> and provides the whole surface (see <a href="/pages/extending-core-plugins/#replace">Extending core plugins</a>).</p>
+<h4 id="example-lets-ilium-broadcast-select-reviewers-reach-every-pane-tagged-review">Example: Lets <code>ilium broadcast --select reviewers</code> reach every pane tagged <code>review</code></h4>
+<p>A package adds this entry in its manifest. It needs no code.</p>
+<pre><code class="language-json">{
+  &quot;api&quot;: &quot;ilium:plugin@0.1.0&quot;,
+  &quot;capabilities&quot;: { &quot;server&quot;: [&quot;extensions.contribute:ilium.core.fleet/selectors&quot;] },
+  &quot;contributes&quot;: {
+    &quot;extensions&quot;: [
+      {
+        &quot;point&quot;: &quot;ilium.core.fleet/selectors&quot;,
+        &quot;id&quot;: &quot;reviewers&quot;,
+        &quot;priority&quot;: 50,
+        &quot;entry&quot;: {
+          &quot;title&quot;: &quot;Reviewers&quot;,
+          &quot;rule&quot;: {
+            &quot;tag&quot;: &quot;review&quot;
+          }
+        }
+      }
+    ]
+  }
+}
+</code></pre>
+<h3 id="abi-used">ABI used</h3>
+<ul>
+<li><a href="/pages/api-cli/">CLI</a> and <a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/api-sessions/">Sessions</a> and <a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/api-intent-send-input/">send-input</a>, <a href="/pages/api-intents/">intents</a> and <a href="/pages/api-events/">events</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a>, <a href="/pages/widgets-input/">input widgets</a> and <a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/api-http-api/">HTTP API</a> and <a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/api-services/">Services API</a> and <a href="/pages/capability-services/">services</a></li>
+</ul>
+<h3 id="see-also">See also</h3>
+<ul>
+<li><a href="/pages/core-plugin-cost/">Cost</a>, which serves the usage figures used above.</li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a>, which decides what counts as an agent pane.</li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a>, which sends actions to a single agent.</li>
+</ul>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/core-plugin-agent-toolbar/"><small>Previous</small>Agent toolbar</a><a class="next" href="/pages/core-plugin-cost/"><small>Next</small>Cost</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#what-it-covers">What it covers</a></li><li class="l2"><a href="#see-it">See it</a></li><li class="l2"><a href="#what-the-user-sees">What the user sees</a></li><li class="l2"><a href="#manifest">Manifest</a></li><li class="l2"><a href="#complete-manifest">Complete manifest</a></li><li class="l2"><a href="#kernel-tabs-this-plugin-owns">Kernel tabs this plugin owns</a></li><li class="l2"><a href="#samples">Samples</a></li><li class="l3"><a href="#ilium-panes">ilium panes</a></li><li class="l3"><a href="#ilium-broadcast">ilium broadcast</a></li><li class="l3"><a href="#ask-for-update">Ask for update</a></li><li class="l3"><a href="#hand-a-request-to-the-notifications-plugin">Hand a request to the notifications plugin</a></li><li class="l3"><a href="#post-create_agent">POST /create_agent</a></li><li class="l3"><a href="#cost-column-from-a-service">Cost column from a service</a></li><li class="l2"><a href="#extension-points">Extension points</a></li><li class="l3"><a href="#example-lets-ilium-broadcast-select-reviewers-reach-every-pane-tagged-review">Example: Lets ilium broadcast --select reviewers reach every pane tagged review</a></li><li class="l2"><a href="#abi-used">ABI used</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

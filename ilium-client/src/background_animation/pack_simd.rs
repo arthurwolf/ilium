@@ -110,7 +110,12 @@ unsafe fn pack_avx2_inner(
                         ((pair & 1) * bits[0]) | (((pair >> 1) & 1) * bits[1]);
                 }
             }
-            for (column, cell) in row_cells.iter_mut().enumerate().skip(vector_cells) {
+            for (column, cell) in row_cells
+                .iter_mut()
+                .enumerate()
+                .take(width)
+                .skip(vector_cells)
+            {
                 let index = row_start + column * 2;
                 *cell |= (u8::from(dots[index] * density > thresholds[index]) * bits[0])
                     | (u8::from(dots[index + 1] * density > thresholds[index + 1]) * bits[1]);
@@ -123,6 +128,7 @@ unsafe fn pack_avx2_inner(
 mod tests {
     use super::{pack_scalar, pack_thresholded};
 
+    #[allow(clippy::needless_range_loop)] // The scalar oracle spells out the braille bit layout by index.
     fn scalar_reference(
         dots: &[f32],
         thresholds: &[f32],
@@ -134,13 +140,13 @@ mod tests {
         let row_width = width * 2;
         let mut cells = vec![0; width * height];
         for cell_row in 0..height {
-            for (dy, bits) in BITS.iter().enumerate() {
+            for (dy, bit_row) in BITS.iter().enumerate() {
                 let row = cell_row * 4 + dy;
                 for column in 0..width {
-                    for (dx, bit) in bits.iter().enumerate() {
+                    for (dx, &bit) in bit_row.iter().enumerate() {
                         let index = row * row_width + column * 2 + dx;
                         if dots[index] * density > thresholds[index] {
-                            cells[cell_row * width + column] |= *bit;
+                            cells[cell_row * width + column] |= bit;
                         }
                     }
                 }

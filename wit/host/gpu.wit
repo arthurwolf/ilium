@@ -1,0 +1,10 @@
+package ilium:host@0.1.0;
+
+interface gpu {
+  use ilium:types/errors@0.1.0.{plugin-error};
+  enum gpu-kernel { blur, threshold, palette-map, dither-ordered, scale }
+  // @unstable(feature = gpu-kernels)
+  run: func(kernel: gpu-kernel, input: list<u8>, width: u32, height: u32, params-json: string) -> result<list<u8>, plugin-error>;
+  // @unstable(feature = gpu-kernels)
+  available: func() -> bool;
+}

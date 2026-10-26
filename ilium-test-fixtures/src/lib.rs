@@ -56,6 +56,10 @@ pub enum FixtureBehavior {
     /// which care only about argv and never about activity classification.
     Idle,
 
+    /// Emits one supplied terminal screen and keeps the process alive without
+    /// further output, so unchanged-screen/background detection is exercised.
+    StaticScreen { text: String },
+
     /// Prints Codex's shared-footer goal suffix plus the literal working
     /// marker (`ilium_detect`'s `"esc to interrupt"`) once a second for
     /// `working_seconds`, then *clears the screen* and prints an idle line.
@@ -457,6 +461,7 @@ mod tests {
     fn assert_every_variant_is_covered(behavior: &FixtureBehavior) {
         match behavior {
             FixtureBehavior::Idle
+            | FixtureBehavior::StaticScreen { .. }
             | FixtureBehavior::WorkingThenIdle { .. }
             | FixtureBehavior::WorkingUntilMarker { .. }
             | FixtureBehavior::HoldArgument { .. }
@@ -485,6 +490,9 @@ mod tests {
         // fixture that silently does the wrong thing.
         let behaviors = [
             FixtureBehavior::Idle,
+            FixtureBehavior::StaticScreen {
+                text: "❯ idle\nSession: first seen 4m …".to_string(),
+            },
             FixtureBehavior::WorkingThenIdle { working_seconds: 5 },
             FixtureBehavior::WorkingUntilMarker {
                 marker_path: PathBuf::from("/tmp/marker"),

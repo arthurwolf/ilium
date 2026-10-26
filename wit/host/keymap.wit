@@ -1,0 +1,8 @@
+package ilium:host@0.1.0;
+
+interface keymap {
+  record binding { command: string, chords: list<string>, context: string, is-default: bool }
+  bindings: func() -> list<binding>;
+  /// The user-visible form, for example "Ctrl+Shift+K".
+  chord-label: func(chord: string) -> string;
+}

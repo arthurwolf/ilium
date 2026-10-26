@@ -47,6 +47,7 @@ mod animation_visibility;
 pub mod antigravity_model_statusline;
 pub mod app;
 pub mod ascii_chart;
+pub mod attention;
 #[cfg(test)]
 mod background_acceptance;
 pub mod background_animation;
@@ -97,6 +98,7 @@ mod ipc_preparation;
 pub mod keymap;
 pub mod keys;
 pub mod last_prompt_banner;
+pub mod last_prompt_toolbar;
 pub mod layout;
 pub mod location_picker;
 pub mod markdown;
@@ -117,17 +119,23 @@ pub mod padding_dialog;
 pub mod padding_ui;
 pub mod pane_title;
 pub mod paths;
+pub mod plugin_host;
 pub mod popover;
 pub mod presentation;
 pub mod progress_bar;
 pub mod progress_display;
 pub mod progress_guard;
+pub mod progress_popover;
+pub mod progress_time;
 pub mod project_config;
 pub mod project_naming;
 pub mod prompt_queue;
 mod provider_admission; // Bounded IO preflight retains original request ownership.
 mod proxy_database;
 pub mod recap;
+pub mod recap_state;
+pub mod recap_ui;
+pub mod recap_worker;
 pub mod release_animation;
 pub mod release_embedding;
 pub mod remote_compaction_app;
@@ -166,6 +174,7 @@ pub use smart_copy_selection::{
     RestoredSelection, SelectionCompletion, SelectionShutdownCustody, SelectionShutdownErrors,
 };
 pub mod agent_message_dialog;
+pub(crate) mod diagnostic;
 pub mod goal_resume_link;
 mod input_backlog;
 mod paste_cursor;
@@ -430,12 +439,13 @@ fn server_event_damage(app: &App, event: &ilium_ipc::ServerEvent) -> ServerEvent
                 needs_immediate_redraw: is_visible,
             }
         }
-        ServerEvent::TerminalReplay { pane_id, .. } | ServerEvent::ScreenUpdate { pane_id, .. } => {
-            ServerEventDamage {
-                needs_redraw: app.is_pane_displayed(*pane_id),
-                needs_immediate_redraw: false,
-            }
-        }
+        ServerEvent::TerminalReplay { pane_id, .. }
+        | ServerEvent::TerminalSnapshot { pane_id, .. }
+        | ServerEvent::TerminalHistory { pane_id, .. }
+        | ServerEvent::ScreenUpdate { pane_id, .. } => ServerEventDamage {
+            needs_redraw: app.is_pane_displayed(*pane_id),
+            needs_immediate_redraw: false,
+        },
         // Per-pane state that background panes report continuously. With
         // hundreds of agents these arrive many times a second; each one used
         // to force an immediate full redraw, bypassing the output frame cap.
@@ -692,6 +702,16 @@ fn apply_presented_frame(
         }
     }
     if presented.rejection.is_none() && presented.uncertainty.is_none() {
+        for (pane_id, sequence) in presented.frame.terminal_sequences.into_iter().flatten() {
+            ilium_platform::startup_timing::record_at(
+                "frame_emitted",
+                0,
+                pane_id,
+                0,
+                sequence,
+                presented.emitted_at,
+            );
+        }
         tracing::trace!(
             frame_id = presented.frame.frame_id,
             layout_revision = presented.frame.layout_revision,
@@ -993,8 +1013,8 @@ async fn run_inner(
     let provider_client = provider_client.with_completion_wake(move || provider_wake.notify_one());
     app.model_catalog_preparation
         .configure(provider_client.clone());
-    let mut naming_workers =
-        NamingWorkers::new(naming_events_tx, &config.inference).map_err(|reason| {
+    let mut naming_workers = NamingWorkers::new(naming_events_tx.clone(), &config.inference)
+        .map_err(|reason| {
             ClientError::TerminalSetup(std::io::Error::other(format!(
                 "naming settings startup: {reason:?}"
             )))
@@ -1106,6 +1126,7 @@ async fn run_inner(
     app.apply_git_settings(config.git);
     app.apply_voice_settings(config.voice);
     app.apply_reset_planning_settings(config.reset_planning);
+    app.apply_attention_settings(config.attention);
     app.apply_cost_settings(config.cost);
     app.apply_remote_compaction_settings(config.remote_compaction);
     app.apply_debug_settings(config.debug);
@@ -1297,6 +1318,9 @@ async fn run_inner(
     // has arrived; start from blank cells.
     startup_dialog.clear();
     app.startup_progress_path = Some(ilium_ipc::startup_progress_path(&options.socket_path));
+    // Pane ids are session-local, so the queue file is keyed by the session's socket.
+    app.attach_attention_store(attention::store::store_path_for_session(&options.socket_path));
+    app.attach_attention_events(naming_events_tx.clone());
 
     // Set so the very first pass through the loop always draws (there's
     // nothing on screen yet); every branch below that actually changes
@@ -1306,6 +1330,7 @@ async fn run_inner(
     let mut needs_redraw = true;
     let mut needs_immediate_redraw = true;
     let mut last_draw_at = Instant::now();
+    let mut detection_freshness_checked_at = crate::scheduled_input::unix_millis_now();
     let mut last_animation_frame_bucket = None;
     let mut last_onboarding_animation_active = false;
     let mut last_recorded_status_message = None;
@@ -1389,9 +1414,11 @@ async fn run_inner(
                 if let Some(failure) = dispatch_ready_input_events(
                     &mut app,
                     &mut empty_input,
-                    &mut naming_workers,
-                    &mut icon_search_workers,
-                    home_dir.as_deref(),
+                    ReadyInputWorkers {
+                        naming_workers: &mut naming_workers,
+                        icon_search_workers: &mut icon_search_workers,
+                        home_dir: home_dir.as_deref(),
+                    },
                     queued.original,
                     &mut no_deferred,
                     &mut editor_deferred_input,
@@ -1415,8 +1442,16 @@ async fn run_inner(
         {
             if let Some(event) = deferred_input.take_front() {
                 if let Some(failure) = dispatch_ready_input_events(
-                    &mut app, &mut input_rx, &mut naming_workers, &mut icon_search_workers,
-                    home_dir.as_deref(), event, &mut deferred_input, &mut editor_deferred_input,
+                    &mut app,
+                    &mut input_rx,
+                    ReadyInputWorkers {
+                        naming_workers: &mut naming_workers,
+                        icon_search_workers: &mut icon_search_workers,
+                        home_dir: home_dir.as_deref(),
+                    },
+                    event,
+                    &mut deferred_input,
+                    &mut editor_deferred_input,
                 ) {
                     input_failure = Some(failure);
                     break;
@@ -1466,6 +1501,12 @@ async fn run_inner(
         if !app.light_copy_recovery.is_empty() || !app.light_copy_restored.is_empty() { tick_delay = tick_delay.min(Duration::from_millis(100)); }
         if crate::onboarding::integration::is_animating(&app) || last_onboarding_animation_active {
             tick_delay = tick_delay.min(Duration::from_millis(33));
+        }
+        // A running recap advances its phase bar from worker-side state, which posts no
+        // event, so redraw on a bounded tick until the worker finishes.
+        if app.recap_is_running() {
+            needs_redraw = true;
+            tick_delay = tick_delay.min(Duration::from_millis(250));
         }
         if needs_redraw && !needs_immediate_redraw && presenter.outstanding_frames() == 0 {
             tick_delay = tick_delay.min(output_redraw_delay(now, last_draw_at));
@@ -1544,9 +1585,11 @@ async fn run_inner(
                         if let Some(failure) = dispatch_ready_input_events(
                             &mut app,
                             &mut input_rx,
-                            &mut naming_workers,
-                            &mut icon_search_workers,
-                            home_dir.as_deref(),
+                            ReadyInputWorkers {
+                                naming_workers: &mut naming_workers,
+                                icon_search_workers: &mut icon_search_workers,
+                                home_dir: home_dir.as_deref(),
+                            },
                             event,
                             &mut deferred_input,
                             &mut editor_deferred_input,
@@ -1749,11 +1792,9 @@ async fn run_inner(
         dispatch_pending_smart_copy_work(&mut app, &mut smart_copy_workers); // Cancellation precedes the dated App-original retry gate.
         smart_copy_workers.collect();
         needs_redraw |= app.collect_terminal_parsing();
-        if app.projection_admission_wake.is_none() {
-        if let Some(event)=app.pending_terminal_events.pop_front() {
+        if let Some(event)=take_pending_server_event(&mut app) {
             let damage=apply_server_events(&mut app,&mut connection.events,event,&mut naming_workers,&mut icon_search_workers,&mut trigger_execution_lease,home_dir.as_deref());
             needs_redraw|=damage.needs_redraw;needs_immediate_redraw|=damage.needs_immediate_redraw;
-        }
         }
         needs_redraw |= app.collect_document_preparation();
         needs_redraw |= app.collect_terminal_context_preparation();
@@ -1962,6 +2003,13 @@ async fn run_inner(
         if animation_frame_bucket != last_animation_frame_bucket {
             needs_redraw = true;
         }
+        let freshness_now = crate::scheduled_input::unix_millis_now();
+        needs_redraw |= crate::status_icons::detection_freshness_expired_since(
+            &app.pane_detection_evidence,
+            detection_freshness_checked_at,
+            freshness_now,
+        );
+        detection_freshness_checked_at = freshness_now;
         let can_draw = output_redraw_is_due(needs_immediate_redraw, Instant::now(), last_draw_at);
         // Reserve before composition: graphics uploads and exact animation
         // receipts must follow the ordered frame that really reaches output.
@@ -1991,6 +2039,13 @@ async fn run_inner(
                 let mut prepared = crate::presentation::PreparedFrame::new(reservation, buffer, cursor,
                     presentation_frame_id, presentation_layout_revision).map_err(ClientError::TerminalSetup)?;
                 prepared.attach_animation(animation);
+                // Use the immutable sources returned by the actual draw: a
+                // progress preview can be newer than the live view, and a
+                // settings screen can omit an otherwise selected terminal.
+                for (slot, (pane_id, source)) in prepared.terminal_sequences.iter_mut()
+                    .zip(app.composed_terminal_sources.iter()) {
+                    *slot = Some((pane_id.0, source.output_sequence()));
+                }
                 let geometry = app.capture_emitted_geometry(presentation_layout_revision);
                 presenter.submit(prepared).map_err(|failure| ClientError::TerminalSetup(failure.error))?;
                 animation_presentations.push_back((presentation_frame_id, geometry));
@@ -2066,9 +2121,9 @@ async fn run_inner(
             if let Some(reason) = app.projection_admission_failure {
                 return Err(ClientError::TerminalSetup(std::io::Error::other(format!("unrecoverable incoming projection admission failure: {reason:?}"))));
             }
-            let event = if app.projection_admission_wake.is_none() {
-                app.pending_terminal_events.pop_front().or_else(|| connection.events.try_recv().ok())
-            } else { None };
+            let event = take_pending_server_event(&mut app).or_else(|| {
+                app.projection_admission_wake.is_none().then(|| connection.events.try_recv().ok()).flatten()
+            });
             if let Some(event) = event {
                 apply_server_events(&mut app, &mut connection.events, event,
                     &mut naming_workers, &mut icon_search_workers,
@@ -2156,8 +2211,9 @@ async fn run_inner(
                 _ = tokio::time::sleep(Duration::from_millis(1)), if owner.is_none() || app.has_pending_exact_prompt_reports() || app.terminal_baselines.as_ref().is_some_and(|files| files.needs_retry()) => {},
             }
         }
-        connection.finish_read_shutdown().await.map_err(|error|
-            ClientError::TerminalSetup(std::io::Error::other(error)))
+        // The reader task ends with the error that closed the connection; it
+        // is a lost server connection, not a terminal setup failure.
+        connection.finish_read_shutdown().await.map_err(ClientError::ServerConnectionLost)
     };
     tokio::time::timeout(Duration::from_secs(5), terminal_drain).await
         .map_err(|_| {
@@ -4115,24 +4171,10 @@ fn voice_text_phase(state: &ilium_voice::VoiceConnectionState) -> ilium_ipc::Voi
     }
 }
 
-/// Applies `first` (already received) and then drains + applies a bounded
-/// batch of queued `ServerEvent`s without waiting for more --
-/// coalescing consecutive `ScreenUpdate`s for the *same* `pane_id` into one
-/// concatenated feed instead of applying each queued chunk individually.
-/// Bytes are concatenated, never dropped: `ScreenUpdate` carries raw PTY
-/// output that a `vt100::Parser` must see byte-for-byte and in order (see
-/// `ilium_ipc::ServerEvent::ScreenUpdate`'s doc comment) -- unlike a
-/// cell-diff or full-screen snapshot, an intermediate chunk can't simply be
-/// discarded once a newer one for the same pane arrives, since it may hold
-/// the other half of a split escape sequence or output a later chunk
-/// doesn't repeat. Concatenating still gets the win this coalescing is for:
-/// N queued chunks for one busy pane become one `vt100::Parser::process`
-/// call and one dirty frame instead of N of each. Events of any other kind,
-/// or a `ScreenUpdate` for a *different* pane, are applied immediately in
-/// arrival order -- only a same-pane_id run of consecutive `ScreenUpdate`s
-/// is ever merged, so no ordering between different panes or event kinds
-/// changes. The batch limit is deliberately applied only between complete
-/// events, so it preserves the stream order while allowing input to run.
+/// Apply a bounded server-event batch. Refused payloads retain their original
+/// allocation guards in the pending queue. Active-pane payloads may bypass only
+/// the terminal-only prefix for other panes; lifecycle barriers and each pane's
+/// own byte/snapshot/history order remain intact.
 fn apply_server_events(
     app: &mut App,
     events_rx: &mut mpsc::Receiver<crate::connection::Received<ilium_ipc::ServerEvent>>,
@@ -4145,10 +4187,7 @@ fn apply_server_events(
     let mut next = Some(first);
     let mut damage = ServerEventDamage::default();
     for _ in 0..MAX_SERVER_EVENTS_PER_BATCH {
-        let received = match next
-            .take()
-            .or_else(|| app.pending_terminal_events.pop_front())
-        {
+        let received = match next.take().or_else(|| take_pending_server_event(app)) {
             Some(event) => event,
             None => match events_rx.try_recv() {
                 Ok(event) => event,
@@ -4217,8 +4256,9 @@ fn apply_server_events(
             .commit(projection_update, app.processing_event_retention.as_ref());
         app.processing_event_retention = None;
         app.processing_derivation_retention = None;
-        if app.status_message.as_deref()
-            == Some("Incoming projection is waiting for bounded UI storage credit")
+        if app.projection_admission_wake.is_none()
+            && app.status_message.as_deref()
+                == Some("Incoming projection is waiting for bounded UI storage credit")
         {
             app.status_message = None;
         }
@@ -4241,8 +4281,61 @@ fn apply_server_events(
     damage
 }
 
-/// Network intake appends to the original FIFO. Callers which already popped
-/// its oldest member pass that member directly to `apply_server_events`.
+/// Only terminal payloads for distinct panes commute. Everything else is a
+/// global barrier: tree snapshots, pane removal, resize and lifecycle events
+/// must retain their arrival order relative to *every* terminal stream.
+fn terminal_event_pane(event: &ilium_ipc::ServerEvent) -> Option<ilium_core::NodeId> {
+    use ilium_ipc::ServerEvent;
+    match event {
+        ServerEvent::ScreenUpdate { pane_id, .. }
+        | ServerEvent::TerminalSnapshot { pane_id, .. }
+        | ServerEvent::TerminalReplay { pane_id, .. }
+        | ServerEvent::TerminalHistory { pane_id, .. } => Some(*pane_id),
+        _ => None,
+    }
+}
+
+/// Select the first payload for the active terminal within the terminal-only
+/// prefix. Selecting its earliest event preserves snapshot/live/history order.
+/// This scan borrows retained payloads; it neither clones bytes nor expands the
+/// bounded pending queue or its shared allocation budget.
+fn focused_terminal_event_index(
+    pending: &std::collections::VecDeque<crate::connection::Received<ilium_ipc::ServerEvent>>,
+    focused: Option<ilium_core::NodeId>,
+) -> Option<usize> {
+    let focused = focused?;
+    for (index, event) in pending.iter().enumerate() {
+        let pane_id = terminal_event_pane(event.view())?;
+        if pane_id == focused {
+            return Some(index);
+        }
+    }
+    None
+}
+
+fn take_pending_server_event(
+    app: &mut App,
+) -> Option<crate::connection::Received<ilium_ipc::ServerEvent>> {
+    // A projection wake belongs to the refused head. An independent active
+    // pane may still have enough credit, but retrying that same head waits for
+    // notification instead of spinning. Keyboard focus may be in the tree or
+    // a menu while the active terminal still needs its first visible screen.
+    if let Some(index) =
+        focused_terminal_event_index(&app.pending_terminal_events, app.active_pane_id())
+    {
+        if index != 0 || app.projection_admission_wake.is_none() {
+            return app.pending_terminal_events.remove(index);
+        }
+    }
+    if app.projection_admission_wake.is_none() {
+        app.pending_terminal_events.pop_front()
+    } else {
+        None
+    }
+}
+
+/// Intake retains FIFO custody; admission may bypass only unrelated terminal
+/// payloads preceding the active pane, never a lifecycle barrier.
 fn queue_server_event_in_order(
     app: &mut App,
     event: crate::connection::Received<ilium_ipc::ServerEvent>,
@@ -4252,11 +4345,7 @@ fn queue_server_event_in_order(
     }
     app.pending_terminal_events.push_back(event);
     confirm_suspended_panes_from_pending_snapshots(app);
-    if app.projection_admission_wake.is_some() {
-        None
-    } else {
-        app.pending_terminal_events.pop_front()
-    }
+    take_pending_server_event(app)
 }
 
 /// Lookahead proves only cancellation of a suspended instance absent from an
@@ -4300,6 +4389,15 @@ fn synchronize_debug_logging_from_server(app: &mut App, enabled: bool) {
     mark_debug_logging_pending(app);
 }
 
+/// The workers and launch context that `dispatch_ready_input_events` forwards
+/// to `dispatch_pending_app_work`, grouped to keep the dispatcher's argument
+/// list short.
+struct ReadyInputWorkers<'a> {
+    naming_workers: &'a mut NamingWorkers,
+    icon_search_workers: &'a mut IconSearchWorkers,
+    home_dir: Option<&'a std::path::Path>,
+}
+
 /// Retain the original mouse event until its live interaction surface has an
 /// actual matching output acknowledgement. Keeping it in native FIFO custody
 /// also preserves a drag's later motion/release instead of replaying only Down.
@@ -4315,14 +4413,11 @@ fn native_input_geometry_ready(
 /// Consecutive mouse-motion reports are coalesced to their newest position:
 /// only that position can determine the current hover state, while keeping
 /// every non-motion event in order preserves click, drag, and scroll input.
-// The arguments are the distinct worker/backlog owners the event loop lends for one batch.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)] // Keep the event-loop owners explicit at this dispatch boundary.
 fn dispatch_ready_input_events<S>(
     app: &mut App,
     input_rx: &mut S,
-    naming_workers: &mut NamingWorkers,
-    icon_search_workers: &mut IconSearchWorkers,
-    home_dir: Option<&std::path::Path>,
+    workers: ReadyInputWorkers<'_>,
     first: Result<terminal_input_owner::InputEvent, terminal_input_owner::InputFailure>,
     deferred: &mut input_backlog::InputBacklog<
         Result<terminal_input_owner::InputEvent, terminal_input_owner::InputFailure>,
@@ -4334,6 +4429,11 @@ where
         Item = Result<terminal_input_owner::InputEvent, terminal_input_owner::InputFailure>,
     >,
 {
+    let ReadyInputWorkers {
+        naming_workers,
+        icon_search_workers,
+        home_dir,
+    } = workers;
     let mut failure = None;
     let mut overflow = None;
     let lookahead = {
@@ -4393,7 +4493,7 @@ where
                     ) {
                         Ok(()) => true,
                         Err(original) => {
-                            overflow = Some(original);
+                            overflow = Some(*original);
                             false
                         }
                     };
@@ -4540,8 +4640,28 @@ fn advance_pending_key_paste(
         return false;
     };
 
+    // Pasted text is data, not commands. A replayed key may open a dialog or
+    // enter the leader state (Enter/Tab can be the leader on some bases); the
+    // remaining characters would then drive shortcut handlers such as Quit or
+    // Detach. Stop the replay the moment the mode changes.
+    let starting_mode = std::mem::discriminant(&app.mode);
+    let mut mode_changed = false;
     for key in replay.next_keys(MAX_PASTE_KEYS_PER_TURN) {
+        if std::mem::discriminant(&app.mode) != starting_mode {
+            mode_changed = true;
+            break;
+        }
         app.handle_event(Event::Key(key));
+    }
+    if !mode_changed && std::mem::discriminant(&app.mode) != starting_mode {
+        mode_changed = true;
+    }
+    if mode_changed {
+        app.status_message =
+            Some("Paste stopped: it changed the interface mode, remaining text discarded".into());
+        replay.retire_original();
+        dispatch_pending_app_work(app, naming_workers, icon_search_workers, home_dir);
+        return true;
     }
     if replay.path_rejected() {
         app.status_message = Some("The instruction-file path must be one line".into());
@@ -4845,6 +4965,10 @@ fn reject_naming_original(
         NamingKind::Restructure(request, _) => {
             app.fail_project_restructure(request.project_id, anyhow::anyhow!(message.clone()))
         }
+        NamingKind::Recap(request) => {
+            app.recap.finish_manual(request.pane_id);
+            app.recap_failed(request.pane_id, message.clone());
+        }
         #[cfg(test)]
         NamingKind::LastPrompt(_) => {}
     }
@@ -5064,6 +5188,20 @@ fn dispatch_pending_app_work(
         }
     }
 
+    for mut request in app.take_pending_recap_requests() {
+        let pane_id = request.pane_id;
+        let Some(home_dir) = home_dir else {
+            app.recap_failed(pane_id, "home directory unavailable".to_string());
+            continue;
+        };
+        if app.onboarding.is_some() || !app.onboarding_progress.automatic_ai_allowed() {
+            app.recap_failed(pane_id, "AI is not allowed yet".to_string());
+            continue;
+        }
+        request.home = home_dir.to_path_buf();
+        handle_naming_admission(naming_workers.spawn_recap_worker(request), app);
+    }
+
     for request in app.take_pending_restructure_requests() {
         if app.onboarding.is_some() || !app.onboarding_progress.automatic_ai_allowed() {
             app.cancel_project_restructure_after_ai_decision(request.project_id);
@@ -5088,6 +5226,140 @@ fn dispatch_pending_app_work(
 mod responsiveness_tests {
     use super::*;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    fn queued_output(
+        pane_id: ilium_core::NodeId,
+        sequence: u64,
+    ) -> crate::connection::Received<ilium_ipc::ServerEvent> {
+        crate::connection::Received::with_retention(
+            ilium_ipc::ServerEvent::ScreenUpdate {
+                pane_id,
+                first_sequence: sequence,
+                sequence,
+                bytes: vec![b'x'],
+            },
+            None,
+        )
+    }
+
+    #[test]
+    fn focused_delivery_bypasses_unrelated_stalled_output() {
+        let mut app = App::new("focused-delivery".into(), std::env::temp_dir());
+        let group = app.tree.add_group(ilium_core::ROOT_ID, "work").unwrap();
+        let background = app
+            .tree
+            .add_pane(group, "background", ilium_core::PaneContentKind::Terminal)
+            .unwrap();
+        let focused = app
+            .tree
+            .add_pane(group, "focused", ilium_core::PaneContentKind::Terminal)
+            .unwrap();
+        app.focus_pane(focused);
+        app.pending_terminal_events
+            .push_back(queued_output(background, 1));
+        let received = queue_server_event_in_order(&mut app, queued_output(focused, 1)).unwrap();
+        assert!(
+            matches!(received.view(), ilium_ipc::ServerEvent::ScreenUpdate { pane_id, .. } if *pane_id == focused),
+            "unrelated backlog must not be selected ahead of focused output"
+        );
+        assert_eq!(app.pending_terminal_events.len(), 1);
+        assert!(
+            matches!(app.pending_terminal_events.front().unwrap().view(), ilium_ipc::ServerEvent::ScreenUpdate { pane_id, .. } if *pane_id == background)
+        );
+    }
+
+    #[test]
+    fn focused_delivery_retains_lifecycle_and_same_pane_order() {
+        let mut app = App::new("focused-order".into(), std::env::temp_dir());
+        app.pending_terminal_events
+            .push_back(queued_output(ilium_core::NodeId(11), 1));
+        let first = queue_server_event_in_order(&mut app, queued_output(ilium_core::NodeId(11), 2))
+            .unwrap();
+        assert!(matches!(
+            first.view(),
+            ilium_ipc::ServerEvent::ScreenUpdate { sequence: 1, .. }
+        ));
+        app.pending_terminal_events.clear();
+        app.pending_terminal_events
+            .push_back(crate::connection::Received::with_retention(
+                ilium_ipc::ServerEvent::DebugLoggingChanged { enabled: false },
+                None,
+            ));
+        let first = queue_server_event_in_order(&mut app, queued_output(ilium_core::NodeId(11), 3))
+            .unwrap();
+        assert!(matches!(
+            first.view(),
+            ilium_ipc::ServerEvent::DebugLoggingChanged { .. }
+        ));
+    }
+
+    #[test]
+    fn focused_delivery_prefix_stops_at_lifecycle_and_keeps_same_pane_head() {
+        let background = ilium_core::NodeId(11);
+        let focused = ilium_core::NodeId(12);
+        let mut queue = std::collections::VecDeque::from([
+            queued_output(background, 1),
+            queued_output(focused, 1),
+            queued_output(focused, 2),
+        ]);
+        assert_eq!(focused_terminal_event_index(&queue, Some(focused)), Some(1));
+        queue.remove(1);
+        assert_eq!(focused_terminal_event_index(&queue, Some(focused)), Some(1));
+        queue.push_front(crate::connection::Received::with_retention(
+            ilium_ipc::ServerEvent::TreeSnapshot(ilium_core::Tree::new()),
+            None,
+        ));
+        assert_eq!(focused_terminal_event_index(&queue, Some(focused)), None);
+        assert_eq!(focused_terminal_event_index(&queue, None), None);
+        let queue = std::collections::VecDeque::from([
+            queued_output(focused, 1),
+            queued_output(focused, 2),
+        ]);
+        assert_eq!(focused_terminal_event_index(&queue, Some(focused)), Some(0));
+    }
+
+    #[test]
+    fn focused_delivery_keeps_bounded_queue_and_waits_on_its_own_refused_head() {
+        let mut app = App::new("focused-credit".into(), std::env::temp_dir());
+        let group = app.tree.add_group(ilium_core::ROOT_ID, "work").unwrap();
+        let background = app
+            .tree
+            .add_pane(group, "background", ilium_core::PaneContentKind::Terminal)
+            .unwrap();
+        let focused = app
+            .tree
+            .add_pane(group, "focused", ilium_core::PaneContentKind::Terminal)
+            .unwrap();
+        app.focus_pane(focused);
+        for sequence in 1..MAX_PENDING_SERVER_EVENTS as u64 {
+            app.pending_terminal_events
+                .push_back(queued_output(background, sequence));
+        }
+        app.projection_admission_wake = Some(Box::pin(
+            crate::execution::admission_notification().notified_owned(),
+        ));
+        let event = queue_server_event_in_order(&mut app, queued_output(focused, 1)).unwrap();
+        assert!(
+            matches!(event.view(), ilium_ipc::ServerEvent::ScreenUpdate { pane_id, .. } if *pane_id == focused)
+        );
+        assert_eq!(
+            app.pending_terminal_events.len(),
+            MAX_PENDING_SERVER_EVENTS - 1
+        );
+        assert!(take_pending_server_event(&mut app).is_none());
+        app.pending_terminal_events.pop_back();
+        app.pending_terminal_events
+            .push_front(queued_output(focused, 1));
+        app.pending_terminal_events
+            .push_back(queued_output(focused, 2));
+        assert_eq!(app.pending_terminal_events.len(), MAX_PENDING_SERVER_EVENTS);
+        assert!(take_pending_server_event(&mut app).is_none());
+        app.projection_admission_wake = None;
+        let first = take_pending_server_event(&mut app).unwrap();
+        assert!(
+            matches!(first.view(), ilium_ipc::ServerEvent::ScreenUpdate { pane_id, sequence: 1, .. } if *pane_id == focused)
+        );
+    }
 
     #[test]
     fn merged_screen_updates_respect_the_byte_ceiling() {
@@ -5171,9 +5443,11 @@ mod responsiveness_tests {
         assert!(dispatch_ready_input_events(
             &mut app,
             &mut rx,
-            &mut naming,
-            &mut icons,
-            None,
+            ReadyInputWorkers {
+                naming_workers: &mut naming,
+                icon_search_workers: &mut icons,
+                home_dir: None,
+            },
             release,
             &mut deferred,
             &mut editor
@@ -5224,9 +5498,11 @@ mod responsiveness_tests {
         assert!(dispatch_ready_input_events(
             &mut app,
             &mut rx,
-            &mut naming,
-            &mut icons,
-            None,
+            ReadyInputWorkers {
+                naming_workers: &mut naming,
+                icon_search_workers: &mut icons,
+                home_dir: None,
+            },
             Ok(press),
             &mut deferred,
             &mut editor
@@ -5259,9 +5535,11 @@ mod responsiveness_tests {
         assert!(dispatch_ready_input_events(
             &mut app,
             &mut rx,
-            &mut naming,
-            &mut icons,
-            None,
+            ReadyInputWorkers {
+                naming_workers: &mut naming,
+                icon_search_workers: &mut icons,
+                home_dir: None,
+            },
             first,
             &mut deferred,
             &mut editor
@@ -5304,6 +5582,34 @@ mod responsiveness_tests {
                 ..
             }))
         ));
+    }
+
+    #[test]
+    fn key_paste_stops_when_a_pasted_key_changes_the_mode() {
+        let project_directory = tempfile::tempdir().unwrap();
+        let mut app = App::new(
+            "paste-mode-change-test".to_owned(),
+            project_directory.path().to_path_buf(),
+        );
+        // With Ctrl+M as leader, a pasted Enter enters the leader state and a
+        // following `q` would otherwise kill the whole session.
+        app.keyboard_settings.shortcut_base = crate::keymap::ShortcutBase::parse("m").unwrap();
+        let (original, _quota) = terminal_input_owner::paste_fixture("\nqqq".to_owned());
+        let client = crate::execution::test_client();
+        let mut replay = crate::paste_cursor::PasteReplay::new(original);
+        replay.reserve_retirement(&client.retirement()).unwrap();
+        app.pending_key_paste = Some(replay);
+        let (naming_tx, _naming_rx) = mpsc::channel(8);
+        let mut naming =
+            NamingWorkers::new(naming_tx, &ilium_inference::InferenceSettings::default()).unwrap();
+        let mut icons = IconSearchWorkers::new();
+
+        while app.pending_key_paste.is_some() {
+            advance_pending_key_paste(&mut app, &mut naming, &mut icons, None);
+        }
+
+        assert!(app.exit_reason.is_none());
+        assert!(app.pending_key_paste.is_none());
     }
 
     #[test]

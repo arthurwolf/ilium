@@ -756,8 +756,7 @@ impl PluginPermissionFiles {
     pub(crate) fn is_pending(&self) -> bool {
         self.pending.is_some()
     }
-    // The plugin permission workflow is not wired into the event loop yet (feature in progress).
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn notification(&self) -> Arc<Notify> {
         self.writer.notification()
     }

@@ -1,0 +1,6 @@
+package ilium:host@0.1.0;
+
+interface sounds {
+  /// Bundled and contributed sound ids.
+  catalog: func() -> list<string>;
+}

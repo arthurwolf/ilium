@@ -1,0 +1,19 @@
+package ilium:host@0.1.0;
+
+interface codec {
+  use ilium:types/errors@0.1.0.{plugin-error};
+  enum compression { zlib, gzip, deflate-raw }
+  record image-info { width: u32, height: u32, frames: u32 }
+  record decoded-image { width: u32, height: u32, rgba: list<u8> }
+  record raster-text { text: string, size-px: u16, max-width-px: u32 }
+  /// Errors: invalid-argument for corrupt data, quota-exceeded when the output passes max-output.
+  inflate: func(format: compression, data: list<u8>, max-output: u32) -> result<list<u8>, plugin-error>;
+  /// level 0 to 9.
+  deflate: func(format: compression, data: list<u8>, level: u8) -> result<list<u8>, plugin-error>;
+  image-info: func(data: list<u8>) -> result<image-info, plugin-error>;
+  /// Errors: quota-exceeded when width times height passes max-pixels.
+  decode-image: func(data: list<u8>, frame: u32, max-pixels: u32) -> result<decoded-image, plugin-error>;
+  sha256: func(data: list<u8>) -> list<u8>;
+  /// Gray in the alpha channel.
+  rasterize-text: func(request: raster-text) -> result<decoded-image, plugin-error>;
+}

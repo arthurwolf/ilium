@@ -20,6 +20,10 @@ Never run commands, jobs, builds, tests, probes or launchers through `ilium new-
 
 Never restart Ilium or its running server, session, or panes. Do not use `--restart-server`, stop or replace the live server, or restart it indirectly through a service. The user alone restarts Ilium. Code changes do not install binaries: see "Deploy policy" below. When the user asks for a deploy and the running server still has the old executable loaded, report that clearly.
 
+## No AGENTS.md
+
+This project's agent instructions live only in `CLAUDE.md`. Any `AGENTS.md` file found anywhere in the repository must be deleted immediately, without asking and without merging it first; never create one.
+
 ## Workspace layout
 
 Cargo workspace, one crate per architectural layer (see ARCHITECTURE.md "Crate roles"). Do not collapse layers back into a single crate for convenience — the boundaries exist so `ilium-core` and `ilium-detect` stay unit-testable without a PTY, a terminal, or a running server.
@@ -85,7 +89,17 @@ generic over any async byte stream and must not learn about sockets or pipes.
 - Run `cargo clippy --workspace --all-targets` and `cargo fmt --check` before considering any change done. Treat new clippy warnings as things to fix, not suppress with `#[allow]`, unless there's a specific documented reason.
 - **Remote build output is cleaned immediately.** The ni-build service retrieves hash-verified artifacts and receipts, then removes only its exact `/data/ni-build-service/jobs/<uuid>/` directory. Preserve failed recovery evidence and other owners' jobs. Local returned artifacts are verified build outputs, not locally compiled outputs.
 
+## ni-build is yours to maintain
+
+The ni-build service (dispatcher in `/home/arthur/dev/misc/julia/ni-build` and the remote service on ni-vm) may be modified by agents when a build or test needs it (new toolchain, new operation, fixing the route). Edit, rebuild, reinstall, verify with a real job, report. Never fall back to local compilation; fix the route instead.
+
+## Red gates are work
+
+A failing test, Clippy, fmt or build is never a reason to ask: diagnose, fix, rerun until green, or show the failure is unrelated and pre-existing (verify against a `git archive` snapshot of HEAD) and report it.
+
 ## Capacity gates
+
+A failing capacity gate is work too: investigate the regression, fix the budget or the consumer, rerun; do not stop and ask.
 
 - Never lower a capacity gate (pane counts in scale tests such as `terminal_pool_runtime.rs`, quota limits, worker caps) to make a test or restore pass. A failing capacity gate is a real regression: fix the budget or the consumer.
 
@@ -108,7 +122,7 @@ A feature session is exactly these five steps, and then it stops:
 2. **Implementation**: make the change, with tests, docs and a `CHANGELOG.md` entry.
 3. **Compilation**: compile through ni-build in a separate build folder (see "Where compile and test runs happen").
 4. **Testing**: run the relevant tests, Clippy and `cargo fmt --check`, and exercise the feature in an isolated environment (separate build folder, isolated tmux session, random port) as far as needed to trust it.
-5. **Report**: say what was built, what was verified, and what was not. If the work was done in a worktree, leave the branch committed and ready to merge into `master` (merge-back itself still follows the Git rules in the global file). Then stop.
+5. **Report**: say what was built, what was verified, and what was not. If the work was done in a worktree, commit on the branch, merge master into it, push the branch, and report "Ready to merge into master" (merge-back itself still follows the Git rules in the global file). Then stop.
 
 Not part of a feature session, unless the user asks for it in that request:
 
@@ -165,7 +179,8 @@ Use the `directories` crate, never hardcode `~`:
 ## Scope reminders specific to this project
 
 - This is a new project with no users yet — no backwards-compatibility shims, no feature flags, no "v2" anything. Change things directly.
-- Don't build the WASM plugin system, remote/SSH sharing, or agent-driving/SDK surface — see ARCHITECTURE.md "Non-goals." If a task seems to need one of those, stop and flag it rather than building toward it.
+- Conflicts in `CHANGELOG.md` during a merge are not a blocker: keep both sides' entries, finish the merge and commit, and tidy the changelog headings later; a changelog conflict must never prevent a merge.
+- Don't build remote/SSH sharing or the agent-driving/SDK surface — see ARCHITECTURE.md "Non-goals." The extension system, including WebAssembly plugins, is authorized project scope.
 - Milestones in ARCHITECTURE.md (M0–M5) are meant to be built in order. M0–M4 are done; M5 (config surface, snapshot-restore-on-boot, notifications) is partially done — read ARCHITECTURE.md "Implementation plan" for exactly what M5 covers (custom detection signatures, keybinding remap, a four-color theme override, snapshot respawn-on-boot, desktop notifications) and what it still deliberately leaves out (resuming an agent CLI's own session on restore; theming beyond the four colors listed) before assuming a piece of it already exists.
 
 ## Background animations: the shared look is mandatory
@@ -189,8 +204,8 @@ Every background animation (built-in, hosted `ilium-ambient` scene, Wikipedia, a
 - Every form row whose label and control can sit far apart (settings rows, dialogs, any full-width input) connects them with grey dotted leaders made of `…` (U+2026, one cell). Use `value_control::leader_span` for text-built rows and `ValueControl` for shared controls; never pad the gap with plain spaces. Leaders are inert: they are never part of a hit target.
 - Shared rule: one blank cell on each side of the dots; a gap shorter than five cells stays blank. Leaders never overwrite label text, glyphs or values.
 
-<!-- ilium-agent-feature: progress version=13 -->
-For every task expected to take at least three minutes inside an Ilium pane (the `ILIUM_PANE_ID` environment variable is set), you MUST use an Ilium progress monitor; never run it as one long foreground command, even with a long tool timeout, because nobody can then see its progress. Start the task in the background from your own shell (never through `ilium new-pane`, which leaves extra panes in the user's tree), detached so it outlives the shell command that started it (e.g. `setsid -f`; some agent shells kill `&` children when the command returns), and verify that its process is alive. Write a cheap probe that prints one JSON object with only these fields (no `type` field; the JSONL rule for agent scripts does not apply to probes): stable non-empty `job_id`, `status` (`not-started-yet`, `running`, `error` or `done`), finite `percent` 0 to 100, one-line `message`, optional multi-line `details`, and `error` only when status is `error`. Read `percent` from a structured source the task writes (a counter file or a JSONL line), not by parsing free-form logs. Make the probe notice a vanished task: when the task starts, record its process ID and the machine's boot identity (on Linux `/proc/sys/kernel/random/boot_id`); if the boot identity changed, or the process is gone and the task left no result, report `error` with a message such as `task process gone without a result (reboot or kill)`, never `running`. The Ilium server runs it from the project root without your shell's directory, variables or aliases: use absolute paths.
+<!-- ilium-agent-feature: progress version=14 -->
+For every task expected to take at least three minutes inside an Ilium pane (the `ILIUM_PANE_ID` environment variable is set), you MUST use an Ilium progress monitor; never run it as one long foreground command, even with a long tool timeout, because nobody can then see its progress. An agent harness's own background mode that only notifies you when the command ends (for example Claude Code's `run_in_background`) is not a substitute either: still register a monitor for the task. Start the task in the background from your own shell (never through `ilium new-pane`, which leaves extra panes in the user's tree), detached so it outlives the shell command that started it (e.g. `setsid -f`; some agent shells kill `&` children when the command returns), and verify that its process is alive. Write a cheap probe that prints one JSON object with only these fields (no `type` field; the JSONL rule for agent scripts does not apply to probes): stable non-empty `job_id`, `status` (`not-started-yet`, `running`, `error` or `done`), finite `percent` 0 to 100, one-line `message`, optional multi-line `details`, and `error` only when status is `error`. Read `percent` from a structured source the task writes (a counter file or a JSONL line), not by parsing free-form logs. Make the probe notice a vanished task: when the task starts, record its process ID and the machine's boot identity (on Linux `/proc/sys/kernel/random/boot_id`); if the boot identity changed, or the process is gone and the task left no result, report `error` with a message such as `task process gone without a result (reboot or kill)`, never `running`. The Ilium server runs it from the project root without your shell's directory, variables or aliases: use absolute paths.
 
 The reader of the progress bar has NOT read your session. `message` (at most about 110 characters) MUST stand alone: WHAT is being done to WHICH thing, then the current step with a count, e.g. `Running the focused unit tests of the ilium-client crate - test 14 of 22`; when finished, the outcome. `details` has 3 to 8 short lines labelled `What:`, `Why:`, `Now:` (with what `percent` measures), `Next:`, `Watch:`. Never rely on session context: no unexplained internal names, abbreviations or pronouns. Update both on every probe run.
 
@@ -211,3 +226,8 @@ A pane can run up to 8 monitors at once, one per task: `set` adds a monitor with
 <!-- ilium-agent-feature: chatroom -->
 If `CHATROOM.md` exists in the project root, read recent coordination with `ilium chat context --limit 40` when beginning work and before changing shared areas. Use `ilium chat send --message "..."` only for a task claim or release, blocker, dependency, material discovery or decision, or a handoff; do not post routine progress narration. Never rewrite `CHATROOM.md` directly.
 <!-- /ilium-agent-feature: chatroom -->
+
+## Changelog fragments
+
+- Never edit `CHANGELOG.md` for a change: add `changelog.d/<branch-or-topic>.md` (format in `changelog.d/README.md`). Every branch editing the same top lines of `CHANGELOG.md` caused conflicts and dirty-checkout merge refusals. `python3 tools/compile_changelog.py` folds fragments in at release. `.gitattributes` also sets `merge=union` on `CHANGELOG.md` as a safety net.
+- A leftover `CHANGELOG.md` conflict is still not a blocker: keep both sides.

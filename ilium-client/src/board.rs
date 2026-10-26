@@ -1956,6 +1956,29 @@ mod tests {
     }
 
     #[test]
+    fn detail_editor_keeps_every_body_character_typed_after_a_title_save() {
+        let path = temporary_path("detail-edit-phrase").join("board.md");
+        let storage = BoardStorage::MarkdownFile { path: path.clone() };
+        let mut board = BoardPane::create(storage).unwrap();
+        board.add_card("Task".to_string()).unwrap();
+        board.open_card_details(0, 0);
+
+        board
+            .input_detail_editor(key_input(KeyCode::Char('!')))
+            .unwrap();
+        board.cycle_detail_editor_focus(false);
+        for character in "Live note".chars() {
+            board
+                .input_detail_editor(key_input(KeyCode::Char(character)))
+                .unwrap();
+        }
+
+        let source = fs::read_to_string(&path).unwrap();
+        assert!(source.contains("  Live note\n"), "{source:?}");
+        let _ = fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
     fn detail_editor_uses_the_same_title_body_contract_for_folder_storage() {
         let path = temporary_path("detail-edit-folder");
         let storage = BoardStorage::Folder { path: path.clone() };

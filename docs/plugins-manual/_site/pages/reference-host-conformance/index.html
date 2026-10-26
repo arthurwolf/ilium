@@ -1,0 +1,2168 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Host conformance matrix | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details open><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/" aria-current="page">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Reference</b></p>
+<h1>Host conformance matrix</h1>
+
+<p>This page is the checklist for a host implementation, and for a test that wants to prove one. It lists every import, export, event, intent and widget of <code>ilium:plugin@0.1.0</code> with the side that may use it, the grant it needs, the delivery policy or deadline, and the error a host must return. The names and shapes are defined in the <a href="/pages/reference-wit/">WIT reference</a>. The rules behind the columns are in the <a href="/pages/reference-runtime-model/">Runtime model</a>. Each matrix has a row for every member, so a missing row in a host test is a missing test [ABI-030].</p>
+<h3 id="what-you-need">What you need</h3>
+<ul>
+<li><strong>The WIT reference.</strong> Row names are the names in the <a href="/pages/reference-wit/">WIT reference</a>.</li>
+<li><strong>A host or a fake host.</strong> The tests below run against the real host or against the test harness described in <a href="/pages/testing/">Testing</a>.</li>
+<li><strong>The counts.</strong> 45 import rows (39 host interfaces, 4 primitives, 2 scene interfaces), 16 export rows, 56 event rows, 42 intent rows and 51 widget rows. A matrix with another count is out of date.</li>
+</ul>
+<h2 id="1-how-to-use-the-matrices">1. How to use the matrices</h2>
+<p>The columns S, C and A mean server, client and scene. A cell says whether a plugin of that side may import or export the interface. A call from a side that is not allowed fails at link time: the interface is not linked, and the component is refused with <code>manifest.import-not-requested</code> when no requested capability unlocks it.</p>
+<p>For each row a conformance test does four things:</p>
+<ol>
+<li>Calls the member from an allowed side with the grant, and checks the documented result.</li>
+<li>Calls it without the grant, and checks <code>not-permitted</code> (or, for an interface the manifest never requested, the trap <code>host.capability-not-requested</code>).</li>
+<li>Calls it with an argument over a limit, and checks <code>invalid-argument</code>, <code>quota-exceeded</code> or the documented code.</li>
+<li>For a slow call, checks the <code>request-completed</code> outcome and the <code>take-*</code> rules: one take, a hold of 30 seconds, and <code>none</code> after that [ABI-014].</li>
+</ol>
+<h2 id="2-import-matrix">2. Import matrix</h2>
+<p>Every grant name is in the <a href="/pages/capabilities/">capability index</a>. A slow call is a function that returns <code>result&lt;request-id, plugin-error&gt;</code>, and its take partner is in brackets.</p>
+<table>
+<thead>
+<tr>
+<th>No.</th>
+<th>Interface</th>
+<th>S</th>
+<th>C</th>
+<th>A</th>
+<th>Grant</th>
+<th>Slow calls (take partner)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><code>log</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>none</td>
+<td>none</td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>clock</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>none</td>
+<td>none</td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>timers</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>no</td>
+<td>none</td>
+<td>none</td>
+</tr>
+<tr>
+<td>4</td>
+<td><code>journal</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>no</td>
+<td>none for own entries, <code>journal.read</code> for others</td>
+<td>none</td>
+</tr>
+<tr>
+<td>5</td>
+<td><code>tree</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>no</td>
+<td><code>tree.read</code>, <code>tree.metadata</code></td>
+<td>none</td>
+</tr>
+<tr>
+<td>6</td>
+<td><code>panes</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>no</td>
+<td><code>panes.read</code></td>
+<td>none</td>
+</tr>
+<tr>
+<td>7</td>
+<td><code>intents-host</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>no</td>
+<td>by intent</td>
+<td><code>submit</code> (completes as <code>request-completed</code>)</td>
+</tr>
+<tr>
+<td>8</td>
+<td><code>storage</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>read only</td>
+<td>none</td>
+<td>none</td>
+</tr>
+<tr>
+<td>9</td>
+<td><code>settings</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>no</td>
+<td>none own, <code>settings.read-all</code>, <code>settings.write-all</code></td>
+<td>none</td>
+</tr>
+<tr>
+<td>10</td>
+<td><code>codec</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>none</td>
+<td>none</td>
+</tr>
+<tr>
+<td>11</td>
+<td><code>fs</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>scope reads only</td>
+<td><code>fs.read:&lt;scope&gt;</code>, <code>fs.write:&lt;scope&gt;</code>, <code>fs.watch:&lt;scope&gt;</code>, <code>fs.pick</code></td>
+<td><code>read-all</code> (<code>take-bytes</code>), <code>scan</code> (<code>take-entries</code>), <code>write</code>, <code>remove</code>, <code>rename</code>, <code>lock</code> (<code>take-lock</code>), <code>pick</code> (<code>take-picked</code>), <code>read-with-revision</code> (<code>take-revisioned</code>), <code>write-atomic</code> (<code>take-written</code>)</td>
+</tr>
+<tr>
+<td>12</td>
+<td><code>http</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td><code>http:&lt;host-pattern&gt;</code></td>
+<td><code>fetch</code> (<code>take-response</code>)</td>
+</tr>
+<tr>
+<td>13</td>
+<td><code>jobs</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td><code>jobs.run</code></td>
+<td><code>start</code> (<code>take-output</code>)</td>
+</tr>
+<tr>
+<td>14</td>
+<td><code>process</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>no</td>
+<td><code>process.run:&lt;program&gt;</code>, <code>process.long-lived</code></td>
+<td><code>run</code> (<code>take-exit</code>)</td>
+</tr>
+<tr>
+<td>15</td>
+<td><code>inference</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>no</td>
+<td><code>inference</code>, <code>inference.provide</code></td>
+<td><code>complete</code> (<code>take-completion</code>), <code>models</code> (<code>take-models</code>)</td>
+</tr>
+<tr>
+<td>16</td>
+<td><code>vector</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>no</td>
+<td><code>vector</code></td>
+<td><code>embed</code> (<code>take-vectors</code>)</td>
+</tr>
+<tr>
+<td>17</td>
+<td><code>sounds</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>no</td>
+<td>none</td>
+<td>none</td>
+</tr>
+<tr>
+<td>18</td>
+<td><code>topics</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>no</td>
+<td><code>topics.publish</code>, <code>topics.subscribe</code></td>
+<td>none</td>
+</tr>
+<tr>
+<td>19</td>
+<td><code>commands</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>no</td>
+<td>none own, <code>commands.invoke:&lt;pattern&gt;</code></td>
+<td><code>invoke</code></td>
+</tr>
+<tr>
+<td>20</td>
+<td><code>services</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>no</td>
+<td><code>services.use:&lt;name&gt;</code>, <code>services.provide:&lt;name&gt;</code></td>
+<td><code>call</code> (<code>take-reply</code>)</td>
+</tr>
+<tr>
+<td>21</td>
+<td><code>ui-host</code></td>
+<td>no</td>
+<td>yes</td>
+<td>no</td>
+<td>none for own views</td>
+<td>none</td>
+</tr>
+<tr>
+<td>22</td>
+<td><code>keys</code></td>
+<td>no</td>
+<td>yes</td>
+<td>no</td>
+<td><code>keys.intercept</code></td>
+<td>none</td>
+</tr>
+<tr>
+<td>23</td>
+<td><code>cli</code></td>
+<td>yes</td>
+<td>no</td>
+<td>no</td>
+<td><code>cli.contribute</code></td>
+<td><code>read-stdin</code> (<code>take-stdin</code>)</td>
+</tr>
+<tr>
+<td>24</td>
+<td><code>http-api</code></td>
+<td>yes</td>
+<td>no</td>
+<td>no</td>
+<td><code>http-api.route:&lt;path&gt;</code></td>
+<td>none</td>
+</tr>
+<tr>
+<td>25</td>
+<td><code>workspace</code></td>
+<td>yes</td>
+<td>no</td>
+<td>no</td>
+<td><code>workspace.manage</code></td>
+<td>none</td>
+</tr>
+<tr>
+<td>26</td>
+<td><code>clipboard</code></td>
+<td>no</td>
+<td>yes</td>
+<td>no</td>
+<td><code>clipboard.read</code>, <code>clipboard.write</code></td>
+<td>none</td>
+</tr>
+<tr>
+<td>27</td>
+<td><code>audio</code></td>
+<td>no</td>
+<td>yes</td>
+<td>yes</td>
+<td><code>audio.capture</code>, <code>audio.loopback</code>, <code>audio.playback</code></td>
+<td><code>play</code></td>
+</tr>
+<tr>
+<td>28</td>
+<td><code>media</code></td>
+<td>no</td>
+<td>yes</td>
+<td>yes</td>
+<td><code>media.video</code></td>
+<td>none</td>
+</tr>
+<tr>
+<td>29</td>
+<td><code>location</code></td>
+<td>no</td>
+<td>yes</td>
+<td>yes</td>
+<td><code>location.observer</code></td>
+<td>none</td>
+</tr>
+<tr>
+<td>30</td>
+<td><code>help</code></td>
+<td>no</td>
+<td>yes</td>
+<td>no</td>
+<td><code>help.read</code></td>
+<td>none</td>
+</tr>
+<tr>
+<td>31</td>
+<td><code>plugins</code></td>
+<td>no</td>
+<td>yes</td>
+<td>no</td>
+<td><code>plugins.manage</code></td>
+<td>none</td>
+</tr>
+<tr>
+<td>32</td>
+<td><code>catalogs</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>no</td>
+<td>none</td>
+<td><code>query-async</code> (<code>take-page</code>)</td>
+</tr>
+<tr>
+<td>33</td>
+<td><code>geocode</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td><code>geocode</code></td>
+<td><code>search</code>, <code>reverse</code> (<code>take-places</code>)</td>
+</tr>
+<tr>
+<td>34</td>
+<td><code>sessions</code></td>
+<td>yes</td>
+<td>no</td>
+<td>no</td>
+<td><code>sessions.cross</code></td>
+<td><code>send</code> (<code>take-reply</code>)</td>
+</tr>
+<tr>
+<td>35</td>
+<td><code>kernel-settings</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>no</td>
+<td><code>settings.read-kernel:&lt;tab-id&gt;</code></td>
+<td>none</td>
+</tr>
+<tr>
+<td>36</td>
+<td><code>keymap</code></td>
+<td>no</td>
+<td>yes</td>
+<td>no</td>
+<td><code>keymap.read</code></td>
+<td>none</td>
+</tr>
+<tr>
+<td>37</td>
+<td><code>gpu</code> (unstable <code>gpu-kernels</code>)</td>
+<td>no</td>
+<td>yes</td>
+<td>yes</td>
+<td><code>gpu.kernels</code></td>
+<td>none</td>
+</tr>
+<tr>
+<td>38</td>
+<td><code>client-requests</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>no</td>
+<td>none for declared kinds</td>
+<td><code>request</code> (<code>take-answer</code>, server side)</td>
+</tr>
+<tr>
+<td>39</td>
+<td><code>extensions</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>no</td>
+<td><code>extensions.provide:&lt;point&gt;</code>, <code>extensions.contribute:&lt;point&gt;</code></td>
+<td><code>run-hook</code> (<code>take-reply</code>)</td>
+</tr>
+<tr>
+<td>40</td>
+<td><code>terminal</code> (primitive)</td>
+<td>yes</td>
+<td>yes</td>
+<td>no</td>
+<td><code>terminal.read-screen</code>, <code>terminal.read-cells</code>, <code>terminal.history</code>, <code>terminal.output-filter</code>, <code>terminal.pointer</code>, <code>terminal.input-lock</code></td>
+<td><code>history-text</code> (<code>take-history</code>), <code>search-history</code> (<code>take-matches</code>)</td>
+</tr>
+<tr>
+<td>41</td>
+<td><code>agent</code> (primitive)</td>
+<td>yes</td>
+<td>yes</td>
+<td>no</td>
+<td><code>agent.read</code>, <code>agent.read-prompts</code>, <code>agent.transcript</code>, <code>agent.signatures</code>, <code>agent.control</code></td>
+<td><code>transcript</code> (<code>take-transcript</code>)</td>
+</tr>
+<tr>
+<td>42</td>
+<td><code>editor</code> (primitive)</td>
+<td>no</td>
+<td>yes</td>
+<td>no</td>
+<td><code>editor.read</code>, <code>editor.edit</code></td>
+<td><code>load-file</code> (<code>take-buffer</code>), <code>save-buffer</code></td>
+</tr>
+<tr>
+<td>43</td>
+<td><code>basic</code> (primitive)</td>
+<td>no</td>
+<td>yes</td>
+<td>no</td>
+<td><code>panes.provide-kind</code></td>
+<td>none</td>
+</tr>
+<tr>
+<td>44</td>
+<td><code>surface</code> (anim)</td>
+<td>no</td>
+<td>no</td>
+<td>yes</td>
+<td>none</td>
+<td>none</td>
+</tr>
+<tr>
+<td>45</td>
+<td><code>fonts</code> (anim)</td>
+<td>no</td>
+<td>no</td>
+<td>yes</td>
+<td>none</td>
+<td>none</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Notes.</strong></p>
+<ul>
+<li>A scene may import <code>storage</code> for reads only (<code>get</code>, <code>keys</code>), and <code>fs</code> for the scopes its manifest names. Both are rows with <code>read only</code> or <code>scope reads only</code> in the A column.</li>
+<li><code>geocode</code> is linked on all three sides. <code>gpu</code> is for client and scene only.</li>
+<li><code>ui-host</code> is the host interface <code>ui</code>. Its name differs only to avoid a clash with the type interface <code>ilium:types/ui</code>.</li>
+</ul>
+<h2 id="3-export-matrix">3. Export matrix</h2>
+<p>An export is named in the manifest <code>exports</code> list unless the Required column says yes. A required export is never listed [ABI-018]. The component exports must equal the required exports plus the manifest list, or the install fails with <code>manifest.exports-mismatch</code> [ABI-007].</p>
+<table>
+<thead>
+<tr>
+<th>No.</th>
+<th>Export</th>
+<th>S</th>
+<th>C</th>
+<th>A</th>
+<th>Required</th>
+<th>Manifest name</th>
+<th>Grant</th>
+<th>Deadline</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><code>lifecycle</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>none</td>
+<td>none</td>
+<td><code>activate</code> 2 s, <code>deactivate</code> 500 ms</td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>handler</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>no</td>
+<td>yes</td>
+<td>none</td>
+<td>none</td>
+<td>20 ms per batch</td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>views</code></td>
+<td>no</td>
+<td>yes</td>
+<td>no</td>
+<td>no</td>
+<td><code>views</code></td>
+<td>none</td>
+<td>10 ms</td>
+</tr>
+<tr>
+<td>4</td>
+<td><code>detector</code></td>
+<td>yes</td>
+<td>no</td>
+<td>no</td>
+<td>no</td>
+<td><code>detector</code></td>
+<td><code>agent.read</code></td>
+<td>20 ms</td>
+</tr>
+<tr>
+<td>5</td>
+<td><code>job-runner</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>no</td>
+<td><code>job-runner</code></td>
+<td>none (kind in <code>contributes.jobs</code>)</td>
+<td>2 s CPU, 20 s wall</td>
+</tr>
+<tr>
+<td>6</td>
+<td><code>service-provider</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>no</td>
+<td>no</td>
+<td><code>service-provider</code></td>
+<td><code>services.provide:&lt;name&gt;</code></td>
+<td>20 ms</td>
+</tr>
+<tr>
+<td>7</td>
+<td><code>inference-provider</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>no</td>
+<td>no</td>
+<td><code>inference-provider</code></td>
+<td><code>inference.provide</code></td>
+<td>20 ms to call, 120 s reply</td>
+</tr>
+<tr>
+<td>8</td>
+<td><code>annotator</code></td>
+<td>no</td>
+<td>yes</td>
+<td>no</td>
+<td>no</td>
+<td><code>annotator</code></td>
+<td><code>editor.read</code></td>
+<td>10 ms</td>
+</tr>
+<tr>
+<td>9</td>
+<td><code>settings-validate</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>no</td>
+<td>no</td>
+<td><code>settings-validate</code></td>
+<td>none</td>
+<td>100 ms</td>
+</tr>
+<tr>
+<td>10</td>
+<td><code>renderer</code></td>
+<td>no</td>
+<td>no</td>
+<td>yes</td>
+<td>yes</td>
+<td>none</td>
+<td>none</td>
+<td>frame budget, at most 50 ms</td>
+</tr>
+<tr>
+<td>11</td>
+<td><code>catalog-provider</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>no</td>
+<td>no</td>
+<td><code>catalog-provider</code></td>
+<td>none (ids in <code>contributes.catalogs</code>)</td>
+<td>20 ms</td>
+</tr>
+<tr>
+<td>12</td>
+<td><code>menu-provider</code></td>
+<td>no</td>
+<td>yes</td>
+<td>no</td>
+<td>no</td>
+<td><code>menu-provider</code></td>
+<td>none</td>
+<td>20 ms</td>
+</tr>
+<tr>
+<td>13</td>
+<td><code>virtual-rows-provider</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>no</td>
+<td>no</td>
+<td><code>virtual-rows-provider</code></td>
+<td><code>tree.decorate</code></td>
+<td>20 ms</td>
+</tr>
+<tr>
+<td>14</td>
+<td><code>token-provider</code></td>
+<td>no</td>
+<td>yes</td>
+<td>no</td>
+<td>no</td>
+<td><code>token-provider</code></td>
+<td><code>editor.read</code></td>
+<td>10 ms</td>
+</tr>
+<tr>
+<td>15</td>
+<td><code>hook-handler</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>no</td>
+<td>no</td>
+<td><code>hook-handler</code></td>
+<td><code>extensions.contribute:&lt;point&gt;</code></td>
+<td>20 ms</td>
+</tr>
+<tr>
+<td>16</td>
+<td><code>migrator</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>no</td>
+<td>no</td>
+<td><code>migrator</code></td>
+<td>none</td>
+<td>60 s for T1, 30 s for T2 and T3, before <code>activate</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Notes.</strong></p>
+<ul>
+<li><code>hook-handler</code> is the export that receives <code>handle-hook</code> calls for extension points. It exists in the contract and is listed here so that the table has all 16 exports of <code>ilium:exports</code>.</li>
+<li>A deadline breach of <code>menu-provider</code> or <code>token-provider</code> falls back to static content and does not fail the user action.</li>
+</ul>
+<h2 id="4-event-matrix">4. Event matrix</h2>
+<p>An event is delivered through <code>handler.on-events</code>. The numbers are the case positions in the <code>event</code> variant, and they are part of the ABI [ABI-002]. The table has 56 rows, one per case. The event catalogue in <a href="/pages/reference-events-and-intents/">Event and intent tables</a> groups three pairs of cases into one row, so it shows 35 base rows for 38 base cases.</p>
+<table>
+<thead>
+<tr>
+<th>No.</th>
+<th>Event</th>
+<th>Grant</th>
+<th>Delivery policy</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><code>tree-changed</code></td>
+<td>tree.read</td>
+<td>coalesced (one merged list)</td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>node-removed</code></td>
+<td>tree.read</td>
+<td>never dropped</td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>pane-created</code></td>
+<td>panes.read</td>
+<td>never dropped</td>
+</tr>
+<tr>
+<td>4</td>
+<td><code>pane-exited</code></td>
+<td>panes.read</td>
+<td>never dropped</td>
+</tr>
+<tr>
+<td>5</td>
+<td><code>pane-focused</code></td>
+<td>panes.read</td>
+<td>coalesced</td>
+</tr>
+<tr>
+<td>6</td>
+<td><code>pane-resized</code></td>
+<td>panes.read</td>
+<td>coalesced (node)</td>
+</tr>
+<tr>
+<td>7</td>
+<td><code>pane-title-changed</code></td>
+<td>panes.read</td>
+<td>coalesced (node)</td>
+</tr>
+<tr>
+<td>8</td>
+<td><code>agent-identified</code></td>
+<td>agent.read</td>
+<td>never dropped</td>
+</tr>
+<tr>
+<td>9</td>
+<td><code>agent-activity-changed</code></td>
+<td>agent.read</td>
+<td>never dropped</td>
+</tr>
+<tr>
+<td>10</td>
+<td><code>agent-goal-changed</code></td>
+<td>agent.read</td>
+<td>coalesced (node)</td>
+</tr>
+<tr>
+<td>11</td>
+<td><code>input-submitted</code></td>
+<td>agent.read-prompts</td>
+<td>never dropped</td>
+</tr>
+<tr>
+<td>12</td>
+<td><code>output-matched</code></td>
+<td>terminal.output-filter</td>
+<td>drop oldest, counted</td>
+</tr>
+<tr>
+<td>13</td>
+<td><code>link-activated</code></td>
+<td>own link_detectors</td>
+<td>never dropped</td>
+</tr>
+<tr>
+<td>14</td>
+<td><code>pointer</code></td>
+<td>terminal.pointer, while claimed</td>
+<td>coalesced (move, drag)</td>
+</tr>
+<tr>
+<td>15</td>
+<td><code>editor-opened</code></td>
+<td>editor.read</td>
+<td>never dropped</td>
+</tr>
+<tr>
+<td>16</td>
+<td><code>editor-closed</code></td>
+<td>editor.read</td>
+<td>never dropped</td>
+</tr>
+<tr>
+<td>17</td>
+<td><code>editor-changed</code></td>
+<td>editor.read</td>
+<td>coalesced (buffer), debounced 100 ms</td>
+</tr>
+<tr>
+<td>18</td>
+<td><code>editor-saved</code></td>
+<td>editor.read</td>
+<td>never dropped</td>
+</tr>
+<tr>
+<td>19</td>
+<td><code>settings-changed</code></td>
+<td>always (own)</td>
+<td>coalesced, keys unioned</td>
+</tr>
+<tr>
+<td>20</td>
+<td><code>timer-fired</code></td>
+<td>always (own)</td>
+<td>coalesced (timer)</td>
+</tr>
+<tr>
+<td>21</td>
+<td><code>request-completed</code></td>
+<td>always (own)</td>
+<td>never dropped</td>
+</tr>
+<tr>
+<td>22</td>
+<td><code>job-progress</code></td>
+<td>always (own)</td>
+<td>coalesced (job)</td>
+</tr>
+<tr>
+<td>23</td>
+<td><code>message</code></td>
+<td>always, or messages.peer of the sender</td>
+<td>never dropped</td>
+</tr>
+<tr>
+<td>24</td>
+<td><code>topic-published</code></td>
+<td>topics.subscribe</td>
+<td>drop oldest, counted</td>
+</tr>
+<tr>
+<td>25</td>
+<td><code>command-invoked</code></td>
+<td>own commands</td>
+<td>never dropped</td>
+</tr>
+<tr>
+<td>26</td>
+<td><code>ui-action</code></td>
+<td>own views</td>
+<td>never dropped (scrolled coalesced)</td>
+</tr>
+<tr>
+<td>27</td>
+<td><code>key-pressed</code></td>
+<td>keys.intercept or wants_keys</td>
+<td>never dropped</td>
+</tr>
+<tr>
+<td>28</td>
+<td><code>key-released</code></td>
+<td>keys.intercept or wants_keys</td>
+<td>never dropped</td>
+</tr>
+<tr>
+<td>29</td>
+<td><code>view-visibility</code></td>
+<td>own views</td>
+<td>coalesced</td>
+</tr>
+<tr>
+<td>30</td>
+<td><code>fs-changed</code></td>
+<td>fs.watch</td>
+<td>coalesced (watch)</td>
+</tr>
+<tr>
+<td>31</td>
+<td><code>audio-frames</code></td>
+<td>audio.capture or audio.loopback</td>
+<td>drop oldest, counted</td>
+</tr>
+<tr>
+<td>32</td>
+<td><code>cli-invoked</code></td>
+<td>cli.contribute</td>
+<td>never dropped</td>
+</tr>
+<tr>
+<td>33</td>
+<td><code>cli-cancelled</code></td>
+<td>cli.contribute</td>
+<td>never dropped</td>
+</tr>
+<tr>
+<td>34</td>
+<td><code>http-called</code></td>
+<td>http-api.route</td>
+<td>never dropped</td>
+</tr>
+<tr>
+<td>35</td>
+<td><code>client-attached</code></td>
+<td>always (server side)</td>
+<td>never dropped</td>
+</tr>
+<tr>
+<td>36</td>
+<td><code>client-detached</code></td>
+<td>always (server side)</td>
+<td>never dropped</td>
+</tr>
+<tr>
+<td>37</td>
+<td><code>theme-changed</code></td>
+<td>always (client side)</td>
+<td>coalesced</td>
+</tr>
+<tr>
+<td>38</td>
+<td><code>events-dropped</code></td>
+<td>always (own)</td>
+<td>coalesced by (event, source), never dropped</td>
+</tr>
+<tr>
+<td>39</td>
+<td><code>screen-changed</code></td>
+<td>terminal.read-cells</td>
+<td>coalesced (pane), 10 per second</td>
+</tr>
+<tr>
+<td>40</td>
+<td><code>user-line-submitted</code></td>
+<td>agent.read-prompts</td>
+<td>never dropped</td>
+</tr>
+<tr>
+<td>41</td>
+<td><code>signal-changed</code></td>
+<td>agent.read</td>
+<td>coalesced (pane, signal)</td>
+</tr>
+<tr>
+<td>42</td>
+<td><code>agent-model-changed</code></td>
+<td>agent.read</td>
+<td>coalesced (pane)</td>
+</tr>
+<tr>
+<td>43</td>
+<td><code>editor-pointer</code></td>
+<td>editor.read</td>
+<td>coalesced on move</td>
+</tr>
+<tr>
+<td>44</td>
+<td><code>editor-viewport-changed</code></td>
+<td>editor.read</td>
+<td>coalesced (pane), 100 ms</td>
+</tr>
+<tr>
+<td>45</td>
+<td><code>http-stream-data</code></td>
+<td>the http grant of the stream</td>
+<td>never dropped, back-pressure</td>
+</tr>
+<tr>
+<td>46</td>
+<td><code>http-stream-closed</code></td>
+<td>the http grant of the stream</td>
+<td>never dropped</td>
+</tr>
+<tr>
+<td>47</td>
+<td><code>child-output</code></td>
+<td>process.long-lived</td>
+<td>never dropped, back-pressure</td>
+</tr>
+<tr>
+<td>48</td>
+<td><code>child-exited</code></td>
+<td>process.long-lived</td>
+<td>never dropped</td>
+</tr>
+<tr>
+<td>49</td>
+<td><code>pane-lifecycle-changed</code></td>
+<td>panes.read</td>
+<td>never dropped</td>
+</tr>
+<tr>
+<td>50</td>
+<td><code>attention-changed</code></td>
+<td>tree.attention or tree.read</td>
+<td>coalesced (node)</td>
+</tr>
+<tr>
+<td>51</td>
+<td><code>client-request</code></td>
+<td>own client_requests (client side)</td>
+<td>never dropped</td>
+</tr>
+<tr>
+<td>52</td>
+<td><code>kernel-settings-changed</code></td>
+<td>settings.read-kernel:<tab></td>
+<td>coalesced (tab), keys unioned</td>
+</tr>
+<tr>
+<td>53</td>
+<td><code>keymap-changed</code></td>
+<td>keymap.read</td>
+<td>coalesced</td>
+</tr>
+<tr>
+<td>54</td>
+<td><code>durable-timer-fired</code></td>
+<td>always (own)</td>
+<td>never dropped</td>
+</tr>
+<tr>
+<td>55</td>
+<td><code>input-uncertain</code></td>
+<td>grant of the original send-input</td>
+<td>never dropped</td>
+</tr>
+<tr>
+<td>56</td>
+<td><code>display-mode-changed</code></td>
+<td>own display_modes</td>
+<td>coalesced</td>
+</tr>
+</tbody>
+</table>
+<h2 id="5-intent-matrix">5. Intent matrix</h2>
+<p>An intent leaves a plugin in a submission. The numbers are the case positions in the <code>intent</code> variant. Every row also fails with the common codes: <code>not-permitted</code> for a missing grant (the whole batch is refused), <code>invalid-argument</code> for a bad value, and <code>busy</code> when the plugin has too many pending requests.</p>
+<table>
+<thead>
+<tr>
+<th>No.</th>
+<th>Intent</th>
+<th>Grant</th>
+<th>Outcomes and limits beyond <code>ok</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><code>rename-node</code></td>
+<td>tree.write</td>
+<td>conflict for a manual title</td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>move-node</code></td>
+<td>tree.write</td>
+<td>invalid-argument for a target inside the node</td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>close-node</code></td>
+<td>tree.write</td>
+<td>conflict for a locked node</td>
+</tr>
+<tr>
+<td>4</td>
+<td><code>set-node-locked</code></td>
+<td>tree.write</td>
+<td>not-found</td>
+</tr>
+<tr>
+<td>5</td>
+<td><code>create-pane</code></td>
+<td>panes.create (+ terminal.write with initial-input)</td>
+<td>ok-node; failed(io)</td>
+</tr>
+<tr>
+<td>6</td>
+<td><code>signal-pane</code></td>
+<td>panes.signal</td>
+<td>pane-not-ready</td>
+</tr>
+<tr>
+<td>7</td>
+<td><code>send-input</code></td>
+<td>terminal.write (+ terminal.raw-input, terminal.input-lock)</td>
+<td>ok-epoch on agent panes; pane-not-ready; conflict on stale epoch</td>
+</tr>
+<tr>
+<td>8</td>
+<td><code>agent-action</code></td>
+<td>agent.control</td>
+<td>unsupported; conflict</td>
+</tr>
+<tr>
+<td>9</td>
+<td><code>set-decoration</code></td>
+<td>tree.decorate</td>
+<td>invalid-argument for an undeclared slot</td>
+</tr>
+<tr>
+<td>10</td>
+<td><code>clear-decoration</code></td>
+<td>tree.decorate</td>
+<td>common codes only</td>
+</tr>
+<tr>
+<td>11</td>
+<td><code>set-virtual-rows</code></td>
+<td>tree.decorate</td>
+<td>invalid-argument for an undeclared kind</td>
+</tr>
+<tr>
+<td>12</td>
+<td><code>play-sound</code></td>
+<td>sound.play</td>
+<td>not-found; rate-limited above 4 per second</td>
+</tr>
+<tr>
+<td>13</td>
+<td><code>notify</code></td>
+<td>notify.desktop</td>
+<td>rate-limited above 6 per minute</td>
+</tr>
+<tr>
+<td>14</td>
+<td><code>open-view</code></td>
+<td>ui.panels</td>
+<td>not-found</td>
+</tr>
+<tr>
+<td>15</td>
+<td><code>close-view</code></td>
+<td>ui.panels</td>
+<td>not-found</td>
+</tr>
+<tr>
+<td>16</td>
+<td><code>invoke-command</code></td>
+<td>commands.invoke</td>
+<td>failed(timed-out) after 30 s</td>
+</tr>
+<tr>
+<td>17</td>
+<td><code>message</code></td>
+<td>messages.peer</td>
+<td>not-found; invalid-argument above 1 MiB</td>
+</tr>
+<tr>
+<td>18</td>
+<td><code>editor-apply-edits</code></td>
+<td>editor.edit</td>
+<td>conflict on a stale revision</td>
+</tr>
+<tr>
+<td>19</td>
+<td><code>editor-open</code></td>
+<td>editor.edit</td>
+<td>ok-node; failed(io)</td>
+</tr>
+<tr>
+<td>20</td>
+<td><code>freeze-pane</code></td>
+<td>panes.lifecycle</td>
+<td>unsupported on Windows</td>
+</tr>
+<tr>
+<td>21</td>
+<td><code>unfreeze-pane</code></td>
+<td>panes.lifecycle</td>
+<td>conflict for a running pane</td>
+</tr>
+<tr>
+<td>22</td>
+<td><code>replace-pane-command</code></td>
+<td>panes.lifecycle</td>
+<td>ok when the new process runs</td>
+</tr>
+<tr>
+<td>23</td>
+<td><code>terminate-pane-process</code></td>
+<td>panes.lifecycle</td>
+<td>grace-ms at most 10,000</td>
+</tr>
+<tr>
+<td>24</td>
+<td><code>resize-pane</code></td>
+<td>panes.lifecycle</td>
+<td>conflict names the neighbour</td>
+</tr>
+<tr>
+<td>25</td>
+<td><code>create-group</code></td>
+<td>tree.restructure</td>
+<td>ok-node</td>
+</tr>
+<tr>
+<td>26</td>
+<td><code>create-folder</code></td>
+<td>tree.restructure</td>
+<td>ok-node</td>
+</tr>
+<tr>
+<td>27</td>
+<td><code>create-project</code></td>
+<td>tree.restructure</td>
+<td>ok-node</td>
+</tr>
+<tr>
+<td>28</td>
+<td><code>create-split</code></td>
+<td>tree.restructure</td>
+<td>2 to 4 panes; ok-node</td>
+</tr>
+<tr>
+<td>29</td>
+<td><code>set-bookmarked</code></td>
+<td>tree.write</td>
+<td>ok</td>
+</tr>
+<tr>
+<td>30</td>
+<td><code>set-expanded</code></td>
+<td>tree.write, or own virtual_rows</td>
+<td>ok</td>
+</tr>
+<tr>
+<td>31</td>
+<td><code>restructure</code></td>
+<td>tree.restructure</td>
+<td>ok-node with undo token; all or nothing</td>
+</tr>
+<tr>
+<td>32</td>
+<td><code>revert-restructure</code></td>
+<td>tree.restructure</td>
+<td>conflict after a later change</td>
+</tr>
+<tr>
+<td>33</td>
+<td><code>set-inferred-icon</code></td>
+<td>tree.decorate</td>
+<td>conflict when a manual icon exists</td>
+</tr>
+<tr>
+<td>34</td>
+<td><code>mark-attention</code></td>
+<td>tree.attention</td>
+<td>ok</td>
+</tr>
+<tr>
+<td>35</td>
+<td><code>ack-attention</code></td>
+<td>tree.attention</td>
+<td>ok</td>
+</tr>
+<tr>
+<td>36</td>
+<td><code>open-external</code></td>
+<td>open-external</td>
+<td>not-permitted when declined; http, https, mailto only</td>
+</tr>
+<tr>
+<td>37</td>
+<td><code>set-status-segment</code></td>
+<td>ui.chrome</td>
+<td>10 per second per segment</td>
+</tr>
+<tr>
+<td>38</td>
+<td><code>clear-status-segment</code></td>
+<td>ui.chrome</td>
+<td>ok</td>
+</tr>
+<tr>
+<td>39</td>
+<td><code>set-frame-slot</code></td>
+<td>ui.chrome</td>
+<td>invalid-argument when applies_to does not match</td>
+</tr>
+<tr>
+<td>40</td>
+<td><code>clear-frame-slot</code></td>
+<td>ui.chrome</td>
+<td>ok</td>
+</tr>
+<tr>
+<td>41</td>
+<td><code>toast</code></td>
+<td>notify.toast</td>
+<td>rate-limited above 3 per 10 s</td>
+</tr>
+<tr>
+<td>42</td>
+<td><code>dismiss-toast</code></td>
+<td>notify.toast</td>
+<td>ok</td>
+</tr>
+</tbody>
+</table>
+<h2 id="6-widget-matrix">6. Widget matrix</h2>
+<p>A plugin sends widgets inside a <code>ui-tree</code>. The numbers are the case positions in the <code>widget</code> variant. The column <code>widget-state</code> names the case that <code>ui.widget-state</code> returns for the widget. The last column lists the action kinds the widget usually sends. The family pages give the exact list.</p>
+<table>
+<thead>
+<tr>
+<th>No.</th>
+<th>Widget</th>
+<th>Family</th>
+<th>Spec</th>
+<th><code>widget-state</code> case</th>
+<th>Typical <code>ui-action</code> kinds</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><code>layout</code></td>
+<td>Layout</td>
+<td><code>layout-spec</code></td>
+<td>none</td>
+<td>none</td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>block</code></td>
+<td>Layout</td>
+<td><code>block-spec</code></td>
+<td>none</td>
+<td>none</td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>tabs</code></td>
+<td>Layout</td>
+<td><code>tabs-spec</code></td>
+<td>tab</td>
+<td>selected</td>
+</tr>
+<tr>
+<td>4</td>
+<td><code>popup</code></td>
+<td>Layout</td>
+<td><code>popup-spec</code></td>
+<td>none</td>
+<td>closed</td>
+</tr>
+<tr>
+<td>5</td>
+<td><code>clear</code></td>
+<td>Layout</td>
+<td><code>none</code></td>
+<td>none</td>
+<td>none</td>
+</tr>
+<tr>
+<td>6</td>
+<td><code>scrollbar</code></td>
+<td>Layout</td>
+<td><code>scrollbar-spec</code></td>
+<td>none</td>
+<td>none</td>
+</tr>
+<tr>
+<td>7</td>
+<td><code>split</code></td>
+<td>Layout</td>
+<td><code>split-spec</code></td>
+<td>split</td>
+<td>changed</td>
+</tr>
+<tr>
+<td>8</td>
+<td><code>separator</code></td>
+<td>Layout</td>
+<td><code>separator-spec</code></td>
+<td>none</td>
+<td>none</td>
+</tr>
+<tr>
+<td>9</td>
+<td><code>dialog</code></td>
+<td>Layout</td>
+<td><code>dialog-spec</code></td>
+<td>none</td>
+<td>closed</td>
+</tr>
+<tr>
+<td>10</td>
+<td><code>scroll-view</code></td>
+<td>Layout</td>
+<td><code>scroll-view-spec</code></td>
+<td>offset</td>
+<td>scrolled</td>
+</tr>
+<tr>
+<td>11</td>
+<td><code>paragraph</code></td>
+<td>Text</td>
+<td><code>paragraph-spec</code></td>
+<td>none</td>
+<td>none</td>
+</tr>
+<tr>
+<td>12</td>
+<td><code>markdown</code></td>
+<td>Text</td>
+<td><code>markdown-spec</code></td>
+<td>none</td>
+<td>none</td>
+</tr>
+<tr>
+<td>13</td>
+<td><code>leader-row</code></td>
+<td>Text</td>
+<td><code>leader-spec</code></td>
+<td>none</td>
+<td>none</td>
+</tr>
+<tr>
+<td>14</td>
+<td><code>key-hints</code></td>
+<td>Text</td>
+<td><code>list&lt;key-hint&gt;</code></td>
+<td>none</td>
+<td>none</td>
+</tr>
+<tr>
+<td>15</td>
+<td><code>diff-view</code></td>
+<td>Text</td>
+<td><code>diff-view-spec</code></td>
+<td>none</td>
+<td>none</td>
+</tr>
+<tr>
+<td>16</td>
+<td><code>%list</code></td>
+<td>Collections</td>
+<td><code>list-spec</code></td>
+<td>selected, ids</td>
+<td>selected, activated, dropped</td>
+</tr>
+<tr>
+<td>17</td>
+<td><code>table</code></td>
+<td>Collections</td>
+<td><code>table-spec</code></td>
+<td>selected, ids</td>
+<td>selected, activated, dropped</td>
+</tr>
+<tr>
+<td>18</td>
+<td><code>tree-list</code></td>
+<td>Collections</td>
+<td><code>tree-list-spec</code></td>
+<td>selected, expanded, ids</td>
+<td>selected, activated, dropped</td>
+</tr>
+<tr>
+<td>19</td>
+<td><code>menu</code></td>
+<td>Collections</td>
+<td><code>menu-spec</code></td>
+<td>selected</td>
+<td>activated</td>
+</tr>
+<tr>
+<td>20</td>
+<td><code>check-list</code></td>
+<td>Collections</td>
+<td><code>check-list-spec</code></td>
+<td>tri</td>
+<td>toggled</td>
+</tr>
+<tr>
+<td>21</td>
+<td><code>list-editor</code></td>
+<td>Collections</td>
+<td><code>list-editor-spec</code></td>
+<td>selected</td>
+<td>changed</td>
+</tr>
+<tr>
+<td>22</td>
+<td><code>gauge</code></td>
+<td>Data</td>
+<td><code>gauge-spec</code></td>
+<td>none</td>
+<td>none</td>
+</tr>
+<tr>
+<td>23</td>
+<td><code>line-gauge</code></td>
+<td>Data</td>
+<td><code>line-gauge-spec</code></td>
+<td>none</td>
+<td>none</td>
+</tr>
+<tr>
+<td>24</td>
+<td><code>sparkline</code></td>
+<td>Data</td>
+<td><code>sparkline-spec</code></td>
+<td>none</td>
+<td>none</td>
+</tr>
+<tr>
+<td>25</td>
+<td><code>bar-chart</code></td>
+<td>Data</td>
+<td><code>bar-chart-spec</code></td>
+<td>none</td>
+<td>none</td>
+</tr>
+<tr>
+<td>26</td>
+<td><code>chart</code></td>
+<td>Data</td>
+<td><code>chart-spec</code></td>
+<td>none</td>
+<td>none</td>
+</tr>
+<tr>
+<td>27</td>
+<td><code>canvas</code></td>
+<td>Data</td>
+<td><code>canvas-spec</code></td>
+<td>none</td>
+<td>none</td>
+</tr>
+<tr>
+<td>28</td>
+<td><code>calendar</code></td>
+<td>Data</td>
+<td><code>calendar-spec</code></td>
+<td>none</td>
+<td>none</td>
+</tr>
+<tr>
+<td>29</td>
+<td><code>progress-row</code></td>
+<td>Data</td>
+<td><code>progress-row-spec</code></td>
+<td>none</td>
+<td>none</td>
+</tr>
+<tr>
+<td>30</td>
+<td><code>meter</code></td>
+<td>Data</td>
+<td><code>meter-spec</code></td>
+<td>none</td>
+<td>none</td>
+</tr>
+<tr>
+<td>31</td>
+<td><code>minimap</code></td>
+<td>Data</td>
+<td><code>minimap-spec</code></td>
+<td>none</td>
+<td>none</td>
+</tr>
+<tr>
+<td>32</td>
+<td><code>button</code></td>
+<td>Input</td>
+<td><code>button-spec</code></td>
+<td>none</td>
+<td>activated</td>
+</tr>
+<tr>
+<td>33</td>
+<td><code>toggle</code></td>
+<td>Input</td>
+<td><code>toggle-spec</code></td>
+<td>checked, tri</td>
+<td>toggled</td>
+</tr>
+<tr>
+<td>34</td>
+<td><code>choice</code></td>
+<td>Input</td>
+<td><code>choice-spec</code></td>
+<td>selected</td>
+<td>selected</td>
+</tr>
+<tr>
+<td>35</td>
+<td><code>number</code></td>
+<td>Input</td>
+<td><code>number-spec</code></td>
+<td>number</td>
+<td>changed</td>
+</tr>
+<tr>
+<td>36</td>
+<td><code>text-input</code></td>
+<td>Input</td>
+<td><code>text-input-spec</code></td>
+<td>text</td>
+<td>changed, submitted</td>
+</tr>
+<tr>
+<td>37</td>
+<td><code>text-area</code></td>
+<td>Input</td>
+<td><code>text-area-spec</code></td>
+<td>text</td>
+<td>changed</td>
+</tr>
+<tr>
+<td>38</td>
+<td><code>schema-form</code></td>
+<td>Input</td>
+<td><code>schema-form-spec</code></td>
+<td>none</td>
+<td>none (settings-changed)</td>
+</tr>
+<tr>
+<td>39</td>
+<td><code>key-capture</code></td>
+<td>Input</td>
+<td><code>key-capture-spec</code></td>
+<td>text</td>
+<td>changed, closed</td>
+</tr>
+<tr>
+<td>40</td>
+<td><code>color-picker</code></td>
+<td>Input</td>
+<td><code>color-picker-spec</code></td>
+<td>text</td>
+<td>changed</td>
+</tr>
+<tr>
+<td>41</td>
+<td><code>path-field</code></td>
+<td>Input</td>
+<td><code>path-field-spec</code></td>
+<td>text</td>
+<td>changed, submitted</td>
+</tr>
+<tr>
+<td>42</td>
+<td><code>location-picker</code></td>
+<td>Input</td>
+<td><code>location-picker-spec</code></td>
+<td>geo</td>
+<td>changed</td>
+</tr>
+<tr>
+<td>43</td>
+<td><code>badge</code></td>
+<td>Status</td>
+<td><code>badge-spec</code></td>
+<td>none</td>
+<td>none</td>
+</tr>
+<tr>
+<td>44</td>
+<td><code>spinner</code></td>
+<td>Status</td>
+<td><code>spinner-spec</code></td>
+<td>none</td>
+<td>none</td>
+</tr>
+<tr>
+<td>45</td>
+<td><code>notice</code></td>
+<td>Status</td>
+<td><code>notice-spec</code></td>
+<td>none</td>
+<td>none</td>
+</tr>
+<tr>
+<td>46</td>
+<td><code>icon</code></td>
+<td>Status</td>
+<td><code>icon-spec</code></td>
+<td>none</td>
+<td>none</td>
+</tr>
+<tr>
+<td>47</td>
+<td><code>image</code></td>
+<td>Media</td>
+<td><code>image-spec</code></td>
+<td>none</td>
+<td>none</td>
+</tr>
+<tr>
+<td>48</td>
+<td><code>surface</code></td>
+<td>Media</td>
+<td><code>surface-spec</code></td>
+<td>none</td>
+<td>pointer</td>
+</tr>
+<tr>
+<td>49</td>
+<td><code>code-view</code></td>
+<td>Media</td>
+<td><code>code-view-spec</code></td>
+<td>none</td>
+<td>changed</td>
+</tr>
+<tr>
+<td>50</td>
+<td><code>terminal-view</code></td>
+<td>Media</td>
+<td><code>terminal-view-spec</code></td>
+<td>none</td>
+<td>pointer</td>
+</tr>
+<tr>
+<td>51</td>
+<td><code>video</code></td>
+<td>Media</td>
+<td><code>video-spec</code></td>
+<td>none</td>
+<td>none</td>
+</tr>
+</tbody>
+</table>
+<h2 id="7-error-behaviour-that-every-host-shares">7. Error behaviour that every host shares</h2>
+<table>
+<thead>
+<tr>
+<th>Situation</th>
+<th>Result</th>
+<th>Test</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Call without the grant</td>
+<td><code>not-permitted</code></td>
+<td>Call each row without its grant</td>
+</tr>
+<tr>
+<td>Function of a capability the manifest never requested, in a linked interface</td>
+<td>trap <code>host.capability-not-requested</code></td>
+<td>Call a function of an unrequested capability</td>
+</tr>
+<tr>
+<td>Interface that no requested capability unlocks</td>
+<td>install refused with <code>manifest.import-not-requested</code></td>
+<td>Install a component that imports <code>clipboard</code> with no clipboard grant</td>
+</tr>
+<tr>
+<td>Call from a side that may not import it</td>
+<td>not linked, install refused</td>
+<td>Import <code>ui-host</code> from a server component</td>
+</tr>
+<tr>
+<td>More than 256 submissions</td>
+<td>trap, none applied</td>
+<td>Return 257 submissions</td>
+</tr>
+<tr>
+<td>Malformed submission in a batch</td>
+<td>whole batch refused, siblings <code>refused(cancelled)</code></td>
+<td>Return one bad submission among 3</td>
+</tr>
+<tr>
+<td>Take twice</td>
+<td>second take returns <code>none</code></td>
+<td>Take a result twice</td>
+</tr>
+<tr>
+<td>Event queue full</td>
+<td>policy of the event case</td>
+<td>Fill a queue of 1,024 events</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Rust test sketch</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::testing::{FakeHost, Grants};
+
+#[test]
+fn clipboard_write_needs_its_grant() {
+    let mut host = FakeHost::client(Grants::none());
+    let result = host.call_clipboard_write(&quot;hello&quot;);
+    assert_eq!(result.unwrap_err().code, ErrorCode::NotPermitted);
+}
+</code></pre>
+<p><strong>TypeScript test sketch</strong></p>
+<pre><code class="language-ts">import { FakeHost, grants } from '@ilium/plugin-sdk/testing';
+
+test('clipboard write needs its grant', () =&gt; {
+  const host = new FakeHost('client', grants());
+  expect(() =&gt; host.clipboard.writeText('hello')).toThrow(expect.objectContaining({ code: 'not-permitted' }));
+});
+</code></pre>
+<h2 id="see-also">See also</h2>
+<ul>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements: WIT and ABI</a></li>
+</ul>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/reference-abi-evolution/"><small>Previous</small>ABI evolution</a><a class="next" href="/pages/reference-requirements-wit-abi/"><small>Next</small>Requirements for WIT and ABI</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#what-you-need">What you need</a></li><li class="l2"><a href="#1-how-to-use-the-matrices">1. How to use the matrices</a></li><li class="l2"><a href="#2-import-matrix">2. Import matrix</a></li><li class="l2"><a href="#3-export-matrix">3. Export matrix</a></li><li class="l2"><a href="#4-event-matrix">4. Event matrix</a></li><li class="l2"><a href="#5-intent-matrix">5. Intent matrix</a></li><li class="l2"><a href="#6-widget-matrix">6. Widget matrix</a></li><li class="l2"><a href="#7-error-behaviour-that-every-host-shares">7. Error behaviour that every host shares</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

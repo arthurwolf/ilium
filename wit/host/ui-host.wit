@@ -1,0 +1,28 @@
+package ilium:host@0.1.0;
+
+interface ui-host {
+  use ilium:types/errors@0.1.0.{plugin-error};
+  use ilium:types/ui@0.1.0.{view-target, widget-state, popup-anchor, popup-options, theme-tokens, theme-extras, pixel-format};
+  /// Marks the view as stale. The host calls views.render before the next frame. Always granted for own views.
+  invalidate: func(view: view-target);
+  /// Errors: not-found when the panel is not declared.
+  open-panel: func(panel: string) -> result<_, plugin-error>;
+  close-panel: func(panel: string);
+  /// Errors: not-found when no popup or dialog node with that key is in the last committed tree of any
+  /// open view, invalid-argument when two match, quota-exceeded for a fifth open popup in one view.
+  open-popup: func(popup: string, anchor: popup-anchor) -> result<_, plugin-error>;
+  open-popup-with: func(popup: string, anchor: popup-anchor, options: popup-options) -> result<_, plugin-error>;
+  /// An id that is not open is a no-op.
+  close-popup: func(popup: string);
+  widget-state: func(view: view-target, key: string) -> option<widget-state>;
+  /// Errors: not-found for an unknown key, invalid-argument when the case does not fit the widget.
+  set-widget-state: func(view: view-target, key: string, state: widget-state) -> result<_, plugin-error>;
+  /// Width in cells by the cell width rule of the UI model page (grapheme clusters, UAX #29).
+  display-width: func(text: string) -> u16;
+  theme: func() -> theme-tokens;
+  theme-extras: func() -> theme-extras;
+  /// Rows are top to bottom. Rows that fall at or past the surface height are ignored.
+  /// Rows are top to bottom. first-row plus the rows written must be within the surface height.
+  /// Errors: not-found for a key with no surface, invalid-argument for a bad length.
+  write-surface: func(view: view-target, key: string, first-row: u32, format: pixel-format, data: list<u8>) -> result<_, plugin-error>;
+}

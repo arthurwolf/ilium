@@ -255,6 +255,13 @@ pub fn chrome_stats_cell(outer_area: ratatui::layout::Rect) -> ratatui::layout::
     ratatui::layout::Position::new(hamburger.x + 2, hamburger.y)
 }
 
+/// The cell of `CHROME_ICONS`' third glyph (the small dot), two cells right of
+/// the big dot: an agent pane makes it the hover/click target of its recap.
+pub fn chrome_recap_cell(outer_area: ratatui::layout::Rect) -> ratatui::layout::Position {
+    let stats = chrome_stats_cell(outer_area);
+    ratatui::layout::Position::new(stats.x + 2, stats.y)
+}
+
 /// Nerd Font powerline round-cap glyphs used to give the status bar rounded
 /// ends: each is rendered with `fg` = the bar's own accent color and no
 /// explicit `bg` (so it blends into whatever sits outside the bar), the
@@ -333,6 +340,23 @@ pub fn gauge_track_bg(scheme: ColorScheme) -> Color {
 /// it, the same assumption `agent_toolbar`'s unstyled buttons already make.
 pub fn last_prompt_style(scheme: ColorScheme) -> Style {
     Style::new().bg(muted_accent_bg(scheme))
+}
+
+/// Background fill for the attention briefing box. A weaker tint than the
+/// last-prompt banner's so the two stacked boxes read as different sections
+/// while both stay dark on the dark scheme.
+pub fn briefing_style(scheme: ColorScheme) -> Style {
+    let blend_target = match scheme {
+        ColorScheme::Dark => Color::Rgb(0, 0, 0),
+        ColorScheme::Light => Color::Rgb(0xff, 0xff, 0xff),
+    };
+    Style::new().bg(mix(current().accent_bg, blend_target, 0.84))
+}
+
+/// Gutter and label colour of the attention briefing box: the focused-border
+/// colour, which differs from the banner's accent gutter.
+pub fn briefing_gutter_style(scheme: ColorScheme) -> Style {
+    briefing_style(scheme).fg(current().border_focused)
 }
 
 #[cfg(test)]

@@ -176,6 +176,9 @@ pub(crate) struct ProgressSetRequestIdentity {
 }
 
 #[derive(Debug, Clone)]
+// Cold path, one value per progress registration: boxing would only add
+// indirection at every match site.
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum ProgressSetRequestOutcome {
     Pending(tokio::sync::watch::Sender<Option<ProgressSetResult>>),
     Complete(ProgressSetResult),
@@ -319,6 +322,10 @@ pub struct ServerState {
     /// Serializes enqueue/clear mutations with completion-driven delivery so
     /// a successful PTY write advances exactly the FIFO head it observed.
     pub prompt_queue_transaction: Mutex<()>,
+    /// Finite menu-query admission, including discovery before a repository is known.
+    pub(crate) repo_facts_admission: tokio::sync::Semaphore,
+    pub(crate) repo_discovery_cache: crate::repo_facts_cache::FactsCache<ilium_git::Repository>,
+    pub(crate) repo_facts_cache: crate::repo_facts_cache::FactsCache<ilium_ipc::RepoFacts>,
     /// Serializes workspace creation and removal within this server for a
     /// canonical Git common directory. Cooperating servers also take the
     /// platform repository lease before the spawn lock; external Git does not.
@@ -338,6 +345,9 @@ pub struct ServerState {
     pub(crate) workspace_git_status_cache: RwLock<HashMap<NodeId, WorkspaceGitStatus>>,
     pub(crate) workspace_close_preferences:
         std::sync::Arc<RwLock<HashMap<NodeId, WorkspaceClosePreference>>>,
+    /// Recaps clients produced, fenced by session and generation. Persisted
+    /// in the session snapshot; the server never generates them.
+    pub(crate) recaps: std::sync::Arc<RwLock<HashMap<NodeId, crate::persistence::PersistedRecap>>>,
     workspace_git_full_requests: mpsc::Sender<NodeId>,
     workspace_git_full_receiver: Mutex<Option<mpsc::Receiver<NodeId>>>,
     workspace_creation_tasks: std::sync::Mutex<WorkspaceCreationTasks>,
@@ -567,11 +577,15 @@ impl ServerState {
             debug_logging_transaction: Mutex::new(()),
             scheduled_input_transaction: Mutex::new(()),
             prompt_queue_transaction: Mutex::new(()),
+            repo_facts_admission: tokio::sync::Semaphore::new(32),
+            repo_discovery_cache: Default::default(),
+            repo_facts_cache: Default::default(),
             workspace_repository_locks: Mutex::new(HashMap::new()),
             workspace_spawn_lock: Mutex::new(()),
             replacing_panes: std::sync::Mutex::new(HashSet::new()),
             workspace_git_status_cache: RwLock::new(HashMap::new()),
             workspace_close_preferences: std::sync::Arc::new(RwLock::new(HashMap::new())),
+            recaps: std::sync::Arc::new(RwLock::new(HashMap::new())),
             workspace_git_full_requests,
             workspace_git_full_receiver: Mutex::new(Some(workspace_git_full_receiver)),
             workspace_creation_tasks: std::sync::Mutex::new(WorkspaceCreationTasks::default()),

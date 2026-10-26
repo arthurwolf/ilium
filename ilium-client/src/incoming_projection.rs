@@ -135,6 +135,8 @@ impl ProjectionRetention {
             PaneRecapScreen { .. }
             | ScreenUpdate { .. }
             | TerminalReplay { .. }
+            | TerminalSnapshot { .. }
+            | TerminalHistory { .. }
             | VoiceTextOffered { .. }
             | VoiceTextResult { .. }
             | ProgressMonitorCheckCompleted { .. }
@@ -156,6 +158,7 @@ impl ProjectionRetention {
             | WorkspaceRemoved { .. }
             | WorkspaceCloseOfferReported { .. }
             | PaneSessionTitleCleared { .. }
+            | RecapUpdated { .. }
             | RepoFactsReported { .. }
             | WorkspaceCreateFailed { .. }
             | WorkspaceInventoryReported { .. }
@@ -166,6 +169,11 @@ impl ProjectionRetention {
             | BlockingErrorsSnapshot { .. }
             | PaneCreateFinished { .. }
             | WorkspaceRemovalBlocked { .. } => return update,
+            | WorkspaceRemovalBlocked { .. }
+            // Plugin-platform events are projected by the plugin client layer, not here (skeleton).
+            | Plugin(_)
+            | Contributions(_)
+            | Rejected(_) => return update,
             AgentDetectionSettingsChanged { result, .. } => match result {
                 Ok(_) => {
                     update.clear_detection_error = true;
@@ -176,6 +184,8 @@ impl ProjectionRetention {
             TextTriggersChanged { .. }
             | PaneProcessTerminated { .. }
             | PaneFrozen { .. }
+            | BlockingErrorsSnapshot { .. }
+            | PaneCreateFinished { .. }
             | SoundPreviewCompleted { .. } => (global, None),
         };
         update.keys.push(Key { slot, scope });

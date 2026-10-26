@@ -1,0 +1,2 @@
+- ilium-plugin-conformance: `[[test]] name = "manual_lint" path = "tests/manual_lint/main.rs"` registration and `ilium_plugin_host::cli::run` over a single `ilium-plugin.json` (COR-043).
+- ilium-plugin-host: `impl CliEnv { pub fn new(data_dir: PathBuf, state_dir: PathBuf, config_dir: PathBuf, cwd: PathBuf, now: SystemTime, is_ci: bool, fetcher: std::sync::Arc<dyn Fetcher>) -> CliEnv }` (constructor; used by core_parity.rs to run `ilium plugin check` on core manifests; COR-043).

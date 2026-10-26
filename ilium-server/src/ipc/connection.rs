@@ -279,6 +279,8 @@ async fn read_requests<R>(
     };
     let mut terminal_subscription_guard = TerminalSubscriptionGuard::new(Arc::clone(&state));
     let mut has_terminal_stream_selection = false;
+    // Connection ownership bounds work and aborts queries on disconnect.
+    let mut repository_queries = tokio::task::JoinSet::new();
     loop {
         let decoded = tokio::select! {
             biased;
@@ -311,6 +313,9 @@ async fn read_requests<R>(
         };
 
         let request = decoded.view();
+        if let ClientRequest::NewPane { request_id, .. } = request {
+            ilium_platform::startup_timing::record("request_received", *request_id, 0, 0, 0);
+        }
         let request_name = request.diagnostic_name();
         if request.is_high_frequency_diagnostic() {
             tracing::debug!(request_name, "client request received");
@@ -418,6 +423,34 @@ async fn read_requests<R>(
             }
         }
 
+        if let ClientRequest::QueryRepoFacts {
+            request_id,
+            project,
+        } = request
+        {
+            while repository_queries.try_join_next().is_some() {}
+            if repository_queries.len() >= 8 {
+                let _ = direct_tx
+                    .send(ServerEvent::RepoFactsReported {
+                        request_id: *request_id,
+                        project: *project,
+                        result: Err("too many pending repository queries; retry shortly".into()),
+                    })
+                    .await;
+            } else {
+                let query_state = Arc::clone(&state);
+                let replies = direct_tx.clone();
+                let query = ClientRequest::QueryRepoFacts {
+                    request_id: *request_id,
+                    project: *project,
+                };
+                repository_queries.spawn(async move {
+                    handlers::handle_request(&query_state, query, &replies).await;
+                });
+            }
+            continue;
+        }
+
         let completes_attach = matches!(
             &request,
             ClientRequest::Attach { .. } | ClientRequest::AttachInteractive { .. }
@@ -448,7 +481,8 @@ async fn read_requests<R>(
 
 /// Forwards direct replies and session events from the ordered journal and
 /// legacy broadcast to this client. A journal cursor advances only after its
-/// event is flushed or intentionally filtered.
+/// event is flushed or intentionally filtered. Production connections use
+/// `write_replies_ordered`; this journal-less form is kept for tests.
 #[cfg(test)]
 async fn write_replies<W, E>(
     write_half: W,
@@ -961,7 +995,9 @@ where
         }
         let result = if matches!(
             event,
-            ServerEvent::ScreenUpdate { .. } | ServerEvent::TerminalReplay { .. }
+            ServerEvent::ScreenUpdate { .. }
+                | ServerEvent::TerminalReplay { .. }
+                | ServerEvent::TerminalSnapshot { .. }
         ) {
             write_server_event_with_storage(
                 frame_writer,
@@ -1074,7 +1110,9 @@ where
                 let Some(target_sequence) = target_sequences.get(&pane_id).copied() else {
                     continue;
                 };
-                if after_sequence >= target_sequence {
+                if delivered_terminal_sequences.contains_key(&pane_id)
+                    && after_sequence >= target_sequence
+                {
                     continue;
                 }
                 let admitted = wait_for_visible_recovery_prefix(
@@ -1162,7 +1200,9 @@ fn should_forward_terminal_event(
     terminal_stream_selection: &TerminalStreamSelection,
 ) -> bool {
     match event {
-        ServerEvent::ScreenUpdate { pane_id, .. } | ServerEvent::TerminalReplay { pane_id, .. } => {
+        ServerEvent::ScreenUpdate { pane_id, .. }
+        | ServerEvent::TerminalReplay { pane_id, .. }
+        | ServerEvent::TerminalSnapshot { pane_id, .. } => {
             terminal_stream_selection.includes(*pane_id)
         }
         _ => true,
@@ -1324,6 +1364,18 @@ where
         })?;
         event = Arc::new(crate::text_trigger_config::snapshot(authority).await);
     }
+    if matches!(event.as_ref(), ServerEvent::BlockingErrorsSnapshot { .. }) {
+        let authority = state.ok_or_else(|| {
+            ilium_ipc::IpcError::Io(std::io::Error::other(
+                "Blocking error output requires server authority",
+            ))
+        })?;
+        // Attach/lag repair and older queued live events all use the same
+        // authority fence; a stale event cannot resurrect a recovered error.
+        event = Arc::new(ServerEvent::BlockingErrorsSnapshot {
+            errors: authority.blocking_errors_snapshot(),
+        });
+    }
     let preparation = codec_client(state, false)?;
     // Acquire the empty envelope before scarce codec credit. The raw event
     // already exists; preattachment cancellation still needs producer custody.
@@ -1449,6 +1501,11 @@ fn record_delivered_terminal_sequence(
             pane_id,
             through_sequence,
             ..
+        }
+        | ServerEvent::TerminalSnapshot {
+            pane_id,
+            through_sequence,
+            ..
         } => (*pane_id, *through_sequence),
         _ => return,
     };
@@ -1469,6 +1526,11 @@ fn is_redundant_terminal_event(
             pane_id, sequence, ..
         } => (*pane_id, *sequence),
         ServerEvent::TerminalReplay {
+            pane_id,
+            through_sequence,
+            ..
+        }
+        | ServerEvent::TerminalSnapshot {
             pane_id,
             through_sequence,
             ..
@@ -2075,18 +2137,24 @@ mod tests {
         };
         let (prefix_sequence, prefix_bytes) = timeout(Duration::from_secs(5), async {
             loop {
-                let replay = handlers::initial_state_events(&state, false, true)
-                    .await
-                    .into_iter()
-                    .find(|event| matches!(event, ServerEvent::TerminalReplay { pane_id: id, .. } if *id == pane_id));
-                if let Some(ServerEvent::TerminalReplay {
-                    through_sequence,
-                    bytes,
-                    is_complete: true,
-                    ..
-                }) = replay
-                {
-                    if bytes.windows(b"writer-prefix".len()).any(|window| window == b"writer-prefix") {
+                // Attach now sends a screen snapshot, so the full raw journal
+                // this test frames by hand comes from recovery after zero.
+                let replay = match handlers::terminal_recovery_event(&state, pane_id, 0).await {
+                    Some(ServerEvent::ScreenUpdate {
+                        sequence, bytes, ..
+                    }) => Some((sequence, bytes)),
+                    Some(ServerEvent::TerminalReplay {
+                        through_sequence,
+                        bytes,
+                        ..
+                    }) => Some((through_sequence, bytes)),
+                    _ => None,
+                };
+                if let Some((through_sequence, bytes)) = replay {
+                    if bytes
+                        .windows(b"writer-prefix".len())
+                        .any(|window| window == b"writer-prefix")
+                    {
                         break (through_sequence, bytes);
                     }
                 }
@@ -2111,26 +2179,32 @@ mod tests {
         );
         let (full_sequence, full_bytes, missing_tail) = timeout(Duration::from_secs(5), async {
             loop {
-                let replay = handlers::initial_state_events(&state, false, true)
-                    .await
-                    .into_iter()
-                    .find(|event| matches!(event, ServerEvent::TerminalReplay { pane_id: id, .. } if *id == pane_id));
-                if let Some(ServerEvent::TerminalReplay {
-                    through_sequence,
-                    bytes,
-                    is_complete: true,
-                    ..
-                }) = replay
-                {
+                // Attach now sends a screen snapshot, so the full raw journal
+                // this test frames by hand comes from recovery after zero.
+                let replay = match handlers::terminal_recovery_event(&state, pane_id, 0).await {
+                    Some(ServerEvent::ScreenUpdate {
+                        sequence, bytes, ..
+                    }) => Some((sequence, bytes)),
+                    Some(ServerEvent::TerminalReplay {
+                        through_sequence,
+                        bytes,
+                        ..
+                    }) => Some((through_sequence, bytes)),
+                    _ => None,
+                };
+                if let Some((through_sequence, bytes)) = replay {
                     if through_sequence > prefix_sequence
-                        && bytes.windows(b"writer-tail".len()).any(|window| window == b"writer-tail")
+                        && bytes
+                            .windows(b"writer-tail".len())
+                            .any(|window| window == b"writer-tail")
                     {
                         if let Some(ServerEvent::ScreenUpdate {
                             first_sequence,
                             sequence,
                             bytes: tail,
                             ..
-                        }) = handlers::terminal_recovery_event(&state, pane_id, prefix_sequence).await
+                        }) = handlers::terminal_recovery_event(&state, pane_id, prefix_sequence)
+                            .await
                         {
                             let mut joined = prefix_bytes.clone();
                             joined.extend_from_slice(&tail);
@@ -2383,6 +2457,89 @@ mod text_trigger_writer_tests {
         initialize_fixture_execution(&state);
         (state, Task(sound_task))
     }
+    #[tokio::test]
+    async fn slow_repository_query_does_not_block_following_tree_mutation() {
+        let directory = tempfile::tempdir().unwrap();
+        assert!(std::process::Command::new("git")
+            .arg("init")
+            .arg(directory.path())
+            .status()
+            .unwrap()
+            .success());
+        assert!(std::process::Command::new("git")
+            .arg("-C")
+            .arg(directory.path())
+            .args([
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "commit",
+                "--allow-empty",
+                "-m",
+                "initial"
+            ])
+            .status()
+            .unwrap()
+            .success());
+        let (state, _sounds) = state_at(directory.path());
+        let repository = ilium_git::discover(directory.path()).await.unwrap();
+        let lock = state
+            .workspace_repository_lock(&repository.common_dir)
+            .await;
+        let blocked_repository = lock.lock().await;
+        let mut events = state.events.subscribe_owned();
+        let (client, server) = duplex(16384);
+        let (replies, mut reply_events) = DirectEventSender::channel(16);
+        let (phase, _phase_receiver) = watch::channel(AttachPhase::Ready);
+        let (controls, mut control_events) = mpsc::channel::<StreamControlCommand>(8);
+        let mut control_task = Task(tokio::spawn(async move {
+            while let Some(control) = control_events.recv().await {
+                let _ = control.applied.send(());
+            }
+        }));
+        let mut reader = Task(tokio::spawn(read_requests(
+            state.clone(),
+            server,
+            replies,
+            phase,
+            controls,
+        )));
+        let mut requests = FrameWriter::new(client);
+        requests
+            .write(&ClientRequest::QueryRepoFacts {
+                request_id: 71,
+                project: ilium_core::ROOT_ID,
+            })
+            .await
+            .unwrap();
+        requests
+            .write(&ClientRequest::NewGroup {
+                parent_group: ilium_core::ROOT_ID,
+                name: "responsive".into(),
+            })
+            .await
+            .unwrap();
+        let event = timeout(WAIT, events.recv())
+            .await
+            .expect("tree mutation stalled behind repository query")
+            .unwrap();
+        assert!(matches!(event, ServerEvent::TreeSnapshot(_)));
+        let tree = state.tree.read().await;
+        assert!(tree
+            .all_ids()
+            .any(|id| tree.get(id).is_some_and(|node| node.name == "responsive")));
+        drop(tree);
+        assert!(
+            reply_events.try_recv().is_err(),
+            "blocked query must not have completed"
+        );
+        drop(requests);
+        reader.joined().await;
+        control_task.joined().await;
+        drop(blocked_repository);
+    }
+
     async fn accept(state: &ServerState, message: &str, revision: u64) {
         let mut current = state.text_trigger_settings.write().await;
         current.settings = rules(message);
@@ -2524,6 +2681,49 @@ mod text_trigger_writer_tests {
         }
         assert!(saw_rules);
         assert_eq!(read(&mut client).await, event("B"));
+    }
+
+    #[tokio::test]
+    async fn blocking_error_lag_repair_and_queued_old_event_use_current_authority() {
+        let directory = tempfile::tempdir().unwrap();
+        let (state, _sound) = state_at(directory.path());
+        state.record_blocking_error(None, "launch", "launch refused");
+        let stale = ServerEvent::BlockingErrorsSnapshot {
+            errors: state.blocking_errors_snapshot(),
+        };
+        state.clear_blocking_error(None, "launch");
+        let (server, mut client) = duplex(64 * 1024);
+        let mut writer = FrameWriter::new(server);
+        let mut sequences = HashMap::new();
+        let expected = handlers::resynchronization_events(&state, &sequences)
+            .await
+            .len();
+        assert!(
+            write_resynchronization(
+                &mut writer,
+                &state,
+                &mut sequences,
+                &TerminalStreamSelection::None
+            )
+            .await
+        );
+        write_server_event(&mut writer, stale, &mut sequences, Some(&state))
+            .await
+            .unwrap();
+        let mut saw_empty_snapshot = false;
+        for _ in 0..expected {
+            if let ServerEvent::BlockingErrorsSnapshot { errors } = read(&mut client).await {
+                assert!(errors.is_empty());
+                saw_empty_snapshot = true;
+            }
+        }
+        assert!(
+            saw_empty_snapshot,
+            "lag repair must replay the current empty error set"
+        );
+        assert!(
+            matches!(read(&mut client).await, ServerEvent::BlockingErrorsSnapshot { errors } if errors.is_empty())
+        );
     }
 
     #[tokio::test]

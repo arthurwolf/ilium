@@ -1,0 +1,198 @@
+{
+  "api": "ilium:plugin@0.1.0",
+  "id": "ilium.core.session-convert",
+  "name": "Session convert",
+  "version": "0.1.0",
+  "publisher": "Ilium",
+  "description": "Session conversion lets a conversation continue under the other agent.",
+  "license": "MIT",
+  "server": {
+    "entry": "server.wasm",
+    "world": "ilium:server/base@0.1.0",
+    "exports": [
+      "job-runner",
+      "service-provider"
+    ]
+  },
+  "client": {
+    "entry": "client.wasm",
+    "world": "ilium:client/base@0.1.0",
+    "exports": [
+      "views",
+      "menu-provider"
+    ]
+  },
+  "unstable": [
+    "plugin-services"
+  ],
+  "capabilities": {
+    "server": [
+      "panes.read",
+      "panes.lifecycle",
+      "panes.create",
+      "tree.write",
+      "agent.read",
+      "fs.read:agent-sessions:claude",
+      "fs.read:agent-sessions:codex",
+      "fs.write:agent-config:claude",
+      "process.run:codex",
+      "process.long-lived",
+      "jobs.run",
+      "notify.toast",
+      "services.provide:ilium.core.session-convert/convert",
+      "extensions.provide:ilium.core.session-convert/formats",
+      "extensions.provide:ilium.core.session-convert/after-convert"
+    ],
+    "client": [
+      "agent.read",
+      "ui.panels"
+    ]
+  },
+  "activation": [
+    "command:convert",
+    "service:convert",
+    "view:session-convert.progress"
+  ],
+  "replaceable": true,
+  "surface": [
+    "services:convert",
+    "points:formats",
+    "points:after-convert",
+    "commands:convert"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "id": "convert",
+        "title": "Convert session",
+        "category": "Agents"
+      }
+    ],
+    "context_menu": [
+      {
+        "id": "pane-convert",
+        "applies_to": [
+          "pane"
+        ],
+        "dynamic": true,
+        "command": "convert"
+      }
+    ],
+    "panels": [
+      {
+        "id": "progress",
+        "title": "Convert session",
+        "modal": true
+      }
+    ],
+    "jobs": [
+      {
+        "kind": "codex-to-claude",
+        "deadline_ms": 60000,
+        "memory_mib": 256
+      }
+    ],
+    "services": {
+      "ilium.core.session-convert/convert": {
+        "start": {
+          "params": {
+            "type": "object",
+            "required": [
+              "pane",
+              "target"
+            ],
+            "properties": {
+              "pane": {
+                "type": "integer"
+              },
+              "target": {
+                "type": "string",
+                "enum": [
+                  "codex",
+                  "claude"
+                ]
+              }
+            }
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "conversion": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "conversion"
+            ]
+          }
+        }
+      }
+    },
+    "extension_points": [
+      {
+        "id": "formats",
+        "kind": "collect",
+        "title": "Transcript formats",
+        "entry_schema": {
+          "type": "object",
+          "required": [
+            "id",
+            "title",
+            "direction",
+            "service"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "direction": {
+              "type": "string",
+              "enum": [
+                "read",
+                "write",
+                "both"
+              ]
+            },
+            "service": {
+              "type": "string"
+            }
+          }
+        },
+        "max_entries": 8,
+        "dynamic": false,
+        "version": "0.1.0"
+      },
+      {
+        "id": "after-convert",
+        "kind": "hook",
+        "mode": "observe",
+        "title": "After conversion",
+        "payload_schema": {
+          "type": "object",
+          "properties": {
+            "from": {
+              "type": "string"
+            },
+            "to": {
+              "type": "string"
+            },
+            "messages": {
+              "type": "integer"
+            },
+            "path": {
+              "type": "string"
+            }
+          }
+        },
+        "risk": "standard",
+        "deadline_ms": 20,
+        "max_handlers": 8,
+        "version": "0.1.0"
+      }
+    ]
+  },
+  "limits_tier": "first-party"
+}
