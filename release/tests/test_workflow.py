@@ -1084,6 +1084,9 @@ class PipelineTests(unittest.TestCase):
             lambda marker: marker['host_events'].insert(3, {'type': 'warning', 'message': 'unknown'}),
             lambda marker: marker['host_events'][1].__setitem__('format', 'snap'),
             lambda marker: marker['host_events'][0].__setitem__('sha256', 'f' * 64),
+            lambda marker: marker['host_events'][0].__setitem__('bytes', 0),  # Reject a journal length that differs from canonical proof bytes.
+            lambda marker: marker['host_events'][0].__setitem__('path', r'C:\synthetic\deb-host-installed-animation.json'),  # Reject Windows-drive evidence for a Linux target.
+            lambda marker: marker['host_events'][2].__setitem__('log', r'C:\synthetic\deb-host.log'),  # Keep the terminal log in the same strict target path domain.
             lambda marker: marker['host_events'][2].__setitem__('log', '/tmp/foreign/deb-host.log'),
         )
         for mutate in mutations:
@@ -1137,6 +1140,7 @@ class PipelineTests(unittest.TestCase):
                               archive=native / target['archive'], packages=packages,
                               target=target_name, tag='v0.1.0',
                               windows_journal=None, container_log=None, host_log=None, native_sandbox_receipt=None)
+                retained_paths: dict[str, Path] = {}  # Map only exact synthetic Linux journal names to local retained paths.
                 if target['os'] == 'windows':
                     journal = log / 'smoke.jsonl'
                     journal.write_text(''.join(json.dumps(row) + '\n' for row in marker['journal']))
@@ -1144,11 +1148,9 @@ class PipelineTests(unittest.TestCase):
                 else:
                     container_log = log / 'container'; container_log.mkdir()
                     host_log = log / 'host'; host_log.mkdir()
-                    for offset, kind in enumerate(animation_smoke.HOST_FORMATS):
-                        marker['host_events'][3 * offset]['path'] = str(
-                            host_log / (kind + '-host-installed-animation.json'))
-                        marker['host_events'][3 * offset + 2]['log'] = str(
-                            host_log / (kind + '-host.log'))
+                    for kind in animation_smoke.HOST_FORMATS:  # Keep the original Linux journal metadata POSIX on every host.
+                        for suffix in ('-host-installed-animation.json', '-host.log'):  # Enumerate only the eight expected fixture aliases.
+                            retained_paths['/tmp/synthetic-host-logs/' + kind + suffix] = host_log / (kind + suffix)  # Adapt test storage without normalizing evidence.
                     for label, proof in marker['containers'].items():
                         (container_log / (label + '-installed-animation.json')).write_text(
                             json.dumps(proof) + '\n')
@@ -1166,23 +1168,36 @@ class PipelineTests(unittest.TestCase):
                     pipeline.write_json(sandbox_receipt, marker['native_sandbox'])
                     inputs['native_sandbox_receipt'] = sandbox_receipt
                     inputs['container_log'], inputs['host_log'] = container_log, host_log
-                with patch.object(animation_smoke.platform, 'system', return_value=
-                                  {'windows': 'Windows', 'linux': 'Linux'}[target['os']]), \
-                     patch.object(animation_smoke.platform, 'machine', return_value=target['arch']), \
-                     patch.object(release_tool, 'emit'):
-                    animation_smoke.seal(SimpleNamespace(**inputs))
+                def fixture_path(value: str | os.PathLike[str]) -> Path:  # Bridge synthetic target names to real test storage only.
+                    if isinstance(value, str) and value in retained_paths:  # Never resolve or normalize foreign or traversal spellings.
+                        return retained_paths[value]  # Return the exact local path assigned to this fixture record.
+                    return Path(value)  # Preserve every ordinary filesystem operation and every unrecognized path.
+                def seal_fixture() -> None:  # Run all production validators against inert test evidence.
+                    with (  # Scope path translation and existing identity simulation to this fixture call.
+                        patch.object(animation_smoke.platform, 'system', return_value={'windows': 'Windows', 'linux': 'Linux'}[target['os']]),  # Simulate the target identity without claiming native execution.
+                        patch.object(animation_smoke.platform, 'machine', return_value=target['arch']),  # Retain the selected fixture architecture.
+                        patch.object(animation_smoke, 'Path', side_effect=fixture_path),  # Map only the exact Linux journal aliases in this test.
+                        patch.object(release_tool, 'emit'),  # Keep synthetic receipts out of the user-facing release stream.
+                    ):  # Leave validation and byte/hash comparisons fully active.
+                        animation_smoke.seal(SimpleNamespace(**inputs))  # Exercise the unchanged production sealer.
+                seal_fixture()  # Require a complete valid fixture to seal before exercising mutations.
                 self.assertEqual(release_tool.read_json(marker_path), marker)
+                with (  # Confirm test-local identity simulation did not remove the native-only production boundary.
+                    patch.object(animation_smoke.platform, 'system', return_value='Darwin'),  # Both Linux and Windows package sealers must reject this foreign system.
+                    patch.object(animation_smoke.platform, 'machine', return_value=target['arch']),  # Keep architecture valid to isolate the platform rejection.
+                    self.assertRaisesRegex(ValueError, 'native package smoke seal ran on another platform'),  # Require the native custody gate itself to fail.
+                ):  # This call performs no target execution or publication.
+                    animation_smoke.seal(SimpleNamespace(**inputs))  # Fail before an existing output could mask the platform check.
                 if target['os'] == 'linux':
-                    foreign = deepcopy(marker['host_events'])
-                    foreign[0]['path'] = '/tmp/foreign/deb-host-installed-animation.json'
-                    foreign[2]['log'] = '/tmp/foreign/deb-host.log'
-                    (inputs['host_log'] / 'host-results.jsonl').write_text(
-                        ''.join(json.dumps(row) + '\n' for row in foreign))
-                    with patch.object(animation_smoke.platform, 'system', return_value='Linux'), \
-                         patch.object(animation_smoke.platform, 'machine', return_value=target['arch']), \
-                         patch.object(release_tool, 'emit'), \
-                         self.assertRaisesRegex(ValueError, 'another smoke log'):
-                        animation_smoke.seal(SimpleNamespace(**inputs))
+                    for foreign_root in ('/tmp/foreign', '/tmp/synthetic-host-logs/../synthetic-host-logs'):  # Reject both a foreign owner and an equivalent-looking traversal spelling.
+                        with self.subTest(foreign_root=foreign_root):  # Identify the exact custody rejection case.
+                            foreign = deepcopy(marker['host_events'])  # Leave the accepted fixture immutable.
+                            foreign[0]['path'] = foreign_root + '/deb-host-installed-animation.json'  # Keep the artifact and log coherent so custody must catch the change.
+                            foreign[2]['log'] = foreign_root + '/deb-host.log'  # Preserve the expected filename and sibling relationship.
+                            (inputs['host_log'] / 'host-results.jsonl').write_text(  # Replace only the retained synthetic journal.
+                                ''.join(json.dumps(row) + '\n' for row in foreign))  # Retain all proof bytes and digest fields.
+                            with self.assertRaisesRegex(ValueError, 'another smoke log'):  # Require the unchanged retained-directory ownership check.
+                                seal_fixture()  # Apply the exact same adapter used by the positive control.
                     (inputs['host_log'] / 'host-results.jsonl').write_text(
                         ''.join(json.dumps(row) + '\n' for row in marker['host_events']))
                 marker_path.unlink()
@@ -1190,11 +1205,8 @@ class PipelineTests(unittest.TestCase):
                     inputs['windows_journal'].write_text('{}\n')
                 else:
                     (inputs['host_log'] / 'flatpak-host-installed-animation.json').unlink()
-                with patch.object(animation_smoke.platform, 'system', return_value=
-                                  {'windows': 'Windows', 'linux': 'Linux'}[target['os']]), \
-                     patch.object(animation_smoke.platform, 'machine', return_value=target['arch']), \
-                     patch.object(release_tool, 'emit'), self.assertRaises((ValueError, OSError)):
-                    animation_smoke.seal(SimpleNamespace(**inputs))
+                with self.assertRaises((ValueError, OSError)):  # Keep malformed Windows and missing Linux retained-proof rejections.
+                    seal_fixture()  # Reuse the same production validation and fixture path boundary.
 
     def test_aggregate_publishes_all_ten_bound_macos_assets_and_rejects_each_changed_file(self):
         packages = pipeline.macos_packages
