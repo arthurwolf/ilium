@@ -15,7 +15,7 @@ use portable_pty::{native_pty_system, Child, CommandBuilder, ExitStatus, PtySize
 use tokio::sync::{broadcast, watch};
 
 use crate::admission::PtyWorkerReservations;
-use crate::error::PtyError;
+use crate::error::{PtyCaptureError, PtyError};
 use crate::owner::{OwnerLimits, PtyInput, PtyOwner, TerminalState};
 use crate::query::TerminalQueryResponder;
 use crate::screen_reader::ScreenReader;
@@ -356,6 +356,113 @@ pub struct PtyScreenSnapshot {
     pub bytes: Vec<u8>,
     /// False when the retention cap dropped output older than this screen.
     pub is_complete: bool,
+}
+
+/// Adapter-owned read handle. It cannot resize, mutate or spawn a PTY. Keeping
+/// the handle alive pins its exact parser/journal pair across an async retry.
+#[derive(Clone)]
+pub struct PtyCaptureHandle {
+    parser: Arc<RwLock<vt100::Parser<TerminalQueryResponder>>>,
+    output_journal: Arc<Mutex<OutputJournal>>,
+    input: PtyInput,
+}
+
+impl PtyCaptureHandle {
+    pub fn input_handle(&self) -> PtyInput {
+        self.input.clone()
+    }
+
+    /// Nonblocking screen capture for async coordination callers. Busy is
+    /// distinct from an unavailable parser: do not fall back to blocking replay
+    /// while a native resize/output operation still owns the parser.
+    pub fn try_attach_snapshot(&self) -> Result<PtyScreenSnapshot, PtyCaptureError> {
+        try_capture_snapshot(&self.parser, &self.output_journal)
+    }
+
+    /// Nonblocking companions preserve the same sequence/retention validation
+    /// as their synchronous counterparts; no bytes are copied on lock refusal.
+    pub fn try_output_replay_estimate(&self) -> Result<PtyOutputReplayEstimate, PtyCaptureError> {
+        try_capture_journal(&self.output_journal, OutputJournal::replay_estimate)
+    }
+
+    pub fn try_output_replay_through_if_retained(
+        &self,
+        expected: PtyOutputReplayEstimate,
+    ) -> Result<Option<PtyOutputReplay>, PtyCaptureError> {
+        try_capture_journal(&self.output_journal, |journal| {
+            journal.replay_through_if_retained(expected)
+        })
+    }
+
+    pub fn try_output_recovery_estimate_after(
+        &self,
+        after_sequence: u64,
+    ) -> Result<Option<PtyOutputRecoveryEstimate>, PtyCaptureError> {
+        try_capture_journal(&self.output_journal, |journal| {
+            journal.recovery_estimate_after(after_sequence)
+        })
+    }
+
+    pub fn try_output_recovery_if_unchanged(
+        &self,
+        after_sequence: u64,
+        expected: PtyOutputRecoveryEstimate,
+    ) -> Result<Option<PtyOutputRecovery>, PtyCaptureError> {
+        try_capture_journal(&self.output_journal, |journal| {
+            journal.recovery_if_unchanged(after_sequence, expected)
+        })
+    }
+
+    pub fn try_output_recovery_prefix_after(
+        &self,
+        after_sequence: u64,
+        max_bytes: usize,
+    ) -> Result<Option<PtyOutputRecovery>, PtyCaptureError> {
+        try_capture_journal(&self.output_journal, |journal| {
+            journal.recovery_prefix_after(after_sequence, max_bytes)
+        })
+    }
+
+    pub fn try_output_recovery_prefix_through(
+        &self,
+        after_sequence: u64,
+        through_sequence: u64,
+        max_bytes: usize,
+    ) -> Result<Option<PtyOutputRecovery>, PtyCaptureError> {
+        try_capture_journal(&self.output_journal, |journal| {
+            journal.recovery_prefix_through(after_sequence, through_sequence, max_bytes)
+        })
+    }
+}
+
+/// Capture the same parser/journal pair as `attach_snapshot` without waiting
+/// for either native-owner lock. Parser-before-journal ordering is mandatory:
+/// holding the parser read guard fences every journal publication it covers.
+fn try_capture_snapshot<Callbacks: vt100::Callbacks>(
+    parser: &RwLock<vt100::Parser<Callbacks>>,
+    journal: &Mutex<OutputJournal>,
+) -> Result<PtyScreenSnapshot, PtyCaptureError> {
+    let parser = parser.try_read().map_err(|error| match error {
+        std::sync::TryLockError::WouldBlock => PtyCaptureError::ParserBusy,
+        std::sync::TryLockError::Poisoned(_) => PtyCaptureError::ParserPoisoned,
+    })?;
+    let estimate = try_capture_journal(journal, OutputJournal::replay_estimate)?;
+    Ok(PtyScreenSnapshot {
+        through_sequence: estimate.through_sequence,
+        bytes: crate::screen_snapshot::snapshot_bytes(parser.screen()),
+        is_complete: estimate.is_complete,
+    })
+}
+
+fn try_capture_journal<T>(
+    journal: &Mutex<OutputJournal>,
+    capture: impl FnOnce(&OutputJournal) -> T,
+) -> Result<T, PtyCaptureError> {
+    let journal = journal.try_lock().map_err(|error| match error {
+        std::sync::TryLockError::WouldBlock => PtyCaptureError::JournalBusy,
+        std::sync::TryLockError::Poisoned(_) => PtyCaptureError::JournalPoisoned,
+    })?;
+    Ok(capture(&journal))
 }
 
 /// Retained raw output older than some sequence, oldest first.
@@ -1446,6 +1553,16 @@ impl PtySession {
         })
     }
 
+    /// Copies only shared ownership handles, never terminal payloads. Capture
+    /// and retry through this handle after releasing server registry guards.
+    pub fn capture_handle(&self) -> PtyCaptureHandle {
+        PtyCaptureHandle {
+            parser: Arc::clone(&self.parser),
+            output_journal: Arc::clone(&self.output_journal),
+            input: self.input_handle(),
+        }
+    }
+
     /// Copies up to `max_bytes` of retained output older than
     /// `before_sequence`, newest chunks first, returned oldest first. A client
     /// that scrolls past its attach snapshot asks for this in pieces. At least
@@ -1781,6 +1898,68 @@ mod tests {
         assert!(
             proof.signalled_processes >= 2,
             "shell and background child must both be signalled"
+        );
+    }
+
+    #[test]
+    fn nonblocking_snapshot_refuses_a_held_native_parser_without_journal_fallback() {
+        let parser = RwLock::new(vt100::Parser::new(24, 80, 0));
+        let journal = Mutex::new(journal());
+        let parser_write = parser.write().unwrap();
+        let journal_write = journal.lock().unwrap();
+        assert_eq!(
+            try_capture_snapshot(&parser, &journal),
+            Err(PtyCaptureError::ParserBusy),
+        );
+        drop(parser_write);
+        assert_eq!(
+            try_capture_snapshot(&parser, &journal),
+            Err(PtyCaptureError::JournalBusy),
+        );
+        drop(journal_write);
+        assert_eq!(
+            try_capture_snapshot(&parser, &journal)
+                .unwrap()
+                .through_sequence,
+            0
+        );
+    }
+
+    #[test]
+    fn nonblocking_snapshot_pairs_the_committed_screen_with_its_journal_sequence() {
+        let parser = RwLock::new(vt100::Parser::new(24, 80, 0));
+        let journal = Mutex::new(journal());
+        {
+            let mut parser = parser.write().unwrap();
+            parser.process(b"committed terminal marker");
+            journal.lock().unwrap().append(b"committed terminal marker");
+        }
+        let snapshot = try_capture_snapshot(&parser, &journal).unwrap();
+        assert_eq!(snapshot.through_sequence, 1);
+        let mut reconstructed = vt100::Parser::new(24, 80, 0);
+        reconstructed.process(&snapshot.bytes);
+        assert!(reconstructed
+            .screen()
+            .contents()
+            .contains("committed terminal marker"));
+    }
+
+    #[test]
+    fn nonblocking_journal_capture_reports_busy_and_poison_separately() {
+        let journal = Mutex::new(journal());
+        let held = journal.lock().unwrap();
+        assert_eq!(
+            try_capture_journal(&journal, OutputJournal::replay_estimate),
+            Err(PtyCaptureError::JournalBusy),
+        );
+        drop(held);
+        let _ = std::panic::catch_unwind(|| {
+            let _held = journal.lock().unwrap();
+            panic!("poison the synthetic journal fixture");
+        });
+        assert_eq!(
+            try_capture_journal(&journal, OutputJournal::replay_estimate),
+            Err(PtyCaptureError::JournalPoisoned),
         );
     }
 

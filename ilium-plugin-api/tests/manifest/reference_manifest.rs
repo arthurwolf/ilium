@@ -2,12 +2,12 @@
 //! (PKG-013..PKG-035). Expected values come from the rule tables of that page and from the
 //! mapping of reference-manifest-schema.md (PKG-562).
 
-use ilium_plugin_api::Tier;
 use ilium_plugin_api::manifest::{
-    CheckMode, DEFAULT_DATA_VERSION, Manifest, Stage, parse_manifest, validate_json,
+    parse_manifest, validate_json, CheckMode, Manifest, Stage, DEFAULT_DATA_VERSION,
 };
+use ilium_plugin_api::Tier;
 use proptest::prelude::*;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use crate::support::*;
 

@@ -1195,18 +1195,23 @@ mod tests {
     async fn directory_users_runs_through_bounded_io_and_retains_process_evidence() {
         let client = crate::execution::test_general_client();
         let root = std::env::current_dir().unwrap();
-        // The scan walks every same-user /proc entry. A same-user process can
-        // refuse cwd inspection (for example a non-dumpable service), and the
-        // scan then fails closed rather than returning a partial list. Accept
-        // only that outcome; a complete scan must report this process.
+        // The host-wide scan can refuse inspection because of permissions or
+        // its fixed deadline, especially during parallel tests. These known
+        // failures must remain errors, never a successful partial user list.
+        // A complete scan must still report this live process.
         match directory_users(&client, &root).await {
             Ok(users) => assert!(
                 users.view().contains(&std::process::id()),
                 "the live test process cwd must be reported by the admitted scan"
             ),
             Err(error) => assert!(
-                error.contains("Permission denied"),
-                "an incomplete scan must fail closed with a permission error, got: {error}"
+                error.contains("Permission denied")
+                    || matches!(
+                        error.as_str(),
+                        "worktree process scan job failed: execution callback failed: process cwd inspection exceeded its deadline"
+                            | "worktree process scan job failed: execution callback failed: process file-descriptor inspection exceeded its deadline"
+                    ),
+                "an incomplete scan must return a known fail-closed inspection error, got: {error}"
             ),
         }
     }

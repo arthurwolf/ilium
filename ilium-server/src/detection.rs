@@ -103,6 +103,9 @@ async fn supervise_loop(state: std::sync::Arc<ServerState>) {
             Err(error) if error.is_cancelled() => return,
             Err(error) => {
                 tracing::error!("agent detection loop panicked and is restarting: {error}");
+                // A deterministic native failure must not respawn tasks in a
+                // tight loop and starve IPC/input on the same runtime.
+                tokio::time::sleep(TICK_FAILURE_BACKOFF_INITIAL).await;
             }
         }
     }
@@ -258,16 +261,21 @@ async fn run_loop(state: std::sync::Arc<ServerState>) {
         // Sleep to the exact nearest pane deadline. New panes and debounced
         // force-checks notify this loop, so an earlier deadline interrupts
         // the sleep immediately without a fixed polling granularity.
+        // Register before inspecting the schedule: a pane/focus update may
+        // notify while next_detection_delay is awaiting registry locks.
+        let schedule_changed = state.detection_schedule_changed.notified();
+        tokio::pin!(schedule_changed);
+        schedule_changed.as_mut().enable();
         match next_detection_delay(&state, Instant::now()).await {
             Some(delay) if !delay.is_zero() => {
                 tokio::select! {
                     () = tokio::time::sleep(delay) => {}
-                    () = state.detection_schedule_changed.notified() => continue,
+                    () = &mut schedule_changed => continue,
                 }
             }
             Some(_) => {}
             None => {
-                state.detection_schedule_changed.notified().await;
+                schedule_changed.await;
                 continue;
             }
         }

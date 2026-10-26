@@ -60,7 +60,16 @@ fn lif_117_batch_of_255_entries_is_applied() {
 fn lif_117_batch_of_exactly_4_mib_is_applied() {
     let (_rig, server) = started();
     // Four one-byte keys keep every value within its independent 1 MiB cap.
-    let batch: Vec<_> = ["a", "b", "c", "d"].into_iter().enumerate().map(|(index,key)| (key.to_owned(), Some(vec![0; MIB as usize - if index == 3 { 4 } else { 0 }]))).collect();
+    let batch: Vec<_> = ["a", "b", "c", "d"]
+        .into_iter()
+        .enumerate()
+        .map(|(index, key)| {
+            (
+                key.to_owned(),
+                Some(vec![0; MIB as usize - if index == 3 { 4 } else { 0 }]),
+            )
+        })
+        .collect();
     server
         .storage(NOTES)
         .write_batch(Bucket::Global, &batch)
@@ -72,7 +81,16 @@ fn lif_117_batch_of_exactly_4_mib_is_applied() {
 fn lif_117_batch_one_byte_over_4_mib_is_invalid_argument() {
     let (_rig, server) = started();
     // Four one-byte keys keep every value within its independent 1 MiB cap.
-    let batch: Vec<_> = ["a", "b", "c", "d"].into_iter().enumerate().map(|(index,key)| (key.to_owned(), Some(vec![0; MIB as usize - if index == 3 { 3 } else { 0 }]))).collect();
+    let batch: Vec<_> = ["a", "b", "c", "d"]
+        .into_iter()
+        .enumerate()
+        .map(|(index, key)| {
+            (
+                key.to_owned(),
+                Some(vec![0; MIB as usize - if index == 3 { 3 } else { 0 }]),
+            )
+        })
+        .collect();
     let error = server
         .storage(NOTES)
         .write_batch(Bucket::Global, &batch)
@@ -85,7 +103,16 @@ fn lif_117_batch_one_byte_over_4_mib_is_invalid_argument() {
 fn lif_117_batch_one_byte_under_4_mib_is_applied() {
     let (_rig, server) = started();
     // Four one-byte keys keep every value within its independent 1 MiB cap.
-    let batch: Vec<_> = ["a", "b", "c", "d"].into_iter().enumerate().map(|(index,key)| (key.to_owned(), Some(vec![0; MIB as usize - if index == 3 { 5 } else { 0 }]))).collect();
+    let batch: Vec<_> = ["a", "b", "c", "d"]
+        .into_iter()
+        .enumerate()
+        .map(|(index, key)| {
+            (
+                key.to_owned(),
+                Some(vec![0; MIB as usize - if index == 3 { 5 } else { 0 }]),
+            )
+        })
+        .collect();
     server
         .storage(NOTES)
         .write_batch(Bucket::Global, &batch)

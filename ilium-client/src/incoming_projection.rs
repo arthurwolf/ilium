@@ -8,6 +8,34 @@ use ilium_core::{NodeId, Tree};
 use ilium_ipc::ServerEvent;
 use std::{collections::HashMap, mem::Discriminant};
 
+/// Preserve immutable impossibility separately from occupancy contention.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum ProjectionAdmissionError {
+    Storage(crate::ipc_preparation::StorageRefusal),
+    Rejected(ilium_execution::RejectReason),
+}
+impl ProjectionAdmissionError {
+    pub(crate) fn reason(self) -> ilium_execution::RejectReason {
+        match self {
+            Self::Storage(error) => error.reason(),
+            Self::Rejected(reason) => reason,
+        }
+    }
+    pub(crate) fn is_permanent(self) -> bool {
+        matches!(self, Self::Storage(error) if error.is_permanent())
+    }
+}
+impl From<ilium_execution::RejectReason> for ProjectionAdmissionError {
+    fn from(reason: ilium_execution::RejectReason) -> Self {
+        Self::Rejected(reason)
+    }
+}
+impl From<crate::ipc_preparation::StorageRefusal> for ProjectionAdmissionError {
+    fn from(error: crate::ipc_preparation::StorageRefusal) -> Self {
+        Self::Storage(error)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 enum Slot {
     Tree,
@@ -194,10 +222,16 @@ impl ProjectionRetention {
         event: &ServerEvent,
         app: &mut App,
         owner: Option<&EventRetention>,
-    ) -> Result<ProjectionUpdate, ilium_execution::RejectReason> {
+    ) -> Result<ProjectionUpdate, ProjectionAdmissionError> {
         let result = Self::prepare_owned_inner(event, app, owner);
         if let Some(owner) = owner {
-            owner.note_projection_result(result.as_ref().err().copied());
+            owner.note_projection_result(
+                result
+                    .as_ref()
+                    .err()
+                    .copied()
+                    .map(ProjectionAdmissionError::reason),
+            );
         }
         result
     }
@@ -205,23 +239,58 @@ impl ProjectionRetention {
         event: &ServerEvent,
         app: &mut App,
         owner: Option<&EventRetention>,
-    ) -> Result<ProjectionUpdate, ilium_execution::RejectReason> {
+    ) -> Result<ProjectionUpdate, ProjectionAdmissionError> {
         let mut update = Self::prepare(event, app);
-        if let Some(bytes) = app.incoming_derivation_bytes(event) {
-            let owner = owner.ok_or(ilium_execution::RejectReason::InvalidCost)?;
-            update.derived_retention = Some(owner.try_reserve_derived(bytes)?);
-        }
+        let derivation_bytes = app.incoming_derivation_bytes(event);
         let registry = &mut app.incoming_projection;
         let target = registry
             .owners
             .len()
             .checked_add(update.keys.len())
-            .ok_or(ilium_execution::RejectReason::WorkerBytes)?;
-        if target > registry.owners.capacity() {
-            let owner = owner.ok_or(ilium_execution::RejectReason::InvalidCost)?;
-            let bytes =
-                metadata_layout(target).ok_or(ilium_execution::RejectReason::WorkerBytes)?;
-            let credit = owner.try_reserve_derived(bytes)?;
+            .ok_or(crate::ipc_preparation::StorageRefusal::SizeOverflow)?;
+        let metadata_bytes = if target > registry.owners.capacity() {
+            Some(
+                metadata_layout(target)
+                    .ok_or(crate::ipc_preparation::StorageRefusal::SizeOverflow)?,
+            )
+        } else {
+            None
+        };
+        let overflow = crate::ipc_preparation::StorageRefusal::SizeOverflow;
+        let mut required = 0usize;
+        for bytes in [derivation_bytes, metadata_bytes].into_iter().flatten() {
+            required = required
+                .checked_add(bytes.checked_add(512).ok_or(overflow)?)
+                .ok_or(overflow)?;
+        }
+        if metadata_bytes.is_some() {
+            // The old table's debit cannot retire until new table allocation
+            // succeeds. Its lifetime is independent of the original payload.
+            required = required
+                .checked_add(
+                    registry
+                        .metadata_retention
+                        .as_ref()
+                        .map_or(0, EventRetention::declared_bytes),
+                )
+                .ok_or(overflow)?;
+        }
+        if required != 0 {
+            owner
+                .ok_or(ilium_execution::RejectReason::InvalidCost)?
+                .validate_projection_overlap(required)?;
+        }
+        if let Some(bytes) = derivation_bytes {
+            update.derived_retention = Some(
+                owner
+                    .ok_or(ilium_execution::RejectReason::InvalidCost)?
+                    .try_reserve_projection(bytes)?,
+            );
+        }
+        if let Some(bytes) = metadata_bytes {
+            let credit = owner
+                .ok_or(ilium_execution::RejectReason::InvalidCost)?
+                .try_reserve_projection(bytes)?;
             registry
                 .owners
                 .try_reserve(update.keys.len())

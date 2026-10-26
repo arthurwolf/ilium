@@ -1454,6 +1454,11 @@ fn compute_drop_target(
     dragged_id: NodeId,
     drop_target: Option<NodeId>,
 ) -> Option<(NodeId, Option<usize>)> {
+    if tree.worktree_container_for_node(dragged_id).is_some()
+        || drop_target.is_some_and(|target| tree.worktree_container_for_node(target).is_some())
+    {
+        return None;
+    }
     let dragged_is_pane = matches!(
         tree.get(dragged_id).map(|node| &node.kind),
         Some(NodeKind::Pane { .. })
@@ -2360,6 +2365,45 @@ fn select_settings_pointer_tab(
 /// module doc comment for the shared layout/hit-test functions this
 /// reproduces no arithmetic of its own from.
 fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mouse: MouseEvent) {
+    if state.tree_layout_editor.is_some() {
+        let layout =
+            crate::settings_ui::compute_layout_for_mode(app.layout.screen_area, app, &state);
+        let position = Position::new(mouse.column, mouse.row);
+        if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
+            if crate::settings_ui::close_button_hit(layout.header_area, position) {
+                crate::tree_layout_settings::dismiss(app, &mut state);
+                app.mode = Mode::Normal;
+                return;
+            }
+            if let Some(tab) =
+                crate::settings_ui::tab_at_for_active(layout.tab_list_area, position, state.tab)
+                    .or_else(|| {
+                        crate::settings_ui::tab_scrollbar_target(layout.tab_list_area, position)
+                    })
+            {
+                crate::tree_layout_settings::dismiss(app, &mut state);
+                select_settings_pointer_tab(app, &mut state, tab, layout.content_area);
+            } else if layout.content_area.contains(position) {
+                let row = position.y.saturating_sub(layout.content_area.y + 2);
+                let editor_width = if layout.content_area.width < 86 {
+                    layout.content_area.width
+                } else {
+                    46
+                };
+                if row < 4 && position.x < layout.content_area.x.saturating_add(editor_width) {
+                    if let Some(editor) = state
+                        .tree_layout_editor
+                        .as_mut()
+                        .filter(|editor| !editor.moving)
+                    {
+                        editor.selected = usize::from(row);
+                    }
+                }
+            }
+        }
+        app.mode = Mode::Settings(Box::new(state));
+        return;
+    }
     let selected_before = state.selected_row;
     let position = Position::new(mouse.column, mouse.row);
     let mut layout =
@@ -3413,7 +3457,12 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                 ) {
                     state.selected_row = hit.index;
                     app.mode = Mode::Settings(Box::new(state));
-                    if app.cost_settings.number_spec(hit.row).is_none()
+                    if let Some(target) = hit.row.icon_target() {
+                        let Mode::Settings(state) = &mut app.mode else {
+                            unreachable!("settings mode was retained for the icon picker");
+                        };
+                        state.icon_picker = Some(crate::app::IconPickerState::new(target));
+                    } else if app.cost_settings.number_spec(hit.row).is_none()
                         && !crate::value_cost::is_choice(hit.row)
                     {
                         app.settings_adjust_cost_row(hit.row, hit.direction);
@@ -3900,6 +3949,39 @@ mod drop_target_tests {
             .add_pane(group_c, "d", ilium_core::PaneContentKind::Terminal)
             .unwrap();
         (tree, group_a, pane_b, group_c, pane_d)
+    }
+
+    #[test]
+    fn dragging_cannot_extract_an_agent_or_insert_foreign_nodes_into_a_worktree() {
+        let mut tree = Tree::new();
+        let project = tree
+            .add_project(std::path::PathBuf::from("/test/repo"))
+            .unwrap();
+        let member = tree
+            .add_pane(project, "agent", ilium_core::PaneContentKind::Terminal)
+            .unwrap();
+        let outsider = tree
+            .add_pane(project, "shell", ilium_core::PaneContentKind::Terminal)
+            .unwrap();
+        tree.set_pane_workspace(
+            member,
+            Some(ilium_core::PaneWorkspace {
+                workspace_id: None,
+                repo_common_dir: "/test/repo/.git".into(),
+                worktree_root: "/test/worktree".into(),
+                branch: "agent/shared".into(),
+                base_ref: "main".into(),
+                base_commit: "abc".into(),
+                created_by_ilium: false,
+                created_at_unix: 0,
+            }),
+        )
+        .unwrap();
+        let worktree = tree.parent_of(member).unwrap();
+        assert_eq!(compute_drop_target(&tree, member, Some(project)), None);
+        assert_eq!(compute_drop_target(&tree, worktree, Some(project)), None);
+        assert_eq!(compute_drop_target(&tree, outsider, Some(worktree)), None);
+        assert_eq!(compute_drop_target(&tree, outsider, Some(member)), None);
     }
 
     #[test]
@@ -4443,7 +4525,71 @@ mod tree_order_context_mouse_tests {
     }
 
     #[test]
-    fn hovering_agent_parent_opens_submenu_and_disabled_item_explains_itself() {
+    fn clicking_existing_worktree_opens_its_agent_dialog() {
+        let mut app = App::new("test-session".to_string(), std::env::temp_dir());
+        app.set_screen_area(Rect::new(0, 0, 100, 30));
+        app.open_context_menu(ROOT_ID, 2, 2);
+        let (parent_column, parent_row) = match &app.mode {
+            Mode::ContextMenu(menu) => {
+                let index = menu
+                    .actions
+                    .iter()
+                    .position(|action| {
+                        *action
+                            == crate::app::ContextMenuAction::NewAgent(
+                                ilium_core::BuiltinAgentProvider::Claude,
+                            )
+                    })
+                    .expect("New Agent should be available in the tree menu");
+                (
+                    menu.area.x + 1,
+                    menu.area.y + 1 + menu.layout().row_for_action(index).unwrap(),
+                )
+            }
+            _ => panic!("context menu should be open"),
+        };
+
+        click(&mut app, parent_column, parent_row);
+
+        let (existing_column, existing_row) = match &app.mode {
+            Mode::ContextMenu(menu) => {
+                let submenu = menu
+                    .submenu
+                    .as_ref()
+                    .expect("New Agent click should open its submenu");
+                let index = submenu
+                    .items
+                    .iter()
+                    .position(|item| {
+                        item.action
+                            == crate::app::SubmenuItemAction::AgentInExistingWorktree(
+                                ilium_core::BuiltinAgentProvider::Claude,
+                            )
+                    })
+                    .expect("existing worktree choice should be present");
+                (
+                    submenu.area.x + 1,
+                    submenu.area.y + 1 + submenu.layout().row_for_action(index).unwrap(),
+                )
+            }
+            _ => panic!("agent submenu should remain open"),
+        };
+
+        click(&mut app, existing_column, existing_row);
+
+        assert!(matches!(
+            &app.mode,
+            Mode::CreateAgentWorkspace(state)
+                if state.mode == crate::worktree_dialog::WorktreeDialogMode::Existing
+        ));
+        assert!(app
+            .take_outbound_requests()
+            .iter()
+            .any(|request| matches!(request, ilium_ipc::ClientRequest::QueryRepoFacts { .. })));
+    }
+
+    #[test]
+    fn hovering_agent_parent_opens_submenu_and_new_worktree_opens_dialog() {
         let mut app = App::new("test-session".to_string(), std::env::temp_dir());
         app.set_screen_area(Rect::new(0, 0, 100, 30));
         app.open_context_menu(ROOT_ID, 2, 2);
@@ -4491,11 +4637,15 @@ mod tree_order_context_mouse_tests {
             _ => panic!("context menu should remain open"),
         };
         click(&mut app, item_column, item_row);
-        assert!(matches!(app.mode, Mode::ContextMenu(_)));
-        assert_eq!(
-            app.status_message.as_deref(),
-            Some("Checking Git repository…")
-        );
+        assert!(matches!(
+            &app.mode,
+            Mode::CreateAgentWorkspace(state)
+                if state.mode == crate::worktree_dialog::WorktreeDialogMode::New
+        ));
+        assert!(matches!(
+            app.take_outbound_requests().as_slice(),
+            [ilium_ipc::ClientRequest::QueryRepoFacts { .. }]
+        ));
     }
 
     #[test]
@@ -4658,7 +4808,7 @@ mod markdown_board_context_mouse_tests {
         assert!(
             matches!(
                 requests.as_slice(),
-                [ilium_ipc::ClientRequest::QueryRepoFacts { .. }, ilium_ipc::ClientRequest::NewBoard {
+                [ilium_ipc::ClientRequest::NewBoard {
                     parent_group,
                     storage: ilium_core::BoardStorage::MarkdownFile { path: board_path },
                     ..

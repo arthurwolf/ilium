@@ -27,7 +27,11 @@ pub fn case_since(family: CaseFamily, case: &str) -> Option<ApiVersion> {
     };
     // Every currently generated case belongs to the first frozen contract.
     // Future additions must carry their own introduction version here.
-    cases.contains(&case).then_some(ApiVersion { major: 0, minor: 1, patch: 0 })
+    cases.contains(&case).then_some(ApiVersion {
+        major: 0,
+        minor: 1,
+        patch: 0,
+    })
 }
 
 /// ABI-029: the outcome as a plugin of `plugin_api` receives it; a newer case maps to the
@@ -48,10 +52,16 @@ pub fn map_reason_for(
     reason: DeactivationReason,
     plugin_api: ApiVersion,
 ) -> Option<DeactivationReason> {
-    if reason == DeactivationReason::CrashRestart { return None; }
-    if case_since(CaseFamily::DeactivationReason, reason.as_str()).is_some_and(|since| plugin_api < since) {
+    if reason == DeactivationReason::CrashRestart {
+        return None;
+    }
+    if case_since(CaseFamily::DeactivationReason, reason.as_str())
+        .is_some_and(|since| plugin_api < since)
+    {
         Some(DeactivationReason::Shutdown)
-    } else { Some(reason) }
+    } else {
+        Some(reason)
+    }
 }
 
 /// ABI-029: whether an event case reaches a plugin of `plugin_api`; a newer case is not

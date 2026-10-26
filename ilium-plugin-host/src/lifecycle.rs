@@ -4,9 +4,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
-use ilium_plugin_api::Side;
 use ilium_plugin_api::generated::host::plugins::{PluginInfo, SideState};
 use ilium_plugin_api::ids::PluginId;
+use ilium_plugin_api::Side;
 
 use crate::error::HostError;
 

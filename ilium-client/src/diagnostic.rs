@@ -19,6 +19,122 @@ pub(crate) struct DiagnosticView {
 const COPY_BUTTON_LABEL: &str = "[ Copy ]";
 
 pub(crate) fn current_text(app: &App) -> Option<String> {
+    contextual_text(app)
+        .or_else(|| app.presentation_warning.clone())
+        .map(|text| with_runtime_context(app, text))
+}
+
+/// All observations are local and nonblocking. In particular, opening F9 must
+/// not ask an already-stalled server for the information needed to diagnose it.
+fn with_runtime_context(app: &App, text: String) -> String {
+    let selected = app
+        .selected_node_id()
+        .map_or_else(|| "none".to_owned(), |node| node.0.to_string());
+    let focused = app
+        .focused_pane_id()
+        .map_or_else(|| "none".to_owned(), |node| node.0.to_string());
+    let projection = app.projection_admission_failure.map_or_else(
+        || "no recorded refusal".to_owned(),
+        |reason| format!("{reason:?}"),
+    );
+    let retry = app.projection_busy_retry_at.map_or_else(
+        || "not scheduled".to_owned(),
+        |deadline| {
+            format!(
+                "{} ms remaining",
+                deadline
+                    .saturating_duration_since(tokio::time::Instant::now())
+                    .as_millis()
+            )
+        },
+    );
+    let parser = app.terminal_parsing.as_ref().map_or_else(
+        || "not started".to_owned(),
+        |parser| {
+            parser.pending_work().map_or_else(
+                || "queue is busy; nonblocking sample unavailable".to_owned(),
+                |(commands, bytes)| {
+                    format!("{commands} commands / {bytes} bytes pending or active")
+                },
+            )
+        },
+    );
+    let log_path = ilium_logging::log_path().map_or_else(
+        || "not initialized".to_owned(),
+        |path| metadata_value(&path.to_string_lossy()),
+    );
+    let mut report = format!(
+        "Ilium diagnostic context\nCaptured: {} UTC\nClient version: {}\nClient process: {}\nSession: {}\nProject directory: {}\nKeyboard focus: {:?}\nSelected node: {selected}\nFocused pane: {focused}\nLocal tree revision: {}\nLast emitted layout revision: {:?}\nPending terminal events: {}\nProjection admission: {projection}\nProjection retry: {retry}\nTerminal parser: {parser}\nLog destination: {log_path}\n",
+        chrono::Utc::now().format("%Y-%m-%d %H:%M:%S"),
+        env!("CARGO_PKG_VERSION"),
+        std::process::id(),
+        metadata_value(&app.session_name),
+        metadata_value(&app.session_cwd.to_string_lossy()),
+        app.focus,
+        app.tree_version,
+        app.emitted_layout_revision(),
+        app.pending_terminal_events.len(),
+    );
+    if let Some(health) = &app.presentation_health {
+        report.push_str(&format!("Terminal presenter: {}\n", health.report()));
+    }
+    append_quota(
+        &mut report,
+        "Client process quota",
+        crate::execution::process_quota().snapshot(),
+    );
+    if let Some(client) = &app.outbound_admission {
+        append_quota(&mut report, "Outbound request tenant quota", client.usage());
+    }
+    if let Some(health) = ilium_logging::health() {
+        report.push_str(&format!(
+            "Logging: worker alive={}, accepting={}, queued={}, retained bytes={}, dropped events={}, failed operations={}\n",
+            health.worker_alive,
+            health.accepting,
+            health.queued_commands,
+            health.retained_bytes,
+            health.dropped_events,
+            health.failed_operations,
+        ));
+    }
+    report.push_str("Server responsiveness: not measured by this local report. Queue counts and quota counters are samples, not proof of a deadlock; quota samples can change concurrently. No terminal contents or input drafts are included in this context.\n\nDiagnostic details\n");
+    // Preserve every byte of the original diagnostic, including its final line.
+    report.push_str(&text);
+    report
+}
+
+fn append_quota(report: &mut String, label: &str, quota: ilium_execution::QuotaSnapshot) {
+    report.push_str(&format!(
+        "{label} (used/limit): jobs={}/{}, services={}/{}, input bytes={}/{}, result bytes={}/{}, worker threads={}/{}, worker bytes={}/{}\n",
+        quota.jobs, quota.limits.jobs,
+        quota.service_jobs, quota.limits.service_jobs,
+        quota.input_bytes, quota.limits.input_bytes,
+        quota.result_bytes, quota.limits.result_bytes,
+        quota.worker_threads, quota.limits.worker_threads,
+        quota.worker_bytes, quota.limits.worker_bytes,
+    ));
+}
+
+/// Bound and escape metadata without truncating the authored diagnostic itself.
+fn metadata_value(value: &str) -> String {
+    let mut characters = value.chars();
+    let mut result = String::new();
+    for character in characters.by_ref().take(1024) {
+        if character.is_control() {
+            result.extend(character.escape_default());
+        } else {
+            result.push(character);
+        }
+    }
+    if characters.next().is_some() {
+        result.push_str("… [metadata truncated]");
+    }
+    result
+}
+
+/// Keep diagnostic selection separate from enrichment so every early-return
+/// source receives the same locally observable debugging facts.
+fn contextual_text(app: &App) -> Option<String> {
     use crate::value_dialog::ValueDialogState;
     let modal = match &app.mode {
         Mode::LocationPicker(state) => state.diagnostic_text().map(str::to_owned),
@@ -289,6 +405,44 @@ mod tests {
     use super::*;
     use crossterm::event::{KeyEvent, KeyModifiers};
     use ratatui::{backend::TestBackend, Terminal};
+    #[test]
+    fn diagnostic_preserves_the_error_and_adds_local_pressure_context() {
+        let mut app = App::new("freeze session".into(), "/project/ilium".into());
+        app.status_message = Some("original error\nFINALDETAIL".into());
+        app.projection_admission_failure = Some(ilium_execution::RejectReason::WorkerBytes);
+        let report = current_text(&app).unwrap();
+        assert!(report.contains("Session: freeze session"));
+        assert!(report.contains("Project directory: /project/ilium"));
+        assert!(report.contains("Projection admission: WorkerBytes"));
+        assert!(report.contains("Client process quota"));
+        assert!(report.contains("Server responsiveness: not measured"));
+        assert!(report.ends_with("original error\nFINALDETAIL"));
+    }
+
+    #[test]
+    fn modal_error_early_return_also_gets_runtime_context() {
+        let mut app = App::new("modal session".into(), "/project/modal".into());
+        let mut dialog = crate::text_trigger_dialog::TextTriggerDialogState::new(None);
+        dialog.save_error = Some("trigger save failure".into());
+        app.mode = Mode::TextTriggerDialog(Box::new(dialog));
+        let report = current_text(&app).unwrap();
+        assert!(report.contains("Session: modal session"));
+        assert!(report.ends_with("trigger save failure"));
+    }
+
+    #[test]
+    fn metadata_is_bounded_and_drafts_are_excluded() {
+        let mut app = App::new("session\nforged label".into(), "/project/modal".into());
+        app.mode = Mode::Rename(crate::text_prompt::TextPromptState::new("private draft"));
+        app.status_message = Some("public failure".into());
+        let report = current_text(&app).unwrap();
+        assert!(report.contains("Session: session\\nforged label\n"));
+        assert!(!report.contains("private draft"));
+        let bounded = metadata_value(&"界".repeat(2000));
+        assert!(bounded.ends_with("… [metadata truncated]"));
+        assert!(bounded.chars().count() < 1100);
+    }
+
     #[test]
     fn unrelated_function_key_reaches_healthy_terminal() {
         let mut app = App::new("test".into(), std::env::temp_dir());

@@ -8,8 +8,8 @@
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::Instant;
 use std::time::Duration;
+use std::time::Instant;
 
 use ilium_plugin_api::generated::exports::inference_provider::ProviderCall;
 use ilium_plugin_api::generated::host::audio::HostAudio;
@@ -56,14 +56,7 @@ use super::fake_net::FakeNet;
 use super::native_guest::NativeGuest;
 use crate::audit::AuditRecord;
 use crate::calls::Trap;
-use crate::dispatch::{Dispatcher, DispatchConfig, PumpReport, SubmissionAdmission};
-use crate::scheduler::{Scheduler, CallKind, EventPush};
-use crate::instance::PluginInstance;
-use ilium_plugin_api::kernel::Origin;
-use ilium_plugin_api::generated::types::lifecycle::Activation;
-use ilium_plugin_api::generated::types::requests::RequestRef;
-use ilium_plugin_api::grants::{Grant, check_grant};
-use ilium_plugin_api::limits::LimitKey;
+use crate::dispatch::{DispatchConfig, Dispatcher, PumpReport, SubmissionAdmission};
 use crate::error::HostError;
 use crate::imports::agent::AgentImport;
 use crate::imports::audio::AudioImport;
@@ -90,8 +83,15 @@ use crate::imports::terminal::TerminalImport;
 use crate::imports::ui_host::UiHostImport;
 use crate::imports::vector::VectorImport;
 use crate::imports::workspace::WorkspaceImport;
+use crate::instance::PluginInstance;
 use crate::instance::{ExportCall, ExportReply};
+use crate::scheduler::{CallKind, EventPush, Scheduler};
 use crate::telemetry::LogLine;
+use ilium_plugin_api::generated::types::lifecycle::Activation;
+use ilium_plugin_api::generated::types::requests::RequestRef;
+use ilium_plugin_api::grants::{check_grant, Grant};
+use ilium_plugin_api::kernel::Origin;
+use ilium_plugin_api::limits::LimitKey;
 
 /// A clock the test advances by hand; milliseconds since an arbitrary start.
 #[derive(Debug, Clone, Default)]
@@ -548,26 +548,44 @@ impl HostHarness {
 
     /// Builds the host and activates the plugin.
     pub fn build(self) -> Result<HarnessHandle, HostError> {
-        let wasm_sources = usize::from(self.wat_text.is_some()) + usize::from(self.wasm_bytes.is_some());
+        let wasm_sources =
+            usize::from(self.wat_text.is_some()) + usize::from(self.wasm_bytes.is_some());
         if wasm_sources > 1 || (wasm_sources != 0 && self.native_guest.is_some()) {
-            return Err(HostError::EngineError("select exactly one native, WAT, or Wasm guest source".into()));
+            return Err(HostError::EngineError(
+                "select exactly one native, WAT, or Wasm guest source".into(),
+            ));
         }
         let wasm_bytes = match (self.wat_text, self.wasm_bytes) {
-            (Some(text), None) => Some(wat::parse_str(&text)
-                .map_err(|error| HostError::EngineError(format!("invalid component text: {error}")))?),
+            (Some(text), None) => Some(wat::parse_str(&text).map_err(|error| {
+                HostError::EngineError(format!("invalid component text: {error}"))
+            })?),
             (None, bytes) => bytes,
             _ => unreachable!("multiple guest sources were rejected above"),
         };
         // Fail closed for builder options whose adapters have not landed yet.
-        if self.both_sides || self.two_plugins || self.activate_error.is_some()
-            || self.session_memory_mib.is_some() || self.session_helpers.is_some()
-            || self.session_pending_requests.is_some() || self.state_dir.is_some()
-            || self.net.is_some() || self.offline || self.system_policy.is_some()
-            || self.user_policy.is_some() || self.effective_uid.is_some()
-            || !self.secrets.is_empty() || !self.options.is_empty()
-            || self.panic_in_import.is_some() || self.tracing || self.profiling
-            || !self.detector_plugins.is_empty() || !self.other_side_grants.is_empty() {
-            return Err(HostError::EngineError("requested harness adapter is not implemented".into()));
+        if self.both_sides
+            || self.two_plugins
+            || self.activate_error.is_some()
+            || self.session_memory_mib.is_some()
+            || self.session_helpers.is_some()
+            || self.session_pending_requests.is_some()
+            || self.state_dir.is_some()
+            || self.net.is_some()
+            || self.offline
+            || self.system_policy.is_some()
+            || self.user_policy.is_some()
+            || self.effective_uid.is_some()
+            || !self.secrets.is_empty()
+            || !self.options.is_empty()
+            || self.panic_in_import.is_some()
+            || self.tracing
+            || self.profiling
+            || !self.detector_plugins.is_empty()
+            || !self.other_side_grants.is_empty()
+        {
+            return Err(HostError::EngineError(
+                "requested harness adapter is not implemented".into(),
+            ));
         }
         let resolved = ilium_plugin_api::limits::clamp(&self.limits, self.tier)
             .map_err(HostError::Diagnostic)?;
@@ -575,68 +593,146 @@ impl HostHarness {
         for text in &self.grants {
             let grant = Grant::parse(text).map_err(HostError::Diagnostic)?;
             check_grant(&grant, self.tier, self.side).map_err(HostError::Diagnostic)?;
-            if !self.declined.contains(text) { grants.push(grant); }
+            if !self.declined.contains(text) {
+                grants.push(grant);
+            }
         }
         let process = if self.side == Side::Server {
             ilium_plugin_api::platform::ProcessKind::Server
-        } else { ilium_plugin_api::platform::ProcessKind::Client };
-        let kernel = self.kernel.unwrap_or_else(|| Arc::new(FakeKernel::new(process)));
+        } else {
+            ilium_plugin_api::platform::ProcessKind::Client
+        };
+        let kernel = self
+            .kernel
+            .unwrap_or_else(|| Arc::new(FakeKernel::new(process)));
         let plugin = PluginId("test.plugin".into());
-        let admission = Arc::new(HarnessAdmission { grants: Arc::new(Mutex::new(grants)) });
-        let dispatcher = Dispatcher::with_admission(kernel.clone(), DispatchConfig {
-            max_pending_per_plugin: resolved[&LimitKey::PendingRequests] as usize,
-            max_submissions_per_call: 256, dedup_window_ms: 600_000,
-        }, admission.clone());
-        let quota = ilium_execution::QuotaGroup::new(ilium_execution::QuotaLimits {
-            clients: 0, jobs: 0, service_jobs: 0, input_bytes: 0, result_bytes: 0,
-            worker_threads: 9, worker_bytes: 32 * 1024 * 1024,
+        let admission = Arc::new(HarnessAdmission {
+            grants: Arc::new(Mutex::new(grants)),
         });
-        let scheduler = Scheduler::try_with_config(process, 1, crate::calls::ResolvedLimits(resolved.clone()), &quota)
-            .map_err(|error| HostError::EngineError(error.to_string()))?;
-        scheduler.register_side_with_limits(&plugin, crate::calls::ResolvedLimits(resolved.clone()));
+        let dispatcher = Dispatcher::with_admission(
+            kernel.clone(),
+            DispatchConfig {
+                max_pending_per_plugin: resolved[&LimitKey::PendingRequests] as usize,
+                max_submissions_per_call: 256,
+                dedup_window_ms: 600_000,
+            },
+            admission.clone(),
+        );
+        let quota = ilium_execution::QuotaGroup::new(ilium_execution::QuotaLimits {
+            clients: 0,
+            jobs: 0,
+            service_jobs: 0,
+            input_bytes: 0,
+            result_bytes: 0,
+            worker_threads: 9,
+            worker_bytes: 32 * 1024 * 1024,
+        });
+        let scheduler = Scheduler::try_with_config(
+            process,
+            1,
+            crate::calls::ResolvedLimits(resolved.clone()),
+            &quota,
+        )
+        .map_err(|error| HostError::EngineError(error.to_string()))?;
+        scheduler
+            .register_side_with_limits(&plugin, crate::calls::ResolvedLimits(resolved.clone()));
         let guest: Box<dyn crate::instance::GuestExports> = if let Some(bytes) = wasm_bytes {
             // These are direct test fixtures, not admitted packages. Full world validation
             // remains a separate package gate; WasmGuest rejects all unlinked imports.
-            let engine = Arc::new(crate::engine::PluginEngine::with_quota(crate::engine::EngineConfig {
-                epoch_tick_ms: 10, cache_dir: None, process,
-            }, &quota)?);
+            let engine = Arc::new(crate::engine::PluginEngine::with_quota(
+                crate::engine::EngineConfig {
+                    epoch_tick_ms: 10,
+                    cache_dir: None,
+                    process,
+                },
+                &quota,
+            )?);
             let compiled = engine.compile(&bytes)?;
             let limits = crate::calls::ResolvedLimits(resolved.clone());
             let (sender, receiver) = std::sync::mpsc::sync_channel(1);
             let now = Instant::now();
-            scheduler.enqueue(&plugin, CallKind::Activate, now, Box::new(move || {
-                let result = crate::wasm_guest::WasmGuest::instantiate(engine, &compiled, limits)
-                    .map(|guest| Box::new(guest) as Box<dyn crate::instance::GuestExports>);
-                let _ = sender.send(result);
-            }));
+            scheduler.enqueue(
+                &plugin,
+                CallKind::Activate,
+                now,
+                Box::new(move || {
+                    let result =
+                        crate::wasm_guest::WasmGuest::instantiate(engine, &compiled, limits)
+                            .map(|guest| Box::new(guest) as Box<dyn crate::instance::GuestExports>);
+                    let _ = sender.send(result);
+                }),
+            );
             scheduler.tick(now);
-            receiver.recv().map_err(|_| HostError::EngineError("component instantiation worker ended without a result".into()))??
+            receiver.recv().map_err(|_| {
+                HostError::EngineError(
+                    "component instantiation worker ended without a result".into(),
+                )
+            })??
         } else {
             Box::new(super::native_guest::NativeGuestAdapter::new(
-                self.native_guest.unwrap_or_else(|| Box::new(NullGuest))))
+                self.native_guest.unwrap_or_else(|| Box::new(NullGuest)),
+            ))
         };
         let instance = PluginInstance::from_guest(guest);
-        let clamp_logs = self.limits.0.iter().filter_map(|(name, requested)| {
-            let key = name.parse::<LimitKey>().ok()?;
-            let effective = resolved.get(&key)?;
-            (*requested > *effective).then(|| LogLine { plugin: plugin.0.clone(), level: "warn".into(),
-                message: format!("manifest limit {name} clamped from {requested} to {effective}") })
-        }).collect();
+        let clamp_logs = self
+            .limits
+            .0
+            .iter()
+            .filter_map(|(name, requested)| {
+                let key = name.parse::<LimitKey>().ok()?;
+                let effective = resolved.get(&key)?;
+                (*requested > *effective).then(|| LogLine {
+                    plugin: plugin.0.clone(),
+                    level: "warn".into(),
+                    message: format!(
+                        "manifest limit {name} clamped from {requested} to {effective}"
+                    ),
+                })
+            })
+            .collect();
         let handle = HarnessHandle {
-            plugin: plugin.clone(), side: self.side, kernel, dispatcher, scheduler, admission,
-            instance: Arc::new(Mutex::new(instance)), lifecycle_state: Arc::new(Mutex::new(InstanceState::Inactive)), pump_lock: Mutex::new(()), execution: Mutex::new(Instant::now()),
-            observations: Mutex::new(HarnessObservations { logs: clamp_logs, ..HarnessObservations::default() }),
+            plugin: plugin.clone(),
+            side: self.side,
+            kernel,
+            dispatcher,
+            scheduler,
+            admission,
+            instance: Arc::new(Mutex::new(instance)),
+            lifecycle_state: Arc::new(Mutex::new(InstanceState::Inactive)),
+            pump_lock: Mutex::new(()),
+            execution: Mutex::new(Instant::now()),
+            observations: Mutex::new(HarnessObservations {
+                logs: clamp_logs,
+                ..HarnessObservations::default()
+            }),
             clock: Mutex::new(self.clock.now_millis),
         };
-        let activation = Activation { plugin, api: "ilium:plugin@0.1.0".into(), instance: 1,
-            side: self.side.as_str().into(), settings_json: serde_json::to_string(
-                &self.settings.into_iter().collect::<serde_json::Map<String, Value>>()
-            ).map_err(|error| HostError::EngineError(error.to_string()))?,
-            granted: harness_lock(&handle.admission.grants).iter().map(|grant| grant.as_str().to_owned()).collect(),
-            restored: None };
+        let activation = Activation {
+            plugin,
+            api: "ilium:plugin@0.1.0".into(),
+            instance: 1,
+            side: self.side.as_str().into(),
+            settings_json: serde_json::to_string(
+                &self
+                    .settings
+                    .into_iter()
+                    .collect::<serde_json::Map<String, Value>>(),
+            )
+            .map_err(|error| HostError::EngineError(error.to_string()))?,
+            granted: harness_lock(&handle.admission.grants)
+                .iter()
+                .map(|grant| grant.as_str().to_owned())
+                .collect(),
+            restored: None,
+        };
         handle.scheduler.begin_activation(&handle.plugin);
-        let result = handle.execute(CallKind::Activate, move |instance| instance.activate(activation));
-        handle.scheduler.finish_activation(&handle.plugin, result.as_ref().is_ok_and(|result| result.is_ok()));
+        let result = handle.execute(CallKind::Activate, move |instance| {
+            instance.activate(activation)
+        });
+        handle.scheduler.finish_activation(
+            &handle.plugin,
+            result.as_ref().is_ok_and(|result| result.is_ok()),
+        );
         // Activation refusals remain observable lifecycle results rather than host failures.
         if let Some(trap) = harness_lock(&handle.instance).last_trap().cloned() {
             harness_lock(&handle.observations).failures.push(trap);
@@ -670,7 +766,10 @@ pub struct HarnessHandle {
 }
 impl std::fmt::Debug for HarnessHandle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("HarnessHandle").field("plugin", &self.plugin).field("side", &self.side).finish_non_exhaustive()
+        f.debug_struct("HarnessHandle")
+            .field("plugin", &self.plugin)
+            .field("side", &self.side)
+            .finish_non_exhaustive()
     }
 }
 #[derive(Default)]
@@ -682,79 +781,135 @@ struct HarnessObservations {
     restored: Option<Vec<u8>>,
 }
 fn harness_lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    mutex
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 fn harness_trap(code: &'static str, function: &str) -> Trap {
-    Trap { code: ilium_plugin_api::Code::from_static(code), interface: "harness".into(), function: function.into() }
+    Trap {
+        code: ilium_plugin_api::Code::from_static(code),
+        interface: "harness".into(),
+        function: function.into(),
+    }
 }
-struct HarnessAdmission { grants: Arc<Mutex<Vec<Grant>>> }
+struct HarnessAdmission {
+    grants: Arc<Mutex<Vec<Grant>>>,
+}
 impl HarnessAdmission {
     fn permits(&self, name: &str) -> bool {
-        Grant::parse(name).is_ok_and(|needed| harness_lock(&self.grants).iter().any(|grant| grant.covers(&needed)))
+        Grant::parse(name).is_ok_and(|needed| {
+            harness_lock(&self.grants)
+                .iter()
+                .any(|grant| grant.covers(&needed))
+        })
     }
 }
 impl SubmissionAdmission for HarnessAdmission {
     fn check(&self, _: &Origin, intent: &Intent) -> Result<(), PluginError> {
         // Exact rows from reference-events-and-intents.md, Intent table and Extended intents.
         let needed = match intent {
-            Intent::RenameNode(_) | Intent::MoveNode(_) | Intent::CloseNode(_) |
-            Intent::SetNodeLocked(_) | Intent::SetBookmarked(_) | Intent::SetExpanded(_) => "tree.write",
+            Intent::RenameNode(_)
+            | Intent::MoveNode(_)
+            | Intent::CloseNode(_)
+            | Intent::SetNodeLocked(_)
+            | Intent::SetBookmarked(_)
+            | Intent::SetExpanded(_) => "tree.write",
             Intent::CreatePane(spec) => {
                 if spec.initial_input.is_some() && !self.permits("terminal.write") {
-                    return Err(PluginError::new(ErrorCode::NotPermitted, "terminal.write required for initial input"));
+                    return Err(PluginError::new(
+                        ErrorCode::NotPermitted,
+                        "terminal.write required for initial input",
+                    ));
                 }
                 if let Some(command) = &spec.command {
                     let Some(program) = command.first() else {
-                        return Err(PluginError::new(ErrorCode::InvalidArgument, "command requires a program"));
+                        return Err(PluginError::new(
+                            ErrorCode::InvalidArgument,
+                            "command requires a program",
+                        ));
                     };
                     if !self.permits(&format!("panes.create-command:{program}")) {
-                        return Err(PluginError::new(ErrorCode::NotPermitted, "program grant required"));
+                        return Err(PluginError::new(
+                            ErrorCode::NotPermitted,
+                            "program grant required",
+                        ));
                     }
                 }
                 "panes.create"
             }
             Intent::SignalPane(_) => "panes.signal",
             Intent::SendInput(spec) => {
-                if (spec.raw.is_some() || spec.mouse.is_some()) && !self.permits("terminal.raw-input") {
-                    return Err(PluginError::new(ErrorCode::NotPermitted, "terminal.raw-input required"));
+                if (spec.raw.is_some() || spec.mouse.is_some())
+                    && !self.permits("terminal.raw-input")
+                {
+                    return Err(PluginError::new(
+                        ErrorCode::NotPermitted,
+                        "terminal.raw-input required",
+                    ));
                 }
                 if spec.lock_user_input && !self.permits("terminal.input-lock") {
-                    return Err(PluginError::new(ErrorCode::NotPermitted, "terminal.input-lock required"));
+                    return Err(PluginError::new(
+                        ErrorCode::NotPermitted,
+                        "terminal.input-lock required",
+                    ));
                 }
                 "terminal.write"
-            },
+            }
             Intent::AgentAction(_) => "agent.control",
-            Intent::SetDecoration(_) | Intent::ClearDecoration(_) | Intent::SetVirtualRows(_) |
-            Intent::SetInferredIcon(_) => "tree.decorate",
+            Intent::SetDecoration(_)
+            | Intent::ClearDecoration(_)
+            | Intent::SetVirtualRows(_)
+            | Intent::SetInferredIcon(_) => "tree.decorate",
             Intent::PlaySound(_) => "sound.play",
             Intent::Notify(_) => "notify.desktop",
             Intent::OpenView(_) | Intent::CloseView(_) => "ui.panels",
             Intent::InvokeCommand(_) => "commands.invoke",
             Intent::Message(_) => "messages.peer",
             Intent::EditorApplyEdits(_) | Intent::EditorOpen(_) => "editor.edit",
-            Intent::FreezePane(_) | Intent::UnfreezePane(_) | Intent::ReplacePaneCommand(_) |
-            Intent::TerminatePaneProcess(_) | Intent::ResizePane(_) => "panes.lifecycle",
-            Intent::CreateGroup(_) | Intent::CreateFolder(_) | Intent::CreateProject(_) |
-            Intent::CreateSplit(_) | Intent::Restructure(_) | Intent::RevertRestructure(_) => "tree.restructure",
+            Intent::FreezePane(_)
+            | Intent::UnfreezePane(_)
+            | Intent::ReplacePaneCommand(_)
+            | Intent::TerminatePaneProcess(_)
+            | Intent::ResizePane(_) => "panes.lifecycle",
+            Intent::CreateGroup(_)
+            | Intent::CreateFolder(_)
+            | Intent::CreateProject(_)
+            | Intent::CreateSplit(_)
+            | Intent::Restructure(_)
+            | Intent::RevertRestructure(_) => "tree.restructure",
             Intent::MarkAttention(_) | Intent::AckAttention(_) => "tree.attention",
             Intent::OpenExternal(_) => "open-external",
-            Intent::SetStatusSegment(_) | Intent::ClearStatusSegment(_) |
-            Intent::SetFrameSlot(_) | Intent::ClearFrameSlot(_) => "ui.chrome",
+            Intent::SetStatusSegment(_)
+            | Intent::ClearStatusSegment(_)
+            | Intent::SetFrameSlot(_)
+            | Intent::ClearFrameSlot(_) => "ui.chrome",
             Intent::Toast(_) | Intent::DismissToast(_) => "notify.toast",
         };
-        if self.permits(needed) { Ok(()) } else {
-            Err(PluginError::new(ErrorCode::NotPermitted, format!("missing grant: {needed}")))
+        if self.permits(needed) {
+            Ok(())
+        } else {
+            Err(PluginError::new(
+                ErrorCode::NotPermitted,
+                format!("missing grant: {needed}"),
+            ))
         }
     }
 }
 
 impl HarnessHandle {
     fn origin(&self) -> Origin {
-        Origin::Plugin { plugin: self.plugin.clone(), side: self.side, instance: 1 }
+        Origin::Plugin {
+            plugin: self.plugin.clone(),
+            side: self.side,
+            instance: 1,
+        }
     }
 
-    fn execute<R: Send + 'static>(&self, kind: CallKind,
-        work: impl FnOnce(&mut PluginInstance) -> R + Send + 'static) -> Result<R, Trap> {
+    fn execute<R: Send + 'static>(
+        &self,
+        kind: CallKind,
+        work: impl FnOnce(&mut PluginInstance) -> R + Send + 'static,
+    ) -> Result<R, Trap> {
         // The production scheduler runs the closure in its owned worker bank and joins it.
         let mut tick = harness_lock(&self.execution);
         if kind != CallKind::Activate && self.state() != InstanceState::Active {
@@ -765,35 +920,57 @@ impl HarnessHandle {
         let instance = self.instance.clone();
         let lifecycle_state = self.lifecycle_state.clone();
         let (sender, receiver) = std::sync::mpsc::sync_channel(1);
-        self.scheduler.enqueue(&self.plugin, kind, now, Box::new(move || {
-            let mut instance = harness_lock(&instance);
-            let result = work(&mut instance);
-            *harness_lock(&lifecycle_state) = instance.state();
-            let _ = sender.send(result);
-        }));
+        self.scheduler.enqueue(
+            &self.plugin,
+            kind,
+            now,
+            Box::new(move || {
+                let mut instance = harness_lock(&instance);
+                let result = work(&mut instance);
+                *harness_lock(&lifecycle_state) = instance.state();
+                let _ = sender.send(result);
+            }),
+        );
         self.scheduler.tick(now);
-        receiver.recv().map_err(|_| harness_trap("trap.panic", "executor channel closed"))
+        receiver
+            .recv()
+            .map_err(|_| harness_trap("trap.panic", "executor channel closed"))
     }
     // ---- dispatch and observation (test plan 1.3)
 
     /// Queues events for the plugin. Pressure is a fixture error; producers that need
     /// backpressure must use `try_deliver` and retain its returned events.
     pub fn deliver(&self, events: Vec<Event>) {
-        assert!(self.try_deliver(events).is_ok(), "harness event queue full: use try_deliver and retain refused events");
+        assert!(
+            self.try_deliver(events).is_ok(),
+            "harness event queue full: use try_deliver and retain refused events"
+        );
     }
 
     /// Queues supported, authorized event sources without losing ownership on pressure.
     /// Unwired subscription/declaration sources are not delivered.
     pub fn try_deliver(&self, events: Vec<Event>) -> Result<(), Vec<Event>> {
-        if self.state() != InstanceState::Active { return Err(events); }
-        let events: Vec<_> = events.into_iter().filter(|event| match event {
-            Event::TreeChanged(_) | Event::NodeRemoved(_) => self.admission.permits("tree.read"),
-            Event::PaneCreated(_) | Event::PaneExited(_) | Event::PaneFocused(_) |
-            Event::PaneResized(_) | Event::PaneTitleChanged(_) => self.admission.permits("panes.read"),
-            Event::SettingsChanged(_) | Event::TimerFired(_) | Event::RequestCompleted(_) |
-            Event::EventsDropped(_) => true,
-            _ => false,
-        }).collect();
+        if self.state() != InstanceState::Active {
+            return Err(events);
+        }
+        let events: Vec<_> = events
+            .into_iter()
+            .filter(|event| match event {
+                Event::TreeChanged(_) | Event::NodeRemoved(_) => {
+                    self.admission.permits("tree.read")
+                }
+                Event::PaneCreated(_)
+                | Event::PaneExited(_)
+                | Event::PaneFocused(_)
+                | Event::PaneResized(_)
+                | Event::PaneTitleChanged(_) => self.admission.permits("panes.read"),
+                Event::SettingsChanged(_)
+                | Event::TimerFired(_)
+                | Event::RequestCompleted(_)
+                | Event::EventsDropped(_) => true,
+                _ => false,
+            })
+            .collect();
         let mut remaining = events.into_iter();
         while let Some(event) = remaining.next() {
             // push_event consumes its argument even when Stuck, so retain an exact copy
@@ -808,29 +985,48 @@ impl HarnessHandle {
     /// Runs the dispatcher until quiet or `max_rounds`.
     pub fn pump(&self, max_rounds: u32) -> PumpReport {
         let _serial = harness_lock(&self.pump_lock);
-        let mut total = PumpReport { rounds: 0, events_delivered: 0, intents_applied: 0, traps: 0 };
+        let mut total = PumpReport {
+            rounds: 0,
+            events_delivered: 0,
+            intents_applied: 0,
+            traps: 0,
+        };
         for _ in 0..max_rounds {
-            if self.state() != InstanceState::Active { break; }
+            if self.state() != InstanceState::Active {
+                break;
+            }
             let staged = self.dispatcher.take_events(256);
             let completion_blocked = if let Err(remaining) = self.try_deliver(staged) {
                 // Only this serialized pump stages events: returning no more than the
                 // drained count cannot exceed the dispatcher's staging capacity.
-                self.dispatcher.deliver(remaining).expect("drained staging capacity remains available");
+                self.dispatcher
+                    .deliver(remaining)
+                    .expect("drained staging capacity remains available");
                 true
-            } else { false };
+            } else {
+                false
+            };
             let batch = self.scheduler.take_events(&self.plugin, 256);
             {
                 let mut observations = harness_lock(&self.observations);
                 for event in &batch {
-                    if let Event::RequestCompleted(result) = event { observations.received.push(result.clone()); }
+                    if let Event::RequestCompleted(result) = event {
+                        observations.received.push(result.clone());
+                    }
                 }
             }
             let mut did_work = !batch.is_empty();
             if !batch.is_empty() {
                 total.events_delivered += batch.len();
-                let returned = self.execute(CallKind::OnEvents, move |instance| instance.on_events(batch)).and_then(|result| result);
+                let returned = self
+                    .execute(CallKind::OnEvents, move |instance| {
+                        instance.on_events(batch)
+                    })
+                    .and_then(|result| result);
                 match returned {
-                    Ok(submissions) => { self.dispatcher.submit_batch(self.origin(), submissions); }
+                    Ok(submissions) => {
+                        self.dispatcher.submit_batch(self.origin(), submissions);
+                    }
                     Err(trap) => {
                         harness_lock(&self.observations).failures.push(trap);
                         total.traps += 1;
@@ -845,23 +1041,37 @@ impl HarnessHandle {
             total.traps += report.traps;
             // Keep completed requests with their dispatcher owner until older
             // completion handoffs have drained; never accumulate retry buffers.
-            let results = if completion_blocked { Vec::new() } else { self.dispatcher.take_outcomes_for(&self.origin(), 256) };
+            let results = if completion_blocked {
+                Vec::new()
+            } else {
+                self.dispatcher.take_outcomes_for(&self.origin(), 256)
+            };
             if !results.is_empty() {
-                harness_lock(&self.observations).outcomes.extend(results.iter().cloned());
-                if let Err(remaining) = self.try_deliver(results.into_iter().map(Event::RequestCompleted).collect()) {
+                harness_lock(&self.observations)
+                    .outcomes
+                    .extend(results.iter().cloned());
+                if let Err(remaining) =
+                    self.try_deliver(results.into_iter().map(Event::RequestCompleted).collect())
+                {
                     // At most 256 pending requests complete per pump. Staged retries are
                     // drained before another batch, preserving this bounded handoff.
-                    self.dispatcher.deliver(remaining).expect("completion staging stays within 4096 events");
+                    self.dispatcher
+                        .deliver(remaining)
+                        .expect("completion staging stays within 4096 events");
                 }
             }
             if let Err(remaining) = self.try_deliver(self.kernel.take_events()) {
                 // Backpressure leaves never-drop kernel events with their original owner,
                 // before any emissions concurrent with this transfer.
                 let mut state = self.kernel.state();
-                for event in remaining.into_iter().rev() { state.events.push_front(event); }
+                for event in remaining.into_iter().rev() {
+                    state.events.push_front(event);
+                }
             }
             did_work |= self.scheduler.queue_len(&self.plugin) != 0;
-            if !did_work { break; }
+            if !did_work {
+                break;
+            }
             total.rounds += 1;
         }
         total
@@ -869,7 +1079,11 @@ impl HarnessHandle {
 
     /// The outcomes waiting for the plugin.
     pub fn outcomes(&self, plugin: &PluginId) -> Vec<RequestResult> {
-        if plugin == &self.plugin { harness_lock(&self.observations).outcomes.clone() } else { Vec::new() }
+        if plugin == &self.plugin {
+            harness_lock(&self.observations).outcomes.clone()
+        } else {
+            Vec::new()
+        }
     }
 
     /// The traps that ended calls so far.
@@ -956,11 +1170,18 @@ impl HarnessHandle {
 
     /// The `ilium:primitives/basic` interface as the plugin sees it.
     pub fn basic(&self) -> impl HostBasic + '_ {
-        BasicImport::new(self.kernel.clone(), self.plugin.0.clone(),
+        BasicImport::new(
+            self.kernel.clone(),
+            self.plugin.0.clone(),
             self.admission.grants.clone(),
-            |message| harness_lock(&self.observations).logs.push(LogLine {
-                plugin: self.plugin.0.clone(), level: "warn".into(), message: message.into(),
-            }))
+            |message| {
+                harness_lock(&self.observations).logs.push(LogLine {
+                    plugin: self.plugin.0.clone(),
+                    level: "warn".into(),
+                    message: message.into(),
+                })
+            },
+        )
     }
 
     /// The `ilium:host/audio` interface as the plugin sees it.
@@ -1075,8 +1296,14 @@ impl HarnessHandle {
 
     /// Calls the plugin's `render` export (PRI basic views).
     pub fn render(&self, view: ViewTarget, area: Area) -> Result<UiTree, Trap> {
-        let result = self.execute(CallKind::Render, move |instance| instance.render(view, area)).and_then(|result| result);
-        if let Err(trap) = &result { harness_lock(&self.observations).failures.push(trap.clone()); }
+        let result = self
+            .execute(CallKind::Render, move |instance| {
+                instance.render(view, area)
+            })
+            .and_then(|result| result);
+        if let Err(trap) = &result {
+            harness_lock(&self.observations).failures.push(trap.clone());
+        }
         result
     }
 
@@ -1089,27 +1316,45 @@ impl HarnessHandle {
 
     /// Whether the request completed (API catalogs).
     pub fn request_completed(&self, request: RequestId) -> bool {
-        harness_lock(&self.observations).outcomes.iter().any(|result| result.request == RequestRef::Call(request))
+        harness_lock(&self.observations)
+            .outcomes
+            .iter()
+            .any(|result| result.request == RequestRef::Call(request))
     }
 
     /// The error code the request completed with, if it failed (API timeouts).
     pub fn request_error(&self, request: RequestId) -> Option<ErrorCode> {
-        harness_lock(&self.observations).outcomes.iter().find_map(|result| {
-            if result.request != RequestRef::Call(request) { return None; }
-            match &result.outcome { Outcome::Refused(error) | Outcome::Failed(error) => Some(error.code), _ => None }
-        })
+        harness_lock(&self.observations)
+            .outcomes
+            .iter()
+            .find_map(|result| {
+                if result.request != RequestRef::Call(request) {
+                    return None;
+                }
+                match &result.outcome {
+                    Outcome::Refused(error) | Outcome::Failed(error) => Some(error.code),
+                    _ => None,
+                }
+            })
     }
 
     /// Submits intents directly, bypassing the guest (HST-49x requests and outcomes).
     pub fn submit_directly(&self, submission: Submission) -> Result<RequestId, ErrorCode> {
-        if self.state() != InstanceState::Active { return Err(ErrorCode::Cancelled); }
-        self.dispatcher.try_submit_call(self.origin(), submission).map_err(|error| error.code)
+        if self.state() != InstanceState::Active {
+            return Err(ErrorCode::Cancelled);
+        }
+        self.dispatcher
+            .try_submit_call(self.origin(), submission)
+            .map_err(|error| error.code)
     }
 
     /// Takes the result of a request once; a second take finds nothing (HST-49x).
     pub fn take_result(&self, request: RequestId) -> Result<RequestResult, ErrorCode> {
         let mut observations = harness_lock(&self.observations);
-        let index = observations.outcomes.iter().position(|result| result.request == RequestRef::Call(request))
+        let index = observations
+            .outcomes
+            .iter()
+            .position(|result| result.request == RequestRef::Call(request))
             .ok_or(ErrorCode::NotFound)?;
         Ok(observations.outcomes.remove(index))
     }
@@ -1188,8 +1433,15 @@ impl HarnessHandle {
 
     /// Deactivates with this reason and returns the restore bytes (HST scheduling calls).
     pub fn deactivate(&self, reason: DeactivationReason) -> Option<Vec<u8>> {
-        if self.state() != InstanceState::Active { return None; }
-        let bytes = self.execute(CallKind::Deactivate, move |instance| instance.deactivate(reason)).ok().flatten();
+        if self.state() != InstanceState::Active {
+            return None;
+        }
+        let bytes = self
+            .execute(CallKind::Deactivate, move |instance| {
+                instance.deactivate(reason)
+            })
+            .ok()
+            .flatten();
         self.dispatcher.cancel_origin(&self.origin());
         let mut observations = harness_lock(&self.observations);
         self.scheduler.take_events(&self.plugin, usize::MAX);
@@ -1279,7 +1531,10 @@ impl HarnessHandle {
 
     /// Counted failures of the plugin on this side (HST-400).
     pub fn failure_count(&self) -> u32 {
-        harness_lock(&self.observations).failures.len().min(u32::MAX as usize) as u32
+        harness_lock(&self.observations)
+            .failures
+            .len()
+            .min(u32::MAX as usize) as u32
     }
 
     /// Counted failures on the given side (HST-411).
@@ -2133,8 +2388,11 @@ impl HarnessHandle {
             Err(code) => return Outcome::Refused(PluginError::new(code, "submission refused")),
         };
         self.pump(1);
-        self.take_result(request).map(|result| result.outcome).unwrap_or_else(|code|
-            Outcome::Failed(PluginError::new(code, "completion unavailable")))
+        self.take_result(request)
+            .map(|result| result.outcome)
+            .unwrap_or_else(|code| {
+                Outcome::Failed(PluginError::new(code, "completion unavailable"))
+            })
     }
 
     /// Drives one export of the guest (reference-wit.md section 8).
@@ -2149,8 +2407,12 @@ impl HarnessHandle {
             ExportCall::ListVirtualChildren { .. } => CallKind::ListVirtualChildren,
             ExportCall::ServiceHandle(_) => CallKind::ServiceProvider,
         };
-        let result = self.execute(kind, move |instance| instance.call_export(call)).and_then(|result| result);
-        if let Err(trap) = &result { harness_lock(&self.observations).failures.push(trap.clone()); }
+        let result = self
+            .execute(kind, move |instance| instance.call_export(call))
+            .and_then(|result| result);
+        if let Err(trap) = &result {
+            harness_lock(&self.observations).failures.push(trap.clone());
+        }
         result
     }
 }
