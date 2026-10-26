@@ -936,7 +936,9 @@ class PipelineTests(unittest.TestCase):
         (arguments.output / 'qualification.json').write_text('{}')
         published = {path.name for path in pipeline.publication_files(arguments.output)}
         self.assertTrue(names <= published)
-        self.assertEqual(len(published), 5 + 6 + 3 + 12 + 10)
+        # Five archives, six shared assets, three Windows, twelve Linux and
+        # eighteen macOS package/receipt/evidence assets must all be published.
+        self.assertEqual(len(published), 5 + 6 + 3 + 12 + 18)
         installer = arguments.output / pipeline.windows_installers.MSI_NAME
         installer.write_bytes(installer.read_bytes() + b'changed')
         with self.assertRaises(ValueError):
