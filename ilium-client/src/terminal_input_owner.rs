@@ -2042,7 +2042,6 @@ mod tests {
     // single-threaded runtime never contends it across the awaits.
     #[allow(clippy::await_holding_lock)]
     #[tokio::test(flavor = "current_thread")]
-    #[allow(clippy::await_holding_lock)] // Serial test guard only; the current-thread runtime never contends it.
     async fn full_queue_preserves_every_paste_and_its_original_allocation() {
         let _serial = INPUT_TEST_LOCK.lock().await;
         let quota = quota();
@@ -2268,7 +2267,6 @@ mod tests {
     // single-threaded runtime never contends it across the awaits.
     #[allow(clippy::await_holding_lock)]
     #[tokio::test(flavor = "current_thread")]
-    #[allow(clippy::await_holding_lock)] // Serial test guard only; the current-thread runtime never contends it.
     async fn read_failure_is_delivered_once_and_does_not_become_normal_end_of_stream() {
         let _serial = INPUT_TEST_LOCK.lock().await;
         let quota = quota();

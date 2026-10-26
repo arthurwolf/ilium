@@ -13,7 +13,7 @@ import copy
 import json
 import math
 import os
-from pathlib import Path, PureWindowsPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 import platform
 import re
 import shutil
@@ -843,7 +843,7 @@ def validate_install_receipt(metadata, proof, target, *, public):
             animation.get('source_files') == {name: metadata['source_inputs'][name] for name in animation_gate.SOURCE_FILES} and
             animation.get('installed_root') == proof.get('installed_pair_directory') and
             animation.get('executable_root') == proof.get('installed_pair_directory') and
-            animation.get('launcher_command') == [str((PureWindowsPath if target['os'] == 'windows' else Path)(proof['installed_pair_directory']) / target['executables'][0]), 'release-animation-probe'] and
+            animation.get('launcher_command') == [str((PureWindowsPath if target['os'] == 'windows' else PurePosixPath)(proof['installed_pair_directory']) / target['executables'][0]), 'release-animation-probe'] and
             animation.get('target') == target['rust_target'] and animation.get('tag') == metadata['tag'] and
             animation.get('format') == 'archive' and animation.get('native_identity', {}).get('system') == expected_system and
             animation.get('native_identity', {}).get('machine') in expected_machines and
@@ -855,8 +855,8 @@ def validate_install_receipt(metadata, proof, target, *, public):
     require(catalogue == animation.get('catalogue') and renders == animation.get('renders') and
             catalogue.get('client_sha256') == proof['installed_client_sha256'] and
             catalogue.get('helper_sha256') == proof['installed_helper_sha256'] and
-            catalogue.get('client_path') == str((PureWindowsPath if target['os'] == 'windows' else Path)(proof['installed_pair_directory']) / target['executables'][0]) and
-            catalogue.get('helper_path') == str((PureWindowsPath if target['os'] == 'windows' else Path)(proof['installed_pair_directory']) / target['executables'][2]) and
+            catalogue.get('client_path') == str((PureWindowsPath if target['os'] == 'windows' else PurePosixPath)(proof['installed_pair_directory']) / target['executables'][0]) and
+            catalogue.get('helper_path') == str((PureWindowsPath if target['os'] == 'windows' else PurePosixPath)(proof['installed_pair_directory']) / target['executables'][2]) and
             animation.get('stdout_sha256') == hashlib.sha256(animation['stdout'].encode('utf-8')).hexdigest() and
             animation.get('stderr_sha256') == hashlib.sha256(b'').hexdigest(),
             'installed animation process, frame, or helper receipt differs')
@@ -890,14 +890,14 @@ def validate_install_receipt(metadata, proof, target, *, public):
             embedding.get('dimension') == 384 and embedding.get('finite_nonzero') is True and
             embedding.get('state') == 'passed', 'installed embedding proof is missing or not aggregate-bound')
     pair_directory = proof.get('installed_pair_directory')
-    pair_path = PureWindowsPath(pair_directory) if target['os'] == 'windows' and isinstance(pair_directory, str) else Path(pair_directory) if isinstance(pair_directory, str) else None
+    pair_path = PureWindowsPath(pair_directory) if target['os'] == 'windows' and isinstance(pair_directory, str) else PurePosixPath(pair_directory) if isinstance(pair_directory, str) else None
     require(isinstance(pair_directory, str) and pair_path.is_absolute() and
             embedding.get('executable_path') == str(pair_path / ('ilium.exe' if target['os'] == 'windows' else 'ilium')) and
             type(embedding.get('process_id')) is int and embedding['process_id'] > 0,
             'installed embedding executable path or process identity differs')
     runtime = embedding.get('loaded_runtime')
     if runtime:
-        runtime_path = PureWindowsPath(runtime) if target['os'] == 'windows' else Path(runtime)
+        runtime_path = PureWindowsPath(runtime) if target['os'] == 'windows' else PurePosixPath(runtime)
         require(runtime_path.is_absolute() and runtime_path.parent == pair_path and
                 binding.get('runtime_files', {}).get(runtime_path.name) == embedding.get('runtime_sha256'),
                 'installed embedding runtime path/hash is not aggregate-bound')
