@@ -1,5 +1,5 @@
 use ilium_plugin_host::audit::{AuditActor, AuditContext, AuditLog, AuditRecord, AuditRetention};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{path::Path, time::Duration};
 
@@ -79,11 +79,9 @@ fn metadata_is_strict_and_missing_provenance_is_refused_without_append() {
     }
     assert!(std::fs::read(&path).unwrap().is_empty());
     let mut no_context = AuditLog::open(path).unwrap();
-    assert!(
-        no_context
-            .append_at(&record(0, json!({"result":"ok"})), 0)
-            .is_err()
-    );
+    assert!(no_context
+        .append_at(&record(0, json!({"result":"ok"})), 0)
+        .is_err());
 }
 
 #[test]
@@ -156,10 +154,9 @@ fn live_deletion_has_explicit_reset_and_tampering_is_not_silently_repaired() {
     )
     .unwrap();
     assert!(log.verify().is_err());
-    assert!(
-        log.append_at(&record(2, json!({"result":"ok"})), 2)
-            .is_err()
-    );
+    assert!(log
+        .append_at(&record(2, json!({"result":"ok"})), 2)
+        .is_err());
 }
 
 #[test]
@@ -381,10 +378,9 @@ fn malformed_durable_state_is_preserved_and_refused() {
         .unwrap();
     let state_path = path.with_extension("refusals.json");
     std::fs::write(&state_path, b"not a state document").unwrap();
-    assert!(
-        log.append_refusal_at(&refusal_record(), "file-open", 1)
-            .is_err()
-    );
+    assert!(log
+        .append_refusal_at(&refusal_record(), "file-open", 1)
+        .is_err());
     assert!(AuditLog::open(path).is_err());
     assert_eq!(std::fs::read(state_path).unwrap(), b"not a state document");
 }

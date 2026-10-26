@@ -1,6 +1,6 @@
 //! Queue admission boundaries beyond the catalogue conformance lane.
 use ilium_plugin_api::abi::{
-    DeliveryPolicy, QueueAdmission, QueueModel, delivery_policy, delivery_policy_for_event,
+    delivery_policy, delivery_policy_for_event, DeliveryPolicy, QueueAdmission, QueueModel,
 };
 use ilium_plugin_api::generated::types::{ActionKind, Event, UiAction, ViewTarget};
 

@@ -6,8 +6,8 @@ use ilium_plugin_api::generated::types::events::Event;
 use ilium_plugin_api::generated::types::ids::NodeId;
 use ilium_plugin_api::generated::types::intents::Intent;
 use ilium_plugin_api::generated::types::requests::{Outcome, RequestRef};
-use ilium_plugin_api::ErrorCode;
 use ilium_plugin_api::ids::PluginId;
+use ilium_plugin_api::ErrorCode;
 use ilium_plugin_host::testing::harness::HostHarness;
 
 // Canonical ABI fixtures adapted from wasm_guest_boundaries.rs: activate checks
@@ -60,8 +60,11 @@ const COMPONENT: &str = r#"(component
 
 #[test]
 fn wat_component_activation_and_events_reach_real_kernel_dispatch() {
-    let host = HostHarness::new().grants(&["tree.read", "tree.write"])
-        .with_wat(COMPONENT).build().expect("actual component builds");
+    let host = HostHarness::new()
+        .grants(&["tree.read", "tree.write"])
+        .with_wat(COMPONENT)
+        .build()
+        .expect("actual component builds");
     assert_eq!(host.state(), InstanceState::Active);
     host.deliver(vec![Event::NodeRemoved(NodeId(5))]);
     let report = host.pump(1);
@@ -74,7 +77,9 @@ fn wat_component_activation_and_events_reach_real_kernel_dispatch() {
     let outcomes = host.outcomes(&PluginId("test.plugin".into()));
     assert_eq!(outcomes.len(), 1);
     assert_eq!(outcomes[0].request, RequestRef::Submission(42));
-    assert!(matches!(&outcomes[0].outcome, Outcome::Refused(error) if error.code == ErrorCode::NotFound));
+    assert!(
+        matches!(&outcomes[0].outcome, Outcome::Refused(error) if error.code == ErrorCode::NotFound)
+    );
 }
 
 #[test]
@@ -87,7 +92,10 @@ fn wasm_bytes_use_the_same_real_component_path() {
 
 #[test]
 fn activation_unreachable_is_a_counted_real_guest_trap() {
-    let text = COMPONENT.replace("local.get 4 i64.const 1 i64.ne if unreachable end", "unreachable");
+    let text = COMPONENT.replace(
+        "local.get 4 i64.const 1 i64.ne if unreachable end",
+        "unreachable",
+    );
     assert_ne!(text, COMPONENT);
     let host = HostHarness::new().with_wat(&text).build().unwrap();
     assert_eq!(host.state(), InstanceState::RestartScheduled);
@@ -98,9 +106,16 @@ fn activation_unreachable_is_a_counted_real_guest_trap() {
 
 #[test]
 fn event_trap_discards_instance_without_applying_submissions() {
-    let text = COMPONENT.replace("local.get 1 i32.const 1 i32.ne if unreachable end", "unreachable");
+    let text = COMPONENT.replace(
+        "local.get 1 i32.const 1 i32.ne if unreachable end",
+        "unreachable",
+    );
     assert_ne!(text, COMPONENT);
-    let host = HostHarness::new().grants(&["tree.read", "tree.write"]).with_wat(&text).build().unwrap();
+    let host = HostHarness::new()
+        .grants(&["tree.read", "tree.write"])
+        .with_wat(&text)
+        .build()
+        .unwrap();
     assert_eq!(host.state(), InstanceState::Active);
     host.deliver(vec![Event::NodeRemoved(NodeId(5))]);
     assert_eq!(host.pump(1).traps, 1);
@@ -112,12 +127,26 @@ fn event_trap_discards_instance_without_applying_submissions() {
 
 #[test]
 fn imports_and_invalid_or_ambiguous_sources_fail_closed() {
-    let error = HostHarness::new().with_wat("(component (import \"ambient\" (func)))").build().unwrap_err();
+    let error = HostHarness::new()
+        .with_wat("(component (import \"ambient\" (func)))")
+        .build()
+        .unwrap_err();
     assert!(error.to_string().contains("effective-grant"));
-    assert!(HostHarness::new().with_wat("invalid component text").build().is_err());
-    assert!(HostHarness::new().with_wasm_bytes(b"not wasm").build().is_err());
-    assert!(HostHarness::new().with_wat(COMPONENT).with_wasm_bytes(b"ignored?").build().unwrap_err()
-        .to_string().contains("exactly one"));
+    assert!(HostHarness::new()
+        .with_wat("invalid component text")
+        .build()
+        .is_err());
+    assert!(HostHarness::new()
+        .with_wasm_bytes(b"not wasm")
+        .build()
+        .is_err());
+    assert!(HostHarness::new()
+        .with_wat(COMPONENT)
+        .with_wasm_bytes(b"ignored?")
+        .build()
+        .unwrap_err()
+        .to_string()
+        .contains("exactly one"));
 }
 
 #[test]

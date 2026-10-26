@@ -9,12 +9,12 @@ use std::time::SystemTime;
 
 use ilium_platform::{file_lock::ExclusiveFileLock, secure_fs};
 use ilium_plugin_api::{
-    grants::{Grant, check_grant, is_high_risk},
+    grants::{check_grant, is_high_risk, Grant},
     side::Side,
     tier::Tier,
 };
 use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
 /// Why a store could not be used.
@@ -486,12 +486,24 @@ impl GrantStore {
     /// Begin a host install decision transaction. Lock order: installed.lock,
     /// then stores.lock. The snapshot is checked before any stage is published.
     pub fn install_transaction(&mut self) -> Result<InstallGrantTransaction<'_>, StoreError> {
-        let parent = self.document.path.parent().ok_or_else(|| invalid("store has no parent"))?;
+        let parent = self
+            .document
+            .path
+            .parent()
+            .ok_or_else(|| invalid("store has no parent"))?;
         let lock = ExclusiveFileLock::acquire(&parent.join("stores.lock")).map_err(io)?;
         let before_bytes = read(&self.document.path)?;
-        if hash(&before_bytes) != self.document.sha256 { return Err(StoreError::Conflict); }
+        if hash(&before_bytes) != self.document.sha256 {
+            return Err(StoreError::Conflict);
+        }
         let before_effective = self.effective.clone();
-        Ok(InstallGrantTransaction { store: self, before_bytes, before_effective, changed: false, _lock: lock })
+        Ok(InstallGrantTransaction {
+            store: self,
+            before_bytes,
+            before_effective,
+            changed: false,
+            _lock: lock,
+        })
     }
 
     /// Records an actual host-approved server decision. Never call with plugin-supplied approvals.
@@ -625,18 +637,22 @@ impl GrantStore {
                 changed |= before != values.len();
             }
             if changed {
-                row["epoch"] = json!(
-                    row["epoch"]
-                        .as_u64()
-                        .ok_or_else(|| invalid("invalid epoch"))?
-                        .checked_add(1)
-                        .ok_or_else(|| invalid("grant epoch exhausted"))?
-                );
+                row["epoch"] = json!(row["epoch"]
+                    .as_u64()
+                    .ok_or_else(|| invalid("invalid epoch"))?
+                    .checked_add(1)
+                    .ok_or_else(|| invalid("grant epoch exhausted"))?);
             }
             Ok(())
         })?;
         // Keep startup filtering; never replace it with unproved disk grants.
-        if let Some(sides) = self.effective.get_mut("plugins").and_then(|plugins| plugins.get_mut(plugin)).and_then(|row| row.get_mut("grants")).and_then(Value::as_object_mut) {
+        if let Some(sides) = self
+            .effective
+            .get_mut("plugins")
+            .and_then(|plugins| plugins.get_mut(plugin))
+            .and_then(|row| row.get_mut("grants"))
+            .and_then(Value::as_object_mut)
+        {
             for values in sides.values_mut() {
                 if let Some(values) = values.as_array_mut() {
                     values.retain(|value| value != grant);
@@ -673,24 +689,46 @@ pub struct InstallGrantTransaction<'a> {
     _lock: ExclusiveFileLock,
 }
 impl InstallGrantTransaction<'_> {
-    pub fn replace_all_sides(&mut self, plugin: &str, key: &str, tier_name: &str,
-        grants: &ilium_plugin_api::manifest::Capabilities) -> Result<u64, StoreError> {
+    pub fn replace_all_sides(
+        &mut self,
+        plugin: &str,
+        key: &str,
+        tier_name: &str,
+        grants: &ilium_plugin_api::manifest::Capabilities,
+    ) -> Result<u64, StoreError> {
         plugin_id(plugin)?;
         let tier = identity(key, tier_name)?;
-        for (side, entries) in [(Side::Server,&grants.server),(Side::Client,&grants.client),(Side::Scene,&grants.scene)] {
-            if entries.len() > 256 { return Err(invalid("more than 256 grants for one side")); }
+        for (side, entries) in [
+            (Side::Server, &grants.server),
+            (Side::Client, &grants.client),
+            (Side::Scene, &grants.scene),
+        ] {
+            if entries.len() > 256 {
+                return Err(invalid("more than 256 grants for one side"));
+            }
             let mut unique = BTreeSet::new();
             for grant in entries {
-                validate_grant(grant,tier,side)?;
-                if !unique.insert(grant.as_str()) { return Err(invalid("duplicate grant")); }
+                validate_grant(grant, tier, side)?;
+                if !unique.insert(grant.as_str()) {
+                    return Err(invalid("duplicate grant"));
+                }
             }
         }
         let mut value = self.store.effective.clone();
         let old = &value["plugins"][plugin];
-        let epoch = old["epoch"].as_u64().unwrap_or(0).checked_add(1).ok_or_else(|| invalid("grant epoch exhausted"))?;
+        let epoch = old["epoch"]
+            .as_u64()
+            .unwrap_or(0)
+            .checked_add(1)
+            .ok_or_else(|| invalid("grant epoch exhausted"))?;
         let installed = if old["key"] == key && old["tier"] == tier_text(tier) {
-            old["installed"].as_str().map(str::to_owned).unwrap_or(timestamp(false)?)
-        } else { timestamp(false)? };
+            old["installed"]
+                .as_str()
+                .map(str::to_owned)
+                .unwrap_or(timestamp(false)?)
+        } else {
+            timestamp(false)?
+        };
         value["plugins"][plugin] = json!({"key":key,"tier":tier_text(tier),"epoch":epoch,"installed":installed,
             "grants":{"server":grants.server.iter().map(Grant::as_str).collect::<Vec<_>>(),
             "client":grants.client.iter().map(Grant::as_str).collect::<Vec<_>>(),
@@ -698,22 +736,26 @@ impl InstallGrantTransaction<'_> {
         validate_grants(&value)?;
         let bytes = encode(&value)?;
         self.changed = true;
-        atomic_write(&self.store.document.path,&bytes)?;
+        atomic_write(&self.store.document.path, &bytes)?;
         self.store.document.sha256 = hash(&bytes);
         self.store.document.value = value.clone();
         self.store.effective = value;
         Ok(epoch)
     }
     pub fn rollback(&mut self) -> Result<(), StoreError> {
-        if !self.changed { return Ok(()); }
-        atomic_write(&self.store.document.path,&self.before_bytes)?;
+        if !self.changed {
+            return Ok(());
+        }
+        atomic_write(&self.store.document.path, &self.before_bytes)?;
         self.store.document.value = parse(&self.before_bytes)?;
         self.store.document.sha256 = hash(&self.before_bytes);
         self.store.effective = self.before_effective.clone();
         self.changed = false;
         Ok(())
     }
-    pub fn sha256(&self) -> &str { self.store.sha256() }
+    pub fn sha256(&self) -> &str {
+        self.store.sha256()
+    }
 }
 
 /// One remembered consent decision.

@@ -160,18 +160,21 @@ fn sec_105_a_plugin_is_rate_limited_after_repeated_prompts() {
     for index in 0..6 {
         // Distinct targets isolate the hourly quota from the three-decline
         // block on a single target required by SEC-110.
-        gate.open("test.plugin", &format!("http:host{index}.example.com")).expect("within six-prompt quota");
+        gate.open("test.plugin", &format!("http:host{index}.example.com"))
+            .expect("within six-prompt quota");
         gate.close(ConsentOutcome::Declined);
     }
-    assert_eq!(gate.open("test.plugin", "http:seventh.example.com"), Err(ConsentOutcome::RateLimited));
+    assert_eq!(
+        gate.open("test.plugin", "http:seventh.example.com"),
+        Err(ConsentOutcome::RateLimited)
+    );
 }
 
 /// REQ: SEC-105
 #[test]
 fn sec_105_an_unanswered_prompt_times_out() {
     let mut gate = ConsentGate::new();
-    gate.open("test.plugin", "http:example.com")
-        .expect("opens");
+    gate.open("test.plugin", "http:example.com").expect("opens");
     assert_eq!(
         gate.tick(Duration::from_secs(24 * 3600)),
         Some(ConsentOutcome::TimedOut)
@@ -211,7 +214,10 @@ fn sec_107_every_row_carries_plain_language_details() {
 /// REQ: SEC-108
 #[test]
 fn sec_108_widened_argument_is_listed_as_wider() {
-    let review = update_review(&[grant("http:api.example.com")], &[grant("http:*.example.com")]);
+    let review = update_review(
+        &[grant("http:api.example.com")],
+        &[grant("http:*.example.com")],
+    );
     assert_eq!(review.wider.len(), 1);
     assert_eq!(review.wider[0].widening, Widening::Argument);
 }
@@ -229,7 +235,10 @@ fn sec_108_removed_grants_are_listed() {
 /// REQ: SEC-108
 #[test]
 fn sec_108_narrowing_is_not_listed_as_wider() {
-    let review = update_review(&[grant("http:*.example.com")], &[grant("http:api.example.com")]);
+    let review = update_review(
+        &[grant("http:*.example.com")],
+        &[grant("http:api.example.com")],
+    );
     assert!(review.wider.is_empty());
 }
 
@@ -241,9 +250,20 @@ fn sec_109_a_changed_signing_key_resets_stored_decisions() {
     let dir = scratch();
     let mut store = GrantStore::open(dir.path()).expect("opens");
     store
-        .set("test.plugin", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "T2", &[grant("tree.read")])
+        .set(
+            "test.plugin",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "T2",
+            &[grant("tree.read")],
+        )
         .expect("set");
-    let kept = store.load("test.plugin", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "T2").expect("load");
+    let kept = store
+        .load(
+            "test.plugin",
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "T2",
+        )
+        .expect("load");
     assert!(kept.is_empty());
 }
 
@@ -253,10 +273,19 @@ fn sec_109_a_changed_tier_resets_stored_decisions() {
     let dir = scratch();
     let mut store = GrantStore::open(dir.path()).expect("opens");
     store
-        .set("test.plugin", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "T2", &[grant("tree.read")])
+        .set(
+            "test.plugin",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "T2",
+            &[grant("tree.read")],
+        )
         .expect("set");
     assert!(store
-        .load("test.plugin", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "T3")
+        .load(
+            "test.plugin",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "T3"
+        )
         .expect("load")
         .is_empty());
 }
@@ -291,7 +320,11 @@ fn sec_111_first_start_without_decisions_grants_nothing() {
     let dir = scratch();
     let store = GrantStore::open(dir.path()).expect("opens");
     assert!(store
-        .load("test.plugin", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "T2")
+        .load(
+            "test.plugin",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "T2"
+        )
         .expect("load")
         .is_empty());
 }
@@ -306,7 +339,12 @@ fn sec_112_grant_store_file_is_owner_only() {
     let dir = scratch();
     let mut store = GrantStore::open(dir.path()).expect("opens");
     store
-        .set("test.plugin", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "T2", &[grant("tree.read")])
+        .set(
+            "test.plugin",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "T2",
+            &[grant("tree.read")],
+        )
         .expect("set");
     let path = store.path().to_owned();
     let mode = std::fs::metadata(path)
@@ -334,7 +372,11 @@ fn sec_113_corrupt_store_is_renamed_and_a_fresh_one_starts() {
     std::fs::write(dir.path().join("grants.json"), b"{ not json").expect("write");
     let store = GrantStore::open(dir.path()).expect("recovers");
     assert!(store
-        .load("test.plugin", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "T2")
+        .load(
+            "test.plugin",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "T2"
+        )
         .expect("load")
         .is_empty());
     assert!(file_names(dir.path())
@@ -349,18 +391,29 @@ fn sec_114_external_edit_of_the_store_is_recorded_in_the_audit_log() {
     let path = {
         let mut store = GrantStore::open(dir.path()).expect("opens");
         store
-            .set("test.plugin", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "T2", &[grant("tree.read")])
+            .set(
+                "test.plugin",
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "T2",
+                &[grant("tree.read")],
+            )
             .expect("set");
         store.path().to_owned()
     };
-    let mut document: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).expect("read actual store")).expect("store JSON");
-    document["plugins"]["test.plugin"]["grants"]["server"] = serde_json::json!(["tree.read", "sound.play"]);
-    std::fs::write(&path, serde_json::to_vec(&document).expect("encode actual store")).expect("external edit");
+    let mut document: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).expect("read actual store"))
+            .expect("store JSON");
+    document["plugins"]["test.plugin"]["grants"]["server"] =
+        serde_json::json!(["tree.read", "sound.play"]);
+    std::fs::write(
+        &path,
+        serde_json::to_vec(&document).expect("encode actual store"),
+    )
+    .expect("external edit");
     let _ = GrantStore::open(dir.path()).expect("reopens");
     let log = AuditLog::open(dir.path()).expect("audit").entries();
     assert!(
-        log.iter()
-            .any(|entry| entry.kind == "store-external-edit"),
+        log.iter().any(|entry| entry.kind == "store-external-edit"),
         "{log:?}"
     );
 }
@@ -429,7 +482,13 @@ fn sec_118_revoking_a_grant_removes_it_from_the_store() {
         .expect("set");
     store.revoke("test.plugin", "sound.play").expect("revoke");
     assert_eq!(
-        store.load("test.plugin", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "T2").expect("load"),
+        store
+            .load(
+                "test.plugin",
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "T2"
+            )
+            .expect("load"),
         vec![grant("tree.read")]
     );
 }
@@ -440,7 +499,12 @@ fn sec_119_uninstall_deletes_grants_and_consents() {
     let dir = scratch();
     let mut grants = GrantStore::open(dir.path()).expect("opens");
     grants
-        .set("test.plugin", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "T2", &[grant("tree.read")])
+        .set(
+            "test.plugin",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "T2",
+            &[grant("tree.read")],
+        )
         .expect("set");
     let mut consents = ConsentStore::open(dir.path()).expect("opens");
     consents
@@ -449,7 +513,11 @@ fn sec_119_uninstall_deletes_grants_and_consents() {
     grants.forget("test.plugin").expect("forget");
     consents.forget("test.plugin").expect("forget");
     assert!(grants
-        .load("test.plugin", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "T2")
+        .load(
+            "test.plugin",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "T2"
+        )
         .expect("load")
         .is_empty());
     assert!(consents.decisions("test.plugin").is_empty());
@@ -540,6 +608,13 @@ fn sec_122_a_list_that_fits_shows_no_indicator() {
 fn sec_123_declined_trust_is_remembered_as_trust_declined() {
     let dir = scratch();
     let mut trust = TrustStore::open(dir.path()).expect("opens");
-    trust.decline("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").expect("decline");
-    assert_eq!(trust.state("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").as_str(), "trust.declined");
+    trust
+        .decline("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+        .expect("decline");
+    assert_eq!(
+        trust
+            .state("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+            .as_str(),
+        "trust.declined"
+    );
 }

@@ -7,8 +7,8 @@ use std::time::{Duration, SystemTime};
 
 use crate::error::HostError;
 use ilium_platform::{file_lock::ExclusiveFileLock, secure_fs};
-use ilium_plugin_api::{Diagnostic, error::Code};
-use serde_json::{Value, json};
+use ilium_plugin_api::{error::Code, Diagnostic};
+use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
 /// A request to append an audit event. `detail_json` is a strict metadata object,
@@ -571,11 +571,9 @@ impl AuditLog {
             summary.value["plugin_id"] == value["plugin_id"] && summary.kind == kind
         }) {
             let count = summary.value["count"].as_u64().unwrap_or(0);
-            summary.value["count"] = json!(
-                count
-                    .checked_add(1)
-                    .ok_or_else(|| failure("audit.state-invalid", "Refusal count exhausted"))?
-            );
+            summary.value["count"] = json!(count
+                .checked_add(1)
+                .ok_or_else(|| failure("audit.state-invalid", "Refusal count exhausted"))?);
         } else {
             // The front retry record moves into this durable slot; it is not an
             // additional record after this transaction succeeds.

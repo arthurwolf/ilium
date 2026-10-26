@@ -997,7 +997,10 @@ fn pkg_123_names_differing_only_in_case_from_listed_ones_refused_entry_unexpecte
     );
     assert_eq!(
         location_codes("Server.wasm"),
-        vec!["package.entry-unexpected".to_owned(), "package.path-case-collision".to_owned()]
+        vec![
+            "package.entry-unexpected".to_owned(),
+            "package.path-case-collision".to_owned()
+        ]
     );
 }
 

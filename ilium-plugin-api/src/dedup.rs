@@ -10,10 +10,17 @@ pub struct DedupKey(String);
 impl DedupKey {
     /// ABI-010: `[A-Za-z0-9._:/-]`, 1..=128 characters; anything else is `invalid-argument`.
     pub fn parse(text: &str) -> Result<DedupKey, PluginError> {
-        if text.is_empty() || text.len() > DEDUP_KEY_MAX_CHARS ||
-            !text.bytes().all(|byte| byte.is_ascii_alphanumeric() || b"._:/-".contains(&byte)) {
-            return Err(PluginError { code: crate::ErrorCode::InvalidArgument,
-                message: "dedup key must contain 1 to 128 ASCII letters, digits or ._:/-".into(), retry_after_ms: None });
+        if text.is_empty()
+            || text.len() > DEDUP_KEY_MAX_CHARS
+            || !text
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || b"._:/-".contains(&byte))
+        {
+            return Err(PluginError {
+                code: crate::ErrorCode::InvalidArgument,
+                message: "dedup key must contain 1 to 128 ASCII letters, digits or ._:/-".into(),
+                retry_after_ms: None,
+            });
         }
         Ok(DedupKey(text.to_owned()))
     }
