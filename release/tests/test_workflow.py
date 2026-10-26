@@ -1375,10 +1375,10 @@ class PipelineTests(unittest.TestCase):
             read_json.side_effect = lambda path: ({'schema': 2, 'state': 'passed'} if Path(path).resolve() == install_arguments.output.resolve() else json.loads(Path(path).read_text()))
             pipeline.install(install_arguments)
         command = list(map(str, logged.call_args.args[0]))
-        self.assertEqual(command[command.index('--embedding-wrapper') + 1], str(arguments.workspace.parent / 'release/tests/embedding_acceptance.py'))
-        self.assertEqual(command[command.index('--embedding-command') + 1], str(native / 'embedding-command.json'))
-        self.assertEqual(command[command.index('--embedding-model') + 1], str(native / 'evidence/model/model.onnx'))
-        self.assertEqual(command[command.index('--embedding-model-register') + 1], str(arguments.workspace.parent / 'release/embedding-model.json'))
+        self.assertEqual(command[command.index('--embedding-wrapper') + 1], str((arguments.workspace.parent / 'release/tests/embedding_acceptance.py').resolve()))
+        self.assertEqual(command[command.index('--embedding-command') + 1], str((native / 'embedding-command.json').resolve()))
+        self.assertEqual(command[command.index('--embedding-model') + 1], str((native / 'evidence/model/model.onnx').resolve()))
+        self.assertEqual(command[command.index('--embedding-model-register') + 1], str((arguments.workspace.parent / 'release/embedding-model.json').resolve()))
         self.assertEqual(json.loads(command[command.index('--expected-embedding-runtime-files') + 1]),
                          json.loads((native / 'native-test-harness.json').read_text())['runtime_files'])
 
