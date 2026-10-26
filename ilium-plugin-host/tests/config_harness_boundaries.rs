@@ -4,7 +4,8 @@ use ilium_plugin_host::testing::config::{ConfigRig, PluginSpec};
 fn owner_refusal_is_atomic_and_uninstall_releases_ownership() {
     let mut rig = ConfigRig::new();
     let first = PluginSpec::new("example.first", "T1").grants(&["settings.write-kernel:terminal"]);
-    let second = PluginSpec::new("example.second", "T1").grants(&["settings.write-kernel:terminal"]);
+    let second =
+        PluginSpec::new("example.second", "T1").grants(&["settings.write-kernel:terminal"]);
     assert!(rig.install(&first).is_ok());
     assert!(!rig.install(&second).is_ok());
     assert!(!rig.is_installed("example.second"));
@@ -17,7 +18,9 @@ fn owner_refusal_is_atomic_and_uninstall_releases_ownership() {
 fn section_custody_limits_and_crash_preserve_last_serialized_value() {
     let mut rig = ConfigRig::new();
     assert!(rig.install(&PluginSpec::new("example.first", "T1")).is_ok());
-    assert!(rig.install(&PluginSpec::new("example.second", "T1")).is_ok());
+    assert!(rig
+        .install(&PluginSpec::new("example.second", "T1"))
+        .is_ok());
     let section = rig.section("example.first", "state", 3, 4);
     rig.write_section(&section, b"old").unwrap();
     let intruder = rig.section("example.second", "state", 3, 4);
@@ -42,7 +45,10 @@ fn malformed_and_complex_documents_are_preserved_without_lossy_edits() {
     let text = "# notes\n[terminal]\nscrollback = 1\nunknown = 'keep'\n";
     rig.write_config(text);
     rig.set_setting("terminal.scrollback", "2");
-    assert_eq!(rig.read_config(), text.replace("scrollback = 1", "scrollback = 2"));
+    assert_eq!(
+        rig.read_config(),
+        text.replace("scrollback = 1", "scrollback = 2")
+    );
     let commented = "[terminal]\nscrollback = 1 # important\n";
     rig.write_config(commented);
     rig.set_setting("terminal.scrollback", "2");
@@ -50,7 +56,9 @@ fn malformed_and_complex_documents_are_preserved_without_lossy_edits() {
     rig.write_project_config("future: { preserve: true }\n");
     rig.set_project_setting("future.preserve", "false");
     assert_eq!(rig.read_project_config(), "future: { preserve: true }\n");
-    assert!(rig.log_codes().contains(&"config.yaml-context-required".into()));
+    assert!(rig
+        .log_codes()
+        .contains(&"config.yaml-context-required".into()));
 }
 
 #[test]

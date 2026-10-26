@@ -1,8 +1,8 @@
 use ilium_plugin_api::grants::Grant;
 use ilium_plugin_host::settings::{
-    KERNEL_TAB_COUNT, kernel_tab_ids, may_write_kernel_tab, validate_settings,
+    kernel_tab_ids, may_write_kernel_tab, validate_settings, KERNEL_TAB_COUNT,
 };
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 fn validate(schema: Value, value: Value) -> bool {
     validate_settings(&schema.to_string(), &value.to_string()).is_ok()

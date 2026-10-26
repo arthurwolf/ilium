@@ -11022,9 +11022,6 @@ mod tests {
         assert!(direct_rx.try_recv().is_err());
 
         // A stale client that doesn't know about the lock still can't
-        // expand it -- the server rejects the mutation and sends a direct
-        // error plus the retained blocking-error snapshot for that folder,
-        // but never a tree broadcast.
         // expand it -- the server rejects the mutation, retains a visible
         // scoped error, and never broadcasts an expanded tree.
         assert!(
@@ -11042,15 +11039,6 @@ mod tests {
             events.recv().await.expect("blocking error broadcast")
         else {
             panic!("a rejected expand must broadcast only its blocking error");
-        };
-        assert!(errors.iter().any(
-            |error| error.node_id == Some(folder_id) && error.operation == "set_node_expanded"
-        ));
-        assert!(events.try_recv().is_err());
-        assert!(direct_rx.try_recv().is_ok());
-            events.try_recv().expect("visible refusal")
-        else {
-            panic!("a refused expansion must publish its retained error");
         };
         assert!(errors.iter().any(|error| error.node_id == Some(folder_id)
             && error.operation == "set_node_expanded"
