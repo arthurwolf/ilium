@@ -1344,15 +1344,6 @@ pub(crate) async fn create_agent_in_workspace(
             {
                 return Err("existing checkout is absent from Git's worktree list".into());
             }
-            {
-                let tree = state.tree.read().await;
-                if tree.panes().any(|pane| {
-                    tree.pane_cwd(pane.id)
-                        .is_some_and(|cwd| cwd.starts_with(&path))
-                }) {
-                    return Err("another Ilium pane already uses this worktree".into());
-                }
-            }
             let launch_cwd = path.join(&source.project_subpath);
             if !crate::workspace_owner::is_directory(&execution.client, &launch_cwd)
                 .await
@@ -1473,6 +1464,14 @@ pub(crate) async fn create_agent_in_workspace(
             };
             tree.ensure_project_default_group(project_id, "default")
                 .map_err(|error| format!("cannot prepare project group: {error}"))?
+        } else {
+            parent_group
+        };
+        // Publish provenance before the node becomes visible. Fixed worktree
+        // containers admit members only through set_pane_workspace below.
+        let parent_group = if tree.worktree_container_for_node(parent_group).is_some() {
+            tree.project_ancestor(parent_group)
+                .ok_or_else(|| "worktree is missing its project".to_string())?
         } else {
             parent_group
         };

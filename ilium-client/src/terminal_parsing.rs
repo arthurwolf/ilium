@@ -2100,6 +2100,14 @@ mod tests {
             "retired engine must release its storage lease"
         );
         parsing.attach(NodeId(2), &mut waiting).unwrap();
+        assert!(
+            waiting.frontend.is_some(),
+            "released engine capacity is reusable"
+        );
+        // Reattachment clears the synchronous engine-admission refusal. The
+        // owner may already report snapshot pressure: this fixture's normal
+        // storage allowance is occupied by the admitted engine itself.
+        assert_eq!(waiting.admission_pressure, None);
         // The recovered engine's envelope occupies the whole ordinary budget of
         // this two-engine ceiling, so a hidden pane cannot publish its first
         // snapshot: only displayed panes may draw on the replacement headroom.

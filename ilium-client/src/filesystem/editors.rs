@@ -4,7 +4,7 @@ use super::editor_snapshot::{
 };
 use super::ordered::{OrderedWriter, WriteCompletion, WriteId};
 use ilium_core::NodeId;
-use ilium_execution::{Client, JobOutcome, JobPoll, Lane, Receipt, Retained};
+use ilium_execution::{Client, JobOutcome, JobPoll, Lane, Receipt, RejectReason, Retained};
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -17,7 +17,10 @@ const MAX_FROZEN_SCREEN_PATH_BYTES: usize = 64 * 1024;
 const FROZEN_SCREEN_BYTES: usize = crate::terminal_parsing::MAX_STATE_BYTES;
 const FROZEN_SCREEN_WRITE_RETAINED_BYTES: usize = FROZEN_SCREEN_BYTES + 1024 * 1024;
 const FROZEN_SCREEN_IO_COST: ilium_execution::JobCost = ilium_execution::JobCost {
-    input_bytes: MAX_FROZEN_SCREEN_PATH_BYTES + 4096,
+    // A growing file can force realloc to keep the old allocation alive while
+    // obtaining its replacement. Input credit covers that temporary original;
+    // result credit covers the final buffer. Both survive until actual release.
+    input_bytes: FROZEN_SCREEN_BYTES + MAX_FROZEN_SCREEN_PATH_BYTES + 4096,
     result_bytes: FROZEN_SCREEN_BYTES,
 };
 const FROZEN_SCREEN_PARSE_COST: ilium_execution::JobCost = ilium_execution::JobCost {
@@ -47,6 +50,11 @@ struct PendingFrozenScreenRead {
 struct PendingFrozenScreenParse {
     target: FrozenScreenTarget,
     receipt: Receipt<ParseFrozenScreen>,
+}
+
+struct WaitingFrozenScreenParse {
+    target: FrozenScreenTarget,
+    job: ParseFrozenScreen,
 }
 
 struct PendingFrozenScreenSave {
@@ -112,7 +120,13 @@ impl ilium_execution::Job for ReadFrozenScreen {
             return Err("frozen screen changed to an unsupported or oversized file".into());
         }
         let mut file = file;
-        let mut bytes = Vec::with_capacity(opened_metadata.len() as usize);
+        let mut bytes = Vec::new();
+        bytes
+            .try_reserve_exact(opened_metadata.len() as usize)
+            .map_err(|error| format!("frozen screen allocation: {error}"))?;
+        if bytes.capacity() > FROZEN_SCREEN_BYTES {
+            return Err("frozen screen allocation exceeded its retained byte limit".into());
+        }
         let mut chunk = [0_u8; 16 * 1024];
         loop {
             if context.stop_requested() {
@@ -120,18 +134,33 @@ impl ilium_execution::Job for ReadFrozenScreen {
             }
             let remaining = FROZEN_SCREEN_BYTES.saturating_sub(bytes.len());
             let read_limit = chunk.len().min(remaining.saturating_add(1));
-            let count = file
-                .read(&mut chunk[..read_limit])
-                .map_err(|error| format!("frozen screen read: {error}"))?;
+            let count = match file.read(&mut chunk[..read_limit]) {
+                Ok(count) => count,
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(error) => return Err(format!("frozen screen read: {error}")),
+            };
             if count == 0 {
                 break;
             }
             if count > remaining {
                 return Err("frozen screen grew beyond its retained byte limit".into());
             }
-            bytes
-                .try_reserve_exact(count)
-                .map_err(|error| format!("frozen screen allocation: {error}"))?;
+            // A file can grow after metadata was read. Geometric growth avoids
+            // copying the whole snapshot for each 16 KiB read, while the
+            // result ceiling bounds each allocation. The separate read-input
+            // scratch allowance covers old/new overlap during realloc.
+            let needed = bytes.len() + count;
+            if needed > bytes.capacity() {
+                let capacity = needed
+                    .max(bytes.capacity().saturating_mul(2))
+                    .min(FROZEN_SCREEN_BYTES);
+                bytes
+                    .try_reserve_exact(capacity - bytes.len())
+                    .map_err(|error| format!("frozen screen allocation: {error}"))?;
+                if bytes.capacity() > FROZEN_SCREEN_BYTES {
+                    return Err("frozen screen allocation exceeded its retained byte limit".into());
+                }
+            }
             bytes.extend_from_slice(&chunk[..count]);
         }
         Ok(bytes)
@@ -247,6 +276,7 @@ pub struct EditorFiles {
     ready: Arc<tokio::sync::Notify>,
     loads: Vec<PendingLoad>,
     frozen_screen_reads: Vec<PendingFrozenScreenRead>,
+    frozen_screen_waiting_parses: VecDeque<WaitingFrozenScreenParse>,
     frozen_screen_parses: Vec<PendingFrozenScreenParse>,
     frozen_screen_saves: Vec<PendingFrozenScreenSave>,
     frozen_screen_write_ids: Vec<(WriteId, FrozenScreenTarget)>,
@@ -276,6 +306,7 @@ impl EditorFiles {
             ready,
             loads: Vec::new(),
             frozen_screen_reads: Vec::new(),
+            frozen_screen_waiting_parses: VecDeque::new(),
             frozen_screen_parses: Vec::new(),
             frozen_screen_saves: Vec::new(),
             frozen_screen_write_ids: Vec::new(),
@@ -297,6 +328,7 @@ impl EditorFiles {
     pub fn pending(&self) -> usize {
         self.loads.len()
             + self.frozen_screen_reads.len()
+            + self.frozen_screen_waiting_parses.len()
             + self.frozen_screen_parses.len()
             + self.measurements.len()
             + self.captures.len()
@@ -310,7 +342,12 @@ impl EditorFiles {
         target: FrozenScreenTarget,
         path: PathBuf,
     ) -> Result<(), String> {
-        if self.frozen_screen_reads.len() + self.frozen_screen_parses.len()
+        if self.closing {
+            return Err("Frozen screen load admission is closed".into());
+        }
+        if self.frozen_screen_reads.len()
+            + self.frozen_screen_waiting_parses.len()
+            + self.frozen_screen_parses.len()
             >= MAX_FROZEN_SCREEN_LOADS
         {
             return Err("Frozen screen load admission is full".into());
@@ -322,6 +359,7 @@ impl EditorFiles {
         cost.input_bytes = path
             .capacity()
             .checked_add(4096)
+            .and_then(|bytes| bytes.checked_add(FROZEN_SCREEN_BYTES))
             .ok_or_else(|| "Frozen screen path cost overflow".to_owned())?;
         let reservation = self
             .client
@@ -488,6 +526,9 @@ impl EditorFiles {
         if let Some(completion) = self.poll_frozen_screen_reads() {
             return Some(completion);
         }
+        if let Some(completion) = self.prepare_frozen_screen_parses() {
+            return Some(completion);
+        }
         if let Some(completion) = self.poll_frozen_screen_parses() {
             return Some(completion);
         }
@@ -626,20 +667,81 @@ impl EditorFiles {
                     });
                 }
             };
-            let reservation = match self.client.try_reserve(Lane::Cpu, FROZEN_SCREEN_PARSE_COST) {
+            self.frozen_screen_waiting_parses
+                .push_back(WaitingFrozenScreenParse {
+                    target: pending.target,
+                    job: ParseFrozenScreen {
+                        bytes,
+                        _read_retention: read_retention,
+                    },
+                });
+            return None;
+        }
+        None
+    }
+
+    fn prepare_frozen_screen_parses(&mut self) -> Option<EditorCompletion> {
+        while let Some(waiting) = self.frozen_screen_waiting_parses.front() {
+            if self.closing {
+                let pending = self.frozen_screen_waiting_parses.pop_front()?;
+                return Some(EditorCompletion::FrozenScreenLoadFailed {
+                    target: pending.target,
+                    message: "Frozen screen parsing was cancelled".into(),
+                });
+            }
+            // Keep the read's original charge until parsing consumes its bytes.
+            // Only the new CPU input reservation is sized to this allocation;
+            // expanded parser output keeps its conservative full bound.
+            let cost = ilium_execution::JobCost {
+                input_bytes: waiting.job.bytes.capacity()
+                    + std::mem::size_of::<ParseFrozenScreen>(),
+                result_bytes: FROZEN_SCREEN_PARSE_COST.result_bytes,
+            };
+            // Immutable ceilings cannot improve after another job releases its
+            // reservation. Distinguish those from temporary pressure before
+            // putting a restored screen into a retry-only state.
+            match self.client.maximum_cpu_job_cost() {
+                Ok(maximum)
+                    if cost.input_bytes <= maximum.input_bytes
+                        && cost.result_bytes <= maximum.result_bytes => {}
+                Err(RejectReason::Busy) => return None,
+                other => {
+                    let pending = self.frozen_screen_waiting_parses.pop_front()?;
+                    return Some(EditorCompletion::FrozenScreenLoadFailed {
+                        target: pending.target,
+                        message: format!(
+                            "Frozen screen parser capability is insufficient: {other:?}"
+                        ),
+                    });
+                }
+            }
+            let reservation = match self.client.try_reserve(Lane::Cpu, cost) {
                 Ok(reservation) => reservation,
+                Err(reason) if frozen_screen_admission_is_retryable(reason) => {
+                    // The process admission notification and normal app ticks
+                    // revisit this bounded queue. Never self-notify here: doing
+                    // so would turn resource pressure into a UI busy loop.
+                    return None;
+                }
                 Err(reason) => {
+                    let pending = self.frozen_screen_waiting_parses.pop_front()?;
                     return Some(EditorCompletion::FrozenScreenLoadFailed {
                         target: pending.target,
                         message: format!("Frozen screen parse not admitted: {reason:?}"),
                     });
                 }
             };
-            let receipt = match reservation.submit(ParseFrozenScreen {
-                bytes,
-                _read_retention: read_retention,
-            }) {
+            let pending = self.frozen_screen_waiting_parses.pop_front()?;
+            let receipt = match reservation.submit(pending.job) {
                 Ok(receipt) => receipt,
+                Err(rejection) if frozen_screen_admission_is_retryable(rejection.reason) => {
+                    self.frozen_screen_waiting_parses
+                        .push_front(WaitingFrozenScreenParse {
+                            target: pending.target,
+                            job: rejection.value,
+                        });
+                    return None;
+                }
                 Err(rejection) => {
                     return Some(EditorCompletion::FrozenScreenLoadFailed {
                         target: pending.target,
@@ -654,7 +756,6 @@ impl EditorFiles {
                 target: pending.target,
                 receipt,
             });
-            return None;
         }
         None
     }
@@ -942,6 +1043,16 @@ impl EditorFiles {
         for pending in &self.loads {
             pending.receipt.cancel();
         }
+        // Restores have no durable side effects. Cancel them during shutdown
+        // instead of waiting indefinitely for a parser admission they no longer
+        // need; accepted saves retain their separate ordered durability owner.
+        self.frozen_screen_waiting_parses.clear();
+        for pending in &self.frozen_screen_reads {
+            pending.receipt.cancel();
+        }
+        for pending in &self.frozen_screen_parses {
+            pending.receipt.cancel();
+        }
     }
 
     fn close_writer_after_preparation(&mut self) {
@@ -953,4 +1064,15 @@ impl EditorFiles {
             self.writes.close_admission();
         }
     }
+}
+
+fn frozen_screen_admission_is_retryable(reason: RejectReason) -> bool {
+    matches!(
+        reason,
+        RejectReason::Busy
+            | RejectReason::QueueFull
+            | RejectReason::JobLimit
+            | RejectReason::InputBytes
+            | RejectReason::ResultBytes
+    )
 }

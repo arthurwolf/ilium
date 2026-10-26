@@ -462,6 +462,7 @@ fn render_structure_children(
             ))
         })?;
         let kind = match &child.kind {
+            NodeKind::Container(container) if container.is_worktree() => "worktree".to_string(),
             NodeKind::Container(container) if container.is_group() => "group".to_string(),
             NodeKind::Container(container) if container.is_split_view() => {
                 let orientation = match tree
@@ -477,7 +478,30 @@ fn render_structure_children(
             NodeKind::Folder { .. } => "folder".to_string(),
             NodeKind::Container(_) => "container".to_string(),
         };
-        lines.push(ilium_prompts::render_value("naming/restructure/v0-v1-id-v2-title-v3-icon-v4-source-v5-name-fixed", &serde_json::json!({"v0": ("  ".repeat(depth)).to_string(), "v1": (kind).to_string(), "v2": (child.id.0).to_string(), "v3": (child.name).to_string(), "v4": (child.inferred_icon.as_deref().unwrap_or("")).to_string(), "v5": (child.structure_source.prompt_label()).to_string(), "v6": (child.is_name_fixed).to_string()})));
+        let mut line = ilium_prompts::render_value(
+            "naming/restructure/v0-v1-id-v2-title-v3-icon-v4-source-v5-name-fixed",
+            &serde_json::json!({"v0": ("  ".repeat(depth)).to_string(), "v1": (kind).to_string(), "v2": (child.id.0).to_string(), "v3": (child.name).to_string(), "v4": (child.inferred_icon.as_deref().unwrap_or("")).to_string(), "v5": (child.structure_source.prompt_label()).to_string(), "v6": (child.is_name_fixed).to_string()}),
+        );
+        // A worktree is immutable checkout custody, not a group the model can
+        // emit in a restructure plan. Keep each member's owner explicit too,
+        // so membership remains clear when hierarchy evidence is clipped.
+        if child.is_worktree() {
+            let project = tree
+                .project_ancestor(child.id)
+                .ok_or_else(|| anyhow::anyhow!("worktree {} has no owning project", child.id.0))?;
+            line.push_str(&format!(
+                " owner_project=\"{}\" membership=\"immutable\" output=\"omit-wrapper\"",
+                project.0
+            ));
+        } else if child.is_pane() {
+            if let Some(worktree) = tree.worktree_container_for_node(child.id) {
+                line.push_str(&format!(
+                    " worktree_owner=\"{}\" membership=\"immutable\"",
+                    worktree.0
+                ));
+            }
+        }
+        lines.push(line);
         if child.is_container() {
             render_structure_children(tree, *child_id, depth + 1, lines)?;
         }
@@ -2619,7 +2643,7 @@ mod tests {
         assert!(prompt.contains("scope the user intends to return to"));
         assert!(prompt.contains("Rewrite an automatic activity summary"));
         assert!(prompt.contains("\"title\":\"LOGIN BUG\""));
-        assert!(prompt.contains("Every fixed group appears once as existing_group"));
+        assert!(prompt.contains("Every ordinary fixed group appears once as existing_group"));
         assert!(prompt.contains("Preserve membership/order"));
         assert!(!prompt.contains("Backend Agent Fixing Login Bug"));
     }
@@ -2757,6 +2781,71 @@ mod tests {
         assert!(prompt.contains("Current work may justify clearer grouping"));
         assert!(prompt.contains("source=\\\"manual\\\""));
         assert!(prompt.contains("source=\\\"LLM restructure\\\""));
+    }
+
+    #[test]
+    fn worktree_evidence_keeps_checkout_membership_separate_from_output_groups() {
+        let mut tree = Tree::new();
+        let project = tree
+            .add_project(PathBuf::from("/test/restructure-worktree"))
+            .unwrap();
+        let first = tree
+            .add_pane(
+                project,
+                "first agent",
+                ilium_core::PaneContentKind::Terminal,
+            )
+            .unwrap();
+        let second = tree
+            .add_pane(
+                project,
+                "second agent",
+                ilium_core::PaneContentKind::Terminal,
+            )
+            .unwrap();
+        let workspace = ilium_core::PaneWorkspace {
+            workspace_id: None,
+            repo_common_dir: "/test/restructure-worktree/.git".into(),
+            worktree_root: "/test/shared-checkout".into(),
+            branch: "agent/shared".into(),
+            base_ref: "main".into(),
+            base_commit: "abc".into(),
+            created_by_ilium: false,
+            created_at_unix: 0,
+        };
+        tree.set_pane_workspace(first, Some(workspace.clone()))
+            .unwrap();
+        tree.set_pane_workspace(second, Some(workspace)).unwrap();
+        let worktree = tree.parent_of(first).unwrap();
+        let structure = render_project_structure(&tree, project).unwrap();
+        let wrapper = structure
+            .lines()
+            .find(|line| line.contains(&format!("worktree id=\"{}\"", worktree.0)))
+            .expect("checkout must be identified as a worktree, not an ordinary group");
+        assert!(wrapper.contains(&format!("owner_project=\"{}\"", project.0)));
+        assert!(wrapper.contains("membership=\"immutable\" output=\"omit-wrapper\""));
+        for member in [first, second] {
+            let row = structure
+                .lines()
+                .find(|line| line.contains(&format!("pane id=\"{}\"", member.0)))
+                .unwrap();
+            assert!(row.contains(&format!(
+                "worktree_owner=\"{}\" membership=\"immutable\"",
+                worktree.0
+            )));
+        }
+        let generator = FakeGenerator::new(format!(
+            r#"{{"children":[{{"kind":"pane","id":{},"title":"renamed first","short_title":null,"icon":null}},{{"kind":"pane","id":{},"title":"renamed second","short_title":null,"icon":null}}]}}"#,
+            first.0, second.0
+        ));
+        let contexts = vec![leaf(first.0, "first agent"), leaf(second.0, "second agent")];
+        let plan =
+            infer_restructure_plan_with_structure(&generator, &contexts, &structure).unwrap();
+        tree.apply_project_restructure(project, plan).unwrap();
+        assert_eq!(tree.parent_of(first), Some(worktree));
+        assert_eq!(tree.parent_of(second), Some(worktree));
+        assert_eq!(tree.get(first).unwrap().name, "renamed first");
+        assert_eq!(tree.get(second).unwrap().name, "renamed second");
     }
 
     #[test]

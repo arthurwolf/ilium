@@ -23,6 +23,9 @@ const CHATROOM_INSTRUCTION: &str = ilium_prompts::agent::CHATROOM_INSTRUCTIONS;
 
 const PROGRESS_INSTRUCTION: &str = ilium_prompts::agent::PROGRESS_INSTRUCTIONS;
 
+const ON_DEMAND_POLICY_MARKER: &str = "<!-- instruction-policy:on-demand-v1 -->";
+const ON_DEMAND_FEATURE_MARKER: &str = "<!-- ilium-on-demand:";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AgentFeature {
     Chatroom,
@@ -49,7 +52,7 @@ impl AgentFeature {
     const fn current_version(self) -> Option<u32> {
         match self {
             Self::Chatroom => None,
-            Self::Progress => Some(16),
+            Self::Progress => Some(17),
         }
     }
 
@@ -69,6 +72,42 @@ impl AgentFeature {
             Self::Chatroom => CHATROOM_INSTRUCTION,
             Self::Progress => PROGRESS_INSTRUCTION,
         }
+    }
+
+    fn compact_instruction(self) -> &'static str {
+        match self {
+            Self::Chatroom => ilium_prompts::agent::COMPACT_CHATROOM_INSTRUCTIONS,
+            Self::Progress => ilium_prompts::agent::COMPACT_PROGRESS_INSTRUCTIONS,
+        }
+    }
+
+    fn compact_guides(self) -> &'static [&'static str] {
+        match self {
+            Self::Chatroom => &["chatroom.md"],
+            Self::Progress => &["goal-monitor-details.md", "progress-probes.md"],
+        }
+    }
+
+    fn compact_policy_available(self, policy_path: Option<&Path>) -> bool {
+        let Some(policy_path) = policy_path else {
+            return false;
+        };
+        let Ok(policy) = read_existing(policy_path) else {
+            return false;
+        };
+        if !policy
+            .lines()
+            .any(|line| line.trim() == ON_DEMAND_POLICY_MARKER)
+        {
+            return false;
+        }
+        let Some(parent) = policy_path.parent() else {
+            return false;
+        };
+        self.compact_guides().iter().all(|name| {
+            read_existing(&parent.join("docs").join(name))
+                .is_ok_and(|guide| !guide.trim().is_empty())
+        })
     }
 
     fn detection_regexes(self) -> Vec<Regex> {
@@ -130,7 +169,16 @@ pub fn global_claude_path() -> Option<PathBuf> {
 }
 
 pub fn status(path: &Path, feature: AgentFeature) -> std::io::Result<FeatureSetupStatus> {
+    status_with_policy(path, feature, global_claude_path().as_deref())
+}
+
+fn status_with_policy(
+    path: &Path,
+    feature: AgentFeature,
+    policy_path: Option<&Path>,
+) -> std::io::Result<FeatureSetupStatus> {
     let contents = read_existing(path)?;
+    let compact = feature.compact_policy_available(policy_path);
     let managed_blocks = validated_managed_blocks(&contents, feature)?;
     if !managed_blocks.is_empty() {
         if let Some(current_version) = feature.current_version() {
@@ -143,15 +191,24 @@ pub fn status(path: &Path, feature: AgentFeature) -> std::io::Result<FeatureSetu
             }
         }
         if managed_blocks.iter().all(|block| {
+            let body = &contents[block.start..block.end];
             block.version == feature.current_version()
-                && feature.is_detected(&contents[block.start..block.end])
+                && if compact {
+                    body.contains(feature.compact_instruction().trim())
+                } else {
+                    !body.contains(ON_DEMAND_FEATURE_MARKER) && feature.is_detected(body)
+                }
         }) {
             return Ok(FeatureSetupStatus::Managed);
         }
         return Ok(FeatureSetupStatus::ManagedStale);
     }
     if feature == AgentFeature::Chatroom && !legacy_chatroom_blocks(&contents)?.is_empty() {
-        return Ok(FeatureSetupStatus::Managed);
+        return Ok(if compact {
+            FeatureSetupStatus::ManagedStale
+        } else {
+            FeatureSetupStatus::Managed
+        });
     }
     Ok(if feature.is_detected(&contents) {
         FeatureSetupStatus::DetectedUnmanaged
@@ -161,7 +218,20 @@ pub fn status(path: &Path, feature: AgentFeature) -> std::io::Result<FeatureSetu
 }
 
 pub fn install(path: &Path, feature: AgentFeature) -> std::io::Result<()> {
+    install_with_policy(path, feature, global_claude_path().as_deref())
+}
+
+fn install_with_policy(
+    path: &Path,
+    feature: AgentFeature,
+    policy_path: Option<&Path>,
+) -> std::io::Result<()> {
     mutate_target(path, |existing| {
+        let instruction = if feature.compact_policy_available(policy_path) {
+            feature.compact_instruction()
+        } else {
+            feature.instruction()
+        };
         let without_previous = remove_managed_blocks(existing, feature)?;
         let separator = if without_previous.trim().is_empty() {
             ""
@@ -172,7 +242,7 @@ pub fn install(path: &Path, feature: AgentFeature) -> std::io::Result<()> {
         };
         Ok(ilium_prompts::render_value(
             "agent/managed-block",
-            &serde_json::json!({"v0": (without_previous).to_string(), "v1": (separator).to_string(), "v2": (feature.opening_marker()).to_string(), "v3": (feature.instruction()).to_string(), "v4": (feature.closing_marker()).to_string()}),
+            &serde_json::json!({"v0": (without_previous).to_string(), "v1": (separator).to_string(), "v2": (feature.opening_marker()).to_string(), "v3": (instruction).to_string(), "v4": (feature.closing_marker()).to_string()}),
         ))
     })
 }
@@ -533,6 +603,120 @@ fn remove_managed_blocks(contents: &str, feature: AgentFeature) -> std::io::Resu
 mod tests {
     use super::*;
 
+    // Existing full-contract cases must not depend on the user's live policy.
+    fn install(path: &Path, feature: AgentFeature) -> std::io::Result<()> {
+        super::install_with_policy(path, feature, None)
+    }
+
+    fn status(path: &Path, feature: AgentFeature) -> std::io::Result<FeatureSetupStatus> {
+        super::status_with_policy(path, feature, None)
+    }
+
+    fn on_demand_policy(directory: &Path) -> PathBuf {
+        let policy = directory.join(".claude/CLAUDE.md");
+        let docs = policy.parent().unwrap().join("docs");
+        fs::create_dir_all(&docs).unwrap();
+        fs::write(&policy, "<!-- instruction-policy:on-demand-v1 -->\n").unwrap();
+        for name in [
+            "goal-monitor-details.md",
+            "progress-probes.md",
+            "chatroom.md",
+        ] {
+            fs::write(docs.join(name), "Required procedure.\n").unwrap();
+        }
+        policy
+    }
+
+    #[test]
+    fn on_demand_guides_select_compact_idempotent_managed_instructions() {
+        for feature in AgentFeature::ALL {
+            let directory = tempfile::tempdir().unwrap();
+            let policy = on_demand_policy(directory.path());
+            let target = directory.path().join("AGENTS.md");
+            fs::write(&target, "Keep unrelated policy.\n").unwrap();
+            super::install_with_policy(&target, feature, Some(&policy)).unwrap();
+            let once = fs::read_to_string(&target).unwrap();
+            assert!(once.contains("<!-- ilium-on-demand:"));
+            assert!(once.contains("Keep unrelated policy."));
+            assert!(once.len() < 2000);
+            assert_eq!(
+                super::status_with_policy(&target, feature, Some(&policy)).unwrap(),
+                FeatureSetupStatus::Managed
+            );
+            super::install_with_policy(&target, feature, Some(&policy)).unwrap();
+            assert_eq!(fs::read_to_string(&target).unwrap(), once);
+            uninstall(&target, feature).unwrap();
+            assert_eq!(
+                fs::read_to_string(&target).unwrap(),
+                "Keep unrelated policy.\n"
+            );
+        }
+    }
+
+    #[test]
+    fn missing_empty_or_non_file_guide_restores_the_full_instruction() {
+        for (feature, name) in [
+            (AgentFeature::Progress, "goal-monitor-details.md"),
+            (AgentFeature::Progress, "progress-probes.md"),
+            (AgentFeature::Chatroom, "chatroom.md"),
+        ] {
+            for replacement in ["missing", "empty", "directory"] {
+                let directory = tempfile::tempdir().unwrap();
+                let policy = on_demand_policy(directory.path());
+                let target = directory.path().join("AGENTS.md");
+                super::install_with_policy(&target, feature, Some(&policy)).unwrap();
+                let guide = policy.parent().unwrap().join("docs").join(name);
+                fs::remove_file(&guide).unwrap();
+                match replacement {
+                    "empty" => fs::write(&guide, " \n").unwrap(),
+                    "directory" => fs::create_dir(&guide).unwrap(),
+                    _ => {}
+                }
+                assert_eq!(
+                    super::status_with_policy(&target, feature, Some(&policy)).unwrap(),
+                    FeatureSetupStatus::ManagedStale,
+                    "{feature:?}: {name}: {replacement}"
+                );
+                super::install_with_policy(&target, feature, Some(&policy)).unwrap();
+                let text = fs::read_to_string(&target).unwrap();
+                assert!(!text.contains("<!-- ilium-on-demand:"));
+                assert!(text.contains(feature.instruction()));
+            }
+        }
+    }
+
+    #[test]
+    fn guides_without_exact_opt_in_do_not_change_the_full_behavior() {
+        let directory = tempfile::tempdir().unwrap();
+        let policy = on_demand_policy(directory.path());
+        fs::write(&policy, "A user quoted instruction-policy:on-demand-v1.\n").unwrap();
+        for feature in AgentFeature::ALL {
+            let target = directory.path().join(format!("{}.md", feature.label()));
+            super::install_with_policy(&target, feature, Some(&policy)).unwrap();
+            let text = fs::read_to_string(&target).unwrap();
+            assert!(!text.contains("<!-- ilium-on-demand:"));
+            assert!(text.contains(feature.instruction()));
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn compact_install_preserves_shared_policy_symlink_and_unrelated_bytes() {
+        use std::os::unix::fs::symlink;
+        let directory = tempfile::tempdir().unwrap();
+        let policy = on_demand_policy(directory.path());
+        let original = fs::read_to_string(&policy).unwrap();
+        let link = directory.path().join("AGENTS.md");
+        symlink(&policy, &link).unwrap();
+        super::install_with_policy(&link, AgentFeature::Progress, Some(&policy)).unwrap();
+        assert!(link.is_symlink());
+        assert!(fs::read_to_string(&policy).unwrap().starts_with(&original));
+        assert_eq!(
+            super::status_with_policy(&link, AgentFeature::Progress, Some(&policy)).unwrap(),
+            FeatureSetupStatus::Managed
+        );
+    }
+
     #[test]
     fn install_reports_managed_and_replaces_old_copy() {
         let directory = tempfile::tempdir().unwrap();
@@ -585,7 +769,7 @@ mod tests {
 
         let contents = fs::read_to_string(&target).unwrap();
         assert!(!contents.contains("as a progress monitor"));
-        assert!(contents.contains("ilium-agent-feature: progress version=16"));
+        assert!(contents.contains("ilium-agent-feature: progress version=17"));
         assert!(contents.contains("you MUST block with `ilium progress wait <monitor_id>`"));
         assert!(contents.contains("--wait"));
         assert!(contents.contains("at least three minutes"));
@@ -863,7 +1047,7 @@ mod tests {
         install(&target, AgentFeature::Progress).unwrap();
         let updated = fs::read_to_string(&target).unwrap();
         assert!(updated.contains("# User policy"));
-        assert!(updated.contains("version=16"));
+        assert!(updated.contains("version=17"));
         assert!(!updated.contains("version=99"));
     }
 

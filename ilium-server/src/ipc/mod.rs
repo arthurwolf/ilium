@@ -2,6 +2,7 @@
 //! (see [`connection`]), dispatching requests through [`handlers`].
 
 mod connection;
+pub(crate) use connection::SERVER_EVENT_RETIREMENT_BYTES;
 pub(crate) mod direct_events;
 pub(crate) use direct_events::DirectEventSender;
 pub(crate) use direct_events::EventReply;
@@ -310,21 +311,14 @@ mod tests {
             write_frame(&mut admitted, &ClientRequest::Detach)
                 .await
                 .expect("detach admitted connection");
-            // A broadcast `BlockingErrorsSnapshot` (published whenever a
-            // request error is retained) may legitimately interleave with
-            // the stream; only the ordering of the request-bound events
-            // matters here.
-            let admitted_end = tokio::time::timeout(TEST_DEADLINE, async {
-                loop {
-                    match read_frame::<ServerEvent, _>(&mut admitted).await {
-                        Ok(ServerEvent::BlockingErrorsSnapshot { .. }) => {}
-                        other => return other,
-                    }
-                }
+            // Detach drains the captured final broadcast prefix before EOF.
+            // A prior wrong-session request can leave feedback after attach's
+            // sync marker; require closure without discarding that contract.
+            tokio::time::timeout(TEST_DEADLINE, async {
+                while read_frame::<ServerEvent, _>(&mut admitted).await.is_ok() {}
             })
             .await
-            .expect("admitted connection did not close");
-            assert!(admitted_end.is_err(), "Detach must end the prior stream");
+            .expect("Detach must drain final events and close the prior stream");
 
             let first_reply: ServerEvent = tokio::time::timeout(TEST_DEADLINE, async {
                 loop {

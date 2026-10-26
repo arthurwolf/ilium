@@ -320,12 +320,10 @@ async fn handle_scoped_request(
             false
         }
         ClientRequest::Attach { session, .. } => {
-            handle_attach(state, &session, direct_tx, true).await;
-            false
+            handle_attach(state, &session, direct_tx, true).await
         }
         ClientRequest::AttachInteractive { session, .. } => {
-            handle_attach(state, &session, direct_tx, false).await;
-            false
+            handle_attach(state, &session, direct_tx, false).await
         }
         ClientRequest::DiscardTerminalDelivery { .. } => {
             // Intercepted by `ipc::connection`: delivery watermarks belong to
@@ -480,7 +478,16 @@ async fn handle_scoped_request(
             request_id,
             project,
         } => {
-            let result = crate::workspace::repo_facts(state, project).await;
+            // Like inventory, a cache-miss Git query needs a fresh poll stack:
+            // the generic dispatcher's large debug frame must not nest below it.
+            // The awaited guard cancels this read-only task with its caller.
+            let facts_state = Arc::clone(state);
+            let result = crate::task_guard::AbortOnDropHandle::new(tokio::spawn(async move {
+                crate::workspace::repo_facts(&facts_state, project).await
+            }))
+            .join()
+            .await
+            .unwrap_or_else(|error| Err(format!("repository facts task failed: {error}")));
             let _ = direct_tx
                 .send(ServerEvent::RepoFactsReported {
                     request_id,
@@ -1598,7 +1605,7 @@ async fn handle_attach(
     session: &str,
     direct_tx: &DirectEventSender,
     include_terminal_output: bool,
-) {
+) -> bool {
     if session != state.session_name {
         send_direct_error(
             direct_tx,
@@ -1608,7 +1615,7 @@ async fn handle_attach(
             ),
         )
         .await;
-        return;
+        return false;
     }
     loop {
         match state.recovery.attach_status().await {
@@ -1642,23 +1649,38 @@ async fn handle_attach(
                     ServerEvent::SessionRecoveryAvailable { pane_count },
                 )
                 .await;
-                return;
+                return false;
             }
             crate::recovery::AttachStatus::Resolving(completion) => {
                 if let Err(message) = crate::recovery::wait_for_result(completion).await {
                     send_direct_error(direct_tx, message.to_string()).await;
-                    return;
+                    return false;
                 }
             }
             crate::recovery::AttachStatus::Failed(message) => {
                 send_direct_error(direct_tx, message.to_string()).await;
-                return;
+                return false;
             }
             crate::recovery::AttachStatus::Settled => break,
         }
     }
 
-    send_initial_state(state, direct_tx, include_terminal_output).await;
+    // Only capacity waiting is bounded. Recovery resolution, seed building,
+    // queue delivery and actual socket flushing keep their existing semantics.
+    if let Err(error) = send_initial_state(
+        state,
+        direct_tx,
+        include_terminal_output,
+        Some(std::time::Duration::from_secs(30)),
+    )
+    .await
+    {
+        // Sending an error would itself need the exhausted General storage.
+        // The reader closes this failed attachment and releases its cursor.
+        tracing::warn!(%error, "initial attach seed failed; closing connection without completing synchronization");
+        return true;
+    }
+    false
 }
 
 /// Sends one ordered, complete client render-cache seed. Both normal attach
@@ -1668,25 +1690,29 @@ async fn send_initial_state(
     state: &ServerState,
     direct_tx: &DirectEventSender,
     include_terminal_output: bool,
-) {
+    storage_admission_timeout: Option<std::time::Duration>,
+) -> Result<(), String> {
     let synchronization = if include_terminal_output {
         TerminalOutputSynchronization::All
     } else {
         TerminalOutputSynchronization::None
     };
-    let (events, producer_storage) =
-        match admitted_state_synchronization_events(state, synchronization, true).await {
-            Ok(batch) => batch,
-            Err(error) => {
-                send_direct_error(direct_tx, error).await;
-                return;
-            }
-        };
+    let (events, producer_storage) = admitted_state_synchronization_events(
+        state,
+        synchronization,
+        true,
+        storage_admission_timeout,
+    )
+    .await?;
     for event in events {
-        let _ = direct_tx
+        direct_tx
             .send_with_storage(event, producer_storage.clone())
-            .await;
+            .await
+            .map_err(|_| {
+                "initial state delivery failed before the complete seed was queued".to_owned()
+            })?;
     }
+    Ok(())
 }
 
 /// Extra bytes reserved per synchronized pane for output that arrives between
@@ -1720,11 +1746,11 @@ impl TerminalOutputSynchronization<'_> {
     fn estimate_for(
         &self,
         pane_id: NodeId,
-        session: &ilium_pty::PtySession,
-    ) -> Option<TerminalOutputEstimate> {
+        session: &ilium_pty::PtyCaptureHandle,
+    ) -> Result<Option<TerminalOutputEstimate>, ilium_pty::PtyCaptureError> {
         let (after_sequence, estimate, snapshot) = match self {
-            Self::All => match session.attach_snapshot() {
-                Some(snapshot) => (
+            Self::All => match session.try_attach_snapshot() {
+                Ok(snapshot) => (
                     0,
                     PtyOutputRecoveryEstimate::Snapshot {
                         through_sequence: snapshot.through_sequence,
@@ -1732,65 +1758,65 @@ impl TerminalOutputSynchronization<'_> {
                     },
                     Some(snapshot),
                 ),
-                // An unreadable parser cannot rebuild its screen; the retained
-                // journal is the only remaining evidence of what it showed.
-                None => (
+                // Only a permanently unavailable parser may use journal
+                // evidence. Busy never falls through to a blocking capture.
+                Err(ilium_pty::PtyCaptureError::ParserPoisoned) => (
                     0,
-                    PtyOutputRecoveryEstimate::Replay(session.output_replay_estimate()),
+                    PtyOutputRecoveryEstimate::Replay(session.try_output_replay_estimate()?),
                     None,
                 ),
+                Err(error) => return Err(error),
             },
-            Self::None => return None,
+            Self::None => return Ok(None),
             Self::RecoverAfter(delivered_sequences) => {
                 let after_sequence = delivered_sequences
                     .get(&pane_id)
                     .copied()
                     .unwrap_or_default();
-                (
-                    after_sequence,
-                    session.output_recovery_estimate_after(after_sequence)?,
-                    None,
-                )
+                let Some(estimate) = session.try_output_recovery_estimate_after(after_sequence)?
+                else {
+                    return Ok(None);
+                };
+                (after_sequence, estimate, None)
             }
         };
-        Some(TerminalOutputEstimate {
+        Ok(Some(TerminalOutputEstimate {
             input: session.input_handle(),
             estimate,
             after_sequence,
             snapshot,
-        })
+        }))
     }
 
     fn event_from_estimate(
         &self,
         pane_id: NodeId,
-        session: &ilium_pty::PtySession,
+        session: &ilium_pty::PtyCaptureHandle,
         estimated: &TerminalOutputEstimate,
-    ) -> Option<ServerEvent> {
-        match self {
+    ) -> Result<Option<ServerEvent>, ilium_pty::PtyCaptureError> {
+        Ok(match self {
             Self::All => match (&estimated.estimate, &estimated.snapshot) {
                 (PtyOutputRecoveryEstimate::Snapshot { .. }, Some(snapshot)) => {
                     Some(terminal_snapshot_event(pane_id, snapshot.clone()))
                 }
-                (PtyOutputRecoveryEstimate::Replay(replay_estimate), None) => {
-                    let replay = session.output_replay_through_if_retained(*replay_estimate)?;
-                    Some(terminal_replay_event(pane_id, replay))
-                }
+                (PtyOutputRecoveryEstimate::Replay(replay_estimate), None) => session
+                    .try_output_replay_through_if_retained(*replay_estimate)?
+                    .map(|replay| terminal_replay_event(pane_id, replay)),
                 _ => None,
             },
             Self::None => None,
-            Self::RecoverAfter(_) => match session
-                .output_recovery_if_unchanged(estimated.after_sequence, estimated.estimate)?
-            {
-                PtyOutputRecovery::Delta(chunk) => Some(ServerEvent::ScreenUpdate {
-                    pane_id,
-                    first_sequence: estimated.after_sequence.saturating_add(1),
-                    sequence: chunk.sequence,
-                    bytes: chunk.bytes.to_vec(),
+            Self::RecoverAfter(_) => session
+                .try_output_recovery_if_unchanged(estimated.after_sequence, estimated.estimate)?
+                .map(|recovery| match recovery {
+                    PtyOutputRecovery::Delta(chunk) => ServerEvent::ScreenUpdate {
+                        pane_id,
+                        first_sequence: estimated.after_sequence.saturating_add(1),
+                        sequence: chunk.sequence,
+                        bytes: chunk.bytes.to_vec(),
+                    },
+                    PtyOutputRecovery::Replay(replay) => terminal_replay_event(pane_id, replay),
                 }),
-                PtyOutputRecovery::Replay(replay) => Some(terminal_replay_event(pane_id, replay)),
-            },
-        }
+        })
     }
 }
 
@@ -1866,8 +1892,57 @@ pub(crate) async fn admitted_resynchronization_events(
         state,
         TerminalOutputSynchronization::RecoverAfter(delivered_terminal_sequences),
         false,
+        None,
     )
     .await
+}
+
+const TERMINAL_CAPTURE_BUSY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+const TERMINAL_CAPTURE_RETRY_INTERVAL: std::time::Duration = std::time::Duration::from_millis(10);
+
+fn terminal_capture_retry_at(
+    now: tokio::time::Instant,
+    deadline: tokio::time::Instant,
+) -> Option<tokio::time::Instant> {
+    (now < deadline).then(|| (now + TERMINAL_CAPTURE_RETRY_INTERVAL).min(deadline))
+}
+
+/// The closure owns no server registry guard. Native try-lock guards are
+/// synchronous locals and are dropped before every sleep, error or return.
+async fn retry_terminal_capture<T>(
+    pane_id: NodeId,
+    operation: &'static str,
+    mut capture: impl FnMut() -> Result<T, ilium_pty::PtyCaptureError>,
+) -> Result<T, String> {
+    let started = tokio::time::Instant::now();
+    let deadline = started + TERMINAL_CAPTURE_BUSY_TIMEOUT;
+    let mut busy_attempts = 0u64;
+    loop {
+        match capture() {
+            Ok(value) => return Ok(value),
+            Err(error @ (ilium_pty::PtyCaptureError::ParserBusy | ilium_pty::PtyCaptureError::JournalBusy)) => {
+                busy_attempts = busy_attempts.saturating_add(1);
+                let Some(retry_at) = terminal_capture_retry_at(tokio::time::Instant::now(), deadline) else {
+                    let waited_ms = started.elapsed().as_millis();
+                    tracing::warn!(pane_id = ?pane_id, operation, busy_attempts, waited_ms = %waited_ms, reason = %error, "terminal capture contention deadline expired");
+                    return Err(format!("terminal capture contention deadline expired: pane={}, operation={operation}, waited_ms={waited_ms}, busy_attempts={busy_attempts}, reason={error}; no delivery watermark was advanced", pane_id.0));
+                };
+                tokio::time::sleep_until(retry_at).await;
+            }
+            Err(error) => return Err(format!("terminal capture unavailable: pane={}, operation={operation}, reason={error}; no delivery watermark was advanced", pane_id.0)),
+        }
+    }
+}
+
+async fn terminal_capture_handle(
+    state: &ServerState,
+    pane_id: NodeId,
+) -> Option<ilium_pty::PtyCaptureHandle> {
+    let panes = state.panes.read().await;
+    match panes.get(&pane_id) {
+        Some(PaneResource::Terminal(runtime)) => Some(runtime.session.capture_handle()),
+        _ => None,
+    }
 }
 
 pub(crate) async fn admitted_terminal_recovery_prefix(
@@ -1879,16 +1954,13 @@ pub(crate) async fn admitted_terminal_recovery_prefix(
     // A selected, silent PTY still has a valid current screen. Sequence zero
     // means no output, rather than no initial state; send it once on reveal.
     if through_sequence == 0 && after_sequence == 0 {
-        let snapshot = {
-            let panes = state.panes.read().await;
-            match panes.get(&pane_id) {
-                Some(PaneResource::Terminal(runtime)) => runtime.session.attach_snapshot(),
-                _ => None,
-            }
-        };
-        let Some(snapshot) = snapshot else {
+        let Some(capture) = terminal_capture_handle(state, pane_id).await else {
             return Ok(None);
         };
+        let snapshot = retry_terminal_capture(pane_id, "zero-sequence visible recovery", || {
+            capture.try_attach_snapshot()
+        })
+        .await?;
         let storage = reserve_connection_event_storage(
             state,
             snapshot.bytes.len(),
@@ -1897,24 +1969,31 @@ pub(crate) async fn admitted_terminal_recovery_prefix(
             Some(pane_id),
         )
         .await?;
+        let Some(current) = terminal_capture_handle(state, pane_id).await else {
+            return Ok(None);
+        };
+        if !capture.input_handle().same_session(&current.input_handle()) {
+            return Err(format!(
+                "terminal session changed during zero-sequence recovery: pane={}",
+                pane_id.0
+            ));
+        }
         return Ok(Some((terminal_snapshot_event(pane_id, snapshot), storage)));
     }
     if through_sequence <= after_sequence {
         return Ok(None);
     }
     for _attempt in 0..8 {
-        let (expected_input, estimate) = {
-            let panes = state.panes.read().await;
-            let Some(PaneResource::Terminal(runtime)) = panes.get(&pane_id) else {
-                return Ok(None);
-            };
-            let Some(estimate) = runtime
-                .session
-                .output_recovery_estimate_after(after_sequence)
-            else {
-                return Ok(None);
-            };
-            (runtime.session.input_handle(), estimate)
+        let Some(capture) = terminal_capture_handle(state, pane_id).await else {
+            return Ok(None);
+        };
+        let expected_input = capture.input_handle();
+        let Some(estimate) = retry_terminal_capture(pane_id, "recovery estimate", || {
+            capture.try_output_recovery_estimate_after(after_sequence)
+        })
+        .await?
+        else {
+            return Ok(None);
         };
         let byte_len = match estimate {
             PtyOutputRecoveryEstimate::Delta { byte_len, .. } => byte_len,
@@ -1930,50 +2009,51 @@ pub(crate) async fn admitted_terminal_recovery_prefix(
             Some(pane_id),
         )
         .await?;
-        let event = {
-            let panes = state.panes.read().await;
-            let Some(PaneResource::Terminal(runtime)) = panes.get(&pane_id) else {
-                return Ok(None);
+        let event = retry_terminal_capture(pane_id, "visible recovery copy", || {
+            let recovery = capture.try_output_recovery_prefix_through(
+                after_sequence,
+                through_sequence,
+                TERMINAL_RECOVERY_EVENT_MAX_BYTES,
+            )?;
+            let recovery = match recovery {
+                Some(recovery) => Some(recovery),
+                // Retention can pass the target; only rebase after a
+                // successful capture, never after journal contention.
+                None => capture.try_output_recovery_prefix_after(
+                    after_sequence,
+                    TERMINAL_RECOVERY_EVENT_MAX_BYTES,
+                )?,
             };
-            if !expected_input.same_session(&runtime.session.input_handle()) {
-                None
-            } else {
-                let recovery = runtime
-                    .session
-                    .output_recovery_prefix_through(
-                        after_sequence,
-                        through_sequence,
-                        TERMINAL_RECOVERY_EVENT_MAX_BYTES,
-                    )
-                    .or_else(|| {
-                        // Retention can advance past the captured target while
-                        // other selected panes are being written. Rebase to
-                        // the current retained journal instead of failing the
-                        // whole connection for a stale watermark.
-                        runtime.session.output_recovery_prefix_after(
-                            after_sequence,
-                            TERMINAL_RECOVERY_EVENT_MAX_BYTES,
-                        )
-                    });
-                match recovery {
-                    Some(PtyOutputRecovery::Delta(chunk)) => Some(ServerEvent::ScreenUpdate {
-                        pane_id,
-                        first_sequence: after_sequence.saturating_add(1),
-                        sequence: chunk.sequence,
-                        bytes: chunk.bytes.to_vec(),
-                    }),
-                    // A replay rebuilds the whole journal on the client; the
-                    // current screen snapshot shows the same state at once.
-                    // The journal replay remains only when no snapshot exists.
-                    Some(PtyOutputRecovery::Replay(replay)) => {
-                        Some(match runtime.session.attach_snapshot() {
-                            Some(snapshot) => terminal_snapshot_event(pane_id, snapshot),
-                            None => terminal_replay_event(pane_id, replay),
-                        })
-                    }
-                    None => None,
+            Ok(match recovery {
+                Some(PtyOutputRecovery::Delta(chunk)) => Some(ServerEvent::ScreenUpdate {
+                    pane_id,
+                    first_sequence: after_sequence.saturating_add(1),
+                    sequence: chunk.sequence,
+                    bytes: chunk.bytes.to_vec(),
+                }),
+                // A replay rebuilds the whole journal on the client; the
+                // current screen snapshot shows the same state at once.
+                // The journal replay remains only when no snapshot exists.
+                Some(PtyOutputRecovery::Replay(replay)) => {
+                    Some(match capture.try_attach_snapshot() {
+                        Ok(snapshot) => terminal_snapshot_event(pane_id, snapshot),
+                        Err(ilium_pty::PtyCaptureError::ParserPoisoned) => {
+                            terminal_replay_event(pane_id, replay)
+                        }
+                        Err(error) => return Err(error),
+                    })
                 }
-            }
+                None => None,
+            })
+        })
+        .await?;
+        let Some(current) = terminal_capture_handle(state, pane_id).await else {
+            return Ok(None);
+        };
+        let event = if expected_input.same_session(&current.input_handle()) {
+            event
+        } else {
+            None
         };
         if let Some(event) = event {
             return Ok(Some((event, producer_storage)));
@@ -1989,18 +2069,16 @@ pub(crate) async fn admitted_terminal_recovery_event(
     after_sequence: u64,
 ) -> Result<Option<(ServerEvent, Option<Arc<ilium_execution::StorageAdmission>>)>, String> {
     for _attempt in 0..8 {
-        let (expected_input, estimate) = {
-            let panes = state.panes.read().await;
-            let Some(PaneResource::Terminal(runtime)) = panes.get(&pane_id) else {
-                return Ok(None);
-            };
-            let Some(estimate) = runtime
-                .session
-                .output_recovery_estimate_after(after_sequence)
-            else {
-                return Ok(None);
-            };
-            (runtime.session.input_handle(), estimate)
+        let Some(capture) = terminal_capture_handle(state, pane_id).await else {
+            return Ok(None);
+        };
+        let expected_input = capture.input_handle();
+        let Some(estimate) = retry_terminal_capture(pane_id, "recovery estimate", || {
+            capture.try_output_recovery_estimate_after(after_sequence)
+        })
+        .await?
+        else {
+            return Ok(None);
         };
         let byte_len = match estimate {
             PtyOutputRecoveryEstimate::Delta { byte_len, .. } => byte_len,
@@ -2015,27 +2093,25 @@ pub(crate) async fn admitted_terminal_recovery_event(
             Some(pane_id),
         )
         .await?;
-        let event = {
-            let panes = state.panes.read().await;
-            let Some(PaneResource::Terminal(runtime)) = panes.get(&pane_id) else {
-                return Ok(None);
-            };
-            if !expected_input.same_session(&runtime.session.input_handle()) {
-                None
-            } else {
-                runtime
-                    .session
-                    .output_recovery_if_unchanged(after_sequence, estimate)
-                    .map(|recovery| match recovery {
-                        PtyOutputRecovery::Delta(chunk) => ServerEvent::ScreenUpdate {
-                            pane_id,
-                            first_sequence: after_sequence.saturating_add(1),
-                            sequence: chunk.sequence,
-                            bytes: chunk.bytes.to_vec(),
-                        },
-                        PtyOutputRecovery::Replay(replay) => terminal_replay_event(pane_id, replay),
-                    })
-            }
+        let recovery = retry_terminal_capture(pane_id, "recovery copy", || {
+            capture.try_output_recovery_if_unchanged(after_sequence, estimate)
+        })
+        .await?;
+        let Some(current) = terminal_capture_handle(state, pane_id).await else {
+            return Ok(None);
+        };
+        let event = if expected_input.same_session(&current.input_handle()) {
+            recovery.map(|recovery| match recovery {
+                PtyOutputRecovery::Delta(chunk) => ServerEvent::ScreenUpdate {
+                    pane_id,
+                    first_sequence: after_sequence.saturating_add(1),
+                    sequence: chunk.sequence,
+                    bytes: chunk.bytes.to_vec(),
+                },
+                PtyOutputRecovery::Replay(replay) => terminal_replay_event(pane_id, replay),
+            })
+        } else {
+            None
         };
         if let Some(event) = event {
             return Ok(Some((event, producer_storage)));
@@ -2045,12 +2121,27 @@ pub(crate) async fn admitted_terminal_recovery_event(
     Err("terminal output changed repeatedly; retry recovery".to_owned())
 }
 
-pub(crate) async fn terminal_output_sequence(state: &ServerState, pane_id: NodeId) -> Option<u64> {
-    let panes = state.panes.read().await;
-    let PaneResource::Terminal(runtime) = panes.get(&pane_id)? else {
-        return None;
+pub(crate) async fn terminal_output_sequence(
+    state: &ServerState,
+    pane_id: NodeId,
+) -> Result<Option<u64>, String> {
+    let Some(capture) = terminal_capture_handle(state, pane_id).await else {
+        return Ok(None);
     };
-    Some(runtime.session.output_replay_estimate().through_sequence)
+    let estimate = retry_terminal_capture(pane_id, "writer sequence target", || {
+        capture.try_output_replay_estimate()
+    })
+    .await?;
+    let Some(current) = terminal_capture_handle(state, pane_id).await else {
+        return Ok(None);
+    };
+    if !capture.input_handle().same_session(&current.input_handle()) {
+        return Err(format!(
+            "terminal session changed during writer sequence capture: pane={}",
+            pane_id.0
+        ));
+    }
+    Ok(Some(estimate.through_sequence))
 }
 
 async fn reserve_connection_event_storage(
@@ -2116,6 +2207,7 @@ async fn admitted_state_synchronization_events(
     state: &ServerState,
     synchronization: TerminalOutputSynchronization<'_>,
     include_initial_sync_complete: bool,
+    storage_admission_timeout: Option<std::time::Duration>,
 ) -> Result<
     (
         Vec<ServerEvent>,
@@ -2127,18 +2219,18 @@ async fn admitted_state_synchronization_events(
     // whether pane output, the pane set or the tree kept moving.
     let mut discarded_attempts: Vec<(&'static str, Option<NodeId>)> = Vec::new();
     for _attempt in 0..8 {
-        let (estimates, snapshot_bytes) = {
+        let (captures, snapshot_bytes) = {
             let tree = state.tree.read().await;
             let panes = state.panes.read().await;
-            let estimates = panes
+            let captures: Vec<_> = panes
                 .iter()
                 .filter_map(|(pane_id, resource)| match resource {
-                    PaneResource::Terminal(runtime) => synchronization
-                        .estimate_for(*pane_id, &runtime.session)
-                        .map(|estimate| (*pane_id, estimate)),
-                    PaneResource::Editor { .. } | PaneResource::Unrestored(_) => None,
+                    PaneResource::Terminal(runtime) => {
+                        Some((*pane_id, runtime.session.capture_handle()))
+                    }
+                    _ => None,
                 })
-                .collect::<HashMap<_, _>>();
+                .collect();
             let snapshot_bytes = crate::snapshot_io::estimated_tree_bytes(&tree)
                 .checked_mul(2)
                 .and_then(|bytes| {
@@ -2153,8 +2245,18 @@ async fn admitted_state_synchronization_events(
             let Some(snapshot_bytes) = snapshot_bytes else {
                 return Err("state snapshot admission size overflow".to_owned());
             };
-            (estimates, snapshot_bytes)
+            (captures, snapshot_bytes)
         };
+        let mut estimates = HashMap::new();
+        for (pane_id, capture) in &captures {
+            if let Some(estimate) = retry_terminal_capture(*pane_id, "attach estimate", || {
+                synchronization.estimate_for(*pane_id, capture)
+            })
+            .await?
+            {
+                estimates.insert(*pane_id, estimate);
+            }
+        }
         let estimated_payload_bytes = estimates.values().try_fold(0usize, |total, estimate| {
             let bytes = match estimate.estimate {
                 PtyOutputRecoveryEstimate::Delta { byte_len, .. } => byte_len,
@@ -2172,14 +2274,22 @@ async fn admitted_state_synchronization_events(
             .and_then(|bytes| bytes.checked_add(snapshot_bytes))
             .and_then(|bytes| output_growth_allowance.and_then(|growth| bytes.checked_add(growth)))
             .ok_or_else(|| "state synchronization admission size overflow".to_owned())?;
-        let producer_storage = reserve_connection_event_storage(
+        let admission = reserve_connection_event_storage(
             state,
             estimated_payload_bytes,
             estimates.len().saturating_add(1),
             ConnectionEventStorageClass::General,
             None,
-        )
-        .await?;
+        );
+        let producer_storage = match storage_admission_timeout {
+            Some(timeout) => tokio::time::timeout(timeout, admission)
+                .await
+                .map_err(|_| format!(
+                    "initial attach seed storage admission exceeded {} seconds; no complete seed was queued",
+                    timeout.as_secs(),
+                ))??,
+            None => admission.await?,
+        };
 
         // Revalidate the current tree's measured retained size against the
         // reservation before cloning the retry fence or the queued snapshot.
@@ -2195,6 +2305,20 @@ async fn admitted_state_synchronization_events(
             }
             tree.clone()
         };
+
+        let mut prepared_events = HashMap::new();
+        for (pane_id, capture) in &captures {
+            if estimates.contains_key(pane_id) {
+                let event = retry_terminal_capture(*pane_id, "fresh attach output copy", || {
+                    let Some(fresh) = synchronization.estimate_for(*pane_id, capture)? else {
+                        return Ok(None);
+                    };
+                    synchronization.event_from_estimate(*pane_id, capture, &fresh)
+                })
+                .await?;
+                prepared_events.insert(*pane_id, event);
+            }
+        }
 
         let built = {
             let tree = state.tree.read().await;
@@ -2235,20 +2359,7 @@ async fn admitted_state_synchronization_events(
                                     break;
                                 }
                                 matched_estimates.insert(*pane_id);
-                                // A busy pane has advanced (or evicted its oldest
-                                // journal chunks) since the estimate, which was taken
-                                // before an awaited reservation. Estimating again and
-                                // building from that fresh estimate shrinks the race to
-                                // two adjacent journal reads; the reservation headroom
-                                // and the final byte check bound the growth.
-                                let fresh = synchronization
-                                    .estimate_for(*pane_id, &runtime.session)
-                                    .unwrap_or_else(|| estimate.clone());
-                                match synchronization.event_from_estimate(
-                                    *pane_id,
-                                    &runtime.session,
-                                    &fresh,
-                                ) {
+                                match prepared_events.remove(pane_id).flatten() {
                                     Some(event) => replay_events.push(event),
                                     None => {
                                         stale = true;
@@ -2285,14 +2396,18 @@ async fn admitted_state_synchronization_events(
                     );
                     None
                 } else {
+                    // The admitted snapshot is authoritative for this seed.
+                    // Release source guards before awaiting recap storage and
+                    // never acquire a nested tree read behind a queued writer.
+                    drop(panes);
+                    drop(tree);
+                    let recap_events = super::recaps::replay_events(state, &snapshot).await;
                     let mut events = vec![ServerEvent::PaneStateSnapshot {
                         tree: snapshot,
                         detection_evidence,
                     }];
                     events.extend(replay_events);
-                    events.extend(super::recaps::replay_events(state).await);
-                    drop(panes);
-                    drop(tree);
+                    events.extend(recap_events);
                     let statuses = state.workspace_git_status_cache.read().await;
                     let status_replays: Vec<_> = match &events[0] {
                         ServerEvent::PaneStateSnapshot { tree, .. } => statuses
@@ -2431,12 +2546,13 @@ async fn state_synchronization_events(
             .collect();
         (snapshot, detection_evidence, replay_events)
     };
+    let recap_events = super::recaps::replay_events(state, &snapshot).await;
     let mut events = vec![ServerEvent::PaneStateSnapshot {
         tree: snapshot,
         detection_evidence,
     }];
     events.extend(replay_events);
-    events.extend(super::recaps::replay_events(state).await);
+    events.extend(recap_events);
     let statuses = state.workspace_git_status_cache.read().await;
     let status_replays: Vec<_> = match &events[0] {
         ServerEvent::PaneStateSnapshot { tree, .. } => statuses
@@ -2503,7 +2619,11 @@ pub(crate) async fn handle_session_recovery_resolution(
     // `should_forward_terminal_event`). `false` matches the same
     // `AttachInteractive` contract `handle_attach` already applies before a
     // recovery decision is pending.
-    send_initial_state(state, direct_tx, false).await;
+    // Recovery already committed. Preserve its unbounded admission semantics;
+    // the pre-seed attach deadline must not cancel accepted restore work.
+    if let Err(error) = send_initial_state(state, direct_tx, false, None).await {
+        send_direct_error(direct_tx, error).await;
+    }
 }
 
 /// Shared plumbing for tree-only mutations, including project path changes:
@@ -5361,8 +5481,15 @@ async fn handle_replace_pane_with_command(
         .pane_cwd(pane_id)
         .map(std::path::Path::to_path_buf)
         .unwrap_or_else(|| state.session_cwd.clone());
+    // A fixed worktree admits panes only after their provenance is known.
+    // Stage its replacement under the project, then let the provenance setter
+    // rejoin the existing checkout owner before restoring the sibling position.
+    let creation_parent = tree
+        .worktree_container_for_node(parent)
+        .and_then(|_| tree.project_ancestor(parent))
+        .unwrap_or(parent);
     let new_pane_id = match tree.add_pane(
-        parent,
+        creation_parent,
         origin.default_pane_name().to_string(),
         PaneContentKind::Terminal,
     ) {
@@ -5383,9 +5510,9 @@ async fn handle_replace_pane_with_command(
         !title_grants_under_lock(&tree, &panes, &continuity_evidence, &HashMap::new()).is_empty()
     };
     let placed = tree
-        .move_node(new_pane_id, parent, position)
-        .and_then(|()| tree.set_pane_launch_cwd(new_pane_id, cwd.clone()))
+        .set_pane_launch_cwd(new_pane_id, cwd.clone())
         .and_then(|()| tree.set_pane_workspace(new_pane_id, workspace.clone()))
+        .and_then(|()| tree.move_node(new_pane_id, parent, position))
         .and_then(|()| {
             tree.inherit_pane_title_with_verified_continuity(
                 pane_id,
@@ -6831,6 +6958,19 @@ async fn acknowledge_progress_outcome_for_input(
     pane_id: NodeId,
     expected_input: Option<&PtyInput>,
 ) {
+    // Most keys have no unread progress outcome. Avoid two session-wide
+    // exclusive locks for this overwhelmingly common no-op. A new outcome
+    // after this read remains unread until the next user action.
+    if !state
+        .tree
+        .read()
+        .await
+        .pane_progress(pane_id)
+        .iter()
+        .any(|progress| progress.has_unread_outcome())
+    {
+        return;
+    }
     let acknowledged = {
         let mut tree = state.tree.write().await;
         let mut panes = state.panes.write().await;
@@ -10281,6 +10421,88 @@ mod tests {
         assert!(agent_detection_settings_save_cost(&oversized_path, &valid).is_err());
     }
 
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn replacing_shared_worktree_member_preserves_owner_directory_and_sibling() {
+        let directory = tempfile::tempdir().expect("isolated replacement fixture");
+        let state = snapshot_io_handler_state(&directory);
+        assert!(state
+            .execution
+            .set(crate::execution::ServerExecution::start().expect("execution bank"))
+            .is_ok());
+        let root = directory.path().join("worktree");
+        let launch_cwd = root.join("src");
+        std::fs::create_dir_all(&launch_cwd).unwrap();
+        let workspace = ilium_core::PaneWorkspace {
+            workspace_id: None,
+            repo_common_dir: directory.path().join(".git"),
+            worktree_root: root,
+            branch: "agent/shared".into(),
+            base_ref: "main".into(),
+            base_commit: "fixture".into(),
+            created_by_ilium: false,
+            created_at_unix: 0,
+        };
+        let (old, sibling, owner, sibling_before) = {
+            let mut tree = state.tree.write().await;
+            let project = tree.add_project(directory.path().to_path_buf()).unwrap();
+            let old = tree
+                .add_pane(project, "old", PaneContentKind::Terminal)
+                .unwrap();
+            tree.set_pane_launch_cwd(old, launch_cwd.clone()).unwrap();
+            tree.set_pane_workspace(old, Some(workspace.clone()))
+                .unwrap();
+            let sibling = tree
+                .add_pane(project, "sibling", PaneContentKind::Terminal)
+                .unwrap();
+            tree.set_pane_launch_cwd(sibling, launch_cwd.clone())
+                .unwrap();
+            tree.set_pane_workspace(sibling, Some(workspace.clone()))
+                .unwrap();
+            let owner = tree.worktree_container_for_node(old).unwrap();
+            (old, sibling, owner, tree.get(sibling).unwrap().clone())
+        };
+        let (sender, mut replies) = DirectEventSender::channel(16);
+        tokio::time::timeout(
+            Duration::from_secs(10),
+            handle_replace_pane_with_command(&state, old, "exec cat".into(), &sender, None, None),
+        )
+        .await
+        .expect("replacement finishes");
+        while let Ok(reply) = replies.try_recv() {
+            assert!(!matches!(reply, ServerEvent::Error { .. }), "{reply:?}");
+        }
+        let replacement = {
+            let tree = state.tree.read().await;
+            assert!(
+                tree.get(old).is_none(),
+                "successful replacement closes only old member"
+            );
+            assert_eq!(tree.get(sibling), Some(&sibling_before));
+            let children = tree.children_of(owner).unwrap();
+            assert_eq!(children.len(), 2);
+            assert_eq!(children[1], sibling);
+            let replacement = children[0];
+            assert_ne!(replacement, old);
+            assert_eq!(tree.worktree_container_for_node(replacement), Some(owner));
+            assert_eq!(tree.pane_cwd(replacement), Some(launch_cwd.as_path()));
+            assert_eq!(tree.pane_workspace(replacement), Some(&workspace));
+            tree.validate().unwrap();
+            replacement
+        };
+        assert!(matches!(
+            state.panes.read().await.get(&replacement),
+            Some(PaneResource::Terminal(_))
+        ));
+        handle_close_pane(&state, replacement, &sender).await;
+        handle_close_pane(&state, sibling, &sender).await;
+        state
+            .execution
+            .get()
+            .expect("execution bank")
+            .request_shutdown();
+    }
+
     #[test]
     fn pane_replacement_reservations_are_per_pane_and_released_on_drop() {
         let directory = tempfile::tempdir().expect("temporary directory");
@@ -11524,7 +11746,9 @@ mod tests {
         assert!(state.execution.get().is_some());
         let (direct_tx, mut direct_rx) = DirectEventSender::channel(16);
 
-        send_initial_state(&state, &direct_tx, false).await;
+        send_initial_state(&state, &direct_tx, false, None)
+            .await
+            .expect("initial state storage and queue admission");
         drop(direct_tx);
 
         let mut snapshot_storage = None;
@@ -13729,5 +13953,61 @@ mod tests {
     mod ordered_owner_regressions {
         use super::*;
         include!("ordered_owner_regressions.rs");
+    }
+}
+
+#[cfg(test)]
+mod terminal_capture_retry_tests {
+    use super::*;
+
+    #[test]
+    fn repeated_contention_never_moves_the_original_capture_deadline() {
+        let started = tokio::time::Instant::now();
+        let deadline = started + TERMINAL_CAPTURE_BUSY_TIMEOUT;
+        for wake in 0..10_000u64 {
+            let now = started + std::time::Duration::from_micros(wake * 500);
+            assert!(terminal_capture_retry_at(now, deadline).is_some_and(|retry| retry <= deadline));
+        }
+        assert_eq!(terminal_capture_retry_at(deadline, deadline), None);
+        assert_eq!(
+            terminal_capture_retry_at(deadline + std::time::Duration::from_secs(1), deadline),
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn ordinary_contention_can_exceed_all_eight_data_churn_attempts() {
+        let mut calls = 0;
+        let value = retry_terminal_capture(NodeId(42), "synthetic contention regression", || {
+            calls += 1;
+            if calls <= 12 {
+                Err(ilium_pty::PtyCaptureError::ParserBusy)
+            } else {
+                Ok(77)
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(value, 77);
+        assert_eq!(calls, 13);
+    }
+
+    #[tokio::test]
+    async fn poisoned_capture_does_not_retry_or_relabel_itself_as_contention() {
+        let mut calls = 0;
+        let result = retry_terminal_capture::<()>(
+            NodeId(43),
+            "synthetic poisoned source regression",
+            || {
+                calls += 1;
+                Err(ilium_pty::PtyCaptureError::JournalPoisoned)
+            },
+        )
+        .await;
+        assert_eq!(calls, 1);
+        let error = result.unwrap_err();
+        assert!(error.contains("unavailable"));
+        assert!(error.contains("43"));
+        assert!(error.contains("poisoned"));
     }
 }

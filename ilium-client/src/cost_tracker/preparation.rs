@@ -23,13 +23,19 @@ pub struct PreparedCostCard {
     pub lines: Arc<[Line<'static>]>,
     storage: CostStorage,
 }
-struct Topology(HashMap<NodeId, (bool, Vec<NodeId>)>);
+struct Topology {
+    nodes: HashMap<NodeId, (bool, Vec<NodeId>)>,
+    agent_providers: HashMap<NodeId, String>,
+}
 impl CostTopology for Topology {
     fn is_pane(&self, id: NodeId) -> bool {
-        self.0.get(&id).is_some_and(|node| node.0)
+        self.nodes.get(&id).is_some_and(|node| node.0)
     }
     fn children(&self, id: NodeId) -> Option<&[NodeId]> {
-        self.0.get(&id).map(|node| node.1.as_slice())
+        self.nodes.get(&id).map(|node| node.1.as_slice())
+    }
+    fn agent_provider(&self, id: NodeId) -> Option<String> {
+        self.agent_providers.get(&id).cloned()
     }
 }
 struct Statistics(HashMap<NodeId, Arc<SessionStats>>);
@@ -139,6 +145,20 @@ impl Capture {
                 ),
             );
         }
+        let agent_providers = input
+            .agent_panes
+            .iter()
+            .filter_map(|id| {
+                input
+                    .tree
+                    .get(*id)
+                    .and_then(|node| match &node.kind {
+                        NodeKind::Pane { status, .. } => status.agent_state(),
+                        _ => None,
+                    })
+                    .map(|agent| (*id, agent.class.label().to_owned()))
+            })
+            .collect();
         let statistics = input
             .agent_panes
             .iter()
@@ -160,7 +180,10 @@ impl Capture {
         });
         Ok(Self {
             identity,
-            topology: Topology(topology),
+            topology: Topology {
+                nodes: topology,
+                agent_providers,
+            },
             statistics: Statistics(statistics),
             agent_panes: input.agent_panes.to_vec(),
             now: input.now,
@@ -1041,6 +1064,7 @@ mod tests {
         settings.calibration = Calibration::OwnHistory;
         if matches!(mode, IneligibleHistoryTick::Disabled) {
             settings.sort_by_cost = false;
+            settings.medals_enabled = false;
             for option in [
                 &mut settings.level_glyph,
                 &mut settings.level_dollars,

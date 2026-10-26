@@ -540,7 +540,19 @@ fn apply_confirm_writes_one_key_keeps_a_record_and_revert_restores_it() {
     assert!(text.contains("Apply to Codex?"));
     assert!(text.contains("model_auto_compact_token_limit"));
     assert!(text.contains(&format!("123,456 -> {}", group_thousands(recommended))));
-    assert!(text.contains("config.toml"));
+    // A long task TMPDIR can wrap even the basename across modal rows.
+    let modal = crate::compaction_ui::modal_layout_for_tests(screen());
+    let lines = crate::compaction_ui::modal_lines_for_tests(pending, modal.text_area.width);
+    let file_rows: Vec<_> = lines
+        .iter()
+        .skip_while(|line| !line.starts_with("File"))
+        .take_while(|line| !line.starts_with("Key"))
+        .map(|line| line.chars().skip(8).collect::<String>())
+        .collect();
+    assert_eq!(file_rows.concat(), pending.plan.path.display().to_string());
+    for row in file_rows {
+        assert!(text.contains(&row), "missing displayed file row: {row}");
+    }
     assert!(text.contains("NEW Codex sessions"));
     assert!(text.contains("Cancel") && text.contains("Apply"));
 

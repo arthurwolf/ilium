@@ -492,17 +492,17 @@ impl SettingsChoice {
             Self::AttentionPressSorts => catalog(
                 &[true, false],
                 app.attention_settings.press_sorts,
-                |value| if value { "☑ On" } else { "☐ Off" }.into(),
+                |value| crate::value_control::boolean_switch(value).into(),
             ),
             Self::AttentionLargeButtons => catalog(
                 &[true, false],
                 app.attention_settings.large_buttons,
-                |value| if value { "☑ On" } else { "☐ Off" }.into(),
+                |value| crate::value_control::boolean_switch(value).into(),
             ),
             Self::AttentionShowBriefing => catalog(
                 &[true, false],
                 app.attention_settings.show_briefing,
-                |value| if value { "☑ On" } else { "☐ Off" }.into(),
+                |value| crate::value_control::boolean_switch(value).into(),
             ),
             Self::AttentionModel => {
                 let mut options = vec![ChoiceOption {
@@ -557,7 +557,7 @@ impl SettingsChoice {
             Self::CodexThreadNames => catalog(
                 &[true, false],
                 app.inference_settings.codex_official_thread_names,
-                |value| if value { "☑ On" } else { "☐ Off" }.into(),
+                |value| crate::value_control::boolean_switch(value).into(),
             ),
             Self::VoiceModel => catalog(
                 &ilium_voice::VoiceModel::ALL,

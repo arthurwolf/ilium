@@ -90,7 +90,7 @@ More: [Getting started](src/docs/getting-started.md) · [Building from source](s
 </tbody>
 </table>
 
-All demos, with the feature each one shows: [Demo gallery](src/docs/demos.md).
+See the full [Demo gallery](src/docs/demos.md) for every feature clip and its recording notes.
 
 ## Daily use
 
@@ -136,6 +136,10 @@ Agent worktrees and recovery in short: start an agent with `Ctrl+B W` or
 ilium new-pane --worktree --branch agent/fix-login -- codex
 ```
 
+Several agents can share an existing worktree. With two or more agents, the
+worktree becomes an expandable leaf-icon row under the project, with its
+agents fixed beneath it. A single agent keeps the compact branch line.
+
 After a restart, Ilium restores the layout and relaunches pane programs, resuming verified Claude Code, Codex, or Antigravity sessions when provider data remains. Unsaved process state does not survive. Snapshots live in `<project>/.ilium/sessions/`; add `.ilium/` to `.gitignore` to keep them out of Git.
 
 ## Command line
@@ -158,7 +162,7 @@ Open Settings with `Ctrl+B :` and the key map with `Ctrl+B ?`. Global settings l
 
 ## Project, help, and licence
 
-Report problems in [issues](https://github.com/arthurwolf/ilium/issues) with your version, OS, terminal, command and observed behaviour; remove private content from logs. Design: [ARCHITECTURE.md](ARCHITECTURE.md). Contribution rules: [AGENTS.md](AGENTS.md) and [Contributing](src/docs/contributing.md).
+Report problems in [issues](https://github.com/arthurwolf/ilium/issues) with your version, OS, terminal, command and observed behaviour; remove private content from logs. Design: [ARCHITECTURE.md](ARCHITECTURE.md). Contribution rules: [Contributing](src/docs/contributing.md).
 
 Ilium is [MIT licensed](LICENSE). The vendored `vt100` patch and `tui-tree-widget` fork retain their MIT licences. Cascadia Code uses SIL Open Font License 1.1; see the [font notice](ilium-client/assets/fonts/NOTICE.md).
 

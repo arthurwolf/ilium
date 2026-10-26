@@ -87,6 +87,20 @@ impl EventRetention {
     }
     /// Admit a NEW heap allocation before copying; cloning this guard alone
     /// never authorizes a copied payload. Shares the original directional cap.
+    pub(crate) fn validate_projection_overlap(
+        &self,
+        bytes: usize,
+    ) -> Result<(), crate::ipc_preparation::StorageRefusal> {
+        self.allocation.validate_projection_overlap(bytes)
+    }
+
+    pub(crate) fn try_reserve_projection(
+        &self,
+        bytes: usize,
+    ) -> Result<Self, crate::ipc_preparation::StorageRefusal> {
+        self.allocation.try_reserve_projection(bytes).map(Self::new)
+    }
+
     pub(crate) fn try_reserve_derived(
         &self,
         bytes: usize,
@@ -206,7 +220,12 @@ impl RequestSender {
                     if error.reason == ilium_execution::RejectReason::Busy {
                         tokio::time::sleep(std::time::Duration::from_millis(1)).await;
                     } else {
-                        notified.await;
+                        // Writer failure need not release any quota. Race closure
+                        // explicitly so a producer cannot wait forever for credit.
+                        tokio::select! {
+                            _ = notified => {},
+                            () = self.sender.closed() => {},
+                        }
                     }
                 }
             }
@@ -449,10 +468,9 @@ impl Connection {
             _codec_owner: owner,
         })
     }
-    /// Stop at a frame boundary. An admitted body still finishes decoding and
-    /// hands off when storage is available. A blocked storage handoff is instead
-    /// cancelled explicitly and reported by finish_read_shutdown; no partial
-    /// frame is retried and cancellation never claims delivery.
+    /// Stop before admission or at the admitted frame boundary. Its body drains
+    /// while the consumer exists; blocked storage/publication can cancel with
+    /// an explicit error. No partial frame is retried or claimed as delivered.
     pub(crate) fn request_read_shutdown(&self) {
         let _ = self.stop_reader.send(true);
     }
@@ -483,6 +501,51 @@ impl Drop for Connection {
 /// (The main loop likewise awaits its outbound-request send for lossless
 /// backpressure -- see the comment at `crate::run`'s
 /// `connection.requests.send` call.)
+async fn read_stop_reason(stop: &mut watch::Receiver<bool>) -> &'static str {
+    loop {
+        if *stop.borrow() {
+            return "read shutdown requested";
+        }
+        if stop.changed().await.is_err() {
+            return "read shutdown owner closed";
+        }
+    }
+}
+
+fn read_wait_cancelled(stage: &str, reason: &str) -> IpcError {
+    IpcError::Io(std::io::Error::new(
+        std::io::ErrorKind::Interrupted,
+        format!("connection {stage} cancelled: {reason}; stream abandoned without delivery acknowledgement"),
+    ))
+}
+
+async fn publish_read_event(
+    event_tx: &mpsc::Sender<Received<ServerEvent>>,
+    event: Received<ServerEvent>,
+    stop: &mut watch::Receiver<bool>,
+) -> Result<(), IpcError> {
+    // Preserve graceful drain of admitted frames when a slot is available.
+    // Only a genuinely blocked handoff is interrupted by graceful shutdown.
+    let permit = match event_tx.try_reserve() {
+        Ok(permit) => permit,
+        Err(mpsc::error::TrySendError::Closed(())) => {
+            return Err(read_wait_cancelled(
+                "event publication",
+                "event receiver closed",
+            ));
+        }
+        Err(mpsc::error::TrySendError::Full(())) => {
+            tokio::select! {
+                biased;
+                reason = read_stop_reason(stop) => return Err(read_wait_cancelled("event publication", reason)),
+                permit = event_tx.reserve() => permit.map_err(|_| read_wait_cancelled("event publication", "event receiver closed"))?,
+            }
+        }
+    };
+    permit.send(event);
+    Ok(())
+}
+
 async fn read_loop<R: tokio::io::AsyncRead + Unpin>(
     read_half: R,
     event_tx: mpsc::Sender<Received<ServerEvent>>,
@@ -491,86 +554,59 @@ async fn read_loop<R: tokio::io::AsyncRead + Unpin>(
 ) -> Result<(), IpcError> {
     let mut frame_reader = FrameReader::new(read_half);
     loop {
-        if *stop.borrow() {
-            break;
-        }
-        // The fixed-size header can wait without occupying a CPU job or
-        // payload bytes. Keep this one reader's header/payload order intact.
         let header = tokio::select! {
             biased;
-            _ = stop.changed() => break,
+            _ = read_stop_reason(&mut stop) => break,
+            () = event_tx.closed() => break,
             header = frame_reader.read_encoded_length() => header,
         };
         let length = match header {
             Ok(length) => length,
             Err(IpcError::Io(error)) if error.kind() == std::io::ErrorKind::UnexpectedEof => break,
-            Err(error) => {
-                tracing::warn!(%error, "connection header failed");
-                return Err(error);
-            }
+            Err(error) => return Err(error),
         };
-        // Admission precedes payload allocation and CPU decoding.
-        let reservation = match preparation.reserve_decoder().await {
-            Ok(reservation) => reservation,
-            Err(error) => {
-                tracing::warn!(%error, "connection decoder admission failed");
-                return Err(error);
-            }
+        let input_bytes = frame_reader.encoded_payload_input_bytes(length)?;
+        // Cancellation after consuming a header abandons the stream. Never
+        // resume an uncertain byte prefix or report it as delivered.
+        let reservation = tokio::select! {
+            biased;
+            reason = read_stop_reason(&mut stop) => return Err(read_wait_cancelled("decoder admission", reason)),
+            () = event_tx.closed() => return Err(read_wait_cancelled("decoder admission", "event receiver closed")),
+            reservation = preparation.reserve_decoder_for(input_bytes) => reservation?,
         };
-        let event = match frame_reader.read_encoded_payload(length).await {
-            Ok(event) => event,
-            Err(IpcError::Io(io_error)) if io_error.kind() == std::io::ErrorKind::UnexpectedEof => {
-                return Err(IpcError::Io(io_error));
-            }
-            Err(error) => {
-                tracing::warn!("connection read failed, closing: {error}");
-                return Err(error);
-            }
+        // The body future borrows the reader, while its reservation stays in
+        // this outer scope. Cancelling body intake drops partial bytes before
+        // releasing their reservation, without depending on capture order.
+        let event = tokio::select! {
+            biased;
+            () = event_tx.closed() => return Err(read_wait_cancelled("frame intake", "event receiver closed")),
+            event = frame_reader.read_encoded_payload(length) => event?,
         };
-        let event = match preparation
-            .run_reserved(reservation, move |_| {
-                let event = ilium_ipc::decode_bounded_frame::<ServerEvent>(&event)?;
+        // Graceful stop drains an admitted body; consumer loss abandons it.
+        // Keep frame credit even if the CPU future is never first polled.
+        let charged_frame = (event, reservation.retention());
+        let event = tokio::select! {
+            biased;
+            () = event_tx.closed() => return Err(read_wait_cancelled("frame decode", "event receiver closed")),
+            event = preparation.run_reserved(reservation, move |_| {
+                let result = ilium_ipc::decode_bounded_frame::<ServerEvent>(&charged_frame.0);
+                drop(charged_frame);
+                let event = result?;
                 let bytes = event.retained_bytes();
                 Ok((event, bytes))
-            })
-            .await
-        {
-            Ok(event) => event,
-            Err(error) => {
-                tracing::warn!(%error, "connection CPU decoding failed");
-                return Err(error);
-            }
+            }) => event?,
         };
         let cancelled = async {
-            let read_stopped = async {
-                loop {
-                    if *stop.borrow() {
-                        return "read shutdown requested";
-                    }
-                    if stop.changed().await.is_err() {
-                        return "read shutdown owner closed";
-                    }
-                }
-            };
             tokio::select! {
                 biased;
-                reason = read_stopped => reason,
+                reason = read_stop_reason(&mut stop) => reason,
                 () = event_tx.closed() => "event receiver closed",
             }
         };
-        let event = match preparation
+        let event = preparation
             .retain_decoded_cancellable(event, cancelled)
-            .await
-        {
-            Ok(event) => event,
-            Err(error) => {
-                tracing::warn!(%error, "connection decoded storage handoff failed");
-                return Err(error);
-            }
-        };
-        if event_tx.send(event).await.is_err() {
-            break;
-        }
+            .await?;
+        publish_read_event(&event_tx, event, &mut stop).await?;
     }
     Ok(())
 }
@@ -691,6 +727,52 @@ mod tests {
             self.position += count;
             Poll::Ready(Ok(()))
         }
+    }
+
+    #[tokio::test]
+    async fn blocked_event_publication_is_cancelled_without_success() {
+        let (sent, mut received) = mpsc::channel(1);
+        sent.send(Received::with_retention(
+            ServerEvent::DebugLoggingChanged { enabled: false },
+            None,
+        ))
+        .await
+        .expect("fill");
+        let (stop, mut stopped) = watch::channel(false);
+        stop.send(true).expect("stop");
+        let error = publish_read_event(
+            &sent,
+            Received::with_retention(ServerEvent::DebugLoggingChanged { enabled: true }, None),
+            &mut stopped,
+        )
+        .await
+        .expect_err("blocked publication must report cancellation");
+        assert!(
+            matches!(error, IpcError::Io(ref error) if error.kind() == std::io::ErrorKind::Interrupted)
+        );
+        assert!(matches!(
+            received.recv().await.expect("original").view(),
+            ServerEvent::DebugLoggingChanged { enabled: false }
+        ));
+        assert!(received.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn ready_event_publication_drains_despite_graceful_stop() {
+        let (sent, mut received) = mpsc::channel(1);
+        let (stop, mut stopped) = watch::channel(false);
+        stop.send(true).expect("stop");
+        publish_read_event(
+            &sent,
+            Received::with_retention(ServerEvent::DebugLoggingChanged { enabled: true }, None),
+            &mut stopped,
+        )
+        .await
+        .expect("drain");
+        assert!(matches!(
+            received.recv().await.expect("event").view(),
+            ServerEvent::DebugLoggingChanged { enabled: true }
+        ));
     }
 
     #[tokio::test]
@@ -1326,7 +1408,7 @@ mod tests {
                 &mut app,
                 received.retention.as_ref()
             ),
-            Err(ilium_execution::RejectReason::WorkerBytes)
+            Err(error) if error.reason() == ilium_execution::RejectReason::WorkerBytes
         ));
         assert_eq!(
             app.tree.get(ilium_core::ROOT_ID).expect("root").name,
@@ -1441,7 +1523,7 @@ mod tests {
                 &mut app,
                 received.retention.as_ref()
             ),
-            Err(ilium_execution::RejectReason::WorkerBytes)
+            Err(error) if error.reason() == ilium_execution::RejectReason::WorkerBytes
         ));
         let crate::app::Mode::CreateAgentWorkspace(state) = &app.mode else {
             panic!("same dialog")
@@ -1883,7 +1965,7 @@ mod tests {
         )
         .err()
         .expect("real table admission refuses");
-        assert_eq!(error, ilium_execution::RejectReason::WorkerBytes);
+        assert_eq!(error.reason(), ilium_execution::RejectReason::WorkerBytes);
         app.pending_terminal_events.push_front(head);
         app.pending_terminal_events
             .push_back(events.try_recv().expect("original following terminal"));
@@ -1937,7 +2019,7 @@ mod tests {
                 &mut app,
                 Some(owner)
             ),
-            Err(ilium_execution::RejectReason::WorkerBytes)
+            Err(error) if error.reason() == ilium_execution::RejectReason::WorkerBytes
         ));
         assert_eq!(preparation.decoded_blocked_projections(), 1);
         drop(fill);

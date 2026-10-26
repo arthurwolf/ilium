@@ -836,6 +836,7 @@ pub enum AppearanceRow {
     MinimumTerminalWidth,
     TreeOrder,
     ProjectSeparators,
+    TreeToolbarAlwaysVisible,
     TreeRowManagementControls,
     AgentIdentifierMode,
     ColorScheme,
@@ -865,9 +866,10 @@ pub enum AppearanceRow {
 }
 
 impl AppearanceRow {
-    const GENERAL: [AppearanceRow; 25] = [
+    const GENERAL: [AppearanceRow; 26] = [
         Self::TreeOrder,
         Self::ProjectSeparators,
+        Self::TreeToolbarAlwaysVisible,
         Self::TreeRowManagementControls,
         Self::AgentIdentifierMode,
         Self::ColorScheme,
@@ -1239,6 +1241,7 @@ pub struct SettingsState {
     /// Whether the Icons preview renders the current session tree or the
     /// complete dummy specimen tree.
     pub icons_preview_real: bool,
+    pub tree_layout_editor: Option<crate::tree_layout_settings::EditorState>,
     /// Full-screen catalogue picker layered over the Icons tab.
     pub icon_picker: Option<IconPickerState>,
     /// The action whose key is being chosen in the collision-safe visual
@@ -1371,6 +1374,7 @@ impl SettingsState {
             plugin_panel: crate::animation_plugins::PluginPanelState::default(),
             plugin_editor: None,
             icons_preview_real: false,
+            tree_layout_editor: None,
             icon_picker: None,
             keyboard_picker: None,
             padding: crate::padding_ui::PaddingUiState::default(),
@@ -1728,12 +1732,7 @@ pub struct ContextMenu {
     pub selected_index: usize,
     pub(crate) row_offset: usize,
     pub submenu: Option<Submenu>,
-    /// Updated from the correlated repository-facts response while this menu
-    /// remains open. Until then, worktree actions fail closed.
-    pub worktree_unavailable_reason: Option<String>,
     pub hover_candidate: Option<(ContextMenuAction, Instant)>,
-    unavailable_retention: Option<crate::connection::EventRetention>,
-    unavailable_copies_retention: Option<crate::connection::EventRetention>,
 }
 
 impl ContextMenu {
@@ -1749,53 +1748,6 @@ impl ContextMenu {
             self.area.height.saturating_sub(2),
             self.row_offset,
         )
-    }
-
-    pub fn set_worktree_unavailable_reason(&mut self, reason: Option<String>) {
-        self.worktree_unavailable_reason = reason;
-        if let Some(submenu) = self.submenu.as_mut() {
-            for item in &mut submenu.items {
-                if matches!(
-                    item.action,
-                    SubmenuItemAction::AgentInNewWorktree(_)
-                        | SubmenuItemAction::AgentInExistingWorktree(_)
-                ) {
-                    item.disabled_reason = self.worktree_unavailable_reason.clone();
-                    item.disabled_reason_retention = None;
-                }
-            }
-        }
-        // Release previous copy credit only after all previous copies dropped.
-        self.unavailable_retention = None;
-        self.unavailable_copies_retention = None;
-    }
-    fn try_set_received_reason(
-        &mut self,
-        reason: Option<String>,
-        owner: Option<&crate::connection::EventRetention>,
-        copies: Option<&crate::connection::EventRetention>,
-    ) -> Result<(), ilium_execution::RejectReason> {
-        let copies = copies.cloned();
-        if reason.is_some() && owner.is_some() && copies.is_none() {
-            return Err(ilium_execution::RejectReason::InvalidCost);
-        }
-        self.set_worktree_unavailable_reason(reason);
-        if self.worktree_unavailable_reason.is_some() {
-            self.unavailable_retention = owner.cloned();
-        }
-        self.unavailable_copies_retention = copies;
-        if let Some(submenu) = &mut self.submenu {
-            for item in &mut submenu.items {
-                if matches!(
-                    item.action,
-                    SubmenuItemAction::AgentInNewWorktree(_)
-                        | SubmenuItemAction::AgentInExistingWorktree(_)
-                ) {
-                    item.disabled_reason_retention = self.unavailable_copies_retention.clone();
-                }
-            }
-        }
-        Ok(())
     }
 }
 
@@ -2502,7 +2454,6 @@ pub struct App {
     pub(crate) plugin_issue_hover: Option<crate::animation_hover::AnimationHover>,
     next_workspace_request_id: u64,
     active_workspace_dialog_query: Option<(u64, NodeId)>,
-    active_workspace_menu_query: Option<(u64, NodeId)>,
     active_workspace_popover_query: Option<(u64, NodeId)>,
     /// Project whose repository check last succeeded for a footer popover, and
     /// when. A hover within `POPOVER_REPO_OK_TTL` reuses it instead of queuing
@@ -2542,6 +2493,9 @@ pub struct App {
     pub smart_copy_light: Option<crate::smart_copy_light::SmartCopyLightState>,
     /// The "Preview" dialog shown for a second after a light selection is copied.
     pub(crate) diagnostic_view: Option<crate::diagnostic::DiagnosticView>,
+    pub(crate) presentation_health: Option<std::sync::Arc<crate::presentation::PresentationHealth>>,
+    pub(crate) presentation_warning: Option<String>,
+    pub(crate) projection_admission_details: Option<String>,
     pub smart_copy_preview: Option<crate::smart_copy_light::SmartCopyPreview>,
     pub(crate) light_copy_selection: Option<crate::smart_copy_selection::SelectionOwner>,
     pub(crate) light_copy_preview_generation: Option<u64>,
@@ -3141,7 +3095,6 @@ impl App {
             plugin_issue_hover: None,
             next_workspace_request_id: 1,
             active_workspace_dialog_query: None,
-            active_workspace_menu_query: None,
             active_workspace_popover_query: None,
             popover_repo_ok: None,
             active_workspace_create_request_id: None,
@@ -3157,6 +3110,9 @@ impl App {
             smart_copy_session: None,
             smart_copy_light: None,
             diagnostic_view: None,
+            presentation_health: None,
+            presentation_warning: None,
+            projection_admission_details: None,
             smart_copy_preview: None,
             light_copy_selection: None,
             light_copy_preview_generation: None,
@@ -6941,6 +6897,12 @@ impl App {
         );
     }
 
+    pub fn settings_set_tree_row_layout(&mut self, layout: crate::tree_row_layout::TreeRowLayout) {
+        let mut ui = self.ui_settings.clone();
+        ui.tree_row_layout = layout.normalized();
+        self.apply_and_persist_ui_settings(ui);
+    }
+
     pub fn settings_set_agent_monitoring_mode(
         &mut self,
         mode: crate::agent_monitoring::AgentMonitoringMode,
@@ -10355,6 +10317,13 @@ impl App {
         self.apply_and_persist_ui_settings(ui);
     }
 
+    /// Keeps the bottom tree action toolbar visible while another panel has focus.
+    pub fn settings_toggle_tree_toolbar_always_visible(&mut self) {
+        let mut ui = self.ui_settings.clone();
+        ui.tree_toolbar_always_visible = !ui.tree_toolbar_always_visible;
+        self.apply_and_persist_ui_settings(ui);
+    }
+
     /// Toggles the lock-closed feature for projects, groups, and folders
     /// (double-click gesture and its right-click menu equivalent).
     /// Disabling only hides the gesture and menu action; an already-locked
@@ -11458,6 +11427,9 @@ impl App {
             }
             AppearanceRow::TreeOrder => self.settings_adjust_tree_order(direction),
             AppearanceRow::ProjectSeparators => self.settings_toggle_project_separators(),
+            AppearanceRow::TreeToolbarAlwaysVisible => {
+                self.settings_toggle_tree_toolbar_always_visible()
+            }
             AppearanceRow::TreeRowManagementControls => {
                 self.settings_toggle_tree_row_management_controls()
             }
@@ -13203,17 +13175,7 @@ impl App {
     /// The full identifier path (top-level down to `id`) as
     /// `tui_tree_widget::TreeState` expects it for `select`/`open`.
     fn path_to(&self, id: NodeId) -> Vec<NodeId> {
-        let mut path = vec![id];
-        let mut current = id;
-        while let Some(parent) = self.tree.parent_of(current) {
-            if parent == ROOT_ID {
-                break;
-            }
-            path.push(parent);
-            current = parent;
-        }
-        path.reverse();
-        path
+        tree_ui::tree_path(&self.tree, id)
     }
 
     /// Selects a complete widget identifier path (does not change focus),
@@ -13363,7 +13325,7 @@ impl App {
         let expandable_nodes: Vec<(NodeId, bool)> = self
             .tree
             .all_ids()
-            .filter(|id| *id != ROOT_ID)
+            .filter(|id| *id != ROOT_ID && !tree_ui::is_compact_worktree(&self.tree, *id))
             .filter_map(|id| {
                 self.tree
                     .get(id)
@@ -13407,7 +13369,12 @@ impl App {
             }
         });
         let visible_pane_target = self.active_pane_id().and_then(|id| self.tree.parent_of(id));
-        selected_target.or(visible_pane_target).unwrap_or(ROOT_ID)
+        let target = selected_target.or(visible_pane_target).unwrap_or(ROOT_ID);
+        if self.tree.worktree_container_for_node(target).is_some() {
+            self.tree.project_ancestor(target).unwrap_or(ROOT_ID)
+        } else {
+            target
+        }
     }
 
     fn project_cwd_for_node(&self, node_id: NodeId) -> PathBuf {
@@ -13692,6 +13659,11 @@ impl App {
     /// Queues a `ClosePane` request. The tree/pane-runtime removal itself
     /// only happens once the server confirms it via the next `TreeSnapshot`.
     pub fn request_close(&mut self, target: NodeId) -> bool {
+        if self.tree.get(target).is_some_and(Node::is_worktree) {
+            self.status_message =
+                Some("Close individual agents; the worktree row has fixed membership".into());
+            return false;
+        }
         let emptied_ancestor = self.empty_group_ancestor_after_close(target);
         let is_admitted = self.queue_request(ClientRequest::ClosePane { pane_id: target });
         if is_admitted {
@@ -13785,6 +13757,10 @@ impl App {
         node_id: NodeId,
         direction: ilium_core::TreeMoveDirection,
     ) -> bool {
+        if self.tree.worktree_container_for_node(node_id).is_some() {
+            self.status_message = Some("Worktree agents stay in their fixed worktree".into());
+            return false;
+        }
         self.restore_manual_tree_order_for_mutation();
         self.queue_request(ClientRequest::MoveNode { node_id, direction })
     }
@@ -13810,6 +13786,12 @@ impl App {
         new_parent: NodeId,
         index: Option<usize>,
     ) -> bool {
+        if self.tree.worktree_container_for_node(node_id).is_some()
+            || self.tree.worktree_container_for_node(new_parent).is_some()
+        {
+            self.status_message = Some("Worktree agents stay in their fixed worktree".into());
+            return false;
+        }
         self.restore_manual_tree_order_for_mutation();
         self.queue_request(ClientRequest::ReparentNode {
             node_id,
@@ -13842,6 +13824,10 @@ impl App {
         short_title: Option<String>,
         inferred_icon: Option<String>,
     ) -> bool {
+        if self.tree.get(node_id).is_some_and(Node::is_worktree) {
+            self.status_message = Some("The worktree row uses its branch name".into());
+            return false;
+        }
         self.queue_request(ClientRequest::RenameNode {
             node_id,
             title,
@@ -14311,7 +14297,12 @@ impl App {
             }
         });
         let visible_pane_target = self.active_pane_id().and_then(|id| self.tree.parent_of(id));
-        selected_target.or(visible_pane_target).unwrap_or(ROOT_ID)
+        let target = selected_target.or(visible_pane_target).unwrap_or(ROOT_ID);
+        if self.tree.worktree_container_for_node(target).is_some() {
+            self.tree.project_ancestor(target).unwrap_or(ROOT_ID)
+        } else {
+            target
+        }
     }
 
     /// Destination to preselect when "New group…" is triggered from a
@@ -14319,6 +14310,9 @@ impl App {
     pub fn create_group_target_for_click(&self, target: NodeId) -> NodeId {
         if target == ROOT_ID {
             return ROOT_ID;
+        }
+        if self.tree.worktree_container_for_node(target).is_some() {
+            return self.tree.project_ancestor(target).unwrap_or(ROOT_ID);
         }
         match self.tree.get(target).map(|node| &node.kind) {
             Some(NodeKind::Container(container)) if container.accepts_normal_children() => target,
@@ -14432,6 +14426,7 @@ impl App {
             .tree
             .pane_ids_in_tree_order()
             .into_iter()
+            .filter(|pane_id| self.tree.worktree_container_for_node(*pane_id).is_none())
             .filter(|pane_id| {
                 self.tree
                     .parent_of(*pane_id)
@@ -14552,20 +14547,8 @@ impl App {
             selected_index: 0,
             row_offset: 0,
             submenu: None,
-            worktree_unavailable_reason: Some("Checking Git repository…".to_string()),
-            unavailable_retention: None,
-            unavailable_copies_retention: None,
             hover_candidate: None,
         });
-        let project = self.tree.project_ancestor(target).unwrap_or(ROOT_ID);
-        let (request_id, admitted) = self.request_workspace_repo_facts(project);
-        self.active_workspace_menu_query = Some((request_id, project));
-        if !admitted {
-            if let Mode::ContextMenu(menu) = &mut self.mode {
-                menu.worktree_unavailable_reason =
-                    Some("Git check was rejected because the UI is busy; reopen the menu".into());
-            }
-        }
     }
 
     pub(crate) fn next_workspace_request_id(&mut self) -> u64 {
@@ -14593,6 +14576,21 @@ impl App {
         target: NodeId,
         existing: bool,
     ) {
+        let preferred_existing_path = if existing {
+            self.tree
+                .worktree_container_for_node(target)
+                .and_then(|worktree| match &self.tree.get(worktree)?.kind {
+                    NodeKind::Container(container) => match &container.kind {
+                        ilium_core::ContainerKind::Worktree { worktree_root, .. } => {
+                            Some(worktree_root.clone())
+                        }
+                        _ => None,
+                    },
+                    _ => None,
+                })
+        } else {
+            None
+        };
         let parent_group = if target == ROOT_ID {
             self.group_for_new_node()
         } else {
@@ -14614,6 +14612,9 @@ impl App {
                 mode,
                 self.git_settings.clone(),
             )));
+        if let Mode::CreateAgentWorkspace(state) = &mut self.mode {
+            state.preferred_existing_path = preferred_existing_path;
+        }
         let (request_id, admitted) = self.request_workspace_repo_facts(project);
         self.active_workspace_dialog_query = Some((request_id, project));
         if !admitted {
@@ -14815,19 +14816,6 @@ impl App {
                 }
             }
         }
-        if self.active_workspace_menu_query == Some((request_id, project)) {
-            if let (Mode::ContextMenu(menu), Err(reason)) = (&self.mode, result) {
-                if self.tree.project_ancestor(menu.target).unwrap_or(ROOT_ID) == project {
-                    return Some(
-                        reason
-                            .len()
-                            .checked_mul(4)
-                            .and_then(|bytes| bytes.checked_add(4096))
-                            .unwrap_or(usize::MAX),
-                    );
-                }
-            }
-        }
         None
     }
     pub fn receive_repo_facts(
@@ -14852,24 +14840,6 @@ impl App {
                             state.apply_facts_error(error);
                             state.status_retention = event_retention;
                         }
-                    }
-                }
-            }
-            return;
-        }
-        if self.active_workspace_menu_query == Some((request_id, project)) {
-            self.active_workspace_menu_query = None;
-            if let Mode::ContextMenu(menu) = &mut self.mode {
-                let menu_project = self.tree.project_ancestor(menu.target).unwrap_or(ROOT_ID);
-                if menu_project == project {
-                    if let Err(reason) = menu.try_set_received_reason(
-                        result.err(),
-                        self.processing_event_retention.as_ref(),
-                        self.processing_derivation_retention.as_ref(),
-                    ) {
-                        self.status_message = Some(format!(
-                            "Repository details remain pending: UI allocation admission refused ({reason:?})"
-                        ));
                     }
                 }
             }
@@ -16101,24 +16071,20 @@ impl App {
                     SubmenuItem {
                         action: SubmenuItemAction::AgentInNewWorktree(provider),
                         label: "In new worktree…".to_string(),
-                        disabled_reason: menu.worktree_unavailable_reason.clone(),
-                        disabled_reason_retention: menu.unavailable_copies_retention.clone(),
+                        disabled_reason: None,
+                        disabled_reason_retention: None,
                     },
                     SubmenuItem {
                         action: SubmenuItemAction::AgentInExistingWorktree(provider),
                         label: "In existing worktree…".to_string(),
-                        disabled_reason: menu.worktree_unavailable_reason.clone(),
-                        disabled_reason_retention: menu.unavailable_copies_retention.clone(),
+                        disabled_reason: None,
+                        disabled_reason_retention: None,
                     },
                 ],
-                if menu.worktree_unavailable_reason.is_some() {
-                    0
-                } else {
-                    match self.git_settings.default_where {
-                        crate::config::GitDefaultWhere::Here => 0,
-                        crate::config::GitDefaultWhere::NewWorktree => 1,
-                        crate::config::GitDefaultWhere::ExistingWorktree => 2,
-                    }
+                match self.git_settings.default_where {
+                    crate::config::GitDefaultWhere::Here => 0,
+                    crate::config::GitDefaultWhere::NewWorktree => 1,
+                    crate::config::GitDefaultWhere::ExistingWorktree => 2,
                 },
             ),
             ContextMenuAction::Worktree => {
@@ -16648,6 +16614,9 @@ impl App {
         ];
         actions.extend(ContextMenuAction::new_agent_actions());
         match self.tree.get(target) {
+            Some(node) if node.is_worktree() => {
+                actions.retain(|action| matches!(action, ContextMenuAction::NewAgent(_)));
+            }
             Some(node) if node.is_split_view() => {
                 actions.retain(|action| {
                     !matches!(
@@ -16753,6 +16722,21 @@ impl App {
             ContextMenuAction::MoveDown,
             ContextMenuAction::Close,
         ]);
+        if self.tree.worktree_container_for_node(target).is_some() {
+            let is_worktree = self.tree.get(target).is_some_and(Node::is_worktree);
+            actions.retain(|action| {
+                let is_restricted_action = matches!(
+                    action,
+                    ContextMenuAction::MoveUp
+                        | ContextMenuAction::MoveDown
+                        | ContextMenuAction::NewGroup
+                        | ContextMenuAction::NewFolder
+                        | ContextMenuAction::NewSplitView
+                ) || is_worktree
+                    && matches!(action, ContextMenuAction::Close | ContextMenuAction::Rename);
+                !is_restricted_action
+            });
+        }
         actions.extend(ContextMenuAction::GLOBAL_ACTIONS);
         ContextMenuAction::ordered(actions)
     }
@@ -17308,8 +17292,19 @@ impl App {
     /// Creates a specific command-line pane (e.g. `claude`, `codex`, `agy`) under
     /// the currently targeted group.
     pub fn action_new_command_pane(&mut self, command_line: impl Into<String>) -> bool {
+        let command_line = command_line.into();
+        let target = self.selected_node_id().or_else(|| self.active_pane_id());
+        if let (Some(provider), Some(target)) = (
+            BuiltinAgentProvider::from_command_line(&command_line),
+            target,
+        ) {
+            if self.tree.worktree_container_for_node(target).is_some() {
+                self.open_create_agent_workspace_dialog(provider, target, true);
+                return true;
+            }
+        }
         let parent = self.group_for_new_node();
-        self.request_new_command_pane(parent, command_line.into())
+        self.request_new_command_pane(parent, command_line)
     }
 
     /// Opens the file-picker overlay rooted at the session's cwd; the
@@ -17395,6 +17390,11 @@ impl App {
     }
 
     fn action_close(&mut self, id: NodeId) {
+        if self.tree.get(id).is_some_and(Node::is_worktree) {
+            self.status_message =
+                Some("Close individual agents; the worktree row has fixed membership".into());
+            return;
+        }
         if id == ROOT_ID {
             self.status_message = Some("Cannot close the root group".to_string());
             return;
@@ -17418,6 +17418,10 @@ impl App {
         let Some(id) = self.selected_node_id() else {
             return;
         };
+        if self.tree.get(id).is_some_and(Node::is_worktree) {
+            self.status_message = Some("The worktree row uses its branch name".into());
+            return;
+        }
         let current_name = self
             .tree
             .get(id)
@@ -20516,6 +20520,54 @@ mod tests {
     }
 
     #[test]
+    fn worktree_controls_cannot_move_close_or_rename_fixed_container() {
+        let mut app = app();
+        let project = app
+            .tree
+            .add_project(PathBuf::from("/test/repository"))
+            .unwrap();
+        let pane = app
+            .tree
+            .add_pane(project, "agent", PaneContentKind::Terminal)
+            .unwrap();
+        app.tree
+            .set_pane_workspace(
+                pane,
+                Some(ilium_core::PaneWorkspace {
+                    workspace_id: None,
+                    repo_common_dir: PathBuf::from("/test/repository/.git"),
+                    worktree_root: PathBuf::from("/test/worktree"),
+                    branch: "agent/shared".into(),
+                    base_ref: "main".into(),
+                    base_commit: "abc".into(),
+                    created_by_ilium: false,
+                    created_at_unix: 0,
+                }),
+            )
+            .unwrap();
+        let worktree = app.tree.parent_of(pane).unwrap();
+        assert!(!app.request_move(pane, ilium_core::TreeMoveDirection::Up));
+        assert!(!app.request_reparent(pane, project, None));
+        assert!(!app.request_rename(worktree, "renamed".into(), None, None));
+        app.action_close(worktree);
+        assert!(app.take_outbound_requests().is_empty());
+        let actions = app.context_actions_for(worktree);
+        assert!(!actions.contains(&ContextMenuAction::Close));
+        assert!(!actions.contains(&ContextMenuAction::Rename));
+        assert!(!actions.contains(&ContextMenuAction::MoveUp));
+        assert!(app
+            .context_actions_for(pane)
+            .contains(&ContextMenuAction::Close));
+        app.select_node(pane);
+        assert_eq!(app.tree_state.selected(), &[project, pane]);
+        assert!(app.action_new_command_pane(BuiltinAgentProvider::Codex.command_line()));
+        assert!(matches!(&app.mode, Mode::CreateAgentWorkspace(state)
+            if state.mode == WorktreeDialogMode::Existing && state.project_id == project));
+        assert!(matches!(app.take_outbound_requests().as_slice(),
+            [ClientRequest::QueryRepoFacts { project: queried, .. }] if *queried == project));
+    }
+
+    #[test]
     fn terminal_keys_wait_for_outbound_capacity_in_original_order() {
         let mut app = app();
         let group = app.tree.add_group(ROOT_ID, "keys").unwrap();
@@ -21792,8 +21844,7 @@ mod tests {
                 terminal
                     .draw(|frame| crate::ui::draw(frame, &mut app))
                     .unwrap();
-                // The release is queued to the animation service thread; wait
-                // for it to be applied before observing the hosted scene.
+                // The draw queues Pause; the actor owns physical scene release.
                 app.animation_frame.settle_for_test();
                 assert_eq!(probe.alive(), 0, "help releases the source host");
                 assert_eq!(app.animation_frame.status(), None);
@@ -23589,7 +23640,10 @@ mod tests {
     fn worktree_menu_uses_server_resolved_cwd_and_guards_unowned_removal() {
         let mut app = app();
         app.set_screen_area(Rect::new(0, 0, 100, 30));
-        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let group = app
+            .tree
+            .add_project(PathBuf::from("/tmp/ilium-worktree-menu-project"))
+            .unwrap();
         let pane = app
             .tree
             .add_pane(group, "agent", PaneContentKind::Terminal)
@@ -23628,6 +23682,8 @@ mod tests {
         workspace.workspace_id = Some("owned".to_string());
         workspace.created_by_ilium = true;
         app.tree.set_pane_workspace(pane, Some(workspace)).unwrap();
+        let worktree = app.tree.parent_of(pane).unwrap();
+        assert!(app.tree.get(worktree).unwrap().is_worktree());
         app.request_new_terminal_in_worktree(pane);
         assert!(app
             .take_outbound_requests()
@@ -23635,7 +23691,7 @@ mod tests {
             .any(|request| matches!(request,
             ClientRequest::NewPane { parent_group, kind: ilium_ipc::NewPaneKind::PlainShell,
                 working_directory: ilium_ipc::NewPaneWorkingDirectory::WorkspacePane(source), .. }
-                if *parent_group == group && *source == pane)));
+                if *parent_group == worktree && *source == pane)));
     }
 
     #[test]
@@ -23699,7 +23755,7 @@ mod tests {
     fn interactive_worktree_close_uses_correlated_offer_and_keeps_by_default() {
         let mut app = app();
         app.ui_settings.auto_remove_empty_groups = false;
-        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let group = app.tree.add_project(PathBuf::from("/tmp/repo")).unwrap();
         let pane_id = app
             .tree
             .add_pane(group, "agent", PaneContentKind::Terminal)
@@ -23761,7 +23817,7 @@ mod tests {
     }
 
     #[test]
-    fn new_agent_submenu_starts_with_here_and_updates_worktree_availability() {
+    fn new_agent_submenu_keeps_worktree_choices_enabled_during_repository_checks() {
         let mut app = app();
         app.set_screen_area(Rect::new(0, 0, 100, 30));
         app.open_context_menu(ROOT_ID, 2, 2);
@@ -23778,18 +23834,9 @@ mod tests {
             SubmenuItemAction::AgentHere(BuiltinAgentProvider::Claude)
         );
         assert!(submenu.items[0].disabled_reason.is_none());
-        assert!(submenu.items[1].disabled_reason.is_some());
-
-        menu.set_worktree_unavailable_reason(None);
-        let submenu = menu.submenu.as_ref().unwrap();
         assert!(submenu.items[1..]
             .iter()
             .all(|item| item.disabled_reason.is_none()));
-        menu.set_worktree_unavailable_reason(Some("Not a Git repository".to_string()));
-        let submenu = menu.submenu.as_ref().unwrap();
-        assert!(submenu.items[1..]
-            .iter()
-            .all(|item| item.disabled_reason.as_deref() == Some("Not a Git repository")));
     }
 
     #[test]
@@ -29294,6 +29341,24 @@ mod tests {
                 .unwrap()
                 .ui
                 .use_stable_glyphs
+        );
+    }
+
+    #[test]
+    fn tree_toolbar_visibility_row_toggles_and_persists() {
+        let config_dir = tempfile::tempdir().unwrap();
+        let mut app = app();
+        app.config_dir = Some(config_dir.path().to_path_buf());
+
+        assert!(app.ui_settings.tree_toolbar_always_visible);
+        app.settings_adjust_row(AppearanceRow::TreeToolbarAlwaysVisible, 1);
+        assert!(!app.ui_settings.tree_toolbar_always_visible);
+        app.settle_filesystem_for_test();
+        assert!(
+            !crate::config::load(config_dir.path())
+                .unwrap()
+                .ui
+                .tree_toolbar_always_visible
         );
     }
 

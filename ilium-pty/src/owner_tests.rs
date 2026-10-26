@@ -995,6 +995,31 @@ fn query_reply_never_splits_an_active_input_payload() {
     );
 }
 
+#[test]
+fn query_flood_while_writer_is_busy_drops_replies_and_keeps_the_pane_input_alive() {
+    let (writer_gate, controller) = gate();
+    let harness = Harness::new(OwnerLimits::default(), Some(writer_gate), None);
+    let input = harness.input.write(b"busy-input").unwrap();
+    assert!(controller
+        .started
+        .recv_timeout(Duration::from_secs(2))
+        .is_ok());
+    // Far more reply bytes than the pending-reply budget while the writer is busy.
+    let flood = b"\x1b[6n".repeat(64);
+    for _ in 0..32 {
+        harness.output(&flood);
+    }
+    eventually(|| harness.generation.load(Ordering::Acquire) >= 32);
+    assert!(controller.release.send(()).is_ok());
+    assert!(input.wait_blocking().is_ok());
+    // The owner must still accept input after the flood.
+    let after_flood = harness.input.write(b"after-flood").unwrap().wait_blocking();
+    assert!(
+        after_flood.is_ok(),
+        "input after query flood: {after_flood:?}"
+    );
+}
+
 // Simulates an opaque native call which has entered the writer but has not
 // acknowledged cancellation. Terminal output must settle admission receipts
 // while retaining this worker; the test releases it before checking joins.

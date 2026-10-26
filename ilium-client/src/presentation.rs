@@ -3,7 +3,7 @@
 //! A slot lives through its acknowledgement, bounding queued AND retained frames.
 use std::collections::VecDeque;
 use std::io::{self, Write};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
@@ -31,17 +31,106 @@ const MAX_DIFF_MASK_BYTES: usize = MAX_FRAME_BYTES / std::mem::size_of::<Cell>()
 const OUTPUT_STACK_BYTES: usize = 2 * 1024 * 1024;
 const OUTPUT_WORKER_BYTES: usize = MAX_FRAME_BYTES * 3 + MAX_DIFF_MASK_BYTES + OUTPUT_STACK_BYTES;
 
+/// Only numeric progress leaves the terminal owner; no output bytes are retained.
+#[derive(Debug)]
+pub(crate) struct PresentationHealth {
+    started: Instant,
+    phase: AtomicUsize,
+    frame: AtomicU64,
+    phase_since_ms: AtomicU64,
+    last_ack_ms: AtomicU64,
+    acknowledged_frame: AtomicU64,
+    queued_frames: AtomicUsize,
+    queued_since_ms: AtomicU64,
+    requested_bytes: AtomicU64,
+    written_bytes: AtomicU64,
+}
+impl PresentationHealth {
+    pub(crate) fn new() -> Arc<Self> {
+        Arc::new(Self {
+            started: Instant::now(),
+            phase: AtomicUsize::new(0),
+            frame: AtomicU64::new(0),
+            phase_since_ms: AtomicU64::new(0),
+            last_ack_ms: AtomicU64::new(0),
+            acknowledged_frame: AtomicU64::new(0),
+            queued_frames: AtomicUsize::new(0),
+            queued_since_ms: AtomicU64::new(0),
+            requested_bytes: AtomicU64::new(0),
+            written_bytes: AtomicU64::new(0),
+        })
+    }
+    fn now_ms(&self) -> u64 {
+        u64::try_from(self.started.elapsed().as_millis()).unwrap_or(u64::MAX)
+    }
+    fn phase(&self, phase: usize) {
+        self.phase_since_ms.store(self.now_ms(), Ordering::Relaxed);
+        self.phase.store(phase, Ordering::Release);
+    }
+    pub(crate) fn acknowledge(&self, frame_id: u64) {
+        self.last_ack_ms.store(self.now_ms(), Ordering::Relaxed);
+        self.acknowledged_frame
+            .fetch_max(frame_id, Ordering::Release);
+    }
+    fn phase_name(&self) -> &'static str {
+        match self.phase.load(Ordering::Acquire) {
+            0 => {
+                if self.queued_frames.load(Ordering::Acquire) == 0 {
+                    "idle"
+                } else {
+                    "queued"
+                }
+            }
+            1 => "queued",
+            2 => "encoding",
+            3 => "writing",
+            4 => "flushing",
+            5 if self.acknowledged_frame.load(Ordering::Acquire)
+                >= self.frame.load(Ordering::Acquire) =>
+            {
+                if self.queued_frames.load(Ordering::Acquire) == 0 {
+                    "idle"
+                } else {
+                    "queued"
+                }
+            }
+            5 => "awaiting UI acknowledgement",
+            _ => "unknown",
+        }
+    }
+    fn progress_age_ms(&self) -> u64 {
+        let since = if self.phase_name() == "queued" {
+            self.queued_since_ms.load(Ordering::Acquire)
+        } else {
+            self.phase_since_ms.load(Ordering::Relaxed)
+        };
+        self.now_ms().saturating_sub(since)
+    }
+    pub(crate) fn report(&self) -> String {
+        let phase = self.phase_name();
+        format!("phase={phase}, owner_frame={}, phase_age_ms={}, last_ack_age_ms={}, requested_bytes={}, confirmed_written_bytes={} (counts are samples; partial writes may precede an error)", self.frame.load(Ordering::Relaxed), self.progress_age_ms(), self.now_ms().saturating_sub(self.last_ack_ms.load(Ordering::Relaxed)), self.requested_bytes.load(Ordering::Relaxed), self.written_bytes.load(Ordering::Relaxed))
+    }
+    pub(crate) fn stalled(&self) -> bool {
+        self.phase_name() != "idle" && self.progress_age_ms() >= 5000
+    }
+}
+
 /// Whole-frame buffering with no implicit Drop flush. A failed explicit flush
 /// consumes the attempted buffer; an uncertain output prefix is never retried.
 pub struct TerminalOutput<W: Write> {
     writer: W,
     bytes: Vec<u8>,
+    health: Arc<PresentationHealth>,
 }
 impl<W: Write> TerminalOutput<W> {
     pub fn new(writer: W) -> Self {
+        Self::with_health(writer, PresentationHealth::new())
+    }
+    pub(crate) fn with_health(writer: W, health: Arc<PresentationHealth>) -> Self {
         Self {
             writer,
             bytes: Vec::new(),
+            health,
         }
     }
 }
@@ -66,10 +155,39 @@ impl<W: Write> Write for TerminalOutput<W> {
         Ok(bytes.len())
     }
     fn flush(&mut self) -> io::Result<()> {
-        let written = self.writer.write_all(&self.bytes);
+        self.health
+            .requested_bytes
+            .store(self.bytes.len() as u64, Ordering::Relaxed);
+        self.health.written_bytes.store(0, Ordering::Relaxed);
+        self.health.phase(3);
+        let mut written = 0;
+        let result = (|| {
+            while written < self.bytes.len() {
+                match self.writer.write(&self.bytes[written..]) {
+                    Ok(0) => {
+                        return Err(io::Error::new(
+                            io::ErrorKind::WriteZero,
+                            "terminal output made no progress",
+                        ))
+                    }
+                    Ok(count) => {
+                        written += count;
+                        self.health
+                            .written_bytes
+                            .store(written as u64, Ordering::Relaxed);
+                        self.health
+                            .phase_since_ms
+                            .store(self.health.now_ms(), Ordering::Relaxed);
+                    }
+                    Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                    Err(error) => return Err(error),
+                }
+            }
+            self.health.phase(4);
+            self.writer.flush()
+        })();
         self.bytes.clear();
-        written?;
-        self.writer.flush()
+        result
     }
 }
 
@@ -284,6 +402,7 @@ pub struct Presenter {
     physical_exit: Arc<tokio::sync::Notify>,
     observed_exit: Option<WorkerExit>,
     _worker: OwnedWorker,
+    health: Arc<PresentationHealth>,
 }
 impl Presenter {
     pub fn start<B: Backend<Error = io::Error> + Send + 'static>(
@@ -298,6 +417,14 @@ impl Presenter {
     pub fn start_with_cleanup<B: Backend<Error = io::Error> + Send + 'static>(
         backend: B,
         quota: &QuotaGroup,
+        cleanup: impl FnOnce() + Send + 'static,
+    ) -> io::Result<Self> {
+        Self::start_with_health_cleanup(backend, quota, PresentationHealth::new(), cleanup)
+    }
+    pub(crate) fn start_with_health_cleanup<B: Backend<Error = io::Error> + Send + 'static>(
+        backend: B,
+        quota: &QuotaGroup,
+        health: Arc<PresentationHealth>,
         cleanup: impl FnOnce() + Send + 'static,
     ) -> io::Result<Self> {
         // Admit before allocating owner/channel state or creating an OS thread.
@@ -342,6 +469,7 @@ impl Presenter {
         let owned = shared.clone();
         let failure_allocation = slots.allocation.clone();
         let wake_allocation = slots.allocation.clone();
+        let owner_health = Arc::clone(&health);
         let worker = reserve_owned_worker(Some(OUTPUT_STACK_BYTES), worker_admission)?
             .spawn_with_completion(
                 "ilium-presentation",
@@ -361,7 +489,7 @@ impl Presenter {
                         drop(queue);
                         cleanup();
                     }));
-                    let result = match emit_frames(backend, &owned, &stop, &acks) {
+                    let result = match emit_frames(backend, &owned, &stop, &acks, &owner_health) {
                         Ok(()) => Ok(()),
                         Err(error) => {
                             let kind = error.kind();
@@ -388,6 +516,7 @@ impl Presenter {
             physical_exit,
             observed_exit: None,
             _worker: worker,
+            health,
         })
     }
     /// Test helper: `try_reserve` also returns `None` while the worker briefly
@@ -443,6 +572,12 @@ impl Presenter {
                 ),
                 frame,
             }));
+        }
+        // Queue admission never overwrites an active emitter identity.
+        if self.health.queued_frames.fetch_add(1, Ordering::AcqRel) == 0 {
+            self.health
+                .queued_since_ms
+                .store(self.health.now_ms(), Ordering::Release);
         }
         queue.frames.push_back(frame);
         drop(queue);
@@ -594,6 +729,7 @@ fn emit_frames<B: Backend<Error = io::Error>>(
     shared: &Shared,
     stop: &StopToken,
     acknowledgements: &mpsc::Sender<io::Result<PresentedFrame>>,
+    health: &PresentationHealth,
 ) -> io::Result<()> {
     let mut emitted: Option<Arc<GuardedBuffer>> = None;
     loop {
@@ -616,6 +752,11 @@ fn emit_frames<B: Backend<Error = io::Error>>(
                 None => return backend.flush(),
             }
         };
+        health.queued_frames.fetch_sub(1, Ordering::AcqRel);
+        health.frame.store(frame.frame_id, Ordering::Release);
+        health.requested_bytes.store(0, Ordering::Relaxed);
+        health.written_bytes.store(0, Ordering::Relaxed);
+        health.phase(2);
         let started = Instant::now();
         let committed = match frame.animation.as_mut() {
             Some(animation) => {
@@ -707,6 +848,7 @@ fn emit_frames<B: Backend<Error = io::Error>>(
                 return Err(io::Error::new(error.kind(), reason));
             }
         };
+        health.phase(5);
         // Only a complete successful backend flush establishes the next diff base.
         emitted = Some(frame.buffer.clone());
         let acknowledgement = PresentedFrame {
@@ -1542,5 +1684,65 @@ mod tests {
         assert!(result.is_err());
         assert_eq!(slots.used.load(Ordering::Acquire), 0);
         assert_eq!(slots.buffers_used.load(Ordering::Acquire), 0);
+    }
+}
+
+#[cfg(test)]
+mod presentation_health_tests {
+    use super::*;
+    struct PrefixThenFailure {
+        calls: usize,
+    }
+    impl Write for PrefixThenFailure {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.calls += 1;
+            match self.calls {
+                1 => Err(io::ErrorKind::Interrupted.into()),
+                2 => Ok(bytes.len().min(2)),
+                _ => Err(io::Error::other("synthetic terminal stall error")),
+            }
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            panic!("failed writes must not flush")
+        }
+    }
+    #[test]
+    fn partial_terminal_failure_reports_only_confirmed_prefix_and_never_retries_it() {
+        let health = PresentationHealth::new();
+        let mut output =
+            TerminalOutput::with_health(PrefixThenFailure { calls: 0 }, health.clone());
+        output.write_all(b"abcde").unwrap();
+        assert!(output.flush().is_err());
+        assert_eq!(health.requested_bytes.load(Ordering::Relaxed), 5);
+        assert_eq!(health.written_bytes.load(Ordering::Relaxed), 2);
+        assert_eq!(health.phase.load(Ordering::Acquire), 3);
+        assert!(
+            output.bytes.is_empty(),
+            "uncertain attempted frame must never replay"
+        );
+        assert_eq!(output.writer.calls, 3);
+    }
+    #[test]
+    fn independent_presenters_do_not_share_health_or_acknowledgements() {
+        let first = PresentationHealth::new();
+        let second = PresentationHealth::new();
+        first.frame.store(99, Ordering::Relaxed);
+        first.phase(3);
+        second.acknowledge(0);
+        assert_eq!(first.phase.load(Ordering::Acquire), 3);
+        assert_eq!(second.phase.load(Ordering::Acquire), 0);
+        assert!(first.report().contains("owner_frame=99"));
+        assert!(second.report().contains("owner_frame=0"));
+        first.phase(5);
+        first.acknowledge(98);
+        assert_eq!(first.phase_name(), "awaiting UI acknowledgement");
+        first.acknowledge(99);
+        assert_eq!(first.phase_name(), "idle");
+        first.queued_frames.store(1, Ordering::Release);
+        assert_eq!(first.phase_name(), "queued");
+        first.frame.store(100, Ordering::Release);
+        first.phase(3);
+        first.acknowledge(99);
+        assert_eq!(first.phase_name(), "writing");
     }
 }

@@ -41,7 +41,7 @@ Native foreground and process-identity preflights run on the existing finite I/O
 
 PTY destruction and ordinary pane teardown only request cancellation. The existing owned child reaper performs one termination attempt through the original child-control handle and keeps that handle and its admission until actual exit is observed. A blocked native child mutex therefore cannot delay the Tokio caller or start the shutdown deadline late; an expired deadline retains the physical reaper as pending custody rather than claiming that it joined. Native termination failures are logged by that reaper.
 
-Server-created PTYs reserve their full persistent worker set before starting the child: five OS threads on Unix and six on Windows, each with a requested 4 MiB stack (`ilium_pty::PTY_WORKER_STACK_BYTES`). PTYs are charged to their own quota group (`ServerExecution::pty_quota_group`), not to the shared server pool, so execution jobs, output replay and recovery frames can never crowd terminals out. That group's limits are a multiple of the per-pane cost: `MAX_OWNED_WORKERS` (8,192) threads and `MAX_OWNED_WORKERS × 4 MiB` of declared stack, so the effective PTY ceiling is the owned-worker table (about 1,600 panes on Unix). The quota holds the charge through physical join, including timed-out shutdown; insufficient admission refuses the launch before a child exists. The shared server pool (execution, output, services) keeps a 4 GiB worker-byte budget with a separate 64 MiB visible-recovery reservation. Stacks are virtual reservations; these are admission declarations, not measured RSS bounds or proof that every library thread is charged. Capacity gates such as the 128-PTY pool regression test must never be lowered to make a test pass.
+Server-created PTYs reserve their full persistent worker set before starting the child: five OS threads on Unix and six on Windows, each with a requested 4 MiB stack (`ilium_pty::PTY_WORKER_STACK_BYTES`). PTYs are charged to their own quota group (`ServerExecution::pty_quota_group`), not to the shared server pool, so execution jobs, output replay and recovery frames can never crowd terminals out. That group's limits are a multiple of the per-pane cost: `MAX_OWNED_WORKERS` (8,192) threads and `MAX_OWNED_WORKERS × 4 MiB` of declared stack, so the effective PTY ceiling is the owned-worker table (about 1,600 panes on Unix). The quota holds the charge through physical join, including timed-out shutdown; insufficient admission refuses the launch before a child exists. The shared server pool (execution, output, services) keeps a 4 GiB worker-byte budget, partitioned to preserve visible capture, ordinary output, visible output and exact retirement metadata headroom. Stacks are virtual reservations; these are admission declarations, not measured RSS bounds or proof that every library thread is charged. Capacity gates such as the 128-PTY pool regression test must never be lowered to make a test pass.
 
 A failed pane start during restore never removes the pane. The restore first registers every saved pane as `PaneResource::Unrestored` (its saved kind, progress monitor and last requested size), so its tree node and command stay in every snapshot; `start_snapshot_pane` then replaces the placeholder with the live resource. Panes whose start failed keep the placeholder, a `Restore incomplete` error event names them, and one owned retry task (`unrestored.rs`) retries with backoff (5 s up to every 5 minutes) until each starts or is closed. Input to a placeholder is refused with the failure reason. Each start also copies the loaded snapshot to `<name>.pre-restore.json` (keeping the previous start's as `.pre-restore.1.json`), independent of the rolling-backup setting.
 
@@ -354,14 +354,15 @@ is opaque and the declared job cost is cooperative rather than a strict peak
 memory bound; this remains a resource-qualification gap.
 
 Session conversion uses the process's shared bounded I/O bank and admits one
-job with a 512 MiB working-set declaration and a 2 MiB result allowance. Its
-progress channel is bounded and nonblocking; overload requests cancellation,
-while semantic completion is delivered through the retained job receipt so a
-full UI queue cannot hide a committed conversion. The worker owns cancellation
-and physical completion through shutdown. Source and generated transcripts are
-capped at 128 MiB, including bounded reads for inspection and verification;
-the Codex import ledger is a regular file capped at 16 MiB. These limits and
-ownership changes are source-integrated but await remote qualification.
+job with a working-set declaration of four times the verified source
+transcript size plus 16 MiB, capped at 512 MiB, and a 2 MiB result allowance.
+The worker checks that the transcript has not grown since admission before
+conversion. Its progress channel is bounded and nonblocking; overload requests
+cancellation, while semantic completion is delivered through the retained job
+receipt so a full UI queue cannot hide a committed conversion. The worker owns
+cancellation and physical completion through shutdown. Source and generated
+transcripts are capped at 128 MiB, including bounded reads for inspection and
+verification; the Codex import ledger is a regular file capped at 16 MiB.
 
 Area 11 ambient-map loading now uses the host's shared physical worker quota
 and retained-storage admission. Topographic decoding/generation reserves a
@@ -2611,6 +2612,15 @@ retry, only for proven zero delivery with the same process, dialog and settings.
 
 ## Agent worktrees
 
+Multiple agent panes may share a linked Git worktree. The tree keeps each
+worktree in a fixed `ContainerKind::Worktree` directly under its project,
+identified by the repository common directory and exact worktree root. Its
+members cannot be moved outside that container by reparenting, splitting,
+restructuring, or undo. A single member keeps the compact agent-and-branch
+presentation; multiple members appear below an expandable worktree row using
+the configured branch icon. Closing one member retains its siblings; closing
+the final member removes only the empty tree container.
+
 An agent pane may own a linked Git worktree. `ilium-core` persists the pane's
 `launch_cwd` and `PaneWorkspace` provenance; `Tree::pane_cwd` is the sole
 directory source for launch, transcript lookup, and restore. For a project
@@ -3013,3 +3023,51 @@ Root879 checkpoint1702, 2026-10-06: private graph1701 selects264 verified hashes
 Instruction1679 selected plus Root1687: full Voice refusal retained; exact active acceptance proof; actual instruction source custody fences native FIFO; clear collector runs without modal; fixture immediately proves typed handoff. PreCPU VoiceCapture, terminal refusal/mismatch native reconciliation and shutdown disposition remain incomplete. Animation1680 and1692 selected: actual IO producer moves original home into measured Source with same client; typed refusal retains accepted migration/read result; path-only retry uses enabled admission wake and bank-close fallback. Root1697 fixed CoordinatorOriginals slot preserves original before await, with sizeof complete root metadata accounting. Read-only1698 source review accepted; cancellation/physical retirement native checks UNRUN.
 
 Root1694/1700 adapt six value indices and borrowed emitted-editor Path fence; immutable ROM glyphs now travel as ConfigText::Static through the existing UI CPU-update queue, avoiding UI String allocation. All staged exact forward/inverse reconstructions and scoped pinned fmt/check pass. No current graph compiler/native/lint/release/PTY/performance claim; compiler1669 remains terminal failed/audited/cleaned. Search132 independently pending, original tab retained and no resubmission. Value host1678 and original semantic/native refusal integration remain unfinished, along with Naming882 startup/frame contracts and full eleven-area acceptance. Canonical Rust unchanged; no Git mutation/install/user-owned restart.
+
+### Input latency and freeze containment
+
+Interactive input and server-event batches have both a count limit and a 4 ms
+elapsed-time budget. A consumed lookahead stays owned by the next turn; batching
+never drops or replays input. Terminal chunks do not trigger a full projection
+retention scan because they cannot remove tree nodes or debug-log owners.
+
+IPC transport keeps idle header waits uncharged, but partial headers, payloads
+and frame writes have a 30 s transfer deadline. Timeout or cancellation abandons
+the connection; a partially written request is never retried automatically.
+A completed reader lets final replies drain; a completed writer cancels its
+reader. Codec input charges include requested payload capacity, growth overlap
+and metadata; decoded results keep their original conservative allowance.
+The client process result ceiling is the unchanged 768 MiB general allowance
+plus two dedicated 128 MiB codec envelopes (1024 MiB total), preventing general
+work from consuming codec headroom. Ready journal and broadcast events alternate
+below direct reply, attach and control priority.
+
+PTY command deadlines use their own notification, independent of ordinary
+output availability. Expiry removes commands in place without rebuilding the
+FIFO, rechecks cancellation after publishing receipts, and publishes shutdown
+receipts outside the admission lock. Frozen-screen restore reads retain their
+original charge while waiting in the existing bounded load budget for parser
+admission; temporary pressure is retried and shutdown cancels unused restores.
+
+Deep generic mutation dispatch and cache-miss repository queries use awaited
+abort-on-drop task handles, giving each handler a fresh runtime poll stack.
+The decoded request and its reservation move into the owned task; the reader
+awaits it before admitting the next mutation and retains the attach barrier.
+Cancellation aborts the owned task; a failed join closes the connection without
+replaying a request whose partial outcome is unknown.
+
+Server output reserves storage before encoder admission. Only active writers
+spend the 512 MiB ordinary output or 384 MiB protected output partition; an
+exact guard from this server's 64 MiB visible-capture root selects protected
+output. These partitions, the exact metadata allowance for 64 output retirement
+envelopes, and general worker storage sum to the existing 4 GiB ceiling.
+A conservative window covers the existing 256 MiB aggregate encoder input
+allowance and 64 MiB frame ceiling. The coordinating runtime retains the
+existing backing-size walk and charges measured input; the CPU encodes within
+that window, then shrinks its lease before socket flushing can block. Original producer guards
+and the output guard remain attached through physical CPU destruction.
+The same 64 retirement slots remain shared with snapshot work; no extra CPU
+bank or slot pool is created. Writers never reacquire storage after encoding,
+so queued producer storage cannot hold encoder credit hostage. Fair admission
+and the existing 30 s transfer deadline bound slow-peer backpressure; peers
+sharing protected output can still backpressure one another.

@@ -1100,6 +1100,23 @@ mod tests {
     }
     #[tokio::test]
     async fn scene_credit_waits_for_real_terminal_owner_flush_acknowledgement() {
+        async fn reserve_frame(
+            presenter: &crate::presentation::Presenter,
+        ) -> crate::presentation::FrameReservation {
+            // Reservation is nonblocking: the output worker may briefly hold
+            // its queue lock even before the first frame is submitted.
+            tokio::time::timeout(Duration::from_secs(3), async {
+                loop {
+                    if let Some(reservation) = presenter.try_reserve() {
+                        break reservation;
+                    }
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .expect("presentation frame reservation did not become available")
+        }
+
         let (mut surface, observed, release, receipts) = fixture();
         entered(&mut surface, &observed);
         release.send(()).unwrap();
@@ -1124,7 +1141,7 @@ mod tests {
         let mut buffer = ratatui::buffer::Buffer::empty(Rect::new(0, 0, 2, 1));
         buffer[(0, 0)].set_symbol(&glyph.to_string());
         let mut frame = crate::presentation::PreparedFrame::new(
-            presenter.reserve_within_test_deadline(),
+            reserve_frame(&presenter).await,
             buffer,
             None,
             42,
@@ -1167,7 +1184,7 @@ mod tests {
         let mut same = ratatui::buffer::Buffer::empty(Rect::new(0, 0, 2, 1));
         same[(0, 0)].set_symbol(&glyph.to_string());
         let mut frame = crate::presentation::PreparedFrame::new(
-            presenter.reserve_within_test_deadline(),
+            reserve_frame(&presenter).await,
             same,
             None,
             43,

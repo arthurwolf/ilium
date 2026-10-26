@@ -372,9 +372,8 @@ impl Engine {
     fn run(mut self, stop: &StopToken, guard: &OwnerExitGuard) {
         loop {
             if self.active.is_some() {
-                // Snapshot the wake generation BEFORE polling: a completion
-                // wake that lands between the poll and the wait must make the
-                // wait return, not sleep until the write deadline.
+                // Observe the wake counter before checking completion. A writer
+                // finishing between the check and wait must prevent sleeping.
                 let wake_generation = self.queue.wake_generation();
                 if let Some((reason, error)) = self.poll_active() {
                     guard.stop(reason, error);
@@ -434,6 +433,7 @@ impl Engine {
         // poll observes either an exact completion or the bounded cancellation
         // grace's unconfirmed result. Keep the original terminal reason.
         while self.active.is_some() {
+            // Use the same check-before-wait ordering during retirement.
             let wake_generation = self.queue.wake_generation();
             let _ = self.poll_active();
             if self.active.is_some() {
@@ -629,17 +629,11 @@ impl Engine {
             parser.callbacks_mut().take_pending_replies()
         };
         let _ = self.terminal.changed.send(());
+        // Automatic capability-query replies are best effort. A child that floods
+        // queries while the writer is busy must not shut the pane's input down,
+        // so the excess replies are dropped instead.
         if pending.len() > MAX_PENDING_REPLY_BYTES.saturating_sub(self.pending_reply_bytes) {
-            return Some((
-                ShutdownReason::WriterFailed,
-                Some(DeliveryError::new(
-                    None,
-                    DeliveryFailure::TooLarge {
-                        requested: self.pending_reply_bytes + pending.len(),
-                        maximum: MAX_PENDING_REPLY_BYTES,
-                    },
-                )),
-            ));
+            return None;
         }
         if !pending.is_empty() {
             self.pending_reply_bytes += pending.len();
