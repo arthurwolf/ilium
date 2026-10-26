@@ -164,10 +164,7 @@ fn pkg_562_each_mapping_row_gives_its_code() {
 fn pkg_562_manifest_errors_follow_bytewise_json_pointer_order() {
     // PKG-578 sorts /name before /zzz, independent of schema traversal.
     let found = errors(&set(set(client(), "/zzz", json!(1)), "/name", json!(5)));
-    assert_eq!(
-        found.first().map(String::as_str),
-        Some("manifest.schema")
-    );
+    assert_eq!(found.first().map(String::as_str), Some("manifest.schema"));
     assert_has(&found, "manifest.unknown-key");
 }
 

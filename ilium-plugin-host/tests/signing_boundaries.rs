@@ -1,9 +1,9 @@
-use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use ilium_plugin_host::package::{read_package, write_package};
 use ilium_plugin_host::signing::{
-    PublicKey, SignedAt, SigningKey, TrustStore, TrustedKey, jcs, sign, verify,
+    jcs, sign, verify, PublicKey, SignedAt, SigningKey, TrustStore, TrustedKey,
 };
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::time::SystemTime;
 
 const KEY_ID: &str = "56475aa75463474c0285df5dbf2bcab73da651358839e9b77481b2eab107708c";
@@ -153,26 +153,25 @@ fn informational_time_does_not_change_trust_but_invalid_calendar_is_refused() {
     let bytes = altered_signature(|document| {
         document["signatures"][0]["signed_at"] = json!("9999-12-31 23:59:59")
     });
-    assert!(
-        verify(
-            &read_package(&bytes).unwrap(),
-            &trust(),
-            SystemTime::UNIX_EPOCH
-        )
-        .is_ok()
-    );
+    assert!(verify(
+        &read_package(&bytes).unwrap(),
+        &trust(),
+        SystemTime::UNIX_EPOCH
+    )
+    .is_ok());
     let bytes = altered_signature(|document| {
         document["signatures"][0]["signed_at"] = json!("2025-02-29 00:00:00")
     });
-    assert_eq!(
-        verification_code(&bytes),
-        "package.signature-format"
-    );
+    assert_eq!(verification_code(&bytes), "package.signature-format");
 }
 #[test]
 fn jcs_known_number_string_and_utf16_key_vectors() {
     assert_eq!(
-        jcs(&serde_json::from_str::<Value>("[333333333.33333329,1e30,4.50,2e-3,1e-27,-0.0]").unwrap()).unwrap(),
+        jcs(
+            &serde_json::from_str::<Value>("[333333333.33333329,1e30,4.50,2e-3,1e-27,-0.0]")
+                .unwrap()
+        )
+        .unwrap(),
         "[333333333.3333333,1e+30,4.5,0.002,1e-27,0]"
     );
     assert_eq!(

@@ -135,7 +135,8 @@ pub struct PluginInstance {
 
 impl std::fmt::Debug for PluginInstance {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.debug_struct("PluginInstance")
+        formatter
+            .debug_struct("PluginInstance")
             .field("state", &self.state)
             .field("kind", &self.kind)
             .field("has_guest", &self.guest.is_some())
@@ -161,35 +162,62 @@ impl PluginInstance {
     }
 
     fn with_kind(guest: Box<dyn GuestExports>, kind: InstanceKind) -> Self {
-        Self { state: InstanceState::Inactive, guest: Some(guest), kind, last_trap: None }
+        Self {
+            state: InstanceState::Inactive,
+            guest: Some(guest),
+            kind,
+            last_trap: None,
+        }
     }
 
     /// Calls activate once. Restore data over the ABI cap is never delivered.
     pub fn activate(&mut self, mut activation: Activation) -> Result<(), PluginError> {
-        if self.kind != InstanceKind::Main || self.state != InstanceState::Inactive || self.guest.is_none() {
-            return Err(PluginError::new(ilium_plugin_api::ErrorCode::Conflict, "instance cannot activate in its current state"));
+        if self.kind != InstanceKind::Main
+            || self.state != InstanceState::Inactive
+            || self.guest.is_none()
+        {
+            return Err(PluginError::new(
+                ilium_plugin_api::ErrorCode::Conflict,
+                "instance cannot activate in its current state",
+            ));
         }
-        if activation.restored.as_ref().is_some_and(|bytes| bytes.len() > ilium_plugin_api::abi::RESTORE_BYTES_MAX) {
+        if activation
+            .restored
+            .as_ref()
+            .is_some_and(|bytes| bytes.len() > ilium_plugin_api::abi::RESTORE_BYTES_MAX)
+        {
             activation.restored = None;
         }
         self.state = InstanceState::Activating;
         let result = self.invoke("lifecycle", "activate", |guest| guest.activate(activation));
         match result {
-            Ok(Ok(())) => { self.state = InstanceState::Active; Ok(()) }
+            Ok(Ok(())) => {
+                self.state = InstanceState::Active;
+                Ok(())
+            }
             Ok(Err(error)) => {
                 self.end_failed();
                 Err(error)
             }
-            Err(trap) => Err(PluginError::with_prefix(ilium_plugin_api::ErrorCode::Internal, &trap.code, "activation trapped")),
+            Err(trap) => Err(PluginError::with_prefix(
+                ilium_plugin_api::ErrorCode::Internal,
+                &trap.code,
+                "activation trapped",
+            )),
         }
     }
 
     /// Tears down once; traps and oversized saved data return no restore bytes.
     /// The lifecycle owner logs a dropped restore and decides whether to restart.
     pub fn deactivate(&mut self, reason: DeactivationReason) -> Option<Vec<u8>> {
-        if self.state != InstanceState::Active || self.kind != InstanceKind::Main { return None; }
+        if self.state != InstanceState::Active || self.kind != InstanceKind::Main {
+            return None;
+        }
         self.state = InstanceState::Deactivating;
-        let saved = self.invoke("lifecycle", "deactivate", |guest| guest.deactivate(reason)).ok().flatten();
+        let saved = self
+            .invoke("lifecycle", "deactivate", |guest| guest.deactivate(reason))
+            .ok()
+            .flatten();
         self.guest = None;
         self.state = InstanceState::Stopped;
         saved.filter(|bytes| bytes.len() <= ilium_plugin_api::abi::RESTORE_BYTES_MAX)
@@ -229,16 +257,22 @@ impl PluginInstance {
     pub fn call_export(&mut self, call: ExportCall) -> Result<ExportReply, Trap> {
         let allowed = match (&call, self.kind) {
             (ExportCall::Job { .. }, InstanceKind::Job)
-            | (ExportCall::Migrate { .. }, InstanceKind::Migration) => self.state == InstanceState::Inactive && self.guest.is_some(),
+            | (ExportCall::Migrate { .. }, InstanceKind::Migration) => {
+                self.state == InstanceState::Inactive && self.guest.is_some()
+            }
             (ExportCall::Job { .. } | ExportCall::Migrate { .. }, _) => false,
             (_, InstanceKind::Main) => self.state == InstanceState::Active,
             _ => false,
         };
-        if !allowed { return Err(boundary_trap("trap.abi", "exports", "call-export")); }
+        if !allowed {
+            return Err(boundary_trap("trap.abi", "exports", "call-export"));
+        }
         let expected = reply_kind(&call);
         let result = self.invoke("exports", "call-export", |guest| guest.call_export(call));
         let result = result.and_then(|reply| {
-            if reply_matches(expected, &reply) { Ok(reply) } else {
+            if reply_matches(expected, &reply) {
+                Ok(reply)
+            } else {
                 let trap = boundary_trap("trap.abi", "exports", "call-export");
                 self.record_trap(&trap);
                 Err(trap)
@@ -252,23 +286,43 @@ impl PluginInstance {
     }
 
     /// Last trapped call, including activate traps mapped to PluginError.
-    pub fn last_trap(&self) -> Option<&Trap> { self.last_trap.as_ref() }
-
-    /// The current lifecycle state. Restart scheduling belongs to the owner.
-    pub fn state(&self) -> InstanceState { self.state }
-
-    fn require_active(&self, interface: &str, function: &str) -> Result<(), Trap> {
-        if self.kind == InstanceKind::Main && self.state == InstanceState::Active && self.guest.is_some() { Ok(()) }
-        else { Err(boundary_trap("trap.abi", interface, function)) }
+    pub fn last_trap(&self) -> Option<&Trap> {
+        self.last_trap.as_ref()
     }
 
-    fn invoke<T>(&mut self, interface: &str, function: &str, call: impl FnOnce(&mut dyn GuestExports) -> Result<T, Trap>) -> Result<T, Trap> {
-        let Some(guest) = self.guest.as_mut() else { return Err(boundary_trap("trap.abi", interface, function)); };
+    /// The current lifecycle state. Restart scheduling belongs to the owner.
+    pub fn state(&self) -> InstanceState {
+        self.state
+    }
+
+    fn require_active(&self, interface: &str, function: &str) -> Result<(), Trap> {
+        if self.kind == InstanceKind::Main
+            && self.state == InstanceState::Active
+            && self.guest.is_some()
+        {
+            Ok(())
+        } else {
+            Err(boundary_trap("trap.abi", interface, function))
+        }
+    }
+
+    fn invoke<T>(
+        &mut self,
+        interface: &str,
+        function: &str,
+        call: impl FnOnce(&mut dyn GuestExports) -> Result<T, Trap>,
+    ) -> Result<T, Trap> {
+        let Some(guest) = self.guest.as_mut() else {
+            return Err(boundary_trap("trap.abi", interface, function));
+        };
         // A native adapter must not unwind through the host. Wasm adapters
         // return engine traps through Result; both paths discard their result.
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| call(guest.as_mut())))
-            .unwrap_or_else(|_| Err(boundary_trap("trap.panic", interface, function)));
-        if let Err(trap) = &result { self.record_trap(trap); }
+        let result =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| call(guest.as_mut())))
+                .unwrap_or_else(|_| Err(boundary_trap("trap.panic", interface, function)));
+        if let Err(trap) = &result {
+            self.record_trap(trap);
+        }
         result
     }
 
@@ -284,11 +338,25 @@ impl PluginInstance {
 }
 
 fn boundary_trap(code: &'static str, interface: &str, function: &str) -> Trap {
-    Trap { code: ilium_plugin_api::Code::from_static(code), interface: interface.to_owned(), function: function.to_owned() }
+    Trap {
+        code: ilium_plugin_api::Code::from_static(code),
+        interface: interface.to_owned(),
+        function: function.to_owned(),
+    }
 }
 
 #[derive(Clone, Copy)]
-enum ReplyKind { Hook, Job, Migration, Annotations, Tokens, Catalog, Menu, VirtualChildren, Service }
+enum ReplyKind {
+    Hook,
+    Job,
+    Migration,
+    Annotations,
+    Tokens,
+    Catalog,
+    Menu,
+    VirtualChildren,
+    Service,
+}
 
 fn reply_kind(call: &ExportCall) -> ReplyKind {
     match call {
@@ -305,33 +373,51 @@ fn reply_kind(call: &ExportCall) -> ReplyKind {
 }
 
 fn reply_matches(kind: ReplyKind, reply: &ExportReply) -> bool {
-    matches!((kind, reply),
-        (ReplyKind::Hook, ExportReply::Hook(_) | ExportReply::HookResult(_)) |
-        (ReplyKind::Job, ExportReply::Job(_)) | (ReplyKind::Migration, ExportReply::Migrated(_)) |
-        (ReplyKind::Annotations, ExportReply::Annotations(_)) | (ReplyKind::Tokens, ExportReply::Tokens(_, _)) |
-        (ReplyKind::Catalog, ExportReply::CatalogPage(_)) | (ReplyKind::Menu, ExportReply::MenuEntries(_)) |
-        (ReplyKind::VirtualChildren, ExportReply::VirtualChildren(_)) | (ReplyKind::Service, ExportReply::ServiceReply(_)))
+    matches!(
+        (kind, reply),
+        (
+            ReplyKind::Hook,
+            ExportReply::Hook(_) | ExportReply::HookResult(_)
+        ) | (ReplyKind::Job, ExportReply::Job(_))
+            | (ReplyKind::Migration, ExportReply::Migrated(_))
+            | (ReplyKind::Annotations, ExportReply::Annotations(_))
+            | (ReplyKind::Tokens, ExportReply::Tokens(_, _))
+            | (ReplyKind::Catalog, ExportReply::CatalogPage(_))
+            | (ReplyKind::Menu, ExportReply::MenuEntries(_))
+            | (ReplyKind::VirtualChildren, ExportReply::VirtualChildren(_))
+            | (ReplyKind::Service, ExportReply::ServiceReply(_))
+    )
 }
 
 fn valid_ui_tree(tree: &UiTree) -> bool {
     use ilium_plugin_api::generated::types::ui::Widget;
-    if tree.root != 0 || tree.nodes.is_empty() || tree.nodes.len() > 4096 { return false; }
+    if tree.root != 0 || tree.nodes.is_empty() || tree.nodes.len() > 4096 {
+        return false;
+    }
     let mut parents = vec![0usize; tree.nodes.len()];
     let mut depths = vec![1usize; tree.nodes.len()];
     let mut keys = std::collections::HashSet::new();
     for (index, node) in tree.nodes.iter().enumerate() {
         if let Some(key) = &node.key {
-            if key.is_empty() || key.chars().count() > 64 || !keys.insert(key) { return false; }
+            if key.is_empty() || key.chars().count() > 64 || !keys.insert(key) {
+                return false;
+            }
         }
         if let Widget::Layout(layout) = &node.widget {
-            if layout.constraints.len() != node.children.len() { return false; }
+            if layout.constraints.len() != node.children.len() {
+                return false;
+            }
         }
         for &child in &node.children {
             let child = child as usize;
-            if child <= index || child >= tree.nodes.len() { return false; }
+            if child <= index || child >= tree.nodes.len() {
+                return false;
+            }
             parents[child] += 1;
             depths[child] = depths[index] + 1;
-            if parents[child] > 1 || depths[child] > 32 { return false; }
+            if parents[child] > 1 || depths[child] > 32 {
+                return false;
+            }
         }
     }
     parents.iter().skip(1).all(|count| *count == 1)

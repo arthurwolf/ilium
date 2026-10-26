@@ -9,14 +9,14 @@ mod diagnostic;
 mod syntax;
 mod validate;
 
-pub use component::{ComponentSummary, check_component};
+pub use component::{check_component, ComponentSummary};
 pub use diagnostic::{Diagnostic, Stage};
 pub use syntax::{
-    ACTIVATION_KINDS, ActivationTrigger, Chord, WhenExpr, parse_activation, parse_chord, parse_when,
+    parse_activation, parse_chord, parse_when, ActivationTrigger, Chord, WhenExpr, ACTIVATION_KINDS,
 };
 pub use validate::{
-    CheckMode, CorePluginSummary, InstalledSummary, ValidationContext, json_schema, parse_manifest,
-    validate, validate_json,
+    json_schema, parse_manifest, validate, validate_json, CheckMode, CorePluginSummary,
+    InstalledSummary, ValidationContext,
 };
 
 use serde::{Deserialize, Serialize};

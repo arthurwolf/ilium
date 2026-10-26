@@ -1,7 +1,7 @@
 //! The contract version and the `ilium:api-version` custom section (reference-abi-evolution.md).
 
-use crate::Code;
 use crate::manifest::{Diagnostic, Stage};
+use crate::Code;
 
 /// The umbrella contract identity of this API (reference-abi-evolution.md).
 pub const CONTRACT: &str = "ilium:plugin@0.1.0";
@@ -78,15 +78,7 @@ impl ApiVersion {
     /// Decodes the 6-byte payload of `ilium:api-version` (ABI-004); a wrong size is
     /// `package.api-section-invalid` (reference-manifest-schema.md).
     pub fn from_custom_section(bytes: &[u8]) -> Result<ApiVersion, Diagnostic> {
-        let [
-            major_high,
-            major_low,
-            minor_high,
-            minor_low,
-            patch_high,
-            patch_low,
-        ] = bytes
-        else {
+        let [major_high, major_low, minor_high, minor_low, patch_high, patch_low] = bytes else {
             let mut diagnostic = Diagnostic::error(
                 Code::from_static(crate::codes::package::API_SECTION_INVALID),
                 "",
