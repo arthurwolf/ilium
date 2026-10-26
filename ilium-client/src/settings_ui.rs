@@ -4077,12 +4077,30 @@ pub(crate) fn described_settings_scroll_for_selection(
     area: Rect,
     state: &SettingsState,
 ) -> u16 {
-    let rows = match state.tab {
-        SettingsTab::Sound => sound_description_geometry(area.width).row_lines,
-        SettingsTab::VoiceControl => voice_view(app, state.selected_row, area.width).row_lines,
+    let line = match state.tab {
+        SettingsTab::Sound => sound_description_geometry(area.width)
+            .row_lines
+            .get(state.selected_row)
+            .copied(),
+        SettingsTab::VoiceControl => voice_view(app, state.selected_row, area.width)
+            .row_lines
+            .get(state.selected_row)
+            .copied(),
+        SettingsTab::Appearance => {
+            let selected = AppearanceRow::visible(app.ui_settings.left_panel_sizing.mode)
+                .get(state.selected_row)
+                .copied();
+            let view = appearance_view(&app.ui_settings, state.selected_row, area.width);
+            view.row_lines
+                .iter()
+                .find(|(row, _)| Some(*row) == selected)
+                .map(|(_, line)| usize::from(*line))
+                // Wide layouts replace the first selector with sizing cards.
+                .or_else(|| (selected == Some(AppearanceRow::LeftPanelSizingMode)).then_some(0))
+        }
         _ => return state.scroll,
     };
-    let Some(line) = rows.get(state.selected_row).copied() else {
+    let Some(line) = line else {
         return state.scroll;
     };
     let line = line.min(usize::from(u16::MAX)) as u16;
@@ -8596,6 +8614,42 @@ mod tests {
             .map(|line| line.to_string())
             .collect::<Vec<_>>()
             .join("\n")
+    }
+
+    #[test]
+    fn appearance_keyboard_selection_keeps_controls_visible_at_compact_heights() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = App::new("appearance-scroll-test".into(), directory.path().into());
+        for mode in LeftPanelSizingMode::ALL {
+            app.ui_settings.left_panel_sizing.mode = mode;
+            let rows = AppearanceRow::visible(mode);
+            for width in [38, 56, SIZING_CARDS_MINIMUM_CONTENT_WIDTH, 120] {
+                let area = Rect::new(7, 3, width, 18);
+                let mut state = SettingsState {
+                    tab: SettingsTab::Appearance,
+                    ..SettingsState::default()
+                };
+                for selected in (0..rows.len()).chain((0..rows.len()).rev()) {
+                    state.selected_row = selected;
+                    state.scroll = described_settings_scroll_for_selection(&app, area, &state);
+                    let view = appearance_view(&app.ui_settings, selected, width);
+                    let line = view
+                        .row_lines
+                        .iter()
+                        .find(|(row, _)| *row == rows[selected])
+                        .map(|(_, line)| *line)
+                        .unwrap_or(0);
+                    assert!(
+                        line >= state.scroll,
+                        "{mode:?} width {width} row {selected}"
+                    );
+                    assert!(
+                        line < state.scroll + area.height,
+                        "{mode:?} width {width} row {selected} below viewport"
+                    );
+                }
+            }
+        }
     }
 
     #[test]

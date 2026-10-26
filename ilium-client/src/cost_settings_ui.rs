@@ -1175,6 +1175,127 @@ mod tests {
     }
 
     #[test]
+    fn medal_scope_plus_retains_failed_choice_and_retries_to_disk() {
+        use crate::app::{Mode, SettingsState, SettingsTab};
+        use crate::cost_settings::MedalScope;
+        use crate::value_dialog::ValueDialogState;
+        use crossterm::event::{
+            Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+        };
+        use ratatui::{backend::TestBackend, Terminal};
+
+        // Plain-label rendering, premature closure, or dropping the retry choice must fail.
+        let directory = tempfile::tempdir().unwrap();
+        let initial = CostSettings {
+            budget_usd: 17.125,
+            ..CostSettings::default()
+        };
+        crate::config::save_cost_settings(directory.path(), &initial).unwrap();
+        let config_path = directory.path().join("config.toml");
+        let original = std::fs::read_to_string(&config_path).unwrap();
+        let mut app = App::new("medal-scope-dialog".into(), directory.path().into());
+        app.config_dir = Some(directory.path().into());
+        app.cost_settings = initial.clone();
+        app.set_screen_area(Rect::new(0, 0, 130, 260));
+        app.mode = Mode::Settings(Box::new(SettingsState {
+            tab: SettingsTab::Cost,
+            ..SettingsState::default()
+        }));
+        let Mode::Settings(state) = &app.mode else {
+            panic!("Cost settings fixture");
+        };
+        let area = crate::settings_ui::compute_layout_for_mode(app.layout.screen_area, &app, state)
+            .content_area;
+        let span = view(&app, 0, area.width)
+            .rows
+            .into_iter()
+            .find(|span| span.row == CostRow::MedalScope)
+            .unwrap();
+        let open = value_control(area, 0, &span, &app)
+            .expect("medal scope must use the shared choice control")
+            .geometry()
+            .open;
+        let mut terminal = Terminal::new(TestBackend::new(130, 260)).unwrap();
+        terminal
+            .draw(|frame| render(frame, area, &app, 0, 0))
+            .unwrap();
+        assert_eq!(terminal.backend().buffer()[(open.x, open.y)].symbol(), "+");
+        crate::mouse::handle_mouse_event(
+            &mut app,
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: open.x,
+                row: open.y,
+                modifiers: KeyModifiers::NONE,
+            },
+        );
+        let Mode::ValueDialog(host) = &app.mode else {
+            panic!("plus must open medal scope catalog");
+        };
+        let ValueDialogState::Choice(choice) = &host.dialog else {
+            panic!("medal scope choices");
+        };
+        assert_eq!(
+            choice
+                .options()
+                .iter()
+                .map(|option| (option.id.as_str(), option.label.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                ("global", "All agents together"),
+                ("per_provider", "Separate by provider")
+            ]
+        );
+        assert_eq!(choice.selected_id.as_deref(), Some("global"));
+        let key = |app: &mut App, code| {
+            crate::keys::handle_event(app, Event::Key(KeyEvent::new(code, KeyModifiers::NONE)));
+        };
+        key(&mut app, KeyCode::Down);
+        let broken_config = "[cost\ninvalid synthetic configuration";
+        std::fs::write(&config_path, broken_config).unwrap();
+        key(&mut app, KeyCode::Enter);
+        assert!(matches!(&app.mode, Mode::ValueDialog(host) if host.is_saving()));
+        app.settle_filesystem_for_test();
+        let Mode::ValueDialog(host) = &app.mode else {
+            panic!("failed save must retain medal scope catalog");
+        };
+        assert!(!host.is_saving());
+        let ValueDialogState::Choice(choice) = &host.dialog else {
+            panic!("failed save lost choice");
+        };
+        assert_eq!(choice.highlighted_id.as_deref(), Some("per_provider"));
+        assert_eq!(choice.selected_id.as_deref(), Some("global"));
+        assert!(choice
+            .notice
+            .as_ref()
+            .is_some_and(|notice| !notice.is_empty()));
+        assert_eq!(
+            std::fs::read_to_string(&config_path).unwrap(),
+            broken_config
+        );
+
+        // Retry the retained selection after repairing the real configuration input.
+        std::fs::write(&config_path, original).unwrap();
+        key(&mut app, KeyCode::Enter);
+        assert!(matches!(&app.mode, Mode::ValueDialog(host) if host.is_saving()));
+        assert_eq!(
+            crate::config::load(directory.path()).unwrap().cost,
+            initial,
+            "admission alone must not be reported as a durable save"
+        );
+        app.settle_filesystem_for_test();
+        assert!(matches!(&app.mode, Mode::Settings(state) if state.tab == SettingsTab::Cost));
+        assert!(app.modal_stack.is_empty());
+        assert_eq!(
+            crate::config::load(directory.path()).unwrap().cost,
+            CostSettings {
+                medal_scope: MedalScope::PerProvider,
+                ..initial
+            }
+        );
+    }
+
+    #[test]
     fn cost_choice_right_click_reverses_and_plus_opens_the_complete_dialog() {
         use crate::app::{Mode, SettingsState, SettingsTab};
         use crate::cost_model::CostMetric;

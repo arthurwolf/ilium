@@ -2679,7 +2679,8 @@ async fn universal_settings_catalog_and_exact_number_survive_fresh_client_reload
         wait_until(
             || {
                 let screen = first_client.screen_text();
-                screen.contains("Verbatim tail") && !screen.contains("Value:")
+                screen.contains("Verbatim tail")
+                    && !screen.contains("Value:")
                     && !screen.contains("number between")
             },
             WAIT_TIMEOUT
@@ -2743,10 +2744,18 @@ async fn universal_settings_catalog_and_exact_number_survive_fresh_client_reload
     first_client
         .write(b"\x1b")
         .expect("cancel the valid but unsaved padding draft");
-    assert!(wait_until(|| {
-        let screen = first_client.screen_text();
-        screen.contains("Terminal columns:") && !screen.contains("Value:")
-    }, WAIT_TIMEOUT).await, "Padding cancellation must close the exact editor: {:?}", first_client.screen_text());
+    assert!(
+        wait_until(
+            || {
+                let screen = first_client.screen_text();
+                screen.contains("Terminal columns:") && !screen.contains("Value:")
+            },
+            WAIT_TIMEOUT
+        )
+        .await,
+        "Padding cancellation must close the exact editor: {:?}",
+        first_client.screen_text()
+    );
     assert_eq!(
         ilium_client::config::load(&xdg.ilium_config_dir)
             .expect("read config after cancelling the valid padding draft")
@@ -2902,10 +2911,13 @@ async fn universal_settings_catalog_and_exact_number_survive_fresh_client_reload
     // offline; the test makes no service/provider call or agent request.
     let osm_label = ilium_client::background_animation::AnimationKind::OpenStreetMap.label();
     let (scene_column, scene_row) = first_client
-        .with_screen(|screen| ascii_label_cell(screen, default_animation.kind.label()))
+        .with_screen(|screen| animation_scene_label_cell(screen, default_animation.kind.label()))
         .expect("initial scene is visible in the scene list");
     for _ in 0..ilium_client::background_animation::AnimationKind::ALL.len() {
-        if first_client.with_screen(|screen| ascii_label_cell(screen, osm_label)).is_some() {
+        if first_client
+            .with_screen(|screen| animation_scene_label_cell(screen, osm_label))
+            .is_some()
+        {
             break;
         }
         let scene_line = |screen: &vt100::Screen| {
@@ -2915,19 +2927,36 @@ async fn universal_settings_catalog_and_exact_number_survive_fresh_client_reload
                 .collect::<String>()
         };
         let before = first_client.with_screen(scene_line);
-        first_client.write(&sgr_mouse_down(65, scene_column, scene_row))
+        first_client
+            .write(&sgr_mouse_down(65, scene_column, scene_row))
             .expect("scroll the scene list without activating intervening scenes");
-        assert!(wait_until(|| first_client.with_screen(scene_line) != before, WAIT_TIMEOUT).await,
-            "scene list did not scroll: {:?}", first_client.screen_text());
+        assert!(
+            wait_until(
+                || first_client.with_screen(scene_line) != before,
+                WAIT_TIMEOUT
+            )
+            .await,
+            "scene list did not scroll: {:?}",
+            first_client.screen_text()
+        );
     }
     let (osm_column, osm_row) = first_client
-        .with_screen(|screen| ascii_label_cell(screen, osm_label))
+        .with_screen(|screen| animation_scene_label_cell(screen, osm_label))
         .expect("OpenStreetMap label after scrolling the actual scene list");
-    first_client.write(&sgr_mouse_click(0, osm_column, osm_row))
+    first_client
+        .write(&sgr_mouse_click(0, osm_column, osm_row))
         .expect("select the actual OpenStreetMap scene row");
-    assert!(wait_until(|| ilium_client::project_config::load(&animation_home).is_ok_and(|config| {
-        config.animation.kind == ilium_client::background_animation::AnimationKind::OpenStreetMap
-    }), WAIT_TIMEOUT).await, "OpenStreetMap scene selection did not persist");
+    assert!(
+        wait_until(
+            || ilium_client::project_config::load(&animation_home).is_ok_and(|config| {
+                config.animation.kind
+                    == ilium_client::background_animation::AnimationKind::OpenStreetMap
+            }),
+            WAIT_TIMEOUT
+        )
+        .await,
+        "OpenStreetMap scene selection did not persist"
+    );
     first_client
         .write(b"\r")
         .expect("select OpenStreetMap and focus its controls");
@@ -2971,8 +3000,15 @@ async fn universal_settings_catalog_and_exact_number_survive_fresh_client_reload
     first_client
         .write(b"+")
         .expect("open the complete OpenStreetMap city catalog");
-    assert!(wait_until(|| first_client.screen_text().contains("Search:"), WAIT_TIMEOUT).await,
-        "city catalog did not open: {:?}", first_client.screen_text());
+    assert!(
+        wait_until(
+            || first_client.screen_text().contains("Search:"),
+            WAIT_TIMEOUT
+        )
+        .await,
+        "city catalog did not open: {:?}",
+        first_client.screen_text()
+    );
     first_client
         .write(chosen_city_label.as_bytes())
         .expect("filter the full catalog to a non-adjacent city");
@@ -3104,6 +3140,17 @@ async fn universal_settings_catalog_and_exact_number_survive_fresh_client_reload
     fresh_client
         .write(b"\x02:")
         .expect("open Settings in fresh client");
+    assert!(
+        wait_until(
+            || fresh_client.screen_text().contains("⚙ Settings"),
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "fresh client should open Settings before row navigation"
+    );
+    fresh_client
+        .write(&b"\x1b[B".repeat(tree_order_row))
+        .expect("scroll the reloaded Tree order row into the compact viewport");
     assert!(
         wait_until(
             || fresh_client.screen_text().contains("Name Z-A"),
@@ -3266,19 +3313,29 @@ async fn universal_settings_catalog_and_exact_number_survive_fresh_client_reload
     // Inspect the global look with room for its pane, then return to the
     // supported compact size for the persisted scene controls. Crossing scene
     // rows with arrows would preview and save unrelated animations.
-    fresh_client.resize(44, 120)
+    fresh_client
+        .resize(44, 120)
         .expect("show the global look pane for the fresh-client palette check");
-    assert!(wait_until(|| fresh_client.screen_text().contains(chosen_palette_label), WAIT_TIMEOUT).await,
-        "fresh client should render the reloaded full-catalog palette: {:?}", fresh_client.screen_text());
+    assert!(
+        wait_until(
+            || fresh_client.screen_text().contains(chosen_palette_label),
+            WAIT_TIMEOUT
+        )
+        .await,
+        "fresh client should render the reloaded full-catalog palette: {:?}",
+        fresh_client.screen_text()
+    );
     let (loaded_scene_column, loaded_scene_row) = fresh_client
-        .with_screen(|screen| ascii_label_cell(screen, osm_label))
+        .with_screen(|screen| animation_scene_label_cell(screen, osm_label))
         .expect("persisted OpenStreetMap scene is visible");
-    fresh_client.write(&sgr_mouse_click(0, loaded_scene_column, loaded_scene_row))
+    fresh_client
+        .write(&sgr_mouse_click(0, loaded_scene_column, loaded_scene_row))
         .expect("focus the persisted scene without visiting unrelated scenes");
     fresh_client
         .write(b"\r")
         .expect("open persisted OpenStreetMap controls in compact client");
-    fresh_client.resize(24, 80)
+    fresh_client
+        .resize(24, 80)
         .expect("restore compact size for city and duration reload acceptance");
     fresh_client
         .write(b"\x1b[B".repeat(place_offset).as_slice())
@@ -3638,7 +3695,14 @@ async fn toolbar_model_strength_and_effort_catalog_use_only_fake_providers() {
     tui.write(&sgr_mouse_up(8, claude_row))
         .expect("release fake Claude pane row");
     assert!(
-        wait_until(|| tui.screen_text().contains("auto"), WAIT_TIMEOUT).await,
+        wait_until(
+            || tui.with_screen(|screen| {
+                column_of_text_in_row(screen, 0, "fake-claude/claude").is_some()
+                    && column_of_text_in_row(screen, 1, "auto").is_some()
+            }),
+            WAIT_TIMEOUT,
+        )
+        .await,
         "Claude toolbar should display its effort control: {:?}",
         tui.screen_text()
     );
@@ -4516,9 +4580,9 @@ fn ascii_label_cell(screen: &vt100::Screen, label: &str) -> Option<(u16, u16)> {
     for row in 0..rows {
         for column in 0..=columns - length {
             if label.bytes().enumerate().all(|(offset, byte)| {
-                screen.cell(row, column + offset as u16).is_some_and(|cell| {
-                    cell.contents().as_bytes() == [byte]
-                })
+                screen
+                    .cell(row, column + offset as u16)
+                    .is_some_and(|cell| cell.contents().as_bytes() == [byte])
             }) {
                 return Some((column, row));
             }
@@ -4527,11 +4591,44 @@ fn ascii_label_cell(screen: &vt100::Screen, label: &str) -> Option<(u16, u16)> {
     None
 }
 
+/// Scene labels also appear as right-pane titles. Restrict pointer targets to
+/// the actual list between its Native/Plugin heading and pagination controls.
+fn animation_scene_label_cell(screen: &vt100::Screen, label: &str) -> Option<(u16, u16)> {
+    let (left, heading_row) = ascii_label_cell(screen, "Native")?;
+    let (next_column, pager_row) = ascii_label_cell(screen, "Next")?;
+    for row in heading_row + 1..pager_row {
+        if let Some(column) = column_of_text_in_row(screen, row, label) {
+            if (left..next_column).contains(&column) {
+                return Some((column, row));
+            }
+        }
+    }
+    None
+}
+
+#[test]
+fn animation_scene_pointer_ignores_duplicate_settings_title() {
+    let mut terminal = vt100::Parser::new(12, 100, 0);
+    terminal.process(b"\x1b[2;61HOpenStreetMap settings\x1b[3;11HNative    Plugin\x1b[4;16HOther scene\x1b[5;16HOpenStreetMap\x1b[9;31HNext");
+    assert_eq!(
+        animation_scene_label_cell(terminal.screen(), "OpenStreetMap"),
+        Some((15, 4))
+    );
+    assert_eq!(
+        animation_scene_label_cell(terminal.screen(), "Missing"),
+        None
+    );
+}
+
 /// Select the painted catalog glyph following a form label, not its leader gap.
 fn catalog_cell_after_label(screen: &vt100::Screen, label: &str) -> Option<(u16, u16)> {
     let (column, row) = ascii_label_cell(screen, label)?;
     (column + label.len() as u16..screen.size().1)
-        .find(|column| screen.cell(row, *column).is_some_and(|cell| cell.contents() == "+"))
+        .find(|column| {
+            screen
+                .cell(row, *column)
+                .is_some_and(|cell| cell.contents() == "+")
+        })
         .map(|column| (column, row))
 }
 
@@ -5149,13 +5246,16 @@ async fn editor_line_context_menu_creates_selected_agent_and_submits_the_prompt(
     // right-hand arrow; options are no longer simultaneous radio buttons.
     let (provider_next_column, provider_row) = tui
         .with_screen(|screen| {
-            let row = *rows_containing(screen, "Agent    ").first()?;
-            (0..screen.size().1).rev().find_map(|column| {
-                screen
-                    .cell(row, column)
-                    .filter(|cell| cell.contents() == "→")
-                    .map(|_| (column, row))
-            })
+            rows_containing(screen, "Agent")
+                .into_iter()
+                .find_map(|row| {
+                    (0..screen.size().1).rev().find_map(|column| {
+                        screen
+                            .cell(row, column)
+                            .filter(|cell| cell.contents() == "→")
+                            .map(|_| (column, row))
+                    })
+                })
         })
         .expect("rendered create-agent provider next button");
     tui.write(&sgr_mouse_click(0, provider_next_column, provider_row))
