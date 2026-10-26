@@ -10425,17 +10425,21 @@ mod tests {
     #[tokio::test]
     async fn replacing_shared_worktree_member_preserves_owner_directory_and_sibling() {
         let directory = tempfile::tempdir().expect("isolated replacement fixture");
+        // Spawn admission requires canonical paths, including macOS temporary
+        // directory aliases; the fixture must satisfy that existing contract.
+        let fixture_root = ilium_platform::paths::canonicalize(directory.path())
+            .expect("canonical replacement fixture");
         let state = snapshot_io_handler_state(&directory);
         assert!(state
             .execution
             .set(crate::execution::ServerExecution::start().expect("execution bank"))
             .is_ok());
-        let root = directory.path().join("worktree");
+        let root = fixture_root.join("worktree");
         let launch_cwd = root.join("src");
         std::fs::create_dir_all(&launch_cwd).unwrap();
         let workspace = ilium_core::PaneWorkspace {
             workspace_id: None,
-            repo_common_dir: directory.path().join(".git"),
+            repo_common_dir: fixture_root.join(".git"),
             worktree_root: root,
             branch: "agent/shared".into(),
             base_ref: "main".into(),
@@ -10445,7 +10449,7 @@ mod tests {
         };
         let (old, sibling, owner, sibling_before) = {
             let mut tree = state.tree.write().await;
-            let project = tree.add_project(directory.path().to_path_buf()).unwrap();
+            let project = tree.add_project(fixture_root).unwrap();
             let old = tree
                 .add_pane(project, "old", PaneContentKind::Terminal)
                 .unwrap();
