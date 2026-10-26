@@ -65,16 +65,22 @@ async fn detection_progresses_with_full_general_and_codec_envelopes_and_busy_wor
             },
         )
         .expect("remaining general input/result envelope");
-    let codec_cost = JobCost {
+    let encoder_cost = JobCost {
         input_bytes: 128 * MIB,
         result_bytes: 192 * MIB,
+    };
+    // Decoder results retain an owner allocation as well as the payload;
+    // saturate that existing envelope without borrowing detection headroom.
+    let decoder_cost = JobCost {
+        result_bytes: 192 * MIB + ilium_execution::retained_result_storage_overhead_bytes(),
+        ..encoder_cost
     };
     let decoders: Vec<_> = (0..4)
         .map(|_| {
             owner
                 .decoder
                 .foundation
-                .try_reserve(Lane::Cpu, codec_cost)
+                .try_reserve(Lane::Cpu, decoder_cost)
                 .expect("full existing decoder capacity")
         })
         .collect();
@@ -83,7 +89,7 @@ async fn detection_progresses_with_full_general_and_codec_envelopes_and_busy_wor
             owner
                 .encoder
                 .foundation
-                .try_reserve(Lane::Cpu, codec_cost)
+                .try_reserve(Lane::Cpu, encoder_cost)
                 .expect("full existing encoder capacity")
         })
         .collect();
