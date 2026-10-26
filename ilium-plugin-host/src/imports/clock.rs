@@ -1,5 +1,8 @@
 //! Always-available wall and monotonic clocks (api-clock-and-timers.md).
-use std::{sync::OnceLock, time::{Duration, Instant, SystemTime, UNIX_EPOCH}};
+use std::{
+    sync::OnceLock,
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+};
 
 use ilium_plugin_api::generated::host::clock::HostClock;
 
@@ -15,7 +18,9 @@ pub struct ClockImport;
 /// Dates before the epoch clamp to zero; unrepresentable millisecond counts
 /// saturate instead of wrapping. Wall-clock corrections remain observable.
 pub fn unix_millis_at(time: SystemTime) -> u64 {
-    time.duration_since(UNIX_EPOCH).map(duration_millis).unwrap_or(0)
+    time.duration_since(UNIX_EPOCH)
+        .map(duration_millis)
+        .unwrap_or(0)
 }
 
 /// Millisecond conversion shared by both clocks, including truncation of

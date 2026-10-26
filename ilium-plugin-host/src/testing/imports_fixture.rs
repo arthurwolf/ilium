@@ -2,16 +2,20 @@
 //! clock and limits. Clock, log, storage and the basic primitive use real adapters;
 //! unrelated imports remain explicit pending production implementations. Test support only.
 
+use super::fake_kernel::FakeKernel;
+use crate::imports::{
+    basic::BasicImport,
+    log::{LogClock, LogDiagnostics, LogFailure, LogImport, LogTime, PluginLogger},
+    storage::{StorageAuthorization, StorageImport, StorageImportContext, StorageInstanceState},
+};
+use crate::storage::StorageContext;
+use crate::telemetry::{LogConfig, LogLevel, PluginLogInstanceBudget, Refusal};
+use ilium_plugin_api::{grants::Grant, ids::parse_plugin_id, ProcessKind};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::collections::BTreeMap;
-use std::time::UNIX_EPOCH;
-use ilium_plugin_api::{grants::Grant, ids::parse_plugin_id, ProcessKind};
-use crate::imports::{basic::BasicImport, log::{LogClock, LogDiagnostics, LogFailure, LogImport, LogTime, PluginLogger}, storage::{StorageAuthorization, StorageImport, StorageImportContext, StorageInstanceState}};
-use crate::telemetry::{LogConfig, LogLevel, PluginLogInstanceBudget, Refusal};
-use crate::storage::StorageContext;
-use super::fake_kernel::FakeKernel;
 use std::time::Duration;
+use std::time::UNIX_EPOCH;
 
 use ilium_plugin_api::generated::host::{
     Bucket, ChildHandle, FieldError, HostClock, HostCodec, HostFs, HostHttp, HostJobs, HostJournal,
@@ -62,48 +66,98 @@ pub type JobRunner = Box<dyn FnMut(&str, &[u8]) -> Result<Vec<u8>, PluginError>>
 
 #[derive(Clone)]
 struct FixtureClock(Arc<Mutex<ClockState>>);
-struct ClockState { wall: u64, monotonic: u64 }
+struct ClockState {
+    wall: u64,
+    monotonic: u64,
+}
 impl HostClock for FixtureClock {
-    fn now_unix_millis(&mut self) -> u64 { self.0.lock().unwrap().wall }
-    fn monotonic_millis(&mut self) -> u64 { self.0.lock().unwrap().monotonic }
+    fn now_unix_millis(&mut self) -> u64 {
+        self.0.lock().unwrap().wall
+    }
+    fn monotonic_millis(&mut self) -> u64 {
+        self.0.lock().unwrap().monotonic
+    }
 }
 impl LogClock for FixtureClock {
     fn now(&self) -> Result<LogTime, Refusal> {
-        let clock=self.0.lock().map_err(|_|Refusal {code:"log.clock-poisoned".into(),message:"fixture clock poisoned".into()})?;
+        let clock = self.0.lock().map_err(|_| Refusal {
+            code: "log.clock-poisoned".into(),
+            message: "fixture clock poisoned".into(),
+        })?;
         // Gregorian civil date from epoch days; UTC is the fixture's explicit
         // local timezone. Wall corrections never change its duration clock.
-        let seconds=clock.wall/1000;
-        let days=(seconds/86400) as i64+719468;
-        let era=days/146097;
-        let day_of_era=days-era*146097;
-        let year_of_era=(day_of_era-day_of_era/1460+day_of_era/36524-day_of_era/146096)/365;
-        let mut year=year_of_era+era*400;
-        let day_of_year=day_of_era-(365*year_of_era+year_of_era/4-year_of_era/100);
-        let month_phase=(5*day_of_year+2)/153;
-        let day=day_of_year-(153*month_phase+2)/5+1;
-        let month=month_phase+if month_phase<10 {3}else{-9};
-        year+=i64::from(month<=2);
-        if year>9999 {return Err(Refusal {code:"log.clock-range".into(),message:"wall clock exceeds log timestamp range".into()});}
-        Ok(LogTime {local_timestamp:format!("{year:04}-{month:02}-{day:02} {:02}:{:02}:{:02}",seconds/3600%24,seconds/60%60,seconds%60),monotonic_millis:clock.monotonic})
+        let seconds = clock.wall / 1000;
+        let days = (seconds / 86400) as i64 + 719468;
+        let era = days / 146097;
+        let day_of_era = days - era * 146097;
+        let year_of_era =
+            (day_of_era - day_of_era / 1460 + day_of_era / 36524 - day_of_era / 146096) / 365;
+        let mut year = year_of_era + era * 400;
+        let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+        let month_phase = (5 * day_of_year + 2) / 153;
+        let day = day_of_year - (153 * month_phase + 2) / 5 + 1;
+        let month = month_phase + if month_phase < 10 { 3 } else { -9 };
+        year += i64::from(month <= 2);
+        if year > 9999 {
+            return Err(Refusal {
+                code: "log.clock-range".into(),
+                message: "wall clock exceeds log timestamp range".into(),
+            });
+        }
+        Ok(LogTime {
+            local_timestamp: format!(
+                "{year:04}-{month:02}-{day:02} {:02}:{:02}:{:02}",
+                seconds / 3600 % 24,
+                seconds / 60 % 60,
+                seconds % 60
+            ),
+            monotonic_millis: clock.monotonic,
+        })
     }
 }
 #[derive(Default)]
 struct FixtureDiagnostics(Mutex<Option<ErrorCode>>);
 impl LogDiagnostics for FixtureDiagnostics {
-    fn failed(&self,_failure:LogFailure) { *self.0.lock().unwrap()=Some(ErrorCode::Io); }
+    fn failed(&self, _failure: LogFailure) {
+        *self.0.lock().unwrap() = Some(ErrorCode::Io);
+    }
 }
-struct FixtureStorage { import:StorageImport, clock:FixtureClock, errors:Arc<FixtureDiagnostics> }
+struct FixtureStorage {
+    import: StorageImport,
+    clock: FixtureClock,
+    errors: Arc<FixtureDiagnostics>,
+}
 impl HostStorage for FixtureStorage {
-    fn get(&mut self,bucket:Bucket,key:String)->Option<Vec<u8>> {self.import.get(bucket,key)}
-    fn put(&mut self,bucket:Bucket,key:String,value:Vec<u8>)->Result<(),PluginError> {self.import.put(bucket,key,value)}
-    fn remove(&mut self,bucket:Bucket,key:String) {self.import.remove(bucket,key)}
-    fn keys(&mut self,bucket:Bucket,prefix:String)->Vec<String> {self.import.keys(bucket,prefix)}
-    fn write_batch(&mut self,bucket:Bucket,entries:Vec<ilium_plugin_api::generated::host::Entry>)->Result<(),PluginError> {self.import.write_batch(bucket,entries)}
-    fn lease(&mut self,key:String,ttl_millis:u32)->bool {
-        let wall=self.clock.0.lock().unwrap().wall;
-        match self.import.lease_at(&key,ttl_millis,UNIX_EPOCH+Duration::from_millis(wall)) {
-            Ok(acquired)=>acquired,
-            Err(error)=> {*self.errors.0.lock().unwrap()=Some(error.code);false},
+    fn get(&mut self, bucket: Bucket, key: String) -> Option<Vec<u8>> {
+        self.import.get(bucket, key)
+    }
+    fn put(&mut self, bucket: Bucket, key: String, value: Vec<u8>) -> Result<(), PluginError> {
+        self.import.put(bucket, key, value)
+    }
+    fn remove(&mut self, bucket: Bucket, key: String) {
+        self.import.remove(bucket, key)
+    }
+    fn keys(&mut self, bucket: Bucket, prefix: String) -> Vec<String> {
+        self.import.keys(bucket, prefix)
+    }
+    fn write_batch(
+        &mut self,
+        bucket: Bucket,
+        entries: Vec<ilium_plugin_api::generated::host::Entry>,
+    ) -> Result<(), PluginError> {
+        self.import.write_batch(bucket, entries)
+    }
+    fn lease(&mut self, key: String, ttl_millis: u32) -> bool {
+        let wall = self.clock.0.lock().unwrap().wall;
+        match self
+            .import
+            .lease_at(&key, ttl_millis, UNIX_EPOCH + Duration::from_millis(wall))
+        {
+            Ok(acquired) => acquired,
+            Err(error) => {
+                *self.errors.0.lock().unwrap() = Some(error.code);
+                false
+            }
         }
     }
 }
@@ -133,50 +187,178 @@ impl ImportsFixtureBuilder {
     /// Fallible setup for tests that deliberately exercise invalid configuration.
     /// This validates fixture identities and limits; it does not claim package
     /// admission or instantiate a WebAssembly guest.
-    pub fn try_build(self)->Result<ImportsFixture,String> {
-        let manifest:serde_json::Value=serde_json::from_str(&self.manifest).map_err(|error|error.to_string())?;
-        if !manifest.is_object() {return Err("fixture manifest must be an object".into());}
-        let plugin=match manifest.get("id") {Some(value)=>value.as_str().ok_or("plugin id must be a string")?,None=>"test.imports"}.to_owned();
-        let plugin_id=parse_plugin_id(&plugin).map_err(|_|"invalid plugin identity")?;
-        let grants=self.grants.iter().map(|grant|Grant::parse(grant).map_err(|error|format!("invalid grant: {error:?}"))).collect::<Result<Vec<_>,_>>()?;
-        let mut additional=Vec::new();
-        let mut identities=std::collections::BTreeSet::from([plugin.clone()]);
+    pub fn try_build(self) -> Result<ImportsFixture, String> {
+        let manifest: serde_json::Value =
+            serde_json::from_str(&self.manifest).map_err(|error| error.to_string())?;
+        if !manifest.is_object() {
+            return Err("fixture manifest must be an object".into());
+        }
+        let plugin = match manifest.get("id") {
+            Some(value) => value.as_str().ok_or("plugin id must be a string")?,
+            None => "test.imports",
+        }
+        .to_owned();
+        let plugin_id = parse_plugin_id(&plugin).map_err(|_| "invalid plugin identity")?;
+        let grants = self
+            .grants
+            .iter()
+            .map(|grant| Grant::parse(grant).map_err(|error| format!("invalid grant: {error:?}")))
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut additional = Vec::new();
+        let mut identities = std::collections::BTreeSet::from([plugin.clone()]);
         for text in self.additional {
-            let value:serde_json::Value=serde_json::from_str(&text).map_err(|error|error.to_string())?;
-            let id=value["id"].as_str().ok_or("additional fixture plugin requires id")?;
-            parse_plugin_id(id).map_err(|_|"invalid additional plugin identity")?;
-            if !identities.insert(id.to_owned()) {return Err("duplicate fixture plugin identity".into());}
+            let value: serde_json::Value =
+                serde_json::from_str(&text).map_err(|error| error.to_string())?;
+            let id = value["id"]
+                .as_str()
+                .ok_or("additional fixture plugin requires id")?;
+            parse_plugin_id(id).map_err(|_| "invalid additional plugin identity")?;
+            if !identities.insert(id.to_owned()) {
+                return Err("duplicate fixture plugin identity".into());
+            }
             additional.push(value);
         }
-        let requested=ilium_plugin_api::limits::Limits(self.limits.clone());
-        let resolved=ilium_plugin_api::limits::clamp(&requested,self.tier).map_err(|error|error.message)?;
-        let bytes_for=|name:&str|->Result<usize,String> {
-            let key=name.parse::<ilium_plugin_api::limits::LimitKey>().map_err(|_|"unknown limit")?;
-            usize::try_from(resolved[&key]).ok().and_then(|value|value.checked_mul(1024*1024)).ok_or_else(||"limit exceeds address space".into())
+        let requested = ilium_plugin_api::limits::Limits(self.limits.clone());
+        let resolved = ilium_plugin_api::limits::clamp(&requested, self.tier)
+            .map_err(|error| error.message)?;
+        let bytes_for = |name: &str| -> Result<usize, String> {
+            let key = name
+                .parse::<ilium_plugin_api::limits::LimitKey>()
+                .map_err(|_| "unknown limit")?;
+            usize::try_from(resolved[&key])
+                .ok()
+                .and_then(|value| value.checked_mul(1024 * 1024))
+                .ok_or_else(|| "limit exceeds address space".into())
         };
-        let root=tempfile::Builder::new().prefix("ilium-imports-").tempdir().map_err(|error|error.to_string())?;
-        let project=match self.project {Some(project)=>std::fs::canonicalize(project).map_err(|error|error.to_string())?,None=> {
-            let project=root.path().join("project");std::fs::create_dir(&project).map_err(|error|error.to_string())?;project
-        }};
-        if !project.is_dir() {return Err("fixture project root must be a directory".into());}
-        let data_version=match manifest.get("data_version") {None=>1,Some(value)=>value.as_u64().and_then(|value|u32::try_from(value).ok()).filter(|value|*value>0).ok_or("invalid fixture data version")?};
-        let scope=StorageContext {project:Some(project),session:Some("imports-fixture".into()),data_version};
-        let errors=Arc::new(FixtureDiagnostics::default());
-        let storage_authorization=Arc::new(Mutex::new(StorageAuthorization::new(plugin_id.clone(),self.side,StorageInstanceState::Active)));
-        let storage_errors=errors.clone();
-        let storage=StorageImport::open(&root.path().join("storage"),StorageImportContext {plugin:plugin_id,side:self.side,scope,tier:self.tier,bucket_limit_bytes:bytes_for("storage_bucket_mib")?,shared_limit_bytes:bytes_for("shared_cache_mib")?},storage_authorization.clone(),move |_,error| {*storage_errors.0.lock().unwrap()=Some(error.code);}).map_err(|error|error.message)?;
-        let clock=FixtureClock(Arc::new(Mutex::new(ClockState {wall:1_893_456_000_000,monotonic:0})));
-        let logger=Arc::new(Mutex::new(PluginLogger::open(&root.path().join("logs"),&plugin,self.tier,LogConfig {threshold:LogLevel::Trace,..LogConfig::for_tier(self.tier)},1024,&[]).map_err(|error|error.code)?));
-        let budget=Arc::new(Mutex::new(PluginLogInstanceBudget::new(1,self.side).map_err(|error|error.code)?));
-        let log_import=LogImport::new(logger.clone(),budget.clone(),Arc::new(clock.clone()),errors.clone()).map_err(|error|error.code)?;
-        let kernel=Arc::new(FakeKernel::new(if self.side==Side::Server {ProcessKind::Server}else{ProcessKind::Client}));
-        kernel.state().current_plugin=plugin.clone();
-        if let Some(kinds)=manifest["contributes"]["pane_kinds"].as_array() {for kind in kinds {if kind["primitive"]=="basic" {
-            let id=kind["id"].as_str().ok_or("basic pane kind requires id")?;
-            if !id.strip_prefix(&format!("{plugin}.")).is_some_and(|local|!local.is_empty()) {return Err("fixture pane kind must belong to its plugin".into());}
-            kernel.register_pane_kind(&plugin,id,ilium_plugin_api::generated::types::tree::PrimitiveKind::Basic);
-        }}}
-        Ok(ImportsFixture {log_import,logger,budget,clock:clock.clone(),storage_import:FixtureStorage {import:storage,clock,errors:errors.clone()},storage_authorization,grants:Arc::new(Mutex::new(grants)),kernel,plugin,manifest,errors,stopped:false,next_node:1,_additional:additional,_validate:self.validate,_validate_latency:self.validate_latency,_runner:self.runner,_websocket:self.websocket,_limits:self.limits,root})
+        let root = tempfile::Builder::new()
+            .prefix("ilium-imports-")
+            .tempdir()
+            .map_err(|error| error.to_string())?;
+        let project = match self.project {
+            Some(project) => std::fs::canonicalize(project).map_err(|error| error.to_string())?,
+            None => {
+                let project = root.path().join("project");
+                std::fs::create_dir(&project).map_err(|error| error.to_string())?;
+                project
+            }
+        };
+        if !project.is_dir() {
+            return Err("fixture project root must be a directory".into());
+        }
+        let data_version = match manifest.get("data_version") {
+            None => 1,
+            Some(value) => value
+                .as_u64()
+                .and_then(|value| u32::try_from(value).ok())
+                .filter(|value| *value > 0)
+                .ok_or("invalid fixture data version")?,
+        };
+        let scope = StorageContext {
+            project: Some(project),
+            session: Some("imports-fixture".into()),
+            data_version,
+        };
+        let errors = Arc::new(FixtureDiagnostics::default());
+        let storage_authorization = Arc::new(Mutex::new(StorageAuthorization::new(
+            plugin_id.clone(),
+            self.side,
+            StorageInstanceState::Active,
+        )));
+        let storage_errors = errors.clone();
+        let storage = StorageImport::open(
+            &root.path().join("storage"),
+            StorageImportContext {
+                plugin: plugin_id,
+                side: self.side,
+                scope,
+                tier: self.tier,
+                bucket_limit_bytes: bytes_for("storage_bucket_mib")?,
+                shared_limit_bytes: bytes_for("shared_cache_mib")?,
+            },
+            storage_authorization.clone(),
+            move |_, error| {
+                *storage_errors.0.lock().unwrap() = Some(error.code);
+            },
+        )
+        .map_err(|error| error.message)?;
+        let clock = FixtureClock(Arc::new(Mutex::new(ClockState {
+            wall: 1_893_456_000_000,
+            monotonic: 0,
+        })));
+        let logger = Arc::new(Mutex::new(
+            PluginLogger::open(
+                &root.path().join("logs"),
+                &plugin,
+                self.tier,
+                LogConfig {
+                    threshold: LogLevel::Trace,
+                    ..LogConfig::for_tier(self.tier)
+                },
+                1024,
+                &[],
+            )
+            .map_err(|error| error.code)?,
+        ));
+        let budget = Arc::new(Mutex::new(
+            PluginLogInstanceBudget::new(1, self.side).map_err(|error| error.code)?,
+        ));
+        let log_import = LogImport::new(
+            logger.clone(),
+            budget.clone(),
+            Arc::new(clock.clone()),
+            errors.clone(),
+        )
+        .map_err(|error| error.code)?;
+        let kernel = Arc::new(FakeKernel::new(if self.side == Side::Server {
+            ProcessKind::Server
+        } else {
+            ProcessKind::Client
+        }));
+        kernel.state().current_plugin = plugin.clone();
+        if let Some(kinds) = manifest["contributes"]["pane_kinds"].as_array() {
+            for kind in kinds {
+                if kind["primitive"] == "basic" {
+                    let id = kind["id"].as_str().ok_or("basic pane kind requires id")?;
+                    if !id
+                        .strip_prefix(&format!("{plugin}."))
+                        .is_some_and(|local| !local.is_empty())
+                    {
+                        return Err("fixture pane kind must belong to its plugin".into());
+                    }
+                    kernel.register_pane_kind(
+                        &plugin,
+                        id,
+                        ilium_plugin_api::generated::types::tree::PrimitiveKind::Basic,
+                    );
+                }
+            }
+        }
+        Ok(ImportsFixture {
+            log_import,
+            logger,
+            budget,
+            clock: clock.clone(),
+            storage_import: FixtureStorage {
+                import: storage,
+                clock,
+                errors: errors.clone(),
+            },
+            storage_authorization,
+            grants: Arc::new(Mutex::new(grants)),
+            kernel,
+            plugin,
+            manifest,
+            errors,
+            stopped: false,
+            next_node: 1,
+            _additional: additional,
+            _validate: self.validate,
+            _validate_latency: self.validate_latency,
+            _runner: self.runner,
+            _websocket: self.websocket,
+            _limits: self.limits,
+            root,
+        })
     }
     /// The tier.
     pub fn tier(mut self, _tier: Tier) -> ImportsFixtureBuilder {
@@ -246,7 +428,8 @@ impl ImportsFixtureBuilder {
 
     /// Builds the fixture.
     pub fn build(self) -> ImportsFixture {
-        self.try_build().unwrap_or_else(|error| panic!("invalid imports fixture setup: {error}"))
+        self.try_build()
+            .unwrap_or_else(|error| panic!("invalid imports fixture setup: {error}"))
     }
 }
 
@@ -328,59 +511,152 @@ impl Drop for ImportsFixture {
     fn drop(&mut self) {
         // Owned adapter handles may outlive the fixture; dropping their runtime
         // owner revokes authority before its private persistence is removed.
-        if let Ok(mut grants)=self.grants.lock() {grants.clear();}
-        if let Ok(mut authorization)=self.storage_authorization.lock() {authorization.set_state(StorageInstanceState::Inactive);}
+        if let Ok(mut grants) = self.grants.lock() {
+            grants.clear();
+        }
+        if let Ok(mut authorization) = self.storage_authorization.lock() {
+            authorization.set_state(StorageInstanceState::Inactive);
+        }
     }
 }
 
 impl ImportsFixture {
     /// The real primitive adapter, sharing current grants and authoritative
     /// registered kinds with this fixture's kernel.
-    pub fn basic(&self)->BasicImport<'static> {
-        let log=Mutex::new(LogImport::new(self.logger.clone(),self.budget.clone(),Arc::new(self.clock.clone()),self.errors.clone()).expect("fixture logger setup is valid"));
-        let errors=self.errors.clone();
-        BasicImport::new(self.kernel.clone(),self.plugin.clone(),self.grants.clone(),move |message| {
-            *errors.0.lock().unwrap()=Some(ErrorCode::NotPermitted);
-            log.lock().unwrap().log(ilium_plugin_api::generated::host::log::Level::Warn,message.into());
-        })
+    pub fn basic(&self) -> BasicImport<'static> {
+        let log = Mutex::new(
+            LogImport::new(
+                self.logger.clone(),
+                self.budget.clone(),
+                Arc::new(self.clock.clone()),
+                self.errors.clone(),
+            )
+            .expect("fixture logger setup is valid"),
+        );
+        let errors = self.errors.clone();
+        BasicImport::new(
+            self.kernel.clone(),
+            self.plugin.clone(),
+            self.grants.clone(),
+            move |message| {
+                *errors.0.lock().unwrap() = Some(ErrorCode::NotPermitted);
+                log.lock().unwrap().log(
+                    ilium_plugin_api::generated::host::log::Level::Warn,
+                    message.into(),
+                );
+            },
+        )
     }
     /// Explicit current-grant replacement, observed by already borrowed adapters.
-    pub fn replace_grants(&mut self, grants:&[&str])->Result<(),String> {
-        if self.stopped {return Err("fixture instance is stopped".into());}
-        let replacement=grants.iter().map(|grant|Grant::parse(grant).map_err(|error|format!("invalid grant: {error:?}"))).collect::<Result<Vec<_>,_>>()?;
-        *self.grants.lock().unwrap()=replacement;
+    pub fn replace_grants(&mut self, grants: &[&str]) -> Result<(), String> {
+        if self.stopped {
+            return Err("fixture instance is stopped".into());
+        }
+        let replacement = grants
+            .iter()
+            .map(|grant| Grant::parse(grant).map_err(|error| format!("invalid grant: {error:?}")))
+            .collect::<Result<Vec<_>, _>>()?;
+        *self.grants.lock().unwrap() = replacement;
         Ok(())
     }
     /// Add an actual pane of a kind already registered by the fixture manifest.
-    pub fn add_basic_pane(&mut self,kind:&str,title:&str,columns:u16,rows:u16)->NodeId {
-        self.insert_node(None,title,ilium_plugin_api::generated::types::tree::NodeClass::Pane,Some(kind.into()),columns,rows)
+    pub fn add_basic_pane(&mut self, kind: &str, title: &str, columns: u16, rows: u16) -> NodeId {
+        self.insert_node(
+            None,
+            title,
+            ilium_plugin_api::generated::types::tree::NodeClass::Pane,
+            Some(kind.into()),
+            columns,
+            rows,
+        )
     }
-    pub fn kernel(&self)->Arc<FakeKernel> {self.kernel.clone()}
-    pub fn manifest(&self)->&serde_json::Value {&self.manifest}
-    fn insert_node(&mut self,parent:Option<NodeId>,title:&str,class:ilium_plugin_api::generated::types::tree::NodeClass,kind:Option<String>,columns:u16,rows:u16)->NodeId {
-        let id=NodeId(self.next_node);self.next_node=self.next_node.checked_add(1).expect("fixture node identity exhausted");
-        let mut state=self.kernel.state();
-        assert!(parent.is_none_or(|id|state.nodes.iter().any(|node|node.id==id)),"fixture parent must exist");
-        state.nodes.push(ilium_plugin_api::kernel::TreeNode {id,parent,class,content_kind:kind,title:title.into(),cwd:None,agent:None,locked:false,revision:1});
-        state.sizes.insert(id,(columns,rows));state.epoch=state.epoch.saturating_add(1);id
+    pub fn kernel(&self) -> Arc<FakeKernel> {
+        self.kernel.clone()
     }
-    fn persisted_logs(&self)->Vec<LogLine> {
-        let mut records=Vec::new();
-        for suffix in [".4",".3",".2",".1",""] {
-            let path=self.root.path().join("logs").join(format!("{}.log{suffix}",self.plugin));
-            let text=match std::fs::read_to_string(path) {Ok(text)=>text,Err(error) if error.kind()==std::io::ErrorKind::NotFound=>continue,Err(error)=>panic!("fixture log read failed: {error}")};
+    pub fn manifest(&self) -> &serde_json::Value {
+        &self.manifest
+    }
+    fn insert_node(
+        &mut self,
+        parent: Option<NodeId>,
+        title: &str,
+        class: ilium_plugin_api::generated::types::tree::NodeClass,
+        kind: Option<String>,
+        columns: u16,
+        rows: u16,
+    ) -> NodeId {
+        let id = NodeId(self.next_node);
+        self.next_node = self
+            .next_node
+            .checked_add(1)
+            .expect("fixture node identity exhausted");
+        let mut state = self.kernel.state();
+        assert!(
+            parent.is_none_or(|id| state.nodes.iter().any(|node| node.id == id)),
+            "fixture parent must exist"
+        );
+        state.nodes.push(ilium_plugin_api::kernel::TreeNode {
+            id,
+            parent,
+            class,
+            content_kind: kind,
+            title: title.into(),
+            cwd: None,
+            agent: None,
+            locked: false,
+            revision: 1,
+        });
+        state.sizes.insert(id, (columns, rows));
+        state.epoch = state.epoch.saturating_add(1);
+        id
+    }
+    fn persisted_logs(&self) -> Vec<LogLine> {
+        let mut records = Vec::new();
+        for suffix in [".4", ".3", ".2", ".1", ""] {
+            let path = self
+                .root
+                .path()
+                .join("logs")
+                .join(format!("{}.log{suffix}", self.plugin));
+            let text = match std::fs::read_to_string(path) {
+                Ok(text) => text,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(error) => panic!("fixture log read failed: {error}"),
+            };
             for line in text.lines() {
-                let Some(level)=line.get(20..25) else {panic!("malformed persisted fixture log")};
-                let Some(rest)=line.get(33..) else {panic!("malformed persisted fixture log")};
-                let Some((plugin,message))=rest.split_once(' ') else {panic!("malformed persisted fixture log")};
-                records.push(LogLine {plugin:plugin.into(),level:level.trim().into(),message:message.into()});
+                let Some(level) = line.get(20..25) else {
+                    panic!("malformed persisted fixture log")
+                };
+                let Some(rest) = line.get(33..) else {
+                    panic!("malformed persisted fixture log")
+                };
+                let Some((plugin, message)) = rest.split_once(' ') else {
+                    panic!("malformed persisted fixture log")
+                };
+                records.push(LogLine {
+                    plugin: plugin.into(),
+                    level: level.trim().into(),
+                    message: message.into(),
+                });
             }
         }
         records
     }
     /// Starts a builder.
     pub fn builder() -> ImportsFixtureBuilder {
-        ImportsFixtureBuilder {tier:Tier::T2,side:Side::Server,grants:Vec::new(),manifest:"{}".into(),project:None,limits:BTreeMap::new(),additional:Vec::new(),validate:None,validate_latency:Duration::ZERO,runner:None,websocket:false}
+        ImportsFixtureBuilder {
+            tier: Tier::T2,
+            side: Side::Server,
+            grants: Vec::new(),
+            manifest: "{}".into(),
+            project: None,
+            limits: BTreeMap::new(),
+            additional: Vec::new(),
+            validate: None,
+            validate_latency: Duration::ZERO,
+            runner: None,
+            websocket: false,
+        }
     }
 
     /// The `log` import.
@@ -455,7 +731,17 @@ impl ImportsFixture {
 
     /// Moves the manual clock and runs due work.
     pub fn advance(&mut self, _by: Duration) {
-        { let mut clock=self.clock.0.lock().unwrap(); clock.wall=clock.wall.saturating_add(crate::imports::clock::duration_millis(_by)); clock.monotonic=clock.monotonic.saturating_add(crate::imports::clock::duration_millis(_by)); } self.kernel.state().clock = Duration::from_millis(self.clock.0.lock().unwrap().monotonic); self.pump();
+        {
+            let mut clock = self.clock.0.lock().unwrap();
+            clock.wall = clock
+                .wall
+                .saturating_add(crate::imports::clock::duration_millis(_by));
+            clock.monotonic = clock
+                .monotonic
+                .saturating_add(crate::imports::clock::duration_millis(_by));
+        }
+        self.kernel.state().clock = Duration::from_millis(self.clock.0.lock().unwrap().monotonic);
+        self.pump();
     }
 
     /// Runs pending work without moving the clock.
@@ -490,7 +776,11 @@ impl ImportsFixture {
 
     /// Every event delivered to a plugin.
     pub fn events_of(&self, _plugin: &str) -> Vec<Event> {
-        if _plugin == self.plugin {self.events()} else {Vec::new()}
+        if _plugin == self.plugin {
+            self.events()
+        } else {
+            Vec::new()
+        }
     }
 
     /// The settings target last opened.
@@ -617,7 +907,11 @@ impl ImportsFixture {
 
     /// Stops the plugin instance.
     pub fn stop_plugin(&mut self) {
-        let mut grants=self.grants.lock().unwrap(); let mut authorization=self.storage_authorization.lock().unwrap(); grants.clear(); authorization.set_state(StorageInstanceState::Inactive); self.stopped=true;
+        let mut grants = self.grants.lock().unwrap();
+        let mut authorization = self.storage_authorization.lock().unwrap();
+        grants.clear();
+        authorization.set_state(StorageInstanceState::Inactive);
+        self.stopped = true;
     }
 
     /// Starts a background request.
@@ -674,22 +968,45 @@ impl ImportsFixture {
 
     /// Adds a terminal pane.
     pub fn add_terminal_pane(&mut self, _title: &str, _columns: u16, _rows: u16) -> NodeId {
-        self.insert_node(None,_title,ilium_plugin_api::generated::types::tree::NodeClass::Pane,Some("ilium.terminal".into()),_columns,_rows)
+        self.insert_node(
+            None,
+            _title,
+            ilium_plugin_api::generated::types::tree::NodeClass::Pane,
+            Some("ilium.terminal".into()),
+            _columns,
+            _rows,
+        )
     }
 
     /// Adds a pane restored from a snapshot.
     pub fn add_restored_pane(&mut self, _title: &str, _columns: u16, _rows: u16) -> NodeId {
-        let pane=self.add_terminal_pane(_title,_columns,_rows);self.kernel.set_pane_restored(pane,true);pane
+        let pane = self.add_terminal_pane(_title, _columns, _rows);
+        self.kernel.set_pane_restored(pane, true);
+        pane
     }
 
     /// Adds a group.
     pub fn add_group(&mut self, _title: &str) -> NodeId {
-        self.insert_node(None,_title,ilium_plugin_api::generated::types::tree::NodeClass::Folder,None,0,0)
+        self.insert_node(
+            None,
+            _title,
+            ilium_plugin_api::generated::types::tree::NodeClass::Folder,
+            None,
+            0,
+            0,
+        )
     }
 
     /// Adds a group under a parent.
     pub fn add_group_under(&mut self, _parent: NodeId, _title: &str) -> NodeId {
-        self.insert_node(Some(_parent),_title,ilium_plugin_api::generated::types::tree::NodeClass::Folder,None,0,0)
+        self.insert_node(
+            Some(_parent),
+            _title,
+            ilium_plugin_api::generated::types::tree::NodeClass::Folder,
+            None,
+            0,
+            0,
+        )
     }
 
     /// Adds a terminal pane under a parent.
@@ -700,7 +1017,14 @@ impl ImportsFixture {
         _columns: u16,
         _rows: u16,
     ) -> NodeId {
-        self.insert_node(Some(_parent),_title,ilium_plugin_api::generated::types::tree::NodeClass::Pane,Some("ilium.terminal".into()),_columns,_rows)
+        self.insert_node(
+            Some(_parent),
+            _title,
+            ilium_plugin_api::generated::types::tree::NodeClass::Pane,
+            Some("ilium.terminal".into()),
+            _columns,
+            _rows,
+        )
     }
 
     /// Exits a pane.
@@ -710,7 +1034,7 @@ impl ImportsFixture {
 
     /// Focuses a pane.
     pub fn focus_pane(&mut self, _pane: NodeId) {
-        self.kernel.state().focus=Some(_pane);
+        self.kernel.state().focus = Some(_pane);
     }
 
     /// Records a host journal entry (`pane-created`, `pane-exited`, `input-sent`).
@@ -720,20 +1044,49 @@ impl ImportsFixture {
 
     /// Takes a storage lease as a second caller.
     pub fn other_caller_lease(&mut self, _key: &str, _ttl_millis: u32) -> bool {
-        let context=self.storage_import.import.context();
-        let caller=crate::storage::PluginStorage::open_with_context(&self.root.path().join("storage"),context.plugin.clone(),context.scope.clone(),context.tier,context.bucket_limit_bytes,context.shared_limit_bytes).expect("fixture storage context was admitted");
-        match caller.lease_at(_key,_ttl_millis,UNIX_EPOCH+Duration::from_millis(self.clock.0.lock().unwrap().wall)) {
-            Ok(acquired)=>acquired,
-            Err(error)=> {*self.errors.0.lock().unwrap()=Some(error.code);false},
+        let context = self.storage_import.import.context();
+        let caller = crate::storage::PluginStorage::open_with_context(
+            &self.root.path().join("storage"),
+            context.plugin.clone(),
+            context.scope.clone(),
+            context.tier,
+            context.bucket_limit_bytes,
+            context.shared_limit_bytes,
+        )
+        .expect("fixture storage context was admitted");
+        match caller.lease_at(
+            _key,
+            _ttl_millis,
+            UNIX_EPOCH + Duration::from_millis(self.clock.0.lock().unwrap().wall),
+        ) {
+            Ok(acquired) => acquired,
+            Err(error) => {
+                *self.errors.0.lock().unwrap() = Some(error.code);
+                false
+            }
         }
     }
 
     /// Makes the on-disk data version of a bucket newer.
     pub fn make_bucket_data_version_newer(&mut self, _bucket: Bucket) {
-        let context=self.storage_import.import.context();
-        let mut newer=context.scope.clone();newer.data_version=newer.data_version.checked_add(1).expect("fixture data version exhausted");
-        let engine=crate::storage::PluginStorage::open_with_context(&self.root.path().join("storage"),context.plugin.clone(),newer.clone(),context.tier,context.bucket_limit_bytes,context.shared_limit_bytes).expect("fixture storage context was admitted");
-        engine.stamp_bucket_after_migration(_bucket.as_str(),newer.data_version).expect("fixture newer bucket stamp write");
+        let context = self.storage_import.import.context();
+        let mut newer = context.scope.clone();
+        newer.data_version = newer
+            .data_version
+            .checked_add(1)
+            .expect("fixture data version exhausted");
+        let engine = crate::storage::PluginStorage::open_with_context(
+            &self.root.path().join("storage"),
+            context.plugin.clone(),
+            newer.clone(),
+            context.tier,
+            context.bucket_limit_bytes,
+            context.shared_limit_bytes,
+        )
+        .expect("fixture storage context was admitted");
+        engine
+            .stamp_bucket_after_migration(_bucket.as_str(), newer.data_version)
+            .expect("fixture newer bucket stamp write");
     }
 
     /// The code of the last refused infallible import call.
@@ -743,17 +1096,48 @@ impl ImportsFixture {
 
     /// Sets the agent signature of a node.
     pub fn set_agent(&mut self, _node: NodeId, _signature: &str) {
-        if let Some(node)=self.kernel.state().nodes.iter_mut().find(|node|node.id==_node) {node.agent=Some(ilium_plugin_api::generated::types::tree::AgentView {signature:_signature.into(),activity:ilium_plugin_api::generated::types::tree::AgentActivity::None,objective:None,goal:None});}
+        if let Some(node) = self
+            .kernel
+            .state()
+            .nodes
+            .iter_mut()
+            .find(|node| node.id == _node)
+        {
+            node.agent = Some(ilium_plugin_api::generated::types::tree::AgentView {
+                signature: _signature.into(),
+                activity: ilium_plugin_api::generated::types::tree::AgentActivity::None,
+                objective: None,
+                goal: None,
+            });
+        }
     }
 
     /// Locks a node.
     pub fn lock_node(&mut self, _node: NodeId) {
-        if let Some(node)=self.kernel.state().nodes.iter_mut().find(|node|node.id==_node) {node.locked=true;node.revision=node.revision.saturating_add(1);}
+        if let Some(node) = self
+            .kernel
+            .state()
+            .nodes
+            .iter_mut()
+            .find(|node| node.id == _node)
+        {
+            node.locked = true;
+            node.revision = node.revision.saturating_add(1);
+        }
     }
 
     /// Renames a node.
     pub fn rename_node(&mut self, _node: NodeId, _title: &str) {
-        if let Some(node)=self.kernel.state().nodes.iter_mut().find(|node|node.id==_node) {node.title=_title.into();node.revision=node.revision.saturating_add(1);}
+        if let Some(node) = self
+            .kernel
+            .state()
+            .nodes
+            .iter_mut()
+            .find(|node| node.id == _node)
+        {
+            node.title = _title.into();
+            node.revision = node.revision.saturating_add(1);
+        }
     }
 
     /// Reads node metadata as a second installed plugin.

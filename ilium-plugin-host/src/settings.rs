@@ -2,9 +2,9 @@
 //! See reference-settings-schema.md and api-settings.md. Persistence, merge-patch
 //! application, scope filtering and optional guest validation belong to the caller.
 
-use ilium_plugin_api::Code;
 use ilium_plugin_api::grants::Grant;
 use ilium_plugin_api::manifest::Diagnostic;
+use ilium_plugin_api::Code;
 use serde_json::Value;
 
 pub const KERNEL_TAB_COUNT: usize = 25;

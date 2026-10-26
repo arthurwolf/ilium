@@ -182,7 +182,12 @@ impl StorageImport {
     }
     /// Explicit host clock sample for deterministic replay/testing. The same
     /// instance authorization remains held through the durable lease mutation.
-    pub fn lease_at(&self, key: &str, ttl_millis: u32, now: std::time::SystemTime) -> Result<bool, PluginError> {
+    pub fn lease_at(
+        &self,
+        key: &str,
+        ttl_millis: u32,
+        now: std::time::SystemTime,
+    ) -> Result<bool, PluginError> {
         let _permit = authorize(&self.authorization, &self.context)?;
         self.engine.lease_at(key, ttl_millis, now)
     }

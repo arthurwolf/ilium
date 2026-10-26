@@ -3,7 +3,7 @@ use std::{io::Read, path::Path, time::Instant};
 
 use serde_json::json;
 
-use super::{CliOutput, offline};
+use super::{offline, CliOutput};
 use crate::install::{Consent, Installer, TrustedInstallContext};
 
 const MAX_PACKAGE_BYTES: u64 = 300 * 1024 * 1024;
@@ -30,7 +30,11 @@ pub fn run(args: &[String], cwd: &Path, backend: &dyn InstallCommandBackend) -> 
             return offline::failure("usage.unknown-flag", "Unsupported file-install flag", 2);
         }
         if source.replace(arg.as_str()).is_some() {
-            return offline::failure("usage.argument-unexpected", "Only one package file is accepted", 2);
+            return offline::failure(
+                "usage.argument-unexpected",
+                "Only one package file is accepted",
+                2,
+            );
         }
     }
     let Some(source) = source else {
@@ -40,12 +44,21 @@ pub fn run(args: &[String], cwd: &Path, backend: &dyn InstallCommandBackend) -> 
         return offline::failure("usage.argument-missing", "A package file is required", 2);
     }
     // PKG-426 classifies URLs before file paths and bare registry identifiers.
-    if source.contains("://") || !(source.contains('/') || source.contains('\\')
-        || source.starts_with('.') || source.starts_with('~') || source.ends_with(".iliumpkg")) {
+    if source.contains("://")
+        || !(source.contains('/')
+            || source.contains('\\')
+            || source.starts_with('.')
+            || source.starts_with('~')
+            || source.ends_with(".iliumpkg"))
+    {
         return offline::failure("install.context-required", "This adapter requires a local package file; registry and URL sources need their admission service", 1);
     }
     if !cwd.is_absolute() {
-        return offline::failure("install.context-required", "An absolute command working directory is required", 1);
+        return offline::failure(
+            "install.context-required",
+            "An absolute command working directory is required",
+            1,
+        );
     }
     backend.install(&cwd.join(source))
 }
@@ -57,19 +70,37 @@ pub fn read_install_file(path: &Path) -> Result<Vec<u8>, CliOutput> {
         let usage = error.kind() == std::io::ErrorKind::NotFound
             || error.kind() == std::io::ErrorKind::InvalidInput;
         offline::failure(
-            if usage { "usage.file-not-found" } else { "install.file-unreadable" },
+            if usage {
+                "usage.file-not-found"
+            } else {
+                "install.file-unreadable"
+            },
             error.to_string(),
             if usage { 2 } else { 1 },
         )
     })?;
-    if file.metadata().map_err(|error| offline::failure("install.file-unreadable", error.to_string(), 1))?.len() > MAX_PACKAGE_BYTES {
-        return Err(offline::failure("package.size-limit", "Package exceeds 300 MiB", 1));
+    if file
+        .metadata()
+        .map_err(|error| offline::failure("install.file-unreadable", error.to_string(), 1))?
+        .len()
+        > MAX_PACKAGE_BYTES
+    {
+        return Err(offline::failure(
+            "package.size-limit",
+            "Package exceeds 300 MiB",
+            1,
+        ));
     }
     let mut bytes = Vec::new();
-    file.take(MAX_PACKAGE_BYTES + 1).read_to_end(&mut bytes)
+    file.take(MAX_PACKAGE_BYTES + 1)
+        .read_to_end(&mut bytes)
         .map_err(|error| offline::failure("install.file-unreadable", error.to_string(), 1))?;
     if bytes.len() as u64 > MAX_PACKAGE_BYTES {
-        return Err(offline::failure("package.size-limit", "Package exceeds 300 MiB", 1));
+        return Err(offline::failure(
+            "package.size-limit",
+            "Package exceeds 300 MiB",
+            1,
+        ));
     }
     Ok(bytes)
 }
@@ -120,13 +151,21 @@ pub fn install_file(
             offline::finish(records, 0)
         }
         Err(error) => {
-            let code = if error.code.as_str() == "install.declined" { "install.review-declined" } else { error.code.as_str() };
+            let code = if error.code.as_str() == "install.declined" {
+                "install.review-declined"
+            } else {
+                error.code.as_str()
+            };
             offline::failure(code, error.message, install_exit_code(code))
         }
     };
     let mut records = output.stdout_jsonl;
-    if let Some(summary) = records.iter_mut().find(|record| record["type"] == "summary") {
-        summary["duration_ms"] = json!(u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX));
+    if let Some(summary) = records
+        .iter_mut()
+        .find(|record| record["type"] == "summary")
+    {
+        summary["duration_ms"] =
+            json!(u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX));
     }
     offline::render(records, output.exit_code)
 }
@@ -137,7 +176,10 @@ pub fn install_exit_code(code: &str) -> i32 {
         "install.locked" => 4,
         "plugin.not-found" | "trust.not-found" | "registry.not-found" => 5,
         "package.blocked" => 7,
-        "registry.unreachable" | "registry.stale" | "registry.metadata-expired" | "install.download-failed" => 8,
+        "registry.unreachable"
+        | "registry.stale"
+        | "registry.metadata-expired"
+        | "install.download-failed" => 8,
         code if code.starts_with("policy.") => 7,
         _ => 1,
     }

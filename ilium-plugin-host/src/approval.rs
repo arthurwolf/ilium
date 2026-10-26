@@ -20,12 +20,18 @@ pub struct ApprovalChannel {
 impl ApprovalChannel {
     /// A channel with an attached client.
     pub fn with_client() -> ApprovalChannel {
-        ApprovalChannel { client_attached: true, next_answer: None }
+        ApprovalChannel {
+            client_attached: true,
+            next_answer: None,
+        }
     }
 
     /// A channel without a client (headless CLI).
     pub fn without_client() -> ApprovalChannel {
-        ApprovalChannel { client_attached: false, next_answer: None }
+        ApprovalChannel {
+            client_attached: false,
+            next_answer: None,
+        }
     }
 
     /// Injects the attached client's next answer for controlled tests. This is
